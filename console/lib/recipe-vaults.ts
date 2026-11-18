@@ -1,6 +1,6 @@
 "use client"
 
-import { api, ApiError, idempotencyKey, type Data } from "@/lib/api"
+import { api, apiAction, ApiError, idempotencyKey, type Data } from "@/lib/api"
 import { vaultCrypto, vaultUnlocked } from "@/lib/envvault/crypto"
 import { currentVault } from "@/lib/envvault/vault"
 
@@ -22,20 +22,32 @@ export class VaultLockedError extends Error {
   }
 }
 
-const vaultPath = (workspace: string, name: string) => `workspaces/${encodeURIComponent(workspace)}/env-vaults/${encodeURIComponent(name)}`
+const vaultsPath = (workspace: string) => `workspaces/${encodeURIComponent(workspace)}/env-vaults`
+const vaultPath = (workspace: string, name: string) => `${vaultsPath(workspace)}/${encodeURIComponent(name)}`
 
 /** `vault_key_missing`: the server needs a key wrapped for this vault; its name. */
 export const missingVault = (error: unknown) =>
-  error instanceof ApiError && error.code === "vault_key_missing" ? (error.details as { vault?: string } | undefined)?.vault : undefined
+  error instanceof ApiError && error.code === "vault_key_missing"
+    ? (error.details as { vault?: string } | undefined)?.vault
+    : undefined
 
 /** `unknown_vault`: the recipe names a vault the workspace does not have; its name. */
 export const unknownVault = (error: unknown) =>
-  error instanceof ApiError && error.code === "unknown_vault" ? (error.details as { name?: string } | undefined)?.name : undefined
+  error instanceof ApiError && error.code === "unknown_vault"
+    ? (error.details as { name?: string } | undefined)?.name
+    : undefined
 
 /** One vault's key, wrapped to the recipe whose token has this id and public key. */
-export async function wrapVault(workspace: string, name: string, token: { id: string; publicKey: string }): Promise<VaultWrap> {
+export async function wrapVault(
+  workspace: string,
+  name: string,
+  token: { id: string; publicKey: string },
+): Promise<VaultWrap> {
   if (!vaultUnlocked()) throw new VaultLockedError(name)
-  const [{ vault }, current] = await Promise.all([api<Data<"/v1/workspaces/{ws}/env-vaults/{name}">>(vaultPath(workspace, name)), currentVault()])
+  const [{ vault }, current] = await Promise.all([
+    api<Data<"/v1/workspaces/{ws}/env-vaults/{name}">>(vaultPath(workspace, name)),
+    currentVault(),
+  ])
   return vaultCrypto<VaultWrap>({
     action: "named-vault-recipe-wrap",
     vault: current,
@@ -61,7 +73,11 @@ export const withVaultKeys = <T>(
 ) => withWraps(send, (name) => wrapVault(workspace, name, token), have)
 
 /** The retry loop of withVaultKeys, with the wrapping of one vault passed in. */
-export async function withWraps<T>(send: (wraps: VaultWrap[]) => Promise<T>, wrap: (vault: string) => Promise<VaultWrap>, have: VaultWrap[] = []): Promise<T> {
+export async function withWraps<T>(
+  send: (wraps: VaultWrap[]) => Promise<T>,
+  wrap: (vault: string) => Promise<VaultWrap>,
+  have: VaultWrap[] = [],
+): Promise<T> {
   const wraps = [...have]
   for (;;) {
     try {
@@ -78,10 +94,58 @@ export async function withWraps<T>(send: (wraps: VaultWrap[]) => Promise<T>, wra
 export async function createNamedVault(workspace: string, name: string, teamId?: string): Promise<void> {
   if (!vaultUnlocked()) throw new VaultLockedError(name)
   // Every engine call carries the account's current password vault, which it checks against what it unlocked.
-  const { wraps } = await vaultCrypto<{ wraps: Vault["wraps"] }>({ action: "named-vault-wraps", vault: await currentVault(), name, team_id: teamId })
-  await api(`workspaces/${encodeURIComponent(workspace)}/env-vaults`, {
+  const { wraps } = await vaultCrypto<{ wraps: Vault["wraps"] }>({
+    action: "named-vault-wraps",
+    vault: await currentVault(),
+    name,
+    team_id: teamId,
+  })
+  await api(vaultsPath(workspace), {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
     body: JSON.stringify({ name, wraps }),
   })
 }
+
+export const namedVaultsKey = (workspace: string) => ["env-named-vaults", workspace]
+
+/** The workspace's named vaults (one answer, not paged), each with the recipes that read it. */
+export const listNamedVaults = (workspace: string, signal?: AbortSignal) =>
+  api<Data<"/v1/workspaces/{ws}/env-vaults">>(vaultsPath(workspace), { signal }).then((answer) => answer.vaults)
+
+/**
+ * The variable names of a named vault; with `change` it first sets (`value`) or removes (`value: null`) one.
+ * Values are opened and sealed in the engine (as `pb env set --vault` does), and only the sealed result is sent;
+ * a vault that changed meanwhile is refused by the server's revision check.
+ */
+export async function namedVaultNames(
+  workspace: string,
+  name: string,
+  change?: { variable: string; value: string | null },
+): Promise<string[]> {
+  if (!vaultUnlocked()) throw new VaultLockedError(name)
+  const [{ vault }, current] = await Promise.all([
+    api<Data<"/v1/workspaces/{ws}/env-vaults/{name}">>(vaultPath(workspace, name)),
+    currentVault(),
+  ])
+  const opened = await vaultCrypto<{ names: string[]; envelope?: string }>({
+    action: "named-vault-values",
+    vault: current,
+    name,
+    vault_wraps: vault.wraps,
+    key_epoch: vault.key_epoch,
+    values_envelope: vault.envelope,
+    ...(change && { variable: change.variable, value: change.value ?? "", delete: change.value === null }),
+  })
+  if (!change) return opened.names
+  await api(`${vaultPath(workspace, name)}/values`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expected_revision: vault.revision, key_epoch: vault.key_epoch, envelope: opened.envelope }),
+  })
+  return opened.names
+}
+
+/** Deletes a vault and its values; the server refuses while a recipe still reads it (`vault_in_use`). */
+export const deleteNamedVault = (workspace: string, name: string) =>
+  apiAction(vaultPath(workspace, name), { method: "DELETE" })

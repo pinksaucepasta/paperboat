@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 import { DeliveryPending, deleteValue, listNames, setValue, type EnvScope } from "@/lib/envvault/vault"
+import { namedVaultNames } from "@/lib/recipe-vaults"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -15,22 +16,44 @@ import { ErrorMessage, errorToastOf } from "@/components/error-reference"
 
 const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+/** Where the variables live: the account's or a team's own records, or one named vault. */
+export type VariableStore = {
+  key: unknown[]
+  list: (signal?: AbortSignal) => Promise<string[]>
+  set: (name: string, value: string) => Promise<unknown>
+  remove: (name: string) => Promise<unknown>
+}
+
+export const scopeStore = (scope: EnvScope): VariableStore => ({
+  key: ["env-names", scope],
+  list: (signal) => listNames(scope, signal),
+  set: (name, value) => setValue(scope, name, value),
+  remove: (name) => deleteValue(scope, name),
+})
+
+export const vaultStore = (workspace: string, vault: string): VariableStore => ({
+  key: ["env-names", "vault", workspace, vault],
+  list: () => namedVaultNames(workspace, vault),
+  set: (name, value) => namedVaultNames(workspace, vault, { variable: name, value }),
+  remove: (name) => namedVaultNames(workspace, vault, { variable: name, value: null }),
+})
+
 /**
  * Names with Set and Remove, and a form to add one. Values go in, never out. With `adding` the
  * Add variable button lives elsewhere (the page header) and opens the form through it.
  */
 export function EnvVariables({
-  scope,
+  store,
   adding,
   onAddingChange,
 }: {
-  scope: EnvScope
+  store: VariableStore
   adding?: boolean
   onAddingChange?: (adding: boolean) => void
 }) {
   const client = useQueryClient()
-  const key = ["env-names", scope]
-  const names = useQuery({ queryKey: key, queryFn: ({ signal }) => listNames(scope, signal), staleTime: 0 })
+  const key = store.key
+  const names = useQuery({ queryKey: key, queryFn: ({ signal }) => store.list(signal), staleTime: 0 })
   const [ownEditing, setOwnEditing] = useState<string | null>(null)
   // A header's Add variable opens the same form with an empty name.
   const editing = adding ? "" : ownEditing
@@ -95,7 +118,7 @@ export function EnvVariables({
       ))}
       {editing !== null && (
         <SetDialog
-          scope={scope}
+          store={store}
           name={editing}
           onClose={() => setEditing(null)}
           onSaved={() => {
@@ -113,7 +136,7 @@ export function EnvVariables({
         action="Remove"
         pending="Removing…"
         mutation={{
-          mutationFn: () => deleteValue(scope, removing ?? ""),
+          mutationFn: () => store.remove(removing ?? ""),
           onSuccess: refresh,
           onError: saved,
         }}
@@ -123,13 +146,13 @@ export function EnvVariables({
 }
 
 function SetDialog({
-  scope,
+  store,
   name: initial,
   onClose,
   onSaved,
   onError,
 }: {
-  scope: EnvScope
+  store: VariableStore
   name: string
   onClose: () => void
   onSaved: () => void
@@ -138,7 +161,7 @@ function SetDialog({
   const [name, setName] = useState(initial)
   const [value, setValue_] = useState("")
   const save = useMutation({
-    mutationFn: (input: { name: string; value: string }) => setValue(scope, input.name, input.value),
+    mutationFn: (input: { name: string; value: string }) => store.set(input.name, input.value),
     onSuccess: onSaved,
     onError,
   })
