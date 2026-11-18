@@ -294,6 +294,11 @@ func TestWorkspaceServicePersonalCheckoutReplayScopeAndWebhook(t *testing.T) {
 	if err != nil || processed {
 		t.Fatalf("duplicate processed=%v err=%v", processed, err)
 	}
+	// The reconcile that moved the workspace onto the paid plan is in the audit log, once (the replay changed nothing).
+	var planChanges int
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='billing.plan_changed' AND resource_id=$1 AND metadata->>'product_code'=$2 AND metadata->>'state'='active'`, "personal:"+user, code).Scan(&planChanges); err != nil || planChanges != 1 {
+		t.Fatalf("plan change audit rows=%d err=%v", planChanges, err)
+	}
 	w, err := service.Overview(ctx, user, "")
 	if err != nil {
 		t.Fatal(err)

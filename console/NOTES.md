@@ -494,14 +494,16 @@ IP data capture configuration; the console no longer sends `$geoip_disable`).
 | `preview_created` | console | the server accepted a preview from the console | `workspace_kind`, `access`, `own_address` |
 | `invitation_accepted` | console | the server accepted a team invitation | `role` |
 | `checkout_completed` | console | billing shows the plan after the page waited for Stripe's webhook | `workspace_kind`, `product` |
-| `signed_in` | server | an account signed in (its first one is its sign-up) | |
+| `signed_up` | server | an account was created (the first sign-in of a new person, in `auth.VerifyCallback`) | |
+| `signed_in` | server | an account signed in | |
+| `plan_changed` | server | a workspace's plan or state changed: a Stripe reconcile (`billing.plan_changed` audit row) or an operator grant/revoke | `plan`, `state` |
 | `machine_enrolled` | server | a machine was created by `pb pair`/recipe (`via` = cli) or approved in the console (`via` = console) | `via` |
 | `team_created` | server | a team was created | |
-| `feature_used` | server | first use of a feature by an account, at most once a day: terminal, exec, transfer (native usage reports), preview, tunnel, env (vault created), recipe | `feature` |
+| `feature_used` | server | first use of a feature by an account, at most once a day: terminal, exec, transfer, ssh (native usage reports), preview, tunnel, env (vault created), recipe | `feature` |
 
-The server sends `signed_in`, `machine_enrolled`, `team_created` and the preview/tunnel/env/recipe `feature_used` events by
-reading its audit log (`server/internal/posthogcapture`, one worker, replay-safe by event id) and the terminal, exec
-and transfer ones when a host reports usage; `PAPERBOAT_POSTHOG_CAPTURE_HOST` and `_KEY` turn it on. The admin
+The server sends `signed_in`, `machine_enrolled`, `team_created`, `plan_changed` and the preview/tunnel/env/recipe `feature_used` events by
+reading its audit log (`server/internal/posthogcapture`, one worker, replay-safe by event id) and the terminal, exec,
+transfer and ssh ones when a host reports usage; `PAPERBOAT_POSTHOG_CAPTURE_HOST` and `_KEY` turn it on. The admin
 Analytics page (Website / Console) reads these through `server/internal/posthogquery`.
 
 Verified end to end on 2026-11-16: `scripts/check-analytics.mjs` pairs a machine through the Add machine dialog and creates a

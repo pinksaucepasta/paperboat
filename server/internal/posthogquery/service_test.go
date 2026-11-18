@@ -43,7 +43,7 @@ func (f *fakePostHog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"results":[[3]]}`))
 	case strings.Contains(q, "uniqIf(distinct_id, event='$pageview'"):
 		w.Write([]byte(`{"results":[[120,100]]}`))
-	case strings.Contains(q, "event='signed_in' AND properties.app='server' GROUP BY distinct_id HAVING first"):
+	case strings.Contains(q, "event='signed_up' AND properties.app='server' GROUP BY distinct_id HAVING first"):
 		w.Write([]byte(`{"results":[[12,8]]}`))
 	case strings.Contains(q, "toDate(timestamp)"):
 		w.Write([]byte(`{"results":[["2026-11-16",10],["2026-11-17",30]]}`))

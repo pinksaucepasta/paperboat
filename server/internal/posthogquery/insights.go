@@ -78,7 +78,7 @@ type Console struct {
 }
 
 // Features the adoption view counts, by the server's feature_used label.
-const adoptionFeatures = `'terminal','exec','transfer','preview','tunnel','env','recipe'`
+const adoptionFeatures = `'terminal','exec','ssh','transfer','preview','tunnel','env','recipe'`
 
 // The first-use features that end the activation funnel.
 const activationFeatures = `'terminal','exec','transfer','tunnel'`
@@ -111,10 +111,10 @@ func onlineQuery(app string) string {
 	return `SELECT uniq(distinct_id) FROM events WHERE properties.app IN (` + app + `) AND timestamp >= now() - INTERVAL 5 MINUTE`
 }
 
-// signups are accounts whose first signed_in (the server's event) falls in the range.
+// signups are accounts whose signed_up (the server's event, sent when the account is created) falls in the range.
 func signupsQuery(days int) string {
 	return fmt.Sprintf(`SELECT countIf(first >= now() - INTERVAL %d DAY), countIf(first < now() - INTERVAL %d DAY) FROM (
- SELECT distinct_id, min(timestamp) AS first FROM events WHERE event='signed_in' AND properties.app='server' GROUP BY distinct_id HAVING first >= now() - INTERVAL %d DAY)`, days, days, 2*days)
+ SELECT distinct_id, min(timestamp) AS first FROM events WHERE event='signed_up' AND properties.app='server' GROUP BY distinct_id HAVING first >= now() - INTERVAL %d DAY)`, days, days, 2*days)
 }
 
 func dailyQuery(days int) string {
@@ -133,14 +133,14 @@ func activeQuery() string {
 // funnelQuery follows the accounts that signed up in the range, wherever their later steps fall.
 func funnelQuery(days int) string {
 	return fmt.Sprintf(`SELECT count(), countIf(machines > 0), countIf(machines > 0 AND used > 0) FROM (
- SELECT distinct_id, minIf(timestamp, event='signed_in') AS signup, countIf(event='machine_enrolled') AS machines,
+ SELECT distinct_id, minIf(timestamp, event='signed_up') AS signup, countIf(event='machine_enrolled') AS machines,
   countIf(event='feature_used' AND properties.feature IN (%s)) AS used
  FROM events WHERE properties.app='server' GROUP BY distinct_id HAVING signup >= now() - INTERVAL %d DAY)`, activationFeatures, days)
 }
 
 func retentionQuery(days int) string {
 	return fmt.Sprintf(`SELECT signup >= now() - INTERVAL %d DAY AS recent, count(), countIf(last_active >= signup + INTERVAL 7 DAY) FROM (
- SELECT distinct_id, minIf(timestamp, event='signed_in' AND properties.app='server') AS signup, max(timestamp) AS last_active
+ SELECT distinct_id, minIf(timestamp, event='signed_up' AND properties.app='server') AS signup, max(timestamp) AS last_active
  FROM events WHERE properties.app IN (%s) GROUP BY distinct_id
  HAVING signup >= now() - INTERVAL %d DAY AND signup <= now() - INTERVAL 7 DAY) GROUP BY recent`, days, activeApps, 2*days)
 }

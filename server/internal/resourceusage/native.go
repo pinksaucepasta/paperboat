@@ -20,7 +20,7 @@ import (
 
 // usageFeatures are the consumers whose first use the product analytics counts (feature_used), by the name the
 // admin adoption view shows. A nil Analytics client ignores them.
-var usageFeatures = map[string]string{peerconsumer.Terminal: "terminal", peerconsumer.Exec: "exec", peerconsumer.FileTransfer: "transfer"}
+var usageFeatures = map[string]string{peerconsumer.Terminal: "terminal", peerconsumer.Exec: "exec", peerconsumer.FileTransfer: "transfer", peerconsumer.SSH: "ssh"}
 
 var ErrDenied = errors.New("usage reporting authority unavailable")
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
@@ -637,8 +638,19 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		if err = updateRenewalGraceTx(ctx, tx, workspaceID, current, event); err != nil {
 			return err
 		}
+		var previousProduct, previousState string
+		if err = tx.QueryRow(ctx, `SELECT coalesce(product_code,''),state FROM billing_workspaces WHERE id=$1`, workspaceID).Scan(&previousProduct, &previousState); err != nil {
+			return err
+		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5 IN ('active','trialing') THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,grant_until=NULL,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
 			return err
+		}
+		// A plan or state change is a product event (retention, revenue): record it so analytics and support can see it.
+		if productCode != previousProduct || current.Status != previousState {
+			if err = audit.NewWriter(nil).WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "billing.plan_changed", ResourceType: "billing_workspace", ResourceID: workspaceID,
+				Metadata: map[string]any{"product_code": productCode, "state": current.Status, "previous_product_code": previousProduct, "previous_state": previousState}}); err != nil {
+				return err
+			}
 		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND scheduled_quantity_at<=$2 AND quantity=scheduled_quantity`, workspaceID, current.PeriodStart); err != nil {
 			return err

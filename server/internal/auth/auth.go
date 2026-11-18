@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
@@ -107,7 +108,11 @@ type Service struct {
 	trustedOrigins        []string
 	now                   func() time.Time
 	providerEncryptionKey string
+	analytics             *posthogcapture.Client // optional: a new account is reported as signed_up
 }
+
+// SetAnalytics reports each newly created account to product analytics (nil: off).
+func (s *Service) SetAnalytics(c *posthogcapture.Client) { s.analytics = c }
 
 // RequireWorkOSSessions binds browser authorization to live WorkOS refresh credentials.
 // Existing sessions without provider credentials must sign in again.
@@ -168,12 +173,19 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	csrfHash := tokenHash(csrfToken)
 	expiresAt := s.now().Add(s.sessionPolicy.LoginLifetime)
 	sessionID := newID("session")
+	var created bool
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		canonical, accountID, err := resolveWorkOSIdentity(ctx, tx, profile)
 		if err != nil {
 			return err
 		}
+		// resolveWorkOSIdentity names an id that does not exist yet for a first sign-in: this is where an account is created.
+		var existed bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.users WHERE id=$1)`, accountID).Scan(&existed); err != nil {
+			return err
+		}
+		created = !existed
 		row, err := q.UpsertWorkOSUser(ctx, dbsqlc.UpsertWorkOSUserParams{CanonicalEmail: sql.NullString{String: canonical, Valid: true}, UserID: accountID, WorkosSubject: profile.Subject, PrimaryEmail: canonical, EmailVerified: profile.EmailVerified, DisplayName: profile.DisplayName})
 		if err != nil {
 			return err
@@ -198,6 +210,9 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	})
 	if err != nil {
 		return User{}, Session{}, fmt.Errorf("upsert workos user and session: %w", err)
+	}
+	if created {
+		s.analytics.Capture(posthogcapture.Event{Name: "signed_up", Distinct: user.ID, At: s.now(), UUID: uuid.NewSHA1(uuid.NameSpaceOID, []byte("signed_up:"+user.ID)).String()})
 	}
 	return user, Session{ID: sessionID, UserID: user.ID, Token: sessionToken, CSRFToken: csrfToken, ExpiresAt: expiresAt, SignedInAt: s.now(), WorkOSSessionID: profile.SessionID}, nil
 }

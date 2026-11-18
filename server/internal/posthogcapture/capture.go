@@ -25,7 +25,7 @@ const (
 
 // allowed are the only property names an event may carry; anything else is dropped before it is queued, so a
 // caller can never leak a name, address or command by accident.
-var allowed = map[string]bool{"feature": true, "platform": true, "role": true, "via": true}
+var allowed = map[string]bool{"feature": true, "platform": true, "role": true, "via": true, "plan": true, "state": true}
 
 type Config struct {
 	Host   string // https origin of PostHog's capture endpoint

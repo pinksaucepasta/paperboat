@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 	"net/http"
 	"net/http/httptest"
 )
@@ -130,5 +132,59 @@ func TestWorkOSSignupEmailPolicyPostgres(t *testing.T) {
 	unverified.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "unverified", Email: canonical, EmailVerified: false}}
 	if _, _, err := unverified.VerifyCallback(ctx, CallbackInput{Code: "unverified-provider-code"}); err == nil {
 		t.Fatal("unverified new subject took over canonical account")
+	}
+}
+
+// signed_up is sent once, when VerifyCallback creates the account, and never for a returning sign-in.
+func TestWorkOSSignupReportsSignedUpOncePostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err = db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	prefix := fmt.Sprintf("signedup%d", time.Now().UnixNano())
+	defer store.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE workos_subject LIKE $1`, prefix+"%")
+	var mu sync.Mutex
+	var bodies []string
+	capture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(raw))
+		mu.Unlock()
+	}))
+	defer capture.Close()
+	client := posthogcapture.New(posthogcapture.Config{Host: capture.URL, Key: "phc_test"})
+	runCtx, stop := context.WithCancel(ctx)
+	finished := make(chan struct{})
+	go func() { _ = client.Run(runCtx); close(finished) }()
+	s := NewService(store, nil, FakeWorkOSVerifier{}, []string{"test-signup-key"}, true)
+	s.SetAnalytics(client)
+	service := *s
+	service.verifier = sessionLogoutVerifier{profile: WorkOSProfile{Subject: prefix + "a", Email: prefix + "@example.test", EmailVerified: true}}
+	first, _, err := service.VerifyCallback(ctx, CallbackInput{Code: "verified-provider-code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.VerifyCallback(ctx, CallbackInput{Code: "verified-provider-code"}); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	<-finished
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(bodies, "\n")
+	if strings.Count(joined, `"event":"signed_up"`) != 1 || !strings.Contains(joined, `"distinct_id":"`+first.ID+`"`) || strings.Contains(joined, prefix) {
+		t.Fatalf("want one signed_up for %s and no email or subject in the payload, got %s", first.ID, joined)
 	}
 }

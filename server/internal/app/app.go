@@ -212,6 +212,9 @@ func New(opts Options) (*App, error) {
 	}
 	authService := auth.NewService(store, auditWriter, workOSVerifier(opts.Config), opts.Config.Secrets.SessionKeys, secureAuthCookies, trustedLoginOrigins...)
 	authService.RequireWorkOSSessions(opts.Config.Secrets.EncryptionKey)
+	// Product analytics: off unless a capture host and key are configured; never blocks a request.
+	analyticsCapture := posthogcapture.New(posthogcapture.Config{Host: opts.Config.Analytics.PostHogCaptureHost, Key: opts.Config.Analytics.PostHogCaptureKey})
+	authService.SetAnalytics(analyticsCapture)
 	if err := authService.ConfigureSessions(opts.Config.BrowserSessions); err != nil {
 		_ = store.Close()
 		return nil, err
@@ -696,8 +699,6 @@ func New(opts Options) (*App, error) {
 	}
 	operatorService.SetNodeCapacity(opts.Config.NodeCapacity)
 	resourceUsageService := resourceusage.New(store)
-	// Product analytics: off unless a capture host and key are configured; never blocks a request.
-	analyticsCapture := posthogcapture.New(posthogcapture.Config{Host: opts.Config.Analytics.PostHogCaptureHost, Key: opts.Config.Analytics.PostHogCaptureKey})
 	resourceUsageService.Analytics = analyticsCapture
 	resourceUsageService.Debiter = workspaceBilling
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))

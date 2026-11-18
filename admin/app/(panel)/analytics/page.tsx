@@ -13,7 +13,7 @@ type Site = Data<"/v1/admin/analytics/site">
 type Console = Data<"/v1/admin/analytics/console">
 type Days = "7" | "30" | "90"
 
-const features: Record<string, string> = { terminal: "Terminals", exec: "Remote commands", transfer: "File transfers", preview: "Previews", tunnel: "Tunnels", env: "ENV", recipe: "Recipes" }
+const features: Record<string, string> = { terminal: "Terminals", exec: "Remote commands", ssh: "SSH", transfer: "File transfers", preview: "Previews", tunnel: "Tunnels", env: "ENV", recipe: "Recipes" }
 const percent = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0)
 
 export default function AnalyticsPage() {
