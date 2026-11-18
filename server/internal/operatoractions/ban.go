@@ -40,6 +40,9 @@ func (s *Service) banAccount(ctx context.Context, tx *db.Tx, actor, target, reas
 	if inserted.RowsAffected() != 1 {
 		return ErrConflict
 	}
+	if err = s.noticeBannedTx(ctx, tx, target, banID, "your account", reason); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, `UPDATE peer_endpoint_certificates SET revoked_at=now(),revocation_reason='account_revoked' WHERE user_id=$1 AND revoked_at IS NULL`, target); err != nil {
 		return err
 	}
@@ -130,8 +133,9 @@ func (s *Service) banTeam(ctx context.Context, tx *db.Tx, actor, target, reason 
 	if id != "" {
 		return ErrConflict
 	}
+	banID := "ban_" + uuid.NewString()
 	inserted, err := tx.Exec(ctx, `INSERT INTO bans(id,subject_kind,subject_id,reason,banned_by,subscriptions) VALUES($1,'team',$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-		"ban_"+uuid.NewString(), target, reason, actor, subscriptionsMode(in))
+		banID, target, reason, actor, subscriptionsMode(in))
 	if err != nil {
 		return err
 	}
@@ -140,6 +144,9 @@ func (s *Service) banTeam(ctx context.Context, tx *db.Tx, actor, target, reason 
 	}
 	var owner string
 	if err = tx.QueryRow(ctx, `SELECT owner_account FROM teams WHERE team_id=$1`, target).Scan(&owner); err != nil {
+		return err
+	}
+	if err = s.noticeBannedTx(ctx, tx, owner, banID, "your team "+target, reason); err != nil {
 		return err
 	}
 	return scheduleSubscriptionsTx(ctx, tx, owner, []string{target}, in.Subscriptions)
