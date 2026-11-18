@@ -36,8 +36,7 @@ type IngressLimitConfig struct {
 type IngressLimits struct {
 	Publication IngressLimitConfig
 	Account     IngressLimitConfig
-	// Throttled is the pace of a workspace that used its fair-use bandwidth; Throttles holds the buckets.
-	Throttled IngressLimitConfig
+	// Throttles slows the workspaces whose fair-use bandwidth is used up; the server sends each one's rate.
 	Throttles *Throttles
 
 	mu sync.Mutex
@@ -58,7 +57,7 @@ type ingressLimitState struct {
 // heartbeat answer carries the configured one.
 func DefaultIngressLimits() *IngressLimits {
 	set := edgelimits.Default()
-	return &IngressLimits{Publication: ingressLimitConfig(set.Publication), Account: ingressLimitConfig(set.Account), Throttled: ingressLimitConfig(set.Throttled)}
+	return &IngressLimits{Publication: ingressLimitConfig(set.Publication), Account: ingressLimitConfig(set.Account)}
 }
 
 func ingressLimitConfig(l edgelimits.Limit) IngressLimitConfig {
@@ -70,26 +69,24 @@ func (r *DataCarrierRouteRegistry) SetIngressLimits(set edgelimits.IngressLimits
 	if r == nil || r.ingressLimits == nil || set.Validate() != nil {
 		return edgelimits.ErrInvalid
 	}
-	return r.ingressLimits.apply(ingressLimitConfig(set.Publication), ingressLimitConfig(set.Account), ingressLimitConfig(set.Throttled))
+	return r.ingressLimits.apply(ingressLimitConfig(set.Publication), ingressLimitConfig(set.Account))
 }
 
-func (l *IngressLimits) apply(publication, account, throttled IngressLimitConfig) error {
-	if !validIngressLimit(publication) || !validIngressLimit(account) || !validIngressLimit(throttled) {
+func (l *IngressLimits) apply(publication, account IngressLimitConfig) error {
+	if !validIngressLimit(publication) || !validIngressLimit(account) {
 		return edgelimits.ErrInvalid
 	}
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.Publication == publication && l.Account == account && l.Throttled == throttled && l.reported {
+	if l.Publication == publication && l.Account == account && l.reported {
 		return nil
 	}
 	l.reported = true
 	slog.Info("ingress_limits_applied",
 		"publication_bytes_per_second", float64(publication.ByteRate), "publication_byte_burst", publication.ByteBurst,
-		"account_bytes_per_second", float64(account.ByteRate), "account_byte_burst", account.ByteBurst,
-		"throttled_bytes_per_second", float64(throttled.ByteRate), "throttled_byte_burst", throttled.ByteBurst)
-	l.Publication, l.Account, l.Throttled = publication, account, throttled
-	l.Throttles.configure(throttled, now)
+		"account_bytes_per_second", float64(account.ByteRate), "account_byte_burst", account.ByteBurst)
+	l.Publication, l.Account = publication, account
 	for _, state := range l.publications {
 		state.reconfigure(publication, now)
 	}
@@ -108,10 +105,10 @@ func newIngressLimits(config *IngressLimits) (*IngressLimits, error) {
 	if config == nil {
 		config = DefaultIngressLimits()
 	}
-	if !validIngressLimit(config.Publication) || !validIngressLimit(config.Account) || !validIngressLimit(config.Throttled) {
+	if !validIngressLimit(config.Publication) || !validIngressLimit(config.Account) {
 		return nil, edgelimits.ErrInvalid
 	}
-	return &IngressLimits{Publication: config.Publication, Account: config.Account, Throttled: config.Throttled, Throttles: newThrottles(config.Throttled), publications: make(map[string]*ingressLimitState), accounts: make(map[string]*ingressLimitState)}, nil
+	return &IngressLimits{Publication: config.Publication, Account: config.Account, Throttles: newThrottles(), publications: make(map[string]*ingressLimitState), accounts: make(map[string]*ingressLimitState)}, nil
 }
 
 func validIngressLimit(config IngressLimitConfig) bool {

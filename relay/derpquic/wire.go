@@ -180,9 +180,7 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 const (
 	carrierBytesPerSecond = 64 << 20  // 512 Mbit/s per carrier
 	accountBytesPerSecond = 128 << 20 // the ceiling of an account's carriers on one relay; the fair-use cap is lower
-	// DefaultAccountMbit is the fair-use speed of one account on one Paperboat-operated relay (SetAccountMbit).
-	DefaultAccountMbit = 20.0
-	// MaxAccountMbit bounds the configured cap: the relay's own ceiling.
+	// MaxAccountMbit bounds the configured caps: the relay's own ceiling.
 	MaxAccountMbit    = float64(accountBytesPerSecond) * 8 / 1e6
 	budgetBurstBytes  = 4 << 20
 	budgetMinimumCost = fragmentHeader + fragmentPayload

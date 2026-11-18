@@ -99,10 +99,12 @@ func (s Scope) workspaceID() string {
 }
 
 // Usage is one kind's count against its limit; Limit is nil for Teams (advertised unlimited) and, for
-// public TCP tunnels, for a workspace on a self-hosted edge.
+// previews and tunnels, console terminals and public TCP tunnels, for a workspace on its own (self-hosted) edges.
 type Usage struct {
 	Used  int  `json:"used"`
 	Limit *int `json:"limit"`
+	// SelfHosted says the kind is not limited because the workspace runs its own edges (Limit is nil).
+	SelfHosted bool `json:"self_hosted,omitempty"`
 	// Granted says the limit is an operator's override, not the plan's.
 	Granted bool `json:"granted,omitempty"`
 }
@@ -132,12 +134,22 @@ func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 		return err
 	}
 	var limit int
-	if kind == PublicTCP {
+	switch {
+	case kind == PublicTCP:
 		var exempt bool
 		if limit, exempt, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan); err != nil || exempt {
 			return err
 		}
-	} else {
+	case kind == Publications || kind == BrowserTerminals:
+		// A workspace on its own edges has no plan limit here, only the internal ceiling that protects the database.
+		own, err := ownEdgesTx(ctx, tx, scope)
+		if err != nil {
+			return err
+		}
+		if limit = limitFor(set.limits, kind, plan); own {
+			limit = set.limits.SelfHostedCeiling
+		}
+	default:
 		limit = limitFor(set.limits, kind, plan)
 	}
 	override, overridden, err := OverrideTx(ctx, tx, scope.workspaceID(), kind)
@@ -190,6 +202,10 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 		return nil, err
 	}
 	plan := planOf(scope, product)
+	own, err := ownEdgesTx(ctx, tx, scope)
+	if err != nil {
+		return nil, err
+	}
 	out := make(map[Kind]Usage, len(kinds))
 	for i, kind := range kinds {
 		u := Usage{Used: used[i]}
@@ -208,6 +224,9 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 				limit, u.Granted = effective(override, overridden, limit)
 				u.Limit = &limit
 			}
+			u.SelfHosted = exempt
+		case own && (kind == Publications || kind == BrowserTerminals):
+			u.SelfHosted = true
 		case overridden:
 			limit, _ := effective(override, overridden, 0)
 			u.Limit, u.Granted = &limit, true
@@ -220,10 +239,17 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 	return out, nil
 }
 
+// ownEdgesTx reports whether every edge of the workspace is self-hosted (its pool policy is self-hosted-only): what goes through its
+// own edges is not Paperboat's to limit.
+func ownEdgesTx(ctx context.Context, tx *db.Tx, scope Scope) (own bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,NULLIF($2,''))='self-hosted-only'`, scope.Account, scope.Team).Scan(&own)
+	return own, err
+}
+
 // publicTCPLimitTx is the workspace's public raw-TCP tunnel limit: per plan for a personal workspace, per paid
 // seat (pooled) for a team. A workspace whose tunnel edge is self-hosted is exempt, its listeners are its own.
 func publicTCPLimitTx(ctx context.Context, tx *db.Tx, l config.PublicTCPLimit, scope Scope, plan Plan) (limit int, exempt bool, err error) {
-	if err = tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,NULLIF($2,''))='self-hosted-only'`, scope.Account, scope.Team).Scan(&exempt); err != nil || exempt {
+	if exempt, err = ownEdgesTx(ctx, tx, scope); err != nil || exempt {
 		return 0, exempt, err
 	}
 	switch plan {

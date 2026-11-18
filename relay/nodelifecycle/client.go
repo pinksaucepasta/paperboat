@@ -63,6 +63,12 @@ type Lease struct {
 	// PoolHandover lists accounts whose pool no longer includes this relay and when to close their carriers; nil
 	// (absent) keeps the list the relay holds, an empty list clears it.
 	PoolHandover *[]PoolHandover `json:"pool_handover,omitempty"`
+	// AccountMbit, SlowMbit and SlowAccounts are the fair-use speeds the control plane sets for this relay (0 on a customer-owned
+	// relay, which is never limited): the relay caps each account at AccountMbit and the listed ones at SlowMbit until a later
+	// observation no longer lists them.
+	AccountMbit  float64  `json:"account_mbit"`
+	SlowMbit     float64  `json:"slow_mbit"`
+	SlowAccounts []string `json:"slow_accounts,omitempty"`
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
 	// no stored set for this process or its digest differs.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
@@ -388,11 +394,15 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		}
 	}
 	if out.SubjectsRequired {
-		// The control plane lost or never had this set: send it in full next time.
+		// The control plane lost or never had this set: send it in full next time, and keep the slow list, which such an
+		// answer does not carry.
 		c.sentSubjects = ""
-		out.SubjectsRequired = false
+		out.SlowAccounts, out.SubjectsRequired = c.lease.SlowAccounts, false
 	} else if full {
 		c.sentSubjects = digest
+	}
+	if server.SetAccountSpeeds(out.AccountMbit, out.SlowMbit) != nil || server.SetSlowAccounts(out.SlowAccounts) != nil {
+		return ErrControl
 	}
 	c.lease = out
 	return nil

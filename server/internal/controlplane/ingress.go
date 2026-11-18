@@ -90,11 +90,46 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+	if err = s.assignThrottleRates(ctx, throttled); err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
 	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 	offline, err = offlineOwnerPreviews(ctx, s.store, nodeID)
 	return decisions, throttled, blocked, ipRules, offline, err
+}
+
+// minThrottleBytesPerSecond keeps one edge's share of a throttled workspace able to move a request at all.
+const minThrottleBytesPerSecond = 1024
+
+// assignThrottleRates gives each throttle entry this edge's share of its workspace's slow speed: Free's or a paid plan's
+// rate (config.FairUse) divided by the number of edges that carry the workspace, so the workspace as a whole stays at the
+// plan's rate however many edges serve it (an idle edge's share is not handed to the busy one).
+// shortcut: the share is fixed per snapshot, not rebalanced by live use; rebalance if workspaces regularly span edges unevenly.
+func (s *EdgeService) assignThrottleRates(ctx context.Context, throttled []wire.IngressThrottle) error {
+	rates := map[string]int64{}
+	for i := range throttled {
+		workspace := throttled[i].Workspace
+		rate, known := rates[workspace]
+		if !known {
+			var paid bool
+			var edges int64
+			if err := s.store.SQL().QueryRowContext(ctx, `SELECT
+ coalesce((SELECT w.product_code IS NOT NULL AND billing_workspace_paid_until(w)>now() FROM billing_workspaces w WHERE w.id=$1),false),
+ (SELECT count(DISTINCT a.edge_node_id) FROM usage_accounting_authorities a WHERE a.workspace_id=$1 AND a.admission_expires_at>now())`, workspace).Scan(&paid, &edges); err != nil {
+				return err
+			}
+			base := s.fairUse.EdgeFreeBytesPerSecond
+			if paid {
+				base = s.fairUse.EdgeBytesPerSecond
+			}
+			rate = max(base/max(edges, 1), minThrottleBytesPerSecond)
+			rates[workspace] = rate
+		}
+		throttled[i].BytesPerSecond = rate
+	}
+	return nil
 }
 
 // offlineOwnerPreviews lists the hostnames of active foreground previews whose owner machine is offline or
