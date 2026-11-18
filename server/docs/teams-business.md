@@ -166,6 +166,7 @@ Every action is `<namespace>.<verb>`. The namespaces, which a test keeps equal t
 <!-- event-catalog:start -->
 | Namespace | Events about |
 |---|---|
+| `abuse_report` | Paperboat operations: triage of reports about public preview and tunnel hostnames. |
 | `api_token` | API tokens created and revoked. |
 | `auth` | Sign-in, sign-out, CLI device approval and revocation. |
 | `backup` | Paperboat operations: database backup reports. |
