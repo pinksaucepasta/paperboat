@@ -18,7 +18,7 @@ import (
 // pbh verifies an update against them (helper/internal/selfupdate); they carry no pb release policy.
 const selfhostTargetPrefix = "selfhost/"
 
-var selfhostTargetPattern = regexp.MustCompile(`^selfhost/([0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,6})/(paperboat-selfhost-linux-(?:amd64|arm64)\.tar\.gz)$`)
+var selfhostTargetPattern = regexp.MustCompile(`^selfhost/(20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(?:0|[1-9][0-9]*))/(paperboat-selfhost-linux-(?:amd64|arm64)\.tar\.gz)$`)
 
 // selfhostTargetCustom says where the bundle's bytes are: the selfhost-<version> GitHub release that carries the
 // signed SHA256SUMS. pbh downloads from this URL and checks the bytes against the target's length and sha256.

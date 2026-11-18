@@ -44,7 +44,7 @@ func signedRepository(t *testing.T, files map[string][]byte) (root []byte, serve
 		if err != nil {
 			t.Fatal(err)
 		}
-		custom := json.RawMessage(`{"repository":"example/paperboat","url":"https://releases.example.test/download/` + filepath.Base(name) + `"}`)
+		custom := json.RawMessage(`{"repository":"example/paperboat","url":"https://github.com/example/paperboat/releases/download/selfhost-` + filepath.Base(filepath.Dir(name)) + `/` + filepath.Base(name) + `"}`)
 		info.Custom = &custom
 		targets.Signed.Targets[name] = info
 	}
@@ -102,7 +102,7 @@ func TestVerifyAcceptsOnlyTheSignedBundle(t *testing.T) {
 	if err := verify(root, "2026.11.19.1", path); err != nil {
 		t.Fatalf("signed bundle refused: %v", err)
 	}
-	if _, url, err := Target(context.Background(), server.URL, root, t.TempDir(), "2026.11.19.1", "amd64", server.Client()); err != nil || url != "https://releases.example.test/download/paperboat-selfhost-linux-amd64.tar.gz" {
+	if _, url, err := Target(context.Background(), server.URL, root, t.TempDir(), "2026.11.19.1", "amd64", server.Client()); err != nil || url != "https://github.com/example/paperboat/releases/download/selfhost-2026.11.19.1/paperboat-selfhost-linux-amd64.tar.gz" {
 		t.Fatalf("signed download URL = %q, %v", url, err)
 	}
 	tampered := filepath.Join(dir, "tampered.tar.gz")
