@@ -209,6 +209,7 @@ func (s *Server) Start() error {
 					// rather than on the peer's default region, which may be a relay this engine cannot reach
 					// (a test Mac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
 					// derp.go derpRoute, issue 150).
+					// Deliberate bypass: a reply route (Tailscale: magicsock derp.go derpRoute, apart from netmap HomeDERP; here one slot serves both).
 					_ = lb.setPeerRelayRegion(src, regionID)
 					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed(nonce, s.startID)); err == nil {
 						// The client's peer map is installed before it sends the meow.
@@ -358,7 +359,7 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 // answer to an earlier handshake, or a second answer from a peer still on two relays does nothing. The region is
 // recorded before the dial is released, so its first packets take it.
 func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce, start [meowNonceLen]byte) {
-	// The waiter is claimed under peerReadyMu and the region set without it: setPeerRelayRegion takes policyMu, which
+	// The waiter is claimed under peerReadyMu and the region set without it: learnPeerRelayRegion takes policyMu, which
 	// SetPeerContacts and InvalidateAuthorizedPeer hold while they take peerReadyMu (ABBA, review of b6eb2018c).
 	s.peerReadyMu.Lock()
 	w := s.peerReady[src]

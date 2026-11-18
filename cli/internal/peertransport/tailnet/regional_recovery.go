@@ -192,6 +192,7 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		if err := server.EnsureRelayPeer(peer, disco); err != nil {
 			return err
 		}
+		// Deliberate bypass: a reply route (Tailscale: magicsock derp.go derpRoute, apart from netmap HomeDERP; here one slot serves both).
 		return engine.SetPeerRelayRegion(peer, regionID)
 	}
 	r.mu.Lock()
@@ -335,6 +336,7 @@ func (r *regionalRecovery) prepareProvisional(ctx context.Context, peerID string
 	if err := server.EnsureRelayPeer(freshPeer, disco); err != nil {
 		return err
 	}
+	// Deliberate bypass: a reply route (Tailscale: magicsock derp.go derpRoute, apart from netmap HomeDERP; here one slot serves both).
 	return r.engine.SetPeerRelayRegion(freshPeer, regionalID(node.NodeID))
 }
 
@@ -596,6 +598,7 @@ func (r *regionalRecovery) receive(ctx context.Context) {
 						return err
 					}
 				}
+				// Deliberate bypass: a reply route (Tailscale: magicsock derp.go derpRoute, apart from netmap HomeDERP; here one slot serves both).
 				return r.engine.SetPeerRelayRegion(in.peer, in.region)
 			}, r.engine.RelayTransport(in.region))
 			if len(reply) > 0 {
@@ -929,6 +932,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				}
 			}
 			if err == nil {
+				// Deliberate bypass: a reply route (Tailscale: magicsock derp.go derpRoute, apart from netmap HomeDERP; here one slot serves both).
 				err = r.engine.SetPeerRelayRegion(peer, regionalID(chosen.node.NodeID))
 			}
 			if err != nil {
