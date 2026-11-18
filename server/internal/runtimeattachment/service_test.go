@@ -604,41 +604,46 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	}
 	exec(`INSERT INTO selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2]::text[])`, account, prefix+"_installation")
 	exec(`UPDATE control_tunnel_nodes SET endpoint_host='backup.example.test' WHERE id=$1`, backupNode)
+	// A self-hosted-only workspace keeps its terminals on Paperboat's managed edge at Paperboat's own hostname: the
+	// managed edge is the first carrier and the route's active edge, its own server a second carrier for its
+	// previews and tunnels that never carries terminals.
 	customer, err := service.Attach(ctx, proof, request)
-	if err != nil || customer.Binding.EdgeNodeID != backupNode || customer.Backup != nil || customer.Hostname == machine+".runtime.example.test" || !strings.HasSuffix(customer.Hostname, ".backup.example.test") {
-		t.Fatalf("customer runtime did not use its owned edge and routing alias: %#v err=%v", customer, err)
+	if err != nil || customer.Binding.EdgeNodeID != node || customer.Hostname != machine+".runtime.example.test" || customer.Backup == nil || customer.Backup.Binding.EdgeNodeID != backupNode || len(customer.More) != 0 || customer.ActiveEdgeNodeID != node || len(customer.TerminalEdgeNodeIDs) != 1 || customer.TerminalEdgeNodeIDs[0] != node {
+		t.Fatalf("self-hosted-only runtime did not take a managed terminal edge and its own server: %#v err=%v", customer, err)
 	}
 	for _, candidate := range customer.EdgeCandidates {
 		if candidate.NodeID != backupNode {
 			t.Fatal("managed candidate escaped customer-only workspace")
 		}
 	}
-	if _, err := IngressURL(ctx, database, env, customer.Hostname); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("unready customer carrier advertised: %v", err)
+	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://"+machine+".runtime.example.test" {
+		t.Fatalf("self-hosted-only terminal address=%q error=%v: want Paperboat's own hostname", actual, err)
 	}
-	if err := service.Observe(ctx, backupEdge, []runtimewire.Observation{{RouteID: route, AttachmentGeneration: customer.AttachmentGeneration, SessionID: customer.Binding.SessionID, Ready: true}}); err != nil {
+	var active string
+	if err := database.SQL().QueryRowContext(ctx, `SELECT edge_node_id FROM runtime_carrier_attachments WHERE route_id=$1 AND active`, route).Scan(&active); err != nil || active != node {
+		t.Fatalf("active carrier %q (%v), want the managed edge %q", active, err, node)
+	}
+	// The workspace's own server holds a valid carrier (its tunnels ride it) but is never the route's active edge.
+	if err := service.Observe(ctx, backupEdge, []runtimewire.Observation{{RouteID: route, AttachmentGeneration: customer.Backup.AttachmentGeneration, SessionID: customer.Backup.Binding.SessionID, Ready: true}}); err != nil {
 		t.Fatal(err)
 	}
-	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test/v1/runtime/"+customer.Hostname {
-		t.Fatalf("customer infrastructure URL=%q error=%v", actual, err)
+	if err := database.SQL().QueryRowContext(ctx, `SELECT edge_node_id FROM runtime_carrier_attachments WHERE route_id=$1 AND active`, route).Scan(&active); err != nil || active != node {
+		t.Fatalf("customer edge became active: %q %v", active, err)
 	}
-	// While the active carrier's edge restarts, a valid carrier on another edge still serves (support_50a7f460).
-	exec(`UPDATE runtime_carrier_attachments SET active=false WHERE route_id=$1`, route)
-	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test/v1/runtime/"+customer.Hostname {
-		t.Fatalf("valid carrier that is not the active one: URL=%q error=%v", actual, err)
-	}
-	exec(`UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1`, route)
-	// An edge whose public HTTPS listener is published on another port advertises it; the URL carries it.
-	exec(`UPDATE control_tunnel_nodes SET public_https_port=18446 WHERE id=$1`, backupNode)
-	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test:18446/v1/runtime/"+customer.Hostname {
-		t.Fatalf("advertised public HTTPS port: URL=%q error=%v", actual, err)
-	}
-	exec(`UPDATE control_tunnel_nodes SET public_https_port=NULL WHERE id=$1`, backupNode)
+	// Its own server down: the managed carrier still serves terminals.
 	exec(`UPDATE control_tunnel_nodes SET ready=false WHERE id=$1`, backupNode)
-	if _, err := service.Attach(ctx, proof, request); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("customer outage used managed fallback: %v", err)
+	down, err := service.Attach(ctx, proof, request)
+	if err != nil || down.Binding.EdgeNodeID != node || down.Backup != nil || down.ActiveEdgeNodeID != node {
+		t.Fatalf("customer outage took terminals down: %#v err=%v", down, err)
 	}
 	exec(`UPDATE control_tunnel_nodes SET ready=true WHERE id=$1`, backupNode)
+	// The managed edge down: terminals are unavailable, and the customer's server never becomes the terminal edge.
+	exec(`UPDATE control_tunnel_nodes SET ready=false WHERE id=$1`, node)
+	noTerminal, err := service.Attach(ctx, proof, request)
+	if err != nil || noTerminal.Binding.EdgeNodeID != backupNode || noTerminal.ActiveEdgeNodeID != "" || len(noTerminal.TerminalEdgeNodeIDs) != 0 {
+		t.Fatalf("managed outage made a customer edge the terminal edge: %#v err=%v", noTerminal, err)
+	}
+	exec(`UPDATE control_tunnel_nodes SET ready=true,last_heartbeat_at=now() WHERE id=$1`, node)
 	exec(`UPDATE selfhost_pool_policies SET mode='managed-only',installation_ids='{}' WHERE scope_kind='account' AND scope_id=$1 AND capability='tunnel'`, account)
 	restored, err := service.Attach(ctx, proof, request)
 	if err != nil || restored.Binding.EdgeNodeID != node || restored.Hostname != machine+".runtime.example.test" {
