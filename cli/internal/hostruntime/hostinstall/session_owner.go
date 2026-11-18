@@ -133,6 +133,14 @@ func bindInitialSessionStore(ctx context.Context, c sessionowner.Catalog, d sess
 	}
 	for _, existing := range all {
 		if existing.Generation == d.Generation {
+			if existing.Source.SHA256 != d.Source.SHA256 {
+				// An archive row: a newer build retired this generation's owner and republished it on its own
+				// code to keep the owner's history readable. The generation is the build being installed
+				// again (downgrade, or rollback to a retired build), which takes its owner and history back;
+				// Publish refuses the swap while the row is registered or running.
+				d.InitialStore = existing.InitialStore
+				return d, nil
+			}
 			if !existing.Source.SameArtifact(d.Source) {
 				return d, sessionowner.ErrInvalid
 			}
