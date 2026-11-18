@@ -234,12 +234,31 @@ def read_targets(path, label):
     if not isinstance(signed, dict):
         raise SystemExit(f"{label} TUF targets metadata has no signed object")
     targets = signed.get("targets")
-    if not isinstance(targets, dict) or not targets or (label == "candidate" and set(targets) != set(expected)):
+    if not isinstance(targets, dict) or not targets:
+        raise SystemExit(f"{label} TUF targets metadata does not contain the exact release asset set")
+    # pb's targets plus, once published, the self-host bundle's (selfhost-release.yml), which pbh verifies.
+    products = {name for name in targets if not name.startswith("selfhost/")}
+    if label == "candidate" and products != set(expected):
         raise SystemExit(f"{label} TUF targets metadata does not contain the exact release asset set")
     # A product that joins the set (macOS after a Linux-only history) is not live yet; unknown ones never are.
-    if label == "live" and not set(targets) <= set(expected):
+    if label == "live" and not products <= set(expected):
         raise SystemExit("live TUF targets metadata contains an unknown release product")
+    for name in set(targets) - products:
+        validate_selfhost_target(name, targets[name])
     return targets
+
+def validate_selfhost_target(name, target):
+    match = re.fullmatch(r"selfhost/(20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(?:0|[1-9][0-9]*))/(paperboat-selfhost-linux-(?:amd64|arm64)\.tar\.gz)", name)
+    if not match or not isinstance(target, dict):
+        raise SystemExit(f"self-host TUF target is invalid: {name}")
+    length, digest, custom = target.get("length"), (target.get("hashes") or {}).get("sha256"), target.get("custom")
+    if isinstance(length, bool) or not isinstance(length, int) or not 1 <= length <= 128 << 20 or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise SystemExit(f"self-host TUF target length or digest is invalid: {name}")
+    repository = custom.get("repository") if isinstance(custom, dict) else None
+    if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or set(custom) != {"repository", "url"}:
+        raise SystemExit(f"self-host TUF target custom metadata is invalid: {name}")
+    require_equal(custom["url"], f"https://github.com/{repository}/releases/download/selfhost-{match[1]}/{match[2]}", f"self-host TUF target download URL is invalid: {name}")
+    return version_parts(match[1], name)
 
 def version_parts(value, name):
     if not isinstance(value, str) or not re.fullmatch(r"20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)", value):
@@ -397,12 +416,26 @@ for name in expected:
         selected.append(name)
         continue
     live_version_parts, _, _, _, _, _ = live_metadata[name]
+    if not refresh and candidate_targets[name] == live_targets[name]:
+        continue  # kept as is: a self-host publication of the same release tag re-signs pb's targets unchanged
     if candidate_version_parts == requested_version_parts:
         if not refresh and compare_versions(candidate_version_parts, live_version_parts) <= 0:
             raise SystemExit(f"selected TUF target version does not advance the live target for {name}")
         selected.append(name)
     elif candidate_targets[name] != live_targets[name]:
         raise SystemExit(f"omitted TUF target metadata changed for {name}")
+
+# The self-host bundle: kept byte-identical, or replaced by the requested version's, which must advance it.
+candidate_selfhost = {name for name in candidate_targets if name.startswith("selfhost/")}
+live_selfhost = {name for name in live_targets if name.startswith("selfhost/")}
+added = {name for name in candidate_selfhost if candidate_targets[name] != live_targets.get(name)}
+for name in added:
+    parts = validate_selfhost_target(name, candidate_targets[name])
+    if parts != requested_version_parts or any(compare_versions(parts, validate_selfhost_target(old, live_targets[old])) <= 0 for old in live_selfhost):
+        raise SystemExit(f"self-host TUF target is not the requested version or does not advance the live bundle: {name}")
+    selected.append(name)
+if (live_selfhost - candidate_selfhost) and not added:
+    raise SystemExit("candidate TUF targets drop the live self-host bundle")
 
 if refresh and len(selected) != len(expected):
     raise SystemExit("refreshed TUF targets must all retain the requested release version")
