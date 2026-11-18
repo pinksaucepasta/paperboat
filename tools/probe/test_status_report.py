@@ -42,10 +42,6 @@ class Checks(unittest.TestCase):
         self.assertFalse(self.run_one(kind="http", url=self.base + "/ok", expect="other")["ok"])
         self.assertEqual(self.run_one(kind="http", url=self.base + "/down")["error"], "status 503")
 
-    def test_relay_wants_the_authorization_answer(self):
-        self.assertTrue(self.run_one(kind="relay", url=self.base + "/relay")["ok"])
-        self.assertFalse(self.run_one(kind="relay", url=self.base + "/down")["ok"])
-
     def test_release_metadata_must_not_be_expired(self):
         self.assertTrue(self.run_one(kind="tuf", url=self.base + "/tuf")["ok"])
         self.assertFalse(self.run_one(kind="tuf", url=self.base + "/tuf-old")["ok"])
@@ -106,8 +102,36 @@ class PinnedRelay(unittest.TestCase):
     def test_another_key_fails(self):
         self.assertFalse(self.check(pin="sha256//" + base64.b64encode(b"x" * 32).decode())["ok"])
 
-    def test_without_a_pin_a_private_certificate_is_not_trusted(self):
-        self.assertFalse(self.check()["ok"])
+    def test_a_relay_the_set_does_not_name_is_judged_on_validity_and_its_answer_only(self):
+        self.assertTrue(self.check()["ok"])
+
+    def relay_file(self, spki_b64std, exp=4102444800):
+        """A relay file like the daemon keeps: a signed candidate set (the signature is not read here) naming this relay's key."""
+        raw = base64.b64decode(spki_b64std.split("//")[1])
+        claims = {"exp": exp, "nodes": [{"endpoint_host": "127.0.0.1", "endpoint_tcp_port": self.server.server_port, "tls_spki_sha256": base64.urlsafe_b64encode(raw).decode().rstrip("="), "roles": ["relay"]}]}
+        payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        return json.dumps({"candidate_set": f"h.{payload}.s", "relay_grants": []})
+
+    def checked(self, file_text):
+        checks = sr.with_identities([{"unit": "relay_x", "kind": "relay", "url": self.url}], sr.relay_pins(file_text))
+        return sr.run_checks(checks)[0]
+
+    def test_identity_comes_from_the_signed_set_not_from_config(self):
+        self.assertTrue(self.checked(self.relay_file(self.pin))["ok"])
+
+    def test_a_rotation_follows_the_set_with_no_config_change(self):
+        stale = self.relay_file("sha256//" + base64.b64encode(b"o" * 32).decode())  # the set still names the old key: the relay is not who the set says
+        self.assertFalse(self.checked(stale)["ok"])
+        self.assertTrue(self.checked(self.relay_file(self.pin))["ok"])  # the set was refreshed with the rotated key: green again, same config
+
+    def test_an_expired_or_unreadable_set_names_no_identity(self):
+        self.assertEqual(sr.relay_pins(self.relay_file(self.pin, exp=1)), {})
+        self.assertEqual(sr.relay_pins("not json"), {})
+        self.assertEqual(sr.relay_pins('{"candidate_set": "x"}'), {})
+
+    def test_a_relay_not_in_the_set_is_still_checked_for_an_expired_certificate(self):
+        self.assertTrue(sr.cert_valid_now("127.0.0.1", self.server.server_port))
+        self.assertFalse(sr.cert_valid_now("127.0.0.1", self.server.server_port, now=4102444800 + 10 * 365 * 86400))
 
 
 class Reporting(unittest.TestCase):
