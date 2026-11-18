@@ -55,7 +55,7 @@ func recordingsCobraCommand() *cobra.Command {
 		control.Flags().Bool("json", false, "print JSON")
 		group.AddCommand(control)
 	}
-	keyGroup := &cobra.Command{Use: "key", Short: "Manage a team's recording key", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
+	keyGroup := &cobra.Command{Use: "key", Short: "Manage a team's recording key", Long: "Manage the team recording key that terminal recordings are sealed to. A team member who holds a copy of the current key can replace it with `pb recordings key replace`: the new key is made and signed on this computer, and machines accept it only through that signature.", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
 	replace := &cobra.Command{Use: "replace", Short: "Replace the team's recording key with a new one signed by your copy of the current key", Long: "Replace the team's recording key.\n\nThe new key is made and signed here with your ENV vault: only a member who holds a copy of the current key can sign the next one, so machines follow it through the signed chain and never because the server says so. Everyone who can replay gets a copy of the new key, and older recordings stay readable through a link sealed to it. The key and its private halves never leave this computer in plaintext.\n\nNeeds the security permission on the team and an unlocked ENV vault (`pb env unlock`).", Args: commandArgs(cobra.NoArgs), RunE: actionRun(recordingsKeyReplace)}
 	replace.Flags().String("team", "", "team whose key to replace; defaults to the active workspace")
 	replace.Flags().String("confirm", "", "must be `REPLACE RECORDING KEY <team>`")

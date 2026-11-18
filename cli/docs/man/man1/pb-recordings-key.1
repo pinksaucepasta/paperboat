@@ -1,0 +1,46 @@
+.nh
+.TH "PB-RECORDINGS-KEY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings-key - Manage a team's recording key
+
+
+.SH SYNOPSIS
+\fBpb recordings key [flags]\fP
+
+
+.SH DESCRIPTION
+Manage the team recording key that terminal recordings are sealed to. A team member who holds a copy of the current key can replace it with \fBpb recordings key replace\fR: the new key is made and signed on this computer, and machines accept it only through that signature.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for key
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-recordings(1)\fP, \fBpb-recordings-key-replace(1)\fP
