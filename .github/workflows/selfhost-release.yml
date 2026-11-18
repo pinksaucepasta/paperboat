@@ -1,6 +1,7 @@
 name: Self-host installer
 
-# Publishes the `pbh` self-host one-liner for an existing release tag. Manual, and only after
+# Publishes the `pbh` self-host packages for an existing release tag as a signed GitHub release `selfhost-<tag>` (never
+# marked Latest: that is the CLI's). The fixed helper/deploy/install.sh finds the newest one. Manual, and only after
 # "Service containers" has published the relay and edge images for the same tag.
 on:
   workflow_dispatch:
@@ -24,14 +25,14 @@ env:
 
 jobs:
   publish:
-    name: Build, publish and verify the self-host installer
+    name: Build, sign and publish the self-host packages
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     environment: paperboat-tuf-published
+    permissions:
+      contents: write
     env:
       RELEASE_URL: ${{ vars.PAPERBOAT_DEFAULT_RELEASE_URL }}
-      RELEASE_HOST: ${{ vars.PAPERBOAT_RELEASE_HOST }}
-      DOCKER_INSTALL_URL: ${{ vars.PAPERBOAT_DOCKER_INSTALL_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,12 +58,6 @@ jobs:
           release = urlsplit(os.environ.get('RELEASE_URL', ''))
           if release.scheme != 'https' or not release.hostname or release.path != '/tuf' or release.port not in (None, 443) or release.username or release.query or release.fragment:
               raise SystemExit('PAPERBOAT_DEFAULT_RELEASE_URL must be https://HOST/tuf')
-          docker = urlsplit(os.environ.get('DOCKER_INSTALL_URL', ''))
-          if docker.scheme != 'https' or not docker.hostname or docker.username or docker.query or docker.fragment:
-              raise SystemExit('PAPERBOAT_DOCKER_INSTALL_URL must be the official https Docker installer URL')
-          host = os.environ.get('RELEASE_HOST', '')
-          if not re.fullmatch(r'[A-Za-z0-9.-]+', host):
-              raise SystemExit('PAPERBOAT_RELEASE_HOST must be a canonical SSH host name or IPv4 address')
           print(f'origin=https://{release.hostname.lower()}')
           PY
       - name: Require multi-architecture relay and edge images for this tag
@@ -79,7 +74,7 @@ jobs:
               raise SystemExit(f'{sys.argv[2]} image is not published for linux/amd64 and linux/arm64')
           PY
           done
-      - name: Build both packages and render the installer
+      - name: Build both packages
         id: build
         env:
           ORIGIN: ${{ steps.endpoints.outputs.origin }}
@@ -91,39 +86,57 @@ jobs:
           export PAPERBOAT_SELFHOST_EDGE_IMAGE="ghcr.io/$GITHUB_REPOSITORY/edge:$RELEASE_VERSION"
           out="$GITHUB_WORKSPACE/.build/selfhost"
           for arch in amd64 arm64; do helper/deploy/package-selfhost.sh "$RELEASE_VERSION" "$arch" "$out"; done
-          helper/deploy/render-installer.sh "$RELEASE_VERSION" "$ORIGIN/selfhost/versions/$RELEASE_VERSION" "$DOCKER_INSTALL_URL" "$out"
-          tar -czf "$RUNNER_TEMP/selfhost-bundle.tgz" -C "$out" install manifest.json paperboat-selfhost-linux-amd64.tar.gz paperboat-selfhost-linux-arm64.tar.gz
-          echo "digest=$(sha256sum "$RUNNER_TEMP/selfhost-bundle.tgz" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      - name: Publish to the protected origin
+      - name: Sign SHA256SUMS with the release key
         env:
-          PAPERBOAT_RELEASE_SSH_KEY: ${{ secrets.PAPERBOAT_RELEASE_SSH_KEY }}
-          PAPERBOAT_RELEASE_KNOWN_HOSTS: ${{ secrets.PAPERBOAT_RELEASE_KNOWN_HOSTS }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          PAPERBOAT_RELEASE_SIGNING_KEY: ${{ secrets.PAPERBOAT_RELEASE_SIGNING_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$PAPERBOAT_RELEASE_SSH_KEY" && test -n "$PAPERBOAT_RELEASE_KNOWN_HOSTS"
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$PAPERBOAT_RELEASE_SSH_KEY" > "$HOME/.ssh/paperboat-release"
-          printf '%s\n' "$PAPERBOAT_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/paperboat-release" "$HOME/.ssh/known_hosts"
-          ssh_options=(-i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes)
-          remote_bundle="/opt/paperboat/releases/staging/paperboat-selfhost-$RELEASE_VERSION-$GITHUB_RUN_ID.tgz"
-          remote_script="/opt/paperboat/releases/staging/publish-selfhost-origin-$GITHUB_RUN_ID.sh"
-          scp "${ssh_options[@]}" "$RUNNER_TEMP/selfhost-bundle.tgz" "root@$RELEASE_HOST:$remote_bundle"
-          scp "${ssh_options[@]}" helper/deploy/publish-selfhost-origin.sh "root@$RELEASE_HOST:$remote_script"
-          # shellcheck disable=SC2029 # the paths and digest are validated and must expand here
-          ssh "${ssh_options[@]}" "root@$RELEASE_HOST" "trap 'rm -f -- $remote_bundle $remote_script' EXIT; bash $remote_script $remote_bundle /opt/paperboat/releases $RELEASE_VERSION $DIGEST"
-      - name: Verify the public one-liner serves exactly what was published
+          test -n "$PAPERBOAT_RELEASE_SIGNING_KEY"
+          key="$RUNNER_TEMP/release-signing-key"
+          (umask 077 && printf '%s\n' "$PAPERBOAT_RELEASE_SIGNING_KEY" > "$key")
+          # Refuses a release the embedded key in the installer cannot verify.
+          sh cli/tools/sign-release-assets.sh "$GITHUB_WORKSPACE/.build/selfhost" "selfhost-$RELEASE_VERSION" "$key" helper/deploy/install.sh
+          rm -f "$key"
+      - name: Publish the signed GitHub release (never Latest)
         env:
-          ORIGIN: ${{ steps.endpoints.outputs.origin }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           out="$GITHUB_WORKSPACE/.build/selfhost"
-          curl --fail --silent --show-error --proto '=https' --max-time 30 "$ORIGIN/selfhost/install" -o "$RUNNER_TEMP/served-install"
-          cmp "$RUNNER_TEMP/served-install" "$out/install"
-          for arch in amd64 arm64; do
-            curl --fail --silent --show-error --proto '=https' --max-time 120 "$ORIGIN/selfhost/versions/$RELEASE_VERSION/paperboat-selfhost-linux-$arch.tar.gz" -o "$RUNNER_TEMP/served-$arch.tar.gz"
-            cmp "$RUNNER_TEMP/served-$arch.tar.gz" "$out/paperboat-selfhost-linux-$arch.tar.gz"
+          tag="selfhost-$RELEASE_VERSION"
+          source_sha=$(git rev-parse HEAD)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # An immutable release is never changed: re-running is fine only when every byte is identical.
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/existing.json"
+            python3 - "$RUNNER_TEMP/existing.json" "$out" <<'PY'
+          import hashlib, json, pathlib, sys
+          assets = {a['name']: a for a in json.load(open(sys.argv[1]))['assets']}
+          files = {p.name: p for p in pathlib.Path(sys.argv[2]).iterdir() if p.is_file()}
+          if set(assets) != set(files):
+              raise SystemExit(f'published self-host release has assets {sorted(assets)}, expected {sorted(files)}')
+          for name, path in files.items():
+              if assets[name].get('digest') != 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest():
+                  raise SystemExit(f'published self-host asset differs from this build: {name}')
+          PY
+            echo "$tag is already published with identical bytes."
+          else
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$source_sha" --title "Paperboat self-host $RELEASE_VERSION" \
+              --notes "Self-host packages for release $RELEASE_VERSION; installed by the fixed helper/deploy/install.sh." --latest=false --draft
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$out"/*
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          fi
+      - name: Verify the public release serves exactly what was built
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/.build/selfhost"
+          tag="selfhost-$RELEASE_VERSION"
+          for file in "$out"/*; do
+            curl --fail --silent --show-error --location --proto '=https' --max-time 120 "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$(basename "$file")" -o "$RUNNER_TEMP/served"
+            cmp "$RUNNER_TEMP/served" "$file"
           done
+          # The CLI installer follows /releases/latest: this release must not have taken it over.
+          latest=$(curl --silent --location --head --output /dev/null --write-out '%{url_effective}' "https://github.com/$GITHUB_REPOSITORY/releases/latest")
+          case "$latest" in */releases/tag/selfhost-*) echo "$tag became the Latest release" >&2; exit 1 ;; esac

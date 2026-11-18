@@ -1,31 +1,37 @@
 #!/bin/sh
+# The fixed Paperboat installer: one file for every release. It finds the latest GitHub release, downloads
+# the binary with the release's SHA256SUMS and SHA256SUMS.sig, verifies the signature with the key embedded
+# below, and only then trusts the hashes. No Paperboat server is involved. Environment (all optional):
+#   PB_TOKEN    machine enrollment token from the console (Add machine)
+#   PB_RECIPE   recipe token: pair this computer from a recipe instead
+#   PB_NAME     machine name        PB_VERSION  install this release instead of the latest
+#   PB_REPO     owner/repo that publishes the releases
 # Keep a truncated curl | sh download from running a partial installation.
 main() {
 set -eu
 
-# The publisher renders each product's immutable GitHub URL and verified
-# TUF digest directly into the first-party installer.
-requested_version=${PAPERBOAT_VERSION:-latest}
+repository=${PB_REPO:-pinksaucepasta/paperboat}
+# The release signing key (ssh-keygen -Y verify allowed_signers line); the private half is only in CI.
+allowed_signers='paperboat-release namespaces="paperboat-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAonuBw7PaD+214NxAVb1UwkLzJYWq0VRmpbM2EXsBhg'
+requested_version=${PB_VERSION:-latest}
 install_dir=${PAPERBOAT_INSTALL_DIR:-"${HOME}/.local/bin"}
 install_dir_requested=false
 setup=false
 pair=false
 join=true
-token=${PAPERBOAT_ENROLLMENT_TOKEN:-}
+token=${PB_TOKEN:-}
 token_file=
-machine_name=${PAPERBOAT_MACHINE_ALIAS:-${PAPERBOAT_MACHINE_NAME:-}}
+machine_name=${PB_NAME:-}
 ssh_port=
 recovery_output=
+unset PB_TOKEN || true
 [ -z "$token" ] || pair=true
-# get.<domain>/recipe sets PAPERBOAT_RECIPE_INSTALL=1: the install pairs from PB_RECIPE and refuses at
-# once, before anything is installed, when PB_RECIPE is missing or not a recipe token (PLAN F26).
+case $repository in */*/*|*[!A-Za-z0-9_./-]*|/*|*/) echo "pb installer: PB_REPO must look like owner/repo" >&2; exit 2 ;; esac
+# PB_RECIPE pairs this computer from a recipe token. It refuses at once, before anything is installed, when
+# the value is not a recipe token (PLAN F26).
 recipe=false
-if [ "${PAPERBOAT_RECIPE_INSTALL:-}" = 1 ]; then
+if [ -n "${PB_RECIPE:-}" ]; then
   recipe=true join=false
-  if [ -z "${PB_RECIPE:-}" ]; then
-    echo "Paperboat: PB_RECIPE is not set. Copy the token from pb recipe create or the console (Settings -> Recipes) and run the installer with PB_RECIPE=<token> set." >&2
-    exit 2
-  fi
   case $PB_RECIPE in
     pbr_*) [ "${#PB_RECIPE}" -eq 67 ] || recipe_bad=true ;;
     *) recipe_bad=true ;;
@@ -40,7 +46,7 @@ usage() { cat <<'EOF'
 Install the current Paperboat release.
 
 Usage: install.sh [options]
-  --version VERSION             Require the version published for this platform
+  --version VERSION             Install this release instead of the latest
   --install-dir DIRECTORY       Install Linux pb here (default: ~/.local/bin)
   --setup                       Run pb setup after installation
   --pair                        Run pb pair after installation
@@ -88,7 +94,8 @@ case $(uname -s) in Darwin) os=darwin ;; Linux) os=linux ;; *) echo "pb installe
 case $(uname -m) in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) echo "pb installer: unsupported architecture: $(uname -m)" >&2; exit 1 ;; esac
 [ "$os" != darwin ] || [ "$arch" = arm64 ] || { echo "pb installer: macOS releases support arm64" >&2; exit 1; }
 
-command -v curl >/dev/null 2>&1 || { echo "pb installer: curl is required" >&2; exit 1; }
+# Tailscale's installer (scripts/installer.sh 399-407) stops the same way when its download tool is missing.
+command -v curl >/dev/null 2>&1 || { echo "The installer needs curl to download files." >&2; echo "Please install curl to proceed." >&2; exit 1; }
 
 # TMPDIR may end in "/" (macOS) or repeat slashes: pb rejects a token file path that is not clean, so use the resolved directory.
 tmp_root=${TMPDIR:-/tmp}
@@ -115,36 +122,51 @@ if [ "$pair" = true ]; then
   token=
 fi
 asset="pb-${os}-${arch}"
-case "$os-$arch" in
-  linux-amd64)
-    product_version='@PAPERBOAT_PRODUCT_LINUX_AMD64_VERSION@'
-    product_url='@PAPERBOAT_PRODUCT_LINUX_AMD64_URL@'
-    product_sha='@PAPERBOAT_PRODUCT_LINUX_AMD64_SHA256@'
-    product_length='@PAPERBOAT_PRODUCT_LINUX_AMD64_LENGTH@' ;;
-  linux-arm64)
-    product_version='@PAPERBOAT_PRODUCT_LINUX_ARM64_VERSION@'
-    product_url='@PAPERBOAT_PRODUCT_LINUX_ARM64_URL@'
-    product_sha='@PAPERBOAT_PRODUCT_LINUX_ARM64_SHA256@'
-    product_length='@PAPERBOAT_PRODUCT_LINUX_ARM64_LENGTH@' ;;
-  darwin-arm64)
-    product_version='@PAPERBOAT_PRODUCT_DARWIN_ARM64_VERSION@'
-    product_url='@PAPERBOAT_PRODUCT_DARWIN_ARM64_URL@'
-    product_sha='@PAPERBOAT_PRODUCT_DARWIN_ARM64_SHA256@'
-    product_length='@PAPERBOAT_PRODUCT_DARWIN_ARM64_LENGTH@' ;;
-  *) echo "pb installer: unsupported platform: $os-$arch" >&2; exit 1 ;;
-esac
-case "$product_version:$product_url:$product_sha:$product_length" in *'@PAPERBOAT_PRODUCT_'*) echo 'pb installer: this platform has no published product record' >&2; exit 1 ;; esac
-[ "$requested_version" = latest ] || [ "$requested_version" = "$product_version" ] || { echo "pb installer: version $requested_version is unavailable for $os-$arch; available version is $product_version" >&2; exit 1; }
-repository='@PAPERBOAT_PRODUCT_REPOSITORY@'
-expected_url="https://github.com/$repository/releases/download/$product_version/$asset"
-[ "$product_url" = "$expected_url" ] || { echo 'pb installer: published product URL is not the canonical immutable asset URL' >&2; exit 1; }
+# Verifying the release signature needs ssh-keygen (always present on macOS). A missing one is installed with the
+# system package manager, as NetBird's and Tailscale's installers install gnupg: the package manager is found with
+# `command -v` in NetBird's order (release_files/install.sh, apt-get, dnf, yum, ...) and the root helper the same
+# way NetBird finds it (sudo, else doas, unless already root; release_files/install.sh lines 25-30).
+SUDO=
+if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO=sudo
+elif command -v doas >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO=doas; fi
+install_ssh_keygen() {
+  [ "$(id -u)" -eq 0 ] || [ -n "$SUDO" ] || return 1
+  echo "pb installer: ssh-keygen is missing; installing OpenSSH to verify the release signature" >&2
+  if command -v apt-get >/dev/null 2>&1; then
+    # Tailscale (scripts/installer.sh 545-548) and NetBird (add_apt_repo) both run apt-get update before the install.
+    $SUDO apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-client
+  elif command -v dnf >/dev/null 2>&1; then $SUDO dnf install -y openssh
+  elif command -v yum >/dev/null 2>&1; then $SUDO yum install -y openssh
+  elif command -v apk >/dev/null 2>&1; then $SUDO apk add --no-cache openssh-keygen
+  elif command -v pacman >/dev/null 2>&1; then $SUDO pacman -S --noconfirm openssh
+  elif command -v zypper >/dev/null 2>&1; then $SUDO zypper --non-interactive install openssh
+  else return 1; fi
+}
+download() { curl --fail --location --show-error --silent --connect-timeout 15 --max-time "$2" --max-filesize "$3" --proto '=https' --proto-redir '=https' "$1" -o "$4"; }
+# The newest release is the one GitHub marks Latest (set only after the release is fully published).
+if [ "$requested_version" = latest ]; then
+  latest_url=$(curl --silent --show-error --location --head --connect-timeout 15 --max-time 60 --proto '=https' --proto-redir '=https' -o /dev/null -w '%{url_effective}' "https://github.com/$repository/releases/latest") || { echo "pb installer: could not reach GitHub to find the latest release; check your network and rerun" >&2; exit 1; }
+  case $latest_url in */releases/tag/*) version=${latest_url##*/} ;; *) echo "pb installer: $repository has no published release yet" >&2; exit 1 ;; esac
+else
+  version=$requested_version
+fi
+case $version in 20[0-9][0-9].[0-9][0-9].[0-9][0-9].*) ;; *) echo "pb installer: $version is not a release version like 2026.11.18.1" >&2; exit 1 ;; esac
+case ${version#????.??.??.} in 0) ;; ''|0*|*[!0123456789]*) echo "pb installer: $version is not a release version like 2026.11.18.1" >&2; exit 1 ;; esac
+release_url="https://github.com/$repository/releases/download/$version"
+# SHA256SUMS carries the release signature only when its first line names this version, so a signed file from
+# another release cannot be replayed here.
+download "$release_url/SHA256SUMS" 60 1048576 "$temporary/SHA256SUMS" || { echo "pb installer: could not download SHA256SUMS for $version; check the version and your network" >&2; exit 1; }
+download "$release_url/SHA256SUMS.sig" 60 65536 "$temporary/SHA256SUMS.sig" || { echo "pb installer: could not download SHA256SUMS.sig for $version" >&2; exit 1; }
+command -v ssh-keygen >/dev/null 2>&1 || install_ssh_keygen || { echo "pb installer: ssh-keygen is required to verify the release signature and could not be installed here; install OpenSSH (openssh-client) and rerun" >&2; exit 1; }
+command -v ssh-keygen >/dev/null 2>&1 || { echo "pb installer: ssh-keygen is still missing after installing OpenSSH" >&2; exit 1; }
+printf '%s\n' "$allowed_signers" > "$temporary/allowed_signers"
+ssh-keygen -Y verify -f "$temporary/allowed_signers" -I paperboat-release -n paperboat-release -s "$temporary/SHA256SUMS.sig" < "$temporary/SHA256SUMS" > /dev/null 2>&1 || { echo "pb installer: the release signature on SHA256SUMS is not valid (needs ssh-keygen from OpenSSH 8.0 or newer); nothing was installed" >&2; exit 1; }
+[ "$(sed -n 1p "$temporary/SHA256SUMS")" = "# paperboat-release $version" ] || { echo "pb installer: SHA256SUMS is signed for a different release than $version" >&2; exit 1; }
+product_sha=$(awk -v a="$asset" '$2 == a { print $1; n++ } END { if (n != 1) exit 1 }' "$temporary/SHA256SUMS") || { echo "pb installer: SHA256SUMS does not list $asset exactly once" >&2; exit 1; }
 [ "${#product_sha}" -eq 64 ] || { echo 'pb installer: published product digest is invalid' >&2; exit 1; }
 case "$product_sha" in *[!0123456789abcdef]*) echo 'pb installer: published product digest is invalid' >&2; exit 1 ;; esac
-case "$product_length" in ''|0|0*|*[!0123456789]*) echo 'pb installer: published product length is invalid' >&2; exit 1 ;; esac
-[ "${#product_length}" -le 9 ] && [ "$product_length" -le 536870912 ] || { echo 'pb installer: published product length is invalid' >&2; exit 1; }
 product_file="$temporary/$asset"
-curl --fail --location --show-error --silent --connect-timeout 15 --max-time 300 --max-filesize "$product_length" --proto '=https' --proto-redir '=https' "$product_url" -o "$product_file"
-[ "$(wc -c < "$product_file" | tr -d ' ')" = "$product_length" ] || { echo "pb installer: product length mismatch" >&2; exit 1; }
+download "$release_url/$asset" 300 536870912 "$product_file"
 if command -v shasum >/dev/null 2>&1; then actual_sha=$(shasum -a 256 "$product_file" | awk '{print $1}');
 elif command -v sha256sum >/dev/null 2>&1; then actual_sha=$(sha256sum "$product_file" | awk '{print $1}');
 elif command -v openssl >/dev/null 2>&1; then actual_sha=$(openssl dgst -sha256 "$product_file" | awk '{print $NF}');
@@ -165,7 +187,6 @@ no_systemd=false
 if [ "$os" = linux ] && [ ! -d /run/systemd/system ]; then no_systemd=true; fi
 
 if [ "$pair" = true ] && [ "$no_systemd" = false ]; then
-  unset PAPERBOAT_ENROLLMENT_TOKEN || true
   host=$(hostname)
   [ -n "$host" ] || { echo "pb installer: could not resolve this machine hostname" >&2; exit 1; }
   "$installer_pb" reset --confirmation 'RESET PAPERBOAT' --hostname "$host" --enrollment-token-file "$token_file" --json > "$temporary/reset.json" || {

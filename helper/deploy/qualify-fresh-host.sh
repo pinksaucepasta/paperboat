@@ -3,7 +3,7 @@
 # container: install, health, idempotent re-run, uninstall, reinstall, data removal.
 #   qualify-fresh-host.sh --base ubuntu:24.04 --enable relay|tunnel|both [--platform linux/amd64]
 #   qualify-fresh-host.sh --base ubuntu:20.04 --expect-refusal
-#   qualify-fresh-host.sh --base ubuntu:24.04 --enable both --published https://<get host>/selfhost/install
+#   qualify-fresh-host.sh --base ubuntu:24.04 --enable both --published https://<get host>/selfhost
 #     (the real published one-liner and its auto-detected address instead of the local origin)
 #   qualify-fresh-host.sh --ssh HOST --enable both --published URL
 #     (the same run on a real machine reached over ssh with passwordless sudo, e.g. amd64 hardware;
@@ -44,18 +44,20 @@ case "$arch" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) fail "unexpected a
 if [ -z "$published" ]; then
 step "build the $arch package and installer"
 export PAPERBOAT_SELFHOST_ADDRESS_URL=https://address.example.test/selfhost/address
-version=0.0.0.1
+version=2026.01.01.1
 "$repo/helper/deploy/package-selfhost.sh" "$version" "$arch" "$work/site" >/dev/null
-other=amd64; [ "$arch" = amd64 ] && other=arm64
-# The installer needs both digests; the other architecture is never downloaded here.
-cp "$work/site/paperboat-selfhost-linux-$arch.tar.gz" "$work/site/paperboat-selfhost-linux-$other.tar.gz"
-(cd "$work/site" && sha256sum paperboat-selfhost-linux-*.tar.gz > SHA256SUMS)
-"$repo/helper/deploy/render-installer.sh" "$version" "https://pkg.example.test:9443/selfhost/versions/$version" https://get.docker.com "$work/site" >/dev/null
+# A throwaway signing key stands in for the release key: the installer under test is a copy that embeds its public half.
+ssh-keygen -q -t ed25519 -N '' -C qualify -f "$work/signkey"
+pub=$(cut -d' ' -f1,2 "$work/signkey.pub")
+sed "s|^allowed_signers=.*|allowed_signers='paperboat-release namespaces=\"paperboat-release\" $pub'|" "$repo/helper/deploy/install.sh" > "$work/site/install"
+sh "$repo/cli/tools/sign-release-assets.sh" "$work/site" "selfhost-$version" "$work/signkey" "$work/site/install"
+# GitHub's tag listing the installer reads to find the newest self-host release (served under the last path component).
+printf '[{"ref":"refs/tags/selfhost-%s"}]\n' "$version" > "$work/site/selfhost-"
 
-step "create the throwaway HTTPS origin and the fresh $base host"
+step "create the throwaway HTTPS origin standing in for GitHub, and the fresh $base host"
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/ca.key" -out "$work/ca.crt" -days 2 -subj "/CN=pbh-qualify-ca" 2>/dev/null
-openssl req -newkey rsa:2048 -nodes -keyout "$work/srv.key" -out "$work/srv.csr" -subj "/CN=pkg.example.test" 2>/dev/null
-printf 'subjectAltName=DNS:pkg.example.test\n' > "$work/ext"
+openssl req -newkey rsa:2048 -nodes -keyout "$work/srv.key" -out "$work/srv.csr" -subj "/CN=github.com" 2>/dev/null
+printf 'subjectAltName=DNS:github.com,DNS:api.github.com\n' > "$work/ext"
 openssl x509 -req -in "$work/srv.csr" -CA "$work/ca.crt" -CAkey "$work/ca.key" -CAcreateserial -out "$work/srv.crt" -days 2 -extfile "$work/ext" 2>/dev/null
 cat > "$work/serve.py" <<'PY'
 import http.server, ssl
@@ -64,19 +66,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory="/srv/site", **kwargs)
     def translate_path(self, path):
         return super().translate_path("/" + path.split("?")[0].rsplit("/", 1)[-1])
-server = http.server.ThreadingHTTPServer(("127.0.0.1", 9443), Handler)
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 443), Handler)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain("/srv/rig/srv.crt", "/srv/rig/srv.key")
 server.socket = context.wrap_socket(server.socket, server_side=True)
 server.serve_forever()
 PY
- fresh_host_up --add-host pkg.example.test:127.0.0.1
+ fresh_host_up --add-host github.com:127.0.0.1 --add-host api.github.com:127.0.0.1
  inside 'mkdir -p /srv/site /srv/rig'
  $docker cp "$work/site/." "$name:/srv/site/"
  for f in srv.crt srv.key serve.py; do $docker cp "$work/$f" "$name:/srv/rig/$f"; done
  $docker cp "$work/ca.crt" "$name:/usr/local/share/ca-certificates/pbh-qualify-ca.crt"
  inside 'update-ca-certificates >/dev/null 2>&1; (nohup python3 -I /srv/rig/serve.py >/var/log/origin.log 2>&1 &); sleep 1'
- installer='curl -fsSL https://pkg.example.test:9443/install | sh -s --'
+ installer='curl -fsSL https://github.com/install | PB_REPO=example/paperboat sh -s --'
 else
  step "fresh $base host"
  fresh_host_up

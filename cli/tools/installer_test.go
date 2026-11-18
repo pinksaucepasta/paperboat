@@ -3,6 +3,7 @@ package tools
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -28,23 +29,40 @@ func requireInOrder(t *testing.T, body string, values ...string) {
 	}
 }
 
-func TestShellInstallerVerifiesBeforeRunningPublicInstall(t *testing.T) {
+// The installers are fixed files for every release: nothing in them is filled in per release, and neither names a
+// Paperboat server.
+func TestInstallersAreFixedAndNameNoServer(t *testing.T) {
+	for _, name := range []string{"install.sh", "install.ps1"} {
+		body := installerSource(t, name)
+		if regexp.MustCompile(`@paperboat_[a-z0-9_]+@`).MatchString(body) {
+			t.Fatalf("%s still carries a per-release placeholder", name)
+		}
+		for _, banned := range []string{"/tuf", "pprbt", "paperboat.cloud", "installer_base_url"} {
+			if strings.Contains(body, banned) {
+				t.Fatalf("%s names a Paperboat host or service: %q", name, banned)
+			}
+		}
+		if !strings.Contains(body, "pinksaucepasta/paperboat") {
+			t.Fatalf("%s has no repository constant", name)
+		}
+	}
+}
+
+func TestShellInstallerVerifiesTheSignatureBeforeTrustingAnyHash(t *testing.T) {
 	body := installerSource(t, "install.sh")
-	for _, required := range []string{
-		"@paperboat_product_linux_amd64_sha256@", "--proto-redir '=https'", "releases/download", "product length mismatch",
-		"product digest mismatch", `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable",
-		"--pair requires --enrollment-token", "umask 077", "--enrollment-token-file", "resume_executable", `"$target" pair`, `"$target" setup`,
-	} {
+	for _, required := range []string{"--proto-redir '=https'", "releases/download", "product digest mismatch", `"$installer_pb" install --install-dir "$install_dir" --json`,
+		"data.executable", "--pair requires --enrollment-token", "umask 077", "--enrollment-token-file", "resume_executable", `"$target" pair`, `"$target" setup`,
+		"-n paperboat-release", "ssh-keygen -y verify"} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("shell installer is missing %q", required)
 		}
 	}
-	for _, removed := range []string{"__install", "--source", "--skip", "--fresh", "cleanup_existing", "sudo installer", "pb-bootstrap", "paperboat_bootstrap", "--tuf-url"} {
+	for _, removed := range []string{"__install", "--source", "--skip", "--fresh", "cleanup_existing", "sudo installer", "pb-bootstrap", "paperboat_bootstrap", "--tuf-url", "paperboat_recipe_install", "paperboat_enrollment_token"} {
 		if strings.Contains(body, removed) {
 			t.Fatalf("shell installer retains obsolete behavior %q", removed)
 		}
 	}
-	requireInOrder(t, body, "product length mismatch", "product digest mismatch", `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable")
+	requireInOrder(t, body, "SHA256SUMS.sig", "ssh-keygen -Y verify", "signed for a different release", "does not list", "product digest mismatch", `"$installer_pb" install --install-dir "$install_dir" --json`, "data.executable")
 	requireInOrder(t, body, `"$installer_pb" reset`, `"$installer_pb" install`)
 	if strings.Index(body, `"$target" pair`) < strings.Index(body, "data.executable") {
 		t.Fatal("shell installer pairs before invoking the installed binary")
@@ -52,8 +70,7 @@ func TestShellInstallerVerifiesBeforeRunningPublicInstall(t *testing.T) {
 }
 
 func TestShellInstallerParses(t *testing.T) {
-	command := exec.Command("sh", "-n", "install.sh")
-	if output, err := command.CombinedOutput(); err != nil {
+	if output, err := exec.Command("sh", "-n", "install.sh").CombinedOutput(); err != nil {
 		t.Fatalf("sh -n install.sh: %v\n%s", err, output)
 	}
 }
@@ -66,4 +83,25 @@ func TestShellInstallerSkipsTheServiceResetWithoutSystemd(t *testing.T) {
 		}
 	}
 	requireInOrder(t, body, "no_systemd=true", `"$installer_pb" reset`)
+}
+
+// Every installer and the selfhost installer embed the one release public key; the signing helper proves it.
+func TestInstallersEmbedTheSameReleaseKey(t *testing.T) {
+	key := regexp.MustCompile(`paperboat-release namespaces="paperboat-release" ssh-ed25519 [A-Za-z0-9+/=]+`)
+	var first string
+	for _, name := range []string{"install.sh", "install.ps1", "../../helper/deploy/install.sh"} {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := key.FindAllString(string(body), -1)
+		if len(found) != 1 {
+			t.Fatalf("%s embeds %d release keys, want 1", name, len(found))
+		}
+		if first == "" {
+			first = found[0]
+		} else if found[0] != first {
+			t.Fatalf("%s embeds a different release key", name)
+		}
+	}
 }
