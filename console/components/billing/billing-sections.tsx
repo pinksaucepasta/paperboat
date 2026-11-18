@@ -25,6 +25,7 @@ import { formatBytes } from "@/lib/format"
 import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { CheckoutConsent } from "@/components/billing/checkout-consent"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ErrorMessage } from "@/components/error-reference"
 
@@ -178,6 +179,7 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
   const max = product?.max_quantity ?? topupDefaults.maxQuantity
   const time = useTimeFormat()
   const [units, setUnits] = useState(1)
+  const [agreed, setAgreed] = useState(false)
   // Same rule as plan Checkout: an unknown provider outcome keeps the key so a retry can't buy twice.
   const [key, setKey] = useState(idempotencyKey)
   const buy = useMutation({
@@ -243,7 +245,7 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
         <span className="flex items-center gap-3">
           {total && <span className="tabular-nums">{total}</span>}
           <Button
-            disabled={!live || buy.isPending}
+            disabled={!live || !agreed || buy.isPending}
             title={live ? undefined : notLiveTitle}
             onClick={() => buy.mutate()}
           >
@@ -255,6 +257,7 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
         Adds to this billing period.
         {expires && ` Unused bandwidth ends when your plan renews on ${expires}.`}
       </p>
+      <CheckoutConsent checked={agreed} onChange={setAgreed} />
       {buy.isError && (
         <p className="py-2 text-sm text-destructive">
           <ErrorMessage error={buy.error} />
