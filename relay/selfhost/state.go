@@ -18,17 +18,20 @@ import (
 )
 
 type Config struct {
-	Name                string      `json:"name"`
-	EndpointHost        string      `json:"endpoint_host"`
-	Listen              string      `json:"listen"`
-	Components          []Component `json:"components"`
-	PreviewDomain       string      `json:"preview_domain,omitempty"`
-	TunnelDomain        string      `json:"tunnel_domain,omitempty"`
-	RuntimeDomain       string      `json:"runtime_domain,omitempty"`
-	BrowserAccess       bool        `json:"browser_access,omitempty"`
-	ControlCA           string      `json:"control_ca,omitempty"`
-	PublicHTTPSCertFile string      `json:"public_https_cert_file,omitempty"`
-	PublicHTTPSKeyFile  string      `json:"public_https_key_file,omitempty"`
+	Name          string      `json:"name"`
+	EndpointHost  string      `json:"endpoint_host"`
+	Listen        string      `json:"listen"`
+	Components    []Component `json:"components"`
+	PreviewDomain string      `json:"preview_domain,omitempty"`
+	TunnelDomain  string      `json:"tunnel_domain,omitempty"`
+	RuntimeDomain string      `json:"runtime_domain,omitempty"`
+	BrowserAccess bool        `json:"browser_access,omitempty"`
+	// BrowserLoginOrigin is how 2026.11.16.2 recorded browser access. It is kept and passed through to the edge's
+	// deployment, so that release's edge image still reads its own deployment after a failed upgrade rolls back to it.
+	BrowserLoginOrigin  string `json:"browser_login_origin,omitempty"`
+	ControlCA           string `json:"control_ca,omitempty"`
+	PublicHTTPSCertFile string `json:"public_https_cert_file,omitempty"`
+	PublicHTTPSKeyFile  string `json:"public_https_key_file,omitempty"`
 }
 type state struct {
 	Version         int           `json:"version"`
@@ -151,6 +154,8 @@ func load(dir string) (state, error) {
 	if len(b) > 2<<20 || json.Unmarshal(b, &s) != nil || s.Version != 1 {
 		return s, errors.New("invalid installation state")
 	}
+	// A 2026.11.16.2 install recorded browser access as its login origin.
+	s.Config.BrowserAccess = s.Config.BrowserAccess || s.Config.BrowserLoginOrigin != ""
 	return s, nil
 }
 func save(dir string, s state) error { return writeJSON(filepath.Join(dir, "selfhost.json"), s) }
