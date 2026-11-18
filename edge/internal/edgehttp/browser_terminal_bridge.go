@@ -96,13 +96,22 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		}
 	}()
 
-	// The terminal's stream is neither counted against the edge allowance nor slowed down: terminal traffic is tiny, and a slowed
-	// terminal is a broken product. Its plan limit (open browser terminals) is counted by the control plane.
+	// The browser's upstream stream is accounted to its attachment, which the server records
+	// as the session's usage authority when it admits the ticket, and is closed at the cap.
+	environment := match.Rule.Environment
+	if environment == "" && p.config.HelperAccess != nil {
+		// A runtime route's rule carries no environment; the server-signed host credential
+		// of this admission names the machine's environment.
+		if claims, err := p.config.HelperAccess.VerifyHelperAccess(ctx, admission.Credential); err == nil {
+			environment = claims.EnvironmentID
+		}
+	}
+	dialCtx := browserTerminalUsage(ctx, environment, admission, time.Now().UTC())
 	upstreamURL := (&url.URL{Scheme: "wss", Host: host, Path: "/v1/browser-terminal"}).String()
 	upstreamHeader := make(http.Header)
 	upstreamHeader.Set("Authorization", "Bearer "+admission.Credential)
 	upstreamClient := &http.Client{Transport: p.config.RuntimeCarrierTransport}
-	upstream, response, err := websocket.Dial(ctx, upstreamURL, &websocket.DialOptions{
+	upstream, response, err := websocket.Dial(dialCtx, upstreamURL, &websocket.DialOptions{
 		HTTPClient:      upstreamClient,
 		HTTPHeader:      upstreamHeader,
 		Subprotocols:    []string{browserTerminalSubprotocol},
@@ -138,7 +147,7 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 			sent = reason.CloseCode()
 		}
 		return reason, typed
-	})
+	}, terminalPacing{throttles: p.config.Throttles, host: host})
 	logBrowserTerminalEnd(ctx, ended, sent)
 	if !moved { // the end of a drain is expected, not an edge failure
 		p.observeBrowserTerminal(ctx, ended)
@@ -193,7 +202,7 @@ func bridgeEndCanceled(parent, ctx context.Context, err error) bool {
 // bridgeBrowserTerminal runs the browser <-> host bridge until one side ends it or stop closes (the control plane
 // ended the admission). endReason names the typed close the browser should get for the cause, if any; every other
 // end drops the connection (the browser reconnects).
-func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription, stop <-chan struct{}, endReason func(error) (terminalend.Reason, bool)) (result error) {
+func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription, stop <-chan struct{}, endReason func(error) (terminalend.Reason, bool), pace terminalPacing) (result error) {
 	// The reads and writes run on a context only this function cancels, after the typed close: a request canceled
 	// from outside (the carrier it rode ended) would otherwise hard-close the browser's WebSocket under its blocked
 	// read before the close below, and the browser got a plain drop instead of "moved".
@@ -229,9 +238,13 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 		}
 	}
 
+	toHost, _ := pace.start(ctx, &workers, func(err error) { report(bridgeEnd{"host_write", err}) }, func(payload []byte) error {
+		return upstream.Write(ctx, websocket.MessageBinary, payload)
+	})
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
+		defer close(toHost)
 		for {
 			kind, message, err := browser.Read(ctx)
 			if err != nil {
@@ -247,18 +260,29 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 				report(bridgeEnd{"browser_read", err})
 				return
 			}
-			if err := upstream.Write(ctx, websocket.MessageBinary, payload); err != nil {
-				report(bridgeEnd{"host_write", err})
+			select {
+			case toHost <- payload:
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	hostDone := make(chan struct{})
+	// Both directions of output (the host's stream and the shared output) are paced; the bridge's own writer takes the queue.
+	forwardOutbound := func(message []byte) error {
+		select {
+		case outbound <- message:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	toBrowser, hostDone := pace.start(ctx, &workers, func(err error) { report(bridgeEnd{"browser_queue", err}) }, forwardOutbound)
+	toBrowserShared, _ := pace.start(ctx, &workers, func(err error) { report(bridgeEnd{"browser_queue", err}) }, forwardOutbound)
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		defer close(hostDone)
+		defer close(toBrowser)
 		for {
 			kind, payload, err := upstream.Read(ctx)
 			if err != nil {
@@ -277,7 +301,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 			// Wait for the writer: a browser that stops reading (a frozen or sleeping page) holds the host back
 			// through TCP instead of ending the terminal.
 			select {
-			case outbound <- message:
+			case toBrowser <- message:
 			case <-ctx.Done():
 				return
 			}
@@ -287,6 +311,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
+		defer close(toBrowserShared)
 		for {
 			record, err := subscription.Next(ctx)
 			var message []byte
@@ -303,7 +328,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 			// writer here so an ordinary burst cannot fill the small bridge
 			// multiplexing queue and force a fresh screen.
 			select {
-			case outbound <- message:
+			case toBrowserShared <- message:
 			case <-ctx.Done():
 				return
 			}
@@ -420,4 +445,11 @@ func (p *Policy) observeBrowserTerminal(ctx context.Context, err error) {
 	if err != nil && p.config.OnFailure != nil && !browserTerminalExpected(err) {
 		p.config.OnFailure(ctx, err)
 	}
+}
+
+func browserTerminalUsage(ctx context.Context, environment string, admission control.BrowserTerminalAdmission, now time.Time) context.Context {
+	if admission.AttachmentID == "" || environment == "" {
+		return ctx
+	}
+	return withRuntimeUsage(ctx, runtimeUsageBinding{Authority: admission.AttachmentID, Environment: environment, IssuedAt: now})
 }

@@ -64,7 +64,7 @@ func TestBrowserTerminalBridgeFailureAndRecovery(t *testing.T) {
 			completed <- err
 			return
 		}
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil, terminalPacing{})
 	}))
 	defer edge.Close()
 	dial := func(id string) *websocket.Conn {
@@ -152,7 +152,7 @@ func TestBrowserTerminalBridgeSendsMovedWhenTheRequestIsCanceled(t *testing.T) {
 		}
 		requestCtx, cancelRequest := context.WithCancel(r.Context())
 		canceled <- cancelRequest
-		_ = bridgeBrowserTerminal(requestCtx, browser, host, sub, nil, func(error) (terminalend.Reason, bool) { return terminalend.Moved, true })
+		_ = bridgeBrowserTerminal(requestCtx, browser, host, sub, nil, func(error) (terminalend.Reason, bool) { return terminalend.Moved, true }, terminalPacing{})
 	}))
 	defer edge.Close()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
@@ -289,7 +289,7 @@ func TestBrowserTerminalBridgeWaitsForAFrozenBrowser(t *testing.T) {
 			completed <- err
 			return
 		}
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil, terminalPacing{})
 	}))
 	defer edge.Close()
 	browser, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
@@ -354,7 +354,7 @@ func TestBrowserTerminalBridgeTellsALaggingBrowserAndStaysUp(t *testing.T) {
 			return
 		}
 		close(subscribed)
-		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil)
+		completed <- bridgeBrowserTerminal(r.Context(), browser, host, sub, nil, nil, terminalPacing{})
 	}))
 	defer edge.Close()
 	browser, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
@@ -468,7 +468,7 @@ func TestBrowserTerminalBridgeDeliversTheHostsLastFrameBeforeTheClose(t *testing
 			return
 		}
 		close(stop)
-		_ = bridgeBrowserTerminal(r.Context(), browser, host, sub, stop, func(error) (terminalend.Reason, bool) { return terminalend.Ended, true })
+		_ = bridgeBrowserTerminal(r.Context(), browser, host, sub, stop, func(error) (terminalend.Reason, bool) { return terminalend.Ended, true }, terminalPacing{})
 	}))
 	defer edge.Close()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)

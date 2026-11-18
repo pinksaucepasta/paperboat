@@ -9,6 +9,7 @@ import (
 	runtimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -589,6 +590,7 @@ type DataCarrierPreviewTransport struct {
 	openWait         time.Duration
 	firstByteWait    time.Duration
 	ingressRegistry  *DataCarrierRouteRegistry
+	runtimeUsage     IngressUsage
 	publicAuthority  func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
 	privateAuthority func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
@@ -601,6 +603,9 @@ type DataCarrierPreviewTransportConfig struct {
 	IngressRegistry       *DataCarrierRouteRegistry
 	PublicAuthority       func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
 	PrivateAuthority      func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
+	// RuntimeUsage meters edge runtime sessions (runtime_https_wss) under the authority of
+	// their verified credential and ends them when that authority's allowance is exhausted.
+	RuntimeUsage IngressUsage
 }
 
 func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*DataCarrierPreviewTransport, error) {
@@ -616,7 +621,7 @@ func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*
 	if config.StreamOpenTimeout <= 0 || config.StreamOpenTimeout > time.Minute || config.ResponseHeaderTimeout < 0 {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
-	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, firstByteWait: config.ResponseHeaderTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority}, nil
+	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, firstByteWait: config.ResponseHeaderTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority, runtimeUsage: config.RuntimeUsage}, nil
 }
 
 func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -765,9 +770,16 @@ func (t *DataCarrierPreviewTransport) roundTripRoute(request *http.Request, host
 	if ingressLease != nil {
 		application = ingressLease.Wrap(lifetimeContext, stream)
 		ingressLease = nil
+	} else if route.Kind == runtimewire.RouteKind {
+		binding, ok := runtimeUsageFrom(request.Context())
+		if ok && t.runtimeUsage != nil {
+			binding.Route, binding.Revision = route.RouteID, route.Revision
+			application = meterRuntimeStream(t.runtimeUsage, binding, stream)
+		}
+		// One line per runtime stream: whether its bytes are accounted, and if not why
+		// (no credential authority on the request, or no meter configured).
+		slog.InfoContext(request.Context(), "runtime_stream_usage", "route_id", route.RouteID, "path", request.URL.Path, "metered", ok && t.runtimeUsage != nil, "authority_present", ok, "meter_configured", t.runtimeUsage != nil)
 	}
-	// A runtime stream (the console's browser terminal) is carried as it is: it is neither counted against the edge allowance nor
-	// slowed down. Terminal traffic is tiny and a slowed terminal is a broken product.
 	out := request.Clone(request.Context())
 	originalBody := out.Body
 	var closeRequestOnce sync.Once

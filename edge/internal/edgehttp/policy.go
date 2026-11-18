@@ -48,7 +48,9 @@ type Config struct {
 	BrowserTerminal interface {
 		Admit(context.Context, string, string, string) (control.BrowserTerminalAdmission, error)
 	}
-	BrowserTerminalHub       *BrowserTerminalHub
+	BrowserTerminalHub *BrowserTerminalHub
+	// Throttles paces the browser terminals of workspaces past their included traffic (the registry's; nil paces nothing).
+	Throttles                *Throttles
 	BrowserTerminalEdgeHost  string
 	InspectorAccess          *InspectorEdgeAccess
 	PreviewBaseDomain        string
