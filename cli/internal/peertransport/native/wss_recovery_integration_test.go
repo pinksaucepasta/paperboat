@@ -165,22 +165,29 @@ func TestNativeSessionRecoversQUICToWSSAndBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertWSSRecoveryBytes(t, session, "over-quic")
+	// The relay's observation is only fresh for a few seconds: every wait renews it, or the client withdraws its only
+	// relay while the test waits and reports no transport at all (macOS, 2026-11-18: waitMixed had no renewal).
+	nextRefresh := time.Now().Add(5 * time.Second)
+	renew := func() {
+		if time.Now().Before(nextRefresh) {
+			return
+		}
+		tick := time.Now()
+		clientConfig.Generation++
+		serverConfig.Generation++
+		clientConfig.IssuedAt = tick.Unix()
+		serverConfig.IssuedAt = tick.Unix()
+		applyTestConfiguration(t, clientAuthority, signer, clientConfig)
+		applyTestConfiguration(t, serverAuthority, signer, serverConfig)
+		nodes[0].ObservedAt, nodes[0].CapacityObservedAt, nodes[0].ExpiresAt = tick.Unix(), tick.Unix(), tick.Add(60*time.Second).Unix()
+		applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
+		applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)
+		nextRefresh = time.Now().Add(5 * time.Second)
+	}
 	waitLeg := func(want string, limit time.Duration) {
-		deadline, nextRefresh := time.Now().Add(limit), time.Now().Add(5*time.Second)
+		deadline := time.Now().Add(limit)
 		for time.Now().Before(deadline) {
-			if time.Now().After(nextRefresh) {
-				tick := time.Now()
-				clientConfig.Generation++
-				serverConfig.Generation++
-				clientConfig.IssuedAt = tick.Unix()
-				serverConfig.IssuedAt = tick.Unix()
-				applyTestConfiguration(t, clientAuthority, signer, clientConfig)
-				applyTestConfiguration(t, serverAuthority, signer, serverConfig)
-				nodes[0].ObservedAt, nodes[0].CapacityObservedAt, nodes[0].ExpiresAt = tick.Unix(), tick.Unix(), tick.Add(60*time.Second).Unix()
-				applyRegionalAuthority(t, clientAuthority, signer, clientConfig, clientTLS, clientDisco, nodes)
-				applyRegionalAuthority(t, serverAuthority, signer, serverConfig, serverTLS, serverDisco, nodes)
-				nextRefresh = time.Now().Add(5 * time.Second)
-			}
+			renew()
 			s := clientAuthority.RegionalStatus()
 			if s.LocalTransport == want && s.PeerTransport == want {
 				return
@@ -199,6 +206,7 @@ func TestNativeSessionRecoversQUICToWSSAndBack(t *testing.T) {
 	waitMixed := func(limit time.Duration) {
 		deadline := time.Now().Add(limit)
 		for time.Now().Before(deadline) {
+			renew()
 			status := clientAuthority.RegionalStatus()
 			if status.LocalTransport != "" && status.PeerTransport != "" && status.LocalTransport != status.PeerTransport {
 				return
