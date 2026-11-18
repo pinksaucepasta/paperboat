@@ -8,7 +8,8 @@ import { getPlatformProxy } from "wrangler"
 import { handle } from "../lib/api.ts"
 import { tick } from "../lib/tick.ts"
 import { sign } from "../lib/probe.ts"
-import { buildSnapshot, catalog, evaluate, minute, readSnapshot, saveReport, uptimeBar, uptimePercent, type Reported } from "../lib/store.ts"
+import { buildSnapshot, catalog, evaluate, minute, readSnapshot, saveReport, type Reported } from "../lib/store.ts"
+import { uptimeBar, uptimePercent } from "../lib/uptime.ts"
 import type { Env } from "../lib/types.ts"
 
 let db: D1Database

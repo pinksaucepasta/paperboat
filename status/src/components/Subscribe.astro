@@ -1,0 +1,18 @@
+<dialog id="subscribe" class="dialog" aria-labelledby="subscribe-title">
+  <form method="dialog" class="dialog-close-row"><button class="icon-btn" aria-label="Close">×</button></form>
+  <h2 id="subscribe-title">Subscribe to updates</h2>
+  <p class="muted">Get notified when we create, update or resolve an incident, or plan maintenance.</p>
+  <form id="subscribe-form" class="sub-form" novalidate>
+    <label for="subscribe-email">Email</label>
+    <div class="sub-row">
+      <input id="subscribe-email" name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" />
+      <button type="submit" class="btn btn-primary">Subscribe</button>
+    </div>
+    <p id="subscribe-message" class="muted" role="status" aria-live="polite"></p>
+  </form>
+  <div class="sub-feed">
+    <span class="sub-feed-label">RSS</span>
+    <input id="subscribe-feed" readonly aria-label="RSS feed address" value="" />
+    <button type="button" class="btn btn-quiet" id="subscribe-copy">Copy</button>
+  </div>
+</dialog>

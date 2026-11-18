@@ -1,0 +1,14 @@
+---
+import Base from "../layouts/Base.astro"
+---
+
+<Base title="Paperboat status" description="Live status of Paperboat: sign-in and API, machine connections, relays, edges, file transfers, console, updates and the website.">
+  <section id="banner" aria-label="Current status"><div class="skeleton"></div></section>
+  <section id="maintenance" aria-label="Scheduled maintenance"></section>
+  <section id="system" aria-label="Components"><div class="skeleton" style="height: 320px"></div></section>
+  <div class="center"><a class="btn btn-quiet" href="/history/">View history</a></div>
+  <noscript><p class="muted">This page needs JavaScript to show live status.</p></noscript>
+  <script>
+    import "../scripts/status.ts"
+  </script>
+</Base>
