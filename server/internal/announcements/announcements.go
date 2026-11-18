@@ -340,11 +340,12 @@ func (s *Service) List(ctx context.Context, state string, after int64, limit int
 	}
 	const stateOf = `CASE WHEN retracted_at IS NOT NULL THEN 'retracted' WHEN ends_at IS NOT NULL AND ends_at<=now() THEN 'ended' WHEN starts_at>now() THEN 'scheduled' ELSE 'live' END`
 	page := Page{Announcements: []Announcement{}}
-	err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM paperboat.announcements WHERE ($1='' OR `+stateOf+`=$1)`, state).Scan(&page.Total)
+	// System notices (node updates) are not operators' announcements: they reach the bells, not this list.
+	err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM paperboat.announcements WHERE created_by<>'system' AND ($1='' OR `+stateOf+`=$1)`, state).Scan(&page.Total)
 	if err != nil {
 		return Page{}, err
 	}
-	rows, err := s.store.Pool().Query(ctx, `SELECT `+columns+`,seq FROM paperboat.announcements WHERE ($1='' OR `+stateOf+`=$1) AND ($2=0 OR seq<$2) ORDER BY seq DESC LIMIT $3`, state, after, limit+1)
+	rows, err := s.store.Pool().Query(ctx, `SELECT `+columns+`,seq FROM paperboat.announcements WHERE created_by<>'system' AND ($1='' OR `+stateOf+`=$1) AND ($2=0 OR seq<$2) ORDER BY seq DESC LIMIT $3`, state, after, limit+1)
 	if err != nil {
 		return Page{}, err
 	}

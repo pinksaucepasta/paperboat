@@ -335,6 +335,7 @@ function route(req, url) {
   if (p === "/v1/admin/server-nodes") return { nodes: world.serverNodes, total: world.serverNodes.length }
   if (p === "/v1/admin/config/billing") return world.policy
   if (p === "/v1/admin/client-update-policy") return world.floor
+  if (p === "/v1/admin/notices") return { notices: [] }
   if (p.startsWith("/v1/admin/release-authority/") && process.env.__FIXTURE_RELEASE === "off") return { __status: 503, code: "release_authority_not_configured", message: "Release authority has not been configured on this server." }
   if (p === "/v1/admin/release-authority/requests") return { requests: world.requests, pagination: { limit: 50, offset: 0, total: world.requests.length, next_offset: null } }
   if (p === "/v1/admin/release-authority/bundles") return { bundles: [], pagination: { limit: 50, offset: 0, total: 0, next_offset: null } }

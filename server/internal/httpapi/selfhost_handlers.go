@@ -12,7 +12,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
@@ -24,38 +23,14 @@ type SelfhostHandlers struct {
 }
 
 // NodeUpdatePolicy is one node component's update floor and newest published release (clientupdate.NewNode).
-type NodeUpdatePolicy interface {
-	Get(context.Context) (clientupdate.Policy, error)
-	Latest() (string, error)
-}
+type NodeUpdatePolicy = controlplane.NodeRelease
 
 // markUpdates flags each installation whose node runs an older release than published (UpdateAvailable) or
-// one below the update floor (UpdateRequired, with the message the node itself is told). A floor or release
-// that cannot be read marks nothing.
+// one below the update floor (UpdateRequired, with the message the node itself is told).
 func (h *SelfhostHandlers) markUpdates(ctx context.Context, list []selfhost.Installation) {
 	for i := range list {
-		var component string
-		switch list[i].Capability {
-		case "tunnel":
-			component = "edge"
-		case "relay":
-			component = "relay"
-		default:
-			continue
-		}
-		floor := h.Floors[component]
-		current, ok := clientupdate.ParseVersion(list[i].Version)
-		if floor == nil || !ok {
-			continue
-		}
-		if latest, err := floor.Latest(); err == nil {
-			if newest, ok := clientupdate.ParseVersion(latest); ok && clientupdate.Compare(current, newest) < 0 {
-				list[i].UpdateAvailable = latest
-			}
-		}
-		if policy, err := floor.Get(ctx); err == nil && clientupdate.RequiresUpdate(policy, list[i].Version, time.Now()) {
-			list[i].UpdateRequired = controlplane.UpdateRequiredMessage(component, list[i].Version, policy)
-		}
+		component := selfhost.ReleaseComponent(list[i].Capability)
+		list[i].UpdateAvailable, list[i].UpdateRequired = controlplane.NodeUpdateState(ctx, h.Floors[component], component, list[i].Version, time.Now())
 	}
 }
 

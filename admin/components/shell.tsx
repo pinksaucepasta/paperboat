@@ -6,6 +6,7 @@ import { useEffect } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { BrandBar } from "@/components/brand-bar"
 import { ErrorBlock } from "@/components/error-block"
+import { NoticesBell } from "@/components/notices"
 import { DotsThreeVerticalIcon, MonitorIcon, MoonIcon, ShieldCheckIcon, SignOutIcon, SunIcon } from "@phosphor-icons/react"
 import { useTheme } from "next-themes"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -98,6 +99,9 @@ function PanelSidebar({ operator }: { operator: Operator }) {
         </div>
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
+        <div className="border-t p-2">
+          <NoticesBell />
+        </div>
         <div className="border-t p-2">
           <OperatorMenu operator={operator} />
         </div>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -116,13 +117,18 @@ func (s *Service) UpdateReport(ctx context.Context, credential, requestID, state
 	if err != nil {
 		return err
 	}
-	result, err := s.database.SQL().ExecContext(ctx, `UPDATE paperboat.selfhost_update_requests SET state=$3,detail=$4,support_reference=$5,updated_at=$6
-WHERE node_id=$1 AND id=$2 AND state NOT IN `+finishedUpdateStates, node, requestID, state, detail, supportReference, s.now().UTC())
-	if err != nil {
+	var target string
+	err = s.database.SQL().QueryRowContext(ctx, `UPDATE paperboat.selfhost_update_requests SET state=$3,detail=$4,support_reference=$5,updated_at=$6
+WHERE node_id=$1 AND id=$2 AND state NOT IN `+finishedUpdateStates+` RETURNING target_version`, node, requestID, state, detail, supportReference, s.now().UTC()).Scan(&target)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUpdateNotRunning
+	}
+	if err != nil || !updateSteps[state] {
 		return err
 	}
-	if n, _ := result.RowsAffected(); n != 1 {
-		return ErrUpdateNotRunning
+	// The step is recorded; a bell notice that fails to write is logged, never a reason for the node to report again.
+	if err := s.notifyUpdateFinished(ctx, node, requestID, state, target, detail, supportReference); err != nil {
+		slog.Warn("selfhost_update_notice_failed", "node", node, "request", requestID, "error", err)
 	}
 	return nil
 }
