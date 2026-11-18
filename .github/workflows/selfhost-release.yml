@@ -176,16 +176,17 @@ jobs:
           mkdir -p "$repository/targets"
           remote 'tar -C /opt/paperboat/releases/current/tuf -cf - metadata' | tar -C "$repository" -xf -
           go run ./tools/tuf-repository validate-signers -repository "$repository" \
-            -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
+            -trusted-root "$GITHUB_WORKSPACE/shared/tufroot/trusted-root.json"
           go run ./tools/tuf-repository verify-published -repository "$repository"
           # A re-run after a successful publication finds the same bundle already signed and changes nothing.
-          if python3 - "$repository/metadata/targets.json" "$out" "$RELEASE_VERSION" <<'PY'
+          if python3 - "$repository/metadata/targets.json" "$out" "$RELEASE_VERSION" "$GITHUB_REPOSITORY" <<'PY'
           import hashlib, json, pathlib, sys
           targets = json.loads(pathlib.Path(sys.argv[1]).read_text())['signed']['targets']
           for arch in ('amd64', 'arm64'):
               file = pathlib.Path(sys.argv[2]) / f'paperboat-selfhost-linux-{arch}.tar.gz'
               target = targets.get(f'selfhost/{sys.argv[3]}/{file.name}')
-              if not target or target['hashes']['sha256'] != hashlib.sha256(file.read_bytes()).hexdigest():
+              url = f'https://github.com/{sys.argv[4]}/releases/download/selfhost-{sys.argv[3]}/{file.name}'
+              if not target or target['hashes']['sha256'] != hashlib.sha256(file.read_bytes()).hexdigest() or target['length'] != file.stat().st_size or target.get('custom') != {'repository': sys.argv[4], 'url': url}:
                   raise SystemExit(1)
           PY
           then
