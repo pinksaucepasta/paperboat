@@ -3849,12 +3849,21 @@ SELECT ('epa_' || x.route_id)::text AS assignment_id,
        COALESCE(engine_scoped_domain.hostname, '')::text AS scoped_domain_hostname,
        COALESCE(engine_scoped_domain.match_type, '')::text AS scoped_domain_match_type,
        COALESCE((
-         SELECT jsonb_agg(jsonb_build_object('id', d.id, 'hostname', d.hostname, 'match_type', d.match_type, 'generation', d.generation) ORDER BY d.hostname, d.id)
-         FROM tunnel_domains AS d
-         WHERE d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.deleted_at IS NULL AND d.ownership_state = 'verified'
-           AND ((tr.protocol = 'tls' AND d.certificate_strategy = 'none' AND d.certificate_state = 'not_applicable' AND d.match_type = 'exact')
-             OR (tr.protocol <> 'tls' AND d.certificate_state = 'ready'))
-           AND d.conflict_state = 'clear'
+         SELECT jsonb_agg(jsonb_build_object('id', b.id, 'hostname', b.hostname, 'match_type', b.match_type, 'generation', b.generation) ORDER BY b.hostname, b.id)
+         FROM (
+           SELECT d.id, d.hostname, d.match_type, d.generation
+           FROM tunnel_domains AS d
+           WHERE d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.deleted_at IS NULL AND d.ownership_state = 'verified'
+             AND ((tr.protocol = 'tls' AND d.certificate_strategy = 'none' AND d.certificate_state = 'not_applicable' AND d.match_type = 'exact')
+               OR (tr.protocol <> 'tls' AND d.certificate_state = 'ready'))
+             AND d.conflict_state = 'clear'
+           UNION ALL
+           -- The name an address change is moving to is served next to the old one until every edge confirms it
+           -- (tunnelv1.SettleAddressMoves); its certificate is the platform wildcard.
+           SELECT 'mv' || substr(md5(h.hostname), 1, 24), h.hostname, 'exact', tr.generation
+           FROM tunnel_address_holds AS h
+           WHERE h.tunnel_id = tr.tunnel_id AND h.kind = 'incoming' AND tr.protocol = 'http' AND tr.match_type = 'managed'
+         ) AS b
        ), '[]'::jsonb)::text AS domain_bindings,
        'active' AS state,
        CASE WHEN x.observed_ready THEN 'ready' ELSE 'pending' END AS observed_state,
