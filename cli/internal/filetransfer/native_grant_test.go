@@ -3,7 +3,6 @@ package filetransfer
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -55,6 +54,7 @@ func (l *nativeTestLease) OpenTransferStream(ctx context.Context) (net.Conn, err
 func (l *nativeTestLease) Close() error { l.closed.Store(true); return l.closeErr }
 
 func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
+	shortSegments(t)
 	// restarting: the renewal first finds the local daemon's socket gone, as while an update restarts
 	// it (F14-02: two 50 MiB sends in flight across pb update failed instead of resuming).
 	// stopping: the old daemon, shutting down for the update, answers the stream with 503 first.
@@ -133,8 +133,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 				case r.Method == http.MethodPatch:
 					offset, _ := strconv.ParseInt(r.Header.Get("Upload-Offset"), 10, 64)
 					chunk, err := io.ReadAll(r.Body)
-					digest := sha256.Sum256(chunk)
-					if err != nil || offset != int64(len(content)) || len(chunk) > protocol.FileTransferChunkBytes || r.Header.Get("Upload-Digest") != "sha256="+hex.EncodeToString(digest[:]) {
+					if err != nil || offset != int64(len(content)) || int64(len(chunk)) > nativeSegmentBytes || r.Header.Get("Upload-Digest") != "" {
 						t.Error("renewal changed durable chunk identity")
 						w.WriteHeader(400)
 						return

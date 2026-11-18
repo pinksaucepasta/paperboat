@@ -3,7 +3,6 @@ package filetransfer
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -24,8 +23,9 @@ import (
 // later request. A committed chunk ends the window, so a slow transfer that keeps committing finishes.
 func TestASlowTransferThatKeepsCommittingOutlivesTheRecoveryWindow(t *testing.T) {
 	saved := nativeRecoveryWindow
-	nativeRecoveryWindow = 300 * time.Millisecond
+	nativeRecoveryWindow = time.Second
 	defer func() { nativeRecoveryWindow = saved }()
+	shortSegments(t)
 	data := bytes.Repeat([]byte("slow"), 6*protocol.FileTransferChunkBytes/4)
 	item := source(data)
 	manifest := Manifest{TransferID: "ft_slow", BatchID: "batch_slow", SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Basename: item.Basename, Size: item.Size, SHA256: hex.EncodeToString(item.SHA256[:])}
@@ -43,8 +43,7 @@ func TestASlowTransferThatKeepsCommittingOutlivesTheRecoveryWindow(t *testing.T)
 			w.WriteHeader(204)
 		case r.Method == http.MethodPatch:
 			chunk, err := io.ReadAll(r.Body)
-			digest := sha256.Sum256(chunk)
-			if err != nil || r.Header.Get("Upload-Offset") != strconv.Itoa(len(content)) || r.Header.Get("Upload-Digest") != "sha256="+hex.EncodeToString(digest[:]) {
+			if err != nil || r.Header.Get("Upload-Offset") != strconv.Itoa(len(content)) || r.Header.Get("Upload-Digest") != "" {
 				w.WriteHeader(400)
 				return
 			}
@@ -54,7 +53,7 @@ func TestASlowTransferThatKeepsCommittingOutlivesTheRecoveryWindow(t *testing.T)
 				connection.Close()
 				return
 			}
-			time.Sleep(100 * time.Millisecond) // a slow path: the remaining chunks take longer than the window
+			time.Sleep(300 * time.Millisecond) // a slow path: the remaining chunks take longer than the window
 			content = append(content, chunk...)
 			w.Header().Set("Upload-Offset", strconv.Itoa(len(content)))
 			w.WriteHeader(204)
@@ -74,8 +73,11 @@ func TestASlowTransferThatKeepsCommittingOutlivesTheRecoveryWindow(t *testing.T)
 	client.retryWait = func(ctx context.Context, _ int) error { return ctx.Err() }
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	if _, err := client.SendBatch(ctx, manifest.BatchID, "", []Source{item}); err != nil || !bytes.Equal(content, data) {
-		t.Fatalf("a slow transfer that kept committing failed after the recovery window: %v (%d of %d bytes)", err, len(content), len(data))
+	_, sendErr := client.SendBatch(ctx, manifest.BatchID, "", []Source{item})
+	mu.Lock()
+	defer mu.Unlock()
+	if sendErr != nil || !bytes.Equal(content, data) {
+		t.Fatalf("a slow transfer that kept committing failed after the recovery window: %v (%d of %d bytes)", sendErr, len(content), len(data))
 	}
 }
 

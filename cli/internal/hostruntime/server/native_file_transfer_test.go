@@ -3,21 +3,20 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	clienttransfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/filetransfer"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
-func TestNativeTransferCommitsOnlyBoundedVerifiedChunks(t *testing.T) {
-	for _, scenario := range []string{"valid", "corrupt", "missing_digest", "oversize", "unauthorized"} {
+func TestNativeTransferStreamsOneBodyAndVerifiesTheWholeFileAtComplete(t *testing.T) {
+	for _, scenario := range []string{"valid", "corrupt", "oversize", "unauthorized"} {
 		t.Run(scenario, func(t *testing.T) {
 			base, durable := fileTransferTestHandler(t)
 			handler, err := NewNativeFileTransferHandler(base.config)
@@ -25,25 +24,22 @@ func TestNativeTransferCommitsOnlyBoundedVerifiedChunks(t *testing.T) {
 				t.Fatal(err)
 			}
 			data := bytes.Repeat([]byte("a"), protocol.FileTransferChunkBytes)
-			if scenario == "oversize" {
-				data = append(data, 'a')
-			}
 			created, err := handler.config.Service.Create(t.Context(), filetransfer.CreateRequest{BatchID: "native_chunk", SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", SessionID: "ses_1", Files: []filetransfer.File{{Basename: "test.bin", Size: int64(len(data)), SHA256: transferDigest(data)}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			id := created[0].ID
-			request := transferRequest(http.MethodPatch, "http://helper.test/v1/file-transfers/"+id+"/content", data)
-			request.Header.Set("Content-Type", "application/offset+octet-stream")
-			request.Header.Set(HeaderUploadOffset, "0")
-			digest := sha256.Sum256(data)
-			request.Header.Set(HeaderUploadDigest, "sha256="+hex.EncodeToString(digest[:]))
+			body := data
 			switch scenario {
 			case "corrupt":
-				request.Header.Set(HeaderUploadDigest, "sha256="+transferDigest([]byte("different")))
-			case "missing_digest":
-				request.Header.Del(HeaderUploadDigest)
-			case "unauthorized":
+				body = bytes.Repeat([]byte("b"), len(data))
+			case "oversize":
+				body = append(bytes.Clone(data), 'a')
+			}
+			request := transferRequest(http.MethodPatch, "http://helper.test/v1/file-transfers/"+id+"/content", body)
+			request.Header.Set("Content-Type", "application/offset+octet-stream")
+			request.Header.Set(HeaderUploadOffset, "0")
+			if scenario == "unauthorized" {
 				request.Header.Set("Authorization", "Bearer wrong")
 			}
 			response := httptest.NewRecorder()
@@ -52,12 +48,21 @@ func TestNativeTransferCommitsOnlyBoundedVerifiedChunks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "valid" {
-				if response.Code != http.StatusNoContent || current.CommittedOffset != int64(len(data)) {
+			switch scenario {
+			case "valid", "corrupt":
+				// The body is one stream with no digest: what arrived is committed, and only Complete's
+				// whole-file hash decides whether those bytes are the file.
+				if response.Code != http.StatusNoContent || current.CommittedOffset != int64(len(data)) || response.Header().Get(HeaderUploadOffset) != strconv.Itoa(len(data)) {
 					t.Fatalf("status=%d offset=%d", response.Code, current.CommittedOffset)
 				}
-			} else if response.Code < 400 || current.CommittedOffset != 0 {
-				t.Fatalf("rejected chunk status=%d offset=%d", response.Code, current.CommittedOffset)
+				_, err := handler.config.Service.Complete(t.Context(), id)
+				if (scenario == "valid") != (err == nil) {
+					t.Fatalf("complete err=%v", err)
+				}
+			default:
+				if response.Code < 400 || current.CommittedOffset != 0 {
+					t.Fatalf("rejected body status=%d offset=%d", response.Code, current.CommittedOffset)
+				}
 			}
 		})
 	}

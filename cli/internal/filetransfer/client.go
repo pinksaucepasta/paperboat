@@ -153,7 +153,8 @@ type Client struct {
 	// any one for a machine the server calls offline (DestinationName names it in the message).
 	Waiting         func(message string)
 	DestinationName string
-	// Committed is told each file's committed offset as the receiver confirms it.
+	// Committed is told each file's progress: the offset as bytes go to the transport (at most one MiB apart, so it may
+	// run ahead of the receiver's durable offset), the receiver's confirmed offset when it answers, never backwards.
 	Committed func(transferID string, offset int64)
 	retryWait func(context.Context, int) error
 	// renewDelay is the pause before the n-th renewal in a row without progress (a field only so tests can shorten it).
@@ -802,6 +803,10 @@ func (c *Client) afterTransportLoss(ctx context.Context, previous Auth, err erro
 	if !c.native || c.RefreshAuth == nil || !retryableTransferFailure(err) {
 		return err
 	}
+	if errors.Is(err, errNativeStalled) {
+		// The peer stopped reading but the lease is fine: no new access session for it.
+		return err
+	}
 	if errors.As(err, new(*PathWaitingError)) {
 		// The daemon refused the stream for its path, not its admission: the lease stays valid and the next
 		// stream opens once a direct or own-relay path returns.
@@ -960,6 +965,8 @@ func (c *Client) noteWaiting(err error) {
 	var noServer *serverUnavailable
 	switch {
 	case c.Waiting == nil:
+	case receiverBusy(err):
+		c.Waiting("Waiting for the destination to finish its other transfers")
 	case errors.As(err, &waiting):
 		c.Waiting(waiting.Message)
 	case errors.As(err, &noServer):

@@ -3,7 +3,6 @@ package filetransfer
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,6 +19,14 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
+
+// shortSegments makes a segment one MiB, so a few MiB of test data take several requests.
+func shortSegments(t *testing.T) {
+	t.Helper()
+	previous := nativeSegmentBytes
+	nativeSegmentBytes = protocol.FileTransferChunkBytes
+	t.Cleanup(func() { nativeSegmentBytes = previous })
+}
 
 func TestNativeClientExplicitCancellationRemovesKnownTransfer(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -57,6 +64,7 @@ func TestNativeClientExplicitCancellationRemovesKnownTransfer(t *testing.T) {
 }
 
 func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) {
+	shortSegments(t)
 	for _, outage := range []bool{false, true} {
 		t.Run(strconv.FormatBool(outage), func(t *testing.T) {
 			data := bytes.Repeat([]byte("native"), (2*protocol.FileTransferChunkBytes)/6+3)
@@ -87,8 +95,7 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 					if err != nil {
 						return // the client gave up mid-upload (its deadline); nothing was committed
 					}
-					digest := sha256.Sum256(chunk)
-					if len(chunk) > protocol.FileTransferChunkBytes || r.Header.Get("Upload-Digest") != "sha256="+hex.EncodeToString(digest[:]) || offset != int64(len(content)) {
+					if int64(len(chunk)) > nativeSegmentBytes || r.Header.Get("Upload-Digest") != "" || offset != int64(len(content)) {
 						t.Error("invalid bounded commit")
 						w.WriteHeader(400)
 						return

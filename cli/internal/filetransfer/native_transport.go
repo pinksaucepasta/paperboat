@@ -16,7 +16,10 @@ func NewNativeRoundTripper(open func(context.Context) (net.Conn, error)) (http.R
 	if open == nil {
 		return nil, errors.New("native file transfer stream opener is required")
 	}
-	transport := &http.Transport{ForceAttemptHTTP2: false, DisableCompression: true, MaxConnsPerHost: 4, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}
+	transport := &http.Transport{ForceAttemptHTTP2: false, DisableCompression: true, MaxConnsPerHost: 4, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second,
+		// A segment streams for as long as the link needs, so no total request timeout applies: the answer is awaited from
+		// the end of the request body, and patchNative cuts a stream that moves no bytes.
+		ResponseHeaderTimeout: 5 * time.Minute}
 	transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return open(ctx) }
 	transport.DialTLSContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return open(ctx) }
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS13}

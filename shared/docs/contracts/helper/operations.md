@@ -41,7 +41,7 @@ return its opaque Paperboat Inbox path.
 | `POST` | `/v1/file-transfers` | Create one idempotent batch and one manifest per declared file. |
 | `GET` | `/v1/file-transfers/{id}` | Inspect current manifest state and result. |
 | `HEAD` | `/v1/file-transfers/{id}/content` | Return committed offset, length, digest, and strong ETag. |
-| `PATCH` | `/v1/file-transfers/{id}/content` | Append `application/offset+octet-stream` at exact `Upload-Offset`. |
+| `PATCH` | `/v1/file-transfers/{id}/content` | Stream `application/offset+octet-stream` at exact `Upload-Offset`: one body of at most 64 MiB, no per-chunk acknowledgement or digest; the receiver commits every 16 MiB and answers the committed `Upload-Offset` after the body. Integrity is the whole-file digest checked at `complete`. |
 | `POST` | `/v1/file-transfers/{id}/complete` | Verify every file and atomically publish or offer the entire batch. |
 | `GET` | `/v1/file-transfers/pending?session_id=...&wait_seconds=...` | Long-poll offers pinned to the authenticated CLI client. |
 | `GET` | `/v1/file-transfers/{id}/content` | Download with strong `If-Match`, byte `Range`, and resume support. |

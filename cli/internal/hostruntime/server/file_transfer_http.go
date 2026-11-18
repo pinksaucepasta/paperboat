@@ -439,14 +439,7 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 			case <-stopClose:
 			}
 		}()
-		digestText := strings.TrimPrefix(request.Header.Get(HeaderUploadDigest), "sha256=")
-		decoded, decodeErr := hex.DecodeString(digestText)
-		if decodeErr != nil || len(decoded) != sha256.Size || len(request.Header.Values(HeaderUploadDigest)) != 1 || request.Header.Get(HeaderUploadDigest) != "sha256="+hex.EncodeToString(decoded) {
-			close(stopClose)
-			writeHTTPError(writer, requestID, "digest_mismatch", http.StatusBadRequest, false)
-			return
-		}
-		updated, err := h.config.Service.AppendVerified(request.Context(), id, offset, request.Body, [sha256.Size]byte(decoded))
+		updated, err := h.config.Service.AppendSegment(request.Context(), id, offset, request.Body)
 		close(stopClose)
 		if err != nil {
 			writeFileTransferError(request.Context(), "delivery", writer, requestID, err)

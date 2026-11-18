@@ -2,9 +2,16 @@ package protocol
 
 import "strings"
 
-// FileTransferChunkBytes bounds an independently verified upload commit. It
-// retains the existing transfer workload's 1 MiB chunk size without a content key.
+// FileTransferChunkBytes bounds one independently verified upload commit (stored-file pulls).
 const FileTransferChunkBytes = 1 << 20
+
+// A native upload is one streamed PATCH per segment, with no acknowledgement inside it: the transport's flow
+// control paces the sender, so throughput is not bounded by round-trip time. The receiver fsyncs and commits
+// every checkpoint (a cut resumes from the last one) and the segment bounds how long an update waits for it.
+const (
+	FileTransferSegmentBytes    = 64 << 20
+	FileTransferCheckpointBytes = 16 << 20
+)
 
 // FileTransferPagination describes one bounded page of authorized metadata.
 // Payload bytes are never included in history discovery.

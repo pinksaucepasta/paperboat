@@ -1,11 +1,9 @@
 package filetransfer
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +11,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -43,7 +43,7 @@ func NewNativeClient(endpoint string, auth Auth, binding Binding, open func(cont
 	if err != nil {
 		return nil, err
 	}
-	client := NewClient(endpoint, auth, binding, &http.Client{Transport: transport, Timeout: 5 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
+	client := NewClient(endpoint, auth, binding, &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
 	client.native = true
 	return &NativeClient{Client: client}, nil
 }
@@ -54,6 +54,19 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	// A successful PATCH returns the committed offset, so the next chunk follows
 	// without a HEAD; the offset is asked again only after a failure.
 	var previous, committed int64 = -1, -1
+	// attemptFrom is where the last request started; a later HEAD past it means that request committed
+	// checkpoints before it failed, which counts as progress for the recovery window and the renewal budget.
+	// reported keeps the progress callback from going backwards when a cut stream resumes from the receiver's offset.
+	var attemptFrom, reported int64 = -1, 0
+	// refusedOffset is the failure of a request the receiver refused for its offset: that is the cut stream's late
+	// checkpoint passing ours, so the next HEAD must be past where the request started, or the conflict is real.
+	var refusedOffset error
+	report := func(offset int64) {
+		if c.Committed != nil && offset > reported {
+			reported = offset
+			c.Committed(manifest.TransferID, offset)
+		}
+	}
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return callerContextError(ctx)
@@ -62,6 +75,14 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 		offset, err := committed, error(nil)
 		if offset < 0 {
 			offset, err = c.Offset(requestCtx, manifest.TransferID)
+			if err == nil && attemptFrom >= 0 && offset > attemptFrom {
+				state.recovery.Progressed()
+				c.renewalProgressed()
+			}
+			if err == nil && refusedOffset != nil && offset <= attemptFrom {
+				requestCancel()
+				return refusedOffset
+			}
 		}
 		committed = -1
 		if err == nil {
@@ -77,22 +98,25 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 				requestCancel()
 				return errors.New("committed transfer offset did not advance")
 			}
-			committed, err = c.patchNative(requestCtx, manifest.TransferID, offset, source)
+			attemptFrom = offset
+			committed, err = c.patchNative(requestCtx, manifest.TransferID, offset, source, report)
 			if err == nil {
 				requestCancel()
 				state.recovery.Progressed()
 				c.renewalProgressed()
 				previous = offset
-				if c.Committed != nil {
-					c.Committed(manifest.TransferID, committed)
-				}
+				report(committed)
 				continue
 			}
 			committed = -1
 		}
 		requestCancel()
-		if !retryableTransferFailure(err) {
+		if !retryableTransferFailure(err) && !receiverBusy(err) {
 			return err
+		}
+		refusedOffset = nil
+		if remote := new(*Error); errors.As(err, remote) && (*remote).Code == "offset_conflict" {
+			refusedOffset = err
 		}
 		c.noteWaiting(err)
 		retryCtx, cancel := state.afterFailure(ctx)
@@ -111,19 +135,84 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	}
 }
 
-// patchNative sends the chunk at offset and returns the receiver's committed offset.
-func (c *Client) patchNative(ctx context.Context, id string, offset int64, source Source) (int64, error) {
-	if _, err := source.Reader.Seek(offset, io.SeekStart); err != nil {
-		return 0, &nativeSourceFailure{err}
+// nativeStallTimeout bounds a segment whose transport accepts no more bytes: the stream is cut and the send
+// resumes from the receiver's committed offset instead of waiting for a dead peer.
+var nativeStallTimeout = 2 * time.Minute
+
+// nativeStallStep is the least progress that restarts the stall timer.
+const nativeStallStep = 32 << 10
+
+// nativeSegmentBytes is how much one request streams before the receiver answers. A var only so tests can shorten it.
+var nativeSegmentBytes int64 = protocol.FileTransferSegmentBytes
+
+// errNativeStalled is retryable: it wraps context.DeadlineExceeded.
+var errNativeStalled = fmt.Errorf("file transfer stream stalled: %w", context.DeadlineExceeded)
+
+// receiverBusy: every transfer slot of the receiver is taken by other uploads, which frees up as they finish.
+func receiverBusy(err error) bool {
+	var remote *Error
+	return errors.As(err, &remote) && remote.Code == "resource_limit" && remote.StatusCode == http.StatusTooManyRequests
+}
+
+// patchNative streams the next segment from offset in one request with no acknowledgement inside it (flow control
+// belongs to the transport, as in taildrop's PUT and rsync's pipeline) and returns the receiver's committed offset.
+// The receiver commits checkpoints while the body is still arriving; report is told the offset as bytes are handed
+// to the transport (once per MiB), and the caller reports the confirmed offset when the receiver answers.
+func (c *Client) patchNative(ctx context.Context, id string, offset int64, source Source, report func(int64)) (committed int64, resultErr error) {
+	length := min(source.Size-offset, nativeSegmentBytes)
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	// The timer starts with the first byte handed over, so waiting for a stream or a path is not a stall.
+	stall := time.AfterFunc(time.Hour, func() { cancel(errNativeStalled) })
+	stall.Stop()
+	defer stall.Stop()
+	var body *segmentReader
+	// The transport may still be reading a body after it has answered (an early refusal) and only then closes it, and
+	// the source is shared by every attempt: the next attempt, and this call's return, wait for that Close.
+	defer func() {
+		if body == nil {
+			return
+		}
+		select {
+		case <-body.done:
+		default:
+			cancel(nil) // still being written after the answer: end the request, which makes the transport close the body
+		}
+		// A body the transport still holds after a minute is reported by the next attempt's own wait, never by
+		// overwriting the answer already in hand.
+		_ = body.wait()
+	}()
+	newBody := func() (io.Reader, error) {
+		if err := body.wait(); err != nil {
+			return nil, &nativeSourceFailure{err}
+		}
+		if _, err := source.Reader.Seek(offset, io.SeekStart); err != nil {
+			return nil, &nativeSourceFailure{err}
+		}
+		b := &segmentReader{reader: source.Reader, remaining: length, lastReset: -nativeStallStep, done: make(chan struct{})}
+		body = b
+		b.onRead = func(sent int64) {
+			// Once the last byte is handed over, the receiver's answer is bounded by the response-header timeout. Until
+			// then the stall timer restarts only for real movement, so a trickle cannot hold the stream open.
+			if sent == length {
+				stall.Stop()
+			} else if sent-b.lastReset >= nativeStallStep {
+				b.lastReset = sent
+				stall.Reset(nativeStallTimeout)
+			}
+			if sent-b.lastReport >= 1<<20 || sent == length {
+				b.lastReport = sent
+				report(offset + sent)
+			}
+		}
+		return b, nil
 	}
-	chunk := make([]byte, min(source.Size-offset, int64(protocol.FileTransferChunkBytes)))
-	if _, err := io.ReadFull(source.Reader, chunk); err != nil {
-		return 0, &nativeSourceFailure{err}
-	}
-	digest := sha256.Sum256(chunk)
-	headers := http.Header{"Upload-Digest": {"sha256=" + hex.EncodeToString(digest[:])}}
-	response, err := c.requestWithBody(ctx, http.MethodPatch, c.Endpoint+"/"+id+"/content", operationID("patch", id), contentType, offset, func() (io.Reader, error) { return bytes.NewReader(chunk), nil }, headers)
+	response, err := c.requestWithBody(ctx, http.MethodPatch, c.Endpoint+"/"+id+"/content", operationID("patch", id), contentType, offset, newBody)
 	if err != nil {
+		if errors.Is(context.Cause(ctx), errNativeStalled) {
+			// Whatever the transport reports for its canceled request, the cause is the stall.
+			err = errNativeStalled
+		}
 		return 0, errors.Join(err, closeResponseBody(response))
 	}
 	committed, parseErr := strconv.ParseInt(response.Header.Get("Upload-Offset"), 10, 64)
@@ -134,6 +223,61 @@ func (c *Client) patchNative(ctx context.Context, id string, offset int64, sourc
 		return 0, &Error{Code: "http_error", Message: "helper returned invalid Upload-Offset", cause: parseErr}
 	}
 	return committed, nil
+}
+
+// segmentReader hands out exactly remaining bytes of the source. A source that ends early or fails is a source
+// failure, never a transport one, so the send does not retry a file that changed under it. onRead gets the bytes
+// handed out so far after every read.
+type segmentReader struct {
+	reader                io.Reader
+	remaining, sent       int64
+	lastReset, lastReport int64
+	onRead                func(sent int64)
+	started               atomic.Bool
+	done                  chan struct{} // closed by the transport when it has finished with the body
+	once                  sync.Once
+}
+
+// Close is the transport's signal that it will not read the body again.
+func (r *segmentReader) Close() error {
+	r.once.Do(func() { close(r.done) })
+	return nil
+}
+
+// wait returns once the transport has closed a body it started reading; a body it never read needs no wait.
+func (r *segmentReader) wait() error {
+	if r == nil || !r.started.Load() {
+		return nil
+	}
+	select {
+	case <-r.done:
+		return nil
+	case <-time.After(time.Minute):
+		return errors.New("the previous transfer request still holds the file")
+	}
+}
+
+func (r *segmentReader) Read(p []byte) (int, error) {
+	r.started.Store(true)
+	if r.remaining == 0 {
+		return 0, io.EOF
+	}
+	n, err := r.reader.Read(p[:min(int64(len(p)), r.remaining)])
+	r.remaining -= int64(n)
+	r.sent += int64(n)
+	if err == io.EOF && r.remaining > 0 {
+		return n, &nativeSourceFailure{io.ErrUnexpectedEOF}
+	}
+	if err != nil && err != io.EOF {
+		return n, &nativeSourceFailure{err}
+	}
+	if n > 0 {
+		r.onRead(r.sent)
+	}
+	if r.remaining == 0 {
+		err = io.EOF
+	}
+	return n, err
 }
 
 // SendBatch also resumes an existing batch. Its ID and source manifests must be
@@ -164,7 +308,7 @@ func (c *Client) failedBatch(ctx context.Context, batch Batch, err error) (Batch
 	if errors.As(err, &authorization) || (errors.As(err, &denied) && (denied.StatusCode == http.StatusUnauthorized || denied.StatusCode == http.StatusForbidden)) {
 		return batch, err
 	}
-	if c.native && !errors.Is(ctx.Err(), context.Canceled) && retryableTransferFailure(err) {
+	if c.native && !errors.Is(ctx.Err(), context.Canceled) && (retryableTransferFailure(err) || receiverBusy(err)) {
 		return batch, &ResumeRequiredError{BatchID: batch.BatchID, Err: err}
 	}
 	return batch, errors.Join(err, c.cancelBatch(batch.Transfers))
@@ -200,6 +344,12 @@ type nativeSourceFailure struct{ cause error }
 func (e *nativeSourceFailure) Error() string { return "file transfer source could not be read" }
 func (e *nativeSourceFailure) Unwrap() error { return e.cause }
 
+// retryableRemote: a refused offset is the stream cut before this one still committing its last checkpoint; the
+// next HEAD reports where the receiver really is.
+func retryableRemote(remote *Error) bool {
+	return transientHTTPStatus(remote.StatusCode) || remote.Code == "offset_conflict"
+}
+
 func retryableTransferFailure(err error) bool {
 	count := 0
 	seen := make(map[error]bool)
@@ -217,7 +367,7 @@ func retryableTransferFailure(err error) bool {
 		case *localDaemonUnavailable, *transferLeaseLost, *machineUnavailable, *serverUnavailable, *PathWaitingError:
 			return true
 		}
-		if remote, ok := err.(*Error); ok && !transientHTTPStatus(remote.StatusCode) {
+		if remote, ok := err.(*Error); ok && !retryableRemote(remote) {
 			return false
 		}
 		if joined, ok := err.(interface{ Unwrap() []error }); ok {
@@ -238,7 +388,7 @@ func retryableTransferFailure(err error) bool {
 			}
 		}
 		if remote, ok := err.(*Error); ok {
-			return transientHTTPStatus(remote.StatusCode)
+			return retryableRemote(remote)
 		}
 		// Winsock reports resets and refusals under its own numbers, not syscall.ECONNRESET: without neterr a cut
 		// connection on Windows ended the send instead of resuming it.

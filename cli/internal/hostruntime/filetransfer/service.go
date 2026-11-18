@@ -254,16 +254,25 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 }
 
 func (s *Service) Append(ctx context.Context, id string, offset int64, body io.Reader) (store.FileTransfer, error) {
-	return s.append(ctx, id, offset, body, nil)
+	return s.append(ctx, id, offset, body, nil, 0)
+}
+
+// AppendSegment streams at most protocol.FileTransferSegmentBytes of one transfer from offset: the receiver
+// writes sequentially, fsyncs and commits every protocol.FileTransferCheckpointBytes (a cut keeps everything
+// before it), and the sender needs no acknowledgement in between. The whole file is verified once, at Complete.
+func (s *Service) AppendSegment(ctx context.Context, id string, offset int64, body io.Reader) (store.FileTransfer, error) {
+	return s.append(ctx, id, offset, body, nil, protocol.FileTransferSegmentBytes)
 }
 
 // AppendVerified commits at most one independently verified native chunk. The
 // existing writer slots bound both buffering and storage work for all callers.
 func (s *Service) AppendVerified(ctx context.Context, id string, offset int64, body io.Reader, digest [sha256.Size]byte) (store.FileTransfer, error) {
-	return s.append(ctx, id, offset, body, &digest)
+	return s.append(ctx, id, offset, body, &digest, 0)
 }
 
-func (s *Service) append(ctx context.Context, id string, offset int64, body io.Reader, digest *[sha256.Size]byte) (store.FileTransfer, error) {
+// append writes body at offset. A limit above zero caps the bytes one call takes. Data is synced and committed
+// at checkpoints, at the end, and when the body ends early (everything received so far is kept for the resume).
+func (s *Service) append(ctx context.Context, id string, offset int64, body io.Reader, digest *[sha256.Size]byte, limit int64) (store.FileTransfer, error) {
 	releaseMutation, err := s.admitMutation(ctx)
 	if err != nil {
 		return store.FileTransfer{}, err
@@ -321,43 +330,115 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 		return transfer, storageFailure(err)
 	}
 	remaining := transfer.Size - offset
+	if limit > 0 {
+		remaining = min(remaining, limit)
+	}
 	canceled := s.cancelSignal(id)
-	written, err := io.Copy(file, io.LimitReader(&contextReader{ctx: ctx, reader: body, canceled: canceled}, remaining+1))
-	if err != nil {
-		if ctx.Err() != nil {
-			return transfer, ctx.Err()
+	reader := &contextReader{ctx: ctx, reader: body, canceled: canceled}
+	// The lease covers the idle time between commits, so every commit renews it. A commit is a short local write
+	// of bytes already synced: a caller that left meanwhile (its context is canceled) must not lose them.
+	commitCtx := context.WithoutCancel(ctx)
+	commit := func(upTo int64) error {
+		if err := file.Sync(); err != nil {
+			return storageFailure(err)
+		}
+		var lease time.Time
+		if transfer.DestinationMachineID == s.config.LocalMachineID {
+			lease = s.config.Now().Add(time.Duration(s.config.Policy.Current().DeliveryTimeoutSeconds) * time.Second)
+		}
+		if err := s.config.Store.CommitFileTransferOffset(commitCtx, id, transfer.CommittedOffset, upTo, lease); err != nil {
+			if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+				return &Error{Code: OffsetConflict, Cause: err}
+			}
+			return storageFailure(err)
+		}
+		transfer.CommittedOffset = upTo
+		transfer.State = "uploading"
+		return nil
+	}
+	var written int64
+	stepBytes, lastCommit := min(checkpointBytes, copyStepBytes), time.Now()
+	for written < remaining+1 {
+		step := min(stepBytes, remaining+1-written)
+		n, err := io.Copy(file, io.LimitReader(reader, step))
+		written += n
+		if err != nil {
+			// Bytes that arrived before the cut stay: the sender's next HEAD reports them. A cancellation or a failing disk keeps nothing, and the first
+			// error is the one returned.
+			if written > 0 {
+				select {
+				case <-canceled:
+				default:
+					_ = commit(offset + min(written, remaining))
+				}
+			}
+			if ctx.Err() != nil {
+				return transfer, ctx.Err()
+			}
+			select {
+			case <-canceled:
+				return transfer, &Error{Code: Canceled}
+			default:
+			}
+			return transfer, classifyIO(err)
+		}
+		if written > remaining {
+			_ = file.Truncate(transfer.CommittedOffset)
+			return transfer, &Error{Code: InvalidSize}
+		}
+		if n < step {
+			break
 		}
 		select {
 		case <-canceled:
+			_ = file.Truncate(transfer.CommittedOffset)
 			return transfer, &Error{Code: Canceled}
 		default:
 		}
-		return transfer, classifyIO(err)
+		// A checkpoint is due by bytes or by time, so a slow link still renews the lease and yields its slot to an
+		// update within a bounded time.
+		if offset+written-transfer.CommittedOffset < checkpointBytes && time.Since(lastCommit) < checkpointInterval {
+			continue
+		}
+		if err := commit(offset + written); err != nil {
+			return transfer, err
+		}
+		lastCommit = time.Now()
+		if s.updating() {
+			return transfer, &Error{Code: UpdateInProgress}
+		}
 	}
 	select {
 	case <-canceled:
-		_ = file.Truncate(offset)
+		_ = file.Truncate(transfer.CommittedOffset)
 		return transfer, &Error{Code: Canceled}
 	default:
 	}
 	if written > remaining {
-		_ = file.Truncate(offset)
+		_ = file.Truncate(transfer.CommittedOffset)
 		return transfer, &Error{Code: InvalidSize}
 	}
-	if err := file.Sync(); err != nil {
-		return transfer, storageFailure(err)
+	if err := commit(offset + written); err != nil {
+		return transfer, err
 	}
-	var lease time.Time
-	if transfer.DestinationMachineID == s.config.LocalMachineID {
-		lease = s.config.Now().Add(time.Duration(s.config.Policy.Current().DeliveryTimeoutSeconds) * time.Second)
-	}
-	if err := s.config.Store.CommitFileTransferOffset(ctx, id, offset, offset+written, lease); err != nil {
-		return transfer, &Error{Code: OffsetConflict, Cause: err}
-	}
-	transfer.CommittedOffset += written
-	transfer.State = "uploading"
 	return transfer, nil
 }
+
+// updating reports that an update fence is closing admission: a long stream stops at its next checkpoint.
+func (s *Service) updating() bool {
+	s.slotMu.Lock()
+	defer s.slotMu.Unlock()
+	return s.updateTransaction != ""
+}
+
+// checkpointBytes is how much a streamed upload writes between fsync + offset commits. A var only so tests can shorten it.
+var checkpointBytes int64 = protocol.FileTransferCheckpointBytes
+
+// copyStepBytes is how much is copied between checks for a due checkpoint, cancellation or update. A var only so tests can shorten it.
+var copyStepBytes int64 = 64 << 10
+
+// checkpointInterval is the longest a streamed upload goes without a commit, however slow the link.
+var checkpointInterval = 15 * time.Second
 
 // slotWait bounds how long a write waits for a free transfer slot; a caller whose context never ends (a stalled
 // HTTP client) gets ResourceLimit instead of waiting forever.

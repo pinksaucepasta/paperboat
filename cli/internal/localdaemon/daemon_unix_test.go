@@ -218,8 +218,7 @@ func TestDaemonNativeFileTransferIPCResumesLostCommitExactly(t *testing.T) {
 		case request.Method == http.MethodPatch:
 			offset, _ := strconv.ParseInt(request.Header.Get("Upload-Offset"), 10, 64)
 			chunk, err := io.ReadAll(request.Body)
-			chunkDigest := sha256.Sum256(chunk)
-			if err != nil || offset != int64(len(content)) || len(chunk) > protocol.FileTransferChunkBytes || request.Header.Get("Upload-Digest") != "sha256="+hex.EncodeToString(chunkDigest[:]) {
+			if err != nil || offset != int64(len(content)) || len(chunk) > protocol.FileTransferSegmentBytes || request.Header.Get("Upload-Digest") != "" {
 				writer.WriteHeader(http.StatusBadRequest)
 				return
 			}
