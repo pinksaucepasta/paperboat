@@ -185,6 +185,9 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 	heartbeat(held, "the workspace switched to its own servers (1st recheck)")
 	heartbeat(held, "the workspace switched to its own servers (2nd recheck)")
 	// A new terminal of the self-hosted-only workspace opens through the managed edge at Paperboat's hostname.
+	tickets.mu.Lock()
+	tickets.used = false // a ticket is redeemed once; this one stands for a second browser's
+	tickets.mu.Unlock()
 	fresh := admit(after)
 	defer fresh.CloseNow()
 	heartbeat(fresh, "a new terminal in the self-hosted-only workspace")
