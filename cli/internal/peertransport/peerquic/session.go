@@ -457,6 +457,14 @@ func quicConfig(sessionConfig SessionConfig) *quic.Config {
 	default:
 		maximumStreams = -1
 	}
+	// A QUIC sender moves at most one receive window per round trip, and quic-go only doubles a window once the
+	// application drains half of it within a few round trips, so 256 KiB never reached the bandwidth-delay product of a
+	// real path: on a reorder-free 100 ms link `pb send` stuck at 8 MB/s, and 4 MiB raises it to 18. The windows are
+	// memory only while the peer's data waits unread.
+	const (
+		streamWindow, maxStreamWindow         = 4 << 20, 32 << 20
+		connectionWindow, maxConnectionWindow = 6 << 20, 64 << 20
+	)
 	return &quic.Config{
 		HandshakeIdleTimeout:           handshakeTimeout(sessionConfig),
 		MaxIdleTimeout:                 sessionConfig.MaxIdleTimeout,
@@ -467,10 +475,10 @@ func quicConfig(sessionConfig SessionConfig) *quic.Config {
 		MaxIncomingUniStreams:          maximumUniStreams,
 		Allow0RTT:                      false,
 		EnableDatagrams:                false,
-		InitialStreamReceiveWindow:     256 << 10,
-		MaxStreamReceiveWindow:         4 << 20,
-		InitialConnectionReceiveWindow: 512 << 10,
-		MaxConnectionReceiveWindow:     16 << 20,
+		InitialStreamReceiveWindow:     streamWindow,
+		MaxStreamReceiveWindow:         maxStreamWindow,
+		InitialConnectionReceiveWindow: connectionWindow,
+		MaxConnectionReceiveWindow:     maxConnectionWindow,
 	}
 }
 
