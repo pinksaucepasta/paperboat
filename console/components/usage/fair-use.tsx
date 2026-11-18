@@ -38,8 +38,8 @@ export function FairUse() {
         <>
           <span className="text-2xl font-medium tracking-tight">Unlimited (your own edges)</span>
           <p className="text-sm text-muted-foreground">
-            Public traffic through your own edges and relays is never counted or limited by Paperboat. Previews, tunnels and browser terminals
-            on them have no plan limits.
+            Public traffic through your own edges and relays is never counted or limited by Paperboat. Previews and tunnels on them have no plan
+            limits.
           </p>
         </>
       ) : (
