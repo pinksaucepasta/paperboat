@@ -7,7 +7,6 @@ set -eu
 repository=${PB_REPO:-pinksaucepasta/paperboat}
 # The release signing key (ssh-keygen -Y verify allowed_signers line); the private half is only in CI.
 allowed_signers='paperboat-release namespaces="paperboat-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAonuBw7PaD+214NxAVb1UwkLzJYWq0VRmpbM2EXsBhg'
-docker_install_url='https://get.docker.com'
 case $repository in */*) ;; *) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
 case /$repository/ in *//*|*/./*|*/../*|*[!A-Za-z0-9_./-]*) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
 case $repository in */*/*) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
@@ -104,10 +103,34 @@ tar -xzf "$install_tmp/package.tar.gz" --no-same-owner --no-same-permissions -C 
 for binary in pbh; do [ -f "$install_tmp/$binary" ] && [ ! -L "$install_tmp/$binary" ] || { echo 'Incomplete release package; installation unchanged.' >&2; exit 1; }; done
 # The helper owns the supported-host policy; refuse before privileged changes.
 "$install_tmp/pbh" check-host
-if ! command -v docker >/dev/null 2>&1; then
- curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 "$docker_install_url" -o "$install_tmp/docker-install.sh"
- echo 'Installing Docker from the configured official source.'
- $elevate sh "$install_tmp/docker-install.sh"
+# Docker Engine, the documented production way (docs.docker.com/engine/install): Docker's own apt repository, pinned
+# to its signing key's published fingerprint. No downloaded script is run. An installed Docker that is new enough is
+# left alone (no Docker daemon configuration is changed either way).
+docker_min_major=20 docker_min_minor=10
+docker_key_fingerprint=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+if command -v docker >/dev/null 2>&1; then
+ docker_version=$(docker --version 2>/dev/null | sed -n 's/^Docker version \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')
+ docker_major=${docker_version%% *} docker_minor=${docker_version#* }
+ case "$docker_major$docker_minor" in ''|*[!0-9]*) echo 'Could not read the installed Docker version; install Docker Engine 20.10 or newer (docs.docker.com/engine/install) and rerun.' >&2; exit 1;; esac
+ if [ "$docker_major" -lt "$docker_min_major" ] || { [ "$docker_major" -eq "$docker_min_major" ] && [ "$docker_minor" -lt "$docker_min_minor" ]; }; then
+  echo "Docker $docker_major.$docker_minor is older than $docker_min_major.$docker_min_minor; upgrade Docker Engine (docs.docker.com/engine/install) and rerun." >&2; exit 1
+ fi
+else
+ command -v apt-get >/dev/null 2>&1 || { echo 'Docker is required and could not be installed here; install Docker Engine (docs.docker.com/engine/install) and rerun.' >&2; exit 1; }
+ docker_os=$(. /etc/os-release && echo "${ID:-}") docker_codename=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}")
+ case $docker_os in ubuntu|debian) ;; *) if [ -n "$(. /etc/os-release && echo "${UBUNTU_CODENAME:-}")" ]; then docker_os=ubuntu; else echo "Docker's repository does not cover $docker_os; install Docker Engine (docs.docker.com/engine/install) and rerun." >&2; exit 1; fi;; esac
+ case $docker_codename in ''|*[!a-z]*) echo 'Could not read this system'"'"'s release name; install Docker Engine (docs.docker.com/engine/install) and rerun.' >&2; exit 1;; esac
+ echo 'Installing Docker Engine from Docker'"'"'s official apt repository.'
+ $elevate apt-get update -qq && $elevate env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl gnupg
+ curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --proto-redir '=https' --connect-timeout 10 --max-time 60 --max-filesize 1048576 "https://download.docker.com/linux/$docker_os/gpg" -o "$install_tmp/docker.asc"
+ # The key is pinned to the fingerprint Docker publishes: exactly one primary key, and it is that one.
+ key_fingerprints=$(gpg --show-keys --with-colons "$install_tmp/docker.asc" | awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 }')
+ [ "$key_fingerprints" = "$docker_key_fingerprint" ] || { echo "Docker's signing key does not match its published fingerprint; nothing was installed." >&2; exit 1; }
+ $elevate install -m 0755 -d /etc/apt/keyrings
+ $elevate install -m 0644 "$install_tmp/docker.asc" /etc/apt/keyrings/docker.asc
+ printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' "$(dpkg --print-architecture)" "$docker_os" "$docker_codename" > "$install_tmp/docker.list"
+ $elevate install -m 0644 "$install_tmp/docker.list" /etc/apt/sources.list.d/docker.list
+ $elevate apt-get update -qq && $elevate env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io
 fi
 $elevate docker info >/dev/null || { echo 'Docker daemon is unavailable; start Docker and rerun.' >&2; exit 1; }
 # Preserve executable provenance before changing an existing installation.

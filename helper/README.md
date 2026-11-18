@@ -6,7 +6,7 @@ your previews and tunnels. Installing a node assigns it to no account: you claim
 dashboard (Network → Add self-hosted node).
 
 Requirements: Ubuntu 22.04/24.04 or Debian 12 on amd64 or arm64, systemd, Docker (the installer adds it
-from its official source when missing), and public inbound connectivity.
+from Docker's official apt repository when missing), and public inbound connectivity.
 
 ## Install
 
