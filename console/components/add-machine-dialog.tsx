@@ -179,7 +179,7 @@ function AddMachine({
   const queryClient = useQueryClient()
   const track = useTrack()
   const workspaceKind = workspace === "personal" ? "personal" : "team"
-  // The token is the same for every computer; the toggle only picks which installer path the command uses.
+  // The token is the same for every computer; the toggle only picks the shell the command is written for.
   const [shell, setShell] = useState<Shell>("posix")
   const [name, setName] = useState("")
 

@@ -435,5 +435,5 @@ func RecipeInstallPreflight(context.Context) error {
 
 var recipeProcessElevated = func() bool { return windows.GetCurrentProcessToken().IsElevated() }
 
-// RecipeNeedsRootMessage is the recipe.ps1 text for the same refusal (cli/tools/install.ps1).
+// RecipeNeedsRootMessage is the recipe install text of cli/tools/install.ps1 for the same refusal.
 const RecipeNeedsRootMessage = `Installing needs an administrator PowerShell. Start PowerShell with "Run as administrator" (or connect over SSH as an administrator) and run the command again. Recipe installs never show an approval prompt, so they never hang a CI job.`

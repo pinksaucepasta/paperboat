@@ -94,6 +94,7 @@ jobs:
           set -euo pipefail
           test -n "$PAPERBOAT_RELEASE_SIGNING_KEY"
           key="$RUNNER_TEMP/release-signing-key"
+          trap 'rm -f "$key"' EXIT
           (umask 077 && printf '%s\n' "$PAPERBOAT_RELEASE_SIGNING_KEY" > "$key")
           # Refuses a release the embedded key in the installer cannot verify.
           sh cli/tools/sign-release-assets.sh "$GITHUB_WORKSPACE/.build/selfhost" "selfhost-$RELEASE_VERSION" "$key" helper/deploy/install.sh
@@ -137,6 +138,12 @@ jobs:
             curl --fail --silent --show-error --location --proto '=https' --max-time 120 "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$(basename "$file")" -o "$RUNNER_TEMP/served"
             cmp "$RUNNER_TEMP/served" "$file"
           done
+          # The installer verifies this public copy with the key it embeds: prove it will.
+          grep -o 'paperboat-release namespaces="paperboat-release" ssh-ed25519 [A-Za-z0-9+/=]*' helper/deploy/install.sh | head -n 1 > "$RUNNER_TEMP/allowed_signers"
+          curl --fail --silent --show-error --location --proto '=https' --max-time 60 "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/SHA256SUMS" -o "$RUNNER_TEMP/public-SHA256SUMS"
+          curl --fail --silent --show-error --location --proto '=https' --max-time 60 "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/SHA256SUMS.sig" -o "$RUNNER_TEMP/public-SHA256SUMS.sig"
+          ssh-keygen -Y verify -f "$RUNNER_TEMP/allowed_signers" -I paperboat-release -n paperboat-release -s "$RUNNER_TEMP/public-SHA256SUMS.sig" < "$RUNNER_TEMP/public-SHA256SUMS" > /dev/null
+          test "$(sed -n 1p "$RUNNER_TEMP/public-SHA256SUMS")" = "# paperboat-release $tag"
           # The CLI installer follows /releases/latest: this release must not have taken it over.
           latest=$(curl --silent --location --head --output /dev/null --write-out '%{url_effective}' "https://github.com/$GITHUB_REPOSITORY/releases/latest")
           case "$latest" in */releases/tag/selfhost-*) echo "$tag became the Latest release" >&2; exit 1 ;; esac

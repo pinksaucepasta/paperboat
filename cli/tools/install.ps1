@@ -12,21 +12,17 @@ if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) { throw 'pb insta
 $repository = if ($env:PB_REPO) { [string]$env:PB_REPO } else { 'pinksaucepasta/paperboat' }
 # The release signing key (ssh-keygen -Y verify allowed_signers line); the private half is only in CI.
 $allowedSigners = 'paperboat-release namespaces="paperboat-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAonuBw7PaD+214NxAVb1UwkLzJYWq0VRmpbM2EXsBhg'
-$server = [string]$env:PAPERBOAT_SERVER
 $requestedVersion = if ($env:PB_VERSION) { [string]$env:PB_VERSION } else { 'latest' }
 $token = [string]$env:PB_TOKEN
-$tokenSource = [string]$env:PAPERBOAT_ENROLLMENT_TOKEN_FILE
 $name = [string]$env:PB_NAME
 Remove-Item Env:PB_TOKEN -ErrorAction SilentlyContinue
 if ($repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'pb installer: PB_REPO must look like owner/repo' }
-if ($server -and $server -notmatch '^https://') { throw 'Paperboat server URL must use HTTPS.' }
-if (-not [string]::IsNullOrWhiteSpace($token) -and -not [string]::IsNullOrWhiteSpace($tokenSource)) { throw 'Use only one Paperboat enrollment token source.' }
 # PB_RECIPE pairs from a recipe token and refuses at once, before anything is installed (PLAN F26).
 $recipe = -not [string]::IsNullOrWhiteSpace([string]$env:PB_RECIPE)
 if ($recipe) {
   $recipeToken = [string]$env:PB_RECIPE
   if (-not $recipeToken.StartsWith('pbr_') -or $recipeToken.Length -ne 67) { throw "Paperboat: PB_RECIPE is not a recipe token. A token starts with pbr_ and is 67 characters; this value is $($recipeToken.Length). Copy it again from where you saved it." }
-  if (-not [string]::IsNullOrWhiteSpace($token) -or -not [string]::IsNullOrWhiteSpace($tokenSource)) { throw 'Paperboat: a recipe install pairs from PB_RECIPE; remove the enrollment token.' }
+  if (-not [string]::IsNullOrWhiteSpace($token)) { throw 'Paperboat: a recipe install pairs from PB_RECIPE; remove PB_TOKEN.' }
   $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Paperboat: installing needs an administrator PowerShell. Start PowerShell with "Run as administrator" and run the command again.' }
 }
@@ -80,15 +76,6 @@ function Invoke-PaperboatInstall([string]$FilePath) {
 
 try {
   $tokenFile = $null
-  if (-not [string]::IsNullOrWhiteSpace($tokenSource)) {
-    if (-not [IO.Path]::IsPathRooted($tokenSource)) { throw 'Paperboat enrollment token file path must be absolute.' }
-    $sourceItem = Get-Item -LiteralPath $tokenSource -Force
-    if ($sourceItem.PSIsContainer -or ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Paperboat enrollment token file must be a regular non-reparse file.' }
-    $owner = (Get-Acl -LiteralPath $tokenSource).Owner
-    $currentOwner = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    if ($owner -ne $currentOwner) { throw 'Paperboat enrollment token file must be owned by the current user.' }
-    $token = [IO.File]::ReadAllText($tokenSource).Trim()
-  }
   if (-not [string]::IsNullOrWhiteSpace($token)) {
     if ($token.Length -gt 512) { throw 'Paperboat enrollment token is too large.' }
     $tokenFile = Join-Path $dir 'enrollment-token'
@@ -109,34 +96,29 @@ try {
   $sshKeygen = Get-SshKeygen
   $allowed = Join-Path $dir 'allowed_signers'
   [IO.File]::WriteAllText($allowed, $allowedSigners + "`n", (New-Object Text.UTF8Encoding($false)))
-  # ssh-keygen reads the signed message on stdin. The bytes go in raw: Start-Process -RedirectStandardInput re-encodes them.
+  # ssh-keygen reads the signed message on stdin, so cmd.exe redirects the file into it. A .NET stdin pipe makes
+  # ssh-keygen.exe hang (seen on a Windows Server 2025 runner), and Start-Process re-encodes the bytes on some hosts.
   $startInfo = New-Object Diagnostics.ProcessStartInfo
-  $startInfo.FileName = $sshKeygen
-  $startInfo.Arguments = '-Y verify -f "' + $allowed + '" -I paperboat-release -n paperboat-release -s "' + $sumsSignature + '"'
+  $startInfo.FileName = $env:ComSpec
+  $startInfo.Arguments = '/c ""' + $sshKeygen + '" -Y verify -f "' + $allowed + '" -I paperboat-release -n paperboat-release -s "' + $sumsSignature + '" < "' + $sums + '""'
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $true
-  $startInfo.RedirectStandardInput = $true
   $startInfo.RedirectStandardOutput = $true
   $startInfo.RedirectStandardError = $true
   $verify = [Diagnostics.Process]::Start($startInfo)
-  $signed = [IO.File]::ReadAllBytes($sums)
-  $verify.StandardInput.BaseStream.Write($signed, 0, $signed.Length)
-  $verify.StandardInput.Close()
-  [void]$verify.StandardOutput.ReadToEnd()
-  [void]$verify.StandardError.ReadToEnd()
-  $verify.WaitForExit()
+  if (-not $verify.WaitForExit(60000)) { $verify.Kill(); throw 'pb installer: verifying the release signature timed out; nothing was installed.' }
   if ($verify.ExitCode -ne 0) { throw 'pb installer: the release signature on SHA256SUMS is not valid; nothing was installed.' }
   # SHA256SUMS carries the release signature only when its first line names this version, so a signed file from another release cannot be replayed here.
   $sumLines = @(Get-Content -LiteralPath $sums)
   if ($sumLines.Count -lt 2 -or $sumLines[0] -cne "# paperboat-release $version") { throw "pb installer: SHA256SUMS is signed for a different release than $version" }
-  $listed = @($sumLines | Where-Object { $_ -match '^[0-9a-f]{64}  \S+$' -and $_.Substring(66) -ceq $asset })
+  $listed = @($sumLines | Where-Object { $_ -cmatch '^[0-9a-f]{64}  \S+$' -and $_.Substring(66) -ceq $asset })
   if ($listed.Count -ne 1) { throw "pb installer: SHA256SUMS does not list $asset exactly once" }
   $productSha = $listed[0].Substring(0, 64)
   $download = Join-Path $dir $asset
   Download-HttpsFile "$releaseUrl/$asset" $download 300 536870912
   $downloadItem = Get-Item -LiteralPath $download -Force
   if ($downloadItem.PSIsContainer -or ($downloadItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Paperboat product must be a regular non-reparse file.' }
-  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $download).Hash.ToLowerInvariant() -ne $productSha) { throw 'Paperboat product digest mismatch.' }
+  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $download).Hash.ToLowerInvariant() -cne $productSha) { throw 'Paperboat product digest mismatch.' }
   Unblock-File -LiteralPath $download -ErrorAction SilentlyContinue
 
   if ($null -ne $tokenFile) {
@@ -164,14 +146,12 @@ try {
   if ($recipe) {
     # pb pair reads PB_RECIPE; an already paired machine is left as it is.
     $pairArgs = @('pair')
-    if ($server) { $pairArgs += @('--server', $server) }
     Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
   } elseif ($null -ne $tokenFile) {
     if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$env:COMPUTERNAME }
     $name = $name.Trim().ToLowerInvariant()
     # Pairing uses the installed binary and never purges an existing identity.
     $pairArgs = @('pair', '--enrollment-token-file', $tokenFile, '--name', $name)
-    if ($server) { $pairArgs += @('--server', $server) }
     Invoke-Paperboat $installedPb $pairArgs 'Paperboat pairing'
   } else {
     # No token: continue into the browser approval, which adds this computer to the account.

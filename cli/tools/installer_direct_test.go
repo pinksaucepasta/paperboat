@@ -130,8 +130,10 @@ func TestInstallerResolvesLatestOrTheRequestedVersion(t *testing.T) {
 			t.Fatalf("version %q was not refused: %v %s", bad, err, out)
 		}
 	}
-	if out, err := r.run(t, []string{"--no-setup"}, append(env, "PB_REPO=not a repo")...); err == nil || !strings.Contains(out, "PB_REPO must look like owner/repo") {
-		t.Fatalf("a bad PB_REPO was not refused: %v %s", err, out)
+	for _, bad := range []string{"not a repo", "justname", "a/b/c", "../evil", "a/../b", "a//b", "/a/b", "a/b/", "a/b?x=1", "a/b@c"} {
+		if out, err := r.run(t, []string{"--no-setup"}, append(env, "PB_REPO="+bad)...); err == nil || !strings.Contains(out, "PB_REPO must look like owner/repo") {
+			t.Fatalf("PB_REPO=%q was not refused: %v %s", bad, err, out)
+		}
 	}
 }
 
