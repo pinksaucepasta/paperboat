@@ -647,9 +647,16 @@ function ChangeEdgesDialog({
     mutationFn: () => switchEdgesStoppingLive(workspace, primary, fallback),
     onSuccess: ({ pair, stopped }) => changed(pair, stopped),
   })
-  const live = liveOf(save.error)
-  const failed = stopAndSwitch.error ?? (live ? null : save.error)
-  const failure = failed && <ErrorMessage error={failed} />
+  // The latest refusal names what is still running; any other error is shown as it is.
+  const live = liveOf(stopAndSwitch.error) ?? liveOf(save.error)
+  const failed = stopAndSwitch.error ?? save.error
+  const failure = failed && !liveOf(failed) && <ErrorMessage error={failed} />
+  const busy = save.isPending || stopAndSwitch.isPending
+  const pick = (set: (id: string) => void) => (id: string) => {
+    save.reset()
+    stopAndSwitch.reset()
+    set(id)
+  }
   if (switched)
     return (
       <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -667,18 +674,18 @@ function ChangeEdgesDialog({
       </Dialog>
     )
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Change edges</DialogTitle>
         </DialogHeader>
         <Field className="gap-1.5">
           <FieldLabel htmlFor="edge-primary">Primary</FieldLabel>
-          <EdgeChoice id="edge-primary" options={options} value={primary} onChange={setPrimary} />
+          <EdgeChoice id="edge-primary" options={options} value={primary} onChange={pick(setPrimary)} />
         </Field>
         <Field className="gap-1.5">
           <FieldLabel htmlFor="edge-fallback">Fallback</FieldLabel>
-          <EdgeChoice id="edge-fallback" options={options} value={fallback} onChange={setFallback} />
+          <EdgeChoice id="edge-fallback" options={options} value={fallback} onChange={pick(setFallback)} />
         </Field>
         {problem && <p className="text-sm text-destructive">{problem}</p>}
         {failure && <p className="text-sm text-destructive">{failure}</p>}
@@ -686,20 +693,23 @@ function ChangeEdgesDialog({
           <StopAndSwitch
             items={live.items}
             count={live.count}
-            pending={stopAndSwitch.isPending}
+            pending={busy}
             onConfirm={() => stopAndSwitch.mutate()}
           />
         ) : (
           live && <p className="text-sm text-destructive">Stop running previews and tunnels first.</p>
         )}
         <DialogFooter>
-          <Button variant="ghost" size="lg" onClick={onClose}>
+          <Button variant="ghost" size="lg" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button
             size="lg"
-            disabled={!primary || !fallback || Boolean(problem) || save.isPending || stopAndSwitch.isPending}
-            onClick={() => save.mutate()}
+            disabled={!primary || !fallback || Boolean(problem) || busy || Boolean(live?.items.length)}
+            onClick={() => {
+              stopAndSwitch.reset()
+              save.mutate()
+            }}
           >
             {save.isPending ? "Saving…" : "Save"}
           </Button>
