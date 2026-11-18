@@ -3,7 +3,6 @@
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { api, ApiError, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
 import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
-import { closeTerminal } from "@/lib/terminal/queries"
 import { pauseTunnelById, stopPreview } from "@/lib/tunnels"
 
 /*
@@ -173,8 +172,8 @@ export const saveEdgePair = (workspace: string, primaryId: string, fallbackId: s
     fallback_id: fallbackId,
   })
 
-/** A preview, tunnel or browser terminal still running on the current edges: what blocks a switch (409 previews_running). */
-export type LiveItem = { kind: "preview" | "tunnel" | "terminal"; id: string; name: string; machine_id?: string }
+/** A preview or tunnel still running on the current edges: what blocks a switch (409 previews_running). */
+export type LiveItem = { kind: "preview" | "tunnel"; id: string; name: string }
 
 /** What the server refused a switch for, from its 409 `previews_running` error; undefined for any other error. */
 export function liveOf(error: unknown): { count: number; items: LiveItem[] } | undefined {
@@ -184,15 +183,11 @@ export function liveOf(error: unknown): { count: number; items: LiveItem[] } | u
   return { count: Number(details.count ?? items.length), items }
 }
 
-/** Ends what is running: previews stop, tunnels pause (they keep their routes), terminals close. */
+/** Ends what is running: previews stop, tunnels pause (they keep their routes). */
 const stopLive = (items: LiveItem[]) =>
   Promise.all(
     items.map((item) =>
-      item.kind === "preview"
-        ? stopPreview(item.id)
-        : item.kind === "tunnel"
-          ? pauseTunnelById(item.id)
-          : closeTerminal(item.machine_id ?? "", item.id),
+      item.kind === "preview" ? stopPreview(item.id) : pauseTunnelById(item.id),
     ),
   )
 
@@ -211,8 +206,6 @@ export async function switchEdgesStoppingLive(workspace: string, primaryId: stri
       if (!live || live.items.length === 0 || round >= 10) throw error
       await stopLive(live.items)
       stopped.push(...live.items)
-      // A closed terminal leaves the edge within a couple of seconds; asking at once would still find it.
-      if (live.items.some((item) => item.kind === "terminal")) await new Promise((resolve) => setTimeout(resolve, 2_000))
     }
   }
 }

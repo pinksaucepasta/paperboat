@@ -13,15 +13,14 @@ import { Input } from "@/components/ui/input"
 
 /*
  * Changing between Paperboat's edges and your own servers strands what runs on the old ones, so the
- * server refuses while previews, tunnels or browser terminals run (409 previews_running) and names
- * them. These are the dialog's two follow-ups: list what is running and stop it after a typed
+ * server refuses while previews or tunnels run (409 previews_running) and names them. These are the dialog's two follow-ups: list what is running and stop it after a typed
  * confirmation, then, once the edges changed, say what to start again and how the domains are doing.
  */
 
 export const CONFIRM_SWITCH = "switch edges"
 
-const verb = { preview: "ends", tunnel: "is paused", terminal: "closes" } as const
-const noun = { preview: "Preview", tunnel: "Tunnel", terminal: "Terminal" } as const
+const verb = { preview: "ends", tunnel: "is paused" } as const
+const noun = { preview: "Preview", tunnel: "Tunnel" } as const
 
 /** What the server named as running: each with what stopping does to it. */
 function LiveList({ items, count }: { items: LiveItem[]; count: number }) {

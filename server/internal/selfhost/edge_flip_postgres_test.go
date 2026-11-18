@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 )
 
-// Changing a workspace's edge ownership: running previews, tunnels and browser terminals refuse it and are named;
+// Changing a workspace's edge ownership: running previews and tunnels refuse it and are named (a browser terminal never does: it always uses Paperboat's edges);
 // once they are stopped the flip repoints the domains of what is left (a paused tunnel, an expired preview) at the
 // new edges and drops their placements in the same transaction, in both directions; it wakes the workspace's
 // machines; and it is refused, changing nothing, while the new servers have no verified public address.
@@ -86,22 +86,20 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 	service := New(store, "edge-flip-test-key")
 	selfHosted := Policy{Mode: "self-hosted-only", InstallationIDs: []string{installation.InstallationID}}
 
-	// 1. The preview, tunnel and terminal all run: the refusal counts and names every one.
+	// 1. The preview and tunnel run (and so does a browser terminal, which does not count): the refusal names both.
 	var live *LivePublicationsError
 	_, err = service.SetPool(ctx, owner, "tunnel", selfHosted)
-	if !errors.As(err, &live) || live.Count != 3 || len(live.Items) != 3 || !errors.Is(err, ErrLiveEdgeModeChange) {
+	if !errors.As(err, &live) || live.Count != 2 || len(live.Items) != 2 || !errors.Is(err, ErrLiveEdgeModeChange) {
 		t.Fatalf("live refusal: %v %+v", err, live)
 	}
 	names := map[string]LiveItem{}
 	for _, item := range live.Items {
 		names[item.Kind] = item
 	}
-	if names["tunnel"].Name != "api tunnel" || names["tunnel"].ID != tunnel || names["preview"].ID != preview || !strings.Contains(names["preview"].Name, previewLabel) ||
-		names["terminal"].Name != "build shell on Work laptop" || names["terminal"].ID != "flip_term_"+stamp || names["terminal"].MachineID != machine {
+	if names["tunnel"].Name != "api tunnel" || names["tunnel"].ID != tunnel || names["preview"].ID != preview || !strings.Contains(names["preview"].Name, previewLabel) {
 		t.Fatalf("live items: %+v", live.Items)
 	}
-	// Only the stopped tunnel and the expired preview are left once the terminal detaches and the tunnel pauses.
-	exec(`UPDATE paperboat.native_usage_authorities SET attached_until=now()-interval '1 minute' WHERE workspace_id='personal:'||$1`, owner)
+	// Only the stopped tunnel and the expired preview are left once the preview expires and the tunnel pauses.
 	exec(`UPDATE paperboat.preview_leases SET lease_deadline=now()-interval '1 minute' WHERE id=$1`, preview)
 	exec(`UPDATE paperboat.tunnels SET desired_state='paused' WHERE id=$1`, tunnel)
 

@@ -28,7 +28,6 @@ import {
   type PairEdge,
   type Node,
 } from "@/lib/network"
-import { terminalKeys } from "@/lib/terminal/queries"
 import { usePageParam } from "@/lib/use-page-param"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { DomainList } from "@/components/domains/domain-list"
@@ -635,7 +634,6 @@ function ChangeEdgesDialog({
     queryClient.setQueryData(edgePairQuery(workspace).queryKey, pair)
     queryClient.invalidateQueries({ queryKey: ["previews"] })
     queryClient.invalidateQueries({ queryKey: ["tunnels"] })
-    queryClient.invalidateQueries({ queryKey: terminalKeys.list })
     if (kindOf(primary) === current?.primary.kind) {
       toast.success("Edges changed")
       onClose()
@@ -692,7 +690,7 @@ function ChangeEdgesDialog({
             onConfirm={() => stopAndSwitch.mutate()}
           />
         ) : (
-          live && <p className="text-sm text-destructive">Stop running previews, tunnels and browser terminals first.</p>
+          live && <p className="text-sm text-destructive">Stop running previews and tunnels first.</p>
         )}
         <DialogFooter>
           <Button variant="ghost" size="lg" onClick={onClose}>
