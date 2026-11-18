@@ -32,15 +32,14 @@ func TestEngineEdgeRestartStagesCertificateForNewProcessEpochOnPostgres(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() { _ = database.Close() }) // registered before the fixture cleanup, so it runs after it: the cleanup needs the open database
 	if err := db.Migrate(ctx, database); err != nil {
 		t.Fatal(err)
 	}
 	fixture := sqlCertificateFixture{suffix: fmt.Sprintf("%d", time.Now().UnixNano())}
 	fixture.insert(t, database)
 	t.Cleanup(func() {
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, fixture.accountID)
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, fixture.edgeID)
+		removeCertificateFixture(database, fixture)
 	})
 	store, err := NewSQLStore(database)
 	if err != nil {

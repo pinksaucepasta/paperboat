@@ -38,7 +38,7 @@ func TestSQLCertificateLifecycleOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() { _ = database.Close() }) // registered before the fixture cleanup, so it runs after it: the cleanup needs the open database
 	if err := db.Migrate(ctx, database); err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +46,7 @@ func TestSQLCertificateLifecycleOnPostgres(t *testing.T) {
 	fixture := sqlCertificateFixture{suffix: suffix}
 	fixture.insert(t, database)
 	t.Cleanup(func() {
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, fixture.accountID)
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, fixture.edgeID)
+		removeCertificateFixture(database, fixture)
 	})
 
 	store, err := NewSQLStore(database)
@@ -185,6 +184,17 @@ type sqlCertificateFixture struct {
 	edgeID    string
 	epoch     string
 	opID      string
+}
+
+// removeCertificateFixture deletes everything a fixture left: its certificate records and their edge distributions
+// (tunnel_certificate_records.account_id has no foreign key to users, so deleting the user leaves them; a pending or
+// failed record would be seen by any test, or job, that lists cleanup work across the table), then the user, then the
+// node (the distributions' edge_node_id foreign key restricts its deletion).
+func removeCertificateFixture(database *db.DB, fixture sqlCertificateFixture) {
+	ctx := context.Background()
+	_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.tunnel_certificate_records WHERE account_id=$1`, fixture.accountID)
+	_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, fixture.accountID)
+	_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, fixture.edgeID)
 }
 
 func (f *sqlCertificateFixture) insert(t *testing.T, database *db.DB) {
