@@ -112,3 +112,14 @@ func TestOnlyTheAttemptsOwnSessionOwnerIsWithdrawn(t *testing.T) {
 		}
 	}
 }
+
+// A pre-image recorded for another generation (a corrupt record) is never published: it would write another
+// generation's row and leave the rewritten one in place.
+func TestRestoringARowRecordedForAnotherGenerationIsRefused(t *testing.T) {
+	candidate := candidateSessionOwner{catalog: sessionowner.Catalog{Root: t.TempDir()}, generation: strings.Repeat("ab", 16), existed: true,
+		previous: &sessionowner.Descriptor{Generation: strings.Repeat("cd", 16)}}
+	err := candidate.withdrawUnless(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "another session owner") {
+		t.Fatalf("a pre-image of another generation was accepted: %v", err)
+	}
+}

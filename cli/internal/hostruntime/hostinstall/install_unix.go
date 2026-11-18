@@ -165,6 +165,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		if candidateOwner, err = newCandidateSessionOwner(request); err != nil {
 			return err
 		}
+		// A signed update (unixPreparedUpdate) keeps no install journal, and the release gate refuses a version older
+		// than the installed one (workerupdate Prepare), so it does not rewrite a retired owner's archive for an older
+		// build; a failed one still restores the row from candidateOwner.previous in memory.
 		if intent != unixPreparedUpdate && candidateOwner.previous != nil {
 			journal.PreviousSessionOwner = candidateOwner.previous
 			if err := writeJournal(paths.journal, journal); err != nil {
@@ -224,7 +227,9 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 			if intent == unixPreparedUpdate {
 				return err
 			}
-			return errors.Join(err, updated.RollbackUnixNativeInstall(paths.updateState), removeJournal(paths.journal))
+			// The candidate's session owner is withdrawn (an archive row it rewrote put back) before the journal that
+			// carries that row goes: a kill in between must leave the journal for recovery.
+			return errors.Join(err, updated.RollbackUnixNativeInstall(paths.updateState), candidateOwner.withdraw(context.WithoutCancel(ctx), paths.metadata, request.UID), removeJournal(paths.journal))
 		}
 		if coldCarrier {
 			if err := prepareColdUnixCarrier(ctx, request, paths, candidateUnits.Carrier); err != nil {

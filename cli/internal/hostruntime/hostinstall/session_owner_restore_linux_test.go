@@ -4,11 +4,11 @@ package hostinstall
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/sessionowner"
@@ -166,12 +166,14 @@ func TestAFailedDowngradeRestoresTheArchiveRowItRewrote(t *testing.T) {
 func TestRecoveryOfAKilledDowngradeRestoresTheArchiveRow(t *testing.T) {
 	f := newRestoreFixture(t)
 	ctx := context.Background()
-	body, err := json.Marshal(installJournal{PreviousSessionOwner: &f.archive})
-	if err != nil {
+	// The journal is the real protected file: the strict decoder must accept the new field and give the row back whole.
+	journalPath := filepath.Join(filepath.Dir(filepath.Dir(f.path)), "journal", "install-journal.json")
+	defer os.Remove(journalPath)
+	if err := writeJournal(journalPath, installJournal{Schema: journalSchemaV1, Stage: "prepared", Source: f.sources["older"], MetadataCaptured: true, UpdatedAt: time.Now().UTC(), PreviousSessionOwner: &f.archive}); err != nil {
 		t.Fatal(err)
 	}
-	var journal installJournal
-	if err = json.Unmarshal(body, &journal); err != nil || journal.PreviousSessionOwner == nil || *journal.PreviousSessionOwner != f.archive {
+	journal, err := loadJournal(journalPath)
+	if err != nil || journal.PreviousSessionOwner == nil || *journal.PreviousSessionOwner != f.archive {
 		t.Fatalf("the journal does not carry the row it found: %v %+v", err, journal.PreviousSessionOwner)
 	}
 	f.startDowngrade(t)

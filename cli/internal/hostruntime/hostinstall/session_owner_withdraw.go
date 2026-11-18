@@ -93,6 +93,9 @@ func (o candidateSessionOwner) restorePrevious(ctx context.Context) error {
 	if o.previous == nil {
 		return nil
 	}
+	if o.previous.Generation != o.generation {
+		return fmt.Errorf("the row recorded before the attempt is for another session owner (%s), not %s: it was not restored", o.previous.Generation, o.generation)
+	}
 	path, err := sessionowner.Find(o.catalog.Root, o.generation)
 	if err != nil {
 		return err
