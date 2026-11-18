@@ -115,7 +115,7 @@ func (s *Service) CreateTeam(ctx context.Context, email string, members []string
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id, team_id, product_code, state, quantity, period_start, period_end, bandwidth_anchor, cancel_at_period_end)
  VALUES ('team:' || $1::text, $1, 'team-pro', 'active', 10, now() - interval '1 hour', now() + interval '90 days', now() - interval '1 hour', false)
- ON CONFLICT (id) DO UPDATE SET state='active', period_start=now() - interval '1 hour', period_end=now() + interval '90 days', cancel_at_period_end=false`, team); err != nil {
+ ON CONFLICT (id) DO UPDATE SET state='active', period_start=now() - interval '1 hour', period_end=now() + interval '90 days', cancel_at_period_end=false, grant_until=NULL`, team); err != nil {
 			return err
 		}
 		for _, m := range members {

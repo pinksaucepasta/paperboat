@@ -174,8 +174,10 @@ or `team:<team>` and `{"revision","product_code","days"[,"quantity"]}` (days 1 t
 the workspace an active plan with no Stripe subscription; `.../revoke` ends it. The grant is the workspace's own
 subscription row, so the plan limits, team entitlement and bandwidth allowance follow the product like a paid plan, it ends
 by itself at `expires_at`, and the Stripe webhook never touches it (it matches workspaces by their Stripe ids). A grant
-is refused (409) while the workspace has a live Stripe subscription or a checkout in flight, and within 72 hours of a Stripe
-cancellation (Stripe may still retry events for it); a later checkout replaces it.
+is refused (409) while the workspace has a live Stripe subscription or a checkout in flight; a later paid checkout replaces it.
+While a grant runs (`grant_until`), a Stripe event for the workspace is applied only if its subscription is live and paid
+(active or trialing, read from Stripe at the time, not from the event), so a retried or replayed event of any age for an old
+subscription cannot overwrite the grant.
 Revoke only ends a grant; a paid plan is cancelled in Stripe. The audit event records product, days and seats.
 Relay drain stops new scheduling; resume requires a new heartbeat before ready.
 Tunnel disable/enable uses the normal configuration-generation and operation

@@ -407,8 +407,8 @@ func readTeam(ctx context.Context, tx *db.Tx, id, after string, limit int) (_ Te
 	return v, rows.Err()
 }
 
-// grantedSQL is a support grant that is still running: an active plan with no Stripe subscription behind it.
-const grantedSQL = `(state='active' AND provider_subscription_id IS NULL AND product_code IS NOT NULL AND period_end>now())`
+// grantedSQL is a support grant that is still running (reconcileSubscription protects it while it does).
+const grantedSQL = `(grant_until>now() AND state='active' AND provider_subscription_id IS NULL)`
 
 func readBilling(ctx context.Context, tx *db.Tx, id string) (Billing, error) {
 	var v Billing

@@ -334,6 +334,5 @@ granted until <date>" with Upgrade still available (a checkout replaces the gran
 customer resets it to Free, so only the running grant is affected.
 
 Decided for plan grants (2026-11-18): a grant keeps the workspace's `bandwidth_anchor`, as any cancelled-and-repurchased Stripe
-workspace does; seats are capped at the team member maximum (128) with no floor against current members; a grant over a cancelled
-Stripe record waits 72 hours after its last change (Stripe's webhook retry window); a revoke that races a succeeded checkout whose
-webhook has not arrived loses to the payment.
+workspace does; seats are capped at the team member maximum (128) with no floor against current members; a revoke that races a
+succeeded checkout whose webhook has not arrived loses to the payment.

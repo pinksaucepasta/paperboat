@@ -71,11 +71,6 @@ type request struct {
 	VaultWraps      []env.NamedVaultWrap `json:"vault_wraps"`
 	RecipePublicKey []byte               `json:"recipe_public_key"`
 	TokenID         string               `json:"token_id"`
-
-	// named-vault-values: the vault's sealed values, and the one variable to set or delete.
-	ValuesEnvelope []byte `json:"values_envelope"`
-	Variable       string `json:"variable"`
-	Delete         bool   `json:"delete"`
 }
 type engine struct {
 	mu          sync.Mutex
@@ -156,7 +151,7 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return e.reconcileScope(r)
 	case "personal-rotate", "personal-rotate-scope":
 		return e.rotatePersonal(ctx, r)
-	case "named-vault-wraps", "named-vault-recipe-wrap", "named-vault-values":
+	case "named-vault-wraps", "named-vault-recipe-wrap":
 		return e.namedVault(r)
 	case "status":
 		account := e.head.AccountID

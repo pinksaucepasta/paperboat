@@ -152,11 +152,11 @@ func TestPlanGrantAndRevokeThroughTheWorkspaceRow(t *testing.T) {
 		}
 		return v.(operator.Billing).Granted
 	}
-	exec(`UPDATE paperboat.billing_workspaces SET state='active',product_code=$2,provider_subscription_id=NULL,period_start=now(),period_end=now()+interval '5 days' WHERE id=$1`, personal, pro)
+	exec(`UPDATE paperboat.billing_workspaces SET state='active',product_code=$2,provider_subscription_id=NULL,period_start=now(),period_end=now()+interval '5 days',grant_until=now()+interval '5 days' WHERE id=$1`, personal, pro)
 	if !isGranted() {
 		t.Fatal("a running grant is not reported as one")
 	}
-	exec(`UPDATE paperboat.billing_workspaces SET period_start=now()-interval '2 seconds',period_end=now()-interval '1 second' WHERE id=$1`, personal)
+	exec(`UPDATE paperboat.billing_workspaces SET period_start=now()-interval '2 seconds',period_end=now()-interval '1 second',grant_until=now()-interval '1 second' WHERE id=$1`, personal)
 	if isGranted() {
 		t.Fatal("an expired grant is still reported as one")
 	}
@@ -167,13 +167,13 @@ func TestPlanGrantAndRevokeThroughTheWorkspaceRow(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT revision FROM paperboat.billing_workspaces WHERE id=$1`, personal).Scan(&rev); err != nil {
 		t.Fatal(err)
 	}
-	// Stripe may still retry events for a subscription cancelled moments ago: not yet.
-	if _, err = run(admin, "g-fresh-"+x, "plan_grant", personal, Input{Revision: rev, ProductCode: pro, Days: 10}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("a grant over a just-cancelled Stripe record: %v", err)
-	}
-	exec(`UPDATE paperboat.billing_workspaces SET updated_at=now()-interval '4 days' WHERE id=$1`, personal)
+	// A cancelled Stripe record is granted over at once (the running grant, not a wait, protects it from old events).
 	if _, err = run(admin, "g-lapsed-"+x, "plan_grant", personal, Input{Revision: rev, ProductCode: pro, Days: 10}); err != nil {
 		t.Fatalf("a grant over a cancelled Stripe record: %v", err)
+	}
+	var running bool
+	if err = store.SQL().QueryRowContext(ctx, `SELECT grant_until>now()+interval '9 days' FROM paperboat.billing_workspaces WHERE id=$1`, personal).Scan(&running); err != nil || !running {
+		t.Fatalf("grant_until not set: %t %v", running, err)
 	}
 	var leftover int
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.billing_workspaces WHERE id=$1 AND (scheduled_quantity IS NOT NULL OR scheduled_quantity_at IS NOT NULL OR pending_seat_capacity IS NOT NULL)`, personal).Scan(&leftover); err != nil || leftover != 0 {
@@ -224,5 +224,21 @@ func TestPlanGrantAndRevokeThroughTheWorkspaceRow(t *testing.T) {
 	}
 	if _, err = run(admin, "t-r-"+x, "plan_revoke", teamWorkspace, Input{Revision: 2}); err != nil || teamPaid() {
 		t.Fatalf("team revoke: paid=%t %v", teamPaid(), err)
+	}
+	// An incomplete_expired Stripe record can be granted over too, and a revoke ends the running grant.
+	exec(`UPDATE paperboat.billing_workspaces SET provider_customer_id='cus_t_'||$2,provider_subscription_id='sub_t_'||$2,state='incomplete_expired',updated_at=now() WHERE id=$1`, teamWorkspace, x)
+	var teamRev int64
+	if err = store.SQL().QueryRowContext(ctx, `SELECT revision FROM paperboat.billing_workspaces WHERE id=$1`, teamWorkspace).Scan(&teamRev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(admin, "t-2-"+x, "plan_grant", teamWorkspace, Input{Revision: teamRev, ProductCode: teamPlan, Days: 2, Quantity: 2}); err != nil || !teamPaid() {
+		t.Fatalf("a grant over an incomplete_expired record: paid=%t %v", teamPaid(), err)
+	}
+	if _, err = run(admin, "t-r2-"+x, "plan_revoke", teamWorkspace, Input{Revision: teamRev + 1}); err != nil || teamPaid() {
+		t.Fatalf("revoke: paid=%t %v", teamPaid(), err)
+	}
+	var cleared bool
+	if err = store.SQL().QueryRowContext(ctx, `SELECT grant_until IS NULL FROM paperboat.billing_workspaces WHERE id=$1`, teamWorkspace).Scan(&cleared); err != nil || !cleared {
+		t.Fatalf("a revoke left the grant running: %t %v", cleared, err)
 	}
 }

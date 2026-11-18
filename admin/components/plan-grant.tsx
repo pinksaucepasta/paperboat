@@ -45,7 +45,7 @@ export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: strin
       <div className="flex flex-wrap gap-2" data-plan-actions>
         <ActionDialog
           title={`Grant a plan to ${workspaceId}`}
-          description="Gives the workspace a plan without Stripe for a number of days; it ends by itself. It replaces an earlier grant and is refused while the workspace has a live Stripe subscription or a checkout in progress, and for 72 hours after a Stripe subscription was cancelled. If the customer subscribes later, their subscription replaces it."
+          description="Gives the workspace a plan without Stripe for a number of days; it ends by itself. It replaces an earlier grant and is refused while the workspace has a live Stripe subscription or a checkout in progress. If the customer subscribes later, their subscription replaces it."
           target={workspaceId}
           submitLabel="Grant plan"
           valid={product !== "" && daysOk && seatsOk}

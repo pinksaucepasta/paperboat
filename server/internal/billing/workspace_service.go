@@ -563,8 +563,21 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		var team sql.NullString
 		var existingSubscription sql.NullString
 		var existingState string
-		if err = tx.QueryRow(ctx, `SELECT team_id,provider_subscription_id,state FROM billing_workspaces WHERE id=$1`, workspaceID).Scan(&team, &existingSubscription, &existingState); err != nil {
+		var grantRunning, grantMarked bool
+		if err = tx.QueryRow(ctx, `SELECT team_id,provider_subscription_id,state,coalesce(grant_until>now(),false),grant_until IS NOT NULL FROM billing_workspaces WHERE id=$1`, workspaceID).Scan(&team, &existingSubscription, &existingState, &grantRunning, &grantMarked); err != nil {
 			return err
+		}
+		// A support grant owns the plan while it runs. The snapshot is read live (never the event payload), so a replayed
+		// or late event for an old subscription carries that subscription's current state, cancelled, and must not
+		// replace the grant; only a subscription that is really paid for does (and then ends the grant).
+		if grantRunning && current.Status != "active" && current.Status != "trialing" {
+			if event != nil {
+				if _, err = tx.Exec(ctx, `INSERT INTO stripe_events(id,event_type,subscription_id) VALUES($1,$2,$3)`, event.ID, event.Type, current.ID); err != nil {
+					return err
+				}
+			}
+			processed = true
+			return nil
 		}
 		newSubscription := !existingSubscription.Valid || existingSubscription.String != current.ID
 		if newSubscription {
@@ -595,7 +608,9 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 					if existingSubscription.Valid {
 						predecessor = existingSubscription.String
 					}
-					allowed = request.PredecessorSubscriptionID == predecessor
+					// A grant cleared the lapsed subscription's id, so a checkout started before it names a predecessor
+					// the row no longer holds; our own succeeded checkout of this workspace is proof enough then.
+					allowed = request.PredecessorSubscriptionID == predecessor || (grantMarked && !existingSubscription.Valid)
 				}
 			}
 			if !allowed {
@@ -622,7 +637,7 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		if err = updateRenewalGraceTx(ctx, tx, workspaceID, current, event); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5 IN ('active','trialing') THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5 IN ('active','trialing') THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,grant_until=NULL,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET scheduled_quantity=NULL,scheduled_quantity_at=NULL WHERE id=$1 AND scheduled_quantity_at<=$2 AND quantity=scheduled_quantity`, workspaceID, current.PeriodStart); err != nil {
