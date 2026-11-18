@@ -68,7 +68,7 @@ func writeEdgePairError(w http.ResponseWriter, r *http.Request, err error) {
 	var live *selfhost.LivePublicationsError
 	switch {
 	case errors.As(err, &live):
-		writeErrorDetails(w, r, http.StatusConflict, "previews_running", "Stop this workspace's running previews and tunnels before switching between Paperboat's edges and your own servers.", map[string]any{"count": live.Count})
+		writeLiveEdgeChange(w, r, live)
 	case expectedHTTPErrorOnly(err, selfhost.ErrUnauthorized):
 		writeError(w, r, http.StatusForbidden, "forbidden", "Only the owner or an admin of this workspace can change its edge pair.")
 	case expectedHTTPErrorOnly(err, selfhost.ErrInvalid):
@@ -78,4 +78,14 @@ func writeEdgePairError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		writeError(w, r, http.StatusServiceUnavailable, "edge_pair_unavailable", "The edge pair is unavailable. Retry later.", err)
 	}
+}
+
+// writeLiveEdgeChange answers a refused edge ownership change: 409 with how many previews, tunnels and browser
+// terminals are running and the first few by name, so the console can list them and offer to stop them.
+func writeLiveEdgeChange(w http.ResponseWriter, r *http.Request, live *selfhost.LivePublicationsError) {
+	items := live.Items
+	if items == nil {
+		items = []selfhost.LiveItem{}
+	}
+	writeErrorDetails(w, r, http.StatusConflict, "previews_running", "Stop this workspace's running previews, tunnels and browser terminals before switching between Paperboat's edges and your own servers.", map[string]any{"count": live.Count, "items": items})
 }

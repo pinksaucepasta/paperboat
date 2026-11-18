@@ -19,3 +19,8 @@ const MaxConnectionsPerNode = 16384
 // Prior art: NetBird's relay token lives 12 h (management/internals/shared/grpc/token_mgr.go); a Tailscale DERP
 // server admits a node key with no control token at all.
 const MaxGrantLifetime = 12 * time.Hour
+
+// PoolHandoverGrace is how long a relay keeps an account's carriers after a pool change took the relay out of the
+// account's pool: longer than the daemons' configuration refresh (about a minute idle), so they have moved to
+// the new relays before the old ones close theirs (make-before-break).
+const PoolHandoverGrace = 5 * time.Minute

@@ -195,14 +195,9 @@ func (s *Service) storePair(ctx context.Context, tx *db.Tx, actor string, ws edg
 	var team any
 	if ws.Kind == "team" {
 		team = ws.ID
-		var allowed bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.teams t JOIN paperboat.team_members m USING(team_id) WHERE t.team_id=$1 AND t.deleted_at IS NULL AND m.account_id=$2 AND m.active
- AND team_role_allows(CASE WHEN t.owner_account=$2 THEN 'owner' ELSE m.role END,'settings.manage'))`, ws.ID, actor).Scan(&allowed); err != nil {
-			return nil, err
-		}
-		if !allowed {
-			return nil, ErrUnauthorized
-		}
+	}
+	if err := requireTeamManager(ctx, tx, actor, Scope{Kind: ws.Kind, ID: ws.ID}); err != nil {
+		return nil, err
 	}
 	first, firstOwn, err := resolvePairEdge(ctx, tx, ws, primaryID)
 	if err != nil {
@@ -228,18 +223,19 @@ func (s *Service) storePair(ctx context.Context, tx *db.Tx, actor string, ws edg
 		return nil, err
 	}
 	if current != mode {
-		var live int
-		if err = tx.QueryRow(ctx, liveEdgePublicationsSQL, ws.Account, team).Scan(&live); err != nil {
+		if err = refuseLiveEdgeChange(ctx, tx, ws.Account, team); err != nil {
 			return nil, err
-		}
-		if live > 0 {
-			return nil, &LivePublicationsError{Count: live}
 		}
 	}
 	// The pool is the pair: the policy decides which edges may serve the workspace, the edge set which of them do.
 	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES($1,$2,'tunnel',$3,$4::text[])
 ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids`, ws.Kind, ws.ID, mode, installations); err != nil {
 		return nil, err
+	}
+	if current != mode {
+		if err = repointWorkspaceDomains(ctx, tx, ws.Account, team, mode); err != nil {
+			return nil, err
+		}
 	}
 	// Eligibility is judged under the new mode, and an edge nobody has heard from lately would be replaced by the
 	// next reconcile, silently undoing the choice.

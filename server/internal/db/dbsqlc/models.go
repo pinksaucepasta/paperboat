@@ -2436,6 +2436,12 @@ type RecordingNativeAdmission struct {
 	CreatedAt          time.Time
 }
 
+type RelayPoolHandover struct {
+	NodeID    string
+	AccountID string
+	CloseAt   time.Time
+}
+
 type RelaySubjectSet struct {
 	NodeID         string
 	ProcessEpoch   string

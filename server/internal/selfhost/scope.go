@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
@@ -42,19 +45,6 @@ type PoolMember struct {
 	Name           string `json:"name"`
 	EndpointHost   string `json:"endpoint_host"`
 }
-
-var ErrLiveEdgeModeChange = fmt.Errorf("%w: stop active workspace previews and tunnels before changing edge ownership; configure customer DNS and certificates before restarting them", ErrInvalid)
-
-// LivePublicationsError is ErrLiveEdgeModeChange with how many previews and tunnels are still running.
-type LivePublicationsError struct{ Count int }
-
-func (e *LivePublicationsError) Error() string { return ErrLiveEdgeModeChange.Error() }
-func (e *LivePublicationsError) Unwrap() error { return ErrLiveEdgeModeChange }
-
-// liveEdgePublicationsSQL counts a workspace's active previews and tunnels (args: account, team or NULL):
-// the publications an edge ownership change would strand.
-const liveEdgePublicationsSQL = `SELECT (SELECT count(*) FROM paperboat.preview_leases WHERE ($2::text IS NOT NULL OR account_id=$1) AND owner_team_id IS NOT DISTINCT FROM $2::text AND terminal_state='active' AND lease_deadline>now())
- + (SELECT count(*) FROM paperboat.tunnels t WHERE ($2::text IS NOT NULL OR t.account_id=$1) AND paperboat.publication_workspace_team('tunnel',t.id) IS NOT DISTINCT FROM $2::text AND desired_state='active' AND deleted_at IS NULL)`
 
 var ErrIncompatibleTopology = errors.New("self-hosted-only HTTP publications require a verified custom domain")
 
@@ -224,57 +214,96 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 		}
 		seen[id] = true
 	}
-	raw, _ := json.Marshal(p.InstallationIDs)
-	tx, err := s.database.SQL().BeginTx(ctx, nil)
+	flipped := false
+	err = s.database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		flipped, err = s.storePool(ctx, tx, actor, capability, p, scope)
+		return err
+	})
 	if err != nil {
 		return p, err
 	}
-	defer func() { returnErr = withTransactionRollbackFailure("set_pool", returnErr, tx.Rollback()) }()
-	if err = lockTeamWrite(ctx, tx, actor, scope); err != nil {
-		return p, err
+	// The pool is stored; a failed wake-up leaves machines to see the new edges when their attachment next refreshes.
+	if flipped {
+		if err = s.publishPairChange(ctx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}); err != nil {
+			slog.ErrorContext(ctx, "pool_publish_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
+		}
+	}
+	return p, nil
+}
+
+// storePool writes one pool policy. For a browser edge pool that changes the workspace's edge mode it refuses
+// while anything runs on the old edges and points the workspace's domains at the new ones (flipped reports it).
+func (s *Service) storePool(ctx context.Context, tx *db.Tx, actor, capability string, p Policy, scope Scope) (flipped bool, err error) {
+	if err = requireTeamManager(ctx, tx, actor, scope); err != nil {
+		return false, err
+	}
+	var team any
+	if scope.Kind == "team" {
+		team = scope.ID
 	}
 	if capability == "tunnel" {
 		// Serialize policy writes and refuse implicit migration of live publications.
-		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('browser-edge-policy:'||$1||':'||$2,0))`, scope.Kind, scope.ID); err != nil {
-			return p, err
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('browser-edge-policy:'||$1||':'||$2,0))`, scope.Kind, scope.ID); err != nil {
+			return false, err
 		}
 		var mode string
-		var live int
-		var team any
-		if scope.Kind == "team" {
-			team = scope.ID
+		if err = tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,$2)`, actor, team).Scan(&mode); err != nil {
+			return false, err
 		}
-		if err = tx.QueryRowContext(ctx, `SELECT paperboat.workspace_edge_mode($1,$2)`, actor, team).Scan(&mode); err != nil {
-			return p, err
-		}
-		if mode != p.Mode {
-			if err = tx.QueryRowContext(ctx, liveEdgePublicationsSQL, actor, team).Scan(&live); err != nil {
-				return p, err
-			}
-			if live > 0 {
-				return p, &LivePublicationsError{Count: live}
+		if flipped = mode != p.Mode; flipped {
+			if err = refuseLiveEdgeChange(ctx, tx, actor, team); err != nil {
+				return false, err
 			}
 		}
 	}
 	var count int
-	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM paperboat.selfhost_installations WHERE id IN(SELECT jsonb_array_elements_text($1::jsonb)) AND state='active' AND claim_complete AND scope_kind<>'global' AND capability=$2 AND ((scope_kind=$3 AND scope_id=$4) OR($3='account' AND paperboat.selfhost_scope_visible(scope_kind,scope_id,$4)))`, string(raw), capability, scope.Kind, scope.ID).Scan(&count)
+	err = tx.QueryRow(ctx, `SELECT count(*) FROM paperboat.selfhost_installations WHERE id=ANY($1::text[]) AND state='active' AND claim_complete AND scope_kind<>'global' AND capability=$2 AND ((scope_kind=$3 AND scope_id=$4) OR($3='account' AND paperboat.selfhost_scope_visible(scope_kind,scope_id,$4)))`, p.InstallationIDs, capability, scope.Kind, scope.ID).Scan(&count)
 	if err != nil {
-		return p, err
+		return false, err
 	}
 	if count != len(p.InstallationIDs) {
-		return p, ErrUnauthorized
+		return false, ErrUnauthorized
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES($1,$2,$3,$4,ARRAY(SELECT jsonb_array_elements_text($5::jsonb))) ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids`, scope.Kind, scope.ID, capability, p.Mode, string(raw))
+	if capability == "relay" {
+		if err = handOverRelays(ctx, tx, scope.ID, p); err != nil {
+			return false, err
+		}
+	} else {
+		_, err = tx.Exec(ctx, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES($1,$2,$3,$4,$5::text[]) ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids`, scope.Kind, scope.ID, capability, p.Mode, p.InstallationIDs)
+	}
 	if err != nil {
-		return p, err
+		return false, err
 	}
-	if err = revokeIneligible(ctx, tx, scope); err != nil {
-		return p, err
+	if flipped {
+		if err = repointWorkspaceDomains(ctx, tx, actor, team, p.Mode); err != nil {
+			return false, err
+		}
 	}
-	return p, tx.Commit()
+	_, err = tx.Exec(ctx, revokeIneligibleSQL, scope.Kind, scope.ID)
+	return flipped, err
 }
+
+// requireTeamManager is the team write check of a pool or pair change; a personal workspace needs none.
+func requireTeamManager(ctx context.Context, tx *db.Tx, actor string, scope Scope) error {
+	if scope.Kind != "team" {
+		return nil
+	}
+	var allowed bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.teams t JOIN paperboat.team_members m USING(team_id) WHERE t.team_id=$1 AND t.deleted_at IS NULL AND m.account_id=$2 AND m.active
+ AND team_role_allows(CASE WHEN t.owner_account=$2 THEN 'owner' ELSE m.role END,'settings.manage'))`, scope.ID, actor).Scan(&allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
+// revokeIneligibleSQL makes the scope's peers fetch their network configuration again, which names the pool's relays.
+const revokeIneligibleSQL = `UPDATE paperboat.peer_network_identities SET relay_revocation_generation=relay_revocation_generation+1 WHERE paperboat.selfhost_scope_visible($1,$2,user_id)`
+
 func revokeIneligible(ctx context.Context, tx *sql.Tx, scope Scope) error {
-	_, err := tx.ExecContext(ctx, `UPDATE paperboat.peer_network_identities SET relay_revocation_generation=relay_revocation_generation+1 WHERE paperboat.selfhost_scope_visible($1,$2,user_id)`, scope.Kind, scope.ID)
+	_, err := tx.ExecContext(ctx, revokeIneligibleSQL, scope.Kind, scope.ID)
 	return err
 }
 func (s *Service) RemoveScoped(ctx context.Context, actor, id string, operator bool) error {
