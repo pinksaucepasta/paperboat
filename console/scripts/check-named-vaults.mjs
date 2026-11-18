@@ -55,12 +55,20 @@ const pressed = (name) => button(name).getAttribute("aria-pressed")
 try {
   await step("ENV is set up in the browser (or unlocked) and the Environment page opens", async () => {
     await page.goto(`${origin}/environment`)
-    const locked = page.getByLabel("Vault password")
+    // The static shell shows an unlock-like card until the vault answer lands: decide only after it.
+    await page.waitForLoadState("networkidle").catch(() => {})
+    const locked = page.locator('input[name="vault-password"]')
     const fresh = page.getByText("Create your vault", { exact: true })
     await locked.or(fresh).or(button("Add variable")).first().waitFor(long)
     if (await fresh.isVisible()) {
-      await page.locator("#vault-new-password").fill(password)
-      await page.locator("#vault-confirm-password").fill(password)
+      // A form filled before React hydrates is cleared: fill, wait, and fill again until the text stays.
+      for (const field of ["#vault-new-password", "#vault-confirm-password"]) {
+        for (let tries = 0; tries < 5; tries++) {
+          await page.locator(field).fill(password)
+          await page.waitForTimeout(1500)
+          if ((await page.locator(field).inputValue()) === password) break
+        }
+      }
       await button("Continue").click()
       await page
         .locator("code", { hasText: /^pbvr1-/ })

@@ -1,0 +1,9 @@
+check-named-vaults.mjs on the live console at 3e98d7d3b, fresh throwaway account (deleted afterwards), 2026-11-18
+PASS  ENV is set up in the browser (or unlocked) and the Environment page opens  (8 s)
+PASS  the switcher shows Default selected and New vault  (0 s)
+PASS  New vault makes a named vault, which is selected and empty  (2 s)
+PASS  a variable added to the vault is listed, and its value never reaches the server  (1 s)
+PASS  Default shows its own variables and the vault keeps its own  (0 s)
+PASS  a variable is removed from the vault  (1 s)
+PASS  the vault is deleted after its name is typed, and Default is shown again  (1 s)
+all passed
