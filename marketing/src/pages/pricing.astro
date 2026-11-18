@@ -1,20 +1,20 @@
 ---
 import Page from "../layouts/Page.astro"
 import Head from "../components/Head.astro"
-import Lanes from "../components/Lanes.astro"
 import Faq from "../components/Faq.astro"
 import Closing from "../components/Closing.astro"
 import Icon from "../components/Icon.astro"
 import Plans from "../components/Plans.astro"
-import { teamTrial, topUp } from "../site"
+import { plans, speeds, teamTrial, topUp } from "../site"
 import { faq, featureGroups, planNames } from "../pricing-data"
-import { directLane, relayLane, publicLane } from "../diagrams"
 import { breadcrumbSchema, faqSchema } from "../schema"
 
-const lanes = [
-  { ...directLane, name: "Direct: never counted", text: "Machines that can reach each other talk peer to peer. That is most traffic, and it is free on every plan." },
-  { ...relayLane, name: "Relayed: counted", text: "When a network blocks the direct path, our relay carries the encrypted bytes. Those bytes count." },
-  { ...publicLane, name: "Public links: counted", text: "Requests to a preview or tunnel pass through our edge. Those bytes count too." },
+const speedRows = [
+  ["Our edges (previews, tunnels)", `${plans[0].bandwidth}, then ${speeds.after[0]}`, `${plans[1].bandwidth}, then ${speeds.after[1]}`],
+  ["Our relays", `${speeds.relay} for ${plans[0].bandwidth}, then ${speeds.after[0]}`, `${speeds.relay} for ${plans[1].bandwidth}, then ${speeds.after[1]}`],
+  ["Browser terminals", "Never slowed", "Never slowed"],
+  ["Your own edges and relays", "Unlimited", "Unlimited"],
+  ["Direct traffic between your machines", "Unlimited", "Unlimited"],
 ]
 ---
 
@@ -24,7 +24,7 @@ const lanes = [
   schema={[breadcrumbSchema(Astro.site, [["Pricing", "/pricing/"]]), faqSchema(faq)]}
 >
   <Head title="Free for personal use" eyebrow="Pricing">
-    <p>Every feature is on every plan. Pro adds more traffic through our servers, and Team adds people.</p>
+    <p>Every feature is on every plan, and nothing is ever cut off. Pro adds more full-speed traffic, and Team adds people.</p>
   </Head>
 
   <section class="section plans-section" aria-label="Plans">
@@ -37,37 +37,32 @@ const lanes = [
   <section class="section section-tint" aria-labelledby="bandwidth-title">
     <div class="wrap">
       <header class="section-head">
-        <h2 class="h2" id="bandwidth-title">Bandwidth</h2>
+        <h2 class="h2" id="bandwidth-title">Never cut off</h2>
         <p class="lede">
-          Only bytes that pass through a server we run. If you <a href="/features/self-hosting/">run your own relay or edge</a>, those bytes are not
-          counted either.
+          Traffic through our servers never stops. After your plan's full-speed amount it's slowed until the month resets. Through
+          <a href="/features/self-hosting/">your own relays and edges</a>, it's never counted.
         </p>
       </header>
-      <Lanes
-        lanes={lanes}
-        caption="Direct traffic between two machines is never counted. Traffic through a Paperboat relay is counted. Requests to a public preview or tunnel through a Paperboat edge are counted."
-      />
+      <div class="scroll">
+        <table class="facts speeds">
+          <thead><tr><th scope="col"><span class="visually-hidden">Traffic</span></th><th scope="col">Free</th><th scope="col">Pro and Team</th></tr></thead>
+          <tbody>
+            {speedRows.map(([what, free, paid]) => <tr><th scope="row">{what}</th><td>{free}</td><td>{paid}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
       <div class="cols cols-3 rules">
         <div class="stack">
-          <h3 class="h3">When it runs out</h3>
-          <p class="rule-text">
-            Relayed connections, previews and tunnels pause until the next month. Direct connections keep working. <code>pb</code> and the console
-            name the limit and link to where you raise it.
-          </p>
-        </div>
-        <div class="stack">
-          <h3 class="h3">Adding more</h3>
-          <p class="rule-text">
-            On Pro and Team, add {topUp.size} for {topUp.price}, as many as you need. It is used after the plan's own allowance and lasts until that
-            month's allowance resets.
-          </p>
+          <h3 class="h3">Need more speed?</h3>
+          <p class="rule-text">On Pro and Team, add {topUp.size} at full speed for {topUp.price}, as often as you like.</p>
         </div>
         <div class="stack">
           <h3 class="h3">On a team</h3>
-          <p class="rule-text">
-            Each member has their own 100 GB inside the team. Extra bandwidth goes into one pool the whole team draws from. A personal plan and a
-            team share nothing.
-          </p>
+          <p class="rule-text">Every seat brings {plans[1].bandwidth} at full speed. Extra traffic you add is shared by the whole team.</p>
+        </div>
+        <div class="stack">
+          <h3 class="h3">Always told</h3>
+          <p class="rule-text"><code>pb</code> and the console show how much full-speed traffic is left, and where to add more.</p>
         </div>
       </div>
     </div>
@@ -132,6 +127,14 @@ const lanes = [
 </Page>
 
 <style>
+  .speeds {
+    min-width: 560px;
+  }
+
+  .speeds tbody th {
+    width: 40%;
+  }
+
   .plans-section {
     padding-top: 0;
   }

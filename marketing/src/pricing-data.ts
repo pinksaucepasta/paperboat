@@ -1,8 +1,8 @@
 /**
  * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
- * for personal use and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
+ * for personal use and differ only in full-speed traffic, which comes from `plans` in site.ts; Team adds people.
  */
-import { auditRetention, plans, publicTcp, ssoMinSeats, teamTrial, topUp } from "./site"
+import { auditRetention, plans, publicTcp, speeds, ssoMinSeats, teamTrial, topUp } from "./site"
 
 const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
   plans[0][key],
@@ -16,14 +16,18 @@ export const featureGroups: { title: string; rows: { feature: string; cells: [Pl
   {
     title: "Limits",
     rows: [
-      { feature: "Relay and edge bandwidth a month", cells: [plans[0].bandwidth, plans[1].bandwidth, plans[2].bandwidth] },
+      { feature: "Our edges (previews, tunnels): full speed a month", cells: [plans[0].bandwidth, plans[1].bandwidth, plans[2].bandwidth] },
+      { feature: "Our relays: full speed a month", cells: [`${speeds.relay} for ${plans[0].bandwidth}`, `${speeds.relay} for ${plans[1].bandwidth}`, `${speeds.relay} for ${plans[2].bandwidth}`] },
+      { feature: "After that, until the month resets", cells: [speeds.after[0], speeds.after[1], speeds.after[2]] },
+      { feature: "Browser terminals", cells: ["Never slowed", "Never slowed", "Never slowed"] },
+      { feature: "Your own edges and relays", cells: ["Unlimited", "Unlimited", "Unlimited"] },
       { feature: "Direct traffic between your machines", cells: ["Unlimited", "Unlimited", "Unlimited"] },
       { feature: "Machines", cells: limitCells("machines") },
       { feature: "Previews and tunnels running at once", cells: limitCells("publications") },
       { feature: "Public raw-TCP tunnel addresses", cells: [publicTcp[0], publicTcp[1], publicTcp[2]] },
       { feature: "Terminals open in the web console at once", cells: limitCells("browserTerminals") },
       { feature: "Terminals from the pb command", cells: ["Unlimited", "Unlimited", "Unlimited"] },
-      { feature: `Extra bandwidth, ${topUp.price} per ${topUp.size}`, cells: [false, true, true] },
+      { feature: `Extra full-speed traffic, ${topUp.price} per ${topUp.size}`, cells: [false, true, true] },
     ],
   },
   {
@@ -69,15 +73,15 @@ export const planNames = plans.map((plan) => plan.name)
 export const faq = [
   {
     q: "What exactly do I pay for?",
-    a: "Bandwidth that passes through servers we run: relays, when two machines cannot connect directly, and edges, which serve public previews and tunnels. Traffic that goes straight between your machines is never counted, on any plan.",
+    a: "Faster traffic through servers we run: edges, which serve your previews and tunnels, and relays, which carry traffic when two machines can't connect directly. Traffic that goes straight between your machines is never counted, on any plan.",
   },
   {
-    q: "What happens when the bandwidth runs out?",
-    a: `Relayed connections, previews and tunnels pause until the next month, or until you add more on a paid plan (${topUp.price} per ${topUp.size}). Direct connections keep working, and you are told which limit was reached and where to raise it.`,
+    q: "What happens after the full-speed amount?",
+    a: `Nothing stops. Traffic through our edges and relays is slowed to ${speeds.after[0]} on Free, or ${speeds.after[1]} on Pro and Team, until the month resets. Browser terminals and direct traffic are never slowed. On a paid plan you can add ${topUp.size} at full speed for ${topUp.price}.`,
   },
   {
     q: "Are features locked behind a paid plan?",
-    a: `No. Free and Pro have the same features and differ in limits and bandwidth. Team adds what a company needs: members, roles and audit log export, and single sign-on and directory sync for teams of ${ssoMinSeats} seats or more.`,
+    a: `No. Free and Pro have the same features and differ in limits and full-speed traffic. Team adds what a company needs: members, roles and audit log export, and single sign-on and directory sync for teams of ${ssoMinSeats} seats or more.`,
   },
   {
     q: "Do I need Team to share with someone?",

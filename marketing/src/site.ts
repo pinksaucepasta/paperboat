@@ -58,7 +58,7 @@ export const plans = [
     machines: "1,000",
     publications: "1,000",
     browserTerminals: "100",
-    detail: "Everything in Free, with more bandwidth. Add 100 GB any time.",
+    detail: "Everything in Free, with more full-speed traffic. Add 100 GB any time.",
   },
   {
     name: "Team",
@@ -72,6 +72,17 @@ export const plans = [
     detail: "Members, and lasting access to each other's machines. Try it free for 14 days.",
   },
 ] as const
+
+/**
+ * Traffic through our servers is never cut off (user decision 2026-11-19): after the plan's
+ * full-speed amount it is slowed until the month resets. Relays also run at a top speed.
+ */
+export const speeds = {
+  /** After the full-speed amount: Free, Pro, Team. */
+  after: ["512 kbit/s", "1 Mbit/s", "1 Mbit/s"],
+  /** Relayed traffic within the full-speed amount, every plan. */
+  relay: "10 Mbit/s",
+} as const
 
 /** Extra bandwidth (PLAN 1.3): bought in 100 GB units for a paid workspace, used after the plan's own allowance. */
 export const topUp = { size: "100 GB", price: "$5" }

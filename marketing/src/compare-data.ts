@@ -14,6 +14,7 @@ export type RowId =
   | "terminal_replay"
   | "terminal_browser"
   | "terminal_share"
+  | "terminal_record"
   | "exec"
   | "ssh_keys"
   | "ssh_tools"
@@ -29,6 +30,8 @@ export type RowId =
   | "tunnel_domains"
   | "tunnel_protocols"
   | "private_network"
+  | "private_names"
+  | "setup_one_line"
   | "encryption_native"
   | "encryption_public"
   | "teams"
@@ -52,6 +55,7 @@ export const sections: Section[] = [
       { id: "terminal_replay", label: "Shows the output you missed" },
       { id: "terminal_browser", label: "From a browser" },
       { id: "terminal_share", label: "Share a live session" },
+      { id: "terminal_record", label: "Record and replay sessions" },
     ],
   },
   {
@@ -117,7 +121,16 @@ export const sections: Section[] = [
     id: "network",
     title: "Private network",
     sentence: "Your machines reach each other's ports without exposing them.",
-    rows: [{ id: "private_network", label: "Machines reach each other" }],
+    rows: [
+      { id: "private_network", label: "Machines reach each other" },
+      { id: "private_names", label: "A private HTTPS address for each port" },
+    ],
+  },
+  {
+    id: "setup",
+    title: "New machines",
+    sentence: "Bring a new machine in, set up and ready.",
+    rows: [{ id: "setup_one_line", label: "Set up a machine in one command" }],
   },
   {
     id: "encryption",
@@ -183,6 +196,7 @@ export const paperboat = {
     terminal_replay: ["Yes, replays what you missed on reconnect"],
     terminal_browser: ["Yes, in the web console"],
     terminal_share: ["Yes, view-only or interactive, by invite"],
+    terminal_record: ["Yes, on every plan, encrypted on the machine"],
     exec: ["Yes, pb exec, with exit codes"],
     ssh_keys: ["Yes, keys and host trust handled"],
     ssh_tools: ["Yes, pb ssh, scp, sftp, rsync and plain ssh"],
@@ -197,7 +211,9 @@ export const paperboat = {
     tunnel_permanent: ["Yes, names that stay"],
     tunnel_domains: ["Yes, on every plan"],
     tunnel_protocols: ["HTTP/1.1, HTTP/2, HTTP/3, WebSocket, raw TCP"],
-    private_network: ["Every port by name, with HTTPS"],
+    private_network: ["Yes, encrypted end to end"],
+    private_names: ["Yes, by port number or a name you choose"],
+    setup_one_line: ["Yes, recipes: access, secrets, config, previews"],
     encryption_native: ["End to end; direct when possible"],
     encryption_public: ["TLS ends at Paperboat's edge"],
     teams: ["Yes, five roles; SSO and SCIM from 10 seats"],
@@ -205,13 +221,13 @@ export const paperboat = {
     api_tokens: ["Yes, scoped API tokens that expire"],
     selfhost: ["Relays and tunnel servers"],
     platforms: ["Linux, macOS and Windows"],
-    pricing_model: ["By relay and edge bandwidth; Team per seat"],
-    free_tier: ["Every feature for personal use, 5 GB a month"],
+    pricing_model: ["By full-speed traffic through our servers; Team per seat"],
+    free_tier: ["Every feature; 5 GB at full speed, then slowed, never cut off"],
   }),
   pricing: [
-    "Free: $0, every feature for personal use, 5 GB of relay and edge bandwidth a month",
-    "Pro: $8 a month or $80 a year, 100 GB",
-    "Team: $15 per seat a month or $150 a year, 100 GB per seat; 14-day trial",
+    "Free: $0, every feature for personal use, 5 GB at full speed a month, then 512 kbit/s",
+    "Pro: $8 a month or $80 a year, 100 GB at full speed, then 1 Mbit/s",
+    "Team: $15 per seat a month or $150 a year, 100 GB per seat at full speed; 14-day trial",
     "Direct traffic between your machines is never counted",
   ],
 }
@@ -252,6 +268,8 @@ const tailscaleSources = {
   policy: "https://tailscale.com/kb/1337/policy-syntax",
   keys: "https://tailscale.com/kb/1085/auth-keys",
   derp: "https://tailscale.com/kb/1118/custom-derp-servers",
+  recorder: "https://tailscale.com/docs/features/tsrecorder",
+  serve: "https://tailscale.com/kb/1312/serve",
   download: "https://tailscale.com/download",
   pricing: "https://tailscale.com/pricing",
 }
@@ -281,13 +299,15 @@ const cfTunnelSources = {
 const teleportSources = {
   matrix: "https://goteleport.com/docs/feature-matrix/",
   tsh: "https://goteleport.com/docs/reference/cli/tsh/",
+  join: "https://goteleport.com/docs/reference/join-methods/",
   pricing: "https://goteleport.com/pricing/",
 }
 
 // NetBird
 const netbirdSources = {
   docs: "https://docs.netbird.io/",
-  ssh: "https://docs.netbird.io/how-to/ssh",
+  ssh: "https://docs.netbird.io/manage/peers/ssh",
+  setupKeys: "https://docs.netbird.io/manage/peers/register-machines-using-setup-keys",
   pricing: "https://netbird.io/pricing",
   plans: "https://docs.netbird.io/manage/settings/plans-and-billing",
   repo: "https://github.com/netbirdio/netbird",
@@ -305,6 +325,7 @@ const zerotierSources = {
 // Twingate
 const twingateSources = {
   ssh: "https://www.twingate.com/docs/ssh-privileged-access-overview",
+  recording: "https://www.twingate.com/docs/ssh-session-recording-compliance",
   resources: "https://www.twingate.com/docs/resources",
   relays: "https://www.twingate.com/docs/understanding-relays",
   users: "https://www.twingate.com/docs/users",
@@ -319,6 +340,7 @@ const twingateSources = {
 const cfZeroTrustSources = {
   setup: "https://developers.cloudflare.com/cloudflare-one/setup/",
   ssh: "https://developers.cloudflare.com/cloudflare-one/tutorials/ssh/",
+  sshLogs: "https://developers.cloudflare.com/cloudflare-one/insights/logs/dashboard-logs/ssh-command-logs/",
   tunnel: "https://developers.cloudflare.com/tunnel/",
   routing: "https://developers.cloudflare.com/tunnel/routing/",
   private: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/private-net/",
@@ -364,6 +386,8 @@ const vscodeSources = {
 
 /** Paperboat's side of the differences that recur, written once. */
 const ours = {
+  extras:
+    "Paperboat records its terminals on every plan, encrypted on the machine, and plays them back in the console or your terminal. A recipe sets up a new machine in one command: its access, secrets, config and previews.",
   terminals:
     "Paperboat terminals run on the machine and keep running when your laptop sleeps or the network drops. When you come back, from the same computer, another one or a browser, you see what happened while you were away, and you can let someone watch or type along.",
   previews:
@@ -388,12 +412,14 @@ export const products: Product[] = [
       "An HTTPS address for every port, by name",
       "Public previews and tunnels on your own domain",
       "Encrypted secrets and config on every machine",
+      "Session recordings on every plan",
     ],
     cells: cells(tailscaleSources, {
       terminal_persistent: ["No, a standard SSH session", "ssh"],
       terminal_replay: ["No", "ssh"],
       terminal_browser: ["Yes, SSH Console in the admin console (beta)", "console"],
       terminal_share: ["No", "ssh"],
+      terminal_record: ["Through Tailscale PAM; its older recorder is deprecated", "recorder"],
       exec: ["Through ssh", "ssh"],
       ssh_keys: ["Yes, with Tailscale SSH", "ssh"],
       ssh_tools: ["Yes, over the private network", "ssh"],
@@ -409,6 +435,8 @@ export const products: Product[] = [
       tunnel_domains: ["No, ts.net names only", "funnel"],
       tunnel_protocols: ["HTTPS on ports 443, 8443, 10000", "funnel"],
       private_network: ["Yes, a WireGuard mesh", "pricing"],
+      private_names: ["One HTTPS name per device, through Serve", "serve"],
+      setup_one_line: ["Joins with an auth key and tags; the rest is yours", "keys"],
       encryption_native: ["End to end (WireGuard)", "funnel"],
       encryption_public: ["TLS ends on your device", "funnel"],
       teams: ["Yes, owner, admin and other roles", "policy"],
@@ -461,6 +489,14 @@ export const products: Product[] = [
           "Paperboat's policy file decides what each person may do on each machine: open a terminal, run a command, send a file, reach a port. One command explains any decision and names the rule.",
         ],
       },
+      {
+        title: "Recordings and new machines",
+        body: [
+          "Tailscale records SSH sessions through Tailscale PAM, and new devices join with an auth key. What runs on them after that is up to you.",
+          ours.extras,
+        ],
+        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+      },
     ],
     pricing: {
       lines: [
@@ -511,6 +547,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "agent"],
       terminal_browser: ["No", "agent"],
       terminal_share: ["No", "agent"],
+      terminal_record: ["No", "agent"],
       exec: ["No", "agent"],
       ssh_keys: ["No", "agent"],
       ssh_tools: ["Only as a TCP endpoint", "agent"],
@@ -526,6 +563,8 @@ export const products: Product[] = [
       tunnel_domains: ["Yes, from Pay-as-you-go", "pricing"],
       tunnel_protocols: ["HTTP, HTTPS, TCP, TLS", "pricing"],
       private_network: ["No", "agent"],
+      private_names: ["n/a"],
+      setup_one_line: ["n/a"],
       encryption_native: ["n/a"],
       encryption_public: ["TLS ends at ngrok; end-to-end TLS optional", "tls"],
       teams: ["Yes, users from Pay-as-you-go", "pricing"],
@@ -566,7 +605,7 @@ export const products: Product[] = [
         title: "How you pay",
         body: [
           "ngrok plans add charges per user, per active domain hour and for data and requests beyond what is included.",
-          "Paperboat plans differ only in bandwidth through its relays and edges; previews, tunnels and domains have no separate charges, and direct traffic between your machines is free.",
+          "Paperboat plans differ only in how much traffic runs at full speed through its edges and relays, and nothing is ever cut off. Previews, tunnels and domains have no separate charges, and direct traffic between your machines is free.",
         ],
       },
     ],
@@ -619,6 +658,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "tunnel"],
       terminal_browser: ["With Cloudflare Access", "private"],
       terminal_share: ["No", "tunnel"],
+      terminal_record: ["No", "tunnel"],
       exec: ["No", "tunnel"],
       ssh_keys: ["With Cloudflare Access", "private"],
       ssh_tools: ["Yes, with cloudflared on the client", "setup"],
@@ -634,6 +674,8 @@ export const products: Product[] = [
       tunnel_domains: ["Yes, on a domain using Cloudflare DNS", "routing"],
       tunnel_protocols: ["HTTP, HTTPS, TCP, SSH, RDP and more", "routing"],
       private_network: ["With the WARP client", "private"],
+      private_names: ["n/a"],
+      setup_one_line: ["n/a"],
       encryption_native: ["Through Cloudflare's network", "tunnel"],
       encryption_public: ["Traffic passes through Cloudflare's proxy", "tunnel"],
       teams: ["Through Cloudflare Zero Trust", "private"],
@@ -714,6 +756,7 @@ export const products: Product[] = [
       terminal_replay: ["Recorded sessions play back afterwards", "tsh"],
       terminal_browser: ["Yes, in the web UI", "matrix"],
       terminal_share: ["Yes, join sessions; moderation in Enterprise", "tsh"],
+      terminal_record: ["Yes, session recording", "matrix"],
       exec: ["Yes, tsh ssh host command", "tsh"],
       ssh_keys: ["Yes, short-lived certificates", "matrix"],
       ssh_tools: ["Yes, tsh and OpenSSH with tsh config", "tsh"],
@@ -729,6 +772,8 @@ export const products: Product[] = [
       tunnel_domains: ["No public tunnels", "matrix"],
       tunnel_protocols: ["SSH, Kubernetes, databases, apps, desktops", "matrix"],
       private_network: ["No; access goes through its proxy", "matrix"],
+      private_names: ["Per app, through its proxy", "matrix"],
+      setup_one_line: ["Joins with a join token; the rest is yours", "join"],
       encryption_native: ["TLS to Teleport's proxy", "matrix"],
       encryption_public: ["n/a"],
       teams: ["Yes, users and roles", "matrix"],
@@ -814,6 +859,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "ssh"],
       terminal_browser: ["Yes, SSH from the dashboard", "ssh"],
       terminal_share: ["No", "ssh"],
+      terminal_record: ["No", "ssh"],
       exec: ["Through ssh", "ssh"],
       ssh_keys: ["Signs in with your identity provider", "ssh"],
       ssh_tools: ["ssh, scp and sftp", "ssh"],
@@ -829,6 +875,8 @@ export const products: Product[] = [
       tunnel_domains: ["No", "docs"],
       tunnel_protocols: ["n/a"],
       private_network: ["Yes, a WireGuard mesh", "docs"],
+      private_names: ["A DNS name per peer", "docs"],
+      setup_one_line: ["Joins with a setup key and groups; the rest is yours", "setupKeys"],
       encryption_native: ["End to end (WireGuard)", "docs"],
       encryption_public: ["n/a"],
       teams: ["Yes, users and groups", "plans"],
@@ -867,6 +915,14 @@ export const products: Product[] = [
           "NetBird is open source and you can run the whole service on your own servers.",
           "With Paperboat there is no management server to run. You can still run your own relays and tunnel servers, on every plan, so relayed and public traffic stays on servers you choose.",
         ],
+      },
+      {
+        title: "Recordings and new machines",
+        body: [
+          "NetBird documents no session recording, and new peers join with a setup key. Setting them up after that is up to you.",
+          ours.extras,
+        ],
+        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
       },
     ],
     pricing: {
@@ -909,6 +965,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "protocol"],
       terminal_browser: ["No", "protocol"],
       terminal_share: ["No", "protocol"],
+      terminal_record: ["No", "protocol"],
       exec: ["No", "protocol"],
       ssh_keys: ["No", "protocol"],
       ssh_tools: ["Your own SSH over the network", "protocol"],
@@ -924,6 +981,8 @@ export const products: Product[] = [
       tunnel_domains: ["No", "protocol"],
       tunnel_protocols: ["n/a"],
       private_network: ["Yes, a virtual Ethernet network", "protocol"],
+      private_names: ["n/a"],
+      setup_one_line: ["Joins a network by ID, then waits for approval", "controller"],
       encryption_native: ["End to end; its relays can't read traffic", "protocol"],
       encryption_public: ["n/a"],
       teams: ["Owners and administrators", "orgs"],
@@ -1000,6 +1059,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "ssh"],
       terminal_browser: ["No", "ssh"],
       terminal_share: ["No", "ssh"],
+      terminal_record: ["Through an SSH gateway you deploy", "recording"],
       exec: ["Through SSH", "ssh"],
       ssh_keys: ["Yes, short-lived certificates (Privileged Access)", "ssh"],
       ssh_tools: ["Yes, ssh, sftp and rsync", "ssh"],
@@ -1015,6 +1075,8 @@ export const products: Product[] = [
       tunnel_domains: ["Private names only", "resources"],
       tunnel_protocols: ["TCP, UDP and ICMP, privately", "resources"],
       private_network: ["People reach resources, not machines each other", "resources"],
+      private_names: ["Resources keep their own names", "resources"],
+      setup_one_line: ["n/a"],
       encryption_native: ["End to end, client to connector", "relays"],
       encryption_public: ["n/a"],
       teams: ["Yes, users and admin roles", "users"],
@@ -1050,6 +1112,14 @@ export const products: Product[] = [
         title: "Files, secrets and settings",
         body: ["Twingate moves files over SFTP or rsync and has no environment variables or config sync.", ours.files],
         us: "$ pb send report.pdf --to laptop",
+      },
+      {
+        title: "Recordings and new machines",
+        body: [
+          "Twingate records SSH sessions through a gateway you deploy in your own network.",
+          ours.extras,
+        ],
+        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
       },
     ],
     pricing: {
@@ -1091,6 +1161,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "setup"],
       terminal_browser: ["Yes, browser SSH and RDP", "setup"],
       terminal_share: ["No", "setup"],
+      terminal_record: ["SSH command logs, through Access for Infrastructure", "sshLogs"],
       exec: ["Through SSH", "ssh"],
       ssh_keys: ["Yes, short-lived certificates", "ssh"],
       ssh_tools: ["Yes, through WARP or cloudflared", "ssh"],
@@ -1106,6 +1177,8 @@ export const products: Product[] = [
       tunnel_domains: ["Yes, on a domain using Cloudflare DNS", "routing"],
       tunnel_protocols: ["HTTP, HTTPS, TCP, SSH, RDP and more", "routing"],
       private_network: ["Yes, routed through Cloudflare", "private"],
+      private_names: ["Private hostnames through the WARP client", "private"],
+      setup_one_line: ["Devices enroll in the WARP client; the rest is yours", "warp"],
       encryption_native: ["Through Cloudflare, which can inspect it", "private"],
       encryption_public: ["Ends at Cloudflare", "tunnel"],
       teams: ["Yes, seats in your organization", "users"],
@@ -1147,6 +1220,14 @@ export const products: Product[] = [
         ],
         us: "$ pb tunnel route add api --name web \\\n    --to http://localhost:3000\n$ pb tunnel domain add api api.example.com \\\n    --route web",
       },
+      {
+        title: "Recordings and new machines",
+        body: [
+          "Cloudflare logs SSH commands through Access for Infrastructure, encrypted with a key you provide.",
+          ours.extras,
+        ],
+        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+      },
     ],
     pricing: {
       lines: ["Free: up to 50 users", "Pay-as-you-go: $7 per user a month", "Contract plans: by quote"],
@@ -1182,6 +1263,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "zpa"],
       terminal_browser: ["Some, as browser access to apps", "zpa"],
       terminal_share: ["No", "zpa"],
+      terminal_record: ["n/a"],
       exec: ["No; SSH once connected", "openvpn"],
       ssh_keys: ["No", "openvpn"],
       ssh_tools: ["Your own SSH once connected", "openvpn"],
@@ -1197,6 +1279,8 @@ export const products: Product[] = [
       tunnel_domains: ["No", "openvpn"],
       tunnel_protocols: ["n/a"],
       private_network: ["Into the company network", "prisma"],
+      private_names: ["n/a"],
+      setup_one_line: ["n/a"],
       encryption_native: ["To the gateway or the vendor's cloud", "zpa"],
       encryption_public: ["n/a"],
       teams: ["Through your identity provider", "zpa"],
@@ -1270,6 +1354,7 @@ export const products: Product[] = [
       terminal_replay: ["With tmux scrollback", "tmux"],
       terminal_browser: ["No", "ssh"],
       terminal_share: ["With a shared tmux session", "tmux"],
+      terminal_record: ["No", "sshd"],
       exec: ["Yes, ssh host command", "ssh"],
       ssh_keys: ["You manage keys on every host", "sshd"],
       ssh_tools: ["Yes, the original", "scp"],
@@ -1285,6 +1370,8 @@ export const products: Product[] = [
       tunnel_domains: ["On servers you run", "ssh"],
       tunnel_protocols: ["TCP forwarding", "ssh"],
       private_network: ["Port forwarding through the bastion", "ssh"],
+      private_names: ["Port forwarding by hand", "ssh"],
+      setup_one_line: ["Your own scripts", "openssh"],
       encryption_native: ["End to end through the jump host", "ssh"],
       encryption_public: ["Whatever you set up", "ssh"],
       teams: ["Unix users on each host", "sshd"],
@@ -1327,6 +1414,14 @@ export const products: Product[] = [
         them: "$ ssh -R 80:localhost:3000 \\\n    server.example.com",
         us: "$ pb preview 3000",
       },
+      {
+        title: "Recordings and new machines",
+        body: [
+          "OpenSSH doesn't record sessions, and setting up a new server is a job for your own scripts.",
+          ours.extras,
+        ],
+        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+      },
     ],
     pricing: {
       lines: ["OpenSSH and tmux: free software", "You pay for and maintain the bastion"],
@@ -1363,6 +1458,7 @@ export const products: Product[] = [
       terminal_replay: ["No", "tunnels"],
       terminal_browser: ["Yes, in vscode.dev", "tunnels"],
       terminal_share: ["No, one user at a time", "tunnels"],
+      terminal_record: ["No", "tunnels"],
       exec: ["No", "tunnels"],
       ssh_keys: ["Signs in with GitHub or Microsoft", "tunnels"],
       ssh_tools: ["No; Remote-SSH is separate", "overview"],
@@ -1378,6 +1474,8 @@ export const products: Product[] = [
       tunnel_domains: ["No", "cli"],
       tunnel_protocols: ["HTTP, HTTPS, WebSocket", "cli"],
       private_network: ["No", "tunnels"],
+      private_names: ["Forwarded ports, one at a time", "ports"],
+      setup_one_line: ["n/a"],
       encryption_native: ["End to end (SSH inside the tunnel)", "tunnels"],
       encryption_public: ["TLS ends at Microsoft's service", "security"],
       teams: ["Share with a tenant or GitHub org", "cli"],
