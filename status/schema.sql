@@ -1,12 +1,13 @@
 -- D1 schema. Free tier: 100k rows written a day, so a probe writes one row a minute (all its results in one JSON value).
+-- reports: one row per vantage point and minute bucket; ts is the unrounded receipt time (freshness), probe_ts the signed time (replay guard).
 CREATE TABLE IF NOT EXISTS reports (
-  vantage TEXT NOT NULL, ts INTEGER NOT NULL, net_ok INTEGER NOT NULL, build TEXT NOT NULL DEFAULT '',
-  results TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (vantage, ts));
+  vantage TEXT NOT NULL, bucket INTEGER NOT NULL, ts INTEGER NOT NULL, probe_ts INTEGER NOT NULL DEFAULT 0, net_ok INTEGER NOT NULL,
+  build TEXT NOT NULL DEFAULT '', results TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (vantage, bucket));
 CREATE TABLE IF NOT EXISTS unit_state (unit TEXT PRIMARY KEY, state TEXT NOT NULL, since INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS uptime_day (
   component TEXT NOT NULL, day TEXT NOT NULL, up INTEGER NOT NULL DEFAULT 0, degraded INTEGER NOT NULL DEFAULT 0,
-  down INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (component, day));
+  down INTEGER NOT NULL DEFAULT 0, delayed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (component, day));
 CREATE TABLE IF NOT EXISTS incidents (
   id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL, components TEXT NOT NULL,
   created INTEGER NOT NULL, updated INTEGER NOT NULL, resolved INTEGER);

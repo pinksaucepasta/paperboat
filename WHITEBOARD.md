@@ -297,6 +297,10 @@ the useful set for tunnels and custom domains.
 
 ## Held for after launch — decided 2026-11-18
 
+- **Status page: move to a hosted provider when revenue allows; swap the adapter.** Ours (`status/`) stays until then. The seams: probes post through
+  one client (`tools/probe/status_report.py`), and the admin panel reaches incidents and maintenance through one server-side interface
+  (`admin/lib/server/status-provider.ts`); a hosted provider (incident.io, Atlassian Statuspage) means one new adapter there plus publishing
+  component states from `status/lib/tick.ts`.
 - **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
   release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach
   descriptor (an optional field becomes required; client and server deploy together), tunnel config snapshot

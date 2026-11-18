@@ -1,9 +1,0 @@
-// The status API: probe writes, the evaluated state, incidents, RSS and email subscribe. Secrets (never in this file):
-// PROBE_KEYS, ADMIN_TOKEN, CHECKS, MAIL_KEY. Vars and the route for the page's host are set at deploy time (deploy.sh).
-{
-  "name": "paperboat-status",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-11-01",
-  "triggers": { "crons": ["* * * * *"] },
-  "d1_databases": [{ "binding": "DB", "database_name": "paperboat-status", "database_id": "local" }]
-}
