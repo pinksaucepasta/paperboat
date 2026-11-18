@@ -226,7 +226,8 @@ func (r *remoteReader) Next(ctx context.Context) (Event, func(), error) {
 				r.ack = out.Event.Sequence + 1
 			}
 			r.mu.Unlock()
-			_, _ = r.execution.invokeBounded("reader_ack", remoteRequest{ReaderID: r.id, Ack: out.Event.Sequence + 1})
+			// The ack rides the next reader_next (or reader_close) instead of a call of its own: a chunk costs one round
+			// trip per hop, not two. The owner releases the event, and its replay bytes, when that call arrives.
 		})
 	}, nil
 }
@@ -339,7 +340,7 @@ func (s *RemoteServer) Call(ctx context.Context, op string, body []byte) ([]byte
 		out.ReaderID = s.next
 		return out.frame()
 	}
-	if op == "reader_next" || op == "reader_ack" || op == "reader_close" {
+	if op == "reader_next" || op == "reader_close" {
 		s.mu.Lock()
 		r := s.readers[request.ReaderID]
 		if op == "reader_close" && r != nil && r.operationID == request.OperationID {

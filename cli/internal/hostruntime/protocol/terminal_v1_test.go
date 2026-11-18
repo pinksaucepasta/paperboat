@@ -365,3 +365,58 @@ func TestTerminalInputAdaptiveCompression(t *testing.T) {
 		t.Fatal("compressed input declaring more than a frame was accepted")
 	}
 }
+
+func TestCompressionGateBacksOffOnIncompressibleOutputAndRecovers(t *testing.T) {
+	var gate CompressionGate
+	tries := 0
+	for range 1000 { // incompressible chunks: every attempt misses
+		if gate.attempt() {
+			tries++
+			gate.record(false)
+		}
+	}
+	if tries > 40 {
+		t.Fatalf("%d compression attempts for 1000 incompressible chunks, want the backoff to skip most", tries)
+	}
+	for range compressionSkipMax + 1 { // the stream turns compressible: found again within one skip window
+		if gate.attempt() {
+			gate.record(true)
+			break
+		}
+	}
+	for i := range 10 {
+		if !gate.attempt() {
+			t.Fatalf("chunk %d after recovery was not tried", i)
+		}
+		gate.record(true)
+	}
+}
+
+func TestGatedEncodingSendsSkippedChunksRawAndStillCompressesTheRest(t *testing.T) {
+	random := make([]byte, 64<<10)
+	rand.New(rand.NewSource(1)).Read(random)
+	zeros := make([]byte, 64<<10)
+	var gate CompressionGate
+	encoding := func(data []byte) byte {
+		wire, err := EncodeTerminalOutputGated(TerminalOutputFrame{Channel: TerminalStdout, StreamID: 1, Data: data}, nil, &gate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wire[2]
+	}
+	for range 50 {
+		if encoding(random) != TerminalOutputRaw {
+			t.Fatal("random chunk was compressed")
+		}
+	}
+	compressed := false
+	for range compressionSkipMax + 1 {
+		compressed = encoding(zeros) == TerminalOutputZstd
+		if compressed {
+			break
+		}
+	}
+	if !compressed {
+		t.Fatal("compressible output was never compressed again after the backoff")
+	}
+}

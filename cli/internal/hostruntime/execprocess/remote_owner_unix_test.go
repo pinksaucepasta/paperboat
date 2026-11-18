@@ -21,7 +21,11 @@ func TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec(t *tes
 	lost := false
 	remote, _ := NewRemoteManager(func(ctx context.Context, op string, body []byte) ([]byte, error) {
 		result, err := server.Call(ctx, op, body)
-		if op == "reader_ack" && !lost && err == nil {
+		var request remoteRequest
+		_, _ = decodeMessage(body, &request, false)
+		// The acknowledgement rides reader_next: lose the answer of the first one that carries it. The server already
+		// released the event; the retry repeats the ack and must get the next event, not an error.
+		if op == "reader_next" && request.Ack != 0 && !lost && err == nil {
 			lost = true
 			return nil, errors.New("lost acknowledgement response")
 		}
@@ -46,8 +50,13 @@ func TestRemoteReaderLostAcknowledgementBoundsAndEpochCleanupPreserveExec(t *tes
 	var from uint64
 	// The child can print before run appends the running state, so the replay holds both in either
 	// order. Drain both: the next Next must find nothing and long-poll.
+	retried := false
 	for running := false; !running || !strings.Contains(output, "ready"); {
 		event, release, err := reader.Next(ctx)
+		if err != nil && lost && !retried {
+			retried = true
+			event, release, err = reader.Next(ctx)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -135,11 +135,12 @@ func (m *NativeAssociationManager) serveAuxiliary(conn net.Conn, p nativeproto.P
 }
 
 type nativeConnection struct {
-	control net.Conn
-	id      [nativeproto.ConnectionIDSize]byte
-	binding [nativeproto.BindingSize]byte
-	expiry  time.Duration
-	timer   *time.Timer
+	control  net.Conn
+	compress protocol.CompressionGate // backs compression off while the output does not compress
+	id       [nativeproto.ConnectionIDSize]byte
+	binding  [nativeproto.BindingSize]byte
+	expiry   time.Duration
+	timer    *time.Timer
 
 	mu            sync.Mutex
 	input         net.Conn
@@ -296,7 +297,7 @@ func (c *nativeConnection) WriteStructured(frame protocol.Frame) error {
 }
 
 func (c *nativeConnection) WriteBinary(frame protocol.BinaryFrame) error {
-	data, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: 1, StartSequence: frame.StartSequence, Data: frame.Data}, nil)
+	data, err := protocol.EncodeTerminalOutputGated(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: 1, StartSequence: frame.StartSequence, Data: frame.Data}, nil, &c.compress)
 	if err != nil {
 		return err
 	}
@@ -304,7 +305,7 @@ func (c *nativeConnection) WriteBinary(frame protocol.BinaryFrame) error {
 }
 
 func (c *nativeConnection) WriteTerminalOutput(streamID uint32, frame protocol.BinaryFrame) error {
-	data, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: streamID, StartSequence: frame.StartSequence, Data: frame.Data}, nil)
+	data, err := protocol.EncodeTerminalOutputGated(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: streamID, StartSequence: frame.StartSequence, Data: frame.Data}, nil, &c.compress)
 	if err != nil {
 		return err
 	}

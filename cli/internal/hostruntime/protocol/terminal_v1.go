@@ -299,20 +299,71 @@ func DecodeTerminalOutput(message []byte) (TerminalOutputFrame, error) {
 }
 
 func EncodeTerminalOutputAdaptive(frame TerminalOutputFrame, dst []byte) ([]byte, error) {
+	return EncodeTerminalOutputGated(frame, dst, nil)
+}
+
+// CompressionGate backs compression off for a stream whose chunks stop compressing, like ssh and rsync do: after
+// compressionMisses chunks in a row that saved too little, it skips the next compressionSkip chunks, doubling the skip
+// (up to compressionSkipMax) at every further miss, and one chunk that compresses restores trying every chunk. Bulk
+// incompressible output (a file, a stream of random bytes) then pays one attempt per ~64 chunks instead of one each.
+type CompressionGate struct {
+	mu     sync.Mutex
+	misses int
+	skip   int // chunks still to pass without an attempt
+	next   int // the skip the next miss sets
+}
+
+const (
+	compressionMisses  = 2
+	compressionSkipMin = 2
+	compressionSkipMax = 64
+)
+
+// attempt reports whether the next chunk should be tried for compression.
+func (g *CompressionGate) attempt() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.skip > 0 {
+		g.skip--
+		return false
+	}
+	return true
+}
+
+func (g *CompressionGate) record(compressed bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if compressed {
+		g.misses, g.next = 0, 0
+		return
+	}
+	if g.misses++; g.misses >= compressionMisses {
+		g.next = min(max(g.next*2, compressionSkipMin), compressionSkipMax)
+		g.skip = g.next
+	}
+}
+
+// EncodeTerminalOutputGated is EncodeTerminalOutputAdaptive with the stream's CompressionGate (nil tries every chunk).
+func EncodeTerminalOutputGated(frame TerminalOutputFrame, dst []byte, gate *CompressionGate) ([]byte, error) {
 	started := time.Now()
 	frame.Encoding = TerminalOutputRaw
 	frame.UncompressedLength = uint32(len(frame.Data))
 	decision := &terminalCompressionCounters.smallFrames
 	if len(frame.Data) >= TerminalOutputMinCompress {
 		decision = &terminalCompressionCounters.insufficientFrames
-		compressed, err := compressTerminal(frame.Data)
-		if err != nil {
-			terminalCompressionCounters.encodeFailures.Add(1)
-			return nil, &Error{Code: InvalidFrame, Cause: err}
-		}
-		if compressed != nil {
-			frame.Encoding, frame.Data = TerminalOutputZstd, compressed
-			decision = &terminalCompressionCounters.compressedFrames
+		if gate == nil || gate.attempt() {
+			compressed, err := compressTerminal(frame.Data)
+			if err != nil {
+				terminalCompressionCounters.encodeFailures.Add(1)
+				return nil, &Error{Code: InvalidFrame, Cause: err}
+			}
+			if gate != nil {
+				gate.record(compressed != nil)
+			}
+			if compressed != nil {
+				frame.Encoding, frame.Data = TerminalOutputZstd, compressed
+				decision = &terminalCompressionCounters.compressedFrames
+			}
 		}
 	}
 	wire, err := EncodeTerminalOutput(frame, dst)
