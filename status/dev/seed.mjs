@@ -5,12 +5,13 @@ const now = Date.now(), DAY = 86_400_000, q = (s) => `'${String(s).replace(/'/g,
 const out = []
 let n = 7
 const rnd = () => ((n = (n * 1103515245 + 12345) % 2147483648) / 2147483648)
+const fresh = process.argv.includes("fresh") // a new deployment: only today has data
 for (const c of catalog.components) {
-  for (let i = 89; i >= 0; i--) {
+  for (let i = fresh ? 0 : 89; i >= 0; i--) {
     const day = new Date(now - i * DAY).toISOString().slice(0, 10)
     const r = rnd()
-    const down = r > 0.985 ? 25 : 0, degraded = r > 0.93 && r <= 0.985 ? 18 : 0, delayed = r < 0.01 ? 40 : 0
-    out.push(`INSERT INTO uptime_day (component, day, up, degraded, down, delayed) VALUES (${q(c.id)}, ${q(day)}, ${1440 - down - degraded - delayed}, ${degraded}, ${down}, ${delayed});`)
+    const down = !fresh && r > 0.985 ? 25 : 0, degraded = !fresh && r > 0.93 && r <= 0.985 ? 18 : 0, delayed = !fresh && r < 0.01 ? 40 : 0, minutes = fresh ? 700 : 1440
+    out.push(`INSERT INTO uptime_day (component, day, up, degraded, down, delayed) VALUES (${q(c.id)}, ${q(day)}, ${minutes - down - degraded - delayed}, ${degraded}, ${down}, ${delayed});`)
   }
 }
 const inc = (id, title, status, comps, daysAgo, hours, updates) => {
