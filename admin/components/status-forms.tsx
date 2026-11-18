@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Panel } from "@/components/page"
 import { SelectField, TextField } from "@/components/fields"
 import { Time } from "@/components/time"
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ApiError, post } from "@/lib/api"
+import { ApiError, send } from "@/lib/api"
 
 export type Incident = { id: string; title: string; status: string; components: string[]; created: number; updates: { status: string; body: string; ts: number }[] }
 export type Maint = { id: string; title: string; components: string[]; starts: number; ends: number }
@@ -21,17 +21,22 @@ const statuses: [string, string][] = [["investigating", "Investigating"], ["iden
 const iso = (ms: number) => new Date(ms).toISOString()
 
 /** A form dialog: runs `send`, shows the failure plainly, closes and refreshes on success. */
-function FormDialog({ title, submit, valid, send, onDone, children, trigger }: { title: string; submit: string; valid: boolean; send: () => Promise<unknown>; onDone: () => void; children: React.ReactNode; trigger: string }) {
+function FormDialog({ title, submit, valid, run: send, onDone, children, trigger }: { title: string; submit: string; valid: boolean; run: (key: string) => Promise<unknown>; onDone: () => void; children: React.ReactNode; trigger: string }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const key = useRef("") // one idempotency key per opening: a retried publish cannot create a second incident or mail twice
   async function run() {
     setBusy(true); setError(null)
-    try { await send(); setOpen(false); onDone() } catch (e) { setError(e instanceof ApiError ? e.message : "The request failed.") } finally { setBusy(false) }
+    try {
+      const result = (await send(key.current)) as { mail?: { failed: number; truncated?: boolean } } | undefined
+      if (result?.mail?.failed || result?.mail?.truncated) { setError(`Saved, but ${result.mail.failed} email(s) could not be sent${result.mail.truncated ? " and the subscriber list was cut off" : ""}.`); onDone(); return }
+      setOpen(false); onDone()
+    } catch (e) { setError(e instanceof ApiError ? e.message : "The request failed.") } finally { setBusy(false) }
   }
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>{trigger}</Button>
+      <Button size="sm" variant="outline" onClick={() => { key.current = crypto.randomUUID(); setError(null); setOpen(true) }}>{trigger}</Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
@@ -77,7 +82,7 @@ function NewIncident({ s, refresh }: { s: Snapshot; refresh: () => void }) {
   const [components, setComponents] = useState<string[]>([])
   return (
     <FormDialog title="New incident" trigger="New incident" submit="Publish" valid={!!title.trim() && !!body.trim() && components.length > 0}
-      send={() => post("/status/incidents", { title, body, status, components })} onDone={() => { setTitle(""); setBody(""); setComponents([]); refresh() }}>
+      run={(key) => send("POST", "/status/incidents", { title, body, status, components }, { "idempotency-key": key })} onDone={() => { setTitle(""); setBody(""); setComponents([]); refresh() }}>
       <TextField label="Title" value={title} onChange={setTitle} maxLength={140} />
       <SelectField label="Status" value={status} onChange={setStatus} options={statuses} />
       <Components s={s} value={components} onChange={setComponents} />
@@ -90,7 +95,7 @@ function IncidentUpdate({ i, refresh }: { i: Incident; refresh: () => void }) {
   const [status, setStatus] = useState(i.status === "resolved" ? "resolved" : i.status)
   const [body, setBody] = useState("")
   return (
-    <FormDialog title={`Update: ${i.title}`} trigger="Post update" submit="Publish" valid={!!body.trim()} send={() => post(`/status/incidents/${i.id}/updates`, { status, body })} onDone={() => { setBody(""); refresh() }}>
+    <FormDialog title={`Update: ${i.title}`} trigger="Post update" submit="Publish" valid={!!body.trim()} run={(key) => send("POST", `/status/incidents/${i.id}/updates`, { status, body }, { "idempotency-key": key })} onDone={() => { setBody(""); refresh() }}>
       <SelectField label="Status" value={status} onChange={setStatus} options={statuses} />
       <Notes label="Update" value={body} onChange={setBody} />
     </FormDialog>
@@ -132,7 +137,7 @@ function NewMaintenance({ s, refresh }: { s: Snapshot; refresh: () => void }) {
   const [body, setBody] = useState("")
   return (
     <FormDialog title="Maintenance window" trigger="Schedule maintenance" submit="Schedule" valid={!!title.trim() && !!starts && !!ends && components.length > 0 && new Date(ends) > new Date(starts)}
-      send={() => post("/status/maintenance", { title, body, components, starts: new Date(starts).getTime(), ends: new Date(ends).getTime() })} onDone={() => { setTitle(""); setBody(""); setComponents([]); refresh() }}>
+      run={() => send("POST", "/status/maintenance", { title, body, components, starts: new Date(starts).getTime(), ends: new Date(ends).getTime() })} onDone={() => { setTitle(""); setBody(""); setComponents([]); refresh() }}>
       <TextField label="Title" value={title} onChange={setTitle} maxLength={140} />
       <TextField label="Starts" type="datetime-local" value={starts} onChange={setStarts} />
       <TextField label="Ends" type="datetime-local" value={ends} onChange={setEnds} hint="At most 7 days. Downtime in the window does not count against uptime." />
@@ -146,7 +151,7 @@ export function StatusMaintenance({ s, refresh }: { s: Snapshot; refresh: () => 
   const names = new Map(s.public.components.map((c) => [c.id, c.name]))
   const [error, setError] = useState<string | null>(null)
   async function cancel(id: string) {
-    try { await post(`/status/maintenance/${id}/cancel`, {}); refresh() } catch (e) { setError(e instanceof ApiError ? e.message : "The request failed.") }
+    try { await send("POST", `/status/maintenance/${id}/cancel`, {}); refresh() } catch (e) { setError(e instanceof ApiError ? e.message : "The request failed.") }
   }
   return (
     <Panel title="Maintenance" action={<NewMaintenance s={s} refresh={refresh} />}>
