@@ -69,6 +69,9 @@ func (p *pipeProcess) Start(context.Context) error {
 		stdin.Close()
 		return err
 	}
+	// Before the child writes: the pipe holds a whole chunk, so one read can return one.
+	enlargePipe(stdout, p.config.ChunkBytes*4)
+	enlargePipe(stderr, p.config.ChunkBytes*4)
 	if err := cmd.Start(); err != nil {
 		stdin.Close()
 		return err

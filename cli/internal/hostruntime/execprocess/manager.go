@@ -205,7 +205,10 @@ func NewPersistent(ctx context.Context, config Config) (*Manager, error) {
 		config.ReplayBytes = 1 << 20
 	}
 	if config.ChunkBytes == 0 {
-		config.ChunkBytes = 32 << 10
+		// One pipe read becomes one framed message through the host's processes (session owner, hostd, worker) and the
+		// tunnel. Measured on a quiet pair at 0 ms: 32 KiB gave 10.9 MB/s, 128 KiB 16, 192 KiB 16.3, and the largest
+		// terminal frame (256 KiB) only 5.5: 128 KiB keeps a wide margin below that cliff.
+		config.ChunkBytes = 128 << 10
 	}
 	if config.CancelGrace == 0 {
 		config.CancelGrace = 2 * time.Second
