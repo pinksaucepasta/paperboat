@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { decideComponent, decideUnit, type Sample, type Series } from "../src/decide.ts"
+import { decideComponent, decideUnit, type Sample, type Series } from "../lib/decide.ts"
 
 const NOW = 10_000_000
 const SLOW = 2000
