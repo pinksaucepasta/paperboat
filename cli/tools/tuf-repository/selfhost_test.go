@@ -60,8 +60,18 @@ func TestSelfhostBundleTargetsAreSignedAndKept(t *testing.T) {
 		}
 		return targets.Signed.Targets
 	}
-	if signed()["selfhost/2026.11.19.1/paperboat-selfhost-linux-arm64.tar.gz"] == nil {
+	target := signed()["selfhost/2026.11.19.1/paperboat-selfhost-linux-arm64.tar.gz"]
+	if target == nil || target.Custom == nil {
 		t.Fatal("self-host bundle target missing")
+	}
+	var custom selfhostTargetCustom
+	if err := json.Unmarshal(*target.Custom, &custom); err != nil || custom.URL != "https://github.com/"+releaseRepository()+"/releases/download/selfhost-2026.11.19.1/paperboat-selfhost-linux-arm64.tar.gz" {
+		t.Fatalf("self-host target download URL = %+v, %v", custom, err)
+	}
+	unsigned := *target
+	unsigned.Custom = nil
+	if validateSelfhostTarget("selfhost/2026.11.19.1/paperboat-selfhost-linux-arm64.tar.gz", &unsigned) == nil {
+		t.Fatal("a self-host target without its download URL was accepted")
 	}
 	publishTestRelease(t, repository, "2026.11.19.2")
 	if signed()["selfhost/2026.11.19.1/paperboat-selfhost-linux-amd64.tar.gz"] == nil {
