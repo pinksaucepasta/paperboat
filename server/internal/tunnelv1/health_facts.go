@@ -124,7 +124,7 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 	}
 	if facts.BandwidthThrottled {
 		view.Dimensions.Access = HealthDimension{Status: "degraded", Code: "bandwidth_throttled"}
-		return set("bandwidth_throttled", "Your workspace used its fair-use bandwidth, so public traffic is slowed down. Nothing is stopped.",
+		return set("bandwidth_throttled", "Your workspace used its included traffic, so public traffic is reduced in speed. Nothing is cut off.",
 			"Add bandwidth or change plan on the Billing page, or wait for the next billing period; full speed returns then.", false)
 	}
 	if view.OverallCode == "ready" && facts.InsecureRemoteRoute != "" {
