@@ -4,12 +4,12 @@ Public status for Paperboat, built to never show a wrong status.
 
 | Part | What | Deploys |
 |---|---|---|
-| `worker/` | Cloudflare Worker + D1: signed probe ingest, the state machine (`src/decide.ts`), incidents, RSS, email subscribe, a once-a-minute cron that also runs the Worker's own checks | `deploy.sh` |
-| `site/` | static page (Cloudflare Pages, git-connected, `build.sh`) | every push touching `status/site` |
+| `worker.ts`, `lib/` | one Cloudflare Worker `paperboat-status`: static assets (the Astro build in `dist/`), the `/api/*` routes (probe ingest, state, incidents, RSS, subscribe), the D1 binding and the once-a-minute cron that decides every unit (`lib/decide.ts` is the state machine) | Workers Builds from git (root `status/`); `deploy.sh` for the first deploy, secrets and vars |
+| `src/` | the page: Astro, static, light only, reusing the marketing site's styles, fonts and mark by import (`../marketing`) | with the Worker |
 | `config/components.ts` | components, their units (checks or regions) and which vantage points report each | with the Worker |
 | `../tools/probe/status_report.py`, `status_run.py` | the probe: user-path checks, own-internet check, signed report; `canary.py` calls it on oracle, `deploy/paperboat-status-probe.timer` runs it on anvit | on the probe hosts |
-| `../admin/app/(panel)/status` | admin Status section (optional: says so without STATUS_API_URL and STATUS_ADMIN_TOKEN) | with the admin panel |
-| `drill.py` | stop/start drill against a staging stack | manual |
+| `../admin/app/(panel)/status` | admin Status section, through `admin/lib/server/status-provider.ts` (the one seam to swap for a hosted provider); optional | with the admin panel |
+| `drill.py`, `drill-results/` | stop/start drill against a staging stack and its results | manual |
 
 ## Rules (user rules; `worker/src/decide.ts` and its tests are the one implementation)
 1. A unit is red (major) only when two independent vantage points each fail 3 checks in a row.
@@ -22,4 +22,4 @@ Public status for Paperboat, built to never show a wrong status.
 8. 90-day bars come from per-minute counts of component states (`uptime_day`), maintenance minutes excluded.
 
 ## Local run
-`cd worker && bun install && bun run test`; `wrangler dev --config wrangler.staging.jsonc --local --test-scheduled` runs the staging catalog; trigger the cron with `GET /cdn-cgi/handler/scheduled`. `node dev-server.mjs 8788 http://127.0.0.1:8787` serves the page against it.
+`bun install && bun run test`; `bun run check` type-checks the Worker and the page. `wrangler dev --config dev/wrangler.staging.jsonc --local --test-scheduled` runs the staging catalog (trigger the cron with `GET /cdn-cgi/handler/scheduled`); `dev/seed.mjs` fills a demo database and `node dev/serve.mjs` serves `dist/` against it.
