@@ -38,3 +38,15 @@ No tunnel check: this stack has no edge the containers can reach, so exec and ss
 2. Withdrawing the old mint key at retire left both machines **offline** (they hold identity credentials signed by it, up to an hour old, and the
    server refused them until they renewed). Fixed: the old mint keys are withdrawn `mint_drain` (65 min) after the run starts.
 3. The server does not migrate on start (`paperboat-server migrate`), and a worker that cannot find the break-glass tables logs an error every 2 s until it is migrated.
+
+## Admin panel click-through (real browser, 2026-11-19, build dev-3a7a6446b, screenshots in breakglass-ui-20261118/)
+Isolated stack again (own database and server, admin panel build pointed at it, 2 machines). Signed in as a throwaway operator with an enrolled authenticator.
+1. `1-keys-not-deployed-checks-blocked.png`: with only the old keys deployed the preview shows the mint and session checks Blocked.
+2. `2-start-disabled-third-party-list.png`: the Break glass button is disabled ("Deploy the missing keys above first"); the third-party checklist with provider links is shown.
+3. `3-confirmation-dialog.png`: after deploying the next keys all checks are Ready; the dialog asks for a reason, a current authenticator code, an optional update floor, the audit reference and the typed phrase; the button stays disabled until the phrase and reference are filled.
+4. `4-wrong-authenticator-code-refused.png`: a wrong code is refused ("wrong, expired or already used") with a support reference; no run was created.
+5. `5-live-progress-pickup-1-of-2.png`: a run with machine b stopped: publish done, pickup running, "1 of 2 online machines hold the new keys" with the machine list (pending first).
+6. `6-run-cancelled.png`: Cancel run from the panel; the run shows Cancelled (state `cancelled` in the database).
+7. `7-full-run-retire-mint-countdown.png`: a second run with both machines online: publish, pickup, switch, revoke (counts), reseal done in seconds; retire running with "Old mint keys are withdrawn in 1 hour (machines renew their credentials first)". The operator's own panel session stayed signed in through the revoke stage.
+The panel's pairing-token revocation was added after the drill of 2026-11-18 (revoke stage now also cancels unused enrollment tokens and unredeemed install material).
+Fixes made after looking at the screenshots: ready checks no longer show the "deploy ..." instruction, "1 CA" singular, a cancelled run shows its running stage as stopped and hides the live machine list.

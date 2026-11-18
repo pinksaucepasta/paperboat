@@ -243,10 +243,23 @@ func (s *Service) keyChecks(ctx context.Context, p Preview) (Preview, error) {
 	for _, n := range p.Sealed {
 		sealed += n
 	}
+	detail := func(ok bool, fact, todo string) string {
+		if ok {
+			return fact
+		}
+		return fact + "; " + todo
+	}
+	plural := func(n int, one, many string) string {
+		if n == 1 {
+			return fmt.Sprintf("%d %s", n, one)
+		}
+		return fmt.Sprintf("%d %s", n, many)
+	}
+	mintOK, sessionOK, ringOK := len(p.MintKeys) >= 2, len(p.SessionKeys) >= 2, len(p.EncryptionKeys) >= 2 || sealed == 0
 	p.Checks = []Check{
-		{"mint signing keys", len(p.MintKeys) >= 2, fmt.Sprintf("%d published, active %s; deploy the new key as active beside the old one", len(p.MintKeys), p.MintActive)},
-		{"session keys", len(p.SessionKeys) >= 2, fmt.Sprintf("%d configured; deploy the new key first in PAPERBOAT_SESSION_KEYS", len(p.SessionKeys))},
-		{"encryption key ring", len(p.EncryptionKeys) >= 2 || sealed == 0, fmt.Sprintf("%d keys in the ring, %d sealed rows under an older key; deploy PAPERBOAT_ENCRYPTION_KEY as new,old", len(p.EncryptionKeys), sealed)},
+		{"mint signing keys", mintOK, detail(mintOK, fmt.Sprintf("%d published, active %s", len(p.MintKeys), p.MintActive), "deploy the new key as active beside the old one")},
+		{"session keys", sessionOK, detail(sessionOK, plural(len(p.SessionKeys), "key", "keys")+" configured", "deploy the new key first in PAPERBOAT_SESSION_KEYS")},
+		{"encryption key ring", ringOK, detail(ringOK, fmt.Sprintf("%s in the ring, %d sealed rows under an older key", plural(len(p.EncryptionKeys), "key", "keys"), sealed), "deploy PAPERBOAT_ENCRYPTION_KEY as new,old")},
 	}
 	return p, nil
 }
