@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,7 +68,9 @@ func (a UnixUpdateActivator) Install(ctx context.Context, binary string, environ
 		if err != nil {
 			return err
 		}
-		if string(current) != string(data) {
+		// Our own unit from an earlier text (a crash and reboot between Install and Retire, across a release
+		// that changed the unit) is replaced; a unit that runs something else is not ours.
+		if string(current) != string(data) && !sameActivatorJob(a.Platform, current, data) {
 			return errors.New("existing update activation job belongs to another installation")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -145,6 +148,39 @@ func (a UnixUpdateActivator) Retire(ctx context.Context) error {
 	defer directory.Close()
 	return directory.Sync()
 }
+
+// sameActivatorJob reports whether two declarations run the same job: the same command line (and, for launchd, the
+// same label), whatever their other directives or environment say.
+func sameActivatorJob(platform string, current, wanted []byte) bool {
+	if platform == "darwin" {
+		var have, want struct {
+			Label            string
+			ProgramArguments []string
+		}
+		if _, err := plist.Unmarshal(current, &have); err != nil {
+			return false
+		}
+		if _, err := plist.Unmarshal(wanted, &want); err != nil {
+			return false
+		}
+		return have.Label != "" && have.Label == want.Label && len(want.ProgramArguments) > 0 && slices.Equal(have.ProgramArguments, want.ProgramArguments)
+	}
+	command := func(body []byte) string {
+		var found string
+		for _, line := range strings.Split(string(body), "\n") {
+			if strings.HasPrefix(line, "ExecStart=") {
+				if found != "" {
+					return ""
+				}
+				found = line
+			}
+		}
+		return found
+	}
+	have := command(current)
+	return have != "" && have == command(wanted)
+}
+
 func unixUpdateActivatorDefinition(platform string, uid int, binary string, environment map[string]string) ([]byte, error) {
 	if !filepath.IsAbs(binary) || filepath.Clean(binary) != binary || strings.ContainsAny(binary, "\x00\r\n") {
 		return nil, ErrInvalidDefinition
