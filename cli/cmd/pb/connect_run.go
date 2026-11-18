@@ -75,10 +75,6 @@ func validateConnectInvocation(command *cobra.Command) error {
 	return nil
 }
 
-func windowsEnrollmentCommand(installerURL string) string {
-	return "powershell -c \"iex (irm '" + installerURL + "')\""
-}
-
 func actionConnect(c *command.Context) error {
 	return actionConnectTarget(c, "")
 }

@@ -7,14 +7,13 @@ import os
 from pathlib import Path
 import pwd
 import re
-import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 import uuid
 
 from pairing_fault import PairingFaultProxy
@@ -200,16 +199,13 @@ def published_fixture(binary, alias):
         binary.device.copy(str(binary), staged)
         staged = winhost.WindowsPb(binary.device, str(staged))
         command = receipt['windows_command']
-        address = next(word.strip('\'"()') for word in command.split() if 'https://' in word)
-        address = address[address.index('https://'):]
     else:
         directory = Path(tempfile.mkdtemp(prefix='pb-published-proof-'))
         staged = directory / 'pb'
         shutil.copyfile(binary, staged)
         staged.chmod(0o700)
         command = receipt['linux_macos_command']
-        address = next(word for word in shlex.split(command) if word.startswith('https://'))
-    token = parse_qs(urlparse(address).query)['p'][0][-26:]
+    token = re.search(r"PB_TOKEN='([0-9A-Z]{26})'", command).group(1)
     assert len(token) == 26 and token.isalnum() and token.upper() == token
     tokenfile = directory / 'enrollment-token'
     if not hasattr(binary, 'device'):
@@ -220,10 +216,10 @@ def published_fixture(binary, alias):
 
 
 def run_published(binary, command, directory, password):
-    """Run the published one-liner as a user would: /bin/sh here, a cmd.exe line on the Windows device."""
+    """Run the published one-liner as a user would: /bin/sh here, PowerShell (started from a cmd.exe line) on the Windows device."""
     if hasattr(binary, 'device'):
         script = directory / 'published.cmd'
-        script.write_text('@' + command + '\r\n')
+        script.write_text('@powershell -NoProfile -Command "' + command + '"\r\n')
         try:
             result = binary.device.run(['cmd.exe', '/c', str(script)], timeout=900)
         finally:
@@ -266,12 +262,9 @@ def inventory(script, inbox, installed, password):
 def enrollment_file(binary, alias, directory):
     receipt = invoke(binary, '--workspace', 'personal', 'machine', 'add',
                      '--name', alias, '--json')
-    if hasattr(binary, 'device'):  # the Windows command (same token kind, its own /install.ps1 path)
-        token = re.search(r"p=([^'\"&]+)", receipt['windows_command']).group(1)[-26:]
-    else:
-        address = next(word for word in shlex.split(receipt['linux_macos_command'])
-                       if word.startswith('https://'))
-        token = parse_qs(urlparse(address).query)['p'][0][-26:]
+    # One token kind for both commands: it is the installer's PB_TOKEN variable.
+    command = receipt['windows_command'] if hasattr(binary, 'device') else receipt['linux_macos_command']
+    token = re.search(r"PB_TOKEN='([0-9A-Z]{26})'", command).group(1)
     if len(token) != 26 or any(character not in '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' for character in token):
         raise RuntimeError('enrollment command has invalid token shape')
     path = directory / 'enrollment-token'

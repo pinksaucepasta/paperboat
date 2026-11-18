@@ -33,8 +33,7 @@ printf '#!/bin/sh\nexport HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%
 ct "/home/pbt/pbm machine add --json" | python3 -c '
 import json, re, sys, urllib.request
 command = json.load(sys.stdin)["data"]["linux_macos_command"]
-script = urllib.request.urlopen(re.search(r"\x27(https?://[^\x27]+)\x27", command).group(1), timeout=60).read().decode()
-sys.stdout.write(re.search(r"PAPERBOAT_ENROLLMENT_TOKEN=\x27([A-Za-z0-9]+)\x27", script).group(1))
+sys.stdout.write(re.search(r"PB_TOKEN=\x27([A-Za-z0-9]+)\x27", command).group(1))
 ' | ssh "$host" "sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $name sh -c 'cat > /home/pbt/tok; chmod 600 /home/pbt/tok'"
 ct "$pbx pair --name $name --enrollment-token-file /home/pbt/tok --json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(json.dumps({"name":"'"$name"'","machine_id":d["machine_id"]}))'
 ct rm -f /home/pbt/tok

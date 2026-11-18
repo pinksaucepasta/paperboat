@@ -498,17 +498,30 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Victus"}, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, output.String())
 	}
-	// One token for both platforms; the installer path (/install, /install.ps1) is what differs.
-	if creates != 1 || !strings.Contains(output.String(), "curl -fsSL 'https://install.example.test/custom/install?p=Victus-the-token' | bash") || !strings.Contains(output.String(), "install.example.test/custom/install.ps1?p=Victus-the-token") || !strings.Contains(output.String(), "PowerShell or Command Prompt") || !strings.Contains(output.String(), `powershell -c "iex (irm '`) || !strings.Contains(output.String(), `')"`) || strings.Contains(output.String(), `| iex`) || strings.Contains(output.String(), "iwr '") || strings.Contains(output.String(), "-OutFile") || strings.Contains(output.String(), "powershell -NoLogo") || strings.Contains(output.String(), "--setup-mode") || strings.Contains(output.String(), "PAPERBOAT_SERVER") {
+	// One token for both platforms, in the installer's environment: never in a URL or an argument. The installer address
+	// is the same for both; the server behind it picks the script by user agent.
+	want := []string{"curl -fsSL https://install.example.test/custom | PB_TOKEN='the-token' PB_NAME='Victus' sh", "$env:PB_TOKEN='the-token'; $env:PB_NAME='Victus'; irm https://install.example.test/custom | iex", "Windows (PowerShell):"}
+	if creates != 1 || strings.Contains(output.String(), "?p=") || strings.Contains(output.String(), "bash") {
 		t.Fatalf("output=%q", output.String())
+	}
+	for _, line := range want {
+		if !strings.Contains(output.String(), line) {
+			t.Fatalf("output lacks %q: %q", line, output.String())
+		}
 	}
 }
 
-func TestWindowsEnrollmentCommandRunsFromCommandPrompt(t *testing.T) {
-	const installerURL = "https://get.example.test/install.ps1?p=rpi-0123456789ABCDEFGHIJKLMNOP"
-	want := `powershell -c "iex (irm 'https://get.example.test/install.ps1?p=rpi-0123456789ABCDEFGHIJKLMNOP')"`
-	if got := windowsEnrollmentCommand(installerURL); got != want {
-		t.Fatalf("windows enrollment command=%q, want %q", got, want)
+func TestInstallCommandsPutVariablesOnTheShellThatReadsThem(t *testing.T) {
+	if got, want := posixInstallCommand("https://get.example.test"), "curl -fsSL https://get.example.test | sh"; got != want {
+		t.Fatalf("posix = %q, want %q", got, want)
+	}
+	if got, want := windowsInstallCommand("https://get.example.test"), "irm https://get.example.test | iex"; got != want {
+		t.Fatalf("windows = %q, want %q", got, want)
+	}
+	for _, bad := range []string{"http://get.example.test", "https://user@get.example.test", "https://get.example.test?x=1", "https://get.example.test#f", ""} {
+		if _, err := installerBase(bad); err == nil {
+			t.Fatalf("installer address %q was accepted", bad)
+		}
 	}
 }
 

@@ -21,7 +21,7 @@ func TestReleaseDownloadsAreNotCutOffByAPIRequestTimeout(t *testing.T) {
 		_, _ = w.Write([]byte("complete"))
 	}))
 
-	for _, path := range []string{"/install", "/tuf/targets/hash.pb-linux-amd64", "/helper-releases/tuf/targets/hash.pb-linux-amd64"} {
+	for _, path := range []string{"/tuf/targets/hash.pb-linux-amd64", "/helper-releases/tuf/targets/hash.pb-linux-amd64"} {
 		recorder := httptest.NewRecorder()
 		done := make(chan struct{})
 		go func() {
@@ -45,106 +45,44 @@ func TestReleaseDownloadsAreNotCutOffByAPIRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestSplitEnrollmentParameterRequiresAnExactToken(t *testing.T) {
-	validToken := "4K7M9Q2V8X4N6P5R1T0W8Y2ZAB"
-	if token, hostname, ok := splitEnrollmentParameter("victus-" + validToken); !ok || token != validToken || hostname != "victus" {
-		t.Fatalf("valid enrollment parameter = %q, %q, %v", token, hostname, ok)
-	}
-	for _, token := range []string{"4K7M9Q2V8X4N6P5R1T0W8Y2Z!B", "4K7M9Q2V8X4N6P5R1T0W8Y2Zab"} {
-		if _, _, ok := splitEnrollmentParameter("victus-" + token); ok {
-			t.Fatalf("malformed enrollment token %q was accepted", token)
-		}
-	}
-}
-
-func TestReleaseEndpointsServeInstallAndTUF(t *testing.T) {
+// First install no longer touches this server: the install scripts live in the repository and GitHub, so the server serves
+// none of them, even when stale script files sit in the release directory. Only signed TUF metadata is served.
+func TestReleaseEndpointsServeTUFMetadataAndNoInstallScripts(t *testing.T) {
 	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "install"), []byte("#!/bin/sh\necho paperboat\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "windows"), []byte("Write-Output paperboat-windows\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(directory, "tuf", "metadata"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "tuf", "metadata", "timestamp.json"), []byte(`{"signed":{"version":1}}`), 0o644); err != nil {
-		t.Fatal(err)
+	for path, body := range map[string]string{
+		"install": "#!/bin/sh\necho paperboat\n", "windows": "Write-Output paperboat-windows\n",
+		"selfhost/install": "#!/bin/sh\necho selfhost\n", "selfhost/versions/2026.11.01.0/paperboat-selfhost-linux-amd64.tar.gz": "package",
+		"tuf/metadata/timestamp.json": `{"signed":{"version":1}}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(directory, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	files, err := NewReleaseFiles(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := NewRouter(Options{OverrideHandler: nil, ReleaseFiles: files})
-	// The path says which installer: /install is the shell script and /install.ps1 the PowerShell one, whatever the client says.
-	for _, test := range []struct{ path, userAgent, body string }{
-		{"/install", "curl/8.5.0", "#!/bin/sh\necho paperboat\n"},
-		{"/install", "Mozilla/5.0 WindowsPowerShell/5.1", "#!/bin/sh\necho paperboat\n"},
-		{"/install.ps1", "curl/8.5.0", "Write-Output paperboat-windows\n"},
-		{"/install.ps1", "PowerShell/7.5", "Write-Output paperboat-windows\n"},
-	} {
-		request := httptest.NewRequest(http.MethodGet, test.path, nil)
-		request.Header.Set("User-Agent", test.userAgent)
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || response.Body.String() != test.body || response.Header().Get("Cache-Control") != "no-store" || response.Result().ContentLength != int64(len(test.body)) {
-			t.Fatalf("plain installer %s for %q: status=%d body=%q headers=%v", test.path, test.userAgent, response.Code, response.Body.String(), response.Header())
-		}
-	}
-	// /recipe and /recipe.ps1 are the same installers marked as a recipe install; the token never goes in the URL (F26).
-	for _, test := range []struct{ path, body string }{
-		{"/recipe", "#!/bin/sh\nPAPERBOAT_RECIPE_INSTALL=1\nexport PAPERBOAT_RECIPE_INSTALL\necho paperboat\n"},
-		{"/recipe.ps1", "$env:PAPERBOAT_RECIPE_INSTALL='1';Write-Output paperboat-windows\n"},
+	for _, path := range []string{
+		"/install", "/install.ps1", "/windows", "/recipe", "/recipe.ps1", "/selfhost/install", "/selfhost/versions/2026.11.01.0/paperboat-selfhost-linux-amd64.tar.gz",
+		"/install?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "/install.ps1?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "/recipe?t=pbr_x", "/current.json",
 	} {
 		response := httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
-		if response.Code != http.StatusOK || response.Body.String() != test.body || response.Header().Get("Cache-Control") != "no-store" || response.Result().ContentLength != int64(len(test.body)) {
-			t.Fatalf("recipe installer %s: status=%d body=%q", test.path, response.Code, response.Body.String())
-		}
-		response = httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path+"?t=pbr_x", nil))
-		if response.Code != http.StatusBadRequest {
-			t.Fatalf("recipe installer %s with a query: status=%d", test.path, response.Code)
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("GET %s = %d %q; the server must not serve install scripts", path, response.Code, response.Body.String())
 		}
 	}
-	for _, path := range []string{"/install", "/install.ps1"} {
-		for _, query := range []string{"?p=", "?other=value", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&other=value", "?p=%invalid"} {
-			response := httptest.NewRecorder()
-			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path+query, nil))
-			if response.Code != http.StatusBadRequest {
-				t.Fatalf("malformed installer query %s%q: status=%d", path, query, response.Code)
-			}
+	// The release file handler itself refuses everything but TUF metadata.
+	for _, path := range []string{"/install", "/windows", "/selfhost/install"} {
+		response := httptest.NewRecorder()
+		files.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("release files served %s: %d", path, response.Code)
 		}
-	}
-
-	// One kind of token: the same token (any first character) goes to either installer.
-	for _, token := range []string{"4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "5K7M9Q2V8X4N6P5R1T0W8Y2ZAB"} {
-		install := httptest.NewRecorder()
-		router.ServeHTTP(install, httptest.NewRequest(http.MethodGet, "/install?p="+token, nil))
-		if install.Code != http.StatusOK || !strings.Contains(install.Body.String(), "echo paperboat") || !strings.Contains(install.Body.String(), "PAPERBOAT_ENROLLMENT_TOKEN") {
-			t.Fatalf("install response = %d %q", install.Code, install.Body.String())
-		}
-		if !strings.HasPrefix(install.Body.String(), "#!/bin/sh\nPAPERBOAT_ENROLLMENT_TOKEN='"+token+"'") || !strings.Contains(install.Body.String(), "\nexport PAPERBOAT_ENROLLMENT_TOKEN PAPERBOAT_MACHINE_ALIAS\n") {
-			t.Fatalf("install response is not an executable POSIX script: %q", install.Body.String())
-		}
-		if got := install.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
-			t.Fatalf("install content type = %q", got)
-		}
-		windows := httptest.NewRecorder()
-		router.ServeHTTP(windows, httptest.NewRequest(http.MethodGet, "/install.ps1?p="+token, nil))
-		if windows.Code != http.StatusOK || !strings.HasPrefix(windows.Body.String(), "$env:PAPERBOAT_ENROLLMENT_TOKEN='"+token+"';") || !strings.Contains(windows.Body.String(), "Write-Output paperboat-windows") {
-			t.Fatalf("windows response = %d %q", windows.Code, windows.Body.String())
-		}
-	}
-	removed := httptest.NewRecorder()
-	router.ServeHTTP(removed, httptest.NewRequest(http.MethodGet, "/windows?p=5K7M9Q2V8X4N6P5R1T0W8Y2ZAB", nil))
-	if removed.Code != http.StatusNotFound {
-		t.Fatalf("legacy /windows endpoint status = %d", removed.Code)
-	}
-	current := httptest.NewRecorder()
-	router.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/current.json", nil))
-	if current.Code != http.StatusNotFound {
-		t.Fatalf("current response = %d %q headers=%v", current.Code, current.Body.String(), current.Header())
 	}
 
 	timestamp := httptest.NewRecorder()
@@ -154,26 +92,6 @@ func TestReleaseEndpointsServeInstallAndTUF(t *testing.T) {
 	}
 	if got := timestamp.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("timestamp cache control = %q", got)
-	}
-}
-
-func TestReleaseEnrollmentRejectsPOSIXInstallerWithoutShebang(t *testing.T) {
-	directory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(directory, "install"), []byte("echo unsafe\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "windows"), []byte("Write-Output safe\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	files, err := NewReleaseFiles(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	router := NewRouter(Options{ReleaseFiles: files})
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/install?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", nil))
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
 	}
 }
 

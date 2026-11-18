@@ -302,6 +302,10 @@ the useful set for tunnels and custom domains.
   with progress in the admin panel; key rollover that machines accept without a reinstall; a timed staging drill.
   Later, when revenue allows: CA and signing keys in a KMS/HSM so a breach cannot copy them. Before launch we only
   check that release signing cannot be done from the prod server and write the private runbook.
+- **Package repositories (apt/yum/Homebrew with GPG, like Tailscale)** (decided 2026-11-18): after launch, publish signed
+  apt, yum/dnf and Homebrew repositories so `apt install paperboat` and `brew install paperboat` work and update with the
+  system. At launch first install is the fixed installer verified with the release key (`cli/tools/install.sh`).
+  Prior art: Tailscale `scripts/installer.sh` (GPG-signed apt/yum repos) and NetBird `release_files/install.sh`.
 - **Status page:** move to a hosted provider (incident.io / Atlassian Statuspage) when revenue allows; swap the adapter.
 - **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
   release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach

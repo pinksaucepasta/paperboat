@@ -60,17 +60,20 @@ export function nameProblem(name: string): string | undefined {
   if (reservedNames.has(value)) return `“${value}” is reserved`
 }
 
-/** The server publishes `curl -fsSL <base>/install | bash …`; the install URL is the part to reuse. */
+/** The server publishes `curl -fsSL <installer> | sh`; the installer address is the part to reuse. */
 export function installUrlFrom(bootstrapCommand: string | undefined): string | undefined {
-  return bootstrapCommand?.match(/https:\/\/[^\s'"]+\/install\b/)?.[0]
+  return bootstrapCommand?.match(/https:\/\/[^\s'"|]+/)?.[0]
 }
 
-/** The same token goes to either installer; the path says which: /install is the shell script, /install.ps1 PowerShell. */
+/**
+ * One address for both shells (it serves install.sh to curl and install.ps1 to PowerShell). The same token goes to
+ * either one in the installer's environment, never in a URL: `PB_TOKEN` and, for a chosen name, `PB_NAME`.
+ */
 export function installCommand(installUrl: string, shell: Shell, token?: string, name?: string): string {
-  const parameter = token ? `?p=${name ? `${name}-${token}` : token}` : ""
+  const variables = token ? [["PB_TOKEN", token], ...(name ? [["PB_NAME", name]] : [])] : []
   return shell === "posix"
-    ? `curl -fsSL '${installUrl}${parameter}' | bash`
-    : `powershell -c "iex (irm '${installUrl}.ps1${parameter}')"`
+    ? `curl -fsSL ${installUrl} | ${variables.map(([key, value]) => `${key}='${value}' `).join("")}sh`
+    : `${variables.map(([key, value]) => `$env:${key}='${value}'; `).join("")}irm ${installUrl} | iex`
 }
 
 /** `workspace` is "personal" (the default) or the team the machine joins when it pairs. */

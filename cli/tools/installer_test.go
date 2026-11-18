@@ -37,10 +37,14 @@ func TestInstallersAreFixedAndNameNoServer(t *testing.T) {
 		if regexp.MustCompile(`@paperboat_[a-z0-9_]+@`).MatchString(body) {
 			t.Fatalf("%s still carries a per-release placeholder", name)
 		}
-		for _, banned := range []string{"/tuf", "pprbt", "paperboat.cloud", "installer_base_url"} {
-			if strings.Contains(body, banned) {
-				t.Fatalf("%s names a Paperboat host or service: %q", name, banned)
+		// The only hosts an installer talks to are GitHub (releases, tag listing) and Docker's official installer.
+		for _, host := range regexp.MustCompile(`https://([a-z0-9.-]+)`).FindAllStringSubmatch(body, -1) {
+			if host[1] != "github.com" && host[1] != "api.github.com" && host[1] != "get.docker.com" {
+				t.Fatalf("%s talks to %s; it must name no Paperboat server", name, host[1])
 			}
+		}
+		if strings.Contains(body, "/tuf") || strings.Contains(body, "installer_base_url") {
+			t.Fatalf("%s depends on the Paperboat release origin", name)
 		}
 		if !strings.Contains(body, "pinksaucepasta/paperboat") {
 			t.Fatalf("%s has no repository constant", name)
