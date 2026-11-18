@@ -29,6 +29,10 @@ scopes; ordering is not significant. Token responses return a normalized space-d
 list. Unknown clients return `invalid_client`; a non-exact or malformed scope set returns
 `invalid_scope`. Other malformed authorization requests return `validation_failed`.
 
+Native send setup (`POST /v1/sends/prepare`) needs the file-transfer
+descriptor's `machines:connect` bearer scope; it introduces no new scope.
+Inventory reads in the same flow need `machines:read`.
+
 ## Device Authorization
 
 `POST /v1/auth/device/authorize` is unauthenticated. It accepts `client_id`,
