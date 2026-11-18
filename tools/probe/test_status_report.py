@@ -13,6 +13,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         code, body = {"/ok": (200, b"ready"), "/down": (503, b"no"), "/relay": (401, b"relay authorization required"),
                       "/tuf": (200, b'{"signed":{"expires":"2999-01-01T00:00:00Z"}}'),
+                      "/tuf-naive": (200, b'{"signed":{"expires":"2999-01-01T00:00:00"}}'),
+                      "/redirect": (302, b""),
                       "/tuf-old": (200, b'{"signed":{"expires":"2001-01-01T00:00:00Z"}}')}.get(self.path, (404, b""))
         self.send_response(code); self.end_headers(); self.wfile.write(body)
 
@@ -46,6 +48,20 @@ class Checks(unittest.TestCase):
     def test_release_metadata_must_not_be_expired(self):
         self.assertTrue(self.run_one(kind="tuf", url=self.base + "/tuf")["ok"])
         self.assertFalse(self.run_one(kind="tuf", url=self.base + "/tuf-old")["ok"])
+
+    def test_naive_expiry_is_read_as_utc_not_a_crash(self):
+        self.assertTrue(self.run_one(kind="tuf", url=self.base + "/tuf-naive")["ok"])
+
+    def test_redirect_is_a_pass_only_when_the_check_says_so(self):
+        self.assertFalse(self.run_one(kind="http", url=self.base + "/redirect")["ok"])
+        self.assertTrue(self.run_one(kind="http", url=self.base + "/redirect", redirect=True)["ok"])
+
+    def test_dns_failure_is_a_failed_result(self):
+        r = self.run_one(kind="http", url="http://no-such-host.invalid/", resolve_all=True)
+        self.assertFalse(r["ok"])
+
+    def test_internet_ok_with_two_answers(self):
+        self.assertTrue(sr.internet_ok([self.base + "/ok", self.base + "/ok"]))
 
     def test_tcp(self):
         self.assertTrue(self.run_one(kind="tcp", host="127.0.0.1", port=self.server.server_port)["ok"])
@@ -98,8 +114,13 @@ class Reporting(unittest.TestCase):
         self.assertEqual([r["unit"] for r in sent[0][0]], ["api_health", "exec"])
         self.assertTrue(sent[0][1])
 
-    def test_internet_needs_two_urls_configured(self):
+    def test_internet_needs_two_urls_configured_and_two_answers(self):
         self.assertFalse(sr.internet_ok(["http://127.0.0.1:9"]))
+        self.assertFalse(sr.internet_ok(["http://127.0.0.1:9", "http://127.0.0.1:9"]))
+
+    def test_unreadable_key_file_does_not_raise(self):
+        cfg = self.cfg(); cfg["key_file"] = "/nonexistent/key"
+        self.assertFalse(sr.post(cfg, [], False))
 
 
 if __name__ == "__main__":
