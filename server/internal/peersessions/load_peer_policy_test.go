@@ -116,7 +116,6 @@ func TestLoadPeerPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.ConfigureQuota("https://console.example.test/billing")
 	// The in-memory documents keep their own LISTEN session when the build has them (not on main).
 	type policyListener interface {
 		ListenPolicy(context.Context, policyListenPool, time.Duration) error

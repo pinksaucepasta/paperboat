@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
@@ -33,17 +32,14 @@ func TestBrowserAccessErrorMapsAmbiguousTeamAccess(t *testing.T) {
 	}
 }
 
-func TestBrowserAccessQuotaClassificationPreservesMixedOperationalFailure(t *testing.T) {
-	const privateCanary = "QUOTA_OPERATION_PRIVATE_CANARY"
+func TestBrowserAccessClassificationPreservesMixedOperationalFailure(t *testing.T) {
+	const privateCanary = "OPERATION_PRIVATE_CANARY"
 	tests := []struct {
 		name   string
 		err    error
 		status int
 		code   string
-	}{
-		{name: "pure exhaustion", err: accountingauthority.ErrQuotaExhausted, status: http.StatusConflict, code: "bandwidth_quota_exhausted"},
-		{name: "mixed storage failure", err: errors.Join(accountingauthority.ErrQuotaExhausted, syscall.EIO, errors.New(privateCanary)), status: http.StatusServiceUnavailable, code: "authorization_unavailable"},
-	}
+	}{}
 	for _, c := range []struct {
 		name   string
 		cause  error

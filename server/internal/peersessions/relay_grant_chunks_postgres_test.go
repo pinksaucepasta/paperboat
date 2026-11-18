@@ -75,7 +75,7 @@ func TestRelayGrantOfAHundredPeerAccountIsOneMembershipOnPostgres(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	grants, err := service.relayGrants(nodes, self, peers, peers, 7, now)
+	grants, err := service.relayGrants(nodes, self, peers, 7, now)
 	if err != nil {
 		t.Fatal(err)
 	}

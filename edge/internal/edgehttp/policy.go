@@ -364,13 +364,6 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			writeBlockedRefusal(writer, request, blocked.Legal)
 			return
 		}
-		if errors.Is(err, ErrIngressQuotaExhausted) {
-			// A typed refusal at admission: the visitor learns why, and direct access is unaffected.
-			var quota connectorprotocol.IngressQuotaError
-			errors.As(err, &quota)
-			writeQuotaRefusal(writer, request, quota.ResetsAt, time.Now())
-			return
-		}
 		if errors.Is(err, datacarrier.ErrStreamLimit) {
 			// The machine's carrier stayed full for its whole permit wait: busy, not broken.
 			writeRefusal(writer, request, http.StatusServiceUnavailable, "carrier_stream_limit", busyTitle, busyMessage, 2*time.Second)
@@ -502,18 +495,6 @@ func writeBlockedRefusal(w http.ResponseWriter, r *http.Request, legal bool) {
 		status = http.StatusUnavailableForLegalReasons
 	}
 	writeRefusal(w, r, status, "publication_blocked", "This link was disabled", "Paperboat disabled this address because it violated Paperboat's acceptable use policy.", 0)
-}
-
-// writeQuotaRefusal answers a workspace out of bandwidth allowance: 429 with Retry-After until the
-// allowance resets (when the server said when) and the reset date on the page.
-func writeQuotaRefusal(w http.ResponseWriter, r *http.Request, resetsAt, now time.Time) {
-	message := "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes when the allowance resets."
-	var wait time.Duration
-	if resetsAt.After(now) {
-		wait = resetsAt.Sub(now)
-		message = "This address has used up its bandwidth allowance. Its owner can add bandwidth, or it resumes on " + resetsAt.UTC().Format("2 Jan 2006 15:04") + " UTC."
-	}
-	writeRefusal(w, r, http.StatusTooManyRequests, "bandwidth_quota_exhausted", "Bandwidth allowance used up", message, wait)
 }
 
 const upstreamUnavailableMessage = "Paperboat could not reach the app behind this address. If you own the app, start it and try again."

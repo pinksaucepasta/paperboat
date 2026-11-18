@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"sync"
 	"time"
 )
 
@@ -31,59 +30,29 @@ func runtimeUsageFrom(ctx context.Context) (runtimeUsageBinding, bool) {
 	return binding, ok && binding.Authority != "" && binding.Environment != ""
 }
 
-// meterRuntimeStream records a runtime session's bytes under its authority and ends the
-// stream when the server reports that authority's workspace out of allowance.
+// meterRuntimeStream records a runtime session's bytes under its authority.
 func meterRuntimeStream(usage IngressUsage, binding runtimeUsageBinding, stream io.ReadWriteCloser) io.ReadWriteCloser {
-	s := &runtimeUsageStream{stream: stream, usage: usage, binding: binding}
-	s.unsubscribe = usage.SubscribeQuota(binding.Authority, binding.IssuedAt, func() {
-		s.mu.Lock()
-		s.exhausted = true
-		s.mu.Unlock()
-		_ = stream.Close()
-	})
-	return s
+	return &runtimeUsageStream{stream: stream, usage: usage, binding: binding}
 }
 
 type runtimeUsageStream struct {
-	stream      io.ReadWriteCloser
-	usage       IngressUsage
-	binding     runtimeUsageBinding
-	unsubscribe func()
-	mu          sync.Mutex
-	exhausted   bool
-	closeOnce   sync.Once
-}
-
-func (s *runtimeUsageStream) quotaExhausted() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.exhausted
+	stream  io.ReadWriteCloser
+	usage   IngressUsage
+	binding runtimeUsageBinding
 }
 
 func (s *runtimeUsageStream) Read(payload []byte) (int, error) {
-	if s.quotaExhausted() {
-		return 0, ErrIngressQuotaExhausted
-	}
 	n, err := s.stream.Read(payload)
 	if n > 0 {
 		err = errors.Join(err, s.usage.Record(s.binding.Environment, s.binding.Route, s.binding.Revision, 0, uint64(n), s.binding.Authority))
-	}
-	if err != nil && s.quotaExhausted() {
-		return n, ErrIngressQuotaExhausted
 	}
 	return n, err
 }
 
 func (s *runtimeUsageStream) Write(payload []byte) (int, error) {
-	if s.quotaExhausted() {
-		return 0, ErrIngressQuotaExhausted
-	}
 	n, err := s.stream.Write(payload)
 	if n > 0 {
 		err = errors.Join(err, s.usage.Record(s.binding.Environment, s.binding.Route, s.binding.Revision, uint64(n), 0, s.binding.Authority))
-	}
-	if err != nil && s.quotaExhausted() {
-		return n, ErrIngressQuotaExhausted
 	}
 	return n, err
 }
@@ -95,11 +64,4 @@ func (s *runtimeUsageStream) CloseWrite() error {
 	return nil
 }
 
-func (s *runtimeUsageStream) Close() error {
-	s.closeOnce.Do(func() {
-		if s.unsubscribe != nil {
-			s.unsubscribe()
-		}
-	})
-	return s.stream.Close()
-}
+func (s *runtimeUsageStream) Close() error { return s.stream.Close() }

@@ -179,9 +179,13 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 // fragments and tiny frames are bounded too.
 const (
 	carrierBytesPerSecond = 64 << 20  // 512 Mbit/s per carrier
-	accountBytesPerSecond = 128 << 20 // shared by an account's carriers on one relay
-	budgetBurstBytes      = 4 << 20
-	budgetMinimumCost     = fragmentHeader + fragmentPayload
+	accountBytesPerSecond = 128 << 20 // the ceiling of an account's carriers on one relay; the fair-use cap is lower
+	// DefaultAccountMbit is the fair-use speed of one account on one Paperboat-operated relay (SetAccountMbit).
+	DefaultAccountMbit = 20.0
+	// MaxAccountMbit bounds the configured cap: the relay's own ceiling.
+	MaxAccountMbit    = float64(accountBytesPerSecond) * 8 / 1e6
+	budgetBurstBytes  = 4 << 20
+	budgetMinimumCost = fragmentHeader + fragmentPayload
 )
 
 type budget struct {
@@ -192,6 +196,13 @@ type budget struct {
 }
 
 func newBudget(bytesPerSecond float64) *budget { return &budget{rate: bytesPerSecond} }
+
+// setRate changes the refill rate; tokens already held stay (the burst bounds them).
+func (b *budget) setRate(bytesPerSecond float64) {
+	b.mu.Lock()
+	b.rate = bytesPerSecond
+	b.mu.Unlock()
+}
 
 func (b *budget) allow(now time.Time, size int) bool {
 	cost := float64(max(size, budgetMinimumCost))

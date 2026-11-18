@@ -1,5 +1,5 @@
 // Package bandwidthgate answers one question for hot paths that must never wait on billing:
-// is every workspace an account can use out of bandwidth allowance? It is one read-only
+// is every workspace an account can use throttled (its fair-use bandwidth used, no operator lift)? It is one read-only
 // statement (MVCC: no write, no row lock, so it cannot queue behind usage debits) with a
 // short timeout and a per-account cache. A failure answers "not denied" (fail open) unless the
 // account was answered "denied" within knownDeniedHold, and starts one longer background lookup
@@ -247,7 +247,7 @@ func (g *Gate) Lookup(ctx context.Context, key string, at time.Time) (bool, erro
 	err := g.store.SQL().QueryRowContext(ctx, workspaces+`
 SELECT coalesce(bool_and(coalesce((
  SELECT true FROM billing_workspace_usage_periods p
- WHERE p.workspace_id=ws.id AND p.period_start<=$2 AND p.period_end>$2 AND p.included_bytes IS NOT NULL
+ WHERE p.workspace_id=ws.id AND p.period_start<=$2 AND p.period_end>$2 AND p.included_bytes IS NOT NULL AND NOT workspace_throttle_lifted(ws.id)
   AND (SELECT coalesce(sum(q.consumed_bytes),0) FROM billing_workspace_usage_periods q
        WHERE q.workspace_id=ws.id AND q.paid=p.paid AND coalesce(q.budget_start,q.period_start)=coalesce(p.budget_start,p.period_start)) >= p.included_bytes+workspace_granted_bytes(ws.id)
   AND (NOT p.paid OR coalesce((SELECT sum(t.remaining_bytes) FROM billing_workspace_topups t WHERE t.workspace_id=ws.id AND t.purchased_at<=$2 AND t.expires_at>$2),0)=0)

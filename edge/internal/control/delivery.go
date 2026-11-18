@@ -47,9 +47,6 @@ func DeliverNext(ctx context.Context, queue *usage.Queue, sink UsageSink) (Usage
 		}
 		return UsageResult{}, true, err
 	}
-	if result.QuotaExhausted {
-		queue.ExhaustAuthority(report.Key.Authority, report.Interval[1])
-	}
 	queue.Ack(report.OperationID)
 	return result, true, nil
 }

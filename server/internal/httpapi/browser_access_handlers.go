@@ -17,7 +17,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/browseringress"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
@@ -45,8 +44,6 @@ func browserAccessError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, 401, "authentication_required", "Sign in again.")
 	case expectedHTTPErrorOnly(err, browseraccess.ErrAmbiguousTeamAccess):
 		writeError(w, r, 409, "ambiguous_team_access", "More than one team grants access to this resource. Use a resource with one team grant until team selection is available.")
-	case expectedHTTPErrorOnly(err, accountingauthority.ErrQuotaExhausted):
-		writeError(w, r, 409, "bandwidth_quota_exhausted", "This workspace's bandwidth allowance is exhausted. Access can resume when its next allowance period begins.")
 	case expectedHTTPErrorOnly(err, browseraccess.ErrAccessDenied):
 		writeError(w, r, 403, "forbidden", "This account cannot open this address.")
 	case expectedHTTPErrorOnly(err, browseraccess.ErrNotAuthorized, connectorprotocol.ErrIngressDenied):

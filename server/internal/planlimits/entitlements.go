@@ -12,11 +12,14 @@ import (
 
 // Operator entitlements on a workspace (billing_workspace_grants): extra bandwidth, or an override of one plan limit. The
 // effective value of every limit comes from this package: the configured plan value, replaced while an override of that
-// kind runs. Bandwidth grants are added to the allowance by the readers of the allowance (billing, the exhaustion gate),
-// through the SQL function workspace_granted_bytes.
+// kind runs. Bandwidth grants are added to the allowance by the readers of the allowance (billing, the throttle gate),
+// through the SQL function workspace_granted_bytes; a running ThrottleLift grant makes the allowance unlimited
+// (workspace_throttle_lifted).
 const (
 	// Bandwidth is the grant kind for extra hosted bandwidth, in bytes.
 	Bandwidth Kind = "bandwidth"
+	// ThrottleLift lifts the workspace's bandwidth throttle while it runs (the amount is ignored: 1).
+	ThrottleLift Kind = "throttle_lift"
 	// Seats overrides a team's purchased seats (what invitations may fill).
 	Seats Kind = "seats"
 	// ViewersPerTerminal overrides the viewer cap of one shared terminal.
@@ -26,6 +29,7 @@ const (
 // GrantKinds are the kinds an operator can grant on a workspace, with whether it applies to personal and team workspaces.
 var GrantKinds = map[Kind]struct{ Personal, Team bool }{
 	Bandwidth:          {true, true},
+	ThrottleLift:       {true, true},
 	Machines:           {true, true},
 	Publications:       {true, true},
 	BrowserTerminals:   {true, true},

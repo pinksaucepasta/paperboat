@@ -30,7 +30,6 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
-	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
@@ -55,7 +54,6 @@ type EdgeService struct {
 	clock                   func() time.Time
 	bandwidth               BandwidthDebiter
 	scopedBandwidth         ScopedBandwidthDebiter
-	relayQuota              *bandwidthgate.Gate
 	relayMetrics            *sharedmetrics.Metrics
 	ingressLimits           edgelimits.IngressLimits
 	audit                   *audit.Writer
@@ -66,10 +64,6 @@ type EdgeService struct {
 		ServeEdgeControl(http.ResponseWriter, *http.Request, string, string)
 	}
 }
-
-// SetRelayQuotaGate makes relay observations report which connected accounts are out of
-// bandwidth allowance (see relayNodeLeaseDocument.QuotaDenied). Nil leaves the list empty.
-func (s *EdgeService) SetRelayQuotaGate(gate *bandwidthgate.Gate) { s.relayQuota = gate }
 
 // SetIngressLimits sets the ingress limits edges receive in every heartbeat answer (T11).
 func (s *EdgeService) SetIngressLimits(limits edgelimits.IngressLimits) { s.ingressLimits = limits }
@@ -932,7 +926,7 @@ func (s *EdgeService) handleUsage(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, status, code, retryable, retryAfterMS, err)
 		return
 	}
-	writeEdgeJSON(w, http.StatusOK, map[string]any{"delta": result.DeltaBytes, "disposition": result.Disposition, "quota_exhausted": result.QuotaExhausted})
+	writeEdgeJSON(w, http.StatusOK, map[string]any{"delta": result.DeltaBytes, "disposition": result.Disposition})
 }
 
 func usageErrorResponse(err error) (status int, code string, retryable bool, retryAfterMS int) {

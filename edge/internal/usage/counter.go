@@ -161,15 +161,14 @@ type Report struct {
 }
 
 type Queue struct {
-	quotaObservers map[*quotaObserver]struct{}
-	mu             sync.Mutex
-	maxReports     int
-	maxBytes       int
-	bytes          int
-	pending        map[string]Report
-	order          []string
-	dead           []DeadLetter
-	refused        uint64
+	mu         sync.Mutex
+	maxReports int
+	maxBytes   int
+	bytes      int
+	pending    map[string]Report
+	order      []string
+	dead       []DeadLetter
+	refused    uint64
 }
 
 type QueueState struct {

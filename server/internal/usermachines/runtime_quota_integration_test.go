@@ -26,8 +26,8 @@ func (f *runtimeQuotaFixture) CheckWorkspaceBandwidthTx(_ context.Context, _ *db
 
 // Only traffic through Paperboat's relays and edges counts against the allowance. A CLI
 // descriptor is issued at the cap (a direct connection must keep working); a browser terminal,
-// which always rides the edge, is accounted below the cap and refused at it.
-func TestCLIDescriptorsAreNeverRefusedForBandwidthButBrowserTerminalsAre(t *testing.T) {
+// which always rides the edge, is accounted below the cap and admitted (to be throttled by the edge) at it.
+func TestNothingIsRefusedForBandwidthAndBrowserTerminalsAreStillAccounted(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -68,7 +68,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
 	quota := &runtimeQuotaFixture{exhausted: true}
-	service.ConfigureRuntimeQuota(quota, "https://console.example.test/billing")
+	service.ConfigureRuntimeQuota(quota)
 	// At the cap a CLI descriptor is still issued: the server cannot know whether the
 	// connection will be direct, and direct machine-to-machine traffic is always free.
 	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_rq_1", "operation_rq_cap_"+suffix, false)
@@ -83,7 +83,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if len(quota.checked) != 0 {
 		t.Fatalf("CLI descriptors checked the allowance: %v", quota.checked)
 	}
-	// A console browser terminal always rides the edge: accounted below the cap, refused at it.
+	// A console browser terminal always rides the edge: accounted below and at the cap.
 	quota.exhausted = false
 	attachment := "attachment_rq_" + suffix
 	if err := service.AdmitBrowserTerminalIngress(ctx, attachment, machineID, "", edgeNodeID, time.Now().Add(time.Minute)); err != nil {
@@ -94,10 +94,12 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatalf("browser accounting workspace=%q route=%q err=%v", workspace, route, err)
 	}
 	quota.exhausted = true
-	err = service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute))
-	var refusal *BandwidthQuotaError
-	if !errors.Is(err, ErrBandwidthQuotaExhausted) || !errors.As(err, &refusal) || refusal.BillingURL != "https://console.example.test/billing" {
-		t.Fatalf("browser admission at the cap err=%v", err)
+	if err = service.AdmitBrowserTerminalIngress(ctx, attachment+"_cap", machineID, "", edgeNodeID, time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("browser admission at the cap must never be refused, err=%v", err)
+	}
+	var capped int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, attachment+"_cap").Scan(&capped); err != nil || capped != 1 {
+		t.Fatalf("a throttled browser terminal is still accounted: %d err=%v", capped, err)
 	}
 
 	// Lane R N3: after an outage the edge carrier re-attaches up to ~30 s after presence returns, and

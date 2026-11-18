@@ -322,15 +322,6 @@ func TestEdgeAdmissionCapturesOperationalCauseAndCanRecover(t *testing.T) {
 	}
 }
 
-// A bandwidth refusal at admission is an expected rejection with its own reason, not an
-// unexpected failure filed as a support report.
-func TestBandwidthRefusalIsAnExpectedAdmissionRejection(t *testing.T) {
-	err := fmt.Errorf("record usage admission: %w", &usermachines.BandwidthQuotaError{BillingURL: "https://console.example.test/billing"})
-	if !expectedTerminalRejection(err) || edgeAdmissionReason(err) != "bandwidth_quota_exhausted" {
-		t.Fatalf("expected=%v reason=%q", expectedTerminalRejection(err), edgeAdmissionReason(err))
-	}
-}
-
 // Slice 7 (Lane K terminal plan): a refused admission closes the control channel with the typed reason the edge
 // sends to the browser, so a lost machine, a closed terminal and a lapsed ticket are told apart.
 func TestEdgeControlRefusalsCarryATypedReason(t *testing.T) {

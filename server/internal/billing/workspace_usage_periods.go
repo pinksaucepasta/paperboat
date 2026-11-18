@@ -125,5 +125,8 @@ FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 
 		out.included = sql.NullInt64{Int64: *policy.included, Valid: true}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO billing_workspace_usage_periods(workspace_id,period_start,period_end,included_bytes,paid,budget_start) VALUES($1,$2,$3,$4,$5,$6)`, id, out.start, out.end, out.included, out.paid, out.budget)
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	return out, noticeBandwidthResetTx(ctx, tx, id, out)
 }

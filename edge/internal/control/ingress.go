@@ -13,15 +13,15 @@ import (
 const maximumIngressDecisions = 4096
 
 // IngressSnapshot is one complete server snapshot for an edge process: the
-// public decisions, the routes withheld only for bandwidth quota, and the
+// public decisions, the routes whose workspace is throttled, and the
 // http-01 responses the edge serves for its ACME challenges.
 type IngressSnapshot struct {
-	Decisions   []connectorprotocol.IngressDecision
-	QuotaDenied []connectorprotocol.IngressQuotaDenial
-	Blocked     []connectorprotocol.IngressBlock
-	IPRules     []connectorprotocol.IngressIPRule
-	Offline     []connectorprotocol.IngressOffline
-	HTTP01      []connectorprotocol.HTTP01Response
+	Decisions []connectorprotocol.IngressDecision
+	Throttled []connectorprotocol.IngressThrottle
+	Blocked   []connectorprotocol.IngressBlock
+	IPRules   []connectorprotocol.IngressIPRule
+	Offline   []connectorprotocol.IngressOffline
+	HTTP01    []connectorprotocol.HTTP01Response
 	// Version identifies this answer. Unchanged marks an answer to a request that carried the
 	// current version: it holds only IssuedAt and Expiries (one per kept decision, in order).
 	Version   string
@@ -44,17 +44,17 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		Version string `json:"version,omitempty"`
 	}{nodeID, epoch, version}
 	var output struct {
-		Version         string                                 `json:"version"`
-		Unchanged       bool                                   `json:"unchanged"`
-		IssuedAt        time.Time                              `json:"issued_at"`
-		Expiries        []time.Time                            `json:"expires_at"`
-		Complete        bool                                   `json:"complete"`
-		Decisions       []connectorprotocol.IngressDecision    `json:"decisions"`
-		QuotaDenied     []connectorprotocol.IngressQuotaDenial `json:"quota_denied"`
-		Blocked         []connectorprotocol.IngressBlock       `json:"blocked"`
-		IPRules         []connectorprotocol.IngressIPRule      `json:"ip_rules"`
-		Offline         []connectorprotocol.IngressOffline     `json:"offline"`
-		HTTP01Responses []connectorprotocol.HTTP01Response     `json:"http01_responses"`
+		Version         string                              `json:"version"`
+		Unchanged       bool                                `json:"unchanged"`
+		IssuedAt        time.Time                           `json:"issued_at"`
+		Expiries        []time.Time                         `json:"expires_at"`
+		Complete        bool                                `json:"complete"`
+		Decisions       []connectorprotocol.IngressDecision `json:"decisions"`
+		Throttled       []connectorprotocol.IngressThrottle `json:"throttled"`
+		Blocked         []connectorprotocol.IngressBlock    `json:"blocked"`
+		IPRules         []connectorprotocol.IngressIPRule   `json:"ip_rules"`
+		Offline         []connectorprotocol.IngressOffline  `json:"offline"`
+		HTTP01Responses []connectorprotocol.HTTP01Response  `json:"http01_responses"`
 	}
 	if err := c.postNodeWithMaximumAndIdentity(ctx, ingressDecisionsPath, nodeID, epoch, input, &output, 16<<20); err != nil {
 		return IngressSnapshot{}, err
@@ -65,7 +65,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		}
 		return IngressSnapshot{Version: version, Unchanged: true, IssuedAt: output.IssuedAt, Expiries: output.Expiries}, nil
 	}
-	if !output.Complete || len(output.Decisions) > maximumIngressDecisions || len(output.QuotaDenied) > maximumIngressDecisions || len(output.Blocked) > maximumIngressDecisions || len(output.IPRules) > maximumIngressDecisions || len(output.Offline) > maximumIngressDecisions || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
+	if !output.Complete || len(output.Decisions) > maximumIngressDecisions || len(output.Throttled) > maximumIngressDecisions || len(output.Blocked) > maximumIngressDecisions || len(output.IPRules) > maximumIngressDecisions || len(output.Offline) > maximumIngressDecisions || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
 		return IngressSnapshot{}, ErrControlUnavailable
 	}
 	// A decision this edge cannot accept refuses only its own name. Rejecting the whole snapshot would
@@ -93,5 +93,5 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 			return IngressSnapshot{}, ErrControlUnavailable
 		}
 	}
-	return IngressSnapshot{Decisions: valid, QuotaDenied: output.QuotaDenied, Blocked: output.Blocked, IPRules: output.IPRules, Offline: output.Offline, HTTP01: output.HTTP01Responses, Version: output.Version}, nil
+	return IngressSnapshot{Decisions: valid, Throttled: output.Throttled, Blocked: output.Blocked, IPRules: output.IPRules, Offline: output.Offline, HTTP01: output.HTTP01Responses, Version: output.Version}, nil
 }

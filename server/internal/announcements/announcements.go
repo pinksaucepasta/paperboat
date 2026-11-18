@@ -215,6 +215,26 @@ func (s *Service) record(ctx context.Context, tx *db.Tx, actor, key, event strin
 		Metadata: map[string]any{"kind": a.Kind, "audience_kind": a.AudienceKind, "audience_value": a.AudienceValue, "starts_at": a.StartsAt, "ends_at": a.EndsAt}})
 }
 
+// SystemCreator is the created_by of notices the platform writes itself (usage notices to a user or a team).
+const SystemCreator = "system"
+
+// SystemNoticeTx puts one notice in the bell of a user or the members of a team, written by the platform in the caller's
+// transaction. A repeat of the key is a no-op, so an event that is retried or seen twice notifies once. It stays until
+// ends (nil: until retention removes it).
+func SystemNoticeTx(ctx context.Context, tx *db.Tx, audienceKind, audienceValue, key, title, body, link string, ends *time.Time) error {
+	in, err := normalize(Input{Kind: KindNotice, Title: title, Body: body, LinkURL: link, AudienceKind: audienceKind, AudienceValue: audienceValue, EndsAt: ends})
+	if err != nil {
+		return err
+	}
+	if ends != nil && !ends.After(time.Now()) {
+		ends = nil
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO paperboat.announcements(id,kind,title,body,link_url,severity,dismissible,audience_kind,audience_value,starts_at,ends_at,created_by,idempotency_key)
+ VALUES($1,'notice',$2,$3,nullif($4,''),'info',true,$5,$6,now(),$7,$8,$9) ON CONFLICT (created_by,idempotency_key) DO NOTHING`,
+		"ann_"+uuid.NewString(), in.Title, in.Body, in.LinkURL, in.AudienceKind, in.AudienceValue, ends, SystemCreator, key)
+	return err
+}
+
 // Create writes an announcement. A retried key returns the row it created.
 func (s *Service) Create(ctx context.Context, actor, key string, in Input) (Announcement, error) {
 	in, err := normalize(in)

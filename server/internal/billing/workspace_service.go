@@ -28,6 +28,7 @@ type WorkspaceService struct {
 	portals          PortalConfigurations
 	mail             config.TransactionalMail
 	mailEnabled      bool
+	throttleMbit     float64 // the speed notices promise a throttled workspace; set from the edge limits (SetThrottleRate)
 	teamTrialDays    int
 }
 
