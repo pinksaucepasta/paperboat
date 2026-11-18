@@ -460,7 +460,8 @@ func TestAccountPreferencesFileTransferModePostgres(t *testing.T) {
 	if code, body := call(http.MethodPatch, `{"file_transfer_mode":"unlimited"}`); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
 		t.Fatalf("restore unlimited: %d %s", code, body)
 	}
-	for _, bad := range []string{`{"file_transfer_mode":"fast"}`, `{"theme":"dark"}`, `not json`} {
+	// A field this route does not have is ignored (a released pb may send one), an invalid value is refused.
+	for _, bad := range []string{`{"file_transfer_mode":"fast"}`, `not json`} {
 		if code, body := call(http.MethodPatch, bad); code != http.StatusBadRequest {
 			t.Fatalf("patch %s: %d %s", bad, code, body)
 		}

@@ -105,7 +105,6 @@ func configConflictAcknowledge(service *controlplane.ConfigConflictService) http
 			LandedRevision string `json:"landed_revision"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
 			writeError(w, r, http.StatusBadRequest, "conflict_resolution_invalid", "Conflict resolution acknowledgement is invalid.")
 			return

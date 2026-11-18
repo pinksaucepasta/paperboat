@@ -323,7 +323,6 @@ func readManagedSSHBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 
 func decodeManagedSSHBytes(body []byte, target any) bool {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	return decoder.Decode(target) == nil && errors.Is(decoder.Decode(&struct{}{}), io.EOF)
 }
 

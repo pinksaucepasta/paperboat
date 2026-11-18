@@ -592,3 +592,29 @@ func TestRelayObservationReplaysConcurrentUpdateConflictPostgres(t *testing.T) {
 		t.Fatalf("observe status = %d, want 200 after replaying the conflict: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// A relay whose remembered generation differs from the node's (its state file was lost or restored)
+// stays fenced while another process holds a live lease and adopts the node's generation once none
+// does; a node serving only one relay transport still starts.
+func TestRelayStartAdoptsGenerationWithoutLiveHolderPostgres(t *testing.T) {
+	n := newRelaySubjectsNode(t, "relay_adopt")
+	ctx := t.Context()
+	n.exec(ctx, `UPDATE control_tunnel_nodes SET transports=ARRAY['derp_quic'],registry_expires_at=now()+interval '5 minutes' WHERE id=$1`, n.id)
+	start := func(epoch string, expected int64) (int, relayNodeLeaseDocument) {
+		raw, _ := json.Marshal(relayNodeStart{NodeID: n.id, ExpectedGeneration: expected, ProcessEpoch: epoch})
+		req := httptest.NewRequest(http.MethodPost, "/v1/relay/nodes/start", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		n.service.handleRelayStart(rec, req)
+		var lease relayNodeLeaseDocument
+		_ = json.Unmarshal(rec.Body.Bytes(), &lease)
+		return rec.Code, lease
+	}
+	if code, _ := start(n.epoch+"-stale", n.generation+5); code != http.StatusConflict {
+		t.Fatalf("stale generation with a live holder: status %d, want 409", code)
+	}
+	n.exec(ctx, `UPDATE control_tunnel_nodes SET registry_expires_at=now()-interval '1 minute' WHERE id=$1`, n.id)
+	if code, lease := start(n.epoch+"-adopt", n.generation+5); code != http.StatusOK || lease.Generation != n.generation+6 {
+		t.Fatalf("adoption: status %d generation %d, want 200 and %d", code, lease.Generation, n.generation+6)
+	}
+}

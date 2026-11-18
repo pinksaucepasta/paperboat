@@ -25,7 +25,6 @@ func userMachineAvailabilityPolicy(service *usermachines.Service) http.HandlerFu
 			Mode            string `json:"mode"`
 		}
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 4097))
-		decoder.DisallowUnknownFields()
 		var extra any
 		if decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")
@@ -62,7 +61,6 @@ func helperRuntimePolicyResolve(enrollments *controlplane.EnrollmentService, mac
 			return
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		var input struct{}
 		var extra any
 		if decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF {

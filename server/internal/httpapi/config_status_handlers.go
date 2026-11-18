@@ -25,7 +25,6 @@ func configStatusRecord(service *controlplane.ConfigStatusService, logger *slog.
 		}
 		var report controlplane.ConfigStatusReport
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&report) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
 			writeError(w, r, http.StatusBadRequest, "status_invalid", "Configuration status is invalid.")
 			return

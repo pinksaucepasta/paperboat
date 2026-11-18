@@ -57,7 +57,6 @@ func decode(raw []byte, out any) error {
 		return ErrInvalid
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
 	if err := d.Decode(out); err != nil {
 		return ErrInvalid
 	}

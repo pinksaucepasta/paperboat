@@ -96,7 +96,6 @@ func userMachineMaintenanceApprovalRequest(service *usermachines.Service) http.H
 			ExpiresInSeconds int64  `json:"expires_in_seconds"`
 		}
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 8193))
-		decoder.DisallowUnknownFields()
 		var extra any
 		if decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")

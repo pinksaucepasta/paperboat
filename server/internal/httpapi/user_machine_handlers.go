@@ -37,7 +37,7 @@ func userMachinePairings(service *usermachines.Service) http.HandlerFunc {
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body request
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		pairing, err := service.CreatePairing(r.Context(), usermachines.PairingInput{Verifier: body.Verifier, EnrollmentToken: body.EnrollmentToken, Alias: body.Alias, Platform: body.Platform, Architecture: body.Architecture, WorkspaceRoot: body.WorkspaceRoot, RuntimeVersions: body.RuntimeVersions, PublicIdentityKey: body.PublicIdentityKey, AcceptBetaPlatform: body.AcceptBetaPlatform, SSHUser: body.SSHUser, SSHPort: body.SSHPort, CanReuseRuntimeIdentity: body.CanReuseRuntimeIdentity, KeepAwake: body.KeepAwake, ReplacesMachineID: body.ReplacesMachineID})
@@ -85,7 +85,6 @@ func machineSetup(service *usermachines.Service) http.HandlerFunc {
 		}
 		var body request
 		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&body); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
@@ -135,7 +134,6 @@ func authenticatedMachineInstallation(service *usermachines.Service) http.Handle
 		}
 		var body request
 		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&body); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
@@ -175,7 +173,6 @@ func userMachineEnrollmentStart(service *usermachines.Service) http.HandlerFunc 
 		}
 		if r.Body != nil {
 			decoder := json.NewDecoder(io.LimitReader(r.Body, 1025))
-			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 				writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body accepts only the destination workspace.")
 				return
@@ -274,7 +271,7 @@ func userMachineInstallationConsume(service userMachineInstallationConsumer) htt
 			PublicIdentityKey string `json:"public_identity_key"`
 			RuntimeEnrolled   bool   `json:"runtime_enrolled"`
 		}
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		material, err := service.ConsumeInstallationForIdentityState(r.Context(), body.Verifier, body.PublicIdentityKey, body.RuntimeEnrolled)
@@ -450,7 +447,6 @@ func transferDestinationDefault(service *usermachines.Service) http.HandlerFunc 
 				MachineID string `json:"machine_id"`
 			}
 			decoder := json.NewDecoder(r.Body)
-			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.MachineID) == "" {
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "A valid machine_id is required.")
 				return
@@ -500,7 +496,6 @@ func terminalSessionTransferDestination(service *usermachines.Service) http.Hand
 				MachineID string `json:"machine_id"`
 			}
 			decoder := json.NewDecoder(r.Body)
-			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.MachineID) == "" {
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "A valid machine_id is required.")
 				return
@@ -606,7 +601,6 @@ func userMachineRename(service *usermachines.Service) http.HandlerFunc {
 		}
 		var body request
 		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&body); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be valid JSON.")
 			return
@@ -703,7 +697,7 @@ func sharedTerminalConnectionDescriptor(service *usermachines.Service) http.Hand
 		var body struct {
 			SourceMachineID string `json:"source_machine_id"`
 		}
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		response, err := service.ConnectSharedTerminalSession(r.Context(), p.User.ID, body.SourceMachineID, p.Client.SessionID, r.PathValue("session_id"))
@@ -749,7 +743,6 @@ func userMachineOperationDescriptor(issue func(context.Context, string, string, 
 			NativeOnlyAccepted bool `json:"native_only_accepted"`
 		}
 		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&body) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must contain a valid source machine and operation ID.")
 			return
@@ -1094,7 +1087,7 @@ func userMachineReplace(service *usermachines.Service) http.HandlerFunc {
 		var body struct {
 			RetiredMachineID string `json:"retired_machine_id"`
 		}
-		if !decodeStrictJSON(w, r, &body) {
+		if !decodeClientJSON(w, r, &body) {
 			return
 		}
 		err := service.ReplaceMachine(r.Context(), p.User.ID, body.RetiredMachineID, r.PathValue("machine_id"))

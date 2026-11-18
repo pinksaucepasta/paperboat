@@ -35,7 +35,6 @@ func portNameWorkspace(r *http.Request) workspace.Scope {
 
 func decodePortNameBody(r *http.Request, into any) bool {
 	d := json.NewDecoder(io.LimitReader(r.Body, 4097))
-	d.DisallowUnknownFields()
 	return d.Decode(into) == nil && d.Decode(&struct{}{}) == io.EOF
 }
 

@@ -56,7 +56,6 @@ func machineEndpointRequest(service machineEndpointRequester, verifier machineEn
 			Certificate string `json:"certificate"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&document) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Machine endpoint request is invalid.")
 			return
@@ -124,7 +123,6 @@ func cliEndpointRequest(service cliEndpointRequester) http.HandlerFunc {
 			return
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&document) != nil {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")
 			return
@@ -176,7 +174,6 @@ func machineEndpointStatus(service machineEndpointStatusReader, verifier machine
 			Generation  uint64 `json:"generation"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		proof, proofErr := base64.RawURLEncoding.Strict().DecodeString(r.Header.Get("X-Paperboat-Machine-Proof"))
 		scheme, credential, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
 		if decoder.Decode(&document) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(document.OperationID) < 8 || len(document.OperationID) > 128 || document.Generation == 0 || proofErr != nil || len(proof) == 0 || !found || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(credential) == "" {

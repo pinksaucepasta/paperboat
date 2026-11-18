@@ -147,7 +147,6 @@ func readConfigLeaseBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) 
 
 func decodeStrictConfigLeaseJSON(body []byte, target any) bool {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	return decoder.Decode(target) == nil && errors.Is(decoder.Decode(&struct{}{}), io.EOF)
 }
 

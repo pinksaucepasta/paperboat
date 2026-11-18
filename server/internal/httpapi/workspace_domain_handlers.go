@@ -37,7 +37,6 @@ func workspaceDomainHandler(service *workspacedomain.Service, action string) htt
 				Hostname string `json:"hostname"`
 			}
 			decoder := json.NewDecoder(io.LimitReader(r.Body, 4096))
-			decoder.DisallowUnknownFields()
 			if decoder.Decode(&body) != nil {
 				writeError(w, r, http.StatusBadRequest, "invalid_request", `Send {"hostname": "dev.example.com"}.`)
 				return

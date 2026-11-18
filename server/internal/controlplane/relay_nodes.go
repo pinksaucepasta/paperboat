@@ -117,7 +117,7 @@ func relayIdentifier(s string) bool { return len(s) > 0 && len(s) <= 256 }
 // API cannot create nodes or change region, account policy, endpoints or keys.
 func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (relayNodeLeaseDocument, error) {
 	var out relayNodeLeaseDocument
-	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.ExpectedGeneration < 1 || in.ExpectedGeneration == int64(^uint64(0)>>1) {
+	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.ExpectedGeneration < 1 || in.ExpectedGeneration >= int64(^uint64(0)>>1)-1 {
 		return out, invalidUsage("relay_nodes.go:79")
 	}
 	tx, err := s.store.SQL().BeginTx(ctx, nil)
@@ -127,7 +127,10 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 	defer tx.Rollback()
 	var epoch, state string
 	var gen, capacity int64
-	err = tx.QueryRowContext(ctx, `SELECT n.node_generation,n.process_epoch,n.capacity_limit,n.state FROM paperboat.control_tunnel_nodes n LEFT JOIN paperboat.managed_node_authority m ON m.node_id=n.id LEFT JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND n.roles @> ARRAY['relay']::text[] AND n.transports @> ARRAY['derp_quic','derp_wss']::text[] AND n.region IS NOT NULL AND (m.node_id IS NULL OR (m.retired_at IS NULL AND r.enabled)) FOR UPDATE OF n`, in.NodeID).Scan(&gen, &epoch, &capacity, &state)
+	var leaseExpires sql.NullTime
+	// A node with any relay transport may start (overlap, not containment): a relay that serves fewer
+	// transports than a later one still starts.
+	err = tx.QueryRowContext(ctx, `SELECT n.node_generation,n.process_epoch,n.capacity_limit,n.state,n.registry_expires_at FROM paperboat.control_tunnel_nodes n LEFT JOIN paperboat.managed_node_authority m ON m.node_id=n.id LEFT JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND n.roles @> ARRAY['relay']::text[] AND n.transports && ARRAY['derp_quic','derp_wss']::text[] AND n.region IS NOT NULL AND (m.node_id IS NULL OR (m.retired_at IS NULL AND r.enabled)) FOR UPDATE OF n`, in.NodeID).Scan(&gen, &epoch, &capacity, &state, &leaseExpires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, invalidUsage("relay_nodes.go:90")
 	}
@@ -139,10 +142,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 	}
 	if epoch == in.ProcessEpoch && gen == in.ExpectedGeneration+1 {
 		// A live startup retry preserves the node's existing readiness.
-		var expires time.Time
-		if err = tx.QueryRowContext(ctx, `SELECT registry_expires_at FROM paperboat.control_tunnel_nodes WHERE id=$1`, in.NodeID).Scan(&expires); err != nil {
-			return out, err
-		}
+		expires := leaseExpires.Time
 		if !expires.After(s.clock()) {
 			// An interrupted startup never published readiness. Its persisted
 			// pending epoch can safely resume without granting a second process.
@@ -157,12 +157,16 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		}
 		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), CapacityLimit: capacity, Revocations: []relayRevocation{}}
 	} else {
-		if gen != in.ExpectedGeneration || epoch == in.ProcessEpoch {
+		now := s.clock().UTC()
+		// A process whose remembered generation differs (its state file was lost or restored) adopts the
+		// node's generation when no live process holds the lease; while one does, it stays fenced. A drained
+		// relay keeps its lease, so adoption waits for it to lapse (relayRegistryLease), never steals it.
+		if epoch == in.ProcessEpoch || gen != in.ExpectedGeneration && leaseExpires.Valid && leaseExpires.Time.After(now) {
 			return out, invalidUsage("relay_nodes.go:119")
 		}
-		now := s.clock().UTC()
+		gen = max(gen, in.ExpectedGeneration)
 		expires := now.Add(relayRegistryLease)
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=node_generation+1,process_epoch=$2,state='registered',ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=NULL,updated_at=$3,version=version+1 WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires)
+		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state='registered',ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=NULL,updated_at=$3,version=version+1 WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1)
 		if err != nil {
 			return out, err
 		}

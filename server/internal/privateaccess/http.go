@@ -247,7 +247,6 @@ func decodeRequest(raw []byte) (Request, error) {
 		return Request{}, ErrInvalid
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	var request Request
 	if err := decoder.Decode(&request); err != nil {
 		return Request{}, ErrInvalid

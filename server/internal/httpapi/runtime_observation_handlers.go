@@ -138,7 +138,6 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if err != nil || len(body) > 1<<20 || decoder.Decode(&req) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Heartbeat payload is invalid JSON.")
 			return

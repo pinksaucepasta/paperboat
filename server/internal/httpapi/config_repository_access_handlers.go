@@ -26,7 +26,6 @@ func configRepositoryAccessIssue(service *controlplane.ConfigRepositoryAccessSer
 			Direction   string `json:"direction"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
 			writeError(w, r, http.StatusBadRequest, "access_invalid", "Repository access request is invalid.")
 			return

@@ -22,7 +22,6 @@ func configCredentialIssue(service *controlplane.ConfigCredentialService) http.H
 		}
 		var input struct{}
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&input) != nil || !errors.Is(decoder.Decode(&struct{}{}), io.EOF) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request is invalid.")
 			return

@@ -37,10 +37,9 @@ func TestUserMachineInstallationConsumeForwardsRuntimeEnrollmentState(t *testing
 	}
 }
 
-// The verifier secret is read by one strict decoder everywhere: unknown fields and trailing data are refused.
-func TestUserMachineInstallationConsumeRefusesUnknownFieldsAndTrailingData(t *testing.T) {
+// The verifier secret is read by one decoder everywhere: trailing data is refused; a field a newer pb adds is ignored.
+func TestUserMachineInstallationConsumeRefusesTrailingData(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown field": `{"verifier":"v","public_identity_key":"k","runtime_enrolled":true,"extra":1}`,
 		"trailing data": `{"verifier":"v","public_identity_key":"k"}{"verifier":"w"}`,
 	} {
 		consumer := &recordingInstallationConsumer{}

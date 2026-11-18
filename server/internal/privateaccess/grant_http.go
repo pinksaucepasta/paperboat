@@ -168,7 +168,6 @@ func decodeGrantIssueRequest(raw []byte) (GrantIssueRequest, error) {
 		return GrantIssueRequest{}, ErrInvalid
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	var request GrantIssueRequest
 	if err := decoder.Decode(&request); err != nil {
 		return GrantIssueRequest{}, ErrInvalid

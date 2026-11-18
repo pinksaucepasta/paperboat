@@ -312,17 +312,18 @@ func TestPreviewLeaseReadinessMapsGenerationAndSessionFailures(t *testing.T) {
 	}
 }
 
-func TestPreviewLeaseCreateHandlerRejectsVanityAndUnknownFields(t *testing.T) {
+// A requested vanity endpoint is not a field of the request: it is ignored, never honoured.
+func TestPreviewLeaseCreateHandlerIgnoresVanityEndpoint(t *testing.T) {
 	service := &fakePreviewLeaseAPI{}
 	request := previewLeaseHandlerRequest(http.MethodPost, "/v1/previews", `{"owner_machine_id":"machine_1","owner_session_id":"session_1","endpoint":"https://custom.preview.example.test","owner_session_kind":"foreground","target":{"scheme":"http","address":"127.0.0.1:3000"},"domains":[]}`)
 	request.Header.Set("Idempotency-Key", "create_1")
 	recorder := httptest.NewRecorder()
 	previewLeaseCreate(service).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
+	if recorder.Code != http.StatusAccepted || strings.Contains(recorder.Body.String(), "custom.preview") {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	if service.createRequest.OwnerMachineID != "" {
-		t.Fatal("service called for rejected unknown endpoint field")
+	if service.createRequest.OwnerMachineID != "machine_1" || strings.Contains(fmt.Sprintf("%+v", service.createRequest), "custom.preview") {
+		t.Fatal("vanity endpoint reached the service")
 	}
 	for _, body := range []string{"null", `{} {}`} {
 		service = &fakePreviewLeaseAPI{}

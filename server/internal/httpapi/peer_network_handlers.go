@@ -173,7 +173,6 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 		if register {
 			var body peerNetworkRegisterBody
 			decoder := json.NewDecoder(bytes.NewReader(raw))
-			decoder.DisallowUnknownFields()
 			if decoder.Decode(&body) != nil {
 				writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network registration is invalid.")
 				return
@@ -193,7 +192,6 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 		}
 		var body peerNetworkConfigBody
 		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&body) != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network configuration request is invalid.")
 			return
