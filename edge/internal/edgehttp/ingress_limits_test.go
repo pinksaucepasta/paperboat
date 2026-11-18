@@ -11,6 +11,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -458,5 +459,104 @@ func TestRegistryThrottleSlowsALiveStreamAndLeavesOthersAlone(t *testing.T) {
 	}
 	if fast := send("fast.example.test"); fast > 300*time.Millisecond {
 		t.Fatalf("an unlisted hostname was slowed: %v", fast)
+	}
+}
+
+// totalThrough drives every given host's ingress stream at full speed for the window and returns the bytes delivered in total.
+func totalThrough(t *testing.T, registries []*DataCarrierRouteRegistry, hosts []string, window time.Duration) int {
+	t.Helper()
+	ctx, stop := context.WithCancel(context.Background())
+	var delivered atomic.Int64
+	var done sync.WaitGroup
+	for i, host := range hosts {
+		registry := registries[i%len(registries)]
+		_, decision := lazyRuleAndDecision(host)
+		decision.Binding.Audience = "team"
+		decision.PrincipalID, decision.GrantID, decision.GrantGeneration, decision.MembershipGeneration = "member", "grant-"+host, 1, 1
+		decision.ExpiresAt = decision.IssuedAt.Add(8 * time.Second)
+		lease, err := registry.AcquireIngress(context.Background(), decision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		local, remote := net.Pipe()
+		wrapped := lease.Wrap(context.Background(), local)
+		done.Add(2)
+		go func() { // the visitor side drains and counts
+			defer done.Done()
+			buffer := make([]byte, 32<<10)
+			for {
+				n, err := remote.Read(buffer)
+				delivered.Add(int64(n))
+				if err != nil {
+					return
+				}
+			}
+		}()
+		go func() { // the app side writes as fast as it is let
+			defer done.Done()
+			chunk := make([]byte, ingressPacingChunk)
+			for ctx.Err() == nil {
+				if _, err := wrapped.Write(chunk); err != nil {
+					return
+				}
+			}
+		}()
+		t.Cleanup(func() { _ = wrapped.Close(); _ = remote.Close() })
+	}
+	time.Sleep(window)
+	total := int(delivered.Load())
+	stop()
+	return total
+}
+
+func throttledRegistry(t *testing.T, entries []connectorprotocol.IngressThrottle) *DataCarrierRouteRegistry {
+	t.Helper()
+	limits := testIngressLimits(1 << 30)
+	limits.Publication.ByteBurst, limits.Account.ByteBurst = 1<<20, 1<<20
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 16, IngressLimits: limits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	registry.SetThrottled(entries)
+	return registry
+}
+
+// The slowed rate is ONE bucket per workspace: six tunnels of one workspace on one edge share it, so their total (not each) is the
+// rate. The bound is the rate for the window plus the bucket's burst (one pacing chunk) and the chunk each stream may have in flight.
+func TestSixRoutesOfOneWorkspaceShareOneRate(t *testing.T) {
+	const rate, window = 128 << 10, 1500 * time.Millisecond
+	hosts := []string{"a.example.test", "b.example.test", "c.example.test", "d.example.test", "e.example.test", "f.example.test"}
+	var entries []connectorprotocol.IngressThrottle
+	for _, h := range hosts {
+		entries = append(entries, connectorprotocol.IngressThrottle{Hostname: h, Workspace: "personal:one", BytesPerSecond: rate})
+	}
+	total := totalThrough(t, []*DataCarrierRouteRegistry{throttledRegistry(t, entries)}, hosts, window)
+	most := int(float64(rate)*window.Seconds()) + ingressPacingChunk + len(hosts)*ingressPacingChunk
+	least := int(float64(rate) * window.Seconds() * 0.7)
+	if total > most || total < least {
+		t.Fatalf("six routes moved %d bytes in %v at a shared %d B/s: want between %d and %d", total, window, rate, least, most)
+	}
+}
+
+// Across two edges the total is still the rate: the server gives each edge its share (rate divided by the edges carrying the workspace),
+// so two edges at half each move, together, no more than the rate (plus each edge's burst and in-flight chunks).
+func TestTwoEdgesOfOneWorkspaceShareOneRate(t *testing.T) {
+	const rate, window = 128 << 10, 1500 * time.Millisecond
+	hosts := []string{"a.example.test", "b.example.test", "c.example.test", "d.example.test"}
+	entries := func(hostnames ...string) []connectorprotocol.IngressThrottle {
+		var out []connectorprotocol.IngressThrottle
+		for _, h := range hostnames {
+			out = append(out, connectorprotocol.IngressThrottle{Hostname: h, Workspace: "personal:one", BytesPerSecond: rate / 2})
+		}
+		return out
+	}
+	first := throttledRegistry(t, entries(hosts[0], hosts[2]))
+	second := throttledRegistry(t, entries(hosts[1], hosts[3]))
+	total := totalThrough(t, []*DataCarrierRouteRegistry{first, second}, hosts, window)
+	most := int(float64(rate)*window.Seconds()) + 2*ingressPacingChunk + len(hosts)*ingressPacingChunk
+	least := int(float64(rate) * window.Seconds() * 0.7)
+	if total > most || total < least {
+		t.Fatalf("two edges moved %d bytes in %v for one %d B/s workspace: want between %d and %d", total, window, rate, least, most)
 	}
 }

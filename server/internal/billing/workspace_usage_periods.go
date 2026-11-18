@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 type usagePolicy struct {
@@ -14,6 +15,8 @@ type usagePolicy struct {
 	providerEnd          sql.NullTime
 	paid                 bool
 	included             *int64
+	teamIncluded         *int64 // a paid team's per-seat allowance times its seats
+	seats                int64  // the seats that allowance is for (0: not a paid team)
 }
 
 type usageWindow struct {
@@ -22,14 +25,17 @@ type usageWindow struct {
 	included           sql.NullInt64
 }
 
-func workspaceUsagePolicyTx(ctx context.Context, tx *db.Tx, id string, at time.Time) (usagePolicy, error) {
+// workspaceUsagePolicyTx reads the workspace's allowance policy. A paid team's included traffic is perSeat times its seats (bought, or
+// an operator's seats override), pooled in the team workspace; teamIncluded carries it so the period row follows a seat change.
+func workspaceUsagePolicyTx(ctx context.Context, tx *db.Tx, id string, at time.Time, perSeat int64) (usagePolicy, error) {
 	var team, catalog sql.NullString
 	var start, end, anchor sql.NullTime
+	var seats int64
 	var out usagePolicy
-	err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,coalesce(billing_workspace_paid_until(w),least(w.period_end,w.updated_at)),w.bandwidth_anchor,p.catalog_ref
+	err := tx.QueryRow(ctx, `SELECT w.team_id,w.period_start,coalesce(billing_workspace_paid_until(w),least(w.period_end,w.updated_at)),w.bandwidth_anchor,p.catalog_ref,w.quantity
 FROM billing_workspaces w LEFT JOIN billing_products p
  ON p.code=w.product_code AND p.provider='stripe' AND w.period_start<=$2 AND billing_workspace_paid_until(w)>$2
-WHERE w.id=$1 FOR UPDATE OF w`, id, at).Scan(&team, &start, &end, &anchor, &catalog)
+WHERE w.id=$1 FOR UPDATE OF w`, id, at).Scan(&team, &start, &end, &anchor, &catalog, &seats)
 	if err != nil {
 		return out, err
 	}
@@ -58,6 +64,15 @@ WHERE w.id=$1 FOR UPDATE OF w`, id, at).Scan(&team, &start, &end, &anchor, &cata
 			out.included = product.AllowanceBytes
 		}
 		out.paid = true
+		if team.Valid && perSeat > 0 {
+			if override, ok, err := planlimits.SeatsOverrideTx(ctx, tx, team.String); err != nil {
+				return out, err
+			} else if ok {
+				seats = int64(override)
+			}
+			total := perSeat * max(seats, 1)
+			out.included, out.teamIncluded, out.seats = &total, &total, max(seats, 1)
+		}
 		out.paidFrom = start.Time
 		if !anchor.Valid {
 			anchor = start
@@ -71,6 +86,17 @@ WHERE w.id=$1 FOR UPDATE OF w`, id, at).Scan(&team, &start, &end, &anchor, &cata
 		return out, ErrBillingPolicyUnconfigured
 	}
 	return out, nil
+}
+
+// syncTeamIncludedTx makes the current period row of a paid team carry the allowance its seats give now (a seat change mid-period
+// applies at once), so every reader of the row (the debit, the throttle gate, the operator views) agrees with the overview.
+func syncTeamIncludedTx(ctx context.Context, tx *db.Tx, id string, policy usagePolicy, window *usageWindow) error {
+	if policy.teamIncluded == nil || !window.paid || (window.included.Valid && window.included.Int64 == *policy.teamIncluded) {
+		return nil
+	}
+	window.included = sql.NullInt64{Int64: *policy.teamIncluded, Valid: true}
+	_, err := tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET included_bytes=$4 WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`, id, window.start, window.end, *policy.teamIncluded)
+	return err
 }
 
 func usageWindowTx(ctx context.Context, tx *db.Tx, id string, policy usagePolicy, at time.Time) (usageWindow, error) {
