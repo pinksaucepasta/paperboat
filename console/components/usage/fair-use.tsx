@@ -63,7 +63,8 @@ export function FairUse() {
             <div className={cn(fair.throttled ? "bg-muted-foreground" : "bg-primary")} style={{ width: `${fair.share * 100}%` }} />
           </div>
           <p className="text-sm text-muted-foreground">
-            {formatBytes(fair.amount)} a month of public traffic included{until && !fair.throttled ? `, resets ${until}` : ""}. After that, speed is
+            {formatBytes(fair.amount)} a month of public traffic included{until && !fair.throttled ? `, resets ${until}` : ""}. Previews, tunnels and
+            console terminals count. After that, speed is
             reduced to {formatSpeed(fair.mbit)} until your next billing date. Never cut off, never billed extra.
           </p>
           <p className="text-xs text-muted-foreground">
