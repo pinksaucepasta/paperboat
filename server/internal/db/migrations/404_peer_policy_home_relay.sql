@@ -1,7 +1,7 @@
 -- +goose Up
 SET LOCAL lock_timeout = '5s';
 SELECT pg_advisory_xact_lock(1885686843);
--- A machine's home relay is part of the peer entry its peers' documents carry (400): a change names the same parties as
+-- A machine's home relay is part of the peer entry its peers' documents carry (403): a change names the same parties as
 -- any other published column of the identity (351), instead of only the coarse account topic. Dropped and created in one
 -- transaction, so no write goes by without it; no table rewrite, the lock is held for the two catalog changes only.
 DROP TRIGGER peer_policy_update ON paperboat.peer_network_identities;
