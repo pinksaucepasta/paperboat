@@ -30,8 +30,13 @@ import (
 // generation and team fence), so a grant that read authority just before a revocation is refused at use.
 // Deadlocks are still replayed.
 func (r *SQLResolver) resolveMachineService(ctx context.Context, in Request) (Target, error) {
+	release, err := r.sessions.enter(ctx, in.UserID+"\x00"+in.CLIClientSessionID)
+	if err != nil {
+		return Target{}, err
+	}
+	defer release()
 	var out Target
-	err := db.RetrySerializable(ctx, func() (e error) {
+	err = db.RetrySerializable(ctx, func() (e error) {
 		out, e = r.resolveMachineServiceAttempt(ctx, in)
 		return e
 	})

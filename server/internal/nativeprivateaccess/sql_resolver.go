@@ -15,6 +15,7 @@ type SQLResolver struct {
 	AdmissionLifetime time.Duration
 	database          *sql.DB
 	now               func() time.Time
+	sessions          sessionGate
 }
 
 func NewSQLResolver(database *db.DB) (*SQLResolver, error) {

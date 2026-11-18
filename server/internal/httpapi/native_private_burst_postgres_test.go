@@ -91,7 +91,7 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 	const burst = 300
 	errs := make([]error, burst)
 	var wg sync.WaitGroup
-	// The machine's own heartbeats rewrite the rows the grants read while they run.
+	// The machine's own heartbeats rewrite the rows the grants read while they run, and keep its snapshot live (30 s) however long the burst takes.
 	stop := make(chan struct{})
 	var writers sync.WaitGroup
 	for range 4 {
@@ -104,11 +104,20 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 					return
 				default:
 				}
-				store.SQL().ExecContext(ctx, `UPDATE paperboat.machine_service_snapshots SET expires_at=expires_at+interval '1 millisecond' WHERE machine_id=$1`, machine)
+				store.SQL().ExecContext(ctx, `UPDATE paperboat.machine_service_snapshots SET expires_at=now()+interval '30 seconds' WHERE machine_id=$1`, machine)
 				store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
+				time.Sleep(10 * time.Millisecond) // a real heartbeat is every ~15 s; a tight loop only adds host load
 			}
 		}()
 	}
+	// One session's burst must not use up the pool: an unrelated request made meanwhile still gets a connection.
+	bystander := make(chan error, 1)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		probe, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		bystander <- store.SQL().QueryRowContext(probe, `SELECT 1`).Scan(new(int))
+	}()
 	for i := range burst {
 		wg.Add(1)
 		go func() {
@@ -119,6 +128,9 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 	wg.Wait()
 	close(stop)
 	writers.Wait()
+	if e := <-bystander; e != nil {
+		t.Fatalf("an unrelated query during the burst: %v (the grants used up the pool)", e)
+	}
 	for i, e := range errs {
 		if e != nil {
 			t.Fatalf("grant %d of %d failed: %v", i, burst, e)
