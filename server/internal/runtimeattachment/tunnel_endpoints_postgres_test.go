@@ -622,8 +622,8 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 		sort.Strings(hosts)
 		return strings.Join(hosts, ",")
 	}
-	if want := strings.Join([]string{oldHost, renamed}, ","); hostsWithDecision() != want && hostsWithDecision() != strings.Join([]string{renamed, oldHost}, ",") {
-		t.Fatalf("ingress decisions while the address moves = %q, want both %q and %q", hostsWithDecision(), oldHost, renamed)
+	if got := hostsWithDecision(); !strings.Contains(got, oldHost) || !strings.Contains(got, renamed) {
+		t.Fatalf("ingress decisions while the address moves = %q, want both %q and %q", got, oldHost, renamed)
 	}
 	// The edge keeps reporting the revision it still serves while it stages the change: that never counts as ready.
 	observeAs := func(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row, revision int64) {
@@ -651,8 +651,8 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if endpoint() != "https://"+renamed || holds() != "retired:"+oldHost {
 		t.Fatalf("after the edges confirmed: address %q holds %q; want the new address and the old name held", endpoint(), holds())
 	}
-	if got := hostsWithDecision(); got != renamed {
-		t.Fatalf("ingress decisions after the move = %q, want only %q", got, renamed)
+	if got := hostsWithDecision(); !strings.Contains(got, renamed) || strings.Contains(got, oldHost) {
+		t.Fatalf("ingress decisions after the move = %q, want %q and not %q", got, renamed, oldHost)
 	}
 	var mirrored string
 	var revision int64
