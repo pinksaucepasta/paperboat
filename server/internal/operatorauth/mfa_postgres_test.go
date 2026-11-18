@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
 
 // The second factor end to end: enrol, a pending session is useless, a code works once, recovery codes work once,
@@ -162,5 +163,74 @@ func TestOperatorSecondFactorLifecycle(t *testing.T) {
 	store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE actor_user_id=$1 AND event_type IN ('operator.mfa.enrolled','operator.mfa.verified','operator.mfa.recovery_used')`, id).Scan(&locked)
 	if failed < maxFailures || locked != 4 {
 		t.Fatalf("audit: %d failed, %d successes", failed, locked)
+	}
+}
+
+// A guarded action checks an authenticator code at that moment: the code works once, within one step either side of
+// now, never twice and never from an earlier step, a recovery code is not accepted, and wrong codes count against
+// the operator's lockout.
+func TestCheckTOTPSpendsACurrentCodeOnce(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated remote PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if err = db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("op_check_%d", time.Now().UnixNano())
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,role,password_hash,status) VALUES($1,$1||'@example.test','admin','unused','active')`, id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_accounts WHERE id=$1`, id)
+	})
+	const secret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+	key := "test-encryption-key-for-operator-mfa"
+	sealed, err := secrets.Encrypt(key, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_totp(operator_id,secret_cipher,confirmed_at) VALUES($1,$2,now())`, id, sealed); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Now()
+	s := &Service{Store: store, SecretKey: key, Now: func() time.Time { return clock }}
+	code := func(at time.Time) string {
+		c, err := TOTPCode(secret, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if err = s.CheckTOTP(ctx, id, code(clock)); err != nil {
+		t.Fatalf("a current code: %v", err)
+	}
+	if err = s.CheckTOTP(ctx, id, code(clock)); !errors.Is(err, ErrMFAInvalid) {
+		t.Fatalf("the same code twice: %v", err)
+	}
+	if err = s.CheckTOTP(ctx, id, code(clock.Add(-totpPeriod*time.Second))); !errors.Is(err, ErrMFAInvalid) {
+		t.Fatalf("a code of an earlier step than the spent one: %v", err)
+	}
+	if err = s.CheckTOTP(ctx, id, code(clock.Add(totpPeriod*time.Second))); err != nil {
+		t.Fatalf("the next step's code is inside the tolerance: %v", err)
+	}
+	if err = s.CheckTOTP(ctx, id, code(clock.Add(10*totpPeriod*time.Second))); !errors.Is(err, ErrMFAInvalid) {
+		t.Fatalf("a code far in the future: %v", err)
+	}
+	if err = s.CheckTOTP(ctx, id, "abcd-efgh-ijkl-mnop"); !errors.Is(err, ErrMFAInvalid) {
+		t.Fatalf("a recovery-code shaped value: %v", err)
+	}
+	var failures int
+	if err = store.SQL().QueryRowContext(ctx, `SELECT failed_attempts FROM paperboat.operator_accounts WHERE id=$1`, id).Scan(&failures); err != nil || failures != 3 {
+		t.Fatalf("wrong codes must count against the lockout: %d %v", failures, err)
 	}
 }

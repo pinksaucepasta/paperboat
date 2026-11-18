@@ -10901,6 +10901,310 @@
           }
         }
       },
+      "BreakGlassCheck": {
+        "type": "object",
+        "required": [
+          "name",
+          "ok",
+          "detail"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "BreakGlassProvider": {
+        "type": "object",
+        "required": [
+          "name",
+          "what",
+          "where",
+          "link"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "what": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string",
+            "description": "Provider dashboard; empty when it has none."
+          }
+        }
+      },
+      "BreakGlassPreview": {
+        "type": "object",
+        "description": "Exactly what a break-glass run would do, with counts.",
+        "required": [
+          "accounts_with_ssh_ca",
+          "ssh_cas",
+          "accounts_mid_rotation",
+          "machines",
+          "machines_expected_to_pick_up",
+          "sessions_and_tokens_to_revoke",
+          "other_operator_sessions_to_revoke",
+          "sealed_rows_to_reseal",
+          "mint_active_key",
+          "mint_keys_published",
+          "mint_keys_to_withdraw",
+          "encryption_key_ids",
+          "session_key_ids",
+          "client_update_floor_now",
+          "checks",
+          "third_party_checklist"
+        ],
+        "properties": {
+          "accounts_with_ssh_ca": {
+            "type": "integer"
+          },
+          "ssh_cas": {
+            "type": "integer"
+          },
+          "accounts_mid_rotation": {
+            "type": "integer"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "machines_expected_to_pick_up": {
+            "type": "integer"
+          },
+          "sessions_and_tokens_to_revoke": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "other_operator_sessions_to_revoke": {
+            "type": "integer"
+          },
+          "sealed_rows_to_reseal": {
+            "type": "object",
+            "description": "table.column to rows still sealed under an older encryption key.",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "mint_active_key": {
+            "type": "string"
+          },
+          "mint_keys_published": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mint_keys_to_withdraw": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "encryption_key_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Fingerprint of a key of the ring, newest first."
+            }
+          },
+          "session_key_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "client_update_floor_now": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakGlassCheck"
+            }
+          },
+          "third_party_checklist": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakGlassProvider"
+            }
+          }
+        }
+      },
+      "BreakGlassStage": {
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "detail"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "publish",
+              "pickup",
+              "switch",
+              "revoke",
+              "reseal",
+              "floor",
+              "retire"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "skipped"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "detail": {
+            "type": "object",
+            "description": "Counts the stage recorded.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "BreakGlassMachine": {
+        "type": "object",
+        "required": [
+          "machine_id",
+          "platform",
+          "fetched_at",
+          "picked_up"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "picked_up": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BreakGlassPickup": {
+        "type": "object",
+        "description": "Online machines and whether each fetched its key set since it was published (not yet first).",
+        "required": [
+          "since",
+          "expected",
+          "picked_up",
+          "machines"
+        ],
+        "properties": {
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expected": {
+            "type": "integer"
+          },
+          "picked_up": {
+            "type": "integer"
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakGlassMachine"
+            }
+          }
+        }
+      },
+      "BreakGlassRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "operator_id",
+          "reason",
+          "preview",
+          "stages",
+          "started_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "done",
+              "cancelled"
+            ]
+          },
+          "operator_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "floor_version": {
+            "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/BreakGlassPreview"
+          },
+          "stages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BreakGlassStage"
+            }
+          },
+          "last_error": {
+            "type": "string",
+            "description": "The last step's failure; the worker retries it."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pickups": {
+            "type": "object",
+            "description": "Live pickup state of the stage that waits for machines (pickup, retire), by stage name.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BreakGlassPickup"
+            }
+          }
+        }
+      },
       "OperatorAccount": {
         "type": "object",
         "additionalProperties": false,
@@ -61647,6 +61951,331 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/breakglass/preview": {
+      "get": {
+        "summary": "Preview a break-glass run",
+        "description": "What a run would do, with counts, and whether the next keys are deployed (mint signing keys, session keys, the encryption key ring). Names no secret.",
+        "operationId": "get_v1_admin_breakglass_preview",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "responses": {
+          "200": {
+            "description": "The preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BreakGlassPreview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Break-glass unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/breakglass/runs": {
+      "post": {
+        "summary": "Start a break-glass run",
+        "description": "Rotates every key machines trust, signs every session and token out except the caller's, re-seals stored secrets and retires the old keys, in stages a worker runs and records. The confirmation is the phrase BREAK GLASS, a reason and a current authenticator code, checked now (not a recent sign-in). Refused until the next keys are deployed.",
+        "operationId": "post_v1_admin_breakglass_runs",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "description": "Opaque incident, ticket, or change reference; do not send prose or secrets.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "phrase",
+                  "reason",
+                  "totp_code"
+                ],
+                "properties": {
+                  "phrase": {
+                    "type": "string",
+                    "enum": [
+                      "BREAK GLASS"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 500
+                  },
+                  "totp_code": {
+                    "type": "string",
+                    "description": "A current six-digit authenticator code; spent by this request."
+                  },
+                  "floor_version": {
+                    "type": "string",
+                    "description": "Optional: also raise the client update floor to this version."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The run, started.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BreakGlassRun"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Wrong phrase, reason or floor version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wrong, expired or used authenticator code, or staff role refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A run is already in progress, or the next keys are not deployed yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Break-glass unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/breakglass/runs/{run_id}": {
+      "get": {
+        "summary": "Read a break-glass run",
+        "description": "The run with each stage's state and counts and, while it waits for machines, which machines hold the new keys.",
+        "operationId": "get_v1_admin_breakglass_runs_run_id",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "description": "A run id, or latest.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BreakGlassRun"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Break-glass unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/breakglass/runs/{run_id}/cancel": {
+      "post": {
+        "summary": "Cancel a break-glass run",
+        "description": "Stops the run. What was done stays done (every stage is idempotent); a new run finishes the rest.",
+        "operationId": "post_v1_admin_breakglass_runs_run_id_cancel",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "description": "A run id, or latest.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "description": "Opaque incident, ticket, or change reference; do not send prose or secrets.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled."
+          },
+          "409": {
+            "description": "The run is not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Break-glass unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
