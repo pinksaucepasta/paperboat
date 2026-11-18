@@ -329,10 +329,9 @@ type serviceFailure struct {
 func (e serviceFailure) Unwrap() error { return e.error }
 
 func main() {
-	reporter, err := reporting.New("paperboat-relay")
+	reporter, err := reporting.NewOrDisabled("paperboat-relay")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error reporting is off:", err)
 	}
 	ctx := reporting.WithSupportReference(context.Background(), reporting.Reference())
 	code := executeContext(ctx, reporter)

@@ -50,10 +50,9 @@ import (
 var version = "development"
 
 func main() {
-	reporter, err := reporting.New("paperboat-edge")
+	reporter, err := reporting.NewOrDisabled("paperboat-edge")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error reporting is off:", err)
 	}
 	ctx := reporting.WithSupportReference(context.Background(), reporting.Reference())
 	code := executeContext(ctx, reporter, os.Args[1:])

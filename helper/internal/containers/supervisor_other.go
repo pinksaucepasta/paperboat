@@ -8,7 +8,7 @@ import (
 	"io"
 )
 
-func Serve(context.Context, string, io.Writer, func(context.Context, string, error)) error {
+func Serve(context.Context, string, string, io.Writer, func(context.Context, string, error)) error {
 	return errors.New("self-hosted containers require supported Linux")
 }
 

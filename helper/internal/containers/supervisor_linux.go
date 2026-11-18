@@ -14,7 +14,7 @@ import (
 
 // Serve locks the container lifecycle before the shared claim supervisor can
 // launch anything, preventing a second invocation from replacing live children.
-func Serve(ctx context.Context, dir string, out io.Writer, observe func(context.Context, string, error)) (result error) {
+func Serve(ctx context.Context, dir, release string, out io.Writer, observe func(context.Context, string, error)) (result error) {
 	if !filepath.IsAbs(dir) {
 		return errors.New("installation directory must be absolute")
 	}
@@ -46,7 +46,7 @@ func Serve(ctx context.Context, dir string, out io.Writer, observe func(context.
 		defer cancel()
 		result = errors.Join(result, removeInstallationRuntimes(cleanup, dir, true))
 	}()
-	launcher := &Launcher{StateDir: dir, Images: images, ReadOnlyFiles: []string{config.ControlCA, config.PublicHTTPSCertFile, config.PublicHTTPSKeyFile}}
+	launcher := &Launcher{StateDir: dir, Release: release, Images: images, ReadOnlyFiles: []string{config.ControlCA, config.PublicHTTPSCertFile, config.PublicHTTPSKeyFile}}
 	return selfhost.RunWithLauncher(ctx, dir, launcher, out, observe)
 }
 

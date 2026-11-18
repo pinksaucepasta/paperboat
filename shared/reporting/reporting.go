@@ -72,6 +72,16 @@ type Reporter struct {
 	httpFailures          atomic.Uint64
 }
 
+// NewOrDisabled is New for long-running services: a Sentry configuration that cannot be used must never stop a
+// relay, edge or helper. It returns a reporter that reports nothing and the reason, for the caller to log as a warning.
+func NewOrDisabled(component string) (*Reporter, error) {
+	reporter, err := New(component)
+	if err != nil {
+		return &Reporter{component: component, localFault: writeLocalFault}, err
+	}
+	return reporter, nil
+}
+
 func New(component string) (*Reporter, error) {
 	if !components[component] {
 		return nil, errors.New("unsupported Sentry component")

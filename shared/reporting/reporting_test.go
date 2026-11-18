@@ -153,6 +153,27 @@ func TestExplicitEnableRequiresConfiguration(t *testing.T) {
 	}
 }
 
+// A relay, edge or helper whose Sentry configuration is unusable runs without reporting and says why; New still refuses.
+func TestNewOrDisabledNeverStopsAServiceForABadSentryConfiguration(t *testing.T) {
+	originalDSN, originalRelease := DefaultDSN, DefaultRelease
+	DefaultDSN, DefaultRelease = "", ""
+	t.Cleanup(func() { DefaultDSN, DefaultRelease = originalDSN, originalRelease })
+	t.Setenv("PAPERBOAT_SENTRY_ENABLED", "true")
+	t.Setenv("PAPERBOAT_SENTRY_DSN", "https://public@example.invalid/1")
+	t.Setenv("PAPERBOAT_SENTRY_RELEASE", "")
+	reporter, err := NewOrDisabled("paperboat-relay")
+	if err == nil || reporter == nil || reporter.enabled {
+		t.Fatalf("a DSN without a release: reporter=%v err=%v, want a disabled reporter and the reason", reporter, err)
+	}
+	reporter.Close()
+	t.Setenv("PAPERBOAT_SENTRY_RELEASE", "2026.11.18.1")
+	reporter, err = NewOrDisabled("paperboat-relay")
+	if err != nil || !reporter.enabled {
+		t.Fatalf("a usable configuration was not enabled: %v", err)
+	}
+	reporter.Close()
+}
+
 func TestEnabledConfigurationAcceptsQualifiedRelease(t *testing.T) {
 	t.Setenv("PAPERBOAT_SENTRY_ENABLED", "true")
 	t.Setenv("PAPERBOAT_SENTRY_DSN", "https://public@example.invalid/1")

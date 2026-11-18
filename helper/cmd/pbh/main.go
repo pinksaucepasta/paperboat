@@ -36,10 +36,9 @@ const defaultState = "/var/lib/paperboat-selfhost"
 const defaultBinaries = "/usr/local/lib/paperboat-selfhost"
 
 func main() {
-	reporter, err := reporting.New("paperboat-selfhost")
+	reporter, err := reporting.NewOrDisabled("paperboat-selfhost")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error reporting is off:", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	ctx = reporting.WithSupportReference(ctx, reporting.Reference())
@@ -309,7 +308,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 // name, because the service journal is the only place the operator will look.
 func serve(ctx context.Context, dir string, out io.Writer, observe func(context.Context, string, error)) error {
 	reapplyHostFirewall(ctx, execCommander, defaultHostPaths(dir), out)
-	err := containers.Serve(ctx, dir, out, observe)
+	err := containers.Serve(ctx, dir, version, out, observe)
 	if errors.Is(err, syscall.EADDRINUSE) {
 		if c, readErr := selfhost.ReadConfig(dir); readErr == nil {
 			return claimListenError(c.Listen, err)

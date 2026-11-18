@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -37,12 +39,16 @@ func (l *Launcher) startContainer(ctx context.Context, capability, image string)
 // SentryDSNFile is the optional owner-only file in the state directory that holds the Sentry DSN for the relay and edge
 // containers. The containers get its path (the state directory is mounted at the same path) and the enabling switch,
 // never the DSN itself: a value in `docker run -e` would show in the process list and `docker inspect`. The release
-// is the image build's (paperboat-<service>:<version>). Without the file the containers report nothing.
+// is pbh's own version: the reporting library refuses a DSN without one. Without the file the containers report nothing.
 const SentryDSNFile = "sentry-dsn"
 
 const maxSentryDSNBytes = 4096
 
-func sentryEnvironment(stateDir string) ([]string, error) {
+var sentryReleasePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
+
+// sentryEnvironment returns the docker flags that turn reporting on. A DSN file or release that cannot be used only
+// turns reporting off: the returned error says why and the caller warns; it must never keep a relay or edge from starting.
+func sentryEnvironment(stateDir, release string) ([]string, error) {
 	path := filepath.Join(stateDir, SentryDSNFile)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -51,15 +57,18 @@ func sentryEnvironment(stateDir string) ([]string, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > maxSentryDSNBytes || info.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("Sentry DSN file " + path + " must be a regular file of at most 4 KiB with owner-only permissions (mode 0600); fix or remove it")
 	}
-	return []string{"--env", "PAPERBOAT_SENTRY_ENABLED=true", "--env", "PAPERBOAT_SENTRY_DSN_FILE=" + path}, nil
+	if !sentryReleasePattern.MatchString(release) {
+		return nil, errors.New("pbh's own version is not a usable Sentry release")
+	}
+	return []string{"--env", "PAPERBOAT_SENTRY_ENABLED=true", "--env", "PAPERBOAT_SENTRY_DSN_FILE=" + path, "--env", "PAPERBOAT_SENTRY_RELEASE=" + release}, nil
 }
 
 func (l *Launcher) startContainerNamed(ctx context.Context, capability, image, name string) error {
 	owner := installationOwner(l.StateDir)
 	args := []string{"run", "-d", "--name", name, "--label", ownerLabel + "=" + owner, "--network", "host", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "NET_BIND_SERVICE", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m", "--mount", bindMount(l.StateDir, false)}
-	sentry, err := sentryEnvironment(l.StateDir)
-	if err != nil {
-		return err
+	sentry, warning := sentryEnvironment(l.StateDir, l.Release)
+	if warning != nil {
+		fmt.Fprintln(os.Stderr, "pbh: error reporting is off for the", capability, "container:", warning)
 	}
 	args = append(args, sentry...)
 	seen := map[string]bool{}

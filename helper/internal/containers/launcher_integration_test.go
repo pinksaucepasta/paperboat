@@ -88,7 +88,7 @@ func TestLiveDockerSupervisorReadinessAndBoundedDrain(t *testing.T) {
 		t.Fatal("read previous node epochs failed")
 	}
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, dir, io.Discard, nil) }()
+	go func() { done <- Serve(ctx, dir, "test", io.Discard, nil) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

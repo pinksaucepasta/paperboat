@@ -34,6 +34,7 @@ type Launcher struct {
 	StateDir      string
 	Images        Images
 	ReadOnlyFiles []string
+	Release       string // pbh's own version, passed with the Sentry DSN
 }
 
 func (l *Launcher) Validate(ctx context.Context, capability, componentDir string) error {
