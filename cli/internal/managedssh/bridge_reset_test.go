@@ -3,9 +3,11 @@ package managedssh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -470,8 +472,40 @@ func TestBridgeSSHOwnCloseInsideCloseWriteIsClean(t *testing.T) {
 		}
 	}()
 	bridgeSide, clientSide := tcpPair(t)
-	_ = clientSide.Close() // the client's EOF, so to_sshd reaches CloseWrite while sshd's end is still coming
+	defer clientSide.Close()
+	// The client half-closes (its EOF, so to_sshd reaches CloseWrite while sshd's end is still coming) and keeps
+	// reading, as `ssh host cmd < file` does. A client that closed outright would make the bridge's write of sshd's
+	// reply meet a reset, which Windows reports at once and which is a different, real failure (resetBridge "abort").
+	_ = clientSide.CloseWrite()
+	go func() { _, _ = io.Copy(io.Discard, clientSide) }()
 	if _, err := BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second); err != nil {
-		t.Fatalf("a session whose own close landed inside CloseWrite reported %v", err)
+		t.Fatalf("a session whose own close landed inside CloseWrite reported %v (%s)", err, bridgeErrorLeaves(err))
 	}
+}
+
+// bridgeErrorLeaves lists the types and texts under a bridge error: the public text hides the cause, so a failure on
+// a machine nobody can reach (a CI runner) would otherwise say only "managed SSH operation failed".
+func bridgeErrorLeaves(err error) string {
+	var leaves []string
+	var walk func(error, int)
+	walk = func(e error, depth int) {
+		if e == nil || depth > 8 {
+			return
+		}
+		switch wrapped := e.(type) {
+		case interface{ Unwrap() []error }:
+			for _, inner := range wrapped.Unwrap() {
+				walk(inner, depth+1)
+			}
+			return
+		case interface{ Unwrap() error }:
+			if wrapped.Unwrap() != nil {
+				walk(wrapped.Unwrap(), depth+1)
+				return
+			}
+		}
+		leaves = append(leaves, fmt.Sprintf("%T: %v", e, e))
+	}
+	walk(err, 0)
+	return strings.Join(leaves, "; ")
 }
