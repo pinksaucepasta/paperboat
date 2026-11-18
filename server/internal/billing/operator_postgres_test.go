@@ -106,8 +106,8 @@ func TestOperatorBillingCatalogAndPolicyPostgres(t *testing.T) {
 			t.Fatal("legacy unverified zero price presented as verified")
 		}
 	}
-	if !found {
-		t.Fatalf("product absent/unsafe: %+v", page)
+	if !found || page.Total < int64(len(page.Products)) {
+		t.Fatalf("product absent/unsafe or total below the page: %+v", page)
 	}
 	products, err := workspace.Products(ctx, ordinary, "", 200, 0)
 	if err != nil {

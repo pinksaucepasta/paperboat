@@ -11698,6 +11698,10 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Every product in the catalog."
+          },
           "products": {
             "type": "array",
             "items": {
@@ -11709,7 +11713,8 @@
           }
         },
         "required": [
-          "products"
+          "products",
+          "total"
         ]
       },
       "AdminBillingOperatorPolicy": {
@@ -19346,6 +19351,7 @@
         "required": [
           "operator_id",
           "email",
+          "total",
           "sessions"
         ],
         "properties": {
@@ -19353,6 +19359,13 @@
             "type": "string"
           },
           "email": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "The operator's live sessions."
+          },
+          "next_after": {
             "type": "string"
           },
           "sessions": {
@@ -42096,6 +42109,26 @@
             "schema": {
               "type": "string",
               "maxLength": 128
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
             }
           }
         ],

@@ -160,7 +160,8 @@ function route(req, url) {
   if (p === "/v1/admin/operators") return page(world.operators, "operators", world.operators.length, url)
   if (/^\/v1\/admin\/operators\/[^/]+\/sessions$/.test(p)) {
     const id = p.split("/")[4]
-    return { operator_id: id, email: world.operators.find((o) => o.id === id)?.email ?? "", sessions: world.operatorSessions[id] ?? [] }
+    const sessions = world.operatorSessions[id] ?? []
+    return { operator_id: id, email: world.operators.find((o) => o.id === id)?.email ?? "", total: sessions.length, sessions }
   }
   if (p.startsWith("/v1/admin/accounts/")) return accounts.find((a) => a.id === decodeURIComponent(p.split("/").pop())) ?? 404
   if (p === "/v1/admin/teams") return { teams: [{ id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, billing_workspace_id: "bw_t", billing_state: "active" }], total: 1 }

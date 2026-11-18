@@ -8,8 +8,9 @@ import { SelectField, TextField } from "@/components/fields"
 import { StatusBadge } from "@/components/filters"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { operatorAction, useApiQuery, type Data } from "@/lib/api"
+import { operatorAction, type Data } from "@/lib/api"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { useAllPages } from "@/lib/paging"
 
 export type OperatorRow = Data<"/v1/admin/operators">["operators"][number]
 type Result = Data<"/v1/admin/operators/{operator_id}/sessions">
@@ -42,11 +43,11 @@ export function CreateOperator() {
 
 /** The session picker: every live session of the operator, or all of them. */
 function SessionPicker({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
-  const sessions = useApiQuery<Result>(["operator-sessions", id], path(id, "sessions"))
+  const sessions = useAllPages<Result["sessions"][number]>(path(id, "sessions"), (page) => (page as unknown as Result).sessions)
   const time = useTimeFormat()
   if (sessions.isPending) return <Skeleton className="h-7 w-full" />
   if (sessions.isError) return <ErrorBlock what="the sessions" error={sessions.error} retry={() => void sessions.refetch()} />
-  const rows = sessions.data.sessions
+  const rows = [...sessions.data.items].sort((a, b) => b.created_at.localeCompare(a.created_at))
   return (
     <div className="flex flex-col gap-1.5" data-operator-sessions>
       <SelectField
@@ -56,6 +57,7 @@ function SessionPicker({ id, value, onChange }: { id: string; value: string; onC
         options={[["all", `All (${rows.length})`], ...rows.map((s): [string, string] => [s.id, `${s.mfa_pending ? "Signing in" : "Signed in"} · ${time.dateTime(s.created_at)}`])]}
       />
       {rows.length === 0 && <span className="text-xs text-muted-foreground">No live sessions.</span>}
+      {sessions.data.capped && <span className="text-xs text-muted-foreground">Showing the first 1000 sessions; All ends every one.</span>}
     </div>
   )
 }

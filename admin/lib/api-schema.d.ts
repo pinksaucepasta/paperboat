@@ -11896,6 +11896,8 @@ export interface components {
             bytes_amount: number | null;
         };
         AdminBillingProductPage: {
+            /** @description Every product in the catalog. */
+            total: number;
             products: components["schemas"]["AdminBillingProduct"][];
             next?: string;
         };
@@ -13977,6 +13979,9 @@ export interface components {
         OperatorSessions: {
             operator_id: string;
             email: string;
+            /** @description The operator's live sessions. */
+            total: number;
+            next_after?: string;
             sessions: components["schemas"]["OperatorSession"][];
         };
         OperatorAnalyticsPair: {
@@ -25921,7 +25926,10 @@ export interface operations {
     };
     get_v1_admin_operator_sessions: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string;
+                limit?: number;
+            };
             header?: never;
             path: {
                 operator_id: string;

@@ -35,7 +35,9 @@ type OperatorSession struct {
 type OperatorSessions struct {
 	OperatorID string            `json:"operator_id"`
 	Email      string            `json:"email"`
+	Total      int64             `json:"total"`
 	Sessions   []OperatorSession `json:"sessions"`
+	NextAfter  string            `json:"next_after,omitempty"`
 }
 
 func readOperators(ctx context.Context, tx *db.Tx, after string, limit int) (_ OperatorPage, resultErr error) {
@@ -67,13 +69,21 @@ func readOperators(ctx context.Context, tx *db.Tx, after string, limit int) (_ O
 	return p, rows.Err()
 }
 
-// readOperatorSessions lists the operator's live sessions (at most 100; an operator has a handful).
-func readOperatorSessions(ctx context.Context, tx *db.Tx, id string) (_ OperatorSessions, resultErr error) {
+// readOperatorSessions pages the operator's live sessions by id (the hex token hash), after the id `after`.
+func readOperatorSessions(ctx context.Context, tx *db.Tx, id, after string, limit int) (_ OperatorSessions, resultErr error) {
 	out := OperatorSessions{OperatorID: id, Sessions: []OperatorSession{}}
+	cursor, err := hex.DecodeString(after)
+	if err != nil {
+		return out, ErrInvalid
+	}
 	if err := tx.QueryRow(ctx, `SELECT email FROM paperboat.operator_accounts WHERE id=$1`, id).Scan(&out.Email); err != nil {
 		return out, scanErr(err)
 	}
-	rows, err := tx.Query(ctx, `SELECT token_hash,created_at,expires_at,mfa_pending FROM paperboat.operator_sessions WHERE operator_id=$1 AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC LIMIT 100`, id)
+	const live = `operator_id=$1 AND revoked_at IS NULL AND expires_at>now()`
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM paperboat.operator_sessions WHERE `+live, id).Scan(&out.Total); err != nil {
+		return out, err
+	}
+	rows, err := tx.Query(ctx, `SELECT token_hash,created_at,expires_at,mfa_pending FROM paperboat.operator_sessions WHERE `+live+` AND token_hash>$2 ORDER BY token_hash LIMIT $3`, id, cursor, limit+1)
 	if err != nil {
 		return out, err
 	}
@@ -85,6 +95,10 @@ func readOperatorSessions(ctx context.Context, tx *db.Tx, id string) (_ Operator
 			return out, err
 		}
 		v.ID = hex.EncodeToString(token)
+		if len(out.Sessions) == limit {
+			out.NextAfter = out.Sessions[limit-1].ID
+			break
+		}
 		out.Sessions = append(out.Sessions, v)
 	}
 	return out, rows.Err()

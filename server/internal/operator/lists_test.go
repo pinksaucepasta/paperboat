@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"fmt"
 	"context"
 	"errors"
 	"net/url"
@@ -147,6 +148,25 @@ func TestAdminListsSearchTotalsAndAuditSearch(t *testing.T) {
 	}
 	if _, err := service.Read(ctx, actor, "audit_events", "", "not-a-number", 5); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad cursor err=%v", err)
+	}
+
+	// An operator's live sessions are paged by id; revoked and expired ones are not counted.
+	for i, state := range []string{"live", "live", "live", "revoked", "expired"} {
+		exec(`INSERT INTO operator_sessions(token_hash,operator_id,csrf_hash,expires_at,revoked_at) VALUES(decode(repeat($1,32),'hex'),$2,decode(repeat('00',32),'hex'),CASE WHEN $3='expired' THEN now()-interval '1 hour' ELSE now()+interval '1 hour' END,CASE WHEN $3='revoked' THEN now() END)`, fmt.Sprintf("%02x", i+1), actorID, state)
+	}
+	sessions, err := service.Read(ctx, actor, "operator_sessions", actorID, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sessions.(OperatorSessions); got.Total != 3 || len(got.Sessions) != 2 || got.Sessions[0].ID != strings.Repeat("01", 32) || got.NextAfter != strings.Repeat("02", 32) {
+		t.Fatalf("first session page = %+v", got)
+	}
+	rest, err := service.Read(ctx, actor, "operator_sessions", actorID, strings.Repeat("02", 32), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rest.(OperatorSessions); len(got.Sessions) != 1 || got.Sessions[0].ID != strings.Repeat("03", 32) || got.NextAfter != "" {
+		t.Fatalf("second session page = %+v", got)
 	}
 
 	// A team's members are paged with the team: a total, a page and the cursor to the next one.

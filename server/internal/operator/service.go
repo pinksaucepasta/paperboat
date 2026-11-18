@@ -234,7 +234,7 @@ func (s *Service) Read(ctx context.Context, actor auth.User, kind, target, after
 	if limit < 1 || limit > 100 || len(after) > 128 || (after != "" && !safeID(after)) {
 		return nil, ErrInvalid
 	}
-	if !pageKind(kind) && kind != "team" && after != "" {
+	if !pageKind(kind) && kind != "team" && kind != "operator_sessions" && after != "" {
 		return nil, ErrInvalid
 	}
 	if len(target) > 1024 || (!pageKind(kind) && kind != "overview" && target == "") || (!pageKind(kind) && kind != "overview" && kind != "infrastructure" && kind != "audit" && (len(target) > 128 || !safeID(target))) {
@@ -364,7 +364,7 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 	case "operators":
 		return readOperators(ctx, tx, after, limit)
 	case "operator_sessions":
-		return readOperatorSessions(ctx, tx, target)
+		return readOperatorSessions(ctx, tx, target, after, limit)
 	case "tunnel_status":
 		return readTunnelStatus(ctx, tx, target)
 	default:

@@ -111,6 +111,7 @@ type Product struct {
 }
 
 type ProductPage struct {
+	Total    int64     `json:"total"`
 	Products []Product `json:"products"`
 	Next     string    `json:"next,omitempty"`
 }
@@ -148,6 +149,9 @@ func (s *OperatorService) ListProducts(ctx context.Context, actorID, after strin
 			return err
 		}
 		if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorUser, EventType: "billing.operator.products_read", ResourceType: "billing_configuration", ResourceID: "products", Metadata: map[string]any{"after": after, "limit": limit}}); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM billing_products WHERE provider='stripe'`).Scan(&out.Total); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT code,catalog_ref,catalog_type,provider_price_id,provider_product_id,verified_unit_amount,verified_currency,verified_interval,active,version FROM billing_products WHERE provider='stripe' AND code>$1 ORDER BY code LIMIT $2`, after, limit+1)
