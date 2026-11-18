@@ -1,6 +1,7 @@
 import catalogJson from "../config/components.json" with { type: "json" }
 import { decideComponent, decideUnit, WINDOW_MS, type Evidence, type Sample, type Series, type State } from "./decide.ts"
 import type { Catalog, Incident, Maintenance, Snapshot, UptimeDay } from "./types.ts"
+import { uptimePercent } from "./uptime.ts"
 
 export const catalog = catalogJson as Catalog
 const UNITS = new Map(catalog.components.flatMap((c) => c.units.map((u) => [u.id, { c, u }] as const)))
@@ -82,22 +83,6 @@ async function inMaintenance(db: D1Database, component: string, now: number) {
   const rows = (await db.prepare("SELECT components FROM maintenance WHERE starts <= ? AND ends > ?").bind(now, now).all<{ components: string }>()).results
   return rows.some((r) => (JSON.parse(r.components) as string[]).includes(component))
 }
-
-/** Measured minutes only: delayed minutes are not in the denominator, degraded counts 30% as down (the footnote on the page says so). */
-export const DEGRADED_WEIGHT = 0.3
-export const uptimePercent = (days: UptimeDay[]): number | null => {
-  const total = days.reduce((n, d) => n + d.up + d.degraded + d.down, 0)
-  if (!total) return null
-  const lost = days.reduce((n, d) => n + d.down + DEGRADED_WEIGHT * d.degraded, 0)
-  return Math.round(((total - lost) / total) * 10000) / 100
-}
-
-export const uptimeBar = (d: UptimeDay): "up" | "degraded" | "down" | "unknown" | "none" =>
-  d.up + d.degraded + d.down + d.delayed === 0 ? "none"
-  : d.down >= 10 ? "down"
-  : d.down > 0 || d.degraded >= 10 ? "degraded"
-  : d.delayed >= 10 && d.delayed >= d.up ? "unknown"
-  : "up"
 
 /**
  * The snapshot the page reads. `at` is the last time units were decided, never the time of this rebuild: an admin write
