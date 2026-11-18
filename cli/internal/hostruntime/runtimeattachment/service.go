@@ -372,6 +372,9 @@ func (s *Service) run(ctx context.Context) {
 	lives := map[string]*live{}
 	retries := map[string]retryState{}
 	publisherKey := ""
+	// noTerminalEdge: the server named no edge that may carry terminals (a self-hosted-only workspace with no managed
+	// edge ready), so no carrier publishes and none is expected to.
+	noTerminalEdge := false
 	var lastFailure *failureClass
 	var pacer roundPacer
 	var refusedSince time.Time
@@ -405,7 +408,7 @@ func (s *Service) run(ctx context.Context) {
 			pacer.wake()
 		default:
 		}
-		if s.leaving.Load() || !pacer.due(time.Now(), carriersReady(lives, publisherKey)) {
+		if s.leaving.Load() || !pacer.due(time.Now(), carriersReady(lives, publisherKey, noTerminalEdge)) {
 			return nil
 		}
 		checkCtx, cancelCheck := context.WithTimeout(ctx, attachmentCheckTimeout)
@@ -458,6 +461,7 @@ func (s *Service) run(ctx context.Context) {
 			s.hubsMu.Unlock()
 			s.answeredOnce.Do(func() { close(s.answered) })
 			ordered := response.carriers()
+			noTerminalEdge = response.TerminalEdgeNodeIDs != nil && len(response.TerminalEdgeNodeIDs) == 0
 			wanted := make(map[string]bool, len(ordered))
 			for _, admission := range ordered {
 				key := carrierKey(admission)
@@ -575,7 +579,7 @@ func (s *Service) run(ctx context.Context) {
 		case err == nil:
 			refusedSince = time.Time{}
 		}
-		pacer.finished(time.Now(), err == nil && wantedCount > 0 && len(lives) == wantedCount && carriersReady(lives, publisherKey), time.Now().Add(serverclock.Until(expiresAt)))
+		pacer.finished(time.Now(), err == nil && wantedCount > 0 && len(lives) == wantedCount && carriersReady(lives, publisherKey, noTerminalEdge), time.Now().Add(serverclock.Until(expiresAt)))
 		if err != nil {
 			s.lastProbe = time.Time{}
 			lastFailure = s.observeFailure(ctx, err, lastFailure)
@@ -591,9 +595,10 @@ func (s *Service) run(ctx context.Context) {
 
 // carriersReady reports whether every connected carrier is ready and one of them publishes from a
 // carrier its edge is not draining (a goaway with no replacement yet runs a round, which moves
-// the publisher and the active edge to the other carrier).
-func carriersReady(lives map[string]*live, publisherKey string) bool {
-	if len(lives) == 0 || publisherKey == "" || lives[publisherKey] == nil || lives[publisherKey].edgeDraining() {
+// the publisher and the active edge to the other carrier). With no terminal-capable edge there is no publisher to
+// wait for: terminals are unavailable, everything else is healthy.
+func carriersReady(lives map[string]*live, publisherKey string, noTerminalEdge bool) bool {
+	if len(lives) == 0 || !noTerminalEdge && (publisherKey == "" || lives[publisherKey] == nil || lives[publisherKey].edgeDraining()) {
 		return false
 	}
 	for _, item := range lives {
