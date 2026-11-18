@@ -7,13 +7,12 @@ ALTER TABLE paperboat.client_update_policy ADD COLUMN component text NOT NULL DE
 ALTER TABLE paperboat.client_update_policy DROP CONSTRAINT client_update_policy_singleton_check;
 ALTER TABLE paperboat.client_update_policy DROP CONSTRAINT client_update_policy_pkey;
 ALTER TABLE paperboat.client_update_policy ADD PRIMARY KEY (component);
-ALTER TABLE paperboat.client_update_policy ADD CONSTRAINT client_update_policy_singleton_is_pb CHECK (singleton = (component = 'pb'));
+ALTER TABLE paperboat.client_update_policy ADD CONSTRAINT client_update_policy_singleton_is_pb CHECK (singleton = (component = 'pb')) NOT VALID;
 
 -- +goose Down
 SET LOCAL lock_timeout = '5s';
-DELETE FROM paperboat.client_update_policy WHERE component <> 'pb';
 ALTER TABLE paperboat.client_update_policy DROP CONSTRAINT client_update_policy_singleton_is_pb;
 ALTER TABLE paperboat.client_update_policy DROP CONSTRAINT client_update_policy_pkey;
 ALTER TABLE paperboat.client_update_policy ADD PRIMARY KEY (singleton);
-ALTER TABLE paperboat.client_update_policy ADD CONSTRAINT client_update_policy_singleton_check CHECK (singleton);
+ALTER TABLE paperboat.client_update_policy ADD CONSTRAINT client_update_policy_singleton_check CHECK (singleton) NOT VALID;
 ALTER TABLE paperboat.client_update_policy DROP COLUMN component;
