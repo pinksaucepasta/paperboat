@@ -104,7 +104,7 @@ func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
+		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, HomeRelay: body.HomeRelay, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return

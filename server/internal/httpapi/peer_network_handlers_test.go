@@ -72,6 +72,15 @@ func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
 	if w.Code != http.StatusOK || stub.config.UserID != "account_2" || stub.config.EndpointID != "cli_2" || len(stub.config.AdmittedScopes) != 1 || stub.config.AdmittedScopes[0].ResourceKind != "machine_access" || stub.config.AdmittedScopes[0].ResourceID != "access_live" {
 		t.Fatal("CLI principal or admitted-scope request binding lost")
 	}
+	// The CLI route forwards home_relay like the machine route, so both bound it the same way (the store keeps a value
+	// only for a machine's row).
+	home := httptest.NewRequest(http.MethodPost, "/v1/peer-network/config", bytes.NewReader([]byte(`{"operation_id":"operation_123","home_relay":"relay_1"}`)))
+	home = home.WithContext(context.WithValue(home.Context(), authContextKey{}, principal{User: auth.User{ID: "account_2"}, Client: &auth.ClientPrincipal{SessionID: "cli_2"}}))
+	w = httptest.NewRecorder()
+	peerNetworkConfig(stub).ServeHTTP(w, home)
+	if w.Code != http.StatusOK || stub.config.HomeRelay != "relay_1" {
+		t.Fatalf("the CLI route dropped home_relay: status=%d config=%+v", w.Code, stub.config)
+	}
 	// Admitted certificates are gone (no client sent them, and the claim they produced was refused by clients and
 	// relays); a request naming them is invalid like any unknown field.
 	stale := httptest.NewRequest(http.MethodPost, "/v1/peer-network/config", bytes.NewReader([]byte(`{"operation_id":"operation_123","admitted_certificates":[]}`)))
