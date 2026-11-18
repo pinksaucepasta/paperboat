@@ -9187,6 +9187,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Customer notices
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only. Customer notices (price increase, terms change, new subprocessor, breach) already sent by email, newest first.
+         */
+        get: operations["get_v1_admin_notices"];
+        put?: never;
+        /**
+         * Send a customer notice
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only. Emails a legally promised notice to an audience (all, paid, a plan, a team or one user). With dry_run it renders the mail and counts the recipients and sends nothing; without it the mails are queued once per recipient and the notice is recorded. A price increase, a terms change and a new subprocessor need an effective date at least 30 days away (a terms change may be sooner with urgent_reason); a breach notice reports whether it goes out more than 48 hours after aware_at.
+         */
+        post: operations["post_v1_admin_notices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/announcements": {
         parameters: {
             query?: never;
@@ -14782,6 +14806,66 @@ export interface components {
             reason_code?: "tunnel_address_not_ready" | "subdomain_taken" | "address_blocked" | "tunnel_paused" | "tunnel_deleted";
             /** Format: date-time */
             updated_at: string;
+        };
+        OperatorNoticeInput: {
+            /** @enum {string} */
+            kind: "price_increase" | "terms_change" | "subprocessor" | "breach";
+            /** @enum {string} */
+            audience_kind: "all" | "paid" | "plan" | "team" | "user";
+            /** @description A plan code (or free), a team ID or a user ID; empty for all and paid. */
+            audience_value?: string;
+            dry_run?: boolean;
+            /** @description YYYY-MM-DD the change takes effect (price_increase, terms_change, subprocessor). */
+            effective?: string;
+            detail?: string;
+            /**
+             * Format: uri
+             * @description https address of the new text; required for terms_change.
+             */
+            link?: string;
+            /** @description Why a terms change takes effect in under 30 days (the law or a security problem). */
+            urgent_reason?: string;
+            name?: string;
+            purpose?: string;
+            location?: string;
+            /**
+             * Format: date-time
+             * @description When we became aware of the breach (breach).
+             */
+            aware_at?: string;
+            what?: string;
+            data?: string;
+            actions?: string;
+            /**
+             * Format: email
+             * @description Who to contact (subprocessor, breach).
+             */
+            contact?: string;
+        };
+        OperatorNotice: {
+            id?: string;
+            kind: string;
+            audience_kind: string;
+            audience_value?: string;
+            subject: string;
+            html: string;
+            recipients: number;
+            /** @description A breach notice sent more than 48 hours after the operator became aware. */
+            late?: boolean;
+            /**
+             * Format: date-time
+             * @description The 48-hour breach deadline.
+             */
+            deadline?: string;
+            created_by?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            queued_at?: string;
+        };
+        OperatorNoticePage: {
+            notices: components["schemas"]["OperatorNotice"][];
+            next_after?: string;
         };
         /** @description Title and text are plain text: clients show them as text, never as markup. */
         OperatorAnnouncementInput: {
@@ -36953,6 +37037,142 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    get_v1_admin_notices: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorNoticePage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_notices: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorNoticeInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorNotice"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_v1_admin_announcements: {
