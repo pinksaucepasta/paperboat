@@ -237,6 +237,24 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 			_ = d.config.Sessions.DetachAttachment(request.SessionID, response.AttachmentID, response.AttachmentLease)
 		}
 	}()
+	// A browser joins the shared output first: its producer attaches (and starts queuing) before the checkpoint
+	// boundary is taken, so output published while the carrier stream opens is still sealed and the browser skips
+	// the overlap. Joining after the checkpoint left a blind window (boundary, attach] that forced a resync.
+	var updates <-chan browserbroadcastserver.Epoch
+	if authorization.BrowserTerminal {
+		if d.config.BrowserOutput == nil {
+			return ErrCapabilityUnavailable
+		}
+		var err error
+		if updates, err = d.config.BrowserOutput.Join(ctx, request.SessionID, generation, response.AttachmentID); err != nil {
+			return err
+		}
+		defer func() {
+			if !ready {
+				d.config.BrowserOutput.Leave(request.SessionID, response.AttachmentID)
+			}
+		}()
+	}
 	checkpoint, boundary, err := d.config.Sessions.BrowserScreenAttachment(request.SessionID, response.AttachmentID, authorization.AccountID, authorization.ClientID, generation)
 	if err != nil {
 		return err
@@ -245,13 +263,6 @@ func (d *Dispatcher) prepareTerminalCheckpoint(ctx context.Context, authorizatio
 	stream.checkpointSequence = boundary
 	stream.checkpointSent = false
 	if authorization.BrowserTerminal {
-		if d.config.BrowserOutput == nil {
-			return ErrCapabilityUnavailable
-		}
-		updates, err := d.config.BrowserOutput.Join(ctx, request.SessionID, generation, response.AttachmentID)
-		if err != nil {
-			return err
-		}
 		stream.broadcast = d.config.BrowserOutput
 		stream.keyUpdates = updates
 		requests := make(chan struct{}, 1)
