@@ -39,6 +39,7 @@ const (
 	commandRejectTeamReserved
 	commandRejectTeamRequestInvalid
 	commandRejectTeamSeatRequired
+	commandRejectTermsNotAccepted
 	commandRejectDaemonAccount
 	commandRejectInspector
 	commandRejectInsufficientSpace
@@ -95,6 +96,8 @@ func (e commandRejection) Error() string {
 		return "The server rejected the team request. Use an available team name, at least one seat and a month or year interval."
 	case commandRejectTeamSeatRequired:
 		return "No free seat: every purchased seat is used or held by a pending invitation. Cancel a pending invitation (`pb team cancel-invite`) or add a seat in the console, then try again."
+	case commandRejectTermsNotAccepted:
+		return "Paying needs your agreement to the terms: \"" + e.detail + "\" To agree and continue, run the command again with --accept-terms."
 	case commandRejectDaemonAccount:
 		var mismatch daemoncmd.ErrDaemonAccountMismatch
 		if errors.As(e.cause, &mismatch) {

@@ -222,6 +222,7 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 			InvitationID       string `json:"invitation_id"`
 			Cursor             string `json:"cursor"`
 			Confirmation       string `json:"confirmation"`
+			AcceptTerms        bool   `json:"accept_terms"`
 		}
 		if err := decodeDesktop(in.Payload, &p); err != nil {
 			return nil, err
@@ -233,7 +234,7 @@ func handleDesktop(c *cobra.Command, in desktopRequest) (any, error) {
 		case "team.get":
 			return client.GetTeam(ctx, p.TeamID)
 		case "team.create":
-			return startPaidTeamCreate(ctx, client, p.TeamID, 1, "month")
+			return startPaidTeamCreate(ctx, client, p.TeamID, 1, "month", p.AcceptTerms)
 		case "team.invite":
 			return client.InviteTeamMember(ctx, p.TeamID, api.TeamInviteRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: p.ExpectedGeneration, AccountID: p.AccountID})
 		case "team.mutate":

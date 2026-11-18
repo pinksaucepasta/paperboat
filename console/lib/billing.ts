@@ -119,7 +119,7 @@ export const billingProductsQuery = (workspace: Workspace | undefined) =>
  * Starts Stripe Checkout and returns its URL. `key` is the operation's idempotency key: a retry
  * after an unknown provider outcome must send the same key so it cannot buy twice.
  */
-export async function startCheckout(workspace: Workspace, product: BillingProduct, key: string) {
+export async function startCheckout(workspace: Workspace, product: BillingProduct, key: string, termsVersion: string) {
   const back = `${window.location.origin}/billing`
   const { url } = await api<{ url: string }>(`${billingPath(workspace)}/checkout`, {
     method: "POST",
@@ -129,6 +129,7 @@ export async function startCheckout(workspace: Workspace, product: BillingProduc
       product_version: product.version,
       success_url: `${back}?checkout=done`,
       cancel_url: back,
+      terms_version: termsVersion,
     }),
   })
   return url
@@ -177,7 +178,7 @@ export const setSeats = (workspace: Workspace, quantity: number) =>
 export const topupDefaults = { unitBytes: 100e9, maxQuantity: 100 } as const
 
 /** Checkout for `quantity` units of the top-up product (each `unit_bytes`, priced `unit_amount`). */
-export async function buyTopup(workspace: Workspace, product: BillingProduct, quantity: number, key: string) {
+export async function buyTopup(workspace: Workspace, product: BillingProduct, quantity: number, key: string, termsVersion: string) {
   const back = `${window.location.origin}/billing`
   const { url } = (await post(
     `${billingPath(workspace)}/topups`,
@@ -187,6 +188,7 @@ export async function buyTopup(workspace: Workspace, product: BillingProduct, qu
       quantity,
       success_url: `${back}?checkout=done`,
       cancel_url: back,
+      terms_version: termsVersion,
     },
     key,
   )) as { url: string }

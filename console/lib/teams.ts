@@ -134,7 +134,7 @@ export function createTeam(teamId: string) {
  * Creating a team is paying first (NOTES.md "Teams"): the server returns Checkout for the seats,
  * and the team exists once payment succeeds. Used when `billingLive.paidTeamCreate` is on.
  */
-export async function createPaidTeam(teamId: string, seats: number, interval: "month" | "year", key: string) {
+export async function createPaidTeam(teamId: string, seats: number, interval: "month" | "year", key: string, termsVersion: string) {
   const back = `${window.location.origin}/team`
   // The server wants the operation ID and the Idempotency-Key to match; a retry of the same form
   // reuses them, so an unknown outcome cannot create two orders.
@@ -148,6 +148,7 @@ export async function createPaidTeam(teamId: string, seats: number, interval: "m
       interval,
       success_url: `${back}?created=${encodeURIComponent(teamId)}`,
       cancel_url: back,
+      terms_version: termsVersion,
     }),
   })
   return url

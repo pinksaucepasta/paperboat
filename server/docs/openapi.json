@@ -2625,7 +2625,8 @@
           "preview_base_domain",
           "tunnel_base_domain",
           "runtime_base_domain",
-          "control_regions"
+          "control_regions",
+          "purchase_consent"
         ],
         "properties": {
           "version": {
@@ -2643,6 +2644,23 @@
             "type": "string",
             "format": "email",
             "description": "Where abuse is reported by email; absent when the server publishes none."
+          },
+          "purchase_consent": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version",
+              "text"
+            ],
+            "description": "The no-refund wording a buyer accepts before any purchase, and its version; clients show text and send version as terms_version.",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
           },
           "issuer": {
             "type": "string",
@@ -9211,6 +9229,10 @@
           "cancel_url": {
             "type": "string",
             "format": "uri"
+          },
+          "terms_version": {
+            "type": "string",
+            "description": "Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required."
           }
         },
         "required": [
@@ -9219,7 +9241,8 @@
           "seats",
           "interval",
           "success_url",
-          "cancel_url"
+          "cancel_url",
+          "terms_version"
         ]
       },
       "TeamMutationRequest": {
@@ -16255,7 +16278,8 @@
           "product_version",
           "quantity",
           "success_url",
-          "cancel_url"
+          "cancel_url",
+          "terms_version"
         ],
         "properties": {
           "product_code": {
@@ -16279,6 +16303,10 @@
           "cancel_url": {
             "type": "string",
             "format": "uri"
+          },
+          "terms_version": {
+            "type": "string",
+            "description": "Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required."
           }
         }
       },
@@ -40783,7 +40811,8 @@
                   "product_code",
                   "success_url",
                   "cancel_url",
-                  "product_version"
+                  "product_version",
+                  "terms_version"
                 ],
                 "properties": {
                   "product_code": {
@@ -40799,6 +40828,10 @@
                     "type": "integer",
                     "minimum": 1,
                     "description": "Reviewed price version; stale requests return409 before provider call."
+                  },
+                  "terms_version": {
+                    "type": "string",
+                    "description": "Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required."
                   }
                 }
               }
@@ -41117,7 +41150,8 @@
                   "product_code",
                   "success_url",
                   "cancel_url",
-                  "product_version"
+                  "product_version",
+                  "terms_version"
                 ],
                 "properties": {
                   "product_code": {
@@ -41133,6 +41167,10 @@
                     "type": "integer",
                     "minimum": 1,
                     "description": "Reviewed price version; stale requests return409 before provider call."
+                  },
+                  "terms_version": {
+                    "type": "string",
+                    "description": "Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required."
                   }
                 }
               }
