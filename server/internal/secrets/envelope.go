@@ -22,7 +22,8 @@ import (
 // is no longer configured.
 var ErrDecrypt = errors.New("secret decryption failed")
 
-// keySeparator splits a configured key into its ring. Keys never contain it (config validation).
+// keySeparator splits a configured key into its ring. ValidRing refuses a ring with an empty key, so a stray comma
+// cannot make the newest key the empty one.
 const keySeparator = ","
 
 // stamp marks a ciphertext that carries the id of the key that sealed it: stamp, 8-byte key id, nonce, sealed.
@@ -47,6 +48,17 @@ func KeyIDs(key string) []string {
 		ids[index] = KeyID(one)
 	}
 	return ids
+}
+
+// ValidRing says every key of a configured ring is non-empty. A key that itself contains the separator is
+// indistinguishable from two keys: keys are random strings, not text.
+func ValidRing(key string) bool {
+	for _, one := range Split(key) {
+		if one == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Split returns each key of a configured key, for validation.
