@@ -8,7 +8,7 @@ import { getPlatformProxy } from "wrangler"
 import { handle } from "../lib/api.ts"
 import { tick } from "../lib/tick.ts"
 import { sign } from "../lib/probe.ts"
-import { buildSnapshot, catalog, evaluate, minute, readSnapshot, saveReport, type Reported } from "../lib/store.ts"
+import { admitProbe, buildSnapshot, catalog, evaluate, minute, readSnapshot, saveReport, type Reported } from "../lib/store.ts"
 import { uptimeBar, uptimePercent } from "../lib/uptime.ts"
 import type { Env } from "../lib/types.ts"
 
@@ -223,4 +223,92 @@ test("subscribe: the daily quota is spent only by a confirmation mail that was s
     assert.equal((await post("two@example.test")).status, 200)
     assert.equal(await quota(), 1)
   } finally { globalThis.fetch = realFetch }
+})
+
+test("a snapshot build that started earlier never overwrites one that started later", async () => {
+  const t = Date.now()
+  const r = await admin("/api/admin/incidents", { title: "Newer", body: "Newest incident.", components: ["api"] })
+  assert.equal(r.status, 201)
+  await buildSnapshot(db, t, t + 10_000) // a newer build, with the incident
+  await db.prepare("DELETE FROM incidents WHERE title = 'Newer'").run()
+  await buildSnapshot(db, t, t + 5_000) // an older build that read after the delete must not win
+  assert.ok((await readSnapshot(db))!.public.incidents.some((i) => i.title === "Newer"))
+  await buildSnapshot(db, t, t + 20_000) // a later one replaces it
+  assert.ok(!(await readSnapshot(db))!.public.incidents.some((i) => i.title === "Newer"))
+})
+
+test("an unreadable report row is skipped and the decision still runs", async () => {
+  const t = Date.UTC(2026, 10, 22, 6, 0, 0)
+  await db.prepare("INSERT INTO reports (vantage, bucket, ts, probe_ts, net_ok, build, results) VALUES ('oracle', ?, ?, 1, 1, 'x', '{not json')").bind(minute(t), t).run()
+  await evaluate(db, t + 30_000)
+  assert.equal(Number((await db.prepare("SELECT v FROM kv WHERE k = 'evaluated_at'").first<{ v: string }>())!.v), t + 30_000)
+})
+
+test("replay: an exact copy is refused, but a clock that ran ahead and came back does not lock the probe out", async () => {
+  const t = Date.UTC(2026, 10, 22, 7, 0, 0)
+  assert.equal(await admitProbe(db, "oracle", t, t + 90_000), "ok") // the probe's clock is 90 s fast
+  await saveReport(db, "oracle", t, t + 90_000, true, "x", {})
+  assert.equal(await admitProbe(db, "oracle", t + 30_000, t + 90_000), "replayed") // the same signed body again
+  assert.equal(await admitProbe(db, "oracle", t + 60_000, t + 60_000), "ok") // corrected clock: older signed time, new data
+})
+
+test("two evaluations of the same minute at once count the uptime once", async () => {
+  const t = Date.UTC(2026, 10, 23, 8, 0, 10)
+  await Promise.all([evaluate(db, t), evaluate(db, t + 5000)])
+  const n = (await db.prepare("SELECT SUM(up + degraded + down + delayed) AS n FROM uptime_day WHERE day = '2026-11-23' AND component = 'api'").first<{ n: number }>())!.n
+  assert.equal(n, 1)
+})
+
+test("a unit never seen before is not green on its first healthy sample", async () => {
+  await db.prepare("DELETE FROM unit_state WHERE unit = 'api_read'").run()
+  const t = Date.UTC(2026, 10, 24, 9, 0, 0)
+  for (const v of ["oracle", "anvit"]) await saveReport(db, v, t + 5_000, t + 5_000, true, "t", report(v))
+  await evaluate(db, t + 10_000)
+  assert.equal((await db.prepare("SELECT state FROM unit_state WHERE unit = 'api_read'").first<{ state: string }>())!.state, "delayed")
+})
+
+test("subscribe: a failed send does not make the retry look like 'already sent'", async () => {
+  const mail = { ...env(), MAIL_ENDPOINT: "https://mail.example.test/emails", MAIL_KEY: "k", MAIL_FROM: "S <s@example.test>", PUBLIC_ORIGIN: "https://status.test" } as Env
+  const post = () => call(new Request("https://status.test/api/subscribe", { method: "POST", body: JSON.stringify({ email: "retry@example.test" }) }), mail)
+  const real = globalThis.fetch
+  const sent: string[] = []
+  try {
+    globalThis.fetch = (async () => new Response("down", { status: 503 })) as typeof fetch
+    assert.equal((await post()).status, 502)
+    globalThis.fetch = (async (_u: unknown, init: RequestInit) => { sent.push(String(init.body)); return new Response("{}") }) as typeof fetch
+    assert.equal((await post()).status, 200)
+    assert.equal(sent.length, 1) // the retry really sent the mail
+  } finally { globalThis.fetch = real }
+})
+
+test("confirm and unsubscribe links only act on POST (a mailbox scanner's GET changes nothing)", async () => {
+  await db.prepare("INSERT OR REPLACE INTO subscribers (email, token, confirmed, created, last_mail) VALUES ('c@example.test', 'tok123', 0, 1, 0)").run()
+  const get = await call(new Request("https://status.test/api/confirm?t=tok123"), env())
+  assert.match(await get.text(), /<form method="post"/)
+  assert.equal((await db.prepare("SELECT confirmed FROM subscribers WHERE token = 'tok123'").first<{ confirmed: number }>())!.confirmed, 0)
+  const form = new URLSearchParams({ t: "tok123" })
+  const post = await call(new Request("https://status.test/api/confirm", { method: "POST", body: form }), env())
+  assert.match(await post.text(), /You will get an email/)
+  assert.equal((await db.prepare("SELECT confirmed FROM subscribers WHERE token = 'tok123'").first<{ confirmed: number }>())!.confirmed, 1)
+})
+
+test("admin: a retried write with the same idempotency key creates one incident; mail failures are reported; no token means closed", async () => {
+  const mail = { ...env(), MAIL_ENDPOINT: "https://mail.example.test/emails", MAIL_KEY: "k", MAIL_FROM: "S <s@example.test>", PUBLIC_ORIGIN: "https://status.test" } as Env
+  await db.prepare("INSERT OR REPLACE INTO subscribers (email, token, confirmed, created, last_mail) VALUES ('m@example.test', 'tokm', 1, 1, 0)").run()
+  const create = (headers: Record<string, string>) => call(new Request("https://status.test/api/admin/incidents", { method: "POST", headers: { authorization: "Bearer admin-secret", "content-type": "application/json", ...headers }, body: JSON.stringify({ title: "Once", body: "One incident.", components: ["api"] }) }), mail)
+  const real = globalThis.fetch
+  try {
+    globalThis.fetch = (async () => new Response("down", { status: 500 })) as typeof fetch
+    const first = (await (await create({ "idempotency-key": "key-0000001" })).json()) as { id: string; mail: { failed: number } }
+    assert.ok(first.mail.failed >= 1) // every confirmed subscriber failed
+    const again = (await (await create({ "idempotency-key": "key-0000001" })).json()) as { id: string; replayed?: boolean }
+    assert.equal(again.id, first.id)
+    assert.equal(again.replayed, true)
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM incidents WHERE title = 'Once'").first<{ n: number }>())!.n, 1)
+    assert.equal((await create({ "idempotency-key": "x" })).status, 400)
+  } finally { globalThis.fetch = real }
+  const closed = await call(new Request("https://status.test/api/admin/state", { headers: { authorization: "Bearer " } }), { ...env(), ADMIN_TOKEN: "" } as Env)
+  assert.equal(closed.status, 503)
+  const multiline = await admin("/api/admin/incidents", { title: "two\nlines", body: "x", components: ["api"] })
+  assert.equal(multiline.status, 400)
 })
