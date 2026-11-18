@@ -21,7 +21,7 @@ export const legalPage = (slug: string) => legalPages.find((page) => page.slug =
 /** Facts about the operating company. Only the company can supply these; never guess them. */
 export const company = {
   /** Until Paperboat, Inc. (a Delaware C corporation) is formed, these two individuals operate Paperboat (user decision 2026-11-19). */
-  /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) and India's E-Commerce Rules 2020 (rule 5(3)(a)) need the trader's legal name and postal address. */
+  /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) needs the trader's legal name and postal address. */
   operators: "Pujan Modha and Anvit Dadape",
   /** Required only where consumer law needs a geographical address (Terms, Refund Policy); never a home address. */
   address: "TODO-USER: postal address for legal notices (not a home address)",
@@ -31,8 +31,6 @@ export const company = {
   privacyEmail: "privacy@mail.paperboat.cloud",
   /** GDPR art. 27 (and UK GDPR): a controller outside the EU/UK that serves people there names a representative in each. */
   euRepresentative: "TODO-USER: EU and UK representative (name and address)",
-  /** India's Consumer Protection (E-Commerce) Rules 2020 require a named grievance officer. */
-  grievanceOfficer: "TODO-USER: grievance officer name",
   /** The user's final answer (2026-11-19). */
   effective: "14 November 2026",
 }
