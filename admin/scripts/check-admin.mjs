@@ -194,7 +194,11 @@ function route(req, url) {
   }
   if (p === "/v1/admin/sentry/issues") return { issues: [{ project: "go", id: "1", short_id: "GO-1", level: "error", status: "unresolved", count: 5, first_seen: "2026-11-16T00:00:00Z", last_seen: "2026-11-17T08:00:00Z" }] }
   if (p === "/v1/admin/nodes") return { items: world.nodes, total: world.nodes.length }
-  if (p === "/v1/admin/publications") return { items: [{ hostname: "blk.example.test", blocked: true, legal: false, reason: "TICKET-9", version: 3, created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-17T00:00:00Z" }, { hostname: "old.example.test", blocked: false, legal: false, reason: "TICKET-8", version: 2, created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-11T00:00:00Z" }].filter((b) => url.searchParams.get("blocked") !== "true" || b.blocked), total: 2 }
+  if (p === "/v1/admin/publications") {
+    const want = url.searchParams.get("blocked")
+    const items = [{ hostname: "blk.example.test", blocked: true, legal: false, reason: "TICKET-9", version: 3, created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-17T00:00:00Z" }, { hostname: "old.example.test", blocked: false, legal: false, reason: "TICKET-8", version: 2, created_at: "2026-11-10T00:00:00Z", updated_at: "2026-11-11T00:00:00Z" }].filter((b) => !want || b.blocked === (want === "true"))
+    return { items, total: items.length }
+  }
   if (p === "/v1/admin/edge/usage-keys") return { items: [{ key_id: "uk_a", edge_node_id: "edge_1", not_before: "2026-11-01T00:00:00Z", expires_at: "2099-01-01T00:00:00Z", created_at: "2026-11-01T00:00:00Z" }], total: 1 }
   if (p === "/v1/admin/mint/signing-keys") return { items: [{ key_id: "mk_active", active: true, withdrawn: false }, { key_id: "mk_old", active: false, withdrawn: false }], total: 2 }
   if (p === "/v1/admin/regions") return world.regionsFail ? { __status: 503, code: "infrastructure_unavailable", message: "Infrastructure is unavailable.", reference: "support_fixture_regions" } : { items: world.regions, total: world.regions.length }
@@ -589,14 +593,20 @@ try {
     await u.getByLabel(/Type/).fill("uk_a")
     await submit(u, "Revoke key")
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Revoke usage key uk_a"]'))
-    expect(lastWrite().path === "/v1/admin/edge/usage-keys/uk_a/revoke" && lastWrite().target === "uk_a" && lastWrite().body.reason === "leaked", `usage key revoke ${JSON.stringify(lastWrite())}`)
+    expect(lastWrite().path === "/v1/admin/edge/usage-keys/uk_a/revoke" && lastWrite().target === "uk_a" && lastWrite().reason === "TICKET-42" && lastWrite().body.reason === "leaked", `usage key revoke ${JSON.stringify(lastWrite())}`)
     await p.getByRole("tab", { name: "Hostnames" }).click()
     await waitReady("hostname blocks")
     expect((await p.locator('[data-block-actions="old.example.test"]').getAttribute("data-actions")) === "block", "an unblocked name offers Block again")
+    await p.click("[data-filter-button]")
+    await p.getByRole("menuitem", { name: "State" }).click()
+    await p.getByRole("menuitemradio", { name: "Blocked", exact: true }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-block-actions="old.example.test"]') && document.querySelector('[data-filter-chip="State"]'))
+    await p.getByRole("button", { name: "Remove State filter" }).click()
+    await p.waitForSelector('[data-block-actions="old.example.test"]')
     await rowAction('[data-block-actions="blk.example.test"]', "Unblock")
     await submit(dialog("Unblock blk.example.test"), "Unblock hostname")
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Unblock blk.example.test"]'))
-    expect(lastWrite().path === "/v1/admin/publications/blk.example.test/unblock" && lastWrite().body.revision === 3, `unblock write ${JSON.stringify(lastWrite())}`)
+    expect(lastWrite().path === "/v1/admin/publications/blk.example.test/unblock" && lastWrite().target === "blk.example.test" && lastWrite().reason === "TICKET-42" && lastWrite().body.revision === 3, `unblock write ${JSON.stringify(lastWrite())}`)
   })
   await step("server nodes: the enrol command is exact; enrol, drain and remove are writes", async () => {
     await p.getByRole("tab", { name: "Server nodes" }).click()

@@ -44,7 +44,8 @@ function RowActions({ item, kind }: { item: Item; kind: "relay" | "tunnel" }) {
   const body = { revision: item.revision }
   const stopLabel = stop === "drain" ? "Drain" : "Disable"
   const goLabel = go === "resume" ? "Resume" : "Enable"
-  if (!useCanOperate()) return null
+  const can = useCanOperate()
+  if (!can) return null
   const actions: RowAction[] = [
     {
       key: go,
@@ -74,7 +75,9 @@ function RowActions({ item, kind }: { item: Item; kind: "relay" | "tunnel" }) {
 
 type Blocks = Data<"/v1/admin/publications">
 type Block = Blocks["items"][number]
-const hostPattern = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/
+// The server's publicationHostPattern (operatoractions/publication_block.go).
+const hostPattern = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/
+const blockDescription = (legal: boolean) => (legal ? "The edge refuses it with a legal notice, and the owner is told." : "The edge refuses it until it is unblocked.")
 
 /** Block a hostname never blocked before: its revision is 1. */
 function BlockHostname() {
@@ -83,7 +86,7 @@ function BlockHostname() {
   return (
     <ActionDialog
       title="Block a hostname"
-      description="The edge refuses it until it is unblocked."
+      description={`${blockDescription(legal)} For a name in the list, use its row menu.`}
       target={host || "-"}
       destructive
       confirmWord={host || undefined}
@@ -113,7 +116,7 @@ function BlockActions({ b }: { b: Block }) {
         label: "Block again",
         destructive: true,
         dialog: (c) => (
-          <ActionDialog {...c} title={`Block ${b.hostname}`} description="The edge refuses it until it is unblocked." target={b.hostname} destructive confirmWord={b.hostname} submitLabel="Block hostname" run={(h) => operatorAction("POST", path("block"), h, { revision: b.version, ...(legal ? { legal: true } : {}) })}>
+          <ActionDialog {...c} title={`Block ${b.hostname}`} description={blockDescription(legal)} target={b.hostname} destructive confirmWord={b.hostname} submitLabel="Block hostname" run={(h) => operatorAction("POST", path("block"), h, { revision: b.version, ...(legal ? { legal: true } : {}) })}>
             <label className="flex items-center gap-2 text-sm"><Checkbox checked={legal} onCheckedChange={(v) => setLegal(v === true)} />Legal takedown (the owner is notified)</label>
           </ActionDialog>
         ),
@@ -124,10 +127,14 @@ function BlockActions({ b }: { b: Block }) {
 /** Blocked hostnames (abuse, legal takedowns), and the ones unblocked since; each row offers the opposite action. */
 export function Publications() {
   const can = useCanOperate()
+  if (!can) return <p className="py-12 text-center text-sm text-muted-foreground">Operations role only.</p>
+  return <PublicationList />
+}
+
+function PublicationList() {
   const [blocked, setBlocked] = useState("")
   const filters = useMemo(() => ({ blocked }), [blocked])
   const list = useCursorList<Blocks>("/v1/admin/publications", filters)
-  if (!can) return <p className="py-12 text-center text-sm text-muted-foreground">Operations role only.</p>
   return (
     <div className="flex flex-col gap-3" data-publications>
       <div className="flex flex-wrap items-center gap-2">
@@ -145,7 +152,7 @@ export function Publications() {
           { header: "State", cell: (b) => <StatusBadge state={b.blocked ? (b.legal ? "legal_block" : "blocked") : "unblocked"} /> },
           { header: "Reason", className: "hidden md:table-cell", cell: (b) => <span className="text-muted-foreground">{b.reason}</span> },
           { header: "Updated", className: "hidden md:table-cell", cell: (b) => <Time iso={b.updated_at} relative /> },
-          { header: "", className: "w-12", cell: (b) => <BlockActions b={b} /> },
+          { header: "", className: "w-12", cell: (b) => <BlockActions key={`${b.hostname}-${b.version}`} b={b} /> },
         ]}
       />
     </div>

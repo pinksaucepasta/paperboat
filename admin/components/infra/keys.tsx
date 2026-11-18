@@ -39,7 +39,7 @@ function ProvisionUsageKey() {
       valid={keyId.test(id) && edge !== "" && publicKey !== "" && iso(from) !== "" && iso(until) !== ""}
       trigger={(open) => <Button variant="outline" size="lg" onClick={open}>Provision key</Button>}
       run={(h) => operatorAction("POST", "/v1/admin/edge/usage-keys", h, { key_id: id, edge_node_id: edge, public_key: toUrl(publicKey), not_before: iso(from), expires_at: iso(until) })}
-      onDone={() => setPublicKey("")}
+      onDone={() => { setId(""); setEdge(""); setPublicKey(""); setFrom(""); setUntil("") }}
     >
       <TextField label="Key id" value={id} onChange={(v) => setId(v.trim())} />
       <TextField label="Edge node id" value={edge} onChange={(v) => setEdge(v.trim())} />
@@ -65,7 +65,7 @@ function RevokeMenu({ id, path, title, description, attr }: { id: string; path: 
           label: "Revoke",
           destructive: true,
           dialog: (c) => (
-            <ActionDialog {...c} title={title} description={description} target={id} destructive confirmWord={id} submitLabel="Revoke key" valid={reason.trim().length > 0} run={(h) => operatorAction("POST", path, h, { reason })}>
+            <ActionDialog {...c} title={title} description={description} target={id} destructive confirmWord={id} submitLabel="Revoke key" valid={reason.trim().length > 0} run={(h) => operatorAction("POST", path, h, { reason: reason.trim() })} onDone={() => setReason("")}>
               <TextField label="Revocation reason" value={reason} onChange={setReason} maxLength={512} />
             </ActionDialog>
           ),
@@ -81,11 +81,15 @@ const signingState = (k: SigningKeys["items"][number]) => (k.revoked_at ? "revok
 /** Edge usage keys and mint signing keys, each a list whose rows can be revoked. */
 export function Keys() {
   const admin = useOperator()?.role === "admin"
+  if (!admin) return <p className="py-12 text-center text-sm text-muted-foreground">Admins only.</p>
+  return <KeyLists />
+}
+
+function KeyLists() {
   const filters = useMemo(() => ({}), [])
   const usage = useCursorList<UsageKeys>("/v1/admin/edge/usage-keys", filters)
-  const signing = useApiQuery<SigningKeys>(["signing-keys"], admin ? "/v1/admin/mint/signing-keys" : null)
+  const signing = useApiQuery<SigningKeys>(["signing-keys"], "/v1/admin/mint/signing-keys")
   const now = useNow()
-  if (!admin) return <p className="py-12 text-center text-sm text-muted-foreground">Admins only.</p>
   return (
     <div className="flex flex-col gap-8" data-keys>
       <Panel title="Edge usage keys" action={<ProvisionUsageKey />}>
@@ -129,7 +133,7 @@ export function Keys() {
                     <tr key={i} className="[&>td]:h-14 [&>td]:px-3">
                       <td><Skeleton className="h-3 w-24" /></td>
                       <td><Skeleton className="h-3 w-16" /></td>
-                      <td />
+                      <td><Skeleton className="h-3 w-20" /></td>
                       <td />
                     </tr>
                   ))
@@ -148,7 +152,7 @@ export function Keys() {
             </tbody>
           </table>
         )}
-        {signing.data?.items.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No signing keys configured.</p>}
+        {signing.data?.items.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No signing keys.</p>}
       </Panel>
     </div>
   )

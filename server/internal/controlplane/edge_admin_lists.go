@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"time"
 
@@ -50,7 +51,8 @@ func (s *EdgeService) ListUsageKeys(ctx context.Context, actorID, after string, 
 			var v UsageKey
 			var revoked sql.NullTime
 			if err := rows.Scan(&v.KeyID, &v.EdgeNodeID, &v.NotBefore, &v.ExpiresAt, &revoked, &v.CreatedAt); err != nil {
-				return err
+				rows.Close()
+				return errors.Join(err, rows.Err())
 			}
 			if len(out.Items) == limit {
 				out.NextAfter = out.Items[len(out.Items)-1].KeyID
@@ -105,7 +107,8 @@ func (s *EdgeService) ListSigningKeys(ctx context.Context, actorID string) (Sign
 			var v SigningKey
 			var at time.Time
 			if err := rows.Scan(&v.ID, &v.Reason, &at); err != nil {
-				return err
+				rows.Close()
+				return errors.Join(err, rows.Err())
 			}
 			v.RevokedAt = &at
 			revoked[v.ID] = v

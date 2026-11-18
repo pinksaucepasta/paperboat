@@ -59,13 +59,8 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 		if !ok {
 			return
 		}
-		blocked := r.URL.Query().Get("blocked")
-		if blocked != "" && blocked != "true" && blocked != "false" {
-			writeError(w, r, 400, "invalid_request", "blocked must be true or false.")
-			return
-		}
 		p, _ := principalFromContext(r.Context())
-		out, err := service.ListPublicationBlocks(r.Context(), p.User.ID, blocked == "true", r.URL.Query().Get("after"), limit)
+		out, err := service.ListPublicationBlocks(r.Context(), p.User.ID, r.URL.Query().Get("blocked"), r.URL.Query().Get("after"), limit)
 		if err != nil {
 			operatorInfrastructureError(w, r, err)
 			return

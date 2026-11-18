@@ -2,6 +2,7 @@ package operatorinfra
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"time"
 
@@ -29,20 +30,21 @@ type PublicationBlockPage struct {
 	NextAfter string             `json:"next_after,omitempty"`
 }
 
-// ListPublicationBlocks pages publication blocks by hostname; blocked=true narrows to hostnames blocked now.
-func (s *Service) ListPublicationBlocks(ctx context.Context, actor string, onlyBlocked bool, after string, limit int) (PublicationBlockPage, error) {
+// ListPublicationBlocks pages publication blocks by hostname; blocked "true" or "false" keeps only names blocked or
+// unblocked now, "" keeps both.
+func (s *Service) ListPublicationBlocks(ctx context.Context, actor, blocked, after string, limit int) (PublicationBlockPage, error) {
 	out := PublicationBlockPage{Items: []PublicationBlock{}}
-	if limit < 1 || limit > 100 || (after != "" && !hostnameAfter.MatchString(after)) {
+	if limit < 1 || limit > 100 || (blocked != "" && blocked != "true" && blocked != "false") || (after != "" && !hostnameAfter.MatchString(after)) {
 		return PublicationBlockPage{}, ErrInvalid
 	}
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := allowRead(ctx, tx, actor); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM publication_blocks WHERE (NOT $1 OR blocked)`, onlyBlocked).Scan(&out.Total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM publication_blocks WHERE ($1='' OR blocked=($1='true'))`, blocked).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT hostname,blocked,legal,reason,version,created_at,updated_at FROM publication_blocks WHERE (NOT $1 OR blocked) AND hostname>$2 ORDER BY hostname LIMIT $3`, onlyBlocked, after, limit+1)
+		rows, err := tx.Query(ctx, `SELECT hostname,blocked,legal,reason,version,created_at,updated_at FROM publication_blocks WHERE ($1='' OR blocked=($1='true')) AND hostname>$2 ORDER BY hostname LIMIT $3`, blocked, after, limit+1)
 		if err != nil {
 			return err
 		}
@@ -50,7 +52,8 @@ func (s *Service) ListPublicationBlocks(ctx context.Context, actor string, onlyB
 		for rows.Next() {
 			var v PublicationBlock
 			if err := rows.Scan(&v.Hostname, &v.Blocked, &v.Legal, &v.Reason, &v.Version, &v.CreatedAt, &v.UpdatedAt); err != nil {
-				return err
+				rows.Close()
+				return errors.Join(err, rows.Err())
 			}
 			if len(out.Items) == limit {
 				out.NextAfter = out.Items[len(out.Items)-1].Hostname

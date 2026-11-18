@@ -23,7 +23,7 @@ func TestListPublicationBlocksPagesByHostnameAndFiltersBlocked(t *testing.T) {
 		}
 	}
 	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
-	page, err := s.ListPublicationBlocks(ctx, admin, false, prefix, 2)
+	page, err := s.ListPublicationBlocks(ctx, admin, "", prefix, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,24 +33,36 @@ func TestListPublicationBlocksPagesByHostnameAndFiltersBlocked(t *testing.T) {
 	if page.Items[1].Blocked || page.Items[1].Version != 2 || page.Items[1].Reason != "abuse report" {
 		t.Fatalf("unblocked row = %+v", page.Items[1])
 	}
-	next, err := s.ListPublicationBlocks(ctx, admin, false, page.NextAfter, 2)
+	next, err := s.ListPublicationBlocks(ctx, admin, "", page.NextAfter, 2)
 	if err != nil || len(next.Items) == 0 || next.Items[0].Hostname != prefix+"-2.example.test" || !next.Items[0].Legal {
 		t.Fatalf("second page = %+v err=%v", next, err)
 	}
-	blocked, err := s.ListPublicationBlocks(ctx, admin, true, prefix, 2)
+	blocked, err := s.ListPublicationBlocks(ctx, admin, "true", prefix, 2)
 	if err != nil || len(blocked.Items) != 2 || blocked.Items[1].Hostname != prefix+"-2.example.test" {
 		t.Fatalf("blocked only = %+v err=%v", blocked, err)
+	}
+	unblocked, err := s.ListPublicationBlocks(ctx, admin, "false", prefix, 2)
+	if err != nil || len(unblocked.Items) == 0 || unblocked.Items[0].Hostname != prefix+"-1.example.test" || unblocked.Items[0].Blocked {
+		t.Fatalf("unblocked only = %+v err=%v", unblocked, err)
+	}
+	for _, bad := range []struct {
+		blocked string
+		limit   int
+	}{{"maybe", 2}, {"", 0}, {"", 101}} {
+		if _, err := s.ListPublicationBlocks(ctx, admin, bad.blocked, "", bad.limit); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("blocked=%q limit=%d err = %v", bad.blocked, bad.limit, err)
+		}
 	}
 	if blocked.Total > page.Total {
 		t.Fatalf("blocked total %d above all %d", blocked.Total, page.Total)
 	}
-	if _, err := s.ListPublicationBlocks(ctx, admin, false, "Not A Hostname", 2); !errors.Is(err, ErrInvalid) {
+	if _, err := s.ListPublicationBlocks(ctx, admin, "", "Not A Hostname", 2); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("bad cursor err = %v", err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='support' WHERE id=$1`, admin); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ListPublicationBlocks(ctx, admin, false, "", 2); !errors.Is(err, ErrForbidden) {
+	if _, err := s.ListPublicationBlocks(ctx, admin, "", "", 2); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("support err = %v", err)
 	}
 }
