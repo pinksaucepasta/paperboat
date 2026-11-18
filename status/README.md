@@ -11,7 +11,7 @@ Public status for Paperboat, built to never show a wrong status.
 | `../admin/app/(panel)/status` | admin Status section, through `admin/lib/server/status-provider.ts` (the one seam to swap for a hosted provider); optional | with the admin panel |
 | `drill.py`, `drill-results/` | stop/start drill against a staging stack and its results | manual |
 
-## Rules (user rules; `worker/src/decide.ts` and its tests are the one implementation)
+## Rules (user rules; `lib/decide.ts` and its tests are the one implementation)
 1. A unit is red (major) only when two independent vantage points each fail 3 checks in a row.
 2. A probe host checks its own internet first (and again after any failure); if that fails it sends a heartbeat and no results.
 3. A bad unit is green again only after 5 passes in a row on two vantage points (one if only one reports).
