@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 )
 
@@ -20,8 +21,15 @@ type clientConfigurationResponse struct {
 	MachinesURL           string `json:"machines_url"`
 	// AbuseMailbox is where abuse is reported by email (the marketing abuse page shows it).
 	AbuseMailbox string `json:"abuse_mailbox,omitempty"`
+	// PurchaseConsent is the wording and version a buyer accepts before any purchase (console and CLI show it).
+	PurchaseConsent purchaseConsent `json:"purchase_consent"`
 	// ControlRegions is the region map clients rank by measured latency (PLAN 3b).
 	ControlRegions []servernodes.Region `json:"control_regions"`
+}
+
+type purchaseConsent struct {
+	Version string `json:"version"`
+	Text    string `json:"text"`
 }
 
 func clientConfiguration(cfg config.Config, regions *servernodes.RegionCache) http.HandlerFunc {
@@ -37,6 +45,7 @@ func clientConfiguration(cfg config.Config, regions *servernodes.RegionCache) ht
 		CLIVerificationURL:    cfg.CLIAuth.VerificationURL,
 		MachinesURL:           cfg.CLIAuth.MachinesURL,
 		AbuseMailbox:          cfg.Mail.AbuseMailbox,
+		PurchaseConsent:       purchaseConsent{Version: legalconsent.Version, Text: legalconsent.Text},
 	}
 	configurationErr := cfg.ValidateClientDiscovery()
 	return func(w http.ResponseWriter, r *http.Request) {

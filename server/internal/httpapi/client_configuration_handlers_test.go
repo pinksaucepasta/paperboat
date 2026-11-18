@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,6 +81,9 @@ func TestClientConfigurationPublishesConfiguredDomains(t *testing.T) {
 				if response.Data[field] != want {
 					t.Errorf("%s=%q, want %q", field, response.Data[field], want)
 				}
+			}
+			if c, _ := response.Data["purchase_consent"].(map[string]any); c["version"] != legalconsent.Version || c["text"] != legalconsent.Text {
+				t.Errorf("purchase_consent=%v", response.Data["purchase_consent"])
 			}
 		})
 	}
