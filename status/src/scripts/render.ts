@@ -144,9 +144,9 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
 }
 
 export function renderSystem(root: HTMLElement, o: Overall, p: Payload | null) {
+  const open = new Set([...root.querySelectorAll(".comp-head[aria-expanded=true]")].map((h) => h.getAttribute("aria-controls"))) // a refresh keeps expanded rows open
   root.replaceChildren()
   if (!p?.public || o === "unavailable") return
-  const open = new Set([...root.querySelectorAll(".comp-head[aria-expanded=true]")].map((h) => h.getAttribute("aria-controls"))) // a refresh keeps expanded rows open
   const card = el("div", "card")
   const head = el("div", "card-head"); head.append(el("h2", "card-title", "System status"))
   const live = el("span", "updated"); live.id = "updated"; live.append(el("span", "live-dot"), el("span", "updated-text", "")); head.append(live)
