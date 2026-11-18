@@ -1,6 +1,9 @@
 package clientupdate
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"testing"
 	"time"
@@ -78,5 +81,30 @@ func TestPublishedCeilingMixedPlatformVersions(t *testing.T) {
 	}
 	if _, err := publishedCeiling(releases.Current{}); err == nil {
 		t.Fatal("missing assets accepted")
+	}
+}
+
+// The node floor's ceiling is the newest self-host version published for both Linux architectures.
+func TestPublishedSelfhostCeilingNeedsEveryArchitecture(t *testing.T) {
+	directory := t.TempDir()
+	if _, err := publishedSelfhostCeiling(directory); err == nil {
+		t.Fatal("ceiling without any publication")
+	}
+	publish := func(version string, arches ...string) {
+		path := filepath.Join(directory, "selfhost", "versions", version)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, arch := range arches {
+			if err := os.WriteFile(filepath.Join(path, "paperboat-selfhost-linux-"+arch+".tar.gz"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	publish("2026.11.16.2", "amd64", "arm64")
+	publish("2026.11.18.1", "amd64")
+	publish("not-a-version", "amd64", "arm64")
+	if got, err := publishedSelfhostCeiling(directory); err != nil || got != "2026.11.16.2" {
+		t.Fatalf("ceiling = %q, %v", got, err)
 	}
 }

@@ -72,9 +72,11 @@ const runs = (node: Node) => {
   return kinds.size === 2 ? "Relay and tunnel server" : kinds.has("tunnel") ? "Tunnel server" : "Relay"
 }
 
-function nodeState(node: Node): { ok: boolean; label: string } {
+function nodeState(node: Node): { ok: boolean; label: string; detail?: string } {
   if (node.installations.some((installation) => installation.enrollment_state === "pending"))
     return { ok: false, label: "Finishing pairing" }
+  const required = node.installations.find((installation) => installation.update_required)
+  if (required) return { ok: false, label: "Update required", detail: required.update_required }
   const notReady = node.installations.filter((installation) => !installation.ready)
   if (!notReady.length) return { ok: true, label: "Ready" }
   if (notReady.length === node.installations.length) return { ok: false, label: "Not ready" }
@@ -185,6 +187,7 @@ function NodeRow({ node }: { node: Node }) {
   const [removing, setRemoving] = useState(false)
   const state = nodeState(node)
   const tunnel = node.installations.find((installation) => installation.capability === "tunnel")
+  const available = node.installations.find((installation) => installation.update_available)?.update_available
   // The newest heartbeat of the node's components.
   const seen = node.installations
     .map((installation) => installation.last_heartbeat_at)
@@ -228,7 +231,8 @@ function NodeRow({ node }: { node: Node }) {
           <td>
             <span className="flex items-center gap-2 text-muted-foreground">
               <StatusDot online={state.ok} />
-              <span className="truncate">{verify.isPending ? "Checking public access…" : state.label}</span>
+              <span className="truncate" title={state.detail}>{verify.isPending ? "Checking public access…" : state.label}</span>
+              {!state.detail && available && <span className="hidden truncate text-xs xl:inline">Update available: {available}</span>}
             </span>
           </td>
           <td className="hidden truncate text-muted-foreground lg:table-cell">
