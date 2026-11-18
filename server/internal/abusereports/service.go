@@ -16,6 +16,8 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
@@ -32,6 +34,15 @@ var Reasons = []string{"phishing", "malware", "spam", "illegal", "other"}
 
 func validReason(r string) bool { return slices.Contains(Reasons, r) }
 
+// Statuses are an operator's triage of a report; every report starts open.
+var Statuses = []string{"open", "actioned", "dismissed"}
+
+// ErrNotFound is a report that does not exist (or was pruned past retention).
+var ErrNotFound = errors.New("abuse report not found")
+
+// ErrForbidden is an actor who is not an active operations or admin operator.
+var ErrForbidden = errors.New("abuse report triage forbidden")
+
 type Input struct {
 	URL           string `json:"url"`
 	Reason        string `json:"reason"`
@@ -47,9 +58,15 @@ type Report struct {
 	Details       string    `json:"details"`
 	ReporterEmail string    `json:"reporter_email"`
 	CreatedAt     time.Time `json:"created_at"`
+	// Triage: Status is open until an operator actions (takes the hostname down) or dismisses it.
+	Status     string     `json:"status"`
+	TriagedBy  string     `json:"triaged_by,omitempty"`
+	TriagedAt  *time.Time `json:"triaged_at,omitempty"`
+	TriageNote string     `json:"triage_note,omitempty"`
 }
 
 type Service struct {
+	audit       *audit.Writer
 	store       *db.DB
 	now         func() time.Time
 	mail        config.TransactionalMail
@@ -57,7 +74,7 @@ type Service struct {
 }
 
 func New(store *db.DB) *Service {
-	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{store: store, audit: audit.NewWriter(store), now: func() time.Time { return time.Now().UTC() }}
 }
 
 // ConfigureMail turns on the operator alert: every report is mailed to the abuse mailbox
@@ -107,7 +124,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	report := Report{ID: "abuse_" + uuid.NewString(), Hostname: host, URL: in.URL, Reason: in.Reason, Details: in.Details, ReporterEmail: in.ReporterEmail, CreatedAt: s.now()}
+	report := Report{ID: "abuse_" + uuid.NewString(), Hostname: host, URL: in.URL, Reason: in.Reason, Details: in.Details, ReporterEmail: in.ReporterEmail, CreatedAt: s.now(), Status: "open"}
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO abuse_reports(id,hostname,url,reason,details,reporter_email,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`,
 			report.ID, report.Hostname, report.URL, report.Reason, report.Details, report.ReporterEmail, report.CreatedAt); err != nil {
@@ -148,9 +165,10 @@ func ParseCursor(cursor string) (time.Time, string, error) {
 	return parsed, id, nil
 }
 
-// List returns reports newest first, optionally for one hostname and one reason, older than (before, beforeID) (zero: now).
-func (s *Service) List(ctx context.Context, hostname, reason string, before time.Time, beforeID string, limit int) (Page, error) {
-	if limit < 1 || limit > 100 || len(beforeID) > 64 || (reason != "" && !validReason(reason)) {
+// List returns reports newest first, optionally for one hostname, one reason and one status, older than
+// (before, beforeID) (zero: now).
+func (s *Service) List(ctx context.Context, hostname, reason, status string, before time.Time, beforeID string, limit int) (Page, error) {
+	if limit < 1 || limit > 100 || len(beforeID) > 64 || (reason != "" && !validReason(reason)) || (status != "" && !slices.Contains(Statuses, status)) {
 		return Page{}, ErrInvalid
 	}
 	if before.IsZero() {
@@ -158,18 +176,19 @@ func (s *Service) List(ctx context.Context, hostname, reason string, before time
 	}
 	host := strings.ToLower(strings.TrimSpace(hostname))
 	out := Page{Reports: []Report{}}
-	if err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM abuse_reports WHERE ($1='' OR hostname=$1) AND ($2='' OR reason=$2)`, host, reason).Scan(&out.Total); err != nil {
+	if err := s.store.Pool().QueryRow(ctx, `SELECT count(*) FROM abuse_reports WHERE ($1='' OR hostname=$1) AND ($2='' OR reason=$2) AND ($3='' OR status=$3)`, host, reason, status).Scan(&out.Total); err != nil {
 		return Page{}, err
 	}
-	rows, err := s.store.Pool().Query(ctx, `SELECT id,hostname,url,reason,details,reporter_email,created_at FROM abuse_reports
-WHERE ($1='' OR hostname=$1) AND ($5='' OR reason=$5) AND (created_at<$2 OR ($3<>'' AND created_at=$2 AND id<$3)) ORDER BY created_at DESC, id DESC LIMIT $4`, host, before, beforeID, limit+1, reason)
+	rows, err := s.store.Pool().Query(ctx, `SELECT `+reportColumns+` FROM abuse_reports
+WHERE ($1='' OR hostname=$1) AND ($5='' OR reason=$5) AND ($6='' OR status=$6) AND (created_at<$2 OR ($3<>'' AND created_at=$2 AND id<$3))
+ORDER BY created_at DESC, id DESC LIMIT $4`, host, before, beforeID, limit+1, reason, status)
 	if err != nil {
 		return Page{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var r Report
-		if err := rows.Scan(&r.ID, &r.Hostname, &r.URL, &r.Reason, &r.Details, &r.ReporterEmail, &r.CreatedAt); err != nil {
+		r, err := scanReport(rows)
+		if err != nil {
 			return Page{}, err
 		}
 		if len(out.Reports) == limit {
@@ -196,4 +215,52 @@ func alertMessage(policy config.TransactionalMail, r Report) transactionalmail.M
 		HTML: fmt.Sprintf("<p>Report %s, %s UTC.</p><p>Link: %s<br>Reason: %s<br>Reporter: %s</p><pre>%s</pre><p>Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.</p>",
 			r.ID, r.CreatedAt.Format("2006-01-02 15:04"), html.EscapeString(r.URL), html.EscapeString(r.Reason), reporter, html.EscapeString(r.Details), html.EscapeString(r.Hostname), r.ID),
 	}
+}
+
+const reportColumns = `id,hostname,url,reason,details,reporter_email,created_at,status,coalesce(triaged_by,''),triaged_at,triage_note`
+
+func scanReport(row interface{ Scan(...any) error }) (Report, error) {
+	var r Report
+	var at *time.Time
+	err := row.Scan(&r.ID, &r.Hostname, &r.URL, &r.Reason, &r.Details, &r.ReporterEmail, &r.CreatedAt, &r.Status, &r.TriagedBy, &at, &r.TriageNote)
+	r.CreatedAt = r.CreatedAt.UTC()
+	if at != nil {
+		utc := at.UTC()
+		r.TriagedAt = &utc
+	}
+	return r, err
+}
+
+// Triage sets a report's status (open, actioned or dismissed) with a note, recording who and when, audited in the
+// same transaction with the operator's reference. Reopening clears the note, who and when.
+func (s *Service) Triage(ctx context.Context, actor, id, status, note, reference string) (Report, error) {
+	note = strings.TrimSpace(note)
+	if actor == "" || id == "" || len(id) > 64 || !slices.Contains(Statuses, status) || len(note) > 1000 || hasControlExceptNewline(note) {
+		return Report{}, ErrInvalid
+	}
+	var out Report
+	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var role, state string
+		if err := tx.QueryRow(ctx, `SELECT role,status FROM operator_accounts WHERE id=$1`, actor).Scan(&role, &state); err != nil || state != "active" || (role != "admin" && role != "operations") {
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			return ErrForbidden
+		}
+		var err error
+		out, err = scanReport(tx.QueryRow(ctx, `UPDATE abuse_reports SET status=$2, triage_note=CASE WHEN $2='open' THEN '' ELSE $3 END,
+  triaged_by=CASE WHEN $2='open' THEN NULL ELSE $4 END, triaged_at=CASE WHEN $2='open' THEN NULL ELSE now() END
+ WHERE id=$1 RETURNING `+reportColumns, id, status, note, actor))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorAdmin, EventType: "abuse_report.triaged", ResourceType: "abuse_report", ResourceID: id, Metadata: map[string]any{"status": status, "note": note, "reference": reference, "hostname": out.Hostname}})
+	})
+	if err != nil {
+		return Report{}, err
+	}
+	return out, nil
 }

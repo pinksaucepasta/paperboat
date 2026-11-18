@@ -5324,6 +5324,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/abuse-reports/{report_id}/triage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Triage an abuse report
+         * @description Sets one abuse report's status: open (the default for new reports), actioned or dismissed, with an optional note; actioned and dismissed record who and when, open clears them. Blocking a hostname with the report id as Operator-Reason marks that report actioned. Current active operator account and separate operator session required.
+         */
+        post: operations["post_v1_admin_abuse_reports_report_id_triage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/abuse-reports": {
         parameters: {
             query?: never;
@@ -11925,6 +11945,13 @@ export interface components {
             next_cursor?: string;
         };
         AbuseReport: {
+            /** @enum {string} */
+            status: "open" | "actioned" | "dismissed";
+            /** @description The operator who actioned or dismissed it. */
+            triaged_by?: string;
+            /** Format: date-time */
+            triaged_at?: string;
+            triage_note?: string;
             id: string;
             hostname: string;
             url: string;
@@ -26797,12 +26824,94 @@ export interface operations {
             };
         };
     };
+    post_v1_admin_abuse_reports_report_id_triage: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status: "open" | "actioned" | "dismissed";
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The report after triage. Audited with the Operator-Reason reference. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AbuseReport"];
+                    };
+                };
+            };
+            /** @description Invalid status or note */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such report */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unavailable; retry */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_v1_admin_abuse_reports: {
         parameters: {
             query?: {
                 limit?: number;
                 hostname?: string;
                 before?: string;
+                status?: "open" | "actioned" | "dismissed";
                 reason?: "phishing" | "malware" | "spam" | "illegal" | "other";
                 /** @description next_cursor of the previous page (replaces before and before_id). */
                 cursor?: string;

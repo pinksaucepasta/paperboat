@@ -111,6 +111,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/operators/{operator_id}/mfa-reset":                              {"admin", "operator_id", ""},
 	"POST /v1/admin/operators/{operator_id}/sessions/revoke":                        {"admin", "operator_id", ""},
 	"GET /v1/admin/abuse-reports":                                                   {"operations", "", "abuse-reports"},
+	"POST /v1/admin/abuse-reports/{report_id}/triage":                               {"operations", "report_id", ""},
 	"GET /v1/admin/accounts/{account_id}":                                           {"support", "account_id", ""},
 	"GET /v1/admin/teams/{team_id}":                                                 {"support", "team_id", ""},
 	"GET /v1/admin/billing/workspaces/{workspace_id}":                               {"support", "workspace_id", ""},
@@ -460,6 +461,7 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 	}
 	if opts.AbuseReports != nil {
 		mux.Handle("GET /v1/admin/abuse-reports", operatorRoute(opts, abuseReportList(opts.AbuseReports)))
+		mux.Handle("POST /v1/admin/abuse-reports/{report_id}/triage", operatorRoute(opts, abuseReportTriage(opts.AbuseReports)))
 	}
 	if opts.OperatorBilling != nil {
 		mux.Handle("GET /v1/admin/billing/products", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

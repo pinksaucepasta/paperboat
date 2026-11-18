@@ -201,10 +201,11 @@ function route(req, url) {
   if (p === "/v1/admin/nodes") return { items: world.nodes, total: world.nodes.length }
   if (p === "/v1/admin/abuse-reports") {
     const all = [
-      { id: "abuse_00000000-0000-4000-8000-000000000002", hostname: "bad.example.test", url: "https://bad.example.test/login", reason: "phishing", details: "Asks for bank passwords", reporter_email: "r@example.test", created_at: "2026-11-17T10:00:00Z" },
-      { id: "abuse_00000000-0000-4000-8000-000000000001", hostname: "spam.example.test", url: "https://spam.example.test/", reason: "spam", details: "", reporter_email: "", created_at: "2026-11-16T10:00:00Z" },
+      { id: "abuse_00000000-0000-4000-8000-000000000002", hostname: "bad.example.test", url: "https://bad.example.test/login", reason: "phishing", details: "Asks for bank passwords", reporter_email: "r@example.test", created_at: "2026-11-17T10:00:00Z", status: "open" },
+      { id: "abuse_00000000-0000-4000-8000-000000000001", hostname: "spam.example.test", url: "https://spam.example.test/", reason: "spam", details: "", reporter_email: "", created_at: "2026-11-16T10:00:00Z", status: "open" },
+      { id: "abuse_00000000-0000-4000-8000-000000000000", hostname: "old.example.test", url: "https://old.example.test/", reason: "other", details: "", reporter_email: "", created_at: "2026-11-01T10:00:00Z", status: "dismissed", triaged_by: "operator_root", triaged_at: "2026-11-02T10:00:00Z", triage_note: "Duplicate" },
     ]
-    const reports = all.filter((r) => (!url.searchParams.get("reason") || r.reason === url.searchParams.get("reason")) && (!url.searchParams.get("hostname") || r.hostname === url.searchParams.get("hostname")))
+    const reports = all.filter((r) => (!url.searchParams.get("status") || r.status === url.searchParams.get("status")) && (!url.searchParams.get("reason") || r.reason === url.searchParams.get("reason")) && (!url.searchParams.get("hostname") || r.hostname === url.searchParams.get("hostname")))
     return { total: reports.length, reports }
   }
   if (p === "/v1/admin/backups")
@@ -633,7 +634,19 @@ try {
   await step("abuse reports filter on the server, open in full, and take a hostname down", async () => {
     await p.goto(`${ORIGIN}/abuse`)
     await waitReady("abuse reports")
-    expect((await p.locator('[data-table="abuse reports"] tbody tr').count()) === 2, "two reports listed")
+    expect((await p.locator('[data-table="abuse reports"] tbody tr').count()) === 2, "the open queue lists the two open reports, not the dismissed one")
+    await p.getByRole("button", { name: "Remove Status filter" }).click()
+    await p.waitForFunction(() => document.querySelectorAll('[data-table="abuse reports"] tbody tr').length === 3)
+    await p.click("[data-filter-button]")
+    await p.getByRole("menuitem", { name: "Status" }).click()
+    await p.getByRole("menuitemradio", { name: "Open", exact: true }).click()
+    await p.waitForFunction(() => document.querySelectorAll('[data-table="abuse reports"] tbody tr').length === 2)
+    await rowAction('[data-abuse-actions="abuse_00000000-0000-4000-8000-000000000001"]', "Dismiss report")
+    const dismiss = dialog("Dismiss report")
+    await dismiss.getByLabel("Note").fill("Not ours")
+    await submit(dismiss, "Dismiss report")
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Dismiss report"]'))
+    expect(lastWrite().path === "/v1/admin/abuse-reports/abuse_00000000-0000-4000-8000-000000000001/triage" && lastWrite().target === "abuse_00000000-0000-4000-8000-000000000001" && lastWrite().body.status === "dismissed" && lastWrite().body.note === "Not ours", `triage write ${JSON.stringify(lastWrite())}`)
     await p.click("[data-filter-button]")
     await p.getByRole("menuitem", { name: "Reason" }).click()
     await p.getByRole("menuitemradio", { name: "Spam", exact: true }).click()

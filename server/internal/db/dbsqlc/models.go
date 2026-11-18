@@ -20,6 +20,10 @@ type AbuseReport struct {
 	Details       string
 	ReporterEmail string
 	CreatedAt     time.Time
+	Status        string
+	TriagedBy     sql.NullString
+	TriagedAt     sql.NullTime
+	TriageNote    string
 }
 
 type AccessIpRule struct {
@@ -287,6 +291,7 @@ type BillingWorkspace struct {
 	PendingSeatCapacity    sql.NullInt32
 	ScheduledQuantity      sql.NullInt32
 	ScheduledQuantityAt    sql.NullTime
+	GrantUntil             sql.NullTime
 }
 
 type BillingWorkspaceOperation struct {

@@ -70,9 +70,9 @@ func abuseReportList(service *abusereports.Service) http.Handler {
 				return
 			}
 		}
-		reports, err := service.List(r.Context(), r.URL.Query().Get("hostname"), r.URL.Query().Get("reason"), before, beforeID, limit)
+		reports, err := service.List(r.Context(), r.URL.Query().Get("hostname"), r.URL.Query().Get("reason"), r.URL.Query().Get("status"), before, beforeID, limit)
 		if errors.Is(err, abusereports.ErrInvalid) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Use a known reason, and the cursor (or before and before_id) from the previous page.")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Use a known reason and status, and the cursor (or before and before_id) from the previous page.")
 			return
 		}
 		if err != nil {
@@ -80,5 +80,33 @@ func abuseReportList(service *abusereports.Service) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: reports})
+	})
+}
+
+// abuseReportTriage sets one report's status (open, actioned, dismissed) with a note; the service audits it with the
+// Operator-Reason reference.
+func abuseReportTriage(service *abusereports.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Status string `json:"status"`
+			Note   string `json:"note"`
+		}
+		if !decodeStrictJSON(w, r, &input) {
+			return
+		}
+		p, _ := principalFromContext(r.Context())
+		report, err := service.Triage(r.Context(), p.User.ID, r.PathValue("report_id"), input.Status, input.Note, r.Header.Get("Operator-Reason"))
+		switch {
+		case errors.Is(err, abusereports.ErrInvalid):
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Use open, actioned or dismissed, and a note of at most 1000 characters.")
+		case errors.Is(err, abusereports.ErrForbidden):
+			writeError(w, r, http.StatusForbidden, "forbidden", "Only operations and admin operators can triage abuse reports.")
+		case errors.Is(err, abusereports.ErrNotFound):
+			writeError(w, r, http.StatusNotFound, "not_found", "The abuse report does not exist; reports are kept 180 days.")
+		case err != nil:
+			writeError(w, r, http.StatusServiceUnavailable, "abuse_reports_unavailable", "The report could not be updated. Try again.", err)
+		default:
+			writeJSON(w, http.StatusOK, SuccessResponse{Data: report})
+		}
 	})
 }

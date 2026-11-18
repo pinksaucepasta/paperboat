@@ -76,7 +76,7 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.List(ctx, strings.ToUpper(host), "", time.Time{}, "", 10)
+	page, err := s.List(ctx, strings.ToUpper(host), "", "", time.Time{}, "", 10)
 	reports := page.Reports
 	if err != nil || page.Total != 2 || len(reports) != 2 || reports[0].ID != second.ID || reports[1].ID != first.ID || reports[0].Details != "drops an exe" {
 		t.Fatalf("reports=%+v err=%v (the expired one must be gone)", reports, err)
@@ -89,12 +89,12 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id = ANY($1) AND payload->'to'->>0='abuse@mail.example.test'`, []string{"abuse-report:" + first.ID, "abuse-report:" + second.ID}).Scan(&alerts); err != nil || alerts != 2 {
 		t.Fatalf("alerts=%d err=%v", alerts, err)
 	}
-	older, err := s.List(ctx, host, "", reports[0].CreatedAt, "", 10)
+	older, err := s.List(ctx, host, "", "", reports[0].CreatedAt, "", 10)
 	if err != nil || len(older.Reports) != 1 || older.Reports[0].ID != first.ID {
 		t.Fatalf("page before the newest=%+v err=%v", older, err)
 	}
 	// One report a page: the cursor carries the id, so the next page resumes exactly after the last row.
-	one, err := s.List(ctx, host, "", time.Time{}, "", 1)
+	one, err := s.List(ctx, host, "", "", time.Time{}, "", 1)
 	if err != nil || len(one.Reports) != 1 || one.Reports[0].ID != second.ID || one.NextBefore == nil || one.NextBeforeID != second.ID {
 		t.Fatalf("first single page=%+v err=%v", one, err)
 	}
@@ -102,17 +102,62 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	if err != nil || !at.Equal(*one.NextBefore) || id != one.NextBeforeID {
 		t.Fatalf("cursor %q = %v %q %v", one.NextCursor, at, id, err)
 	}
-	rest, err := s.List(ctx, host, "", *one.NextBefore, one.NextBeforeID, 1)
+	rest, err := s.List(ctx, host, "", "", *one.NextBefore, one.NextBeforeID, 1)
 	if err != nil || len(rest.Reports) != 1 || rest.Reports[0].ID != first.ID || rest.NextBefore != nil {
 		t.Fatalf("second single page=%+v err=%v", rest, err)
 	}
 	// The reason filter is applied in the query, total included.
-	malware, err := s.List(ctx, host, "malware", time.Time{}, "", 10)
+	malware, err := s.List(ctx, host, "malware", "", time.Time{}, "", 10)
 	if err != nil || malware.Total != 1 || len(malware.Reports) != 1 || malware.Reports[0].ID != second.ID {
 		t.Fatalf("malware only=%+v err=%v", malware, err)
 	}
-	if _, err := s.List(ctx, host, "nonsense", time.Time{}, "", 10); !errors.Is(err, ErrInvalid) {
+	if _, err := s.List(ctx, host, "nonsense", "", time.Time{}, "", 10); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown reason err=%v", err)
+	}
+
+	// Triage: an operations operator dismisses one report with a note; it leaves the open queue, says who and when,
+	// and is audited with the reference. Reopening clears who and when. Support operators are refused.
+	operator, support := "abuse_ops_"+host, "abuse_support_"+host
+	for id, role := range map[string]string{operator: "operations", support: "support"} {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active',$2)`, id, role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.operator_accounts WHERE id IN ($1,$2)`, operator, support)
+	})
+	if open, err := s.List(ctx, host, "", "open", time.Time{}, "", 10); err != nil || open.Total != 2 || open.Reports[0].Status != "open" {
+		t.Fatalf("new reports are open: %+v err=%v", open, err)
+	}
+	dismissed, err := s.Triage(ctx, operator, first.ID, "dismissed", " Not ours: a third-party host. ", "TICKET-7")
+	if err != nil || dismissed.Status != "dismissed" || dismissed.TriagedBy != operator || dismissed.TriagedAt == nil || dismissed.TriageNote != "Not ours: a third-party host." {
+		t.Fatalf("dismissed=%+v err=%v", dismissed, err)
+	}
+	if open, err := s.List(ctx, host, "", "open", time.Time{}, "", 10); err != nil || open.Total != 1 || open.Reports[0].ID != second.ID {
+		t.Fatalf("open queue after the dismissal=%+v err=%v", open, err)
+	}
+	var audited int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='abuse_report.triaged' AND resource_id=$1 AND actor_user_id=$2 AND metadata->>'reference'='TICKET-7'`, first.ID, operator).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("triage audit rows=%d err=%v", audited, err)
+	}
+	reopened, err := s.Triage(ctx, operator, first.ID, "open", "back to the queue", "TICKET-8")
+	if err != nil || reopened.Status != "open" || reopened.TriagedBy != "" || reopened.TriagedAt != nil || reopened.TriageNote != "" {
+		t.Fatalf("reopened=%+v err=%v", reopened, err)
+	}
+	if _, err := s.Triage(ctx, support, first.ID, "dismissed", "", "TICKET-9"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("support triage err=%v", err)
+	}
+	if _, err := s.Triage(ctx, operator, "abuse_00000000-0000-4000-8000-000000000000", "dismissed", "", "TICKET-9"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing report err=%v", err)
+	}
+	if _, err := s.Triage(ctx, operator, first.ID, "closed", "", "TICKET-9"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown status err=%v", err)
+	}
+	if _, err := s.Triage(ctx, operator, first.ID, "dismissed", strings.Repeat("x", 1001), "TICKET-9"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("over-long note err=%v", err)
+	}
+	if _, err := s.List(ctx, host, "", "closed", time.Time{}, "", 10); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown status filter err=%v", err)
 	}
 }
 

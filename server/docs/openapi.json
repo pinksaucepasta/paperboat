@@ -11828,9 +11828,29 @@
           "reason",
           "details",
           "reporter_email",
-          "created_at"
+          "created_at",
+          "status"
         ],
         "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "actioned",
+              "dismissed"
+            ]
+          },
+          "triaged_by": {
+            "type": "string",
+            "description": "The operator who actioned or dismissed it."
+          },
+          "triaged_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "triage_note": {
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -43554,6 +43574,154 @@
         }
       }
     },
+    "/v1/admin/abuse-reports/{report_id}/triage": {
+      "post": {
+        "operationId": "post_v1_admin_abuse_reports_report_id_triage",
+        "summary": "Triage an abuse report",
+        "responses": {
+          "400": {
+            "description": "Invalid status or note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The report after triage. Audited with the Operator-Reason reference.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AbuseReport"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Sets one abuse report's status: open (the default for new reports), actioned or dismissed, with an optional note; actioned and dismissed record who and when, open clears them. Blocking a hostname with the report id as Operator-Reason marks that report actioned. Current active operator account and separate operator session required.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "actioned",
+                      "dismissed"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/abuse-reports": {
       "get": {
         "operationId": "get_v1_admin_abuse_reports",
@@ -43645,6 +43813,19 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "actioned",
+                "dismissed"
+              ]
             }
           },
           {

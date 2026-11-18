@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
@@ -20,7 +21,7 @@ import (
 // every edge snapshot, so the edge answers the takedown page without contacting the origin. The row
 // stays after an unblock (evidence and history); revision is 1 for a name never blocked, else the
 // row's version. A block mails the owning account once per version.
-func (s *Service) publicationAction(ctx context.Context, tx *db.Tx, target, reason string, block bool, input Input, out *Result) error {
+func (s *Service) publicationAction(ctx context.Context, tx *db.Tx, actorID, target, reason string, block bool, input Input, out *Result) error {
 	host := strings.ToLower(strings.TrimSuffix(target, "."))
 	if !publicationHostPattern.MatchString(host) {
 		return ErrInvalid
@@ -55,6 +56,17 @@ func (s *Service) publicationAction(ctx context.Context, tx *db.Tx, target, reas
 	state := "active"
 	if block {
 		state = "blocked"
+		// A block whose reference is an open abuse report about this hostname handles that report.
+		marked, err := tx.Exec(ctx, `UPDATE abuse_reports SET status='actioned', triaged_by=$3, triaged_at=now(), triage_note='Hostname blocked.'
+ WHERE id=$1 AND hostname=$2 AND status='open'`, reason, host, actorID)
+		if err != nil {
+			return err
+		}
+		if marked.RowsAffected() == 1 {
+			if err = s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "abuse_report.triaged", ResourceType: "abuse_report", ResourceID: reason, Metadata: map[string]any{"status": "actioned", "note": "Hostname blocked.", "reference": reason, "hostname": host}}); err != nil {
+				return err
+			}
+		}
 		if err = s.noticeBlockedTx(ctx, tx, host, reason, version); err != nil {
 			return err
 		}

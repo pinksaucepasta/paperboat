@@ -50,7 +50,7 @@ function Options({ filter }: { filter: Filter }) {
   return (
     <DropdownMenuRadioGroup value={filter.value} onValueChange={(next) => filter.onChange(String(next))}>
       {filter.options.map(([value, label]) => (
-        <DropdownMenuRadioItem key={value} value={value}>
+        <DropdownMenuRadioItem key={value} value={value} closeOnClick>
           {label}
         </DropdownMenuRadioItem>
       ))}
@@ -59,21 +59,22 @@ function Options({ filter }: { filter: Filter }) {
 }
 
 /**
- * The console's "Filter ⌄" button and chips (console/components/machine-filters.tsx): unset filters are offered in the
+ * The console's "Filter ⌄" button and chips (console/components/machine-filters.tsx): every filter is offered in the
  * button's submenus; a set one becomes a chip whose value changes in place and whose × clears it.
  */
 export function Filters({ items }: { items: Filter[] }) {
-  const unset = items.filter((f) => !f.value)
+  // The button and its menu stay mounted and list every filter: unmounting an open menu (its last unset filter
+  // just chosen) left its overlay blocking the page.
   return (
     <>
-      {unset.length > 0 && (
+      {(
         <DropdownMenu>
           <DropdownMenuTrigger className={control} data-filter-button>
             <FunnelSimpleIcon className="size-4" />
             Filter
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-40">
-            {unset.map((f) => (
+            {items.map((f) => (
               <DropdownMenuSub key={f.label}>
                 <DropdownMenuSubTrigger>{f.label}</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-40">
@@ -112,7 +113,7 @@ export function Filters({ items }: { items: Filter[] }) {
   )
 }
 
-const good = new Set(["signing", "active", "online", "ready", "succeeded", "enabled", "connected", "resolved"])
+const good = new Set(["signing", "actioned", "active", "online", "ready", "succeeded", "enabled", "connected", "resolved"])
 const bad = new Set(["suspended", "failed", "dead_letter", "past_due", "unpaid", "revoked", "stale", "uncertain", "disabled", "offline", "unhealthy", "draining", "blocked", "legal_block", "expired"])
 
 /** A state as the console shows one: a dot and the word. */

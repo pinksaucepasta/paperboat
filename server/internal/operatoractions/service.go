@@ -134,7 +134,7 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 				return err
 			}
 		case "publication_block", "publication_unblock":
-			if err = s.publicationAction(ctx, tx, target, reason, kind == "publication_block", input, &result); err != nil {
+			if err = s.publicationAction(ctx, tx, actorID, target, reason, kind == "publication_block", input, &result); err != nil {
 				return err
 			}
 		case "tunnel_disable", "tunnel_enable":

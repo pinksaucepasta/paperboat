@@ -42,13 +42,36 @@ func TestPublicationBlockTakesDownRestoresAndMailsTheOwner(t *testing.T) {
 	if _, err := s.Execute(ctx, actor, "block-stale-"+x, "publication_block", host, "abuse_case", Input{Revision: 2}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("first block with revision 2: %v", err)
 	}
-	blocked, err := s.Execute(ctx, actor, "block-"+x, "publication_block", strings.ToUpper(host), "abuse_case", Input{Revision: 1, Legal: true})
+	// An open abuse report about this host, used as the block's reference, is marked actioned by the block (and
+	// audited as a triage); a report about another host is left open even if named.
+	report := "abuse_00000000-0000-4000-8000-" + fmt.Sprintf("%012d", time.Now().UnixNano()%1e12)
+	other := "abuse_00000000-0000-4000-9000-" + fmt.Sprintf("%012d", time.Now().UnixNano()%1e12)
+	exec(`INSERT INTO paperboat.abuse_reports(id,hostname,url,reason) VALUES($1,$2,'https://'||$2,'phishing'),($3,'other-'||$2,'https://other-'||$2,'spam')`, report, host, other)
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.abuse_reports WHERE id IN ($1,$2)`, report, other)
+	})
+	blocked, err := s.Execute(ctx, actor, "block-"+x, "publication_block", strings.ToUpper(host), report, Input{Revision: 1, Legal: true})
 	if err != nil || blocked != (Result{ResourceID: host, State: "blocked", Version: 1}) {
 		t.Fatalf("block=%#v err=%v", blocked, err)
 	}
 	var legal, isBlocked bool
 	if err = store.SQL().QueryRowContext(ctx, `SELECT blocked,legal FROM paperboat.publication_blocks WHERE hostname=$1`, host).Scan(&isBlocked, &legal); err != nil || !isBlocked || !legal {
 		t.Fatalf("row blocked=%v legal=%v err=%v", isBlocked, legal, err)
+	}
+	var status, by string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT status,coalesce(triaged_by,'') FROM paperboat.abuse_reports WHERE id=$1`, report).Scan(&status, &by); err != nil || status != "actioned" || by != actor {
+		t.Fatalf("the report the block referenced: status=%q by=%q err=%v", status, by, err)
+	}
+	var triaged int
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='abuse_report.triaged' AND resource_id=$1 AND actor_user_id=$2`, report, actor).Scan(&triaged); err != nil || triaged != 1 {
+		t.Fatalf("triage audit for the block: %d err=%v", triaged, err)
+	}
+	// Repeating the block (same revision, already blocked) with the other report as reference changes nothing.
+	if _, err = s.Execute(ctx, actor, "block-other-"+x, "publication_block", host, other, Input{Revision: 1, Legal: true}); err != nil {
+		t.Fatalf("repeated block: %v", err)
+	}
+	if err = store.SQL().QueryRowContext(ctx, `SELECT status FROM paperboat.abuse_reports WHERE id=$1`, other).Scan(&status); err != nil || status != "open" {
+		t.Fatalf("a report about another host was touched: %q %v", status, err)
 	}
 	restored, err := s.Execute(ctx, actor, "unblock-"+x, "publication_unblock", host, "abuse_case", Input{Revision: 1})
 	if err != nil || restored.State != "active" || restored.Version != 2 {
