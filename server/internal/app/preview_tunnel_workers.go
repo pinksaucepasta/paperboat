@@ -46,6 +46,7 @@ func certificateTelemetry(producer *telemetry.Producer) func(context.Context, tu
 
 type tunnelExpiryReconciler interface {
 	ReconcileExpired(context.Context, tunnelv1.ExpiryReconcileRequest) ([]tunnelv1.MutationResult, error)
+	SettleAddressMoves(context.Context, tunnelv1.ExpiryReconcileRequest) error
 }
 
 func previewLeaseReconciliationWorker(service previewLeaseReconciler, interval time.Duration, producers ...*telemetry.Producer) workers.Worker {
@@ -86,6 +87,13 @@ func tunnelExpiryReconciliationWorker(service tunnelExpiryReconciler, interval t
 		})
 		if err != nil {
 			return fmt.Errorf("reconcile tunnel expiry: %w", err)
+		}
+		// The same sweep finishes the address changes whose new name every edge now serves.
+		if err := service.SettleAddressMoves(ctx, tunnelv1.ExpiryReconcileRequest{
+			Limit: 100, ActorID: "paperboat-server.tunnel-address-settler", ActorType: "system",
+			RequestID: requestID, CorrelationID: correlationID,
+		}); err != nil {
+			return fmt.Errorf("settle tunnel address moves: %w", err)
 		}
 		return nil
 	})

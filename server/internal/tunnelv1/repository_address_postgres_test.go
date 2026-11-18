@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 var addressAttempts atomic.Uint64
@@ -18,7 +19,7 @@ func (f *trk07PostgresFixture) changeAddress(t *testing.T, accountID, tunnelID, 
 	hash := sha256.Sum256([]byte("address:" + tunnelID + label + n))
 	return f.repository.Patch(context.Background(), PatchRecord{
 		OperationID: "op_addr_" + tunnelID + label + n, AuditEventID: "aud_addr_" + tunnelID + label + n, TunnelID: tunnelID, AccountID: accountID,
-		Subdomain: &label, ExpectedGeneration: generation, IdempotencyKey: "address:" + tunnelID + label + n, RequestHash: hash,
+		Subdomain: &label, AddressPolicy: AddressPolicy{MoveTimeout: 5 * time.Minute, Cooldown: time.Hour}, ExpectedGeneration: generation, IdempotencyKey: "address:" + tunnelID + label + n, RequestHash: hash,
 		ActorID: accountID, AuditActorID: accountID, ActorType: "user", RequestID: "req_addr_" + label,
 		CorrelationID: "corr_addr_" + label, SourceMachineID: "", Now: f.now,
 	})
@@ -74,8 +75,21 @@ func TestSQLRepositoryChangesTunnelAddressOnPostgres(t *testing.T) {
 	if c, err := f.repository.CheckAddress(ctx, otherAccount, otherID, label); err != nil || c.Free || c.Current {
 		t.Fatalf("held name check = %+v err=%v", c, err)
 	}
-	// The old generated name is free at once and the other account can take it.
+	// The old generated name stays the tunnel's for the cooldown: another account cannot take it, the tunnel can
+	// take it back, and once the cooldown has passed it is free for anyone.
 	oldLabel := oldHost[:len(oldHost)-len(".tunnels.example.test")]
+	if c, err := f.repository.CheckAddress(ctx, otherAccount, otherID, oldLabel); err != nil || c.Free {
+		t.Fatalf("name in its cooldown check = %+v err=%v", c, err)
+	}
+	if _, err := f.changeAddress(t, otherAccount, otherID, oldLabel, other.Tunnel.Generation); !errors.Is(err, ErrSubdomainTaken) {
+		t.Fatalf("taking a name in its cooldown = %v, want ErrSubdomainTaken", err)
+	}
+	if c, err := f.repository.CheckAddress(ctx, account, tunnelID, oldLabel); err != nil || !c.Free {
+		t.Fatalf("own old name check = %+v err=%v", c, err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_address_holds SET until=now()-interval '1 second' WHERE hostname=$1`, oldHost); err != nil {
+		t.Fatal(err)
+	}
 	if c, err := f.repository.CheckAddress(ctx, otherAccount, otherID, oldLabel); err != nil || !c.Free || c.Host != oldHost {
 		t.Fatalf("released name check = %+v err=%v", c, err)
 	}

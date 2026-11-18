@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -536,23 +537,110 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if err != nil || restored != 1 {
 		t.Fatalf("engine domain certificate completion = %d, %v; want the projection restored", restored, err)
 	}
-	// A new address (what PATCH subdomain writes: the stable endpoint and the managed route, one route generation
-	// up) reaches the engine mirror and the edge snapshot, and the old host leaves it.
-	renamed := "renamed-" + endpointID[:8] + ".tunnels.example.test"
+	// An address change is make before break: the old host stays the route's name and the new one rides along as a
+	// second name of the same route on every edge until each edge has observed it, then the new host is the name
+	// and the old one is retired. A move the edges do not confirm in time is undone.
+	repo, err = tunnelv1.NewRepository(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := tunnelv1.AddressPolicy{MoveTimeout: 5 * time.Minute, Cooldown: time.Hour}
+	oldHost := endpointID + ".tunnels.example.test"
+	label := "renamed-" + endpointID[:8]
+	renamed := label + ".tunnels.example.test"
+	currentGeneration := func() int64 {
+		var g int64
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT generation FROM tunnels WHERE id=$1`, tunnel).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	patch := func(name string) tunnelv1.MutationRecord {
+		t.Helper()
+		key := "addr-" + name + "-" + f.prefix
+		out, err := repo.Patch(f.ctx, tunnelv1.PatchRecord{
+			OperationID: "op_" + key, AuditEventID: "aud_" + key, TunnelID: tunnel, AccountID: f.account, Subdomain: &name, AddressPolicy: policy,
+			ExpectedGeneration: currentGeneration(), IdempotencyKey: key, RequestHash: sha256.Sum256([]byte(key)),
+			ActorID: f.account, AuditActorID: f.account, ActorType: "user", RequestID: "req_" + key, CorrelationID: "corr_" + key, Now: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	settle := func(at time.Time) {
+		t.Helper()
+		if err := repo.SettleAddressMoves(f.ctx, tunnelv1.AddressSettleRecord{Now: at, Limit: 10, Policy: policy, ActorID: "settler", ActorType: "system", RequestID: "req_settle", CorrelationID: "corr_settle"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	endpoint := func() string {
+		var e string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT stable_endpoint FROM tunnels WHERE id=$1`, tunnel).Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	holds := func() string {
+		var h string
+		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT coalesce(string_agg(kind||':'||hostname,',' ORDER BY hostname),'') FROM tunnel_address_holds WHERE tunnel_id=$1`, tunnel).Scan(&h); err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	allReady := func() {
+		f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND desired='active'`, tunnel)
+	}
 	var before int64
 	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT revision FROM endpoint_routes WHERE id=$1`, route).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	f.exec(t, `UPDATE tunnels SET stable_endpoint='https://'||$2 WHERE id=$1`, tunnel, renamed)
-	f.exec(t, `UPDATE tunnel_routes SET match_hostname=$2, generation=generation+1 WHERE id=$1`, route, renamed)
-	sync()
+	allReady()
+	started := patch(label)
+	if started.Tunnel.StableEndpoint != "https://"+oldHost || holds() != "incoming:"+renamed {
+		t.Fatalf("after the change started: address %q holds %q; want the old address and the new name held", started.Tunnel.StableEndpoint, holds())
+	}
+	rows = snapshot()
+	if len(rows) != 1 || rows[0].PublicHost != oldHost || !strings.Contains(rows[0].DomainBindings, renamed) || rows[0].ObservedState != "pending" || rows[0].RouteGeneration != before+1 {
+		t.Fatalf("edge snapshot while the address moves = %+v, want the old host with %q as a second name", rows, renamed)
+	}
+	settle(time.Now().UTC())
+	if endpoint() != "https://"+oldHost || holds() != "incoming:"+renamed {
+		t.Fatalf("a move no edge confirmed yet settled: address %q holds %q", endpoint(), holds())
+	}
+	allReady()
+	settle(time.Now().UTC())
+	if endpoint() != "https://"+renamed || holds() != "retired:"+oldHost {
+		t.Fatalf("after the edges confirmed: address %q holds %q; want the new address and the old name held", endpoint(), holds())
+	}
 	var mirrored string
 	var revision int64
-	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT hostname,revision FROM endpoint_routes WHERE id=$1`, route).Scan(&mirrored, &revision); err != nil || mirrored != renamed || revision != before+1 {
-		t.Fatalf("engine route after the address change = %q rev %d, %v; want %q rev %d", mirrored, revision, err, renamed, before+1)
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT hostname,revision FROM endpoint_routes WHERE id=$1`, route).Scan(&mirrored, &revision); err != nil || mirrored != renamed || revision <= before+1 {
+		t.Fatalf("engine route after the address change = %q rev %d, %v; want %q", mirrored, revision, err, renamed)
 	}
-	if rows := snapshot(); len(rows) != 1 || rows[0].PublicHost != renamed || rows[0].RouteGeneration != before+1 {
+	if rows := snapshot(); len(rows) != 1 || rows[0].PublicHost != renamed || strings.Contains(rows[0].DomainBindings, oldHost) {
 		t.Fatalf("edge snapshot after the address change = %+v, want one route at %q", rows, renamed)
+	}
+	var phase string
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM audit_events WHERE resource_id=$1 AND event_type IN ('tunnel.address_change_started','tunnel.address_changed')`, tunnel).Scan(&phase); err != nil || phase != "2" {
+		t.Fatalf("address audit events = %q, %v; want started and changed", phase, err)
+	}
+	// A move the edges never confirm is undone at its deadline: the old address keeps serving, the new name is
+	// dropped and the operation fails.
+	second := patch("never-" + endpointID[:8])
+	if holds() != "incoming:never-"+endpointID[:8]+".tunnels.example.test,retired:"+oldHost || second.Tunnel.StableEndpoint != "https://"+renamed {
+		t.Fatalf("second move: address %q holds %q", second.Tunnel.StableEndpoint, holds())
+	}
+	settle(time.Now().UTC().Add(policy.MoveTimeout + time.Minute))
+	var opState string
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state||'/'||coalesce(error_code,'') FROM operations WHERE id=$1`, "op_addr-never-"+endpointID[:8]+"-"+f.prefix).Scan(&opState); err != nil {
+		t.Fatal(err)
+	}
+	if endpoint() != "https://"+renamed || holds() != "retired:"+oldHost || opState != "failed/tunnel_address_not_ready" {
+		t.Fatalf("undone move: address %q holds %q operation %q", endpoint(), holds(), opState)
+	}
+	if rows := snapshot(); len(rows) != 1 || rows[0].PublicHost != renamed || strings.Contains(rows[0].DomainBindings, "never-") {
+		t.Fatalf("edge snapshot after the undone move = %+v", rows)
 	}
 	attach([]string{runtimewire.CapabilityEndpoints})
 	if endpoint, _, _ := state(); endpoint {

@@ -188,6 +188,7 @@ func New(opts Options) (*App, error) {
 		CursorKey:          cursorKey[:],
 		BandwidthDenied:    bandwidthgate.New(store).Denied,
 		ReservedSubdomains: opts.Config.Tunnel.ReservedSubdomains,
+		AddressPolicy:      tunnelv1.AddressPolicy{MoveTimeout: opts.Config.Tunnel.AddressMoveTimeout, Cooldown: opts.Config.Tunnel.AddressCooldown},
 	})
 	if err != nil {
 		_ = store.Close()

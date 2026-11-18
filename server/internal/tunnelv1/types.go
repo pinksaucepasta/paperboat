@@ -97,6 +97,8 @@ type Config struct {
 	PublicTCPPortMax int32
 	// ReservedSubdomains are the labels an owner may not choose as a tunnel address.
 	ReservedSubdomains []string
+	// AddressPolicy bounds an address change (move timeout, cooldown of the old name); required to change an address.
+	AddressPolicy AddressPolicy
 	// BandwidthDenied, when set, reports whether the account's workspaces are out of bandwidth
 	// allowance so status can say so. It must fail open.
 	BandwidthDenied func(ctx context.Context, accountID string, at time.Time) bool

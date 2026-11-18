@@ -349,6 +349,11 @@ type Tunnel struct {
 	// ReservedSubdomains are labels under BaseDomain no tunnel owner may choose as their address (our own
 	// hostnames and names that read as official). Replacing the list in the configuration replaces these.
 	ReservedSubdomains []string `json:"reserved_subdomains"`
+	// AddressMoveTimeout is how long every edge gets to serve a tunnel's new address next to the old one before the
+	// change is undone; AddressCooldown is how long the old name stays reserved to the tunnel afterwards, so a
+	// visitor with the old link cannot land on another account's tunnel.
+	AddressMoveTimeout time.Duration `json:"address_move_timeout"`
+	AddressCooldown    time.Duration `json:"address_cooldown"`
 }
 
 func defaultReservedSubdomains() []string {
@@ -610,7 +615,7 @@ func Default() Config {
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 90 * time.Second, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
-		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost", ReservedSubdomains: defaultReservedSubdomains()},
+		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost", ReservedSubdomains: defaultReservedSubdomains(), AddressMoveTimeout: 5 * time.Minute, AddressCooldown: 24 * time.Hour},
 		ConfigSync: ConfigSync{
 			Mode:             "disabled",
 			ManifestContract: "paperboat-manifest-v1", ManifestMaxBytes: 256 << 10,
@@ -961,6 +966,9 @@ func (c Config) Validate() error {
 	}
 	if !validEndpointBaseDomain(c.Tunnel.BaseDomain) {
 		errs = append(errs, fmt.Errorf("tunnel.base_domain must be a DNS hostname"))
+	}
+	if c.Tunnel.AddressMoveTimeout < 30*time.Second || c.Tunnel.AddressCooldown < time.Minute {
+		errs = append(errs, fmt.Errorf("tunnel.address_move_timeout must be at least 30s and tunnel.address_cooldown at least 1m"))
 	}
 	if err := c.Certificates.Validate(c.Environment); err != nil {
 		errs = append(errs, err)

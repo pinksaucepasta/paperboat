@@ -552,6 +552,8 @@ func writeTunnelError(w http.ResponseWriter, r *http.Request, err error) {
 		writePreviewTunnelError(w, r, http.StatusBadRequest, "subdomain_reserved", "This name is reserved. Choose another.", "unchanged", false, "choose_another_subdomain", err)
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrSubdomainTaken):
 		writePreviewTunnelError(w, r, http.StatusConflict, "subdomain_taken", "This name is already taken. Choose another.", "unchanged", false, "choose_another_subdomain", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrAddressChangePending):
+		writePreviewTunnelError(w, r, http.StatusConflict, "address_change_pending", "This tunnel is already moving to a new address. Wait for it to finish, then try again.", "unchanged", false, "retry_later", err)
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrAddressBlocked):
 		writePreviewTunnelError(w, r, http.StatusForbidden, "address_blocked", "This tunnel's address is blocked by Paperboat and cannot be changed.", "unchanged", false, "contact_support", err)
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrInvalidInput):

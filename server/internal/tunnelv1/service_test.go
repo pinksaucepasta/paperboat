@@ -108,6 +108,10 @@ func (f *fakeTunnelRepository) Patch(_ context.Context, input PatchRecord) (Muta
 	return f.patchResult, nil
 }
 
+func (f *fakeTunnelRepository) SettleAddressMoves(context.Context, AddressSettleRecord) error {
+	return nil
+}
+
 func (f *fakeTunnelRepository) CheckAddress(_ context.Context, _, _, label string) (AddressCheck, error) {
 	f.checkedLabel = label
 	host := label + ".tunnels.example.test"

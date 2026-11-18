@@ -65,6 +65,7 @@ type TunnelRepository interface {
 	// CheckAddress says what the tunnel's address would be with this label (under the base domain of its stored
 	// endpoint, not the masked one a self-hosted workspace shows) and whether it could take it.
 	CheckAddress(ctx context.Context, accountID, tunnelID, label string) (AddressCheck, error)
+	SettleAddressMoves(ctx context.Context, input AddressSettleRecord) error
 	Transition(context.Context, StateRecord) (MutationRecord, error)
 	ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error)
 	HealthFacts(ctx context.Context, accountID, tunnelID string, now time.Time) (HealthFacts, error)
@@ -107,6 +108,7 @@ type PatchRecord struct {
 	ExpirySet    bool
 	// Subdomain is the validated new label; the repository derives the host from the tunnel's current base domain.
 	Subdomain          *string
+	AddressPolicy      AddressPolicy
 	ExpectedGeneration int64
 	IdempotencyKey     string
 	RequestHash        [sha256.Size]byte
@@ -491,6 +493,7 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 		}
 		moveAddress := newHost != "" && "https://"+newHost != current.StableEndpoint
 		oldEndpoint := current.StableEndpoint
+		addressMoving := false
 		changed := patchChanges(current, input) || moveAddress
 		now := r.now().UTC()
 		if changed {
@@ -500,7 +503,7 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 			}
 			current = updated
 			if moveAddress {
-				if current, err = moveAddressTx(ctx, tx, current, newHost, input.ActorID, now); err != nil {
+				if current, addressMoving, err = startAddressMoveTx(ctx, tx, current, newHost, input.ActorID, input.AddressPolicy, now); err != nil {
 					return err
 				}
 			}
@@ -531,8 +534,14 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 			return err
 		}
 		if moveAddress {
+			// A move that keeps the old address up until the edges serve the new one is completed (or undone) later by
+			// SettleAddressMoves, which records the outcome.
+			event := "tunnel.address_changed"
+			if addressMoving {
+				event = "tunnel.address_change_started"
+			}
 			if err := insertAudit(ctx, queries, input.AuditEventID+".address", input.AccountID, auditActorID(input.ActorID, input.AuditActorID), input.ActorType,
-				"tunnel.address_changed", "update", "changed", current.ID, input.IdempotencyKey, input.RequestID,
+				event, "update", "changed", current.ID, input.IdempotencyKey, input.RequestID,
 				input.CorrelationID, input.SourceMachineID, now, map[string]any{
 					"generation": current.Generation, "previous_hostname": strings.TrimPrefix(oldEndpoint, "https://"), "hostname": newHost,
 				}); err != nil {

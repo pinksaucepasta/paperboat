@@ -50,7 +50,13 @@ func (r *recordingPreviewLeaseReconciler) Reconcile(_ context.Context, actorID, 
 
 type recordingTunnelExpiryReconciler struct {
 	request tunnelv1.ExpiryReconcileRequest
+	settle  tunnelv1.ExpiryReconcileRequest
 	err     error
+}
+
+func (r *recordingTunnelExpiryReconciler) SettleAddressMoves(_ context.Context, request tunnelv1.ExpiryReconcileRequest) error {
+	r.settle = request
+	return nil
 }
 
 func (r *recordingTunnelExpiryReconciler) ReconcileExpired(_ context.Context, request tunnelv1.ExpiryReconcileRequest) ([]tunnelv1.MutationResult, error) {

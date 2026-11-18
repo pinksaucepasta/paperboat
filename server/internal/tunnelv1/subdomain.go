@@ -19,6 +19,8 @@ var (
 	ErrSubdomainTaken = errors.New("subdomain is already taken")
 	// ErrAddressBlocked: an operator blocked this tunnel's address; renaming would evade the block.
 	ErrAddressBlocked = errors.New("tunnel address is blocked")
+	// ErrAddressChangePending: the tunnel is already moving to another address; it finishes or fails first.
+	ErrAddressChangePending = errors.New("an address change is already in progress")
 )
 
 // subdomainPattern is the strictest union of the reference products' public-name rules (zrok util/names.go,
