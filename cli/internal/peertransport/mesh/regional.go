@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"time"
@@ -89,7 +90,7 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	if len(regions) != 0 {
 		b.homeDERP = regions[0].RegionID
 	}
-	for k := range b.clients { // a region this engine lost or gained changes where peers are reached
+	for _, k := range slices.Collect(maps.Keys(b.clients)) { // a region this engine lost or gained changes where peers are reached
 		b.syncClientRegionLocked(k)
 	}
 	b.updateServerMapLocked()
@@ -213,6 +214,9 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	defer b.policyMu.Unlock()
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return errors.New("mesh: server is closed")
+	}
 	if !b.dm.Regions[id].HasDERP() {
 		return errors.New("mesh: unknown relay region")
 	}

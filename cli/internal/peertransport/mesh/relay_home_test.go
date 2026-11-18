@@ -353,6 +353,47 @@ func TestRecoveryPinIsAReplyRoute(t *testing.T) {
 	if got := peerHome(s, peer); got != one.RegionID {
 		t.Fatalf("a recovery pin changed the stored home to %d", got)
 	}
+	s.InvalidateAuthorizedPeer(peer) // a retired lease re-adds its peer on the rendezvous it had
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, three.RegionID, time.Second)
+	if err := s.ReplaceAllowedPeers(map[key.NodePublic]netip.Addr{}); err != nil { // a removed peer forgets it
+		t.Fatal(err)
+	}
+	s.lb.mu.Lock()
+	left := len(s.lb.replyRoutes)
+	s.lb.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d reply routes outlived their peers", left)
+	}
+	_ = s.Close()
+	if s.SetPeerRelayRegion(peer, three.RegionID) == nil {
+		t.Fatal("a pin was accepted after Close")
+	}
+}
+
+// A peer heard on its route's region keeps the route fresh past the TTL (the flow works only through it); heard on
+// another region it does not, and the route expires back to the home.
+func TestHeardOnRenewsTheReplyRoute(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, three := startRoutesServer(t, 400*time.Millisecond, peer)
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerRelayRegion(peer, two.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	for range 14 { // 1.4 s, three TTLs
+		s.lb.heardOn(peer, two.RegionID)
+		time.Sleep(100 * time.Millisecond)
+	}
+	awaitRegion(t, s, peer, two.RegionID, 100*time.Millisecond)
+	for range 14 {
+		s.lb.heardOn(peer, three.RegionID)
+		time.Sleep(100 * time.Millisecond)
+	}
+	awaitRegion(t, s, peer, one.RegionID, time.Second)
 }
 
 // A machine that reports no home drops what its peers held as its home; a route pinned since stays.
@@ -395,7 +436,7 @@ func TestSignedHomeOfAWithdrawnRelayIsNotReinstalled(t *testing.T) {
 	awaitRegion(t, s, peer, two.RegionID, time.Second)
 }
 
-// A reply route racing a home change never rewrites the stored home, and the peer ends on one of the two regions.
+// A reply route racing a home change never rewrites the stored home; the peer ends where the later of the two says.
 func TestReplyRouteRacingAHomeChangeKeepsTheHome(t *testing.T) {
 	const peers = 40
 	keys := make([]key.NodePublic, peers)
@@ -426,8 +467,17 @@ func TestReplyRouteRacingAHomeChangeKeepsTheHome(t *testing.T) {
 		if got := peerHome(s, peer); got != one.RegionID {
 			t.Fatalf("stored home %d, want %d", got, one.RegionID)
 		}
-		if got := s.lb.peerDERPRegion(peer); got != one.RegionID && got != two.RegionID {
-			t.Fatalf("peer is on region %d", got)
+		// Whichever of the two took the locks last decides: a route set after the new home outranks it while fresh, one set
+		// before it is dropped.
+		s.lb.mu.Lock()
+		route := s.lb.replyRoutes[peer]
+		s.lb.mu.Unlock()
+		want := one.RegionID
+		if route != nil {
+			want = two.RegionID
+		}
+		if got := s.lb.peerDERPRegion(peer); got != want {
+			t.Fatalf("peer is on region %d, want %d (route held: %v)", got, want, route != nil)
 		}
 	}
 }

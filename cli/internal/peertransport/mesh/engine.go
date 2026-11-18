@@ -187,6 +187,7 @@ func (s *Server) Start() error {
 		if s.OnRelayControl != nil && s.OnRelayControl(regionID, src, pkt) {
 			return true
 		}
+		lb.heardOn(src, regionID) // every non-disco packet, WireGuard data too (magicsock OnDERPRecv)
 		if !IsMeowPacket(pkt) {
 			return false
 		}

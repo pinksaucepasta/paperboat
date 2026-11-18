@@ -298,6 +298,18 @@ func (b *locoBackend) syncClientRegionLocked(peer key.NodePublic) bool {
 	return true
 }
 
+// heardOn renews peer's reply route when a packet from peer arrives on the route's region: the route is fresh for as long as
+// the peer keeps using it, as magicsock sets a derpRoute from the region a peer was heard on (derp.go runDerpReader). Without it
+// a flow that only works through the route would fall back to the signed home five minutes after its handshake. Called per DERP
+// packet: one b.mu hold and a map lookup, like peerForIP.
+func (b *locoBackend) heardOn(peer key.NodePublic, region tailcfg.DERPRegionID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if route := b.replyRoutes[peer]; route != nil && route.region == region {
+		route.at = time.Now()
+	}
+}
+
 // dropReplyRouteLocked forgets peer's reply route. b.mu must be held.
 func (b *locoBackend) dropReplyRouteLocked(peer key.NodePublic) {
 	if route := b.replyRoutes[peer]; route != nil && route.timer != nil {
@@ -313,6 +325,10 @@ func (b *locoBackend) expireReplyRoute(peer key.NodePublic, route *replyRoute) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed || b.replyRoutes[peer] != route {
+		return
+	}
+	if left := b.routeTTLValue() - time.Since(route.at); left > 0 { // heard on it since: still fresh
+		route.timer = time.AfterFunc(left, func() { b.expireReplyRoute(peer, route) })
 		return
 	}
 	if b.syncClientRegionLocked(peer) {
