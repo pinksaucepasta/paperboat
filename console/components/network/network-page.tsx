@@ -1,6 +1,6 @@
 "use client"
 
-import { CaretUpDownIcon, CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
+import { ArrowClockwiseIcon, CaretUpDownIcon, CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -17,14 +17,17 @@ import {
   poolQuery,
   poolServersQuery,
   removeInstallation,
+  requestUpdate,
   saveEdgePair,
   savePool,
   scopeOf,
+  updating,
   verifyIngress,
   type EdgePair,
   type PairEdge,
   type Node,
 } from "@/lib/network"
+import { useNow } from "@/lib/use-now"
 import { usePageParam } from "@/lib/use-page-param"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { DomainList } from "@/components/domains/domain-list"
@@ -68,9 +71,29 @@ const runs = (node: Node) => {
   return kinds.size === 2 ? "Relay and tunnel server" : kinds.has("tunnel") ? "Tunnel server" : "Relay"
 }
 
-function nodeState(node: Node): { ok: boolean; label: string; detail?: string } {
+const updateSteps: Record<string, string> = {
+  requested: "waiting for the server to check in",
+  downloading: "downloading",
+  verifying: "verifying the signed release",
+  swapping: "keeping the current version",
+  checking: "installing and checking health",
+}
+
+function nodeState(node: Node, now: number): { ok: boolean; label: string; detail?: string } {
   if (node.installations.some((installation) => installation.enrollment_state === "pending"))
     return { ok: false, label: "Finishing pairing" }
+  const running = node.installations.find(updating)?.update
+  if (running) return { ok: false, label: `Updating to ${running.target_version}: ${updateSteps[running.state] ?? running.state}` }
+  // A failed update stays shown for a day: the reason and its support reference are in the tooltip.
+  const failed = node.installations
+    .map((installation) => installation.update)
+    .find((update) => update && (update.state === "failed" || update.state === "rolled_back") && now - Date.parse(update.updated_at) < 86_400_000)
+  if (failed)
+    return {
+      ok: false,
+      label: failed.state === "rolled_back" ? "Update rolled back" : "Update failed",
+      detail: `${failed.detail ?? ""}${failed.support_reference ? ` Support reference ${failed.support_reference}.` : ""}`,
+    }
   const required = node.installations.find((installation) => installation.update_required)
   if (required) return { ok: false, label: "Update required", detail: required.update_required }
   const notReady = node.installations.filter((installation) => !installation.ready)
@@ -86,7 +109,12 @@ export function NetworkPage() {
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(q)
-  const installations = useApiQuery({ ...installationsQuery(scope, q, pages.page), enabled: Boolean(workspace) })
+  const installations = useApiQuery({
+    ...installationsQuery(scope, q, pages.page),
+    enabled: Boolean(workspace),
+    // Live progress while a node updates.
+    refetchInterval: (query) => (query.state.data?.items.some(updating) ? 5000 : 10_000),
+  })
   const [adding, setAdding] = useState<"relay" | "tunnel" | undefined>()
   const nodes = groupNodes(installations.data?.items ?? [])
   const none = installations.isSuccess && installations.data.total === 0 && !q
@@ -181,7 +209,7 @@ export function NetworkPage() {
 function NodeRow({ node }: { node: Node }) {
   const queryClient = useQueryClient()
   const [removing, setRemoving] = useState(false)
-  const state = nodeState(node)
+  const state = nodeState(node, useNow())
   const tunnel = node.installations.find((installation) => installation.capability === "tunnel")
   const available = node.installations.find((installation) => installation.update_available)?.update_available
   // The newest heartbeat of the node's components.
@@ -191,6 +219,14 @@ function NodeRow({ node }: { node: Node }) {
     .sort()
     .at(-1)
   const refresh = () => refreshNetwork(queryClient)
+  const update = useMutation({
+    mutationFn: () => requestUpdate(node.installations[0]),
+    onSuccess: async () => {
+      await refresh()
+      toast.success(`${node.name} updates at its next check-in`)
+    },
+    onError: (error) => errorToast("Update could not be requested", error),
+  })
   const verify = useMutation({
     mutationFn: () => verifyIngress(tunnel!),
     onSuccess: async () => {
@@ -209,6 +245,17 @@ function NodeRow({ node }: { node: Node }) {
             icon: ShieldCheckIcon,
             disabled: verify.isPending,
             onSelect: () => verify.mutate(),
+          },
+        ] satisfies Entry[])
+      : []),
+    ...(available && !node.installations.some(updating)
+      ? ([
+          {
+            kind: "item",
+            label: `Update to ${available}`,
+            icon: ArrowClockwiseIcon,
+            disabled: update.isPending,
+            onSelect: () => update.mutate(),
           },
         ] satisfies Entry[])
       : []),
