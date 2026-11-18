@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
@@ -38,29 +36,23 @@ func machineEnrollmentCommand() *cobra.Command {
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		base, err := url.Parse(discovery.InstallerBaseURL)
-		if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-			return errors.New("server discovery does not provide a valid installer URL; ask the server operator to configure installation")
+		base, err := installerBase(discovery.InstallerBaseURL)
+		if err != nil {
+			return err
 		}
 		enrollment, err := client.StartMachineEnrollmentIn(ctx.Context, newIdempotencyKey(), workspace)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		// One token for every platform: the installer path says which shell runs it.
-		makeURL := func(installer string) string {
-			parameter := enrollment.BootstrapToken
-			if name != "" {
-				parameter = name + "-" + parameter
-			}
-			return strings.TrimRight(base.String(), "/") + installer + "?p=" + url.QueryEscape(parameter)
-		}
-		linuxCommand := "curl -fsSL '" + makeURL("/install") + "' | bash"
-		windowsCommand := windowsEnrollmentCommand(makeURL("/install.ps1"))
+		// One token for every platform; it goes in the environment of the installer, never in a URL or an argument.
+		variables := enrollmentVariables(enrollment.BootstrapToken, name)
+		linuxCommand := posixInstallCommand(base, variables...)
+		windowsCommand := windowsInstallCommand(base, variables...)
 		asJSON, _ := command.Flags().GetBool("json")
 		if asJSON {
 			err = writeCLIJSON(command.OutOrStdout(), map[string]any{"expires_at": enrollment.ExpiresAt, "linux_macos_command": linuxCommand, "windows_command": windowsCommand})
 		} else {
-			_, err = fmt.Fprintf(command.OutOrStdout(), "Linux/macOS:\n%s\n\nWindows (PowerShell or Command Prompt):\n%s\n", linuxCommand, windowsCommand)
+			_, err = fmt.Fprintf(command.OutOrStdout(), "Linux/macOS:\n%s\n\nWindows (PowerShell):\n%s\n", linuxCommand, windowsCommand)
 		}
 		if err != nil {
 			return cancelEnrollmentCommands(ctx.Context, client, err, enrollment)

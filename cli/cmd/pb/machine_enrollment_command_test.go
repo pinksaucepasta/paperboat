@@ -43,8 +43,8 @@ func TestMachineAddJSONCarriesOneTokenForBothInstallers(t *testing.T) {
 	}
 	result := envelope.Data
 	if creates != 1 ||
-		result["linux_macos_command"] != "curl -fsSL 'https://install.example.test/install?p=ABCDEFGHIJKLMNOPQRSTUVWXYZ' | bash" ||
-		result["windows_command"] != `powershell -c "iex (irm 'https://install.example.test/install.ps1?p=ABCDEFGHIJKLMNOPQRSTUVWXYZ')"` {
+		result["linux_macos_command"] != "curl -fsSL https://install.example.test | PB_TOKEN='ABCDEFGHIJKLMNOPQRSTUVWXYZ' sh" ||
+		result["windows_command"] != `$env:PB_TOKEN='ABCDEFGHIJKLMNOPQRSTUVWXYZ'; irm https://install.example.test | iex` {
 		t.Fatalf("creates=%d result=%v", creates, result)
 	}
 }

@@ -371,10 +371,10 @@ tags have no `v` prefix.
 Releases contain one complete `pb` asset per released platform and architecture:
 Linux amd64/arm64 raw ELF executables, one ad-hoc-signed macOS arm64 executable, and Windows
 amd64/arm64 PE executables. The Windows executables are not Authenticode-signed: trust comes from the
-signed TUF metadata and the pinned SHA-256. Users install through
-[`https://get.pprbt.dev/install`](https://get.pprbt.dev/install) (`/install.ps1` on Windows). The trusted HTTPS
-installer pins the selected product's exact URL, version, SHA-256, and length before
-execution. First installation does not locally verify a TUF signature; the installed
+signed TUF metadata and the signed `SHA256SUMS`. Users install with `curl -fsSL https://get.pprbt.dev | sh`
+(`irm https://get.pprbt.dev | iex` in PowerShell). The fixed installer in the repository finds the latest GitHub
+release, verifies the signature of its `SHA256SUMS` with an embedded release key and then the product's SHA-256,
+before it executes anything. First installation does not locally verify a TUF signature; the installed
 updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack

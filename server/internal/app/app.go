@@ -307,7 +307,7 @@ func New(opts Options) (*App, error) {
 	if releaseBaseURL == "" {
 		releaseBaseURL = publicBaseURL
 	}
-	userMachineService.ConfigureBootstrapCommand("curl -fsSL " + releaseBaseURL + "/install | bash -s -- --pair")
+	userMachineService.ConfigureBootstrapCommand("curl -fsSL " + releaseBaseURL + " | sh")
 	if err := userMachineService.ConfigureRuntimeRoute(opts.Config.RuntimeBaseDomain, opts.Config.UserMachines.RuntimeListenPort); err != nil {
 		return nil, err
 	}

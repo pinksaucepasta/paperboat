@@ -44,7 +44,7 @@ func TestRecipeCreateSendsIDAndAuthAndPrintsTheTokenOnce(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
-	for _, want := range []string{"Recipe ci created in workspace acme.", "Tags        ci", "Reach       nothing", "Preview     port 3000 for 2h", "Machines    up to 20; removed 30m after going offline", "Expires     2027-02-14 (90d)", "curl -fsSL https://get.example.test/recipe | bash", "irm https://get.example.test/recipe.ps1 | iex"} {
+	for _, want := range []string{"Recipe ci created in workspace acme.", "Tags        ci", "Reach       nothing", "Preview     port 3000 for 2h", "Machines    up to 20; removed 30m after going offline", "Expires     2027-02-14 (90d)", "curl -fsSL https://get.example.test | sh", "irm https://get.example.test | iex"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in:\n%s", want, out)
 		}

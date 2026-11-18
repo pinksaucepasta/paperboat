@@ -2026,8 +2026,8 @@ class RemainingFamilyPlumbing(unittest.TestCase):
     def test_enrollment_file_takes_the_windows_token_for_a_device(self):
         # Tokens are per OS: the Linux one is refused by pb pair on Windows (hostruntimecmd/main.go, bootstrap.go).
         import pairing_lifecycle
-        receipt = {'windows_command': "powershell -c \"iex (irm 'https://x.test/install.ps1?p=name-0123456789ABCDEFGHIJKLMNOP')\"",
-                   'linux_macos_command': "curl 'https://x.test/i?p=ZZZZZZZZZZZZZZZZZZZZZZZZZZ'"}
+        receipt = {'windows_command': "$env:PB_TOKEN='0123456789ABCDEFGHIJKLMNOP'; irm https://x.test | iex",
+                   'linux_macos_command': "curl -fsSL https://x.test | PB_TOKEN='ZZZZZZZZZZZZZZZZZZZZZZZZZZ' sh"}
         written = []
 
         class File:

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -116,12 +115,12 @@ func recipeInstallLines(command *cobra.Command, client *api.Client) (map[string]
 	if err != nil {
 		return nil, friendlyCommandError(err)
 	}
-	base, err := url.Parse(discovery.InstallerBaseURL)
-	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
-		return nil, fmt.Errorf("server discovery does not provide a valid installer URL; ask the server operator to configure installation")
+	base, err := installerBase(discovery.InstallerBaseURL)
+	if err != nil {
+		return nil, err
 	}
-	root := strings.TrimRight(base.String(), "/")
-	return map[string]string{"linux_macos": "curl -fsSL " + root + "/recipe | bash", "windows": "irm " + root + "/recipe.ps1 | iex"}, nil
+	// PB_RECIPE is read from the environment (a CI secret, say), so the lines carry no token.
+	return map[string]string{"linux_macos": posixInstallCommand(base), "windows": windowsInstallCommand(base)}, nil
 }
 
 func writeRecipeSummary(out io.Writer, r recipe.Recipe, stored api.Recipe) {

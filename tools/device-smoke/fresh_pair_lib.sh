@@ -25,9 +25,7 @@ pair_user() { # pair_user CONTAINER USER UID NAME: install $FRESH_BINARY as USER
 import json, os, re, subprocess, sys
 added = json.load(sys.stdin)
 added.get("data") or sys.exit("enrollment refused: " + json.dumps(added.get("error", added))[:300])
-url = re.search(r"'"'"'(https?://[^'"'"']+)'"'"'", added["data"]["linux_macos_command"]).group(1)
-script = subprocess.run(["curl", "-fsSL", url], capture_output=True, text=True, check=True).stdout
-token = re.search(r"PAPERBOAT_ENROLLMENT_TOKEN='"'"'([A-Za-z0-9]+)'"'"'", script).group(1)
+token = re.search(r"PB_TOKEN='"'"'([A-Za-z0-9]+)'"'"'", added["data"]["linux_macos_command"]).group(1)
 with open(os.open(os.environ["TOKEN"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     f.write(token)
 '
