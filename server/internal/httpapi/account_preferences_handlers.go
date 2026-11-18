@@ -33,7 +33,6 @@ func accountPreferencesPatch(service *accountprefs.Service) http.HandlerFunc {
 		}
 		var update accountprefs.Update
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
-		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&update); err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body must be a JSON object of known preferences.")
 			return

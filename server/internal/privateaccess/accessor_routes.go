@@ -156,7 +156,6 @@ func (h *AccessorHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	var in accessorRequest
 	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
 	if d.Decode(&in) != nil {
 		writeHTTPError(requestContext(r), w, 400, "invalid_request", "The request is invalid.", false)
 		return

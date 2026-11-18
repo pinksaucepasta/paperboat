@@ -74,7 +74,8 @@ func TestPreviewDomainCreateHandlerStrictAndOperationResponse(t *testing.T) {
 	request.Header.Set(previewtunnelapi.IdempotencyHeader, "domain-create-2")
 	recorder = httptest.NewRecorder()
 	PreviewDomainCreateHandler(stub).ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
+	// A field a newer pb adds is ignored (released clients keep working against this server).
+	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unknown field status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }

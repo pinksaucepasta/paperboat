@@ -311,10 +311,10 @@ func TestEdgeAssignmentSerializesRevokedAsBoolean(t *testing.T) {
 	}
 }
 
-func TestEdgeHandlerRejectsUnknownAndTrailingJSON(t *testing.T) {
+// Unknown fields are ignored (released edges and relays send what their release knows); trailing JSON is refused.
+func TestEdgeHandlerRejectsTrailingJSON(t *testing.T) {
 	service := NewEdgeService(nil, "edge-control-credential-01234567890123456789")
 	for _, body := range []string{
-		`{"edge_node_id":"node","unknown":true}`,
 		`{"edge_node_id":"node"}{"edge_node_id":"other"}`,
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/v1/edge/routes/desired-state", strings.NewReader(body))

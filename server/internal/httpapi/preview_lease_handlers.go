@@ -481,7 +481,6 @@ func decodePreviewLeaseBody(raw []byte, target any) error {
 		return fmt.Errorf("%w: request body must be a JSON object", previewv1.ErrInvalidInput)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("%w: request body must match the preview schema", previewv1.ErrInvalidInput)
 	}

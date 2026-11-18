@@ -21,7 +21,6 @@ func userMachineCapabilities(service *usermachines.Service) http.HandlerFunc {
 			Desired         usermachines.MachineCapabilitySelection `json:"desired"`
 		}
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 4097))
-		decoder.DisallowUnknownFields()
 		var extra any
 		if decoder.Decode(&input) != nil || decoder.Decode(&extra) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body must match the documented schema.")

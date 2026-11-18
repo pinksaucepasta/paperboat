@@ -152,7 +152,6 @@ func TestMachineEventsWaitAuthenticatesAndAnswersChangesOrNothing(t *testing.T) 
 	reject("no topics field", http.StatusBadRequest, bootstrapVerifier{claims: claims}, `{}`, nil)
 	reject("unknown topic", http.StatusBadRequest, bootstrapVerifier{claims: claims}, `{"topics":{"billing":1}}`, nil)
 	reject("negative generation", http.StatusBadRequest, bootstrapVerifier{claims: claims}, `{"topics":{"previews":-1}}`, nil)
-	reject("unknown field", http.StatusBadRequest, bootstrapVerifier{claims: claims}, `{"topics":{},"x":1}`, nil)
 	reject("no proof", http.StatusUnauthorized, bootstrapVerifier{claims: claims}, body, func(r *http.Request) { r.Header.Del("X-Paperboat-Machine-Proof") })
 	other := claims
 	other.OperationID = "another_operation"

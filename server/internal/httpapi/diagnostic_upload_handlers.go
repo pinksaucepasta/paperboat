@@ -45,8 +45,7 @@ func diagnosticUploadIntentCreate(service *diagnosticuploads.Service) http.Handl
 			return
 		}
 		var body request
-		if !decodeStrictDiagnosticJSON(w, r, &body, maximumDiagnosticIntentRequestBytes,
-			"schema", "correlation_id", "bytes", "sha256", "categories", "failure_references") {
+		if !decodeDiagnosticJSON(w, r, &body, maximumDiagnosticIntentRequestBytes) {
 			return
 		}
 		if body.Schema != "paperboat.diagnostic-upload-intent-request/v1" {
@@ -77,7 +76,7 @@ func diagnosticUploadIntentComplete(service *diagnosticuploads.Service) http.Han
 			return
 		}
 		var body struct{}
-		if !decodeStrictDiagnosticJSON(w, r, &body, 32) {
+		if !decodeDiagnosticJSON(w, r, &body, 32) {
 			return
 		}
 		intent, err := service.Complete(r.Context(), principal.User.ID, r.PathValue("intent_id"))
@@ -89,7 +88,9 @@ func diagnosticUploadIntentComplete(service *diagnosticuploads.Service) http.Han
 	}
 }
 
-func decodeStrictDiagnosticJSON(w http.ResponseWriter, r *http.Request, output any, maximum int64, allowedFields ...string) bool {
+// decodeDiagnosticJSON reads one bounded JSON object from a released pb: fields a newer build adds are
+// ignored (and never stored: only output's fields are read).
+func decodeDiagnosticJSON(w http.ResponseWriter, r *http.Request, output any, maximum int64) bool {
 	if r.Header.Get("Content-Type") != "application/json" || r.URL.RawQuery != "" || r.ContentLength < 0 || r.ContentLength > maximum {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "Request must contain bounded application/json.")
 		return false
@@ -119,16 +120,6 @@ func decodeStrictDiagnosticJSON(w http.ResponseWriter, r *http.Request, output a
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		writeDiagnosticJSONDecodeError(w, r, nil, err)
 		return false
-	}
-	allowed := make(map[string]struct{}, len(allowedFields))
-	for _, field := range allowedFields {
-		allowed[field] = struct{}{}
-	}
-	for field := range fields {
-		if _, ok := allowed[field]; !ok {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "Request body contains an unknown field.")
-			return false
-		}
 	}
 	if err := json.Unmarshal(raw, output); err != nil {
 		writeDiagnosticJSONDecodeError(w, r, nil, err)

@@ -63,7 +63,6 @@ func machineLatencyReport(machines machineLookup, latency machineLatencyService)
 		}
 		var in request
 		decoder := json.NewDecoder(io.LimitReader(r.Body, 16<<10))
-		decoder.DisallowUnknownFields()
 		if decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Send the relay measurements as JSON.")
 			return
