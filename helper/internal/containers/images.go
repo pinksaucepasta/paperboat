@@ -81,8 +81,8 @@ func LoadImages(dir string) (Images, error) {
 		return images, err
 	}
 	defer file.Close()
+	// A field another pbh release wrote (an update, or a rollback to this one) is ignored, never "invalid".
 	decoder := json.NewDecoder(io.LimitReader(file, 16385))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&images); err != nil {
 		return images, errors.New("runtime image configuration is invalid")
 	}

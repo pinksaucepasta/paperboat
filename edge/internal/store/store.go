@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
+	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 )
 
 const (
@@ -118,7 +119,7 @@ func Load(path string) (State, error) {
 		return State{}, ErrCorrupt
 	}
 	var wrapped envelope
-	if err := strictJSON(payload, &wrapped); err != nil {
+	if err := decodeOne(payload, &wrapped); err != nil {
 		return State{}, ErrCorrupt
 	}
 	if wrapped.Version != CurrentVersion {
@@ -129,23 +130,24 @@ func Load(path string) (State, error) {
 		return State{}, ErrCorrupt
 	}
 	var state State
-	if err := strictJSON(wrapped.State, &state); err != nil || state.Version != CurrentVersion || state.CounterEpoch == "" || len(state.Counters) > 100000 || len(state.PendingUsage.Reports) > 100000 {
+	if err := decodeOne(wrapped.State, &state); err != nil || state.Version != CurrentVersion || state.CounterEpoch == "" || len(state.Counters) > 100000 || len(state.PendingUsage.Reports) > 100000 {
 		return State{}, ErrCorrupt
 	}
 	return state, nil
 }
 
-func strictJSON(payload []byte, target any) error {
+// decodeOne reads exactly one JSON value. Fields this build does not know are ignored: a store written by the
+// previous release (2026.11.16.2 kept "operations") or by a newer one must load after an update or a rollback.
+// Integrity is the checksum over the stored bytes, which no field change invalidates.
+func decodeOne(payload []byte, target any) error {
+	if strictjson.Validate(payload, 64) != nil { // duplicate keys stay refused
+		return ErrCorrupt
+	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return ErrCorrupt
-	}
-	canonical, err := json.Marshal(target)
-	if err != nil || !bytes.Equal(canonical, payload) {
 		return ErrCorrupt
 	}
 	return nil

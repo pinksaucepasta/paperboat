@@ -105,3 +105,20 @@ func TestLoadRejectsDuplicateCanonicalFieldsEvenWithValidChecksum(t *testing.T) 
 		t.Fatalf("duplicate checksummed state error=%v", err)
 	}
 }
+
+// A store written by the previous release (2026.11.16.2, with its since-dropped "operations") loads after an update:
+// testdata/state-2026.11.16.2.json was written by that release's own Save.
+func TestLoadsStoreWrittenByPreviousRelease(t *testing.T) {
+	raw, err := os.ReadFile("testdata/state-2026.11.16.2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := Load(path)
+	if err != nil || state.CounterEpoch != "epoch_test_01" || len(state.Counters) != 1 || len(state.PendingUsage.Reports) != 1 {
+		t.Fatalf("previous release's store = %+v, %v", state, err)
+	}
+}
