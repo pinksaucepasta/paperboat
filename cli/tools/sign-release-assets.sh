@@ -16,7 +16,7 @@ rm -f SHA256SUMS SHA256SUMS.sig
 {
   # The first line names the release: a signed SHA256SUMS from another release cannot be replayed under this tag.
   printf '# paperboat-release %s\n' "$tag"
-  for file in $(LC_ALL=C ls); do sha256sum "$file"; done
+  for file in *; do [ -f "$file" ] && sha256sum "$file"; done
 } > "$work/SHA256SUMS"
 cp "$work/SHA256SUMS" SHA256SUMS
 ssh-keygen -q -Y sign -f "$key" -n paperboat-release SHA256SUMS
