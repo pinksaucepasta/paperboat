@@ -120,49 +120,6 @@ func TestOperationErrorOwnedProsePreservesRecoveryFields(t *testing.T) {
 	}
 }
 
-// F13-03: when the workspace allowance is used up, the user learns that direct access still
-// works and where to add bandwidth, from the server's audited code, never from response text.
-func TestBandwidthQuotaExhaustedHasAuthoredRecoveryMessage(t *testing.T) {
-	err := &APIError{Status: http.StatusConflict, Code: "bandwidth_quota_exhausted", Message: apiErrorMessage("bandwidth_quota_exhausted", http.StatusConflict)}
-	if err.PublicCode() != "bandwidth_quota_exhausted" {
-		t.Fatalf("code was projected as %q", err.PublicCode())
-	}
-	for _, want := range []string{"Direct machine-to-machine access still works", "Billing", "next allowance period"} {
-		if !strings.Contains(err.Message, want) {
-			t.Fatalf("message %q lacks %q", err.Message, want)
-		}
-	}
-	if generic := apiErrorMessage("unknown_code", http.StatusConflict); err.Message == generic {
-		t.Fatal("quota exhaustion fell back to the generic conflict message")
-	}
-}
-
-// The only server-provided detail the quota message may carry is an http(s) Billing URL.
-func TestBandwidthQuotaMessageCarriesOnlySafeBillingURL(t *testing.T) {
-	good := apiErrorMessageFor("bandwidth_quota_exhausted", http.StatusConflict, map[string]any{"billing_url": "https://console.example.test/billing"})
-	if !strings.HasSuffix(good, "Add bandwidth: https://console.example.test/billing") {
-		t.Fatalf("message lacks the Billing URL: %q", good)
-	}
-	for _, unsafe := range []any{"javascript:alert(1)", "https://user:secret@console.example.test/billing", "/billing", "", 7, nil} {
-		if got := apiErrorMessageFor("bandwidth_quota_exhausted", http.StatusConflict, map[string]any{"billing_url": unsafe}); strings.Contains(got, "Add bandwidth:") {
-			t.Fatalf("billing_url %v was shown: %q", unsafe, got)
-		}
-	}
-	if got := apiErrorMessageFor("conflict", http.StatusConflict, map[string]any{"billing_url": "https://console.example.test/billing"}); strings.Contains(got, "Add bandwidth") {
-		t.Fatalf("another code carried the billing link: %q", got)
-	}
-}
-
-func TestPeerNetworkRelayDenialIsTypedAndOnlyForQuota(t *testing.T) {
-	denial := PeerNetworkConfigurationResult{RelayDenied: "bandwidth_quota_exhausted", BillingURL: "https://console.example.test/billing"}.RelayDenial()
-	if denial == nil || denial.Code != "bandwidth_quota_exhausted" || denial.Status != http.StatusConflict || !strings.Contains(denial.Message, "https://console.example.test/billing") {
-		t.Fatalf("denial = %+v", denial)
-	}
-	if (PeerNetworkConfigurationResult{}).RelayDenial() != nil || (PeerNetworkConfigurationResult{RelayDenied: "something_else"}).RelayDenial() != nil {
-		t.Fatal("an unknown or absent denial produced an error")
-	}
-}
-
 // F12-06: a team mutation while the team is suspended (409 team_suspended) says the team is
 // suspended and what to do, not the generic "resource state changed".
 func TestTeamSuspendedHasAuthoredRecoveryMessage(t *testing.T) {

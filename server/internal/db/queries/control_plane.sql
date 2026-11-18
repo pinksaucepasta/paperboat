@@ -1361,10 +1361,10 @@ VALUES
    sqlc.arg(route_revision), sqlc.arg(direction), sqlc.arg(observed_bytes), sqlc.arg(delta_bytes),
    sqlc.arg(interval_start), sqlc.arg(interval_end))
 ON CONFLICT (operation_id) DO NOTHING
-RETURNING *;
+RETURNING operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, actor_account_id;
 
 -- name: GetControlUsageReceipt :one
-SELECT * FROM control_usage_receipts WHERE operation_id = $1;
+SELECT operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, actor_account_id FROM control_usage_receipts WHERE operation_id = $1;
 
 -- name: AcknowledgeControlUsageReceipt :execrows
 UPDATE control_usage_receipts SET acknowledged_at = coalesce(acknowledged_at, sqlc.arg(now))

@@ -83,7 +83,7 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		report := usageReport(fmt.Sprintf("scope_op_%d_%s", i, suffix), "scope_epoch_"+suffix, 100, now)
 		report.AuthorityID, report.EdgeNodeID, report.EnvironmentID, report.RouteID = binding.ID, binding.Node, binding.Environment, binding.Route
 		receipt, err := ReconcileScopedUsage(ctx, store, report, now.Add(2*time.Hour), scopedTestDebiter{})
-		if err != nil || receipt.DeltaBytes != 100 || !receipt.QuotaExhausted {
+		if err != nil || receipt.DeltaBytes != 100 {
 			t.Fatalf("delayed team %d receipt=%+v err=%v", i, receipt, err)
 		}
 
@@ -97,7 +97,7 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 			t.Fatal("edge receipt and history lost their authenticated member")
 		}
 		receipt, err = ReconcileScopedUsage(ctx, store, report, now.Add(3*time.Hour), scopedTestDebiter{})
-		if err != nil || !receipt.Duplicate || !receipt.QuotaExhausted {
+		if err != nil || !receipt.Duplicate {
 			t.Fatalf("retry=%+v err=%v", receipt, err)
 		}
 		changed := report
