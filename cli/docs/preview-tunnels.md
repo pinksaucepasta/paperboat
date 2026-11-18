@@ -95,8 +95,9 @@ derives from the name you type. The name is only a label: `pb tunnel rename api 
 changes it without touching the address, names need not be unique, and `pb tunnel list`
 and `pb tunnel show` print the address next to the name. To pick the address itself,
 run `pb tunnel address api helloworld`: the first label becomes `helloworld` under the
-same base domain, the old address stops working at once, a name another tunnel uses or
-a reserved name is refused, and changes are rate limited. A preview's name cannot be
+same base domain, the new address is published first and the old one stops working once every
+edge serves the new one (it stays reserved to the tunnel for a day), a name another tunnel
+uses or a reserved name is refused, and changes are rate limited. A preview's name cannot be
 changed. To serve from your own address, attach a custom domain (below).
 
 Inspect the durable resource and live health:

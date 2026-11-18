@@ -82,8 +82,9 @@ function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () 
         <DialogHeader>
           <DialogTitle>Change address</DialogTitle>
           <DialogDescription>
-            Pick the name this tunnel answers on. The current address stops working as soon as you save, and
-            anyone using it, including webhooks and bookmarks, must switch to the new one.
+            Pick the name this tunnel answers on. The new address starts working first; the current one keeps
+            working until the new one is ready everywhere, then stops. Anyone using it, including webhooks and
+            bookmarks, must switch to the new one.
           </DialogDescription>
         </DialogHeader>
         <form
