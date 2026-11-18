@@ -16,6 +16,9 @@ type candidateSessionOwner struct {
 	catalog    sessionowner.Catalog
 	generation string
 	existed    bool // its descriptor was published before this attempt
+	// previous is that descriptor as it was when the attempt began. A downgrade rewrites a retired owner's archive
+	// row (it names the newer build's code) to name the older build; when the attempt fails the row goes back.
+	previous *sessionowner.Descriptor
 }
 
 func newCandidateSessionOwner(request Request) (candidateSessionOwner, error) {
@@ -35,7 +38,15 @@ func newCandidateSessionOwner(request Request) (candidateSessionOwner, error) {
 	if err != nil && !installNotExistOnly(err) {
 		return candidateSessionOwner{}, err
 	}
-	return candidateSessionOwner{catalog: catalog, generation: generation, existed: err == nil}, nil
+	owner := candidateSessionOwner{catalog: catalog, generation: generation, existed: err == nil}
+	if owner.existed {
+		d, err := sessionowner.Read(path)
+		if err != nil {
+			return candidateSessionOwner{}, err
+		}
+		owner.previous = &d
+	}
+	return owner, nil
 }
 
 // withdrawUnless undoes the candidate after an attempt that did not commit: its unit
@@ -43,8 +54,11 @@ func newCandidateSessionOwner(request Request) (candidateSessionOwner, error) {
 // failed at service apply left one running). A generation that was already
 // published, or that the installation record now names (committed), is not this attempt's.
 func (o candidateSessionOwner) withdrawUnless(ctx context.Context, committed string) error {
-	if o.existed || o.generation == "" || o.generation == committed {
+	if o.generation == "" || o.generation == committed {
 		return nil
+	}
+	if o.existed {
+		return o.restorePrevious(ctx)
 	}
 	path, err := sessionowner.Find(o.catalog.Root, o.generation)
 	if err != nil {
@@ -68,6 +82,38 @@ func (o candidateSessionOwner) withdrawUnless(ctx context.Context, committed str
 		return err
 	}
 	return o.catalog.Forget(ctx, d)
+}
+
+// restorePrevious puts back the row this attempt found, when the attempt rewrote it: the owner the attempt started
+// on the rewritten row is stopped first, then the row is republished as it was, so a failed downgrade never leaves
+// the archive pointing at code the installation does not run. A row the attempt did not change (the same build
+// installed again) and a live owner are left alone.
+func (o candidateSessionOwner) restorePrevious(ctx context.Context) error {
+	if o.previous == nil {
+		return nil
+	}
+	path, err := sessionowner.Find(o.catalog.Root, o.generation)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); installNotExistOnly(err) {
+		return nil
+	}
+	current, err := sessionowner.Read(path)
+	if err != nil {
+		return err
+	}
+	if current == *o.previous {
+		return nil
+	}
+	installer, err := o.catalog.InstallerForRemoval(current)
+	if err != nil {
+		return err
+	}
+	if err := installer.Uninstall(ctx); err != nil {
+		return err
+	}
+	return o.catalog.Publish(ctx, *o.previous)
 }
 
 // replaceCandidate runs one replacement of an installation by a candidate version. The machine guard moves to the
