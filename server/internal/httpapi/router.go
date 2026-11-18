@@ -414,6 +414,9 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/selfhost/installations/{installationID}", read)
 			mux.Handle("DELETE /v1/selfhost/installations/{installationID}", write)
 			mux.Handle("POST /v1/selfhost/installations/{installationID}/verify-ingress", write)
+			mux.Handle("POST /v1/selfhost/installations/{installationID}/update", write)
+			mux.HandleFunc("POST /v1/selfhost/update/check", opts.Selfhost.UpdateCheck)
+			mux.HandleFunc("POST /v1/selfhost/update/report", opts.Selfhost.UpdateReport)
 			mux.Handle("GET /v1/selfhost/pools/{capability}", read)
 			mux.Handle("PUT /v1/selfhost/pools/{capability}", write)
 			mux.Handle("GET /v1/selfhost/placements/{resourceKind}/{resourceID}", read)
@@ -423,6 +426,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/admin/selfhost/installations", operatorRoute(opts, global))
 			mux.Handle("GET /v1/admin/selfhost/installations/{installationID}", operatorRoute(opts, global))
 			mux.Handle("DELETE /v1/admin/selfhost/installations/{installationID}", operatorRoute(opts, global))
+			mux.Handle("POST /v1/admin/selfhost/installations/{installationID}/update", operatorRoute(opts, global))
 		}
 		if opts.EdgeControl != nil {
 			mux.Handle("/v1/", opts.EdgeControl)

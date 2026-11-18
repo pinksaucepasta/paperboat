@@ -781,7 +781,7 @@ func New(opts Options) (*App, error) {
 		IPRules:                  accessrules.New(store),
 		OperatorBilling:          billing.NewOperatorService(store, priceReader),
 		OperatorAudit:            auditWriter,
-		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService, Floors: map[string]httpapi.NodeUpdatePolicy{"edge": nodeFloors["edge"], "relay": nodeFloors["relay"]}},
+		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService, Floors: map[string]httpapi.NodeUpdatePolicy{"pbh": nodeFloors["pbh"], "edge": nodeFloors["edge"], "relay": nodeFloors["relay"]}},
 		Config:                   opts.Config,
 		Logger:                   opts.Logger,
 		ReadinessChecker:         checker,
