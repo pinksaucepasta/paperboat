@@ -1,0 +1,111 @@
+{
+ "check": "transfer-quiet-host-investigation",
+ "setup": "two throwaway containers on one quiet 12-core host (load ~0.3), docker bridge, sender egress netem delay = extra RTT; 200 MB file unless noted; builds: before=a57abf0c7 (stop-and-wait), final=ec1e463e9 (streamed)",
+ "baselines_MBps": {
+  "raw_tcp_between_containers_0ms": 1791,
+  "raw_tcp_50ms_rtt_single_stream": 74,
+  "pb_exec_stream_dd_0ms": [
+   10.7,
+   11.2
+  ],
+  "pb_scp_200MB_0ms": [
+   42.5,
+   43.7
+  ]
+ },
+ "send_vs_scp_200MB_MBps": {
+  "extra_rtt_ms": [
+   0,
+   25,
+   50,
+   100
+  ],
+  "send_before": [
+   17.9,
+   6.3,
+   5.9,
+   3.9
+  ],
+  "send_final": [
+   31.5,
+   7.3,
+   7.0,
+   7.0
+  ],
+  "scp": [
+   42.7,
+   9.3,
+   8.0,
+   6.3
+  ]
+ },
+ "wall_seconds_0ms": {
+  "size_MB": [
+   1,
+   50,
+   200,
+   1500
+  ],
+  "send_final": [
+   2.95,
+   3.6,
+   7.0,
+   37.3
+  ],
+  "scp": [
+   1.11,
+   2.1,
+   4.6,
+   31.3
+  ]
+ },
+ "steady_state_MBps_0ms": {
+  "send_final": 43,
+  "scp": 49,
+  "note": "slope between 200 MB and 1500 MB"
+ },
+ "folders_seconds_0ms": {
+  "4x40MB_plus_1000x40KB_192MB": {
+   "send": [
+    8.4,
+    9.8
+   ],
+   "scp_r": 9.5
+  },
+  "one_200MB_file": {
+   "send": [
+    7.1,
+    9.0
+   ],
+   "scp_r": 4.7
+  },
+  "5000x40KB_196MB": {
+   "send": [
+    8.7,
+    8.9
+   ],
+   "scp_r": 30.6
+  }
+ },
+ "cpu_profile_1500MB_send": {
+  "sender_daemon_cores": 1.62,
+  "sender_sendmmsg_pct": 24,
+  "sender_wireguard_encrypt_pct": 28,
+  "receiver_carrier_cores": 1.36,
+  "receiver_worker_disk_path_cores": 0.21
+ },
+ "control_plane_rtt_ms": 165,
+ "no_effect_experiments": [
+  "QUIC receive windows 2/16 MiB",
+  "QUIC HyStart off",
+  "gVisor UDP endpoint buffers 4 MiB"
+ ],
+ "harness_dependent_experiment": {
+  "quic_packet_reordering_threshold_3_to_64_send_MBps_at_extra_rtt_25_50_100ms": [
+   23.1,
+   17.4,
+   15.1
+  ],
+  "note": "netem on a multi-queue veth reorders packets (none at 0 ms); not shipped"
+ }
+}
