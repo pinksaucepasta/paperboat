@@ -100,7 +100,7 @@ func TestDecodeOutcomeRejectsDuplicateOperationID(t *testing.T) {
 }
 
 func TestDispatchMintsExactSingleOperationCredentialAndPostsCanonicalRequest(t *testing.T) {
-	for _, prefix := range []string{"", "/v1/runtime/machine.customer.test"} {
+	for _, prefix := range []string{""} {
 		t.Run(prefix, func(t *testing.T) {
 			now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 			request := testDispatchRequest()

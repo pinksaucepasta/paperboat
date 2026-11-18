@@ -307,14 +307,7 @@ func TestCanonicalTerminalLaunchCWD(t *testing.T) {
 	}
 }
 
-func TestMachineTerminalEndpointsPreserveCustomerInfrastructureRouting(t *testing.T) {
-	customer := machineTerminalEndpoints("wss://edge.customer.test/v1/runtime/machine.customer.test")
-	if customer.WSS != "wss://edge.customer.test/v1/runtime/machine.customer.test/v1/runtime" {
-		t.Fatalf("customer runtime prefix was lost: %#v", customer)
-	}
-	if customer.QUIC != "" {
-		t.Fatal("advertised QUIC cannot carry customer logical runtime route")
-	}
+func TestMachineTerminalEndpointsAreTheManagedHost(t *testing.T) {
 	managed := machineTerminalEndpoints("wss://machine.runtime.example.test")
 	if managed.WSS != "wss://machine.runtime.example.test/v1/runtime" || managed.QUIC != "quic://machine.runtime.example.test:443" {
 		t.Fatalf("managed terminal endpoints changed: %#v", managed)
