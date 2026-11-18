@@ -12,9 +12,13 @@ RED_LIMIT, GREEN_LIMIT, POLL = 420, 900, 5
 
 
 def states(url):
-    with urllib.request.urlopen(url + "/api/status", timeout=10) as r:
-        d = json.load(r)
-    return d["delayed"], {c["id"]: c["state"] for c in d["public"]["components"]}
+    """(delayed, {component: state}); a failed poll is reported as delayed with no states, never as a crash or a pass."""
+    try:
+        with urllib.request.urlopen(url + "/api/status", timeout=10) as r:
+            d = json.load(r)
+        return d["delayed"], {c["id"]: c["state"] for c in d["public"]["components"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return True, {}
 
 
 def ssh(host, cmd):
@@ -40,7 +44,7 @@ def main():
     ok = True
     for component, unit in targets:
         _, s = states(url)
-        assert all(v == "operational" for v in s.values()), f"not green before {component}: {s}"
+        assert s and all(v == "operational" for v in s.values()), f"not green before {component}: {s}"
         ssh(host, f"systemctl --user stop {unit}")
         red, moved_red = wait(url, log, component, "major", RED_LIMIT, "operational")
         ssh(host, f"systemctl --user start {unit}")
