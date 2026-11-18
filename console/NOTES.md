@@ -75,8 +75,9 @@ owns it.
   implementation filtered by lifecycle. The API still has separate `/v1/previews` and
   `/v1/tunnels`.
 - **Install commands.** `/v1/machine-enrollments` returns a token and a POSIX template; the
-  console extracts the install URL from `bootstrap_command` and builds both shells' commands
-  (`lib/enrollment.ts`). The server should return the per-shell commands itself. Machine names
+  console extracts the installer address from `bootstrap_command` (`curl -fsSL <installer> | sh`) and builds both
+  shells' commands (`lib/enrollment.ts`): one address for both (it serves `install.sh` to curl and `install.ps1` to
+  PowerShell), the token in `PB_TOKEN` and the name in `PB_NAME`, never in a URL. The server should return the per-shell commands itself. Machine names
   are validated against a mirror of `machinealias.Valid`; descriptions are applied with
   `PATCH /v1/machines/{id}` after pairing because the installers cannot carry them.
 - **Docs.** The sidebar Docs button is a placeholder until a docs site exists.

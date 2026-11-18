@@ -1,14 +1,14 @@
 ---
 import Icon from "./Icon.astro"
-import { installCommand, installUrl, windowsInstallCommand } from "../site"
+import { installCommand, installScripts, windowsInstallCommand } from "../site"
 /**
  * The install command, with its copy button inside the box; below it the platform switch and a link
  * to the script itself. No script: radio inputs pick the platform, so both commands share one box.
  */
 const id = `os-${Math.random().toString(36).slice(2, 8)}`
 const commands = [
-  { key: "unix", label: "macOS & Linux", command: installCommand, prompt: "$", script: installUrl },
-  { key: "windows", label: "Windows", command: windowsInstallCommand, prompt: ">", script: `${installUrl}.ps1` },
+  { key: "unix", label: "macOS & Linux", command: installCommand, prompt: "$", script: installScripts.unix },
+  { key: "windows", label: "Windows", command: windowsInstallCommand, prompt: ">", script: installScripts.windows },
 ]
 ---
 

@@ -102,7 +102,7 @@ func isReleaseDownload(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
-	return strings.HasPrefix(r.URL.Path, "/selfhost/") || r.URL.Path == "/install" || strings.HasPrefix(r.URL.Path, "/tuf/") || strings.HasPrefix(r.URL.Path, "/helper-releases/tuf/")
+	return strings.HasPrefix(r.URL.Path, "/tuf/") || strings.HasPrefix(r.URL.Path, "/helper-releases/tuf/")
 }
 
 // streamingRoutePath matches the GET routes that hold a response or socket open by design: the preview and

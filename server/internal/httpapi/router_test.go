@@ -69,7 +69,6 @@ func TestTelemetryRouteFamilyIsFinite(t *testing.T) {
 	tests := map[string]string{
 		"/healthz":                     "health",
 		"/v1/edge/routes":              "edge_control",
-		"/install":                     "release",
 		"/tuf/root.json":               "release",
 		"/v1/previews/preview_1":       "public_api",
 		"/customer.example/token/path": "other",

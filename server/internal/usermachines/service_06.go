@@ -443,7 +443,7 @@ func enrollmentTokenHash(token string) [sha256.Size]byte {
 }
 
 // randomEnrollmentToken returns one URL-safe credential, the same kind for every platform: the installer path
-// (/install or /install.ps1) says which shell runs it, not the token.
+// (the installer address picks the script by user agent) says which shell runs it, not the token.
 func randomEnrollmentToken() (string, error) {
 	return randomCodeFromAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", enrollmentTokenLength)
 }

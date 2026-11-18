@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -8,48 +9,70 @@ from unittest import mock
 
 import release_run
 
-
-def installer(version, amd64, arm64):
-    block = lambda name, data: (f"  {name})\n    product_version='{version}'\n"
-                                f"    product_url='https://example.test/{name}'\n"
-                                f"    product_sha='{hashlib.sha256(data).hexdigest()}'\n"
-                                f"    product_length='{len(data)}' ;;\n")
-    return "case x in\n" + block('linux-amd64', amd64) + block('linux-arm64', arm64) + "esac\n"
+VERSION = '2026.10.19.17'
 
 
 class ReleaseRunTest(unittest.TestCase):
-    def serve(self, text, assets):
+    """A throwaway key signs SHA256SUMS; the module under test trusts the key it is given in place of the embedded one."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.root, True))
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(self.root / 'key')], check=True)
+        public = ' '.join((self.root / 'key.pub').read_text().split()[:2])
+        installer = self.root / 'install.sh'
+        installer.write_text(f"allowed_signers='paperboat-release namespaces=\"paperboat-release\" {public}'\n")
+        patch = mock.patch.object(release_run, 'INSTALLER', installer)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def release(self, assets, version=VERSION):
+        sums = f'# paperboat-release {version}\n' + ''.join(f'{hashlib.sha256(data).hexdigest()}  pb-{name}\n' for name, data in assets.items())
+        (self.root / 'SHA256SUMS').write_text(sums)
+        (self.root / 'SHA256SUMS.sig').unlink(missing_ok=True)
+        subprocess.run(['ssh-keygen', '-q', '-Y', 'sign', '-f', str(self.root / 'key'), '-n', 'paperboat-release', str(self.root / 'SHA256SUMS')], check=True)
+
+    def serve(self, assets):
         def fetch(url, limit):
-            return text.encode() if url.endswith('/install') else assets[url.rsplit('/', 1)[1]]
+            name = url.rsplit('/', 1)[1]
+            if name in ('SHA256SUMS', 'SHA256SUMS.sig'):
+                return (self.root / name).read_bytes()
+            return assets[name[3:]]
         return mock.patch.object(release_run, 'fetch', fetch)
 
-    def test_downloads_exactly_the_pinned_release(self):
+    def test_downloads_exactly_the_signed_release(self):
         assets = {'linux-amd64': b'amd64 bytes', 'linux-arm64': b'arm64 bytes'}
-        with self.serve(installer('2026.10.19.17', *assets.values()), assets), tempfile.TemporaryDirectory() as d:
-            files = release_run.download('2026.10.19.17', 'https://example.test/install', Path(d))
+        self.release(assets)
+        with self.serve(assets), tempfile.TemporaryDirectory() as d:
+            files = release_run.download(VERSION, 'example/paperboat', Path(d))
             self.assertEqual(files['linux-arm64'].read_bytes(), b'arm64 bytes')
 
-    def test_refuses_a_release_the_one_liner_does_not_serve(self):
+    def test_refuses_sums_signed_for_another_release(self):
         assets = {'linux-amd64': b'a', 'linux-arm64': b'b'}
-        with self.serve(installer('2026.10.19.18', *assets.values()), assets), tempfile.TemporaryDirectory() as d:
-            with self.assertRaisesRegex(SystemExit, 'not 2026.10.19.17'):
-                release_run.download('2026.10.19.17', 'https://example.test/install', Path(d))
+        self.release(assets, version='2026.10.19.18')
+        with self.serve(assets), tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(SystemExit, 'not signed for 2026.10.19.17'):
+                release_run.download(VERSION, 'example/paperboat', Path(d))
 
-    def test_refuses_bytes_that_do_not_match_the_pin(self):
-        with self.serve(installer('2026.10.19.17', b'good', b'good'), {'linux-amd64': b'evil', 'linux-arm64': b'good'}), \
-                tempfile.TemporaryDirectory() as d:
+    def test_refuses_edited_sums_and_bytes_that_do_not_match(self):
+        assets = {'linux-amd64': b'good', 'linux-arm64': b'good'}
+        self.release(assets)
+        with self.serve({'linux-amd64': b'evil', 'linux-arm64': b'good'}), tempfile.TemporaryDirectory() as d:
             with self.assertRaisesRegex(SystemExit, 'SHA-256'):
-                release_run.download('2026.10.19.17', 'https://example.test/install', Path(d))
+                release_run.download(VERSION, 'example/paperboat', Path(d))
+        sums = self.root / 'SHA256SUMS'
+        sums.write_text(sums.read_text().replace('0', '1', 1))
+        with self.serve(assets), tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(SystemExit, 'signature'):
+                release_run.download(VERSION, 'example/paperboat', Path(d))
 
-    def test_refuses_plain_http_and_a_partial_installer(self):
+    def test_refuses_plain_http(self):
         with self.assertRaisesRegex(SystemExit, 'non-https'):
-            release_run.fetch('http://example.test/install', 10)
-        with self.assertRaisesRegex(SystemExit, 'both Linux'):
-            release_run.pins("case x in\n  linux-amd64)\n    product_version='1'\n    product_url='https://e'\n    product_sha='" + 'a' * 64 + "'\n    product_length='1' ;;\nesac\n")
+            release_run.fetch('http://example.test/SHA256SUMS', 10)
 
     def test_the_run_executes_every_check(self):
         for flag in ('--skip', '--only-check', '--only-list'):
-            with self.subTest(flag=flag), mock.patch.object(sys, 'argv', ['x', '--version', '1', '--installer-url', 'https://e/install', '--', flag, 'a']):
+            with self.subTest(flag=flag), mock.patch.object(sys, 'argv', ['x', '--version', '1', '--', flag, 'a']):
                 with self.assertRaisesRegex(SystemExit, 'every check'):
                     release_run.main()
 

@@ -21,8 +21,9 @@ export const apiBaseUrl = apiUrl
 /** Where abuse is reported by email; undefined when the server publishes none. */
 export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
-export const installUrl = `${config.installer_base_url}/install`
-export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`
+/** One install address for every platform: it serves install.sh to curl and install.ps1 to PowerShell. */
+export const installUrl = config.installer_base_url
+export const selfhostInstallUrl = `${config.installer_base_url}/selfhost`
 export const localDomain = config.local_access_base_domain
 export const previewDomain = config.preview_base_domain
 export const tunnelDomain = config.tunnel_base_domain
@@ -30,9 +31,14 @@ export const tunnelDomain = config.tunnel_base_domain
 /** The public source repository (LICENSE: MIT and AGPL-3.0). */
 export const sourceUrl = "https://github.com/pinksaucepasta/paperboat"
 
-export const installCommand = `curl -fsSL ${installUrl} | bash`
-/** The Windows installer (server /install.ps1), run in PowerShell. */
-export const windowsInstallCommand = `irm ${installUrl}.ps1 | iex`
+export const installCommand = `curl -fsSL ${installUrl} | sh`
+/** The Windows installer, run in PowerShell: the same address, which serves install.ps1 to PowerShell. */
+export const windowsInstallCommand = `irm ${installUrl} | iex`
+/** The fixed scripts the install address redirects to, in the public repository. */
+export const installScripts = {
+  unix: `${sourceUrl}/blob/main/cli/tools/install.sh`,
+  windows: `${sourceUrl}/blob/main/cli/tools/install.ps1`,
+}
 
 /** Plans and prices (PLAN 1.3): the one place the site states them. */
 export const plans = [

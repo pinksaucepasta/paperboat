@@ -3,7 +3,7 @@ name: TUF rollout pause or quarantine
 # Stops automatic updates to the published release without publishing a new one: the online signer
 # re-signs every target's deployment policy as paused (no automatic update, manual install still
 # allowed) or quarantined (refused), at a new monotonic rollout revision (this run's id, like
-# release.yml). The installer and artifacts on the origin are unchanged.
+# release.yml). The artifacts on the origin are unchanged.
 on:
   workflow_dispatch:
     inputs:
@@ -128,10 +128,9 @@ jobs:
           live_bundle="$RUNNER_TEMP/paperboat-live-release.tgz"
           staged="$RUNNER_TEMP/paperboat-tuf-rollout"
           ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
-            'tar -C /opt/paperboat/releases/current -czf - install windows tuf' > "$live_bundle"
+            'tar -C /opt/paperboat/releases/current -czf - tuf' > "$live_bundle"
           mkdir -p "$staged"
           tar -C "$staged" -xzf "$live_bundle"
-          test -f "$staged/install" && test -f "$staged/windows"
           test -d "$staged/tuf/metadata"
           test -d "$staged/tuf/targets"
           test -z "$(find "$staged/tuf/targets" -mindepth 1 -print -quit)"
@@ -168,7 +167,7 @@ jobs:
           PY
           )
           bundle="$RUNNER_TEMP/paperboat-tuf-rollout-$release_version.tgz"
-          tar -C "$staged" -czf "$bundle" install windows tuf
+          tar -C "$staged" -czf "$bundle" tuf
           digest=$(sha256sum "$bundle" | awk '{print $1}')
           {
             printf 'PAPERBOAT_REFRESH_VERSION=%s\n' "$release_version"
