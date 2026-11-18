@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -121,7 +122,9 @@ func newWorld(t *testing.T) *world {
 	}
 	w.rebuild()
 	// One run at a time per database: a run another test left behind must not block this one.
-	end := func() { w.exec(`UPDATE paperboat.breakglass_runs SET state = 'cancelled', finished_at = now() WHERE state = 'running'`) }
+	end := func() {
+		w.exec(`UPDATE paperboat.breakglass_runs SET state = 'cancelled', finished_at = now() WHERE state = 'running'`)
+	}
 	end()
 	w.exec(`DELETE FROM paperboat.managed_ssh_ca_fetches`) // machines of earlier tests do not fetch any more
 	t.Cleanup(end)
@@ -190,7 +193,8 @@ func (w *world) issue(m machine, client ssh.PublicKey) *ssh.Certificate {
 	return parsed.(*ssh.Certificate)
 }
 
-// accepts is the machine's sshd check: a certificate signed by a CA the machine trusts, for its principal.
+// accepts is the machine's sshd check: a certificate signed by a CA the machine trusts, for its principal, from the
+// loopback bridge.
 func (w *world) accepts(set managedssh.TrustedUserCASet, certificate *ssh.Certificate) bool {
 	checker := ssh.CertChecker{
 		Clock: func() time.Time { return w.clock },
@@ -205,8 +209,17 @@ func (w *world) accepts(set managedssh.TrustedUserCASet, certificate *ssh.Certif
 		},
 		SupportedCriticalOptions: []string{"source-address"},
 	}
-	return checker.CheckCert(set.Principal, certificate) == nil
+	_, err := checker.Authenticate(fakeConn{user: set.Principal}, certificate)
+	return err == nil
 }
+
+type fakeConn struct {
+	ssh.ConnMetadata
+	user string
+}
+
+func (c fakeConn) User() string       { return c.user }
+func (fakeConn) RemoteAddr() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40000} }
 
 func (w *world) start(operator string, floor string) Run {
 	w.t.Helper()
@@ -248,7 +261,8 @@ func (w *world) until(id string, stage Stage) Run {
 			w.t.Fatalf("stage %s failed: %s", stage, run.LastError)
 		}
 	}
-	w.t.Fatalf("stage %s did not finish", stage)
+	run, _ := w.svc.Get(context.Background(), id)
+	w.t.Fatalf("stage %s did not finish: %+v", stage, stageOf(run, stage))
 	return Run{}
 }
 
