@@ -9021,6 +9021,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tunnels/{tunnel_id}/subdomain-availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tunnel_id: components["parameters"]["TunnelID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Check whether a tunnel can take a subdomain
+         * @description Says whether the owner's tunnel could take ?subdomain= as its public address now (valid, not reserved, not taken by any account). Rate limited per account together with address changes.
+         */
+        get: operations["get_v1_tunnels_tunnel_id_subdomain_availability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -10195,6 +10217,8 @@ export interface components {
             /** @enum {string} */
             access_mode?: "public" | "private";
             expires_at?: string | null;
+            /** @description Moves the tunnel's public address to <subdomain> under its current base domain. 3-63 lowercase letters, digits or hyphens, not only digits, not a reserved name, unique across all accounts. Make before break: the new address is published next to the old one and the old one stops once every live edge serves the new one (the operation stays running until then; if the edges do not confirm within the move timeout the change is undone and the operation fails with tunnel_address_not_ready). The old address then stays reserved to the tunnel for a cooldown. Applies to managed HTTP addresses; a tunnel nothing serves moves at once. Rate limited per account. Errors: invalid_subdomain, subdomain_reserved (400), subdomain_taken, address_change_pending (409), address_blocked (403), rate_limited (429). */
+            subdomain?: string;
         };
         TunnelStateMutationRequest: Record<string, never>;
         PreviewTunnelEventActor: {
@@ -14209,6 +14233,20 @@ export interface components {
                 override?: number;
             };
             grants: components["schemas"]["OperatorEntitlementGrant"][];
+        };
+        TunnelSubdomainAvailability: {
+            subdomain: string;
+            available: boolean;
+            /**
+             * @description Why it is not available.
+             * @enum {string}
+             */
+            reason?: "invalid" | "reserved" | "taken" | "current";
+            /** @description Plain-words reason, safe to show. */
+            message?: string;
+        };
+        TunnelSubdomainAvailabilityResponse: {
+            data: components["schemas"]["TunnelSubdomainAvailability"];
         };
     };
     responses: {
@@ -35756,6 +35794,36 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    get_v1_tunnels_tunnel_id_subdomain_availability: {
+        parameters: {
+            query: {
+                subdomain: string;
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                tunnel_id: components["parameters"]["TunnelID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Availability of the subdomain. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TunnelSubdomainAvailabilityResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
 }

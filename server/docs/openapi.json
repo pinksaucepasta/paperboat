@@ -4631,6 +4631,13 @@
                 "type": "null"
               }
             ]
+          },
+          "subdomain": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+            "description": "Moves the tunnel's public address to <subdomain> under its current base domain. 3-63 lowercase letters, digits or hyphens, not only digits, not a reserved name, unique across all accounts. Make before break: the new address is published next to the old one and the old one stops once every live edge serves the new one (the operation stays running until then; if the edges do not confirm within the move timeout the change is undone and the operation fails with tunnel_address_not_ready). The old address then stays reserved to the tunnel for a cooldown. Applies to managed HTTP addresses; a tunnel nothing serves moves at once. Rate limited per account. Errors: invalid_subdomain, subdomain_reserved (400), subdomain_taken, address_change_pending (409), address_blocked (403), rate_limited (429)."
           }
         }
       },
@@ -19891,6 +19898,48 @@
             }
           }
         }
+      },
+      "TunnelSubdomainAvailability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subdomain",
+          "available"
+        ],
+        "properties": {
+          "subdomain": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "invalid",
+              "reserved",
+              "taken",
+              "current"
+            ],
+            "description": "Why it is not available."
+          },
+          "message": {
+            "type": "string",
+            "description": "Plain-words reason, safe to show."
+          }
+        }
+      },
+      "TunnelSubdomainAvailabilityResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TunnelSubdomainAvailability"
+          }
+        }
       }
     },
     "responses": {
@@ -22244,7 +22293,7 @@
       "get": {
         "summary": "Download the Paperboat installer",
         "security": [],
-        "description": "Without a query, serves the published shell installer (`curl \u2026 | bash`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
+        "description": "Without a query, serves the published shell installer (`curl … | bash`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
         "parameters": [
           {
             "name": "p",
@@ -22278,7 +22327,7 @@
       "get": {
         "summary": "Download the Paperboat recipe installer",
         "security": [],
-        "description": "Serves the published shell installer (`curl \u2026 | bash`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.",
+        "description": "Serves the published shell installer (`curl … | bash`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.",
         "responses": {
           "200": {
             "description": "Product-pinned Paperboat installer with exact Content-Length.",
@@ -22300,7 +22349,7 @@
       "get": {
         "summary": "Download the Paperboat PowerShell installer",
         "security": [],
-        "description": "Without a query, serves the published PowerShell installer (`irm \u2026 | iex`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
+        "description": "Without a query, serves the published PowerShell installer (`irm … | iex`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
         "parameters": [
           {
             "name": "p",
@@ -22334,7 +22383,7 @@
       "get": {
         "summary": "Download the Paperboat recipe installer",
         "security": [],
-        "description": "Serves the published PowerShell installer (`irm \u2026 | iex`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.",
+        "description": "Serves the published PowerShell installer (`irm … | iex`) marked as a recipe install: it pairs from PB_RECIPE and refuses at once, before downloading, when PB_RECIPE is missing or not a recipe token. The token never goes in the URL, so any query is rejected (400). Responses are not cached.",
         "responses": {
           "200": {
             "description": "Product-pinned Paperboat installer with exact Content-Length.",
@@ -29937,7 +29986,7 @@
         "summary": "Complete GitHub OAuth from browser redirect",
         "responses": {
           "303": {
-            "description": "Redirect to the console's /github/done?result=connected&login=\u2026 or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
+            "description": "Redirect to the console's /github/done?result=connected&login=… or ?result=error&code=github_scope_denied|github_identity_conflict|github_oauth_failed|github_link_expired, plus return_to when set."
           },
           "401": {
             "$ref": "#/components/responses/Error"
@@ -50824,7 +50873,7 @@
         },
         "responses": {
           "204": {
-            "description": "Cancelled; a consumed grant\u2019s client session is revoked."
+            "description": "Cancelled; a consumed grant’s client session is revoked."
           },
           "400": {
             "description": "Invalid client or device code."
@@ -53596,7 +53645,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/billing/workspaces/teams/{team_id}/topups": {
@@ -53676,7 +53725,7 @@
             }
           }
         },
-        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity \u00d7 unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
+        "description": "Paid workspaces only. Integer quantity 1..product.max_quantity buys quantity × unit_bytes (100 GB each). Extra bandwidth belongs to the allowance month it is bought in (a monthly plan: it ends with the plan renewal; unused bytes are gone then) and is consumed after the plan allowance. Checkout uses the exact quantity and verified unit price; only signed provider-confirmed paid events credit the workspace once. Requires Idempotency-Key and configured-origin return URLs. invalid_quantity rejects missing/zero/over-limit quantity."
       }
     },
     "/v1/teams/{team_id}/invitations/{invitation_id}/resend": {
@@ -56812,7 +56861,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "The bearer is an API token (pbat_\u2026). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
+        "description": "The bearer is an API token (pbat_…). The session ends when the token is revoked or expires; a scoped token's session is held to the scope."
       }
     },
     "/v1/github/native-links/{link_id}/review": {
@@ -61351,6 +61400,74 @@
         ],
         "x-operator-capability": "admin",
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/tunnels/{tunnel_id}/subdomain-availability": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TunnelID"
+        }
+      ],
+      "get": {
+        "summary": "Check whether a tunnel can take a subdomain",
+        "description": "Says whether the owner's tunnel could take ?subdomain= as its public address now (valid, not reserved, not taken by any account). Rate limited per account together with address changes.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:write"
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability of the subdomain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelSubdomainAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_tunnels_tunnel_id_subdomain_availability",
+        "parameters": [
+          {
+            "name": "subdomain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
       }
     }
   }
