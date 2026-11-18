@@ -870,13 +870,13 @@ jobs:
             rm -f "$archive"
             test "$status" -eq 42 || exit "$status"
             go run ./tools/tuf-repository init -repository "$repository" \
-              -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
+              -trusted-root "$GITHUB_WORKSPACE/shared/tufroot/trusted-root.json"
             initialized=true
           fi
           rm -f "$archive"
           go run ./tools/tuf-repository validate-signers \
             -repository "$repository" \
-            -trusted-root "$GITHUB_WORKSPACE/cli/internal/hostruntime/bootstrap/trusted-root.json"
+            -trusted-root "$GITHUB_WORKSPACE/shared/tufroot/trusted-root.json"
           if test "$initialized" = false; then
             go run ./tools/tuf-repository verify-published -repository "$repository"
           fi

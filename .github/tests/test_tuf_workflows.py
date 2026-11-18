@@ -49,7 +49,7 @@ class TUFWorkflowSignerTest(unittest.TestCase):
 
     def assert_empty_origin_initialization(self, directory, publication, root, secret):
         workspace = directory / "checkout"
-        trusted = workspace / "cli/internal/hostruntime/bootstrap/trusted-root.json"
+        trusted = workspace / "shared/tufroot/trusted-root.json"
         trusted.parent.mkdir(parents=True)
         trusted.write_bytes(root.read_bytes())
         binaries = directory / "bin"

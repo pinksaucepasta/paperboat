@@ -112,6 +112,7 @@ func ReadCurrent(directory string) (result Current, resultErr error) {
 		}
 		return Current{}, errors.New("release targets metadata is invalid")
 	}
+	dropSelfhostTargets(metadata.Signed.Targets)
 	if len(metadata.Signed.Targets) != len(supportedPlatformArchitectures) {
 		return Current{}, errors.New("release targets metadata is invalid")
 	}
@@ -201,6 +202,7 @@ func Ready(directory string) error {
 	if json.Unmarshal(body, &metadata) != nil {
 		return errors.New("release targets metadata is invalid")
 	}
+	dropSelfhostTargets(metadata.Signed.Targets)
 	if len(metadata.Signed.Targets) != len(current.Assets) {
 		return errors.New("release targets metadata has an unexpected asset set")
 	}
@@ -216,6 +218,16 @@ func Ready(directory string) error {
 		}
 	}
 	return nil
+}
+
+// dropSelfhostTargets leaves pb's assets: the self-host bundle's signed targets (selfhost/<version>/…, which pbh
+// verifies its updates against) are not pb releases.
+func dropSelfhostTargets(targets map[string]tufAssetTarget) {
+	for name := range targets {
+		if strings.HasPrefix(name, "selfhost/") {
+			delete(targets, name)
+		}
+	}
 }
 
 type tufAssetTarget struct {
