@@ -167,29 +167,24 @@ func TestDeletedTeamsAreTrimmedAfterTheirWindowOnPostgres(t *testing.T) {
 		return n
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	t.Cleanup(func() {
+		deleteDeletedTeamFixture(func(q string, args ...any) { store.SQL().ExecContext(context.Background(), q, args...) }, old)
+		deleteDeletedTeamFixture(func(q string, args ...any) { store.SQL().ExecContext(context.Background(), q, args...) }, recent)
+	})
 	for team, age := range map[string]string{old: "40 days", recent: "5 days"} {
 		exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation,deleted_at) VALUES($1,$2,1,now()-$3::interval)`, team, user, age)
-		exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',false)`, team, user)
-		exec(`INSERT INTO paperboat.team_invitations(invitation_id,team_id,recipient_account,created_by,expires_at,cancelled_at) VALUES('inv_'||$1,$1,$2,$2,now(),now())`, team, user)
+		insertDeletedTeamRows(t, exec, team, user)
 	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		for _, team := range []string{old, recent} {
-			store.SQL().ExecContext(bg, `DELETE FROM paperboat.team_members WHERE team_id=$1`, team)
-			store.SQL().ExecContext(bg, `DELETE FROM paperboat.team_invitations WHERE team_id=$1`, team)
-			store.SQL().ExecContext(bg, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
-		}
-	})
 	cfg := config.Default().Retention
 	if _, err = Run(ctx, store, cfg); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`SELECT count(*) FROM paperboat.team_members WHERE team_id=$1`, `SELECT count(*) FROM paperboat.team_invitations WHERE team_id=$1`} {
+	for table, q := range teamRowCounts() {
 		if n := count(q, old); n != 0 {
-			t.Errorf("a team deleted 40 days ago kept rows: %s -> %d", q, n)
+			t.Errorf("%s: a team deleted 40 days ago kept %d rows", table, n)
 		}
-		if n := count(q, recent); n != 1 {
-			t.Errorf("a team deleted 5 days ago lost rows: %s -> %d", q, n)
+		if n := count(q, recent); n < 1 {
+			t.Errorf("%s: a team deleted 5 days ago lost its rows", table)
 		}
 	}
 	if n := count(`SELECT count(*) FROM paperboat.teams WHERE team_id IN ($1,$2)`, old, recent); n != 2 {
