@@ -393,6 +393,7 @@
           "compressed",
           "failure",
           "insufficient",
+          "skipped",
           "small"
         ],
         "encoding": [

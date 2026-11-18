@@ -330,7 +330,7 @@ func DefaultDescriptors() []Descriptor {
 		{Name: "paperboat_runtime_terminal_frames_total", Kind: Counter, Labels: map[string]map[string]bool{"direction": set("input", "output")}},
 		{Name: "paperboat_runtime_terminal_bytes_total", Kind: Counter, Labels: map[string]map[string]bool{"direction": set("input", "output")}},
 		{Name: "paperboat_runtime_terminal_stage_nanoseconds_total", Kind: Counter, Labels: map[string]map[string]bool{"stage": set("socket_to_pty", "pty_to_socket")}},
-		{Name: "paperboat_runtime_terminal_compression_frames_total", Kind: Counter, Labels: map[string]map[string]bool{"encoding": set("raw", "zstd"), "decision": set("small", "insufficient", "compressed", "failure")}},
+		{Name: "paperboat_runtime_terminal_compression_frames_total", Kind: Counter, Labels: map[string]map[string]bool{"encoding": set("raw", "zstd"), "decision": set("small", "insufficient", "skipped", "compressed", "failure")}},
 		{Name: "paperboat_runtime_terminal_compression_bytes_total", Kind: Counter, Labels: map[string]map[string]bool{"kind": set("raw", "encoded")}},
 		{Name: "paperboat_runtime_terminal_compression_nanoseconds_total", Kind: Counter, Labels: map[string]map[string]bool{"stage": set("encode", "decode")}},
 		{Name: "paperboat_runtime_terminal_compression_failures_total", Kind: Counter, Labels: map[string]map[string]bool{"stage": set("encode", "decode")}},

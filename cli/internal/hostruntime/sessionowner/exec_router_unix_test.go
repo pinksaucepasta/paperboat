@@ -207,11 +207,18 @@ func TestExecRouterRefusesMalformedCallsWithoutAskingAnOwner(t *testing.T) {
 
 // stubOwner is an owner whose active commands are synthetic: it lets one list answer outgrow a page.
 type stubOwner struct {
-	execprocess.Service
 	snapshots []execprocess.Snapshot
 }
 
 func (s stubOwner) ActiveSnapshots() []execprocess.Snapshot { return s.snapshots }
+
+func (stubOwner) Get(string) (execprocess.ExecutionService, error) {
+	return nil, execprocess.ErrNotFound
+}
+
+func (stubOwner) Start(context.Context, execprocess.Request) (execprocess.ExecutionService, bool, error) {
+	return nil, false, execprocess.ErrInvalid
+}
 
 // Several older owners hold commands across updates: a call for a command nobody remembers is probed through every
 // live owner, active first, and the list joins them all, in pages.
@@ -226,8 +233,9 @@ func TestExecRouterProbesAndListsAcrossSeveralOlderOwners(t *testing.T) {
 		manager, client := execOwnerBridge(t, ctx, root, generation)
 		managers[generation], clients[generation] = manager, client
 	}
-	// A catalogued generation whose owner is gone: it is skipped, not fatal.
-	generations = append(generations, "gone_generation")
+	// A catalogued generation whose owner is gone sits before the others: it is skipped, not fatal, and the probe
+	// and the list still reach everyone after it.
+	generations = append([]string{generations[0], "gone_generation"}, generations[1:]...)
 	connections := &Connections{
 		active:      Descriptor{Generation: "active_generation"},
 		clients:     clients,
@@ -239,13 +247,14 @@ func TestExecRouterProbesAndListsAcrossSeveralOlderOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, generation := range generations[1:4] {
+	older := []string{"older_one", "older_two", "older_three"}
+	for _, generation := range older {
 		if _, _, err := managers[generation].Start(ctx, execRequest(t, "operation_held_by_"+generation, root)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	for _, generation := range generations[1:4] {
+	for _, generation := range older {
 		id := "operation_held_by_" + generation
 		execution, err := routed.Get(id)
 		if err != nil {
@@ -258,19 +267,31 @@ func TestExecRouterProbesAndListsAcrossSeveralOlderOwners(t *testing.T) {
 			t.Fatalf("%s remembered on %q, want %q", id, connections.execs[id], generation)
 		}
 	}
+	// The same command ID on the active owner and an older one: probing goes active first.
+	for _, generation := range []string{"active_generation", "older_one"} {
+		if _, _, err := managers[generation].Start(ctx, execRequest(t, "operation_on_both_owners", root)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := routed.Get("operation_on_both_owners"); err != nil {
+		t.Fatal(err)
+	}
+	if connections.execs["operation_on_both_owners"] != "active_generation" {
+		t.Fatalf("probe answered from %q, want the active owner first", connections.execs["operation_on_both_owners"])
+	}
 	if _, err := routed.Get("operation_held_nowhere"); !errors.Is(err, execprocess.ErrNotFound) {
 		t.Fatalf("a command no owner holds: %v", err)
 	}
 
 	listed := routed.ActiveSnapshots()
-	if len(listed) != 3 {
+	if len(listed) != 5 { // three older commands plus the one held by both the active and an older owner
 		t.Fatalf("list across the older owners: %+v", listed)
 	}
 	seen := map[string]bool{}
 	for _, snapshot := range listed {
 		seen[snapshot.OperationID] = true
 	}
-	for _, generation := range generations[1:4] {
+	for _, generation := range older {
 		if !seen["operation_held_by_"+generation] {
 			t.Fatalf("list lacks the command of %s: %+v", generation, listed)
 		}
@@ -281,7 +302,7 @@ func TestExecRouterListIsPagedAcrossOwners(t *testing.T) {
 	root := shorttemp.Dir(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	const perOwner = 1500 // three owners: 4500 snapshots, more than one page
+	const perOwner = 2500 // one owner alone holds more than a page, and three owners hold 7500
 	snapshots := func(owner string) []execprocess.Snapshot {
 		out := make([]execprocess.Snapshot, perOwner)
 		for i := range out {
@@ -328,12 +349,12 @@ func TestExecRouterListIsPagedAcrossOwners(t *testing.T) {
 		if !p.More {
 			break
 		}
-		if pages > 10 {
+		if pages > 20 {
 			t.Fatal("paging does not end")
 		}
 	}
-	if len(got) != 3*perOwner || pages < 2 {
-		t.Fatalf("%d snapshots in %d pages, want %d in several", len(got), pages, 3*perOwner)
+	if len(got) != 3*perOwner || pages != 4 {
+		t.Fatalf("%d snapshots in %d pages, want %d in 4", len(got), pages, 3*perOwner)
 	}
 	// Active owner first, then the older ones in the catalogue's order, each owner's list in its own order.
 	for i, snapshot := range got {
