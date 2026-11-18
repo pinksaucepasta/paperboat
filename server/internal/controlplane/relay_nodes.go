@@ -56,9 +56,6 @@ type relayNodeObservation struct {
 	// SubjectsDigest is relaySubjectsDigest of the relay's list. A relay that sends it may omit Subjects when the
 	// server still holds that list for the node's generation and epoch.
 	SubjectsDigest string `json:"subjects_digest,omitempty"`
-	// QuotaDeniedSupported is sent by relays that understand LeaseDocument.QuotaDenied. Relays
-	// decode leases strictly, so an older relay must never be sent the field.
-	QuotaDeniedSupported bool `json:"quota_denied_supported,omitempty"`
 	// Metrics is the relay's version, CPU, memory and bytes forwarded; optional, an older relay sends none.
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 }
@@ -70,10 +67,6 @@ type relayNodeLeaseDocument struct {
 	CapacityLimit int64                 `json:"capacity_limit"`
 	Revocations   []relayRevocation     `json:"revocations"`
 	PeerRelay     *relayServiceIdentity `json:"peer_relay,omitempty"`
-	// QuotaDenied lists connected accounts whose workspaces are all out of bandwidth allowance:
-	// the relay refuses their new admissions and closes their carriers (typed), until a later
-	// observation no longer lists them. It never carries authority.
-	QuotaDenied []string `json:"quota_denied,omitempty"`
 	// PoolHandover lists accounts whose relay pool no longer includes this node and when the relay closes their
 	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
 	// relay's list as it is (the read failed); an empty list clears it.
@@ -199,12 +192,11 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		seen[k] = true
 	}
 	now := s.clock().UTC()
-	var set relaySubjectSet
 	var required bool
 	// The repeatable-read SELECT ... FOR UPDATE fails with 40001 when the relay's row changed after the
 	// snapshot (a relay restart's StartRelayNode, a second server during a rollout); replay it like InTx does.
 	err := db.RetrySerializable(ctx, func() (err error) {
-		out, set, required, err = s.observeRelayNodeTx(ctx, in, now)
+		out, _, required, err = s.observeRelayNodeTx(ctx, in, now)
 		return err
 	})
 	if err != nil {
@@ -212,18 +204,6 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	}
 	s.countRelayObservation(in, required)
 	s.recordNodeMetrics(ctx, "relay", in.NodeID, in.ProcessEpoch, in.CapacityUsed, in.Metrics)
-	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
-	if s.relayQuota != nil && in.QuotaDeniedSupported {
-		accounts := make([]string, 0, len(set.list))
-		listed := map[string]bool{}
-		for _, subject := range set.list {
-			if !listed[subject.AccountID] {
-				listed[subject.AccountID] = true
-				accounts = append(accounts, subject.AccountID)
-			}
-		}
-		out.QuotaDenied = s.relayQuota.DeniedAmong(ctx, accounts, now, relayQuotaFreshLookups)
-	}
 	out.PoolHandover = s.relayPoolHandovers(ctx, in.NodeID)
 	return out, nil
 }
@@ -337,9 +317,6 @@ func (s *EdgeService) countRelayObservation(in relayNodeObservation, required bo
 	}
 	_ = s.relayMetrics.IncCounter(telemetry.MetricRelaySubjectObservations, sharedmetrics.Labels{"shape": shape})
 }
-
-// relayQuotaFreshLookups bounds the uncached allowance reads one relay observation may cost.
-const relayQuotaFreshLookups = 64
 
 func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeStart

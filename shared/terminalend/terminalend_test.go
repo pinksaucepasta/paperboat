@@ -4,7 +4,7 @@ import "testing"
 
 func TestEveryReasonHasItsOwnCloseCodeAndParsesBack(t *testing.T) {
 	want := map[Reason]int{
-		NoAccess: 4404, Ended: 4409, Revoked: 4401, Expired: 4408, Limit: 4402, BandwidthQuotaExhausted: 4403,
+		NoAccess: 4404, Ended: 4409, Revoked: 4401, Expired: 4408, Limit: 4402,
 		TooManyPending: 4429, MachineUnavailable: 4503, EdgeUnavailable: 4504, Moved: 4301, Protocol: 4500,
 	}
 	seen := map[int]Reason{}
@@ -32,13 +32,13 @@ func TestAnUnknownReasonIsAProtocolError(t *testing.T) {
 
 // The browser worker and the console match these strings; changing one is a contract change.
 func TestWireValuesAreStable(t *testing.T) {
-	if BandwidthQuotaExhausted != "bandwidth_quota_exhausted" || NoAccess != "no_access" || MachineUnavailable != "machine_unavailable" {
+	if NoAccess != "no_access" || MachineUnavailable != "machine_unavailable" {
 		t.Fatal("a browser terminal close reason changed")
 	}
 }
 
 func TestForCloseCodeInvertsCloseCode(t *testing.T) {
-	for _, r := range []Reason{NoAccess, Ended, Revoked, Expired, Limit, BandwidthQuotaExhausted, TooManyPending, MachineUnavailable, EdgeUnavailable, Protocol} {
+	for _, r := range []Reason{NoAccess, Ended, Revoked, Expired, Limit, TooManyPending, MachineUnavailable, EdgeUnavailable, Protocol} {
 		if got := ForCloseCode(r.CloseCode()); got != r {
 			t.Fatalf("ForCloseCode(%d) = %s, want %s", r.CloseCode(), got, r)
 		}

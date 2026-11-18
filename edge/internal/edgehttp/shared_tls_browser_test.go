@@ -526,17 +526,17 @@ func TestSharedTLSRestrictedDurableCarrierAuthority(t *testing.T) {
 	}
 }
 
-type quotaDeniedAuthority struct {
+type takedownAuthority struct {
 	tlsAuthorityFixture
 	denied map[string]bool
 }
 
-func (a *quotaDeniedAuthority) QuotaDenied(host string) bool { return a.denied[host] }
+func (a *takedownAuthority) Withheld(host string) bool { return a.denied[host] }
 
-// An exhausted workspace's route must still complete TLS so the request can be answered with the
-// typed 429; before this a quota-denied name looked like an unknown one and the connection was
-// closed during the handshake (live check, 2026-10-20). A name that is simply unknown stays closed.
-func TestSharedTLSQuotaDeniedRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T) {
+// A taken-down route must still complete TLS so the request can be answered with the takedown page;
+// otherwise it looked like an unknown name and the connection was closed during the handshake. A name
+// that is simply unknown stays closed.
+func TestSharedTLSTakenDownRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T) {
 	match, _ := browserTestMatch()
 	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
 	clientTLS.ServerName = match.Host
@@ -546,27 +546,27 @@ func TestSharedTLSQuotaDeniedRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T
 	}
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer registry.Close()
-	authority := &quotaDeniedAuthority{denied: map[string]bool{match.Host: true}}
+	authority := &takedownAuthority{denied: map[string]bool{match.Host: true}}
 	// The route matcher knows the managed hostname; the snapshot has no decision for it.
 	shared, err := NewSharedTLSListener(raw, authority, registry, func(host string) bool { return host == match.Host }, 4, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
+		w.WriteHeader(http.StatusForbidden)
 	})}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
 	connection, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
 	if err != nil {
-		t.Fatalf("a quota-denied route did not complete TLS: %v", err)
+		t.Fatalf("a taken-down route did not complete TLS: %v", err)
 	}
 	connection.Close()
 	authority.denied = nil
 	connection, err = tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
 	if err == nil {
 		connection.Close()
-		t.Fatal("a route with no decision and no quota denial completed TLS")
+		t.Fatal("a route with no decision and no takedown completed TLS")
 	}
 }
 
@@ -638,7 +638,7 @@ func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
 	}
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer registry.Close()
-	shared, err := NewSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, 4, "")
+	shared, err := NewSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, 4, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +678,7 @@ func TestSharedTLSUnknownNameIsTheDeniedPage(t *testing.T) {
 	}
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer registry.Close()
-	shared, err := NewSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, 4, "")
+	shared, err := NewSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, 4, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,7 +755,7 @@ func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) 
 			if tc.admitAfter > 0 {
 				time.AfterFunc(tc.admitAfter, func() { admitted.Store(true) })
 			}
-			shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
+			shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
 			shared.ServeUnknownNamesWithPage(serverTLS)
 			shared.routeGrace = func() time.Duration { return tc.grace }
 			shared.holdableName = func(string) bool { return true }

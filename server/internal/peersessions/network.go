@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
@@ -77,10 +76,6 @@ type NetworkConfigResult struct {
 	ConfigurationDelta *peernetwork.ConfigurationDelta `json:"configuration_delta,omitempty"`
 	CandidateSet       string                          `json:"candidate_set"`
 	RelayGrants        []string                        `json:"relay_grants"`
-	// RelayDenied is set when hosted relay grants were withheld at admission (see
-	// RelayDeniedQuotaExhausted); BillingURL then says where to add bandwidth.
-	RelayDenied string `json:"relay_denied,omitempty"`
-	BillingURL  string `json:"billing_url,omitempty"`
 }
 
 type NetworkService struct {
@@ -93,9 +88,6 @@ type NetworkService struct {
 	}
 	issuer string
 	now    func() time.Time
-	// Relay quota gate (relay_quota.go): nil (off) until ConfigureQuota.
-	quotaGate  *bandwidthgate.Gate
-	billingURL string
 	// The in-memory policy documents (policy_cache.go) and their LISTEN session; relay nodes per account (relay_nodes.go).
 	cache        *policyCache
 	policyListen sync.Mutex
@@ -721,20 +713,14 @@ WHERE t>$3`, self.AccountID, self.MachineID, now).Scan(&entitlementChange); err 
 	if entitlementChange.Valid && entitlementChange.Time.Before(validUntil) {
 		validUntil = entitlementChange.Time
 	}
-	var teamOf map[string]string
-	if s.quotaGate != nil && len(peers) > 0 {
-		if teamOf, err = relayTeams(ctx, tx, self, peers); err != nil {
-			return nil, err
-		}
-	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &policyDoc{self: self, peers: peers, expiry: expiry, teamOf: teamOf, validUntil: validUntil, keys: policyKeys(self, peers)}, nil
+	return &policyDoc{self: self, peers: peers, expiry: expiry, validUntil: validUntil, keys: policyKeys(self, peers)}, nil
 }
 
 // signConfiguration signs one request's answer from a policy document: the configuration under this request's
-// generation, the regional candidates and relay grants from the current relay nodes, and the relay quota decision.
+// generation, the regional candidates and relay grants from the current relay nodes.
 func (s *NetworkService) signConfiguration(ctx context.Context, in NetworkConfigRequest, doc *policyDoc, generation int64, now time.Time) (NetworkConfigResult, error) {
 	claims := configurationClaims(s.issuer, now, doc.expiry, generation, doc.self, doc.peers)
 	token, err := s.signer.SignNetworkConfiguration(claims)
@@ -756,16 +742,11 @@ func (s *NetworkService) signConfiguration(ctx context.Context, in NetworkConfig
 		slog.Warn("peer network authority unavailable", "site", "network.go:500")
 		return NetworkConfigResult{}, ErrUnavailable
 	}
-	billable := s.billableRelayPeers(ctx, doc.self, doc.peers, doc.teamOf, now)
-	withheld := len(billable) < len(doc.peers)
-	relayGrants, err := s.relayGrants(nodes, doc.self, doc.peers, billable, generation, now)
+	relayGrants, err := s.relayGrants(nodes, doc.self, doc.peers, generation, now)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
 	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
-	if withheld {
-		result.RelayDenied, result.BillingURL = RelayDeniedQuotaExhausted, s.billingURL
-	}
 	if result.ConfigurationDelta = s.sent.answer(in.EndpointID, in.BaseGeneration, token, claims); result.ConfigurationDelta != nil {
 		result.Configuration = ""
 	}
@@ -864,10 +845,9 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	return peers, nil
 }
 
-// relayGrants signs one grant per eligible relay node. A Paperboat-hosted node relays only the
-// billable peers (their workspace has allowance left); a customer-run node (never metered
-// against Paperboat's allowance) relays every peer.
-func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, peers, billable []networkPeer, generation int64, now time.Time) ([]string, error) {
+// relayGrants signs one grant per eligible relay node, each for every peer: relay traffic is never refused
+// for bandwidth (a relay caps each account's speed instead, relay/derpquic).
+func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, peers []networkPeer, generation int64, now time.Time) ([]string, error) {
 	grants := make([]string, 0, 4)
 	relays := 0
 	for _, n := range nodes {
@@ -879,15 +859,8 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 		}
 		relays++
 		nodeID, processEpoch, nodeGeneration, peerRelayEnabled := n.id, n.processEpoch, n.nodeGeneration, n.peerRelay
-		peerRelayWG, peerRelayDisco, peerRelayAddress, customerOwned := n.peerRelayWG, n.peerRelayDisco, n.peerRelayAddress, n.selfHosted
-		nodePeers := billable
-		if customerOwned {
-			nodePeers = peers
-		}
-		if len(nodePeers) == 0 && len(peers) > 0 {
-			continue
-		}
-		peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(nodePeers)
+		peerRelayWG, peerRelayDisco, peerRelayAddress := n.peerRelayWG, n.peerRelayDisco, n.peerRelayAddress
+		peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(peers)
 		// Not capped by the configuration's refresh hint or the relay's registry lease: a grant is bound to this
 		// configuration's generation and to the relay's process epoch, and is withdrawn by a relay fence, not by
 		// running out (relaylimits.MaxGrantLifetime).
@@ -899,7 +872,7 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 		claims := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
 			Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
 			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch}
-		for i, part := range relayGrantMembershipParts(relayGrantMemberships(self, nodePeers, expires.Unix())) {
+		for i, part := range relayGrantMembershipParts(relayGrantMemberships(self, peers, expires.Unix())) {
 			g := claims
 			g.Memberships = part
 			if i == 0 && peerRelayReady { // the relay and the CLI merge the parts; the descriptor rides in the first

@@ -490,6 +490,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)
 	}
+	ingressAuthority.OnThrottled = durableRoutes.SetThrottled
 	publicListenHost, publicListenPort, err := net.SplitHostPort(deployment.PublicHTTPSListenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("parse public listener address: %w", err)

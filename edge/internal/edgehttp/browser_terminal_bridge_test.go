@@ -200,7 +200,6 @@ func TestBrowserTerminalEndsWithTheTypedReason(t *testing.T) {
 		code      int
 		reason    string
 	}{
-		"quota":              {fmt.Errorf("failed to read frame header: %w", ErrIngressQuotaExhausted), ended(""), 4403, "bandwidth_quota_exhausted"},
 		"revoked":            {context.Canceled, ended(terminalend.Revoked), 4401, "revoked"},
 		"terminal ended":     {context.Canceled, ended(terminalend.Ended), 4409, "ended"},
 		"control plane down": {context.Canceled, ended(terminalend.EdgeUnavailable), 4504, "edge_unavailable"},
@@ -235,9 +234,6 @@ func TestBrowserTerminalEndsWithTheTypedReason(t *testing.T) {
 				t.Fatalf("browser saw %v, want %d %q", err, tc.code, tc.reason)
 			}
 		})
-	}
-	if !browserTerminalExpected(fmt.Errorf("read: %w", ErrIngressQuotaExhausted)) {
-		t.Fatal("allowance cut filed as an edge failure")
 	}
 	if !browserTerminalExpected(&control.BrowserTerminalRefused{Reason: terminalend.NoAccess}) || browserTerminalExpected(&control.BrowserTerminalRefused{Reason: terminalend.MachineUnavailable}) {
 		t.Fatal("a user-level refusal is expected; an unavailable machine is an edge failure")

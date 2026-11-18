@@ -359,8 +359,6 @@ func refused(reason terminalend.Reason, cause error) error {
 // rejectionReason names an expected rejection of a ticket's terminal.
 func rejectionReason(err error) terminalend.Reason {
 	switch {
-	case errors.Is(err, usermachines.ErrBandwidthQuotaExhausted):
-		return terminalend.BandwidthQuotaExhausted
 	case errors.Is(err, usermachines.ErrTerminalBrowserSessionClosed):
 		return terminalend.Ended
 	case errors.Is(err, ErrTicketInvalid):
@@ -375,8 +373,6 @@ func admissionRefusalReason(err error) terminalend.Reason {
 	switch {
 	case errors.As(err, &named):
 		return named.reason
-	case errors.Is(err, usermachines.ErrBandwidthQuotaExhausted):
-		return terminalend.BandwidthQuotaExhausted
 	case errors.Is(err, ErrForbidden):
 		return terminalend.NoAccess
 	case errors.Is(err, ErrHostUnavailable):
@@ -416,9 +412,6 @@ func edgeAdmissionReason(err error) string {
 	}
 	if errors.Is(err, ErrHostUnavailable) {
 		return "host_unavailable"
-	}
-	if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
-		return "bandwidth_quota_exhausted"
 	}
 	return "internal_unavailable"
 }

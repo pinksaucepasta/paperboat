@@ -3,10 +3,8 @@ package edgehttp
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
 	"io"
 	"log/slog"
@@ -17,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	"golang.org/x/time/rate"
 )
@@ -56,7 +55,7 @@ func (s *ingressMemoryStream) Close() error      { s.closed = true; return nil }
 func (s *ingressMemoryStream) CloseWrite() error { return nil }
 
 func testIngressLimits(byteRate rate.Limit) *IngressLimits {
-	return &IngressLimits{Publication: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Account: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}}
+	return &IngressLimits{Publication: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Account: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Throttled: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}}
 }
 
 // Section 5 of the edge abuse plan: popularity is not abuse. Any number of concurrent streams and
@@ -235,88 +234,54 @@ func TestIngressOutlivesAuthorityWindowUntilDisconnectedAndReleasesCapacity(t *t
 	next.Release()
 }
 
-func (r *ingressUsageRecorder) SubscribeQuota(string, time.Time, func()) func() { return func() {} }
-
-type quotaFeedbackSink struct{}
-
-func (quotaFeedbackSink) ReportUsage(context.Context, control.UsageReport) (control.UsageResult, error) {
-	return control.UsageResult{Disposition: "accounted", QuotaExhausted: true}, nil
-}
-
-func TestIngressQuotaFeedbackIsolatesSharedRouteAndAllowsFreshAdmission(t *testing.T) {
-	_, private, _ := ed25519.GenerateKey(nil)
-	now := time.Now().UTC()
-	q, _ := usage.NewQueue(4, 1<<20)
-	meter := &usage.Meter{Node: "edge", Epoch: "epoch", Counters: usage.NewCounters(), Queue: q, KeyID: "key", PrivateKey: private, Persist: func() error { return nil }}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20), Usage: meter})
+// A workspace the server lists as throttled has all its routes paced by one shared bucket at the throttled
+// rate (its streams stay open and the bytes pass), another workspace runs at full speed, and the pace ends at
+// the reset time or when the server stops listing the workspace.
+func TestThrottledWorkspaceIsPacedAcrossItsRoutesAndRecovers(t *testing.T) {
+	limits := &IngressLimits{Publication: IngressLimitConfig{ByteRate: 1 << 30, ByteBurst: 1 << 20}, Account: IngressLimitConfig{ByteRate: 1 << 30, ByteBurst: 1 << 20}, Throttled: IngressLimitConfig{ByteRate: 64 << 10, ByteBurst: ingressPacingChunk}}
+	limits, err := newIngressLimits(limits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer registry.Close()
-	open := func(grant string, at time.Time) (io.ReadWriteCloser, net.Conn) {
-		t.Helper()
-		_, d := lazyRuleAndDecision("quota.example.test")
-		// These validated private decisions share the same route but carry distinct grants.
-		d.Binding.Audience = "team"
-		d.PrincipalID = "member"
-		d.GrantID = grant
-		d.GrantGeneration = 1
-		d.MembershipGeneration = 1
-		lease, e := registry.AcquireIngress(context.Background(), d)
-		if e != nil {
-			t.Fatal(e)
+	throttles := limits.Throttles
+	throttles.Set([]connectorprotocol.IngressThrottle{
+		{Hostname: "a.example.test", Workspace: "personal:one"},
+		{Hostname: "b.example.test", Workspace: "personal:one"},
+		{Hostname: "c.example.test", Workspace: "team:two", ResetsAt: time.Now().Add(-time.Second)},
+	})
+	ctx := context.Background()
+	// Both routes of one workspace share one bucket: the burst is consumed by the first, so the second waits.
+	if err := throttles.Wait(ctx, "a.example.test", ingressPacingChunk); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if err := throttles.Wait(ctx, "b.example.test", ingressPacingChunk); err != nil {
+		t.Fatal(err)
+	}
+	if waited := time.Since(started); waited < 300*time.Millisecond {
+		t.Fatalf("a second route of the throttled workspace waited %v, want about 0.5 s at 64 KiB/s", waited)
+	}
+	// A reset time in the past and an unlisted route are not paced.
+	started = time.Now()
+	for _, host := range []string{"c.example.test", "unlisted.example.test"} {
+		if err := throttles.Wait(ctx, host, 4*ingressPacingChunk); err != nil {
+			t.Fatal(err)
 		}
-		lease.decision.IssuedAt = at
-		local, remote := net.Pipe()
-		wrapped := lease.Wrap(context.Background(), local)
-		t.Cleanup(func() { _ = wrapped.Close(); _ = remote.Close() })
-		return wrapped, remote
 	}
-	a, _ := open("team-a", now.Add(-time.Second))
-	b, bPeer := open("team-b", now.Add(-time.Second))
-	done := make(chan error, 1)
-	go func() { _, e := a.Read(make([]byte, 1)); done <- e }()
-	report, e := usage.NewSignedReport("key", private, usage.SignedDocument{OperationID: "quota_report", Key: usage.Key{Authority: "grant:team-a", Node: "edge", Epoch: "epoch", Environment: "env", Route: "route", Revision: 1, Direction: "ingress"}, Bytes: 100, Start: now, End: now})
-	if e != nil {
-		t.Fatal(e)
+	if waited := time.Since(started); waited > 100*time.Millisecond {
+		t.Fatalf("routes at full speed waited %v", waited)
 	}
-	if e = q.Enqueue(report); e != nil {
-		t.Fatal(e)
+	// The waiting honors cancellation instead of holding the stream forever.
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if err := throttles.Wait(short, "a.example.test", 8*ingressPacingChunk); err == nil {
+		t.Fatal("a paced wait outlived its context")
 	}
-	if _, _, e = control.DeliverNext(context.Background(), q, quotaFeedbackSink{}); e != nil {
-		t.Fatal(e)
+	throttles.Set(nil)
+	started = time.Now()
+	if err := throttles.Wait(ctx, "a.example.test", 8*ingressPacingChunk); err != nil || time.Since(started) > 100*time.Millisecond {
+		t.Fatalf("workspace stayed paced after the server stopped listing it: %v", err)
 	}
-	select {
-	case e := <-done:
-		if !errors.Is(e, ErrIngressQuotaExhausted) {
-			t.Fatalf("quota closure error=%v", e)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("exhaustion did not close active stream")
-	}
-	// Another team's grant remains usable on the same route.
-	writeDone := make(chan error, 1)
-	go func() { _, e := bPeer.Write([]byte("b")); writeDone <- e }()
-	buf := make([]byte, 1)
-	if _, e = b.Read(buf); e != nil || buf[0] != 'b' {
-		t.Fatalf("other workspace disrupted: %v", e)
-	}
-	if e = <-writeDone; e != nil {
-		t.Fatal(e)
-	}
-	// A newly authorized stream after period recovery ignores delayed old feedback.
-	fresh, freshPeer := open("team-a", now.Add(time.Second))
-	q.ExhaustAuthority("grant:team-a", now)
-	go func() { _, e := freshPeer.Write([]byte("f")); writeDone <- e }()
-	if _, e = fresh.Read(buf); e != nil || buf[0] != 'f' {
-		t.Fatalf("fresh period admission closed by old receipt: %v", e)
-	}
-	if e = <-writeDone; e != nil {
-		t.Fatal(e)
-	}
-	_ = fresh.Close()
-	_ = b.Close()
-	_ = a.Close()
 }
 
 type failingIngressUsage struct{ ingressUsageRecorder }

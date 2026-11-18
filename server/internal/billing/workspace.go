@@ -46,6 +46,10 @@ type Workspace struct {
 	AllowanceBytes       *int64            `json:"allowance_bytes"`
 	// AllowanceGrantedBytes is the part of AllowanceBytes an operator granted (it is included in AllowanceBytes).
 	AllowanceGrantedBytes int64 `json:"allowance_granted_bytes,omitempty"`
+	// Throttled: the fair-use amount is used up, so edge traffic runs at the throttled rate until AllowancePeriodEnd.
+	// ThrottleLifted: an operator lifted it (the workspace runs at full speed meanwhile).
+	Throttled      bool `json:"throttled"`
+	ThrottleLifted bool `json:"throttle_lifted"`
 	// SeatsGranted is an operator's override of the team's seats, replacing what it bought.
 	SeatsGranted      *int       `json:"seats_granted,omitempty"`
 	ID                string     `json:"id"`

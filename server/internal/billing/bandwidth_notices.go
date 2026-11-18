@@ -1,0 +1,155 @@
+// Package billing implements plans, workspaces and billing on Stripe: Free, Pro and Team subscriptions
+// with seat quantities, checkout and portal sessions, trials and grace periods, bandwidth top-ups and
+// usage periods, and the webhook handlers that reconcile Stripe's state. Operator products and prices
+// are read through the PriceReader. Uncertain provider outcomes are recorded so they can be reconciled
+// instead of repeated.
+package billing
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"html"
+	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/announcements"
+	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
+)
+
+// BandwidthThrottledEvent is the Activity action shown to the workspace's owner and admins when its fair-use
+// bandwidth is used up and its edge traffic slows down.
+const BandwidthThrottledEvent = "billing.bandwidth_throttled"
+
+// ConfigureNotificationMail supplies the deployment's mail policy. Without it (no mail
+// provider key) the Activity event is still recorded and no mail is queued.
+func (s *WorkspaceService) ConfigureNotificationMail(policy config.TransactionalMail, enabled bool) {
+	s.mail, s.mailEnabled = policy, enabled
+}
+
+// SetThrottleRate tells the notices how fast a throttled workspace's edge traffic runs (bytes per second; the edges
+// get the same value from the same server configuration).
+func (s *WorkspaceService) SetThrottleRate(bytesPerSecond int64) {
+	s.throttleMbit = float64(bytesPerSecond) * 8 / 1e6
+}
+
+func gigabytes(bytes int64) string { return fmt.Sprintf("%g GB", float64(bytes)/1e9) }
+
+// workspaceAudience is who the bell and the mail of a workspace's notices go to: the account (personal) or the team's
+// members. ok is false for an id that is neither.
+func workspaceAudience(workspaceID string) (kind, id string, ok bool) {
+	prefix, id, found := strings.Cut(workspaceID, ":")
+	if !found || id == "" || (prefix != "personal" && prefix != "team") {
+		return "", "", false
+	}
+	if prefix == "team" {
+		return announcements.AudienceTeam, id, true
+	}
+	return announcements.AudienceUser, id, true
+}
+
+// noticeBandwidthWarningTx puts "80% of fair-use bandwidth used" in the workspace's bell, once per allowance period.
+func (s *WorkspaceService) noticeBandwidthWarningTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow, allowance int64) error {
+	audience, id, ok := workspaceAudience(workspaceID)
+	if !ok {
+		return nil
+	}
+	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-80:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
+		"80% of fair-use traffic used",
+		fmt.Sprintf("After %s a month, public traffic through Paperboat's edges slows to %g Mbit/s. Add bandwidth to keep full speed.", gigabytes(allowance), s.throttleMbit),
+		"/billing", &window.end)
+}
+
+// noticeBandwidthResetTx tells a workspace whose previous allowance period ended throttled that full speed is back. It runs
+// when the new period's row is created, so it fires once per period, and only after a throttled one.
+func noticeBandwidthResetTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow) error {
+	audience, id, ok := workspaceAudience(workspaceID)
+	if !ok {
+		return nil
+	}
+	var previous sql.NullTime
+	if err := tx.QueryRow(ctx, `SELECT max(coalesce(budget_start,period_start)) FROM billing_workspace_usage_periods
+WHERE workspace_id=$1 AND coalesce(budget_start,period_start)<$2`, workspaceID, window.budget).Scan(&previous); err != nil || !previous.Valid {
+		return err
+	}
+	var throttled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.announcements WHERE created_by=$1 AND idempotency_key=$2)`,
+		announcements.SystemCreator, "bandwidth-throttled:"+workspaceID+":"+previous.Time.UTC().Format(time.RFC3339)).Scan(&throttled); err != nil || !throttled {
+		return err
+	}
+	ends := time.Now().AddDate(0, 0, 14)
+	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-reset:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
+		"Full speed is back", "A new billing period started. Public traffic through Paperboat's edges runs at full speed again.", "/billing", &ends)
+}
+
+// noticeBandwidthThrottledTx tells a workspace's owner (personal) or owner and admins (team) that edge traffic is slowed,
+// once per allowance period: the bell notice, the audit event and each recipient's mail are idempotent on the period, so
+// every later debit or retry is a no-op. It runs in the debit's transaction, so a notice exists if and only if the debit
+// committed.
+func (s *WorkspaceService) noticeBandwidthThrottledTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow, allowance int64) error {
+	kind, id, found := strings.Cut(workspaceID, ":")
+	if !found || (kind != "personal" && kind != "team") || id == "" {
+		return nil
+	}
+	period := window.budget.UTC().Format(time.RFC3339)
+	audience, _, _ := workspaceAudience(workspaceID)
+	if err := announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-throttled:"+workspaceID+":"+period,
+		fmt.Sprintf("Public traffic slowed to %g Mbit/s", s.throttleMbit),
+		fmt.Sprintf("This workspace used its %s fair-use amount. Full speed returns on %s, or sooner if you add bandwidth.", gigabytes(allowance), window.end.UTC().Format("2 Jan")),
+		"/billing", &window.end); err != nil {
+		return err
+	}
+	resource := "user"
+	if kind == "team" {
+		resource = "team"
+	}
+	if err := audit.NewWriter(nil).WriteTx(ctx, tx, audit.Event{
+		ActorType: audit.ActorSystem, EventType: BandwidthThrottledEvent, ResourceType: resource, ResourceID: id,
+		IdempotencyKey: "bandwidth-throttled:" + workspaceID + ":" + period,
+		Metadata:       map[string]any{"workspace": workspaceID, "resets_at": window.end.UTC().Format(time.RFC3339)},
+	}); err != nil {
+		return err
+	}
+	if !s.mailEnabled {
+		return nil
+	}
+	query := `SELECT u.id,u.primary_email,'your personal workspace' FROM users u WHERE u.id=$1 AND u.status='active' AND u.email_verified AND u.primary_email<>''`
+	if kind == "team" {
+		query = `SELECT u.id,u.primary_email,coalesce(t.display_name,t.team_id) FROM teams t JOIN team_members m ON m.team_id=t.team_id AND m.active
+JOIN users u ON u.id=m.account_id WHERE t.team_id=$1 AND t.deleted_at IS NULL AND (team_role_allows(CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END,'members.manage') OR team_role_allows(CASE WHEN t.owner_account=m.account_id THEN 'owner' ELSE m.role END,'billing.manage'))
+AND u.status='active' AND u.email_verified AND u.primary_email<>'' ORDER BY u.id LIMIT 64`
+	}
+	rows, err := tx.Query(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	type recipient struct{ account, address, name string }
+	var recipients []recipient
+	for rows.Next() {
+		var r recipient
+		if err := rows.Scan(&r.account, &r.address, &r.name); err != nil {
+			rows.Close()
+			return err
+		}
+		recipients = append(recipients, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	billing := strings.TrimRight(s.mail.ConsoleOrigin, "/") + "/billing"
+	for _, r := range recipients {
+		message := transactionalmail.Message{
+			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: public traffic slowed down",
+			HTML: fmt.Sprintf("<p>Public traffic through Paperboat's edges for %s now runs at %g Mbit/s because its fair-use bandwidth is used up. Nothing is stopped. Direct machine-to-machine traffic, relays, and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
+				html.EscapeString(r.name), s.throttleMbit, window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
+		}
+		if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "bandwidth-throttled:"+workspaceID+":"+period+":"+r.account, message); err != nil {
+			return err
+		}
+	}
+	return nil
+}

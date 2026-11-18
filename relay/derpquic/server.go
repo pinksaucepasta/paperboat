@@ -12,7 +12,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,10 +64,10 @@ type Server struct {
 	mu                                                   sync.Mutex
 	peers                                                map[key.NodePublic]*peerConn
 	fences                                               map[string]*grantFence
-	quotaDenied                                          map[string]bool
 	handover                                             map[string]time.Time
 	handoverTimer                                        *time.Timer
 	accounts                                             map[string]*budget
+	accountRate                                          float64 // bytes per second each account may use here
 	connections                                          map[*quic.Conn]struct{}
 	wssConnections                                       map[*peerConn]struct{}
 	draining                                             bool
@@ -129,7 +128,7 @@ func NewServer(v Verifier) (*Server, error) {
 		return nil, err
 	}
 	v.Keys = nil
-	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
+	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: DefaultAccountMbit * 1e6 / 8, connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
 	s.keys.Store(&keys)
 	return s, nil
 }
@@ -369,9 +368,6 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	if s.draining && (p.key.IsZero() || !now.Before(s.deadline)) {
 		return ErrOverload
 	}
-	if s.quotaDenied[g.AccountID] {
-		return ErrQuota
-	}
 	if s.handedOver(g.AccountID, now) {
 		return ErrOverload
 	}
@@ -451,7 +447,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 				}
 			}
 		}
-		s.accounts[g.AccountID] = newBudget(accountBytesPerSecond)
+		s.accounts[g.AccountID] = newBudget(s.accountRate)
 	}
 	return nil
 }
@@ -565,44 +561,25 @@ func (s *Server) writePackets(p *peerConn) {
 	}
 }
 
-// SetQuotaDenied replaces the set of accounts this relay refuses because the control plane
-// reported them out of bandwidth allowance. New admissions and re-authentications of listed
-// accounts get ErrQuota, and their live carriers are closed with it now; unlisted accounts
-// are unaffected, and an empty set clears every refusal. It fences nothing: a grant stays
-// valid and works again as soon as the account is no longer listed.
-func (s *Server) SetQuotaDenied(accounts []string) error {
-	if len(accounts) > MaxConnections {
+// SetAccountMbit sets the speed one account may use on this relay, shared by all its carriers (a token bucket per
+// account: Tailscale's DERP applies one per client the same way, derpserver.go rateLimit). Traffic above it is
+// dropped and the carrier stays up, so the account's own transport slows down. 0 lifts the fair-use cap, leaving only
+// the relay's overload ceiling (a self-hosted relay is never limited by Paperboat).
+func (s *Server) SetAccountMbit(mbit float64) error {
+	if mbit < 0 || mbit > MaxAccountMbit {
 		return ErrProtocol
 	}
-	denied := make(map[string]bool, len(accounts))
-	for _, account := range accounts {
-		if account == "" || len(account) > 256 {
-			return ErrProtocol
-		}
-		denied[account] = true
+	rate := float64(accountBytesPerSecond)
+	if mbit > 0 {
+		rate = min(rate, mbit*1e6/8)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.quotaDenied = denied
-	for k, p := range s.peers {
-		if denied[p.grant.AccountID] {
-			delete(s.peers, k)
-			p.close(ErrQuota.Code, ErrQuota.Message)
-		}
+	s.accountRate = rate
+	for _, b := range s.accounts {
+		b.setRate(rate)
 	}
 	return nil
-}
-
-// QuotaDenied lists the accounts currently refused for bandwidth, sorted.
-func (s *Server) QuotaDenied() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	accounts := make([]string, 0, len(s.quotaDenied))
-	for account := range s.quotaDenied {
-		accounts = append(accounts, account)
-	}
-	sort.Strings(accounts)
-	return accounts
 }
 
 // ValidRevocation is the shape Revoke accepts: both ids present and bounded, and a first valid

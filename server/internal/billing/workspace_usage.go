@@ -26,11 +26,12 @@ func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Wo
 	w.AllowancePeriodEnd = policy.end
 	w.AllowanceBytes = nil
 	var allowance sql.NullInt64
-	err = tx.QueryRow(ctx, `SELECT coalesce(sum(u.observed_bytes),0),max(p.included_bytes)
+	var consumed int64
+	err = tx.QueryRow(ctx, `SELECT coalesce(sum(u.observed_bytes),0),max(p.included_bytes),coalesce(sum(u.consumed_bytes),0)
 FROM billing_workspace_usage_periods p JOIN billing_workspace_usage_periods u
  ON u.workspace_id=p.workspace_id AND u.paid=p.paid
  AND coalesce(u.budget_start,u.period_start)=coalesce(p.budget_start,p.period_start)
-WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).Scan(&w.UsageBytes, &allowance)
+WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).Scan(&w.UsageBytes, &allowance, &consumed)
 	if err != nil {
 		return err
 	}
@@ -41,6 +42,18 @@ WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).S
 		}
 		total := allowance.Int64 + w.AllowanceGrantedBytes
 		w.AllowanceBytes = &total
+		// Throttled: the fair-use amount is used up (a paid plan's top-ups come first) and no operator lifted it.
+		if err = tx.QueryRow(ctx, `SELECT workspace_throttle_lifted($1)`, w.ID).Scan(&w.ThrottleLifted); err != nil {
+			return err
+		}
+		w.Throttled = consumed >= total && !w.ThrottleLifted
+		if w.Throttled && policy.paid && window.paid {
+			remaining, err := WorkspaceTopupRemainingTx(ctx, tx, w.ID, at)
+			if err != nil {
+				return err
+			}
+			w.Throttled = remaining == 0
+		}
 	}
 	return nil
 }
@@ -66,8 +79,9 @@ func (s *WorkspaceService) DebitWorkspaceBandwidthTx(ctx context.Context, tx *db
 	return s.workspaceBandwidthTx(ctx, tx, workspaceID, bytes, at)
 }
 
-// CheckWorkspaceBandwidthTx creates the authoritative period before admission.
-// Zero allowance denies the first request; nil remains unlimited.
+// CheckWorkspaceBandwidthTx creates the authoritative period before admission and reports whether the
+// workspace used its fair-use bandwidth, so its edge traffic is throttled (never refused). Zero allowance
+// throttles from the first request; nil remains unlimited.
 func (s *WorkspaceService) CheckWorkspaceBandwidthTx(ctx context.Context, tx *db.Tx, workspaceID string, at time.Time) (bool, error) {
 	_, exhausted, err := s.workspaceBandwidthTx(ctx, tx, workspaceID, 0, at)
 	return exhausted, err
@@ -91,6 +105,13 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 		return 0, false, err
 	}
 	included := window.included
+	var lifted bool
+	if err = tx.QueryRow(ctx, `SELECT workspace_throttle_lifted($1)`, workspaceID).Scan(&lifted); err != nil {
+		return 0, false, err
+	}
+	if lifted {
+		included.Valid = false // an operator lifted the throttle: the workspace is unlimited while the grant runs
+	}
 	if included.Valid {
 		// Extra bandwidth an operator granted is part of the allowance while it runs.
 		var extra int64
@@ -107,6 +128,11 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 	if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET consumed_bytes=consumed_bytes+$4,observed_bytes=observed_bytes+$5 WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`, workspaceID, window.start, window.end, granted, bytes); err != nil {
 		return 0, false, err
 	}
+	if bytes > 0 && included.Valid && included.Int64 > 0 && (consumed+granted)*5 >= included.Int64*4 {
+		if err = s.noticeBandwidthWarningTx(ctx, tx, workspaceID, window, included.Int64); err != nil {
+			return 0, false, err
+		}
+	}
 	exhausted := included.Valid && consumed+granted >= included.Int64
 	if exhausted && policy.paid && window.paid {
 		used, err := ConsumeWorkspaceTopupsTx(ctx, tx, workspaceID, bytes-granted, at)
@@ -121,7 +147,7 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 		exhausted = remaining == 0
 	}
 	if exhausted && bytes > 0 {
-		if err = s.noticeBandwidthExhaustedTx(ctx, tx, workspaceID, window); err != nil {
+		if err = s.noticeBandwidthThrottledTx(ctx, tx, workspaceID, window, included.Int64); err != nil {
 			return 0, false, err
 		}
 	}

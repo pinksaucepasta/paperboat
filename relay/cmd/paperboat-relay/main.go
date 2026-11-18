@@ -70,6 +70,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	servicePath := fs.String("peer-relay-service", "", "registered public service descriptor JSON file")
 	serviceKeyPath := fs.String("peer-relay-disco-key", "", "private service discovery key file (rawurl base64)")
 	serviceAddresses := fs.String("peer-relay-addresses", "", "comma-separated advertised UDP relay IP:port addresses")
+	accountMbit := fs.Float64("account-mbit", derpquic.DefaultAccountMbit, "fair-use speed of one account on this relay in Mbit/s; 0 lifts the cap (self-hosted relays)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fs.SetOutput(os.Stdout)
@@ -156,6 +157,9 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	}
 	if err = server.SetConnectionLimit(int(lease.CapacityLimit)); err != nil {
 		return err
+	}
+	if err = server.SetAccountMbit(*accountMbit); err != nil {
+		return errors.New("account-mbit must be between 0 and the relay's ceiling")
 	}
 	server.SetKeyRefresher(func() error {
 		refresh, stop := context.WithTimeout(context.WithoutCancel(processCtx), 5*time.Second)

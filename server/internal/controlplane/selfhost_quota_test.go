@@ -74,7 +74,7 @@ func TestSelfhostAdmissionIgnoresHostedBandwidthExhaustion(t *testing.T) {
 			b.ID = "quota:" + suffix + ":" + payer + ":" + ownership
 			err := accountingauthority.Record(ctx, store, b, policy)
 			if ownership == "global" {
-				if !errors.Is(err, accountingauthority.ErrQuotaExhausted) {
+				if !errors.Is(err, accountingauthority.ErrThrottled) {
 					t.Fatalf("hosted/global quota: %v", err)
 				}
 			} else if err != nil {
@@ -82,7 +82,7 @@ func TestSelfhostAdmissionIgnoresHostedBandwidthExhaustion(t *testing.T) {
 			}
 		}
 		exec(`DELETE FROM selfhost_installations WHERE id=$1`, install)
-		if err := accountingauthority.Record(ctx, store, b, policy); !errors.Is(err, accountingauthority.ErrQuotaExhausted) {
+		if err := accountingauthority.Record(ctx, store, b, policy); !errors.Is(err, accountingauthority.ErrThrottled) {
 			t.Fatalf("ordinary hosted admission: %v", err)
 		}
 		var consumed, observed int64

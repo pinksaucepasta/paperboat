@@ -213,13 +213,11 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 	for i, d := range out {
 		b := d.Binding
 		err := results[i]
-		if resetsAt, exhausted := quotaExhaustion(err); exhausted {
-			if s.QuotaDenied != nil {
-				*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})
+		if t, throttled := throttleOf(err); throttled {
+			if s.Throttled != nil {
+				*s.Throttled = append(*s.Throttled, wire.IngressThrottle{Hostname: b.Hostname, Workspace: t.Workspace, ResetsAt: t.ResetsAt})
 			}
-			continue
-		}
-		if err != nil {
+		} else if err != nil {
 			if err = s.rowFailed(ctx, "preview_accounting", b.RouteID, err); err != nil {
 				return nil, err
 			}

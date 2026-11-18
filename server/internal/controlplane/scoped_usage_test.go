@@ -122,14 +122,14 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		quotaBinding.ID += "_quota"
 		quotaBinding.IssuedAt = now
 		err = accountingauthority.Record(ctx, store, quotaBinding, scopedTestQuota{})
-		var quota *accountingauthority.QuotaExhaustedError
+		var quota *accountingauthority.ThrottledError
 		var periodEnd time.Time
 		if e := store.SQL().QueryRowContext(ctx, `SELECT max(period_end) FROM billing_workspace_usage_periods WHERE workspace_id=$1`, "team:"+team).Scan(&periodEnd); e != nil {
 			t.Fatal(e)
 		}
-		// Edge abuse plan 6.4: the refusal carries the period end, so the visitor page shows the reset date.
-		if !errors.As(err, &quota) || !errors.Is(err, accountingauthority.ErrQuotaExhausted) || !quota.ResetsAt.Equal(periodEnd) {
-			t.Fatalf("exhausted admission=%v (period end %v)", err, periodEnd)
+		// The throttle answer carries the workspace and the period end, so the edge shares one limit and the visitor page can show the reset date.
+		if !errors.As(err, &quota) || !errors.Is(err, accountingauthority.ErrThrottled) || !quota.ResetsAt.Equal(periodEnd) {
+			t.Fatalf("throttled admission=%v (period end %v)", err, periodEnd)
 		}
 		if _, err = store.SQL().ExecContext(ctx, `UPDATE billing_workspace_usage_periods SET included_bytes=1000 WHERE workspace_id=$1`, "team:"+team); err != nil {
 			t.Fatal(err)

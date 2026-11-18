@@ -310,5 +310,3 @@ func task24CertificatesWithKey(t *testing.T, generate func() crypto.Signer, extr
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 	return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{clientCert}, RootCAs: pool, ServerName: "localhost"}, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}, caPEM, clientPEM, clientKeyPEM
 }
-
-func (task24Usage) SubscribeQuota(string, time.Time, func()) func() { return func() {} }
