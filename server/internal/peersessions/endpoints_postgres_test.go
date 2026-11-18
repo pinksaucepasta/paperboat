@@ -331,3 +331,89 @@ func TestEndpointsAfterAnEmptyDeliveredSetAreDeliveredAtOnceOnPostgres(t *testin
 		t.Fatalf("the first real set after an empty delivered one was held back: %v", got[peer])
 	}
 }
+
+// hop-89: a machine reports the relay it is homed on with its configuration request. Only an eligible relay of the
+// account is stored; a request without one keeps it; a change publishes peer_network once and peers are given it on
+// the machine's entry (and never in a signed identity), so they send their relay handshake to where it is.
+func TestHomeRelayReachesPeersOnPostgres(t *testing.T) {
+	f := newEndpointsFixture(t)
+	peer := f.account + "_m_1"
+	now := time.Now().UTC()
+	relays := []string{"relay_a_" + f.suffix, "relay_b_" + f.suffix}
+	for _, node := range append(relays, "relay_other_"+f.suffix) {
+		allowed := f.account
+		if strings.HasPrefix(node, "relay_other_") {
+			allowed = "someone_else_" + f.suffix
+		}
+		if _, err := f.store.SQL().ExecContext(f.ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'default','v1',$1,'relay.example.test',443,444,'ready',true,$2,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,20,$2,$3,ARRAY[$4])`, node, now, now.Add(time.Minute), allowed); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
+		})
+	}
+	report := func(op, home string) {
+		t.Helper()
+		if _, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: op + "_" + f.suffix, UserID: f.account, EndpointID: peer, HomeRelay: home}); err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+	}
+	delivered := func() string {
+		t.Helper()
+		f.configure(t, "read_"+fmt.Sprint(time.Now().UnixNano()), 0, nil)
+		raw, err := json.Marshal(*f.signed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var claims struct {
+			Self  map[string]any `json:"self"`
+			Peers []struct {
+				Identity  map[string]any `json:"identity"`
+				HomeRelay string         `json:"home_relay"`
+			} `json:"peers"`
+		}
+		if err := json.Unmarshal(raw, &claims); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range claims.Peers {
+			if _, inIdentity := p.Identity["home_relay"]; inIdentity {
+				t.Fatal("a signed identity carries home_relay")
+			}
+			if p.Identity["endpoint_id"] == peer {
+				return p.HomeRelay
+			}
+		}
+		t.Fatal("the peer is missing from the configuration")
+		return ""
+	}
+	if got := delivered(); got != "" {
+		t.Fatalf("delivered home %q before any report", got)
+	}
+	before := f.topic(t)
+	report("home_a", relays[0])
+	if got := delivered(); got != relays[0] || f.topic(t) != before+1 {
+		t.Fatalf("after the first report: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	report("again", relays[0])
+	report("not_ours", "relay_other_"+f.suffix)
+	report("unknown", "relay_missing_"+f.suffix)
+	if got := delivered(); got != relays[0] || f.topic(t) != before+1 {
+		t.Fatalf("a repeat or a relay not the account's changed the home: %q, topic moves %d", got, f.topic(t)-before)
+	}
+	report("moved", relays[1])
+	if got := delivered(); got != relays[1] || f.topic(t) != before+2 {
+		t.Fatalf("after the machine moved relay: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	// A machine homed on no relay says so, and peers stop sending to the one it left at once.
+	report("none", "")
+	if got := delivered(); got != "" || f.topic(t) != before+3 {
+		t.Fatalf("after the machine reported no home: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	report("back", relays[0])
+	if got := delivered(); got != relays[0] || f.topic(t) != before+4 {
+		t.Fatalf("after the machine was homed again: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	if _, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: "long_" + f.suffix, UserID: f.account, EndpointID: peer, HomeRelay: strings.Repeat("r", 129)}); err == nil {
+		t.Fatal("an oversized home relay was accepted")
+	}
+}

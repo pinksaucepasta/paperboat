@@ -184,6 +184,7 @@ func (s *Server) Start() error {
 	sys.Set(store)
 
 	lb.onDERPRecv = func(regionID tailcfg.DERPRegionID, src key.NodePublic, pkt []byte) bool {
+		lb.heardOn(src, regionID) // every non-disco packet, WireGuard data and relay control too (magicsock OnDERPRecv)
 		if s.OnRelayControl != nil && s.OnRelayControl(regionID, src, pkt) {
 			return true
 		}
@@ -191,8 +192,9 @@ func (s *Server) Start() error {
 			return false
 		}
 		if IsMeowedPacket(pkt) {
-			nonce, start, echoed := meowedNonce(pkt) // pkt is the receiver's buffer: read it before returning
-			go s.meowed(src, regionID, nonce, start, echoed)
+			if nonce, start, ok := meowedNonce(pkt); ok { // pkt is the receiver's buffer: read it before returning
+				go s.meowed(src, regionID, nonce, start)
+			}
 			return true
 		}
 		if _, discoPub, nonce, ok := ParseMeowPing(pkt); ok {
@@ -208,6 +210,7 @@ func (s *Server) Start() error {
 					// rather than on the peer's default region, which may be a relay this engine cannot reach
 					// (a test Mac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
 					// derp.go derpRoute, issue 150).
+					// A reply route, kept apart from the signed home (magicsock derpRoute vs derpAddr); it expires back to the home.
 					_ = lb.setPeerRelayRegion(src, regionID)
 					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed(nonce, s.startID)); err == nil {
 						// The client's peer map is installed before it sends the meow.
@@ -351,18 +354,17 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 	return s.awaitMeow(ctx, peer)
 }
 
-// meowed handles a peer's answer to our handshake. Only the first answer to the outstanding handshake (its nonce)
-// records the region it arrived on: the peer is homed there, so send to it there from now on, as magicsock learns a
-// peer's derpRoute from where it was heard (derp.go addDerpPeerRoute). A duplicate, a late answer to an earlier
-// handshake, or a second answer from a peer still on two relays moves nothing. A bare answer (a peer that sends no
-// nonce) completes the handshake without moving the peer. The region is recorded before the dial is released, so
-// its first packets take it.
-func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce, start [meowNonceLen]byte, echoed bool) {
+// meowed handles a peer's answer to our handshake. Only the first answer that echoes the outstanding handshake's
+// nonce completes it, and records the region it arrived on: the peer is homed there, so send to it there from now
+// on, as magicsock learns a peer's derpRoute from where it was heard (derp.go addDerpPeerRoute). A duplicate, a late
+// answer to an earlier handshake, or a second answer from a peer still on two relays does nothing. The region is
+// recorded before the dial is released, so its first packets take it.
+func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce, start [meowNonceLen]byte) {
 	// The waiter is claimed under peerReadyMu and the region set without it: setPeerRelayRegion takes policyMu, which
 	// SetPeerContacts and InvalidateAuthorizedPeer hold while they take peerReadyMu (ABBA, review of b6eb2018c).
 	s.peerReadyMu.Lock()
 	w := s.peerReady[src]
-	if w != nil && echoed && w.probe != ([meowNonceLen]byte{}) && nonce == w.probe {
+	if w != nil && w.probe != ([meowNonceLen]byte{}) && nonce == w.probe {
 		w.probe = [meowNonceLen]byte{}
 		restarted := s.notePeerStartLocked(src, start)
 		s.peerReadyMu.Unlock()
@@ -371,19 +373,17 @@ func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce
 		}
 		return
 	}
-	if w == nil || w.claimed || (echoed && nonce != w.nonce) {
+	if w == nil || w.claimed || nonce != w.nonce {
 		s.peerReadyMu.Unlock()
 		return
 	}
 	w.claimed = true
-	restarted := echoed && s.notePeerStartLocked(src, start)
+	restarted := s.notePeerStartLocked(src, start)
 	s.peerReadyMu.Unlock()
 	if restarted {
 		s.resetRestartedPeer(src) // before the dial is released, so its first packets handshake at once
 	}
-	if echoed {
-		_ = s.lb.setPeerRelayRegion(src, regionID)
-	}
+	_ = s.lb.setPeerRelayRegion(src, regionID) // a reply route, not the peer's home; takes policyMu and b.mu: never under peerReadyMu
 	s.peerReadyMu.Lock()
 	defer s.peerReadyMu.Unlock()
 	if s.peerReady[src] == w { // not invalidated meanwhile

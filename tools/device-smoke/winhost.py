@@ -201,9 +201,12 @@ def linux_silent_cut(out_match, in_match):
     tag = ['-m', 'comment', '--comment', 'pbsilent']
     rules = [(t, ['-t', 'mangle'], 'OUTPUT', out_match + tag + ['-j', 'MARK', '--set-mark', '0x70b']) for t in ('iptables', 'ip6tables')]
     rules += [(t, [], 'INPUT', in_match + tag + ['-j', 'DROP']) for t in ('iptables', 'ip6tables')]
-    proof = []
+    proof, owned = [], []
     try:
         for dev in devs:
+            if sudo('tc', 'qdisc', 'show', 'dev', dev, 'handle', '70b:').stdout.strip():
+                continue  # a cut around this one (relay_home_wire: UDP cut, then a relay cut) already owns the qdisc, mark and filter
+            owned.append(dev)
             for step in (['qdisc', 'add', 'dev', dev, 'root', 'handle', '70b:', 'prio', 'bands', '3', 'priomap'] + ['0'] * 16,
                          ['qdisc', 'add', 'dev', dev, 'parent', '70b:3', 'handle', '70c:', 'netem', 'loss', '100%'],
                          ['filter', 'add', 'dev', dev, 'parent', '70b:', 'protocol', 'all', 'prio', '1', 'handle', '0x70b',
@@ -222,7 +225,7 @@ def linux_silent_cut(out_match, in_match):
                       for line in sudo(t, '-vnxL', 'INPUT').stdout.splitlines() if 'pbsilent' in line)
         for tool, table, chain, rule in rules:
             sudo(tool, *table, '-D', chain, *rule)
-        for dev in devs:
+        for dev in owned:
             sudo('tc', 'qdisc', 'del', 'dev', dev, 'root', 'handle', '70b:')
         proof.append('silent cut on %s: %d outgoing packets lost after their send succeeded, %d incoming dropped'
                      % (','.join(devs), lost, dropped))

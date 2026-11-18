@@ -51,7 +51,10 @@ func normalizeEndpoints(reported []string) ([]string, error) {
 const endpointPublishInterval = time.Minute
 
 // endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump): it
-// stores the reported set ($4, NULL when none was sent). When
+// stores the reported set ($4, NULL when none was sent) and a machine's home relay ($6): NULL (the machine is homed on
+// no relay) clears it at once, a relay that is not an eligible relay of the account keeps the old one, so a machine cannot
+// send peers to a relay that is not theirs. Only a machine's row holds one.
+// When
 // the latest set differs from the delivered one it is published now if the last publication is older than $5
 // seconds, else held back until then (endpoints_due_at); a set equal to the delivered one clears a held-back one.
 // NULL and an empty set are the same set. The delivered set's change publishes peer_network (migration 186).
@@ -60,7 +63,9 @@ const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_gen
  published_endpoints=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` AND NOT ` + endpointsVanish + ` THEN coalesce($4::text[],endpoints) ELSE published_endpoints END,
  endpoints_published_at=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` AND NOT ` + endpointsVanish + ` THEN $1 ELSE endpoints_published_at END,
  endpoints_due_at=CASE WHEN ` + endpointsVanish + ` THEN coalesce(CASE WHEN coalesce(endpoints,'{}')<>'{}' THEN NULL ELSE endpoints_due_at END,$1::timestamptz+make_interval(secs=>$5))
-  WHEN ` + endpointsDiffer + ` AND NOT ` + endpointsOpen + ` THEN endpoints_published_at+make_interval(secs=>$5) END
+  WHEN ` + endpointsDiffer + ` AND NOT ` + endpointsOpen + ` THEN endpoints_published_at+make_interval(secs=>$5) END,
+ home_relay=CASE WHEN role<>'machine' THEN home_relay WHEN $6::text IS NULL THEN NULL
+  WHEN EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes t WHERE t.id=$6::text AND paperboat.node_pool_eligible(t.id,$2,'relay')) THEN $6::text ELSE home_relay END
  WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`
 
 const (
@@ -123,7 +128,7 @@ func configurationClaims(issuer string, now, expiry time.Time, generation int64,
 			slog.Warn("network configuration omits a peer with an incomplete identity", "site", "endpoints.go:configurationClaims")
 			continue
 		}
-		out.Peers = append(out.Peers, peernetwork.Peer{Identity: p.Identity.Binding, Scopes: p.Scopes, Endpoints: p.Identity.Endpoints})
+		out.Peers = append(out.Peers, peernetwork.Peer{Identity: p.Identity.Binding, Scopes: p.Scopes, Endpoints: p.Identity.Endpoints, HomeRelay: p.Identity.HomeRelay})
 	}
 	// Ordered by endpoint id, as a delta's receiver rebuilds it (peernetwork.ConfigurationDelta.Rebuild).
 	slices.SortFunc(out.Peers, func(a, b peernetwork.Peer) int { return strings.Compare(a.Identity.EndpointID, b.Identity.EndpointID) })

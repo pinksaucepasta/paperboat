@@ -45,6 +45,9 @@ type PeerNetworkConfigurationRequest struct {
 	OperationID    string                 `json:"operation_id"`
 	AdmittedScopes []AdmittedNetworkScope `json:"admitted_scopes,omitempty"`
 	Endpoints      *[]string              `json:"endpoints,omitempty"`
+	// HomeRelay is the node id of the regional relay this machine is homed on, sent with every renewal so peers
+	// send their relay handshake there; empty on a CLI, which nobody dials.
+	HomeRelay string `json:"home_relay,omitempty"`
 	// Authority "until_revoked_v1" asks for machine_network scopes and host session rights without expiry
 	// (expires_at 0): this client keeps its last verified configuration while Paperboat is unreachable (F21-01).
 	Authority string `json:"authority,omitempty"`

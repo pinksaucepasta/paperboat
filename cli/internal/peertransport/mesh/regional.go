@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"time"
@@ -84,12 +85,20 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	}
 	redefined := redefinedPinnedRegions(b.dm, dm, b.clients)
 	b.dm = dm
+	previousHome := b.homeDERP
 	b.homeDERP = 0
 	if len(regions) != 0 {
 		b.homeDERP = regions[0].RegionID
 	}
+	for _, k := range slices.Collect(maps.Keys(b.clients)) { // a region this engine lost or gained changes where peers are reached
+		b.syncClientRegionLocked(k)
+	}
 	b.updateServerMapLocked()
+	homeMoved, report := b.homeDERP != previousHome, b.onLocalEndpoints
 	b.mu.Unlock()
+	if homeMoved && report != nil {
+		go report() // peers learn the new home from the next renewal (HomeRegion)
+	}
 	ms := b.sys.MagicSock.Get()
 	ms.SetDERPMap(dm)
 	for _, id := range redefined {
@@ -197,29 +206,49 @@ func (s *Server) SetPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPRegionID
 	return s.lb.setPeerRelayRegion(peer, id)
 }
 
+// setPeerRelayRegion pins peer's reply route to region id: an answer's arrival region, the region a peer pinged us on, a
+// recovery selection. It never changes the peer's home (its signed region, peer_contacts.go); sends take the route while it
+// is fresh (replyRouteTTL) and the home after.
 func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPRegionID) error {
 	b.policyMu.Lock()
 	defer b.policyMu.Unlock()
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return errors.New("mesh: server is closed")
+	}
 	if !b.dm.Regions[id].HasDERP() {
 		return errors.New("mesh: unknown relay region")
 	}
-	n := b.clients[peer]
-	if n == nil {
+	if b.clients[peer] == nil {
 		return errors.New("mesh: peer is not admitted")
 	}
-	n = n.Clone()
-	n.HomeDERP = id
-	b.setClientLocked(peer, n)
-	mak.Set(&b.peerRegions, peer, id)
-	b.updateServerMapLocked()
+	b.dropReplyRouteLocked(peer)
+	route := &replyRoute{region: id, at: time.Now()}
+	route.timer = time.AfterFunc(b.routeTTLValue(), func() { b.expireReplyRoute(peer, route) })
+	mak.Set(&b.replyRoutes, peer, route)
+	if b.syncClientRegionLocked(peer) {
+		b.updateServerMapLocked()
+	}
 	return nil
 }
 
 // connectRelay connects and pings this engine's carrier for region (magicsock PrepareDERP).
 func (b *locoBackend) connectRelay(ctx context.Context, region tailcfg.DERPRegionID) error {
 	return b.sys.MagicSock.Get().PrepareDERP(ctx, region)
+}
+
+// HomeRegion is the relay region this engine is homed on (0 before a relay is set).
+func (s *Server) HomeRegion() tailcfg.DERPRegionID {
+	if s.lb == nil {
+		return 0
+	}
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	if s.lb.dm == nil {
+		return 0
+	}
+	return s.lb.derpRegionIDLocked()
 }
 
 // relayRegionIDs is every relay region this engine can send through.
