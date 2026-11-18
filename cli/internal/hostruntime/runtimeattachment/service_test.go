@@ -1140,3 +1140,14 @@ func TestAdmissionNamesTheCarriersThatMayCarryTerminals(t *testing.T) {
 		t.Fatal("an empty list (no managed edge ready) allows no carrier")
 	}
 }
+
+// A self-hosted-only workspace with no managed edge ready has carriers but no terminal publisher: that is healthy
+// (terminals are unavailable), not a state to retry every second.
+func TestCarriersAreReadyWithoutAPublisherWhenNoEdgeMayCarryTerminals(t *testing.T) {
+	if carriersReady(map[string]*live{}, "", true) {
+		t.Fatal("no carrier at all is not ready")
+	}
+	if carriersReady(map[string]*live{"own": {}}, "", false) {
+		t.Fatal("a workspace with a terminal edge needs its publisher")
+	}
+}
