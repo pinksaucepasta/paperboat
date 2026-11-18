@@ -6,29 +6,89 @@ so a broken probe host can never make a service look down. Config (JSON, path in
   url        the Worker's /api/probe endpoint        vantage   this host's name in status/config/components.json
   key_file   file holding the vantage's signing key  net_urls  two or more URLs that must answer for "my internet works"
   checks     [{unit, kind: http|relay|tuf|tcp, url|host+port, expect?, redirect? (a 3xx is healthy), resolve_all? (every DNS address),
-              pin? (sha256//<base64 public key hash>: for a relay, whose certificate is private; without it the certificate is verified normally)}]  steps     {probe.sh step name: unit} for canary steps run on this host
+              pin? (sha256//<base64 public key hash> for one check)}]
+  relay_set_cmd  a shell command that prints this host's canary machine's relay file (the signed candidate set its daemon keeps); relay checks
+             trust the key the SIGNED set names for that relay, the way clients do, so a certificate rotation follows the set, never this config  steps     {probe.sh step name: unit} for canary steps run on this host
 Used by canary.py (oracle, with its steps) and status_run.py (anvit and staging).
 """
-import hashlib, hmac, json, os, re, socket, subprocess, sys, time, urllib.request
+import base64, hashlib, hmac, json, os, re, socket, ssl, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 CHECK_TIMEOUT = 10
 
 
-def curl(url, resolve=None, pin=None):
+def curl(url, resolve=None, pin=None, insecure=False):
     """(http_code, seconds, body) or raises RuntimeError with the curl error."""
     cmd = ["curl", "-sS", "--max-time", str(CHECK_TIMEOUT), "-o", "-", "-w", "\n%{http_code} %{time_total}"]
     if resolve:
         cmd += ["--resolve", resolve]
-    if pin:  # a relay's certificate is private: trust exactly its key, never "any certificate" (pinning is checked even with -k)
-        cmd += ["-k", "--pinnedpubkey", pin]
+    if insecure or pin:  # a relay's certificate is private (no CA): its identity is the pinned key when the signed set names one, else only validity is judged
+        cmd.append("-k")
+    if pin:
+        cmd += ["--pinnedpubkey", pin]  # checked even with -k
     done = subprocess.run(cmd + [url], capture_output=True, timeout=CHECK_TIMEOUT + 5)
     if done.returncode != 0:
         raise RuntimeError(done.stderr.decode(errors="replace").strip()[-150:] or f"curl exit {done.returncode}")
     body, _, tail = done.stdout.rpartition(b"\n")
     code, seconds = tail.decode().split()
     return int(code), float(seconds), body.decode(errors="replace")
+
+
+def relay_pins(text, now=None):
+    """{(host, port): 'sha256//<base64>'} from a relay file (the daemon's copy of the signed candidate set). The set is already
+    verified by the daemon that wrote it; an expired or unreadable set gives no identities, never a guess."""
+    try:
+        token = json.loads(text)["candidate_set"]
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if claims["exp"] <= (now if now is not None else time.time()):
+            return {}
+        pins = {}
+        for node in claims["nodes"]:
+            spki = node.get("tls_spki_sha256")
+            if spki and node.get("endpoint_host") and node.get("endpoint_tcp_port"):
+                raw = base64.urlsafe_b64decode(spki + "=" * (-len(spki) % 4))
+                pins[(node["endpoint_host"], int(node["endpoint_tcp_port"]))] = "sha256//" + base64.b64encode(raw).decode()
+        return pins
+    except (ValueError, KeyError, TypeError, IndexError):
+        return {}
+
+
+def load_relay_pins(cfg):
+    cmd = cfg.get("relay_set_cmd")
+    if not cmd:
+        return {}
+    try:
+        done = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
+        return relay_pins(done.stdout) if done.returncode == 0 else {}
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+
+
+def with_identities(checks, pins):
+    """Relay checks get the key the signed set names for their host and port, when it names one."""
+    out = []
+    for c in checks:
+        if c.get("kind") == "relay" and "pin" not in c:
+            hostport = c["url"].split("://", 1)[1].split("/", 1)[0]
+            host, _, port = hostport.rpartition(":")
+            pin = pins.get((host, int(port))) if port.isdigit() else None
+            c = {**c, "pin": pin} if pin else c
+        out.append(c)
+    return out
+
+
+def cert_valid_now(host, port, now=None):
+    """The relay's leaf certificate is inside its validity period (clients check this too: nodetls verifies the leaf against itself)."""
+    context = ssl.create_default_context()
+    context.check_hostname, context.verify_mode = False, ssl.CERT_NONE
+    with socket.create_connection((host, int(port)), timeout=5) as raw, context.wrap_socket(raw) as tls:
+        pem = ssl.DER_cert_to_PEM_cert(tls.getpeercert(binary_form=True))
+    out = subprocess.run(["openssl", "x509", "-noout", "-startdate", "-enddate"], input=pem, capture_output=True, text=True, timeout=10).stdout
+    when = {k: ssl.cert_time_to_seconds(v) for k, v in re.findall(r"(notBefore|notAfter)=(.+)", out)}
+    t = now if now is not None else time.time()
+    return when["notBefore"] <= t <= when["notAfter"]
 
 
 def one(check):
@@ -38,9 +98,13 @@ def one(check):
         if kind == "tcp":
             socket.create_connection((check["host"], int(check["port"])), timeout=5).close()
             return True, round((time.monotonic() - start) * 1000), ""
-        code, seconds, body = curl(check["url"], check.get("resolve"), check.get("pin"))
+        code, seconds, body = curl(check["url"], check.get("resolve"), check.get("pin"), kind == "relay")
         ms = round(seconds * 1000)
         if kind == "relay":  # a relay's TLS port answers an unauthenticated GET with 401; 503 means full or draining
+            hostport = check["url"].split("://", 1)[1].split("/", 1)[0]
+            host, _, port = hostport.rpartition(":")
+            if not cert_valid_now(host, port):
+                return False, ms, "relay certificate is expired or not yet valid"
             ok = code == 401 and "relay authorization required" in body
             return ok, ms, "" if ok else f"relay answered {code}"
         if kind == "tuf":
@@ -126,7 +190,7 @@ def report(cfg, extra_results=()):
     """Run this host's checks and post them; returns what was posted (None when the host's internet is down)."""
     try:
         net_ok = internet_ok(cfg["net_urls"])
-        results = run_checks(cfg.get("checks", [])) + list(extra_results) if net_ok else []
+        results = run_checks(with_identities(cfg.get("checks", []), load_relay_pins(cfg))) + list(extra_results) if net_ok else []
         if net_ok and any(not r["ok"] for r in results):  # a drop during the run must not read as an outage
             net_ok = internet_ok(cfg["net_urls"])
     except Exception as error:  # a bug in this host's own checking: say so with a heartbeat that vouches for nothing
