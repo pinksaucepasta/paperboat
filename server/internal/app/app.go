@@ -37,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/customernotices"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
@@ -699,6 +700,8 @@ func New(opts Options) (*App, error) {
 	operatorActions.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	abuseReports := abusereports.New(store)
 	abuseReports.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	customerNotices := customernotices.New(store)
+	customerNotices.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)
@@ -834,6 +837,7 @@ func New(opts Options) (*App, error) {
 		AccountDeletion:          accountDeletion,
 		AccountPreferences:       accountprefs.New(store),
 		Announcements:            announcements.New(store),
+		CustomerNotices:          customerNotices,
 		ControlDiagnostics:       controlDiagnostics,
 		OperationRecovery:        operationRecovery,
 		PeerIdentity:             peerIdentityService,
