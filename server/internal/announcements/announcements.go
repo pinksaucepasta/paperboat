@@ -367,3 +367,9 @@ func (s *Service) List(ctx context.Context, state string, after int64, limit int
 	}
 	return page, rows.Err()
 }
+
+// AudienceExists refuses a team, user or plan that does not exist (other audiences always exist); customer notices
+// reuse it so a typo cannot silently reach nobody.
+func AudienceExists(ctx context.Context, tx *db.Tx, kind, value string) error {
+	return audienceExists(ctx, tx, kind, value)
+}
