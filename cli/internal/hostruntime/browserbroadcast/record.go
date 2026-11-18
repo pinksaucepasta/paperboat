@@ -85,15 +85,15 @@ func validRecord(value Record) bool {
 	return value.SessionID != "" && len(value.SessionID) <= 128 && value.Generation != 0 && value.Index != 0 && (value.Channel == protocol.TerminalStdout || value.Channel == protocol.TerminalStderr) && len(value.Data) > 0 && len(value.Data) <= MaxDataBytes
 }
 
-// Seal uses a fresh deterministic nonce within an epoch. The caller must
+// Seal takes the publication's CompressionGate (nil tries every record) and uses a fresh deterministic nonce within an epoch. The caller must
 // serialize Index and never reuse it with the same epoch key.
-func Seal(value Record, epoch Epoch, private ed25519.PrivateKey) ([]byte, error) {
+func Seal(value Record, epoch Epoch, private ed25519.PrivateKey, gate *protocol.CompressionGate) ([]byte, error) {
 	if !validRecord(value) || value.EpochID != epoch.ID || len(private) != ed25519.PrivateKeySize {
 		return nil, ErrInvalidRecord
 	}
 	// Reuse the established terminal-v1 adaptive zstd codec once at the machine;
 	// all edge subscribers receive the same compressed ciphertext.
-	output, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: value.Channel, StreamID: 1, StartSequence: value.StartSequence, Data: value.Data}, nil)
+	output, err := protocol.EncodeOutput(gate, 1, value.Channel, value.StartSequence, value.Data)
 	if err != nil {
 		return nil, err
 	}

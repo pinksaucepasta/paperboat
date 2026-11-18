@@ -16,16 +16,17 @@ var terminalDecoderPool sync.Pool
 var terminalCodecSlots = make(chan struct{}, 16)
 
 type compressionCounters struct {
-	smallFrames, insufficientFrames, compressedFrames atomic.Uint64
-	rawBytes, encodedBytes                            atomic.Uint64
-	encodeFailures, decodeFailures                    atomic.Uint64
-	encodeNanos, decodeNanos                          atomic.Uint64
+	smallFrames, insufficientFrames, compressedFrames, skippedFrames atomic.Uint64
+	rawBytes, encodedBytes                                           atomic.Uint64
+	encodeFailures, decodeFailures                                   atomic.Uint64
+	encodeNanos, decodeNanos                                         atomic.Uint64
 }
 
 type CompressionMetrics struct {
 	SmallFrames        uint64
 	InsufficientFrames uint64
 	CompressedFrames   uint64
+	SkippedFrames      uint64 // sent raw without an attempt: the stream's CompressionGate was backing off
 	RawBytes           uint64
 	EncodedBytes       uint64
 	EncodeFailures     uint64
@@ -40,7 +41,7 @@ var terminalCompressionCounters compressionCounters
 // include them, so tests that assert an exact set of series start from zero.
 func ResetTerminalCompressionMetrics() {
 	c := &terminalCompressionCounters
-	for _, counter := range []*atomic.Uint64{&c.smallFrames, &c.insufficientFrames, &c.compressedFrames, &c.rawBytes, &c.encodedBytes, &c.encodeFailures, &c.decodeFailures, &c.encodeNanos, &c.decodeNanos} {
+	for _, counter := range []*atomic.Uint64{&c.smallFrames, &c.insufficientFrames, &c.compressedFrames, &c.skippedFrames, &c.rawBytes, &c.encodedBytes, &c.encodeFailures, &c.decodeFailures, &c.encodeNanos, &c.decodeNanos} {
 		counter.Store(0)
 	}
 }
@@ -50,6 +51,7 @@ func TerminalCompressionMetrics() CompressionMetrics {
 		SmallFrames:        terminalCompressionCounters.smallFrames.Load(),
 		InsufficientFrames: terminalCompressionCounters.insufficientFrames.Load(),
 		CompressedFrames:   terminalCompressionCounters.compressedFrames.Load(),
+		SkippedFrames:      terminalCompressionCounters.skippedFrames.Load(),
 		RawBytes:           terminalCompressionCounters.rawBytes.Load(),
 		EncodedBytes:       terminalCompressionCounters.encodedBytes.Load(),
 		EncodeFailures:     terminalCompressionCounters.encodeFailures.Load(),
@@ -343,6 +345,12 @@ func (g *CompressionGate) record(compressed bool) {
 	}
 }
 
+// EncodeOutput is the one way a connection or publisher encodes a chunk of terminal or exec output: adaptive zstd under
+// the stream's CompressionGate (nil tries every chunk).
+func EncodeOutput(gate *CompressionGate, streamID uint32, channel byte, startSequence uint64, data []byte) ([]byte, error) {
+	return EncodeTerminalOutputGated(TerminalOutputFrame{Channel: channel, StreamID: streamID, StartSequence: startSequence, Data: data}, nil, gate)
+}
+
 // EncodeTerminalOutputGated is EncodeTerminalOutputAdaptive with the stream's CompressionGate (nil tries every chunk).
 func EncodeTerminalOutputGated(frame TerminalOutputFrame, dst []byte, gate *CompressionGate) ([]byte, error) {
 	started := time.Now()
@@ -350,8 +358,9 @@ func EncodeTerminalOutputGated(frame TerminalOutputFrame, dst []byte, gate *Comp
 	frame.UncompressedLength = uint32(len(frame.Data))
 	decision := &terminalCompressionCounters.smallFrames
 	if len(frame.Data) >= TerminalOutputMinCompress {
-		decision = &terminalCompressionCounters.insufficientFrames
+		decision = &terminalCompressionCounters.skippedFrames
 		if gate == nil || gate.attempt() {
+			decision = &terminalCompressionCounters.insufficientFrames
 			compressed, err := compressTerminal(frame.Data)
 			if err != nil {
 				terminalCompressionCounters.encodeFailures.Add(1)

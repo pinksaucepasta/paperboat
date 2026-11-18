@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcast"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -44,6 +45,7 @@ type publication struct {
 	stream        io.WriteCloser
 	cancel        context.CancelFunc
 	diagnosticCtx context.Context
+	compress      protocol.CompressionGate // backs compression off while the session's output does not compress
 	mu            sync.Mutex
 	// writeMu orders records on the stream. Writes happen outside mu, so a stalled stream never blocks
 	// Join or Leave (Leave's stop closes the stream, which ends the stalled write).
@@ -273,7 +275,7 @@ func (r *Registry) publish(ctx context.Context, p *publication, key ed25519.Priv
 			return
 		}
 		p.index++
-		frame, encodeErr := browserbroadcast.Seal(browserbroadcast.Record{SessionID: p.sessionID, Generation: p.generation, EpochID: p.epoch.ID, Index: p.index, Channel: byte(event.Channel), StartSequence: event.StartSequence, Data: event.Data}, p.epoch, key)
+		frame, encodeErr := browserbroadcast.Seal(browserbroadcast.Record{SessionID: p.sessionID, Generation: p.generation, EpochID: p.epoch.ID, Index: p.index, Channel: byte(event.Channel), StartSequence: event.StartSequence, Data: event.Data}, p.epoch, key, &p.compress)
 		p.mu.Unlock()
 		if encodeErr == nil {
 			encodeErr = writeRecord(p.stream, frame)

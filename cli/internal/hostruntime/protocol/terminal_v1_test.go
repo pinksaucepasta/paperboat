@@ -420,3 +420,33 @@ func TestGatedEncodingSendsSkippedChunksRawAndStillCompressesTheRest(t *testing.
 		t.Fatal("compressible output was never compressed again after the backoff")
 	}
 }
+
+func TestEncodeOutputUsesTheGateAndCountsSkippedChunks(t *testing.T) {
+	random := make([]byte, 32<<10)
+	rand.New(rand.NewSource(2)).Read(random)
+	var gate CompressionGate
+	before := TerminalCompressionMetrics()
+	for range 100 {
+		wire, err := EncodeOutput(&gate, 1, TerminalStdout, 0, random)
+		if err != nil || wire[2] != TerminalOutputRaw {
+			t.Fatalf("random chunk: %v encoding %d", err, wire[2])
+		}
+	}
+	after := TerminalCompressionMetrics()
+	if skipped := after.SkippedFrames - before.SkippedFrames; skipped < 60 {
+		t.Fatalf("only %d of 100 incompressible chunks skipped the attempt", skipped)
+	}
+	if tried := after.InsufficientFrames - before.InsufficientFrames; tried > 40 {
+		t.Fatalf("%d attempts for 100 incompressible chunks", tried)
+	}
+	before = TerminalCompressionMetrics()
+	for range 20 { // no gate: every chunk is tried
+		if _, err := EncodeOutput(nil, 1, TerminalStdout, 0, random); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after = TerminalCompressionMetrics()
+	if after.SkippedFrames != before.SkippedFrames || after.InsufficientFrames-before.InsufficientFrames != 20 {
+		t.Fatalf("a nil gate skipped: %+v -> %+v", before, after)
+	}
+}

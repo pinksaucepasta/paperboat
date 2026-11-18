@@ -126,6 +126,7 @@ type webSocketConnection struct {
 	readMu     sync.Mutex
 	closeOnce  sync.Once
 	revoked    atomic.Bool
+	compress   protocol.CompressionGate // see nativeConnection.compress
 }
 
 func newWebSocketConnection(parent context.Context, connection *websocket.Conn) *webSocketConnection {
@@ -179,7 +180,7 @@ func (c *webSocketConnection) WriteStructured(frame protocol.Frame) error {
 }
 
 func (c *webSocketConnection) WriteBinary(frame protocol.BinaryFrame) error {
-	encoded, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: 1, StartSequence: frame.StartSequence, Data: frame.Data}, nil)
+	encoded, err := protocol.EncodeOutput(&c.compress, 1, frame.Channel, frame.StartSequence, frame.Data)
 	if err != nil {
 		return err
 	}
@@ -187,7 +188,7 @@ func (c *webSocketConnection) WriteBinary(frame protocol.BinaryFrame) error {
 }
 
 func (c *webSocketConnection) WriteTerminalOutput(streamID uint32, frame protocol.BinaryFrame) error {
-	encoded, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: streamID, StartSequence: frame.StartSequence, Data: frame.Data}, nil)
+	encoded, err := protocol.EncodeOutput(&c.compress, streamID, frame.Channel, frame.StartSequence, frame.Data)
 	if err != nil {
 		return err
 	}

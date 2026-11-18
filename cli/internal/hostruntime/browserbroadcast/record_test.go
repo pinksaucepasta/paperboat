@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 )
 
 func TestCOSERecordAuthenticatedAndBound(t *testing.T) {
@@ -18,7 +20,7 @@ func TestCOSERecordAuthenticatedAndBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Record{SessionID: "umts_test", Generation: 7, EpochID: epoch.ID, Index: 1, Channel: 1, StartSequence: 43, Data: []byte("\x1b[38;2;128;0;255mhello")}
-	raw, err := Seal(want, epoch, private)
+	raw, err := Seal(want, epoch, private, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +66,7 @@ func TestCOSERecordRejectsInvalidAndOversized(t *testing.T) {
 		{SessionID: "umts_test", Generation: 1, EpochID: epoch.ID, Index: 1, Channel: 1, Data: make([]byte, MaxDataBytes+1)},
 		{SessionID: "", Generation: 1, EpochID: epoch.ID, Index: 1, Channel: 1, Data: []byte("x")},
 	} {
-		if _, err := Seal(value, epoch, private); !errors.Is(err, ErrInvalidRecord) {
+		if _, err := Seal(value, epoch, private, nil); !errors.Is(err, ErrInvalidRecord) {
 			t.Fatalf("invalid record accepted: %v", err)
 		}
 	}
@@ -80,7 +82,7 @@ func TestSharedOutputCompressesBeforeEncryption(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := bytes.Repeat([]byte("\x1b[38;2;128;0;255mterminal frame\x1b[0m\n"), 2048)
-	wire, err := Seal(Record{SessionID: "umts_color", Generation: 1, EpochID: epoch.ID, Index: 1, Channel: 1, Data: data}, epoch, private)
+	wire, err := Seal(Record{SessionID: "umts_color", Generation: 1, EpochID: epoch.ID, Index: 1, Channel: 1, Data: data}, epoch, private, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,5 +92,36 @@ func TestSharedOutputCompressesBeforeEncryption(t *testing.T) {
 	decoded, err := Open(wire, epoch, public)
 	if err != nil || !bytes.Equal(decoded.Data, data) {
 		t.Fatalf("compressed output changed: %v", err)
+	}
+}
+
+// The publisher's gate backs compression off for incompressible output, and every record still opens.
+func TestSealWithAGateSkipsCompressionOfIncompressibleRecords(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch, err := NewEpoch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 16<<10)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+	var gate protocol.CompressionGate
+	before := protocol.TerminalCompressionMetrics()
+	for index := uint64(1); index <= 60; index++ {
+		raw, err := Seal(Record{SessionID: "umts_gate", Generation: 1, EpochID: epoch.ID, Index: index, Channel: 1, Data: data}, epoch, private, &gate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Open(raw, epoch, public)
+		if err != nil || !bytes.Equal(got.Data, data) {
+			t.Fatalf("record %d did not open intact: %v", index, err)
+		}
+	}
+	if skipped := protocol.TerminalCompressionMetrics().SkippedFrames - before.SkippedFrames; skipped < 30 {
+		t.Fatalf("only %d of 60 incompressible records skipped the attempt", skipped)
 	}
 }

@@ -481,6 +481,7 @@ func (a browserTerminalAddr) Network() string { return "websocket" }
 func (a browserTerminalAddr) String() string  { return string(a) }
 
 type browserTerminalApplicationConnection struct {
+	compress   protocol.CompressionGate // see nativeConnection.compress
 	connection *websocket.Conn
 	stream     net.Conn
 	ctx        context.Context
@@ -568,7 +569,7 @@ func (c *browserTerminalApplicationConnection) WriteStructured(frame protocol.Fr
 }
 
 func (c *browserTerminalApplicationConnection) WriteBinary(frame protocol.BinaryFrame) error {
-	encoded, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: 1, StartSequence: frame.StartSequence, Data: frame.Data}, nil)
+	encoded, err := protocol.EncodeOutput(&c.compress, 1, frame.Channel, frame.StartSequence, frame.Data)
 	if err != nil {
 		return err
 	}
@@ -576,7 +577,7 @@ func (c *browserTerminalApplicationConnection) WriteBinary(frame protocol.Binary
 }
 
 func (c *browserTerminalApplicationConnection) WriteTerminalOutput(streamID uint32, frame protocol.BinaryFrame) error {
-	encoded, err := protocol.EncodeTerminalOutputAdaptive(protocol.TerminalOutputFrame{Channel: frame.Channel, StreamID: streamID, StartSequence: frame.StartSequence, Data: frame.Data}, nil)
+	encoded, err := protocol.EncodeOutput(&c.compress, streamID, frame.Channel, frame.StartSequence, frame.Data)
 	if err != nil {
 		return err
 	}

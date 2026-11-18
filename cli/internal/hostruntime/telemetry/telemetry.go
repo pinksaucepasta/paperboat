@@ -263,10 +263,11 @@ func (r *Registry) Snapshot() []Series {
 		)
 	}
 	compression := protocol.TerminalCompressionMetrics()
-	if compression.SmallFrames+compression.InsufficientFrames+compression.CompressedFrames+compression.EncodeFailures+compression.DecodeFailures > 0 {
+	if compression.SmallFrames+compression.InsufficientFrames+compression.SkippedFrames+compression.CompressedFrames+compression.EncodeFailures+compression.DecodeFailures > 0 {
 		result = append(result,
 			Series{Name: "paperboat_runtime_terminal_compression_frames_total", Labels: map[string]string{"encoding": "raw", "decision": "small"}, Value: float64(compression.SmallFrames)},
 			Series{Name: "paperboat_runtime_terminal_compression_frames_total", Labels: map[string]string{"encoding": "raw", "decision": "insufficient"}, Value: float64(compression.InsufficientFrames)},
+			Series{Name: "paperboat_runtime_terminal_compression_frames_total", Labels: map[string]string{"encoding": "raw", "decision": "skipped"}, Value: float64(compression.SkippedFrames)},
 			Series{Name: "paperboat_runtime_terminal_compression_frames_total", Labels: map[string]string{"encoding": "zstd", "decision": "compressed"}, Value: float64(compression.CompressedFrames)},
 			Series{Name: "paperboat_runtime_terminal_compression_frames_total", Labels: map[string]string{"encoding": "raw", "decision": "failure"}, Value: float64(compression.EncodeFailures)},
 			Series{Name: "paperboat_runtime_terminal_compression_bytes_total", Labels: map[string]string{"kind": "raw"}, Value: float64(compression.RawBytes)},
