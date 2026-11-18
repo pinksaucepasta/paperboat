@@ -1,0 +1,16 @@
+{
+  "name": "paperboat-status-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "check": "tsc --noEmit",
+    "dev": "wrangler dev --local --persist-to .wrangler/state"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "*",
+    "@types/node": "^26.6.6",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.0.0"
+  }
+}
