@@ -61,7 +61,8 @@ func TestE2ECore(t *testing.T) {
 		internal = freePort(t, "127.0.0.1")
 	}
 	e := &e2eCore{t: t, root: root, work: t.TempDir(), host: "e2e-server.example.test", port: port,
-		internal: "127.0.0.1:" + internal, mintKey: "e2e:" + base64.RawURLEncoding.EncodeToString(seed), machines: []string{"e2e-a", "e2e-b"}}
+		internal: "127.0.0.1:" + internal, mintKey: "e2e:" + base64.RawURLEncoding.EncodeToString(seed), machines: []string{"e2e-a", "e2e-b"},
+		previous: os.Getenv("PAPERBOAT_E2E_PREVIOUS")}
 	if os.Getenv("PAPERBOAT_E2E_THROUGHPUT") == "" { // e2e-t: the owner's, transferred to the team; e2e-d: the member's
 		e.machines = append(e.machines, "e2e-t", "e2e-d")
 	}
@@ -129,6 +130,66 @@ func TestE2ECore(t *testing.T) {
 	e.step("block the direct path between the machines", e.blockDirect)
 	e.assertCore("relayed")
 	e.assertTeamExec("relayed")
+	if e.previous != "" {
+		e.step("unblock the direct path (before the update)", e.unblockDirect)
+		e.updateToHead()
+		e.assertAll("after update to HEAD")
+	}
+}
+
+// serverURL is this server as the machines reach it. A released pb has the production server built in, and pair
+// takes the server only from --server, so every install and pair names it.
+func (e *e2eCore) serverURL() string { return "https://" + e.host + ":" + e.port }
+
+// updateToHead is the skew check's last phase: the edge and relay, then every machine's pb, move from the previous
+// release to HEAD in place (pb install over the running one, as an operator updates), keeping their pairing.
+func (e *e2eCore) updateToHead() {
+	e.step("update to HEAD: edge and relay", func() error {
+		if err := e.stopEdge(); err != nil {
+			return err
+		}
+		for _, name := range []string{"bin/paperboat-edge", "bin/paperboat-relay", "selfhost-node.test"} {
+			if err := os.Rename(filepath.Join(e.work, "head", name), filepath.Join(e.work, name)); err != nil {
+				return err
+			}
+		}
+		if err := e.startEdge(); err != nil {
+			return err
+		}
+		if err := e.awaitEdgeReady(); err != nil {
+			return err
+		}
+		return e.awaitEdgeServes()
+	})
+	for _, name := range e.machines {
+		e.step("update to HEAD: pb on "+name, func() error {
+			if _, err := e.run(2*time.Minute, "docker", "cp", filepath.Join(e.work, "head", "pb"), name+":/home/pbt/pb"); err != nil {
+				return err
+			}
+			if _, err := e.run(time.Minute, "docker", "exec", name, "bash", "-c", "chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb"); err != nil {
+				return err
+			}
+			if out, err := e.run(3*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", name, "./pb", "--server", e.serverURL(), "install"); err != nil {
+				return fmt.Errorf("pb install of HEAD: %w (%s)", err, lastBytes(out, 400))
+			}
+			return nil
+		})
+	}
+}
+
+// usePrevious moves the HEAD build at work/name aside to work/head/name and puts the previous release's in its place.
+func (e *e2eCore) usePrevious(name, previous string) error {
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(e.work, "head", name)), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(filepath.Join(e.work, name), filepath.Join(e.work, "head", name)); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(filepath.Join(e.previous, previous))
+	if err != nil {
+		return fmt.Errorf("previous release's %s: %w", previous, err)
+	}
+	return os.WriteFile(filepath.Join(e.work, name), raw, 0o755)
 }
 
 func (e *e2eCore) assertAll(phase string) {
@@ -167,6 +228,9 @@ type e2eCore struct {
 	caaResolver  string
 	edge         *exec.Cmd
 	edgeDone     chan error
+	// previous is the skew check's directory of the previous release's pb, paperboat-edge, paperboat-relay and
+	// selfhost-node.test (tools/device-smoke/skew_check.sh); empty runs HEAD everywhere.
+	previous string
 }
 
 // assertCore is every core path, each its own named step. The first command of a phase waits (bounded) for
@@ -287,9 +351,12 @@ func (e *e2eCore) certificates() error {
 
 func (e *e2eCore) buildPB() error {
 	p, url := "github.com/pinksaucepasta/paperboat/cli/internal/buildinfo", "https://"+e.host+":"+e.port
-	commit, err := e.run(time.Minute, "git", "rev-parse", "HEAD")
-	if err != nil {
-		return err
+	commit := os.Getenv("GITHUB_SHA") // a synced tree (skew_check.sh, remote-test.sh) has no .git
+	if commit == "" {
+		var err error
+		if commit, err = e.run(time.Minute, "git", "rev-parse", "HEAD"); err != nil {
+			return err
+		}
 	}
 	flags := fmt.Sprintf("-X %[1]s.Version=dev-e2e -X %[1]s.Commit=%[2]s -X %[1]s.ProtocolVersion=1 -X %[1]s.DefaultServerURL=%[3]s -X %[1]s.DefaultReleaseURL=%[3]s", p, strings.TrimSpace(commit), url)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -298,6 +365,9 @@ func (e *e2eCore) buildPB() error {
 	cmd.Dir, cmd.Env = filepath.Join(e.root, "cli"), append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("go build pb: %w: %s", err, lastBytes(string(out), 2000))
+	}
+	if e.previous != "" {
+		return e.usePrevious("pb", "pb")
 	}
 	return nil
 }
@@ -412,6 +482,9 @@ func (e *e2eCore) startMachine(name string) error {
 		{"exec", name, "bash", "-c", "loginctl enable-linger pbt && systemctl start user@1000.service"},
 		{"cp", filepath.Join(e.work, "pb"), name + ":/home/pbt/pb"},
 		{"exec", name, "bash", "-c", "chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb"},
+		// A released pb has the production server built in; the skew check points it at this server.
+		{"exec", "-u", "pbt", name, "bash", "-c", "umask 077 && mkdir -p /home/pbt/.config/paperboat && " +
+			"printf '{\"server_url\":\"" + e.serverURL() + "\"}' > /home/pbt/.config/paperboat/config.json"},
 	} {
 		if _, err := e.run(2*time.Minute, "docker", args...); err != nil {
 			return err
@@ -430,7 +503,7 @@ func (e *e2eCore) pair(name string) error {
 	if err := json.Unmarshal(raw, &tokens); err != nil {
 		return err
 	}
-	if out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", name, "./pb", "install"); err != nil {
+	if out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", name, "./pb", "--server", e.serverURL(), "install"); err != nil {
 		return fmt.Errorf("pb install: %w (%s)", err, lastBytes(out, 400))
 	}
 	tokenFile := filepath.Join(e.work, "token-"+name)
@@ -444,7 +517,7 @@ func (e *e2eCore) pair(name string) error {
 		return err
 	}
 	out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt",
-		name, ".local/bin/pb", "pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json")
+		name, ".local/bin/pb", "--server", e.serverURL(), "pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json")
 	if err != nil {
 		return err
 	}
