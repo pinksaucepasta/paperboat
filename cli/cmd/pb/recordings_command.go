@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/command"
+	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
@@ -54,8 +55,67 @@ func recordingsCobraCommand() *cobra.Command {
 		control.Flags().Bool("json", false, "print JSON")
 		group.AddCommand(control)
 	}
-	group.AddCommand(list, play, export)
+	keyGroup := &cobra.Command{Use: "key", Short: "Manage a team's recording key", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
+	replace := &cobra.Command{Use: "replace", Short: "Replace the team's recording key with a new one signed by your copy of the current key", Long: "Replace the team's recording key.\n\nThe new key is made and signed here with your ENV vault: only a member who holds a copy of the current key can sign the next one, so machines follow it through the signed chain and never because the server says so. Everyone who can replay gets a copy of the new key, and older recordings stay readable through a link sealed to it. The key and its private halves never leave this computer in plaintext.\n\nNeeds the security permission on the team and an unlocked ENV vault (`pb env unlock`).", Args: commandArgs(cobra.NoArgs), RunE: actionRun(recordingsKeyReplace)}
+	replace.Flags().String("team", "", "team whose key to replace; defaults to the active workspace")
+	replace.Flags().String("confirm", "", "must be `REPLACE RECORDING KEY <team>`")
+	replace.Flags().Bool("json", false, "print JSON")
+	keyGroup.AddCommand(replace)
+	group.AddCommand(list, play, export, keyGroup)
 	return group
+}
+
+// recordingsKeyReplace makes the next generation of a team's recording key with this account's unlocked vault
+// (recording.ReplaceKey) and posts it; the server stores it only when its signature verifies under the current key.
+func recordingsKeyReplace(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	team := strings.TrimSpace(c.String("team"))
+	if team == "" {
+		team = client.Workspace()
+	}
+	if team == "" || team == wire.PersonalWorkspace {
+		return localArgumentError("name the team with --team <team-id>; a personal workspace's key is replaced in the console")
+	}
+	if c.String("confirm") != "REPLACE RECORDING KEY "+team {
+		return localArgumentError("replacing the key requires --confirm `REPLACE RECORDING KEY " + team + "`")
+	}
+	parent, ok := c.Context.Value(confirmationCommandKey{}).(*cobra.Command)
+	if !ok {
+		return errors.New("replacing the key requires CLI command context")
+	}
+	vault, err := passwordVaultForCommand(parent)
+	if err != nil {
+		return err
+	}
+	state, err := client.RecordingKeyState(c.Context, team)
+	if err != nil {
+		return err
+	}
+	var request wire.KeyCreate
+	err = vault.WithUnlockedKeys(c.Context, func(keys *environmente2ee.VaultKeys) (makeErr error) {
+		request, makeErr = recording.ReplaceKey(keys.SharingPrivate, team, state)
+		return makeErr
+	})
+	switch {
+	case errors.Is(err, environmentmanager.ErrVaultLocked):
+		return localArgumentError("your ENV vault is locked on this computer; run `pb env unlock`, then retry")
+	case errors.Is(err, recording.ErrNoCopy):
+		return localArgumentError("you hold no copy of this team's current recording key: ask a member who can replay to open Recordings in the console, or to replace the key")
+	case err != nil:
+		return err
+	}
+	key, err := client.ReplaceRecordingKey(c.Context, team, request)
+	if err != nil {
+		return err
+	}
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"team": team, "generation": key.Generation, "copies": len(request.Grants)})
+	}
+	_, err = fmt.Fprintf(c.Writer, "Replaced the recording key of %s: generation %d, %d members got a copy. Machines follow it through the signed chain; older recordings stay readable.\n", team, key.Generation, len(request.Grants))
+	return err
 }
 
 func recordingsList(c *command.Context) error {

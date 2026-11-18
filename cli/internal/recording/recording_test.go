@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 	"strings"
 	"testing"
 	"time"
@@ -163,5 +164,97 @@ func TestReaderFollowsTheSegmentChain(t *testing.T) {
 	}
 	if _, err := NewReader(team.Bytes(), "rec_2", 2).Open(files[0]); err == nil {
 		t.Fatal("another recording's segment opened")
+	}
+}
+
+// A member holding generation 1 replaces the key: the new generation verifies as a signed successor (what a machine
+// checks), the previous bundle is sealed to it so older recordings stay readable through the chain, a copy sealed
+// to a member opens the new generation, and a signature made by anyone else is refused.
+func TestRotateMakesASignedSuccessorThatKeepsOldRecordingsReadable(t *testing.T) {
+	member := teamKey(t)
+	first, firstPublic := newBundle(t)
+	firstSigningPublic := ed25519.PrivateKey(first.Signing).Public().(ed25519.PublicKey)
+	gen1 := wire.Key{Generation: 1, PublicKey: firstPublic, SigningPublicKey: firstSigningPublic}
+	rotation, err := Rotate("team_1", 1, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen2 := wire.Key{Generation: 2, PublicKey: rotation.PublicKey, SigningPublicKey: rotation.SigningPublicKey, RotationSignature: rotation.RotationSignature}
+	if !wire.VerifyRotation("team_1", gen1, gen2) {
+		t.Fatal("the new generation is not a signed successor of generation 1")
+	}
+	if wire.VerifyRotation("team_2", gen1, gen2) {
+		t.Fatal("the rotation verified for another team")
+	}
+	forged := gen2
+	forged.RotationSignature = ed25519.Sign(rotation.Bundle.Signing, wire.RotationMessage("team_1", 2, gen2.PublicKey, gen2.SigningPublicKey))
+	if wire.VerifyRotation("team_1", gen1, forged) {
+		t.Fatal("a signature by the new key itself verified: only generation 1's signing key may replace it")
+	}
+	copy2, err := SealBundle(member.PublicKey().Bytes(), "team_1", 2, rotation.Bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := []ChainLink{{Generation: 2, SealedPrevious: rotation.SealedPrevious}}
+	if got, err := OpenRecordingKey(member.Bytes(), "team_1", 2, copy2, chain, 1); err != nil || !bytes.Equal(got, first.Private) {
+		t.Fatalf("a recording made under generation 1 must stay readable through the chain: %v", err)
+	}
+	if got, err := OpenRecordingKey(member.Bytes(), "team_1", 2, copy2, nil, 2); err != nil || !bytes.Equal(got, rotation.Bundle.Private) {
+		t.Fatalf("the new generation opens with the member's copy: %v", err)
+	}
+	if _, err := Rotate("", 1, first); err == nil {
+		t.Fatal("a rotation without a team was made")
+	}
+	if _, err := Rotate("team_1", 1, Bundle{Private: first.Private}); err == nil {
+		t.Fatal("a rotation without the signing key was made")
+	}
+}
+
+// The CLI's whole client side of replacing the key: the caller's own copy of the current generation signs the next
+// one, every viewer with a vault gets a copy of it (one without a vault is skipped), and a caller without a copy of
+// the current generation cannot.
+func TestReplaceKeyForACallerWhoHoldsTheCurrentKey(t *testing.T) {
+	caller, other := teamKey(t), teamKey(t)
+	first, firstPublic := newBundle(t)
+	gen1 := wire.Key{Generation: 1, PublicKey: firstPublic, SigningPublicKey: ed25519.PrivateKey(first.Signing).Public().(ed25519.PublicKey)}
+	copy1, err := SealBundle(caller.PublicKey().Bytes(), "team_1", 1, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := wire.KeyState{
+		Key:   &gen1,
+		MyKey: &wire.SealedKey{Generation: 1, Sealed: copy1},
+		Viewers: []wire.Viewer{
+			{AccountID: "caller", SharingPublicKey: caller.PublicKey().Bytes(), HasGrant: true},
+			{AccountID: "other", SharingPublicKey: other.PublicKey().Bytes()},
+			{AccountID: "novault"},
+		},
+	}
+	request, err := ReplaceKey(caller.Bytes(), "team_1", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Key.Generation != 2 || !wire.VerifyRotation("team_1", gen1, request.Key) {
+		t.Fatal("the replacement is not a signed successor of the current key")
+	}
+	if len(request.Grants) != 2 || request.Grants[0].AccountID != "caller" || request.Grants[1].AccountID != "other" {
+		t.Fatalf("grants %+v", request.Grants)
+	}
+	chain := []ChainLink{{Generation: 2, SealedPrevious: request.SealedPrevious}}
+	if got, err := OpenRecordingKey(other.Bytes(), "team_1", 2, request.Grants[1].Sealed, chain, 1); err != nil || !bytes.Equal(got, first.Private) {
+		t.Fatalf("another member opens an old recording through the chain: %v", err)
+	}
+	// No copy, a copy of an older generation, or a copy sealed to another vault: nobody can sign the next key.
+	for name, bad := range map[string]wire.KeyState{
+		"no copy":    {Key: &gen1, Viewers: state.Viewers},
+		"older copy": {Key: &wire.Key{Generation: 2, PublicKey: firstPublic, SigningPublicKey: gen1.SigningPublicKey, RotationSignature: make([]byte, 64)}, MyKey: state.MyKey, Viewers: state.Viewers},
+		"no viewers": {Key: &gen1, MyKey: state.MyKey},
+	} {
+		if _, err := ReplaceKey(caller.Bytes(), "team_1", bad); err == nil {
+			t.Fatalf("%s: a key was made", name)
+		}
+	}
+	if _, err := ReplaceKey(other.Bytes(), "team_1", state); err == nil {
+		t.Fatal("a copy sealed to another vault was opened")
 	}
 }
