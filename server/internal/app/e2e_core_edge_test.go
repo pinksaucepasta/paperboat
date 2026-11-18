@@ -67,6 +67,13 @@ func (e *e2eCore) buildEdge() error {
 			return fmt.Errorf("go %s in %s: %w: %s", build[1], build[0], err, lastBytes(string(out), 2000))
 		}
 	}
+	if e.previous != "" {
+		for _, name := range []string{"bin/paperboat-edge", "bin/paperboat-relay", "selfhost-node.test"} {
+			if err := e.usePrevious(name, filepath.Base(name)); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
