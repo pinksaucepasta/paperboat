@@ -11,7 +11,7 @@ import (
 )
 
 // Switching an account to only its own relays hands the Paperboat relays over make-before-break: each is listed
-// with a close time one grace away (its own relay is not), switching back cancels the handover, and another
+// with a close time one grace away (its own relay is not), a relay back in the pool cancels its handover, and another
 // account is untouched.
 func TestRelayPoolSwitchListsHandoversOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
@@ -80,17 +80,24 @@ func TestRelayPoolSwitchListsHandoversOnPostgres(t *testing.T) {
 	if len(handovers(other)) != 0 {
 		t.Fatalf("another account was handed over: %v", handovers(other))
 	}
-	// A repeated switch keeps the first deadline; switching back to the shared pool cancels the handover.
+	// A repeated switch keeps the first deadline; a relay back in the pool cancels its handover.
 	if _, err = service.SetPool(ctx, owner, "relay", Policy{Mode: "self-hosted-only", InstallationIDs: []string{own.InstallationID}}); err != nil {
 		t.Fatal(err)
 	}
 	if again := handovers(owner)[managed]; !again.Equal(at) {
 		t.Fatalf("a repeated switch moved the deadline: %v -> %v", at, again)
 	}
+	// Back to the shared pool alone: Paperboat's relay returns (its handover is cancelled), its own leaves.
 	if _, err = service.SetPool(ctx, owner, "relay", Policy{Mode: "mixed", InstallationIDs: []string{}}); err != nil {
 		t.Fatal(err)
 	}
+	if got = handovers(owner); len(got) != 1 || got[own.NodeID].IsZero() {
+		t.Fatalf("switching back: handovers %v, want only its own relay", got)
+	}
+	if _, err = service.SetPool(ctx, owner, "relay", Policy{Mode: "mixed", InstallationIDs: []string{own.InstallationID}}); err != nil {
+		t.Fatal(err)
+	}
 	if got = handovers(owner); len(got) != 0 {
-		t.Fatalf("switching back left handovers: %v", got)
+		t.Fatalf("a pool with both relays left handovers: %v", got)
 	}
 }
