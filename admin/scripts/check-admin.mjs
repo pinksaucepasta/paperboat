@@ -726,6 +726,19 @@ try {
     expect((await text("[data-failure-group]")).includes("14 occurrences"), "failure group statistics not shown")
     await p.screenshot({ path: `${shots}/support-light.png`, fullPage: true })
   })
+  await step("user: sign out everywhere needs the id typed and sends the account version", async () => {
+    await p.goto(`${ORIGIN}/users/usr_001`)
+    await p.waitForSelector("[data-user-actions]")
+    await p.getByRole("button", { name: "Sign out everywhere" }).click()
+    const out = dialog("Sign person1@example.test out everywhere")
+    await out.getByLabel("Reference for the audit log").fill("TICKET-60")
+    expect(await out.getByRole("button", { name: "Sign out everywhere" }).isDisabled(), "sign out everywhere must need the typed id")
+    await out.getByLabel(/Type/).fill("usr_001")
+    await out.getByRole("button", { name: "Sign out everywhere" }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Sign person1@example.test out everywhere"]'))
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/accounts/usr_001/sessions/revoke" && w.target === "usr_001" && w.body.revision === 1, `sessions revoke ${JSON.stringify(w)}`)
+  })
   await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
     await p.goto(`${ORIGIN}/operators`)
     await waitReady("operators")
@@ -849,7 +862,7 @@ try {
   await step("a support-role operator sees no write buttons", async () => {
     await p.goto(`${ORIGIN}/users/usr_001`)
     await p.waitForSelector('[data-table="machines"][data-state="ready"]')
-    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA/ }).count()) === 0, "support sees account writes")
+    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA|Sign out everywhere/ }).count()) === 0, "support sees account writes")
     await p.goto(`${ORIGIN}/billing`)
     await p.getByRole("tab", { name: "Plans & prices" }).click()
     await waitReady("plans and prices")

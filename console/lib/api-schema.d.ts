@@ -5025,6 +5025,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/accounts/{account_id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator revoke all sessions of an account
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Ends every browser session and access grant, CLI session with its tokens, personal API token, pending device grant and machine access session of the account, and wakes its hosts so open SSH sessions end within seconds. Unlike a ban the account stays active and can sign in again at once. The revision is the account version; the result's version is the new one.
+         */
+        post: operations["post_v1_admin_accounts_account_id_sessions_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/operators": {
         parameters: {
             query?: never;
@@ -25355,6 +25375,83 @@ export interface operations {
         };
     };
     post_v1_admin_accounts_account_id_unban: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorActionInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_accounts_account_id_sessions_revoke: {
         parameters: {
             query?: never;
             header: {

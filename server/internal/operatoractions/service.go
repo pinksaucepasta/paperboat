@@ -103,6 +103,10 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 			if err = accountAction(ctx, tx, actorID, target, kind == "account_ban", input.Revision, &result); err != nil {
 				return err
 			}
+		case "account_sessions_revoke":
+			if err = sessionsRevokeAction(ctx, tx, target, input.Revision, &result); err != nil {
+				return err
+			}
 		case "team_ban", "team_unban":
 			generation, teamErr := teams.SetOperatorSuspensionTx(ctx, tx, actorID, target, kind == "team_ban", input.Revision)
 			if teamErr != nil {
@@ -241,26 +245,68 @@ func accountAction(ctx context.Context, tx *db.Tx, actor, target string, ban boo
 		version++
 	}
 	if ban {
-		if _, err := tx.Exec(ctx, `UPDATE sessions SET revoked_at=coalesce(revoked_at,now()),updated_at=now(),version=version+1 WHERE user_id=$1 AND revoked_at IS NULL`, target); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE cli_client_sessions SET state='revoked',revoked_at=coalesce(revoked_at,now()),revocation_reason=coalesce(revocation_reason,'account_suspended'),version=version+1 WHERE user_id=$1 AND state='active'`, target); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE cli_access_tokens t SET revoked_at=coalesce(t.revoked_at,now()) FROM cli_client_sessions s WHERE t.cli_client_session_id=s.id AND s.user_id=$1`, target); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE cli_refresh_tokens t SET state='revoked',revoked_at=coalesce(t.revoked_at,now()) FROM cli_client_sessions s WHERE t.cli_client_session_id=s.id AND s.user_id=$1 AND t.state<>'revoked'`, target); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE device_grants SET state='denied',denied_at=coalesce(denied_at,now()),version=version+1 WHERE user_id=$1 AND state IN('pending','approved')`, target); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE user_machine_access_sessions SET state='revoked',revoked_at=coalesce(revoked_at,now()),revocation_reason='account_suspended',updated_at=now() WHERE user_id=$1 AND state='active'`, target); err != nil {
+		if err := revokeUserAuthority(ctx, tx, target, "account_suspended"); err != nil {
 			return err
 		}
 	}
 	*out = Result{ResourceID: target, State: wanted, Version: version}
+	return nil
+}
+
+// revokeUserAuthority ends the account's sessions and tokens: browser sessions and access grants, CLI sessions with
+// their tokens, personal API tokens, recipes, pending device grants and machine access sessions. The state changes are
+// the ones the revoke triggers publish to hosts (migrations 202/203), so open SSH sessions end within seconds. Peer
+// network certificates are not revoked here: a new one needs a live CLI session, and an endpoint that is already
+// connected keeps its identity until the certificate expires (account deletion revokes them).
+// A ban and an operator's session revoke share it; only the ban also changes the account's status.
+func revokeUserAuthority(ctx context.Context, tx *db.Tx, target, reason string) error {
+	for _, statement := range []struct {
+		query      string
+		withReason bool // the query's $2 is the revocation reason
+	}{
+		{`UPDATE sessions SET revoked_at=coalesce(revoked_at,now()),updated_at=now(),version=version+1 WHERE user_id=$1 AND revoked_at IS NULL`, false},
+		{`UPDATE browser_access_sessions SET revoked_at=coalesce(revoked_at,now()) WHERE (account_id=$1 OR owner_account_id=$1) AND revoked_at IS NULL`, false},
+		{`UPDATE cli_client_sessions SET state='revoked',revoked_at=coalesce(revoked_at,now()),revocation_reason=coalesce(revocation_reason,$2),version=version+1 WHERE user_id=$1 AND state='active'`, true},
+		{`UPDATE cli_access_tokens t SET revoked_at=coalesce(t.revoked_at,now()) FROM cli_client_sessions s WHERE t.cli_client_session_id=s.id AND s.user_id=$1`, false},
+		{`UPDATE cli_refresh_tokens t SET state='revoked',revoked_at=coalesce(t.revoked_at,now()) FROM cli_client_sessions s WHERE t.cli_client_session_id=s.id AND s.user_id=$1 AND t.state<>'revoked'`, false},
+		{`UPDATE api_tokens SET revoked_at=now(),revoked_by=$2 WHERE account_id=$1 AND revoked_at IS NULL`, true},
+		// A recipe mints new CLI sessions on its own, so an account that stays active must lose them too.
+		{`UPDATE recipes SET revoked_at=now(),revoked_by=$2 WHERE account_id=$1 AND revoked_at IS NULL`, true},
+		{`UPDATE device_grants SET state='denied',denied_at=coalesce(denied_at,now()),version=version+1 WHERE user_id=$1 AND state IN('pending','approved')`, false},
+		{`UPDATE user_machine_access_sessions SET state='revoked',revoked_at=coalesce(revoked_at,now()),revocation_reason=$2,updated_at=now() WHERE user_id=$1 AND state='active'`, true},
+	} {
+		args := []any{target}
+		if statement.withReason {
+			args = append(args, reason)
+		}
+		if _, err := tx.Exec(ctx, statement.query, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sessionsRevokeAction ends all of the account's sessions and tokens and leaves the account usable: it can sign
+// in again at once. The revision is the account's version, so a page that read an older state is refused.
+func sessionsRevokeAction(ctx context.Context, tx *db.Tx, target string, revision int64, out *Result) error {
+	var status string
+	var version int64
+	if err := tx.QueryRow(ctx, `SELECT status,version FROM users WHERE id=$1 FOR UPDATE`, target).Scan(&status, &version); err != nil {
+		if operatorNoRowsOnly(err) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if (status != "active" && status != "suspended") || revision != version {
+		return ErrConflict
+	}
+	if err := revokeUserAuthority(ctx, tx, target, "operator_revoked"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET version=version+1,updated_at=now() WHERE id=$1`, target); err != nil {
+		return err
+	}
+	*out = Result{ResourceID: target, State: status, Version: version + 1}
 	return nil
 }
 
@@ -308,7 +354,7 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 func validKind(v string) bool {
 	switch v {
-	case "account_ban", "account_unban", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
+	case "account_ban", "account_unban", "account_sessions_revoke", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
 		return true
 	}
 	return false
@@ -317,7 +363,7 @@ func allowed(role, kind string) bool {
 	if isStaffKind(kind) {
 		return role == "admin"
 	}
-	if kind == "account_ban" || kind == "account_unban" || kind == "team_ban" || kind == "team_unban" {
+	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || kind == "team_ban" || kind == "team_unban" {
 		return role == "admin"
 	}
 	return role == "admin" || role == "operations"

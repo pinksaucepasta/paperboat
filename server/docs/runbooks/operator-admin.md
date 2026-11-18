@@ -164,6 +164,10 @@ Every operator mutation requires session/Origin/CSRF checks plus:
 Account ban/unban revokes existing customer credentials on ban and never
 resurrects them on unban. Operator identities are separate, so banning a
 customer account does not change an operator account.
+`POST /v1/admin/accounts/{id}/sessions/revoke` (body `{"revision":<account version>}`) ends the same
+credentials (browser sessions and access grants, CLI sessions and tokens, API tokens, device grants,
+machine access sessions) without suspending: use it when an account may be compromised but the
+customer should simply sign in again. Hosts are woken, so open SSH sessions end within seconds.
 Relay drain stops new scheduling; resume requires a new heartbeat before ready.
 Tunnel disable/enable uses the normal configuration-generation and operation
 pipeline, so acceptance is distinct from runtime convergence. Team suspension

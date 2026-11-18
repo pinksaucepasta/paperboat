@@ -37,6 +37,18 @@ export function UserActions({ id, email, status, version }: { id: string; email:
   return (
     <div className="flex flex-wrap gap-2" data-user-actions>
       <BanButtons kind="accounts" id={id} label={email} suspended={status === "suspended"} revision={version} />
+      {status === "active" && (
+        <ActionDialog
+          title={`Sign ${email} out everywhere`}
+          description="Ends every browser session, CLI login and token, API token and open SSH session of this account now. The account stays active: the customer can sign in again at once. Use it when credentials may have leaked; use Suspend to block the account."
+          target={id}
+          destructive
+          confirmWord={id}
+          submitLabel="Sign out everywhere"
+          trigger={(open) => <Button variant="outline" onClick={open} data-action="revoke-sessions">Sign out everywhere</Button>}
+          run={(h) => operatorAction("POST", `/v1/admin/accounts/${encodeURIComponent(id)}/sessions/revoke`, h, { revision: version })}
+        />
+      )}
       <ActionDialog
         title={`Rotate the SSH user CA of ${email}`}
         description="Advances the account's managed SSH certificate authority one step (a new CA becomes pending, then active, and the old one retires). Machines pick it up on their next sync."

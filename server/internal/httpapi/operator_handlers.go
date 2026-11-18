@@ -88,6 +88,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"PUT /v1/admin/config/billing":                                                  {"admin", "", "billing-policy"},
 	"POST /v1/admin/accounts/{account_id}/ban":                                      {"admin", "account_id", ""},
 	"POST /v1/admin/accounts/{account_id}/unban":                                    {"admin", "account_id", ""},
+	"POST /v1/admin/accounts/{account_id}/sessions/revoke":                          {"admin", "account_id", ""},
 	"POST /v1/admin/teams/{team_id}/ban":                                            {"admin", "team_id", ""},
 	"POST /v1/admin/teams/{team_id}/unban":                                          {"admin", "team_id", ""},
 	"POST /v1/admin/relays/{node_id}/drain":                                         {"operations", "node_id", ""},
@@ -416,6 +417,7 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 		for _, route := range []struct{ pattern, kind, param string }{
 			{"POST /v1/admin/accounts/{account_id}/ban", "account_ban", "account_id"},
 			{"POST /v1/admin/accounts/{account_id}/unban", "account_unban", "account_id"},
+			{"POST /v1/admin/accounts/{account_id}/sessions/revoke", "account_sessions_revoke", "account_id"},
 			{"POST /v1/admin/teams/{team_id}/ban", "team_ban", "team_id"},
 			{"POST /v1/admin/teams/{team_id}/unban", "team_unban", "team_id"},
 			{"POST /v1/admin/relays/{node_id}/drain", "relay_drain", "node_id"},
