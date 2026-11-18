@@ -1,5 +1,5 @@
 // DOM builders for the status page. Every dynamic string goes through textContent, never innerHTML.
-import { BANNER, PHASES, PHASE_WORD, STATE_WORD, byMonth, dayLines, duration, incidentsOn, kindOf, lastDays, phaseIndex, shownState } from "./model.ts"
+import { BANNER, PHASES, PHASE_WORD, STATE_WORD, byMonth, dayLines, duration, incidentsOn, kindOf, phaseIndex, shownState, todayUtc, trackedDays } from "./model.ts"
 import type { Component, Incident, Maintenance, Overall, Payload, State } from "./model.ts"
 import { attachBars } from "./tooltip.ts"
 
@@ -34,6 +34,7 @@ const tone = (s: string) => ({ operational: "", degraded: "warn", major: "bad", 
 
 const dateFmt = new Intl.DateTimeFormat([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" })
 const dayFmt = new Intl.DateTimeFormat([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
+const sinceFmt = new Intl.DateTimeFormat([], { day: "numeric", month: "short", timeZone: "UTC" })
 const monthFmt = new Intl.DateTimeFormat([], { month: "long", year: "numeric", timeZone: "UTC" })
 export const when = (ms: number) => dateFmt.format(ms)
 const time = (ms: number, text = when(ms)) => { const t = el("time", "", text); t.dateTime = new Date(ms).toISOString(); return t }
@@ -42,9 +43,10 @@ export function renderBanner(root: HTMLElement, o: Overall, p: Payload | null) {
   const copy = BANNER[o], now = p?.now ?? Date.now()
   const card = el("div", `card banner is-${o}`)
   const head = el("div", "banner-head")
-  const words = el("div"); words.append(el("h1", "banner-title", copy.title))
-  if (copy.detail) words.append(el("p", "banner-detail", copy.detail))
-  head.append(icon(o === "unavailable" ? "unknown" : o === "incident" ? "degraded" : o), words)
+  const line = el("div", "line")
+  line.append(icon(o === "unavailable" ? "unknown" : o === "incident" ? "degraded" : o), el("h1", "banner-title", copy.title))
+  head.append(line)
+  if (copy.detail) head.append(el("p", "banner-detail", copy.detail))
   card.append(head)
   const open = (p?.public?.incidents ?? []).filter((i) => i.status !== "resolved")
   if (open.length && o !== "delayed" && o !== "unavailable") {
@@ -107,21 +109,29 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
   head.append(el("span", "comp-up", shown === "unknown" ? "—" : c.uptime === null ? "Collecting data" : `${c.uptime}% uptime`))
   head.addEventListener("click", () => { const open = head.getAttribute("aria-expanded") !== "true"; head.setAttribute("aria-expanded", String(open)); panel.hidden = !open })
   box.append(head, el("p", "comp-note", c.note))
-  const days = lastDays(c.days, p.now)
+  const tracked = trackedDays(c.days, p.now)
+  const days = tracked.days
+  const today = todayUtc(p.now)
+  const slots = days.length > 30 ? 90 : 30 // a short 30-day view until there is more than a month to show; bars stay right-aligned, never padded
   const bars = el("div", "bars")
+  bars.style.setProperty("--slots", String(slots))
   bars.setAttribute("role", "group")
-  bars.setAttribute("aria-label", `${c.name}: daily status for the last 90 days. Use the arrow keys to move between days.`)
+  bars.setAttribute("aria-label", `${c.name}: daily status${tracked.full ? " for the last 90 days" : ` since ${sinceFmt.format(Date.parse(`${tracked.since}T00:00:00Z`))}`}. Use the arrow keys to move between days.`)
   days.forEach((d, i) => {
-    const b = el("button", `bar ${kindOf(d)}`); b.type = "button"; b.tabIndex = i === days.length - 1 ? 0 : -1
+    const isToday = d.day === today
+    const b = el("button", `bar ${kindOf(d)}${isToday ? " today" : ""}`); b.type = "button"; b.tabIndex = i === days.length - 1 ? 0 : -1
+    b.style.gridColumn = String(slots - days.length + i + 1) // right-aligned: nothing is drawn before tracking started
     const inc = incidentsOn(d.day, c.id, p.public!.incidents, p.now)
+    const lines = [...(isToday ? ["Today so far"] : []), ...dayLines(d)]
     b.dataset.day = d.day
-    b.dataset.lines = dayLines(d).join("\n")
+    b.dataset.lines = lines.join("\n")
     b.dataset.incidents = inc.map((x) => x.title).join("\n")
-    b.setAttribute("aria-label", `${dayFmt.format(Date.parse(`${d.day}T00:00:00Z`))}: ${dayLines(d).join(", ")}${inc.length ? `. Incidents: ${inc.map((x) => x.title).join(", ")}` : ""}`)
+    b.setAttribute("aria-label", `${dayFmt.format(Date.parse(`${d.day}T00:00:00Z`))}: ${lines.join(", ")}${inc.length ? `. Incidents: ${inc.map((x) => x.title).join(", ")}` : ""}`)
     bars.append(b)
   })
-  attachBars(bars)
-  const axis = el("div", "bars-axis"); axis.append(el("span", "", "90 days ago"), el("span", "", "Today"))
+  if (days.length) attachBars(bars)
+  const axis = el("div", "bars-axis")
+  axis.append(el("span", "", tracked.since === null ? "" : tracked.full ? "90 days ago" : `Since ${sinceFmt.format(Date.parse(`${tracked.since}T00:00:00Z`))}`), el("span", "", "Today"))
   box.append(bars, axis)
   for (const u of c.units) {
     const us = shownState(o, u)
@@ -136,10 +146,14 @@ function row(c: Component, o: Overall, p: Payload, ix: number): HTMLElement {
 export function renderSystem(root: HTMLElement, o: Overall, p: Payload | null) {
   root.replaceChildren()
   if (!p?.public || o === "unavailable") return
+  const open = new Set([...root.querySelectorAll(".comp-head[aria-expanded=true]")].map((h) => h.getAttribute("aria-controls"))) // a refresh keeps expanded rows open
   const card = el("div", "card")
-  const head = el("div", "card-head"); head.append(el("h2", "card-title", "System status")); card.append(head)
+  const head = el("div", "card-head"); head.append(el("h2", "card-title", "System status"))
+  const live = el("span", "updated"); live.id = "updated"; live.append(el("span", "live-dot"), el("span", "updated-text", "")); head.append(live)
+  card.append(head)
   p.public.components.forEach((c, i) => card.append(row(c, o, p, i)))
   root.append(card)
+  for (const id of open) { const h = card.querySelector<HTMLElement>(`[aria-controls="${id}"]`); if (h) h.click() }
 }
 
 /** One incident as a native <details>: phases, then the timeline of updates, newest first. */
