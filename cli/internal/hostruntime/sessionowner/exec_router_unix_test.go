@@ -5,6 +5,7 @@ package sessionowner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -201,5 +202,149 @@ func TestExecRouterRefusesMalformedCallsWithoutAskingAnOwner(t *testing.T) {
 	}
 	if _, err := connections.execCall(ctx, "list", []byte(`{`)); !errors.Is(err, execprocess.ErrInvalid) {
 		t.Fatalf("list with a broken body: %v", err)
+	}
+}
+
+// stubOwner is an owner whose active commands are synthetic: it lets one list answer outgrow a page.
+type stubOwner struct {
+	execprocess.Service
+	snapshots []execprocess.Snapshot
+}
+
+func (s stubOwner) ActiveSnapshots() []execprocess.Snapshot { return s.snapshots }
+
+// Several older owners hold commands across updates: a call for a command nobody remembers is probed through every
+// live owner, active first, and the list joins them all, in pages.
+func TestExecRouterProbesAndListsAcrossSeveralOlderOwners(t *testing.T) {
+	root := shorttemp.Dir(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	generations := []string{"active_generation", "older_one", "older_two", "older_three"}
+	clients := map[string]*workloadbridge.Client{}
+	managers := map[string]*execprocess.Manager{}
+	for _, generation := range generations {
+		manager, client := execOwnerBridge(t, ctx, root, generation)
+		managers[generation], clients[generation] = manager, client
+	}
+	// A catalogued generation whose owner is gone: it is skipped, not fatal.
+	generations = append(generations, "gone_generation")
+	connections := &Connections{
+		active:      Descriptor{Generation: "active_generation"},
+		clients:     clients,
+		descriptors: map[string]Descriptor{},
+		execs:       map[string]string{},
+		generations: func(context.Context) []string { return generations },
+	}
+	routed, err := connections.Executions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, generation := range generations[1:4] {
+		if _, _, err := managers[generation].Start(ctx, execRequest(t, "operation_held_by_"+generation, root)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, generation := range generations[1:4] {
+		id := "operation_held_by_" + generation
+		execution, err := routed.Get(id)
+		if err != nil {
+			t.Fatalf("probe for %s: %v", id, err)
+		}
+		if snapshot := execution.Snapshot(); snapshot.OperationID != id {
+			t.Fatalf("probe for %s answered %+v", id, snapshot)
+		}
+		if connections.execs[id] != generation {
+			t.Fatalf("%s remembered on %q, want %q", id, connections.execs[id], generation)
+		}
+	}
+	if _, err := routed.Get("operation_held_nowhere"); !errors.Is(err, execprocess.ErrNotFound) {
+		t.Fatalf("a command no owner holds: %v", err)
+	}
+
+	listed := routed.ActiveSnapshots()
+	if len(listed) != 3 {
+		t.Fatalf("list across the older owners: %+v", listed)
+	}
+	seen := map[string]bool{}
+	for _, snapshot := range listed {
+		seen[snapshot.OperationID] = true
+	}
+	for _, generation := range generations[1:4] {
+		if !seen["operation_held_by_"+generation] {
+			t.Fatalf("list lacks the command of %s: %+v", generation, listed)
+		}
+	}
+}
+
+func TestExecRouterListIsPagedAcrossOwners(t *testing.T) {
+	root := shorttemp.Dir(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	const perOwner = 1500 // three owners: 4500 snapshots, more than one page
+	snapshots := func(owner string) []execprocess.Snapshot {
+		out := make([]execprocess.Snapshot, perOwner)
+		for i := range out {
+			out[i] = execprocess.Snapshot{OperationID: fmt.Sprintf("operation_%s_%05d", owner, i), State: execprocess.StateRunning}
+		}
+		return out
+	}
+	clients := map[string]*workloadbridge.Client{}
+	generations := []string{"active_generation", "older_one", "older_two"}
+	for _, generation := range generations {
+		_, client := execOwnerBridgeFor(t, ctx, root, generation, stubOwner{snapshots: snapshots(generation)})
+		clients[generation] = client
+	}
+	connections := &Connections{
+		active:      Descriptor{Generation: "active_generation"},
+		clients:     clients,
+		descriptors: map[string]Descriptor{},
+		execs:       map[string]string{},
+		generations: func(context.Context) []string { return generations },
+	}
+	type page struct {
+		Snapshots []execprocess.Snapshot
+		More      bool
+	}
+	var from uint64
+	var got []execprocess.Snapshot
+	pages := 0
+	for {
+		request, _ := execprocess.EncodeMessage(struct{ From uint64 }{from}, nil)
+		frame, err := connections.execCall(ctx, "list", request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(frame) > execprocess.MaxMessageBytes/4 {
+			t.Fatalf("a list page is %d bytes", len(frame))
+		}
+		var p page
+		if _, err := execprocess.DecodeMessage(frame, &p); err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		got = append(got, p.Snapshots...)
+		from += uint64(len(p.Snapshots))
+		if !p.More {
+			break
+		}
+		if pages > 10 {
+			t.Fatal("paging does not end")
+		}
+	}
+	if len(got) != 3*perOwner || pages < 2 {
+		t.Fatalf("%d snapshots in %d pages, want %d in several", len(got), pages, 3*perOwner)
+	}
+	// Active owner first, then the older ones in the catalogue's order, each owner's list in its own order.
+	for i, snapshot := range got {
+		want := fmt.Sprintf("operation_%s_%05d", generations[i/perOwner], i%perOwner)
+		if snapshot.OperationID != want {
+			t.Fatalf("snapshot %d is %s, want %s", i, snapshot.OperationID, want)
+		}
+	}
+	// And through the manager the worker uses: every page is read.
+	routed, _ := connections.Executions()
+	if all := routed.ActiveSnapshots(); len(all) != 3*perOwner {
+		t.Fatalf("manager listed %d of %d", len(all), 3*perOwner)
 	}
 }

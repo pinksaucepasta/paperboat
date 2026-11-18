@@ -179,6 +179,9 @@ func (c *Connections) probeContext(ctx context.Context, generation string) conte
 
 // liveGenerations lists catalogued generations, active first.
 func (c *Connections) liveGenerations(ctx context.Context) []string {
+	if c.generations != nil {
+		return c.generations(ctx)
+	}
 	out := []string{}
 	all, _ := c.catalog.ReadAll(ctx, c.active.Instance)
 	for _, d := range all {

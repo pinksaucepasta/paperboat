@@ -23,6 +23,8 @@ type Connections struct {
 	start       func(context.Context, string) error
 	router      *Router
 	execs       map[string]string // operation ID -> generation
+	// generations replaces the catalogue read in tests, whose root must be root-owned and so cannot be built unprivileged.
+	generations func(context.Context) []string
 }
 
 func NewConnections(ctx context.Context, catalog Catalog, active Descriptor, start func(context.Context, string) error, maxSessions int) (*Connections, error) {
