@@ -3,6 +3,7 @@
  * for personal use and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
 import { auditRetention, plans, publicTcp, ssoMinSeats, teamTrial, topUp } from "./site"
+import { fairUse } from "./legal-data"
 
 const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
   plans[0][key],
@@ -73,7 +74,7 @@ export const faq = [
   },
   {
     q: "What happens when the bandwidth runs out?",
-    a: `Relayed connections, previews and tunnels pause until the next month, or until you add more on a paid plan (${topUp.price} per ${topUp.size}). Direct connections keep working, and you are told which limit was reached and where to raise it.`,
+    a: `Nothing stops. Relayed connections, previews and tunnels keep working at a lower speed (${fairUse.edge.slowFree} on Free, ${fairUse.edge.slowPaid} on paid plans) until the next month, or until you add more on a paid plan (${topUp.price} per ${topUp.size}). Direct connections are never slowed. The <a href="/legal/acceptable-use/#fair-use">fair-use rules</a> have the details.`,
   },
   {
     q: "Are features locked behind a paid plan?",
@@ -98,6 +99,6 @@ export const faq = [
   },
   {
     q: "What happens to my machines if I cancel?",
-    a: "You move back to Free. Machines, terminals and settings stay; only the limits change.",
+    a: 'Cancelling stops the next renewal; your plan keeps working until the end of the period you paid for, then you move back to Free. Machines, terminals and settings stay; only the limits change. Payments are not refunded (<a href="/legal/refunds/">Refund Policy</a>).',
   },
 ]

@@ -7,6 +7,7 @@ import Closing from "../components/Closing.astro"
 import Icon from "../components/Icon.astro"
 import Plans from "../components/Plans.astro"
 import { teamTrial, topUp } from "../site"
+import { fairUse } from "../legal-data"
 import { faq, featureGroups, planNames } from "../pricing-data"
 import { directLane, relayLane, publicLane } from "../diagrams"
 import { breadcrumbSchema, faqSchema } from "../schema"
@@ -33,6 +34,10 @@ const lanes = [
     <div class="wrap">
       <Plans />
       <p class="small trial">{teamTrial}</p>
+      <p class="small trial">
+        Paid plans renew until you cancel, and payments are not refunded. See the <a href="/legal/terms/">Terms</a> and the
+        <a href="/legal/refunds/">Refund Policy</a>.
+      </p>
     </div>
   </section>
 
@@ -53,8 +58,8 @@ const lanes = [
         <div class="stack">
           <h3 class="h3">When it runs out</h3>
           <p class="rule-text">
-            Relayed connections, previews and tunnels pause until the next month. Direct connections keep working. <code>pb</code> and the console
-            name the limit and link to where you raise it.
+            Nothing is cut off. Relayed connections, previews and tunnels slow to {fairUse.edge.slowFree} on Free or {fairUse.edge.slowPaid} on
+            paid plans until the next month. Direct connections are never slowed. See <a href="/legal/acceptable-use/#fair-use">fair use</a>.
           </p>
         </div>
         <div class="stack">

@@ -1,0 +1,11 @@
+---
+/** One company fact from legal-data: highlighted while it is still a TODO-USER, a mail link when it is an address. */
+import { company } from "../legal-data"
+
+interface Props {
+  name: keyof typeof company
+}
+const value = company[Astro.props.name]
+---
+
+{value.startsWith("TODO-USER") ? <mark class="todo">{value}</mark> : value.includes("@") ? <a href={`mailto:${value}`}>{value}</a> : value}
