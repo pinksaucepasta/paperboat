@@ -320,8 +320,11 @@ type BreakGlass struct {
 	PickupThreshold float64       `json:"pickup_threshold"`
 	PickupTimeout   time.Duration `json:"pickup_timeout"`
 	OnlineWindow    time.Duration `json:"online_window"`
-	Batch           int           `json:"batch"`
-	Interval        time.Duration `json:"interval"`
+	// MintDrain is how long after a run starts the old mint keys are withdrawn: longer than the one hour a machine
+	// credential lives plus clock skew.
+	MintDrain time.Duration `json:"mint_drain"`
+	Batch     int           `json:"batch"`
+	Interval  time.Duration `json:"interval"`
 }
 
 type UserMachines struct {
@@ -626,7 +629,7 @@ func Default() Config {
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
 		ManagedSSH:        ManagedSSH{CertificateValidity: 12 * time.Hour},
-		BreakGlass:        BreakGlass{PickupThreshold: 0.9, PickupTimeout: 20 * time.Minute, OnlineWindow: 30 * time.Minute, Batch: 500, Interval: 2 * time.Second},
+		BreakGlass:        BreakGlass{PickupThreshold: 0.9, PickupTimeout: 20 * time.Minute, OnlineWindow: 30 * time.Minute, MintDrain: 65 * time.Minute, Batch: 500, Interval: 2 * time.Second},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 90 * time.Second, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
 		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
