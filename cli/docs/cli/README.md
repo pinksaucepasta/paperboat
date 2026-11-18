@@ -180,6 +180,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb recordings export](pb_recordings_export.md) | Write a recording as an asciicast v2 file |
 | [pb recordings key](pb_recordings_key.md) | Manage a team's recording key |
 | [pb recordings key replace](pb_recordings_key_replace.md) | Replace the team's recording key with a new one signed by your copy of the current key |
+| [pb recordings key reset](pb_recordings_key_reset.md) | Replace a recording key nobody holds any more; older recordings become unreadable |
 | [pb recordings list](pb_recordings_list.md) | List the recordings you may see |
 | [pb recordings play](pb_recordings_play.md) | Replay a recording in this terminal |
 | [pb recordings start](pb_recordings_start.md) | Start recording the terminal session you are attached to |

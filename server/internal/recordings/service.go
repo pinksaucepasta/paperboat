@@ -43,12 +43,16 @@ type Service struct {
 	// sharingKeys maps each account to its current vault sharing public key; an account without a vault is absent
 	// (vaultSharingKeys; tests stub it).
 	sharingKeys func(context.Context, *db.Tx, []string) (map[string][]byte, error)
-	buckets     Buckets
+	// writerKey is an account's current ENV vault writer public key (the key its ENV team-vault reset is signed with);
+	// nil for an account without a vault.
+	writerKey func(context.Context, *db.Tx, string) ([]byte, error)
+	buckets   Buckets
 }
 
 func New(store *db.DB, cfg config.Recordings, signer admission.Signer, issuer string) *Service {
 	s := &Service{db: store, cfg: cfg, signer: signer, issuer: issuer, now: time.Now}
 	s.sharingKeys = s.vaultSharingKeys
+	s.writerKey = s.vaultWriterKey
 	return s
 }
 
@@ -133,7 +137,7 @@ func version(p recording.Policy) int64 {
 }
 
 func keysTx(ctx context.Context, tx *db.Tx, team string) ([]recording.Key, error) {
-	rows, err := tx.Query(ctx, `SELECT generation, public_key, signing_public_key, rotation_signature FROM recording_keys WHERE team_id = $1 ORDER BY generation`, team)
+	rows, err := tx.Query(ctx, `SELECT generation, public_key, signing_public_key, rotation_signature, reset_public_key, reset_signature FROM recording_keys WHERE team_id = $1 ORDER BY generation`, team)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +145,7 @@ func keysTx(ctx context.Context, tx *db.Tx, team string) ([]recording.Key, error
 	out := []recording.Key{}
 	for rows.Next() {
 		var k recording.Key
-		if err := rows.Scan(&k.Generation, &k.PublicKey, &k.SigningPublicKey, &k.RotationSignature); err != nil {
+		if err := rows.Scan(&k.Generation, &k.PublicKey, &k.SigningPublicKey, &k.RotationSignature, &k.ResetPublicKey, &k.ResetSignature); err != nil {
 			return nil, err
 		}
 		out = append(out, k)
