@@ -209,7 +209,8 @@ test("delayed minutes are their own bucket: not in the percentage, shown as unkn
   assert.equal(uptimeBar({ day: "d", ...day }), "unknown")
   assert.equal(uptimePercent([{ day: "d", ...day }]), null)
   assert.equal(uptimePercent([{ day: "d", up: 1400, degraded: 40, down: 0, delayed: 500 }]), 99.17)
-  assert.equal(uptimePercent([{ day: "d", up: 600, degraded: 0, down: 0, delayed: 0 }]), null) // under a day measured: no percentage
+  assert.equal(uptimePercent([{ day: "d", up: 120, degraded: 0, down: 0, delayed: 0 }]), null) // under three hours measured: no percentage
+  assert.equal(uptimePercent([{ day: "d", up: 600, degraded: 0, down: 0, delayed: 0 }]), 100) // a few hours: the tracked period
 })
 
 test("subscribe: the daily quota is spent only by a confirmation mail that was sent", async () => {
