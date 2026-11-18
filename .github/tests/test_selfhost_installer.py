@@ -21,6 +21,7 @@ while [ "$#" -gt 0 ]; do case "$1" in -o) out=$2; shift 2;; --connect-timeout|--
 printf '%s\\n' "$url" >> "$FAKE_LOG"
 case "$url" in
   https://api.github.com/repos/$FAKE_REPO/git/matching-refs/tags/selfhost-) cp "$FAKE_RELEASES/refs.json" "$out" ;;
+  https://download.docker.com/linux/*/gpg) printf 'docker key placeholder\\n' > "$out" ;;
   https://github.com/$FAKE_REPO/releases/download/*/*) f=${url##*/}; v=${url%/*}; v=${v##*/}; [ -f "$FAKE_RELEASES/$v/$f" ] || exit 22; cp "$FAKE_RELEASES/$v/$f" "$out" ;;
   *) exit 22 ;;
 esac
@@ -39,7 +40,7 @@ def have(tool):
 
 
 @unittest.skipUnless(have("ssh-keygen") and have("sha256sum"), "ssh-keygen and sha256sum are required")
-class SelfhostInstallerTest(unittest.TestCase):
+class SelfhostFixture(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
@@ -84,6 +85,9 @@ class SelfhostInstallerTest(unittest.TestCase):
         path = self.root / "log"
         return path.read_text().split() if path.exists() else []
 
+
+@unittest.skipUnless(have("ssh-keygen") and have("sha256sum"), "ssh-keygen and sha256sum are required")
+class SelfhostInstallerTest(SelfhostFixture):
     def test_a_verified_release_reaches_the_package_and_picks_the_highest_version(self):
         result = self.run_installer()
         self.assertEqual(result.returncode, 77, result.stderr)
@@ -161,6 +165,103 @@ class SelfhostInstallerTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("could not be installed here", result.stderr)
         self.assertNotIn("reached-check-host", result.stderr)
+
+
+DOCKER_FINGERPRINT = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+
+
+def host_release():
+    try:
+        with open("/etc/os-release") as handle:
+            values = dict(line.rstrip("\n").split("=", 1) for line in handle if "=" in line)
+    except OSError:
+        return "", ""
+    return values.get("ID", "").strip('"'), (values.get("UBUNTU_CODENAME") or values.get("VERSION_CODENAME") or "").strip('"')
+
+
+@unittest.skipUnless(have("ssh-keygen") and have("sha256sum") and host_release()[0] in ("ubuntu", "debian"), "needs ssh-keygen and a Debian or Ubuntu host (the installer reads /etc/os-release)")
+class SelfhostInstallerDockerTest(SelfhostFixture):
+    """Docker comes from Docker's own apt repository, pinned to its key's published fingerprint; no downloaded script runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.pbh_ok()
+        self.limited = self.root / "limited"
+        self.limited.mkdir()
+        for tool in ("awk", "sed", "wc", "tr", "cat", "mktemp", "rm", "cp", "ls", "dirname", "basename", "grep", "head", "sort", "tail", "sha256sum", "tar", "env", "ln", "sh", "mkdir", "printf", "cut", "chmod", "gzip", "mv", "ssh-keygen"):
+            if shutil.which(tool):
+                os.symlink(shutil.which(tool), self.limited / tool)
+        for name in ("curl", "id", "systemctl", "timeout", "uname"):
+            shutil.copy(self.bin / name, self.limited / name)
+        self.shim("install", r'''printf 'install %s\n' "$*" >> "$PM_LOG"
+if [ "$1" = -m ] && [ "$#" -eq 4 ] && [ "$3" != -d ]; then cp "$3" "$CAPTURE/$(basename "$4")"; fi
+true''')
+        self.shim("apt-get", 'printf \'apt-get %s\\n\' "$*" >> "$PM_LOG"')
+        self.shim("dpkg", "echo arm64")
+        self.shim("gpg", 'printf "tru::1:0:0:3:1:5\\npub:-:4096:1:8D81803C0EBFCD88:1:::-:::scESC::::::23::0:\\nfpr:::::::::%s:\\nuid:::::::::Docker Release:\\n" "$GPG_FINGERPRINT"')
+        (self.root / "capture").mkdir()
+
+    def pbh_ok(self):
+        self.package(b"#!/bin/sh\nexit 0\n")
+
+    def shim(self, name, body):
+        (self.limited / name).write_text("#!/bin/sh\n" + body + "\n")
+        (self.limited / name).chmod(0o755)
+
+    def run_docker(self, fingerprint=DOCKER_FINGERPRINT):
+        env = {**os.environ, "PATH": str(self.limited), "TMPDIR": str(self.root), "FAKE_RELEASES": str(self.releases), "FAKE_REPO": REPO,
+               "FAKE_LOG": str(self.root / "log"), "PB_REPO": REPO, "PB_VERSION": VERSION, "PM_LOG": str(self.root / "pm"),
+               "CAPTURE": str(self.root / "capture"), "GPG_FINGERPRINT": fingerprint}
+        result = subprocess.run([shutil.which("sh"), str(self.installer)], env=env, capture_output=True, text=True, timeout=60)
+        pm = (self.root / "pm").read_text().splitlines() if (self.root / "pm").exists() else []
+        return result, pm
+
+    def test_docker_is_installed_from_dockers_apt_repository_with_the_pinned_key(self):
+        os_id, codename = host_release()
+        family = "ubuntu" if os_id == "ubuntu" or os.environ.get("UBUNTU_CODENAME") else "debian"
+        result, pm = self.run_docker()
+        self.assertEqual(result.returncode, 1, result.stderr)  # stops at `docker info`: no daemon here
+        self.assertIn("Docker daemon is unavailable", result.stderr)
+        apt = [line for line in pm if line.startswith("apt-get")]
+        self.assertEqual(apt, ["apt-get update -qq", "apt-get install -y -qq ca-certificates curl gnupg", "apt-get update -qq",
+                               "apt-get install -y -qq docker-ce docker-ce-cli containerd.io"])
+        self.assertIn("install -m 0755 -d /etc/apt/keyrings", pm)
+        listing = (self.root / "capture" / "docker.list").read_text()
+        self.assertRegex(listing, rf"^deb \[arch=arm64 signed-by=/etc/apt/keyrings/docker.asc\] https://download.docker.com/linux/{family} {codename} stable\n$")
+        self.assertTrue((self.root / "capture" / "docker.asc").exists())
+        self.assertFalse(any("get.docker.com" in url for url in self.log()), "a Docker install script was downloaded")
+        self.assertIn("https://download.docker.com/linux/%s/gpg" % family, self.log())
+
+    def test_a_key_that_is_not_dockers_is_refused_before_anything_is_installed(self):
+        result, pm = self.run_docker(fingerprint="0" * 40)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("does not match its published fingerprint", result.stderr)
+        self.assertFalse(any(line.startswith("install ") for line in pm), pm)
+        self.assertNotIn("apt-get install -y -qq docker-ce docker-ce-cli containerd.io", pm)
+
+    def test_an_installed_docker_that_is_new_enough_is_left_alone(self):
+        self.shim("docker", 'case "$1" in --version) echo "Docker version 27.5.1, build abc" ;; info) exit 1 ;; esac')
+        result, pm = self.run_docker()
+        self.assertIn("Docker daemon is unavailable", result.stderr)
+        self.assertEqual(pm, [], "something was installed although Docker is already there")
+        for version in ("20.10.24", "23.0.1", "28.1.0"):
+            self.shim("docker", f'case "$1" in --version) echo "Docker version {version}, build x" ;; info) exit 1 ;; esac')
+            self.assertIn("Docker daemon is unavailable", self.run_docker()[0].stderr, version)
+
+    def test_a_docker_that_is_too_old_or_unreadable_is_refused(self):
+        for output, message in (("Docker version 19.03.15, build x", "older than 20.10"), ("Docker version 20.9.1, build x", "older than 20.10"), ("podman emulation", "Could not read the installed Docker version")):
+            self.shim("docker", f'case "$1" in --version) echo "{output}" ;; esac')
+            result, pm = self.run_docker()
+            self.assertEqual(result.returncode, 1, output)
+            self.assertIn(message, result.stderr)
+            self.assertEqual(pm, [])
+
+    def test_without_apt_the_installer_points_at_dockers_documentation(self):
+        (self.limited / "apt-get").unlink()
+        result, pm = self.run_docker()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("docs.docker.com/engine/install", result.stderr)
+        self.assertEqual(pm, [])
 
 
 if __name__ == "__main__":
