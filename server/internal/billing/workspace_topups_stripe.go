@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -42,6 +43,9 @@ func (c HTTPStripeClient) CreateTopupCheckout(ctx context.Context, in StripeTopu
 		suffix[i] = 'a' + hash[i]%26
 	}
 	v.Set("integration_identifier", "paperboat_topup_"+string(suffix))
+	// A top-up has no subscription invoice, so ask Checkout for one: it carries the consent footer and Stripe emails it.
+	v.Set("invoice_creation[enabled]", "true")
+	v.Set("invoice_creation[invoice_data][footer]", legalconsent.InvoiceFooter())
 	c.businessCheckout(v)
 	var out struct{ ID, URL, Customer string }
 	if err := c.do(ctx, http.MethodPost, "/v1/checkout/sessions", in.IdempotencyKey, v, &out); err != nil {

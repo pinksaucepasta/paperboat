@@ -304,6 +304,15 @@ type BillingTeamOrder struct {
 	UpdatedAt          time.Time
 }
 
+type BillingTermsConsent struct {
+	OperationID  string
+	ActorUserID  string
+	Kind         string
+	TermsVersion string
+	TextSha256   string
+	AcceptedAt   time.Time
+}
+
 type BillingUncertainRecovery struct {
 	IdempotencyKey string
 	OperationKind  string

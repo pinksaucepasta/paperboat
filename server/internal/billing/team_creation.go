@@ -22,6 +22,8 @@ type TeamCreationInput struct {
 	Interval    string `json:"interval"`
 	SuccessURL  string `json:"success_url"`
 	CancelURL   string `json:"cancel_url"`
+	// TermsVersion is the no-refund consent version the buyer accepted (checked and recorded by the handler).
+	TermsVersion string `json:"terms_version"`
 }
 
 type teamCreationRequest struct {

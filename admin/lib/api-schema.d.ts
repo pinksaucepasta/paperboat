@@ -10126,6 +10126,11 @@ export interface components {
              * @description Where abuse is reported by email; absent when the server publishes none.
              */
             abuse_mailbox?: string;
+            /** @description The no-refund wording a buyer accepts before any purchase, and its version; clients show text and send version as terms_version. */
+            purchase_consent: {
+                version: string;
+                text: string;
+            };
             /** Format: uri */
             issuer: string;
             /** Format: uri */
@@ -11684,6 +11689,8 @@ export interface components {
             success_url: string;
             /** Format: uri */
             cancel_url: string;
+            /** @description Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required. */
+            terms_version: string;
         };
         TeamMutationRequest: {
             operation_id: string;
@@ -13586,6 +13593,8 @@ export interface components {
             success_url: string;
             /** Format: uri */
             cancel_url: string;
+            /** @description Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required. */
+            terms_version: string;
         };
         InboxItem: {
             id: string;
@@ -24983,6 +24992,8 @@ export interface operations {
                     cancel_url: string;
                     /** @description Reviewed price version; stale requests return409 before provider call. */
                     product_version: number;
+                    /** @description Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required. */
+                    terms_version: string;
                 };
             };
         };
@@ -25129,6 +25140,8 @@ export interface operations {
                     cancel_url: string;
                     /** @description Reviewed price version; stale requests return409 before provider call. */
                     product_version: number;
+                    /** @description Version of the no-refund consent the buyer accepted; the current one is purchase_consent.version in client configuration. Other values return 400 terms_consent_required. */
+                    terms_version: string;
                 };
             };
         };
