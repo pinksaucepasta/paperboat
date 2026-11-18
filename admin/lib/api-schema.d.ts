@@ -8180,6 +8180,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/server-nodes/{node_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator-only: Resume a draining server node (cancels the drain; back into the region map and DNS)
+         * @description Any enrolled node serves this (equal peers). Only works in the first seconds after a drain, before the node has beaten again: once a beat reports the drain the node shuts down. 409 `server_node_stopped` means that has happened; remove the node and enrol the slot again.
+         */
+        post: operations["post_v1_admin_server_nodes_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/server-nodes/{node_id}/remove": {
         parameters: {
             query?: never;
@@ -32968,6 +32988,46 @@ export interface operations {
         };
     };
     post_v1_admin_server_nodes_drain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Exact node id. */
+                "Operator-Target": string;
+                /** @description Opaque audit reason reference. */
+                "Operator-Reason": string;
+                /** @description Stable key for retrying the exact mutation. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Result in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerNodeEnvelope"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_admin_server_nodes_resume: {
         parameters: {
             query?: never;
             header: {

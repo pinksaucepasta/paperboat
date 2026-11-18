@@ -80,6 +80,20 @@ func checkServerNodeRoutes(t *testing.T, ctx context.Context, store *db.DB, requ
 	if r := nodeAction("mumbai-slot-64", "drain"); r.Code != 200 || !strings.Contains(r.Body.String(), `"state":"draining"`) {
 		t.Fatalf("drain: %d %s", r.Code, r.Body.String())
 	}
+	// A drain is reversible while the node still beats: resume puts it back to active.
+	if r := nodeAction("mumbai-slot-64", "resume"); r.Code != 200 || !strings.Contains(r.Body.String(), `"state":"active"`) {
+		t.Fatalf("resume: %d %s", r.Code, r.Body.String())
+	}
+	expect("resume an active node", nodeAction("mumbai-slot-64", "resume"), 409, "server_node_state_conflict")
+	expect("unconfirmed resume", request("POST", "/v1/admin/server-nodes/mumbai-slot-64/resume", `{}`, true), 400, "operator_confirmation_required")
+	expect("resume unknown node", nodeAction("mumbai-slot-63", "resume"), 404, "server_node_not_found")
+	if r := nodeAction("mumbai-slot-64", "drain"); r.Code != 200 || !strings.Contains(r.Body.String(), `"state":"draining"`) {
+		t.Fatalf("drain again: %d %s", r.Code, r.Body.String())
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE paperboat.control_server_nodes SET last_seen_at=now()-interval '1 hour' WHERE id='mumbai-slot-64'`); err != nil {
+		t.Fatal(err)
+	}
+	expect("resume a drained node that exited", nodeAction("mumbai-slot-64", "resume"), 409, "server_node_stopped")
 	expect("unconfirmed drain", request("POST", "/v1/admin/server-nodes/mumbai-slot-64/drain", `{}`, true), 400, "operator_confirmation_required")
 	expect("unknown node", nodeAction("mumbai-slot-63", "remove"), 404, "server_node_not_found")
 	listed := request("GET", "/v1/admin/server-nodes", "", false)
@@ -105,6 +119,7 @@ func TestServerNodeErrorShapes(t *testing.T) {
 		{servernodes.ErrUsed, 409, "server_node_exists"},
 		{servernodes.ErrNotFound, 404, "server_node_not_found"},
 		{servernodes.ErrState, 409, "server_node_state_conflict"},
+		{servernodes.ErrStale, 409, "server_node_stopped"},
 		{errors.Join(servernodes.ErrUnreachable, syscall.ECONNREFUSED), 502, "server_node_unreachable"},
 	} {
 		request, _, _ := diagnosticRequest("/v1/admin/server-nodes/enrollments")

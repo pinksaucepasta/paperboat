@@ -65,9 +65,10 @@ function Actions({ n }: { n: ServerNode }) {
   const path = (a: string) => `/v1/admin/server-nodes/${encodeURIComponent(n.id)}/${a}`
   return (
     <div className="flex flex-wrap gap-1" data-server-node-actions={n.id}>
+      {n.state !== "draining" && (
       <ActionDialog
         title={`Drain ${n.id}`}
-        description="Takes the node out of the region map and DNS and shuts it down gracefully; held connections finish first. There is no resume: to bring capacity back, enrol a new node."
+        description="Takes the node out of the region map and DNS and shuts it down gracefully; held connections finish first. Resume cancels this only in the first seconds, before the node has reported again; after that it shuts down, and you bring capacity back by removing it and enrolling a new node."
         target={n.id}
         destructive
         confirmWord={n.id}
@@ -75,6 +76,17 @@ function Actions({ n }: { n: ServerNode }) {
         trigger={(open) => <Button size="xs" variant="destructive" onClick={open}>Drain</Button>}
         run={(h) => operatorAction("POST", path("drain"), h, {})}
       />
+      )}
+      {n.state === "draining" && (
+        <ActionDialog
+          title={`Resume ${n.id}`}
+          description="Cancels the drain: the node goes back into the region map and DNS. This only works in the first seconds after the drain; once the node has seen it, it shuts down, and then the server says so and you remove it and enrol a new node."
+          target={n.id}
+          submitLabel="Resume node"
+          trigger={(open) => <Button size="xs" variant="outline" onClick={open}>Resume</Button>}
+          run={(h) => operatorAction("POST", path("resume"), h, {})}
+        />
+      )}
       <ActionDialog
         title={`Remove ${n.id}`}
         description="Removes the node for good: its heartbeats are refused and it cannot rejoin. Re-enrol a new node to replace it."

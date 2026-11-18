@@ -154,3 +154,71 @@ VALUES ($1,$2,$3,'v','c',now(),`+seen+`)`, id, n[0], n[1]); err != nil {
 		t.Fatalf("a database failure dropped the region map: %+v", again)
 	}
 }
+
+// A drain is reversible while the node still beats: resume puts a draining node back to active (its next beat
+// reports no drain). Once a node has beaten after the drain it has seen it and is shutting down, so resume says so
+// (ErrStale); only a draining node resumes; an unknown node is not found.
+func TestServerNodeResumeOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	n := Node{ID: fmt.Sprintf("resume-%d", time.Now().UnixNano()), Region: "mumbai", Version: "v1", Commit: "c1", StartedAt: time.Now().UTC()}
+	t.Cleanup(func() { _, _ = store.Pool().Exec(ctx, `DELETE FROM paperboat.control_server_nodes WHERE id=$1`, n.ID) })
+	if err := Heartbeat(ctx, store, n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resume(ctx, store, n.ID); !errors.Is(err, ErrState) {
+		t.Fatalf("resuming an active node: %v", err)
+	}
+	if _, err := Drain(ctx, store, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	var before, after time.Time
+	if err := store.Pool().QueryRow(ctx, `SELECT last_seen_at FROM paperboat.control_server_nodes WHERE id=$1`, n.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := Heartbeat(ctx, store, n); !errors.Is(err, ErrDraining) {
+		t.Fatalf("a draining node's beat: %v", err)
+	}
+	if err := store.Pool().QueryRow(ctx, `SELECT last_seen_at FROM paperboat.control_server_nodes WHERE id=$1`, n.ID).Scan(&after); err != nil || !after.Equal(before) {
+		t.Fatalf("a draining beat moved last_seen_at from %v to %v (%v)", before, after, err)
+	}
+	got, err := Resume(ctx, store, n.ID)
+	if err != nil || got.State != "active" {
+		t.Fatalf("resume a draining node: %+v %v", got, err)
+	}
+	if err := Heartbeat(ctx, store, n); err != nil {
+		t.Fatalf("a resumed node's beat still reports the drain: %v", err)
+	}
+	if _, err := Drain(ctx, store, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE paperboat.control_server_nodes SET last_seen_at=now()-interval '9 seconds' WHERE id=$1`, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resume(ctx, store, n.ID); !errors.Is(err, ErrStale) {
+		t.Fatalf("resuming a drained node that stopped beating: %v", err)
+	}
+	if _, err := Remove(ctx, store, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resume(ctx, store, n.ID); !errors.Is(err, ErrState) {
+		t.Fatalf("resuming a removed node: %v", err)
+	}
+	if _, err := Resume(ctx, store, n.ID+"-nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("resuming an unknown node: %v", err)
+	}
+}

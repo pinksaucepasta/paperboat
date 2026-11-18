@@ -120,6 +120,12 @@ function mutate(method, p, json) {
   if (area === "regions" && action === "create") world.regions.push({ id, display_name: json.display_name, enabled: true, revision: 1, updated_at: new Date().toISOString() })
   if (area === "regions" && action === "disable") world.regions.find((r) => r.id === id).enabled = false
   if (p === "/v1/admin/server-nodes/enrollments") world.serverNodes.push({ ...world.serverNodes[0], id: "srv_2", state: "registered", healthy: false })
+  if (area === "server-nodes" && action === "drain") world.serverNodes.find((n) => n.id === id).state = "draining"
+  if (area === "server-nodes" && action === "resume") {
+    const node = world.serverNodes.find((n) => n.id === id)
+    if (node.stopped) return { __status: 409, code: "server_node_stopped", message: "The node already shut down after the drain, so there is nothing to resume. Remove it and enrol the slot again.", reference: "support_fixture_stopped" }
+    node.state = "active"
+  }
   if (area === "server-nodes" && action === "remove") world.serverNodes = world.serverNodes.filter((n) => n.id !== id)
   if (p === "/v1/admin/config/billing") world.policy = { ...json, revision: json.revision + 1 }
   if (p === "/v1/admin/client-update-policy") {
@@ -553,7 +559,29 @@ try {
     const drain = dialog("Drain srv_2")
     await drain.getByLabel("Reference for the audit log").fill("TICKET-44b")
     expect(await drain.getByRole("button", { name: "Drain node" }).isDisabled(), "drain is one-way and must need the typed id")
-    await drain.getByRole("button", { name: "Cancel" }).click()
+    await drain.getByLabel(/Type/).fill("srv_2")
+    await drain.getByRole("button", { name: "Drain node" }).click()
+    await p.waitForFunction(() => document.querySelector('[data-server-node-actions="srv_2"]')?.textContent?.includes("Resume"))
+    expect(!(await p.locator('[data-server-node-actions="srv_2"]').textContent()).includes("Drain"), "a draining node offers Resume, not Drain")
+    expect(lastWrite().path === "/v1/admin/server-nodes/srv_2/drain", "drain write")
+    await p.locator('[data-server-node-actions="srv_2"]').getByRole("button", { name: "Resume" }).click()
+    await submit(dialog("Resume srv_2"), "Resume node")
+    await p.waitForFunction(() => document.querySelector('[data-server-node-actions="srv_2"]')?.textContent?.includes("Drain"))
+    expect(lastWrite().path === "/v1/admin/server-nodes/srv_2/resume" && lastWrite().target === "srv_2", "resume write")
+    // A drained node whose process has exited cannot be resumed: the server says so and the panel shows it with its reference.
+    world.serverNodes.find((n) => n.id === "srv_2").stopped = true
+    await p.locator('[data-server-node-actions="srv_2"]').getByRole("button", { name: "Drain" }).click()
+    const again = dialog("Drain srv_2")
+    await again.getByLabel("Reference for the audit log").fill("TICKET-44c")
+    await again.getByLabel(/Type/).fill("srv_2")
+    await again.getByRole("button", { name: "Drain node" }).click()
+    await p.waitForFunction(() => document.querySelector('[data-server-node-actions="srv_2"]')?.textContent?.includes("Resume"))
+    await p.locator('[data-server-node-actions="srv_2"]').getByRole("button", { name: "Resume" }).click()
+    const stale = dialog("Resume srv_2")
+    await submit(stale, "Resume node")
+    await stale.locator("[data-action-error]").waitFor()
+    expect((await stale.locator("[data-action-error]").innerText()).includes("already shut down") && (await stale.locator("[data-action-error]").innerText()).includes("support_fixture_stopped"), "the stopped-node answer is not shown with its reference")
+    await stale.getByRole("button", { name: "Cancel" }).click()
     await p.locator('[data-server-node-actions="srv_1"]').getByRole("button", { name: "Remove" }).click()
     const r = dialog("Remove srv_1")
     await r.getByLabel("Reference for the audit log").fill("TICKET-45")

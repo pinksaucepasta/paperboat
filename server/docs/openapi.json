@@ -56369,6 +56369,105 @@
         "x-operator-capability": "admin"
       }
     },
+    "/v1/admin/server-nodes/{node_id}/resume": {
+      "post": {
+        "operationId": "post_v1_admin_server_nodes_resume",
+        "summary": "Operator-only: Resume a draining server node (cancels the drain; back into the region map and DNS)",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Exact node id."
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Opaque audit reason reference."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Stable key for retrying the exact mutation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNodeEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Any enrolled node serves this (equal peers). Only works in the first seconds after a drain, before the node has beaten again: once a beat reports the drain the node shuts down. 409 `server_node_stopped` means that has happened; remove the node and enrol the slot again.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-operator-capability": "admin"
+      }
+    },
     "/v1/admin/server-nodes/{node_id}/remove": {
       "post": {
         "operationId": "post_v1_admin_server_nodes_remove",

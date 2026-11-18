@@ -40,7 +40,7 @@ func registerServerNodes(mux *http.ServeMux, opts Options) {
 		}
 		writeJSON(w, 200, SuccessResponse{Data: node})
 	})))
-	for action, apply := range map[string]func(context.Context, *db.DB, string) (servernodes.Status, error){"drain": servernodes.Drain, "remove": servernodes.Remove} {
+	for action, apply := range map[string]func(context.Context, *db.DB, string) (servernodes.Status, error){"drain": servernodes.Drain, "resume": servernodes.Resume, "remove": servernodes.Remove} {
 		mux.Handle("POST /v1/admin/server-nodes/{node_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, 1024)
 			var in struct{}
@@ -67,8 +67,10 @@ func serverNodeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, 410, "claim_code_expired", "The claim code expired. Run enroll-node on the new node again for a fresh code.")
 	case errors.Is(err, servernodes.ErrNotFound):
 		writeError(w, r, 404, "server_node_not_found", "No server node has this id. Refresh the list.")
+	case errors.Is(err, servernodes.ErrStale):
+		writeError(w, r, 409, "server_node_stopped", "The node has already seen the drain and is shutting down, so it can no longer be resumed (that works only in the first seconds). Remove it and enrol the slot again.")
 	case errors.Is(err, servernodes.ErrState):
-		writeError(w, r, 409, "server_node_state_conflict", "The node is not in a state this action applies to (a removed node cannot be drained or removed again). Refresh the list.")
+		writeError(w, r, 409, "server_node_state_conflict", "The node is not in a state this action applies to (only an active node can be drained, only a draining one resumed, and a removed one nothing). Refresh the list.")
 	case errors.Is(err, servernodes.ErrUsed):
 		writeError(w, r, 409, "server_node_exists", "That code was already used, or a node with this region and instance is enrolled. Pick a free instance slot.")
 	default:

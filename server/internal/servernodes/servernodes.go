@@ -45,13 +45,16 @@ var ErrRemoved = errors.New("this server node was removed")
 // ErrDraining means an operator drains this node: the beat is recorded, and the node shuts down gracefully.
 var ErrDraining = errors.New("this server node is draining")
 
-// Heartbeat records the node as seen now. A removed node is never brought back by its own heartbeat.
+// Heartbeat records the node as seen now. A removed node is never brought back by its own heartbeat. A draining
+// node's beat does not advance last_seen_at: the drain is then dated by the last beat before it, which is what
+// Resume measures (a node that has beaten since the drain has seen it and is shutting down).
 func Heartbeat(ctx context.Context, d *db.DB, n Node) error {
 	var state string
 	err := d.Pool().QueryRow(ctx, `INSERT INTO paperboat.control_server_nodes (id, region, version, commit, started_at, last_seen_at)
 VALUES ($1,$2,$3,$4,$5,now())
 ON CONFLICT (id) DO UPDATE SET region=excluded.region, version=excluded.version, commit=excluded.commit,
-  started_at=excluded.started_at, last_seen_at=now()
+  started_at=excluded.started_at,
+  last_seen_at=CASE WHEN control_server_nodes.state='draining' THEN control_server_nodes.last_seen_at ELSE now() END
 WHERE control_server_nodes.state <> 'removed'
 RETURNING state`, n.ID, n.Region, n.Version, n.Commit, n.StartedAt).Scan(&state)
 	switch {
@@ -185,6 +188,43 @@ var (
 // region's DNS is still reconciled (to empty) after its last node leaves; the slot can be enrolled again.
 func Drain(ctx context.Context, d *db.DB, id string) (Status, error) {
 	return setState(ctx, d, id, "draining", "active", "registered")
+}
+
+// ResumeWindow is how long after its last beat before the drain a node can still be resumed: its next beat is
+// due one HeartbeatInterval later and finds the drain, after which the process shuts down and cannot be called back.
+// A little shorter than the interval, so a resume never lands after the beat that would have seen the drain.
+const ResumeWindow = HeartbeatInterval - 2*time.Second
+
+// ErrStale means the drain can no longer be cancelled: the node has had its next beat since (it has seen the
+// drain and is shutting down or gone). The operator removes the node and enrols the slot again.
+var ErrStale = errors.New("server node already saw the drain")
+
+// Resume cancels a drain: the node goes back to active, so the region map and DNS list it again and its next beat
+// reports no drain. It only works in the first ResumeWindow after the drain; a node's process exits as soon as
+// a beat reports the drain, and nothing can undo that.
+func Resume(ctx context.Context, d *db.DB, id string) (Status, error) {
+	var s Status
+	err := d.Pool().QueryRow(ctx, `UPDATE paperboat.control_server_nodes SET state='active'
+WHERE id=$1 AND state='draining' AND last_seen_at > now() - make_interval(secs => $2)
+RETURNING id, region, state, coalesce(public_address, ''), version, commit, started_at, last_seen_at`, id, ResumeWindow.Seconds()).
+		Scan(&s.ID, &s.Region, &s.State, &s.PublicAddress, &s.Version, &s.Commit, &s.StartedAt, &s.LastSeenAt)
+	if err == nil {
+		return s, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Status{}, err
+	}
+	var state string
+	if err := d.Pool().QueryRow(ctx, `SELECT state FROM paperboat.control_server_nodes WHERE id=$1`, id).Scan(&state); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Status{}, ErrNotFound
+		}
+		return Status{}, err
+	}
+	if state == "draining" {
+		return Status{}, ErrStale
+	}
+	return Status{}, ErrState
 }
 
 func Remove(ctx context.Context, d *db.DB, id string) (Status, error) {
