@@ -102,7 +102,10 @@ func updateApply(ctx context.Context, args []string, out io.Writer) error {
 		},
 		download: func(ctx context.Context) (string, error) {
 			path := filepath.Join(work, "bundle.tar.gz")
-			url := node.ControlURL() + "/selfhost/versions/" + *target + "/paperboat-selfhost-linux-" + arch + ".tar.gz"
+			_, url, err := selfupdate.Target(ctx, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(work, "tuf"), *target, arch, node.DownloadClient())
+			if err != nil {
+				return "", err
+			}
 			return path, downloadBundle(ctx, node.DownloadClient(), url, path)
 		},
 		verify: func(ctx context.Context, bundle string) error {
