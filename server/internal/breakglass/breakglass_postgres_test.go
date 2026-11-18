@@ -407,6 +407,8 @@ func TestResealStageMovesEverySealedValueToTheNewestKeyAndReportsUnreadableRows(
 	}
 	w.exec(`INSERT INTO paperboat.operator_totp(operator_id,secret_cipher,confirmed_at) VALUES ($1,$2,now())`, totpOwner, sealed)
 	w.exec(`INSERT INTO paperboat.operator_totp(operator_id,secret_cipher,confirmed_at) VALUES ($1,$2,now())`, broken, bytes.Repeat([]byte{9}, 64))
+	w.clock = w.clock.Add(time.Minute)
+	w.fetching = []machine{m}
 	run := w.start(operator, "")
 	if run.Preview.Sealed["managed_ssh_user_cas.private_key_ciphertext"] < 1 || run.Preview.Sealed["operator_totp.secret_cipher"] < 2 {
 		t.Fatalf("the preview must count rows under the old key: %v", run.Preview.Sealed)
