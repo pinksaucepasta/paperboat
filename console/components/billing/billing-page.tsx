@@ -24,6 +24,7 @@ import { useTrack } from "@/lib/analytics"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { CheckoutConsent } from "@/components/billing/checkout-consent"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ErrorMessage } from "@/components/error-reference"
 
@@ -215,6 +216,7 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
   const subscribe = billing.granted
   const products = useApiQuery(billingProductsQuery(workspace))
   const [interval, setPeriod] = useState<BillingInterval>("month")
+  const [agreed, setAgreed] = useState(false)
   if (products.isPending) return <Skeleton className="h-24 w-full" />
   if (products.isError)
     return (
@@ -243,8 +245,9 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
       }
     >
       {shown.map((product) => (
-        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} verb={subscribe ? "Subscribe" : "Upgrade"} />
+        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} agreed={agreed} verb={subscribe ? "Subscribe" : "Upgrade"} />
       ))}
+      <CheckoutConsent checked={agreed} onChange={setAgreed} />
     </Section>
   )
 }
@@ -253,11 +256,13 @@ function PlanOffer({
   workspace,
   product,
   canManage,
+  agreed,
   verb,
 }: {
   workspace: Workspace
   product: BillingProduct
   canManage: boolean
+  agreed: boolean
   verb: string
 }) {
   const queryClient = useQueryClient()
@@ -288,8 +293,8 @@ function PlanOffer({
           </span>
         </span>
         <Button
-          disabled={!canManage || checkout.isPending}
-          title={canManage ? undefined : "Only the workspace owner can change billing."}
+          disabled={!canManage || !agreed || checkout.isPending}
+          title={canManage ? (agreed ? undefined : "Tick the box below to continue.") : "Only the workspace owner can change billing."}
           onClick={() => checkout.mutate()}
         >
           {checkout.isPending && <CircleNotchIcon className="animate-spin" />}
