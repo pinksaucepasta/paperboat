@@ -113,7 +113,7 @@ func readLayerState(path string, key []byte, value any) (missing bool, resultErr
 	}
 	var envelope authenticatedLayerState
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	if err := dec.Decode(&envelope); err != nil {
 		return false, invalidLayerStateFailure(err)
 	}
@@ -131,7 +131,7 @@ func readLayerState(path string, key []byte, value any) (missing bool, resultErr
 		return false, ErrInvalidSnapshot
 	}
 	dec = json.NewDecoder(bytes.NewReader(envelope.Record))
-	dec.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	if err := dec.Decode(value); err != nil {
 		return false, invalidLayerStateFailure(err)
 	}

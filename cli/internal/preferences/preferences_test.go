@@ -28,11 +28,12 @@ func TestLoadSaveStrictAndPreservesExplicitEmptyPanels(t *testing.T) {
 	if clone.TUI.PreviewPanels == nil {
 		t.Fatal("context clone collapsed explicit empty panels")
 	}
+	// A field another release wrote is ignored, so its preferences still load.
 	if err := os.WriteFile(path, []byte(`{"version":1,"unknown":true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
-		t.Fatal("unknown field accepted")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("preferences with a newer field: %v", err)
 	}
 }
 

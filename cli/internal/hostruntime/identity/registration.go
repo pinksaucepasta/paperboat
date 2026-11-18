@@ -69,7 +69,7 @@ func (s *Store) Registration() (Registration, error) {
 		return Registration{}, ErrInvalidStore
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var value Registration
 	if err := decoder.Decode(&value); err != nil {
 		return Registration{}, invalidIdentityStore(err)

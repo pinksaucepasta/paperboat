@@ -108,7 +108,7 @@ func (s *Store) recoverableUnsignedPeerEndpoint(generation uint64) bool {
 	}
 	var document peerEndpointDocument
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var extra any
 	return decoder.Decode(&document) == nil && decoder.Decode(&extra) == io.EOF && document.Version == 1 && document.Generation == generation && document.Certificate == ""
 }
@@ -171,7 +171,7 @@ func (s *Store) loadPeerEndpoint(generation uint64, machineID string) (PeerEndpo
 		return PeerEndpoint{}, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
+	// A file this or another release wrote: fields it does not know are ignored, so an update or a rollback still loads it.
 	var document peerEndpointDocument
 	var extra any
 	if decoder.Decode(&document) != nil || decoder.Decode(&extra) != io.EOF || document.Version != 1 {
