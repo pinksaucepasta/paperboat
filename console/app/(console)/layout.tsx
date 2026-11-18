@@ -1,4 +1,5 @@
 import { Suspense } from "react"
+import { AnalyticsPageviews } from "@/components/analytics-pageviews"
 import { ActiveNavigation, AppSidebar, Navigation } from "@/components/app-sidebar"
 import { QuotaBanner } from "@/components/quota-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
@@ -22,6 +23,9 @@ export default function ConsoleLayout({ children }: LayoutProps<"/">) {
         }
       />
       <SidebarInset className="min-w-0">
+        <Suspense>
+          <AnalyticsPageviews />
+        </Suspense>
         <QuotaBanner />
         <WithSession>{children}</WithSession>
       </SidebarInset>

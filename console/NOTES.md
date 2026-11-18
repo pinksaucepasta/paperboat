@@ -470,21 +470,39 @@ Tailscale-grade machine page would also need, reported by the daemon and stored 
 
 ## Product analytics (PostHog)
 
-`lib/analytics.ts`: explicit events, no SDK, no autocapture, no session replay. Build env:
+`lib/analytics.ts`: explicit events, no SDK, no autocapture, no session replay, no cookies. Build env:
 `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` (public browser key; in `.env.local`, never in git).
 Without them, with Do Not Track or Global Privacy Control, or with Settings → Privacy → "Share usage
-statistics" off (per browser), nothing is sent; a blocked request is ignored. Events carry the account's
-server id and coarse properties only: never email, machine or team name, command, file name, URL or content.
-Nothing runs in apps behind previews or tunnels.
+statistics" off (per browser), nothing is sent; a blocked request is ignored. The marketing site, the console and the
+server send to the same PostHog project; every event carries `app` = `site`, `console` or `server` to split them.
+Events carry the account's server id and coarse properties only: never email, machine or team name, command, file
+name, query string or content. Nothing runs in apps behind previews or tunnels.
 
-| Event | When | Properties |
-|---|---|---|
-| `add_machine_started` | Add machine dialog got its pairing token | `workspace_kind` |
-| `machine_paired` | the server reports the enrollment `ready` with a machine | `workspace_kind`, `via` |
-| `cli_approved` | the server accepted the approval on `/cli/authorize` | `enroll` |
-| `preview_created` | the server accepted a preview from the console | `workspace_kind`, `access`, `own_address` |
-| `invitation_accepted` | the server accepted a team invitation | `role` |
-| `checkout_completed` | billing shows the plan after the page waited for Stripe's webhook | `workspace_kind`, `product` |
+Every console event also carries `$session_id` (random per tab, sessionStorage), `$pathname` / `$current_url` (the
+route template, e.g. `/machines/[machineId]`, never an id, a name or a query), `$host`, and `$browser`, `$os`,
+`$device_type` (derived from the user agent here, the SDK-less API does not do it). PostHog derives the country from
+the request address and the project setting "Discard client IP data" drops the address (set under Settings → Project →
+IP data capture configuration; the console no longer sends `$geoip_disable`).
+
+| Event | App | When | Properties |
+|---|---|---|---|
+| `$pageview`, `$pageleave` | console, site | a page is shown / left (PostHog's own names, so Web Analytics works) | `$referring_domain`; site adds `utm_*` |
+| `install_command_copied`, `signup_clicked` | site | the install command is copied / a link to the console is clicked | `platform` / `label`, `path` |
+| `add_machine_started` | console | Add machine dialog got its pairing token | `workspace_kind` |
+| `machine_paired` | console | the server reports the enrollment `ready` with a machine | `workspace_kind`, `via` |
+| `cli_approved` | console | the server accepted the approval on `/cli/authorize` | `enroll` |
+| `preview_created` | console | the server accepted a preview from the console | `workspace_kind`, `access`, `own_address` |
+| `invitation_accepted` | console | the server accepted a team invitation | `role` |
+| `checkout_completed` | console | billing shows the plan after the page waited for Stripe's webhook | `workspace_kind`, `product` |
+| `signed_in` | server | an account signed in (its first one is its sign-up) | |
+| `machine_enrolled` | server | a machine was created by `pb pair`/recipe (`via` = cli) or approved in the console (`via` = console) | `via` |
+| `team_created` | server | a team was created | |
+| `feature_used` | server | first use of a feature by an account, at most once a day: terminal, exec, transfer (native usage reports), preview, tunnel, env (vault created), recipe | `feature` |
+
+The server sends `signed_in`, `machine_enrolled`, `team_created` and the preview/tunnel/env/recipe `feature_used` events by
+reading its audit log (`server/internal/posthogcapture`, one worker, replay-safe by event id) and the terminal, exec
+and transfer ones when a host reports usage; `PAPERBOAT_POSTHOG_CAPTURE_HOST` and `_KEY` turn it on. The admin
+Analytics page (Website / Console) reads these through `server/internal/posthogquery`.
 
 Verified end to end on 2026-11-16: `scripts/check-analytics.mjs` pairs a machine through the Add machine dialog and creates a
 preview through the New preview dialog on the live console, and records that the browser sent `add_machine_started`,
@@ -493,4 +511,4 @@ preview through the New preview dialog on the live console, and records that the
 API key is kept here), so "arrived" means accepted by its capture endpoint.
 
 Tunnels are created by `pb tunnel`, not the console, so there is no console tunnel event.
-The marketing site sends `pageview` (path only), `install_command_copied` and `signup_clicked` (see its `.env.example`).
+The marketing site's events are in the table above (see its `.env.example` for the build settings).
