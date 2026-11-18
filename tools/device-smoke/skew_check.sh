@@ -4,38 +4,39 @@
 # the HEAD server through the previous edge and relay; every core (pair, exec, ssh, send), edge (tunnel, preview)
 # and team path runs; then the edge, relay and each machine's pb move to HEAD in place and everything runs again.
 # Runs on our own host (docker + PostgreSQL in ~/.pb-test-pg-dsn), never a GitHub runner; builds happen there.
-#   tools/device-smoke/skew_check.sh <previous-release-tag> [host]     (default host: ubuntu@anvit)
+#   tools/device-smoke/skew_check.sh [previous-ref] [host]   (default: the latest official release; host ubuntu@anvit)
+# previous-ref is any git ref (a release tag, or origin/main before the first release exists).
 # SKEW_CHECK_PUBLISH=1 records the result as the commit status paperboat/skew-check on HEAD, which release.yml
 # requires before it publishes a release of that commit: run it on the exact release commit (the tag).
-# pb is the released asset from GitHub Releases; edge, relay and the self-host harness are built from the tag.
+# pb, edge, relay and the self-host harness are all built from previous-ref's source on the host.
 set -euo pipefail
-prev=${1:?usage: skew_check.sh <previous-release-tag> [host]} host=${2:-ubuntu@anvit}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-git rev-parse -q --verify "refs/tags/$prev" >/dev/null || git fetch -q origin "refs/tags/$prev:refs/tags/$prev"
+prev=${1:-$(gh release view --json tagName -q .tagName)} host=${2:-ubuntu@anvit}
+git fetch -q origin --tags
+prev_sha=$(git rev-parse --verify "$prev^{commit}")
 arch=$(ssh -o BatchMode=yes "$host" uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/head" "$stage/previous-src" "$stage/previous"
 git archive HEAD -- . ':!console' ':!marketing' ':!admin' | tar x -C "$stage/head"
-git archive "$prev" -- . ':!console' ':!marketing' ':!admin' | tar x -C "$stage/previous-src"
-gh release download "$prev" --pattern "pb-linux-$arch" --dir "$stage/previous"
-mv "$stage/previous/pb-linux-$arch" "$stage/previous/pb"
-chmod 755 "$stage/previous/pb"
+git archive "$prev_sha" -- . ':!console' ':!marketing' ':!admin' | tar x -C "$stage/previous-src"
 lane=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 dest="pb-skew/$lane"
-echo "skew-check: $prev ($arch) vs HEAD $(git rev-parse --short HEAD) on $host" >&2
+echo "skew-check: $prev ${prev_sha:0:9} ($arch) vs HEAD $(git rev-parse --short HEAD) on $host" >&2
 ssh -o BatchMode=yes "$host" "mkdir -p '$dest'"
 rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:$dest/"
 sha=$(git rev-parse HEAD)
 set +e
 ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
-  "GITHUB_SHA=$(git rev-parse HEAD) flock -w 7200 \$HOME/pb-remote-test/host.lock bash -s -- $dest" <<'REMOTE'
+  "GITHUB_SHA=$sha PREV_SHA=$prev_sha flock -w 7200 \$HOME/pb-remote-test/host.lock bash -s -- $dest" <<'REMOTE'
 set -euo pipefail
 umask 022
 dest="$HOME/$1" lane=${1##*/}
 export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local CGO_ENABLED=0
-# The previous release's edge, relay and self-host harness, built from its own source.
+# The previous release's pb, edge, relay and self-host harness, built from its own source.
+b=github.com/pinksaucepasta/paperboat/cli/internal/buildinfo
+cd "$dest/previous-src/cli" && go build -trimpath -ldflags "-X $b.Version=dev-previous -X $b.Commit=$PREV_SHA -X $b.ProtocolVersion=1" -o "$dest/previous/pb" ./cmd/pb
 cd "$dest/previous-src/edge" && go build -trimpath -o "$dest/previous/paperboat-edge" ./cmd/paperboat-edge
 cd "$dest/previous-src/relay" && go build -trimpath -o "$dest/previous/paperboat-relay" ./cmd/paperboat-relay
 cd "$dest/previous-src/relay" && go test -c -o "$dest/previous/selfhost-node.test" ./selfhost
