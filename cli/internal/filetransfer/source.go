@@ -180,7 +180,7 @@ func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 		}
 		var digest [sha256.Size]byte
 		copy(digest[:], hash.Sum(nil))
-		batch.Sources = append(batch.Sources, Source{Basename: filepath.Base(path), Size: read, SHA256: digest, Reader: file})
+		batch.Sources = append(batch.Sources, Source{Basename: filepath.Base(path), Size: read, SHA256: digest, Reader: file, guard: &sourceGuard{reader: file}})
 	}
 	failed = false
 	return batch, nil
@@ -242,7 +242,7 @@ func PrepareDescriptors(paths []string, files []*os.File, limits Limits) ([]Sour
 		}
 		var digest [sha256.Size]byte
 		copy(digest[:], hash.Sum(nil))
-		sources = append(sources, Source{Basename: filepath.Base(path), Size: read, SHA256: digest, Reader: files[index]})
+		sources = append(sources, Source{Basename: filepath.Base(path), Size: read, SHA256: digest, Reader: files[index], guard: &sourceGuard{reader: files[index]}})
 	}
 	return sources, nil
 }

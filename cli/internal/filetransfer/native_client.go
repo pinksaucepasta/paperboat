@@ -53,7 +53,10 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	// A folder streams from a tar-writer goroutine; a terminal outcome releases it (and the in-flight file fd) now
 	// instead of holding both until PreparedBatch.Close at batch end.
 	defer closeFolderSource(source)
-	source.guard = &sourceGuard{reader: source.Reader}
+	// One guard per open file for the life of its Source, so a resumed send still excludes an old request's reads.
+	if source.guard == nil {
+		source.guard = &sourceGuard{reader: source.Reader}
+	}
 	// A successful PATCH returns the committed offset, so the next chunk follows
 	// without a HEAD; the offset is asked again only after a failure.
 	var previous, committed int64 = -1, -1

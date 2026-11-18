@@ -250,5 +250,5 @@ func prepareFolder(path string, limits Limits) (Source, error) {
 	}
 	var digest [sha256.Size]byte
 	copy(digest[:], hash.Sum(nil))
-	return Source{Basename: name, Size: read, SHA256: digest, Reader: stream, Folder: folder}, nil
+	return Source{Basename: name, Size: read, SHA256: digest, Reader: stream, Folder: folder, guard: &sourceGuard{reader: stream}}, nil
 }
