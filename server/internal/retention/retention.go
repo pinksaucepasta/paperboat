@@ -254,7 +254,7 @@ var policies = []policy{
 // config default's adoptions cascade with them. The teams row, billing records and everything with its own window stay
 // (retention_postgres_test lists every table with a team_id and says which).
 var deletedTeamTables = []string{
-	"team_members", "team_resource_bindings", "team_invitations", "team_config_defaults", "team_network_preferences",
+	"team_members", "team_resource_bindings", "team_invitations", "team_config_defaults",
 	"team_receipt_smtp", "team_machine_requests", "team_jit_requests", "team_sso_domains", "team_identity_state",
 	"team_directory_group_roles", "terminal_browser_access_policies", "browser_viewer_policies", "audit_stream_destinations",
 	"team_buckets", "workspace_policies",
