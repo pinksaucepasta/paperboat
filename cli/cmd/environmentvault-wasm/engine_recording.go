@@ -9,6 +9,7 @@ import (
 
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/cli/internal/recording"
+	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 // Team session recordings: the team recording key is made, shared and opened only inside this worker.
@@ -51,6 +52,8 @@ func (e *engine) recordingOperation(r request) (any, error) {
 		return e.recordingKeyGrant(r)
 	case "recording-key-rotate":
 		return e.recordingKeyRotate(r)
+	case "recording-key-reset":
+		return e.recordingKeyReset(r)
 	case "recording-open":
 		return e.recordingOpen(r)
 	case "recording-segment":
@@ -140,7 +143,11 @@ func (e *engine) recordingKeyRotate(r request) (any, error) {
 	}
 	defer clear(old.Private)
 	defer clear(old.Signing)
-	rotation, err := recording.Rotate(r.TeamID, r.Generation, old)
+	resetPublic, err := decodeOptional(r.ResetPublicKey)
+	if err != nil {
+		return nil, env.ErrInvalid
+	}
+	rotation, err := recording.Rotate(r.TeamID, r.Generation, old, resetPublic)
 	if err != nil {
 		return nil, err
 	}
@@ -151,10 +158,56 @@ func (e *engine) recordingKeyRotate(r request) (any, error) {
 		return nil, err
 	}
 	return map[string]any{
-		"key":             map[string]any{"generation": r.Generation + 1, "public_key": encoded(rotation.PublicKey), "signing_public_key": encoded(rotation.SigningPublicKey), "rotation_signature": encoded(rotation.RotationSignature)},
+		"key":             map[string]any{"generation": r.Generation + 1, "public_key": encoded(rotation.PublicKey), "signing_public_key": encoded(rotation.SigningPublicKey), "reset_public_key": encoded(rotation.ResetPublicKey), "rotation_signature": encoded(rotation.RotationSignature)},
 		"sealed_previous": encoded(rotation.SealedPrevious),
 		"grants":          grants,
 	}, nil
+}
+
+// recordingKeyReset replaces a recording key nobody holds: this account's ENV writer key, the identity the ENV
+// team-vault reset is signed with, signs the next generation (only the team owner's key matches the reset key the
+// recording key pinned), and the new bundle is sealed to every viewer. There is no previous bundle: recordings made
+// before become unreadable for everyone. The private halves never leave the worker.
+func (e *engine) recordingKeyReset(r request) (any, error) {
+	if len(e.raw) == 0 {
+		return nil, errRecordingLocked
+	}
+	resetPublic, err := decode(r.ResetPublicKey)
+	if err != nil || r.TeamID == "" || r.Generation < 1 || len(r.Viewers) == 0 || len(r.Viewers) > maxRecordingViewers {
+		return nil, env.ErrInvalid
+	}
+	viewers := make([]wire.Viewer, 0, len(r.Viewers))
+	for _, viewer := range r.Viewers {
+		public, err := decode(viewer.SharingPublicKey)
+		if err != nil || viewer.AccountID == "" {
+			return nil, env.ErrInvalid
+		}
+		viewers = append(viewers, wire.Viewer{AccountID: viewer.AccountID, SharingPublicKey: public})
+	}
+	request, err := recording.ResetKey(e.keys.WriterSeed, r.TeamID, wire.KeyState{Key: &wire.Key{Generation: r.Generation, ResetPublicKey: resetPublic}, Viewers: viewers})
+	if errors.Is(err, recording.ErrNotResetAuthority) {
+		return nil, errors.New("Only the team owner's ENV key can reset the recording key.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	grants := make([]recordingGrant, len(request.Grants))
+	for i, grant := range request.Grants {
+		grants[i] = recordingGrant{AccountID: grant.AccountID, SharingPublicKey: encoded(grant.SharingPublicKey), Sealed: encoded(grant.Sealed)}
+	}
+	key := request.Key
+	return map[string]any{
+		"key":    map[string]any{"generation": key.Generation, "public_key": encoded(key.PublicKey), "signing_public_key": encoded(key.SigningPublicKey), "reset_public_key": encoded(key.ResetPublicKey), "reset_signature": encoded(key.ResetSignature)},
+		"grants": grants,
+	}, nil
+}
+
+// decodeOptional decodes a byte field that may be empty.
+func decodeOptional(value string) ([]byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+	return decode(value)
 }
 
 func sealRecordingGrants(teamID string, generation int64, bundle recording.Bundle, viewers []recordingViewer) ([]recordingGrant, error) {

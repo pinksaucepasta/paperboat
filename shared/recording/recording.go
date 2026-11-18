@@ -88,7 +88,13 @@ type Key struct {
 	Generation        int64  `json:"generation"`
 	PublicKey         []byte `json:"public_key"`                   // X25519, 32 bytes
 	SigningPublicKey  []byte `json:"signing_public_key"`           // Ed25519, 32 bytes
-	RotationSignature []byte `json:"rotation_signature,omitempty"` // absent at generation 1
+	RotationSignature []byte `json:"rotation_signature,omitempty"` // by the previous generation's signing key; absent at generation 1
+	// ResetPublicKey is the team owner's ENV vault writer public key (Ed25519) when this generation was made: the
+	// identity the ENV team-vault reset signs with (server/internal/environment/vault_scopes_protocol.go parseVaultScope).
+	// A machine pins it with generation 1 and accepts a RESET generation, one signed by it when nobody holds the previous
+	// signing key (ResetSignature), only on that signature. Empty on keys made without it: those cannot be reset.
+	ResetPublicKey []byte `json:"reset_public_key,omitempty"`
+	ResetSignature []byte `json:"reset_signature,omitempty"` // by the previous generation's ResetPublicKey; instead of RotationSignature
 }
 
 // Policy is what one machine needs to decide recordings on its own, online and offline.
@@ -382,28 +388,64 @@ const (
 	ErrorRecordingDeleted = "recording_deleted"
 )
 
-const rotationDomain = "paperboat.recording-key.rotation.v1"
+const rotationDomain = "paperboat.recording-key.rotation.v2"
 
-// RotationMessage is the exact byte string a rotation signature covers.
-func RotationMessage(teamID string, generation int64, publicKey, signingPublicKey []byte) []byte {
-	out := []byte(rotationDomain)
-	for _, part := range [][]byte{[]byte(teamID), binary.BigEndian.AppendUint64(nil, uint64(generation)), publicKey, signingPublicKey} {
+const resetDomain = "paperboat.recording-key.reset.v1"
+
+func signedMessage(domain, teamID string, generation int64, publicKey, signingPublicKey, resetPublicKey []byte) []byte {
+	out := []byte(domain)
+	for _, part := range [][]byte{[]byte(teamID), binary.BigEndian.AppendUint64(nil, uint64(generation)), publicKey, signingPublicKey, resetPublicKey} {
 		out = binary.BigEndian.AppendUint32(out, uint32(len(part)))
 		out = append(out, part...)
 	}
 	return out
 }
 
-// ValidKey checks sizes and generation.
-func (k Key) ValidKey() bool {
-	return k.Generation >= 1 && len(k.PublicKey) == 32 && len(k.SigningPublicKey) == ed25519.PublicKeySize &&
-		(k.Generation == 1) == (len(k.RotationSignature) == 0) && (k.Generation == 1 || len(k.RotationSignature) == ed25519.SignatureSize)
+// RotationMessage is the exact byte string a rotation signature covers: the new generation's keys and the reset key it
+// carries, so nobody but a holder of the previous signing key can change who may reset.
+func RotationMessage(teamID string, generation int64, publicKey, signingPublicKey, resetPublicKey []byte) []byte {
+	return signedMessage(rotationDomain, teamID, generation, publicKey, signingPublicKey, resetPublicKey)
 }
 
-// VerifyRotation reports whether next is a valid successor of previous for team.
+// ResetMessage is what a reset signature covers (its own domain, so a rotation signature is never a reset one).
+func ResetMessage(teamID string, generation int64, publicKey, signingPublicKey, resetPublicKey []byte) []byte {
+	return signedMessage(resetDomain, teamID, generation, publicKey, signingPublicKey, resetPublicKey)
+}
+
+// ValidKey checks sizes and generation: generation 1 has no signature, a later one exactly one of a rotation (a holder of
+// the previous key) or a reset (the pinned reset key).
+func (k Key) ValidKey() bool {
+	signatures := 0
+	for _, signature := range [][]byte{k.RotationSignature, k.ResetSignature} {
+		if len(signature) != 0 {
+			signatures++
+			if len(signature) != ed25519.SignatureSize {
+				return false
+			}
+		}
+	}
+	return k.Generation >= 1 && len(k.PublicKey) == 32 && len(k.SigningPublicKey) == ed25519.PublicKeySize &&
+		(len(k.ResetPublicKey) == 0 || len(k.ResetPublicKey) == ed25519.PublicKeySize) && signatures == min(int(k.Generation-1), 1)
+}
+
+// VerifyRotation reports whether next is a valid successor of previous for team signed by previous's signing key.
 func VerifyRotation(teamID string, previous, next Key) bool {
-	return previous.ValidKey() && next.ValidKey() && next.Generation == previous.Generation+1 &&
-		ed25519.Verify(previous.SigningPublicKey, RotationMessage(teamID, next.Generation, next.PublicKey, next.SigningPublicKey), next.RotationSignature)
+	return previous.ValidKey() && next.ValidKey() && next.Generation == previous.Generation+1 && len(next.RotationSignature) != 0 &&
+		ed25519.Verify(previous.SigningPublicKey, RotationMessage(teamID, next.Generation, next.PublicKey, next.SigningPublicKey, next.ResetPublicKey), next.RotationSignature)
+}
+
+// VerifyReset reports whether next is a reset successor of previous: signed by the reset key previous carries (the team
+// owner's ENV writer key, pinned with generation 1), for when nobody holds previous's signing key. It is checked exactly
+// like a rotation by machines, so only that owner key can replace a key nobody holds.
+func VerifyReset(teamID string, previous, next Key) bool {
+	return previous.ValidKey() && next.ValidKey() && next.Generation == previous.Generation+1 && len(next.ResetSignature) != 0 &&
+		len(previous.ResetPublicKey) == ed25519.PublicKeySize &&
+		ed25519.Verify(previous.ResetPublicKey, ResetMessage(teamID, next.Generation, next.PublicKey, next.SigningPublicKey, next.ResetPublicKey), next.ResetSignature)
+}
+
+// VerifyLink is how a machine and the server accept one step of the chain: a rotation by a holder, or a reset by the owner.
+func VerifyLink(teamID string, previous, next Key) bool {
+	return VerifyRotation(teamID, previous, next) || VerifyReset(teamID, previous, next)
 }
 
 // A personal workspace (Free and Pro) records under the scope "personal:<account>" wherever a team's id would

@@ -1,0 +1,60 @@
+.nh
+.TH "PB-RECORDINGS-KEY-RESET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings-key-reset - Replace a recording key nobody holds any more; older recordings become unreadable
+
+
+.SH SYNOPSIS
+\fBpb recordings key reset [flags]\fP
+
+
+.SH DESCRIPTION
+Reset the team's recording key when nobody holds it any more.
+
+.PP
+Only the team owner can. The new key is made here and signed with your ENV vault's writer key, the identity the ENV team-vault reset uses; machines accept it only because that signature verifies under the key they pinned for the team, never because the server says so. Everyone who can replay gets a copy of the new key. Recordings made before cannot be opened by anyone, you included: use \fBpb recordings key replace\fR instead while any member still holds the key.
+
+.PP
+Needs an unlocked ENV vault (\fBpb env unlock\fR).
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	the team id, typed to confirm
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for reset
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--team\fP=""
+	team whose key to reset; defaults to the active workspace
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-recordings-key(1)\fP

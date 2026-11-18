@@ -220,7 +220,7 @@ func verifiedKey(policy wire.Policy, pinned *wire.Key) (*wire.Key, error) {
 		return nil, ErrKeyUnverified
 	}
 	for i := start + 1; i < len(keys); i++ {
-		if !wire.VerifyRotation(policy.TeamID, keys[i-1], keys[i]) {
+		if !wire.VerifyLink(policy.TeamID, keys[i-1], keys[i]) {
 			return nil, ErrKeyUnverified
 		}
 	}
