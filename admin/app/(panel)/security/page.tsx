@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { BreakGlass } from "@/components/breakglass"
 import { CopyReference } from "@/components/copy-reference"
 import { Page, Panel } from "@/components/page"
 import { RecoveryCodes } from "@/components/recovery-codes"
@@ -45,6 +46,9 @@ export default function SecurityPage() {
           <Button type="submit" size="lg" className="self-start" disabled={busy}>Replace recovery codes</Button>
         </form>
         {codes && <RecoveryCodes codes={codes} />}
+      </Panel>
+      <Panel title="Break glass">
+        <BreakGlass />
       </Panel>
     </Page>
   )
