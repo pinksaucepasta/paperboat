@@ -26,7 +26,8 @@ const sections: [string, string][] = [
 
 <Legal slug="terms" description="The agreement between you and Paperboat for the hosted service: accounts, plans, payment, fair use, suspension and liability." {sections}>
   <p slot="intro">
-    These terms are the agreement between you and <Fact name="name" /> (“Paperboat”, “we”) for using the hosted Paperboat service. They are
+    These terms are the agreement between you and Paperboat (“Paperboat”, “we”, “us”) for using the hosted Paperboat service. Paperboat is
+    operated by <Fact name="operators" /> until Paperboat, Inc., a Delaware C corporation, is formed (section 16). They are
     written to be read. Where a word matters legally, we say what we mean by it.
   </p>
 
@@ -286,6 +287,12 @@ const sections: [string, string][] = [
         <li>These terms, with the policies they name, are the whole agreement between you and us about the hosted service.</li>
         <li>If a part of them cannot be enforced, the rest still applies.</li>
         <li>If we do not enforce a right at once, we have not given it up.</li>
+        <li>
+          <strong>Operator and successor.</strong> Paperboat is operated by <Fact name="operators" />, who are together the party to these
+          terms, until Paperboat, Inc., a Delaware C corporation, is formed. When it is, these terms, the Data Processing Addendum, your account
+          and any subscription transfer automatically to Paperboat, Inc., which takes on all our rights and obligations under them from that day.
+          You agree to that transfer now; we tell you by email when it happens, and nothing else changes for you.
+        </li>
         <li>You may not transfer these terms without our agreement. We may transfer them to a company that takes over the service, and will tell you.</li>
         <li>Neither side is responsible for a delay or failure caused by events outside its reasonable control.</li>
         <li>We send notices by email to your account's address or in the console. You send notices to the address below.</li>
@@ -296,7 +303,7 @@ const sections: [string, string][] = [
   <section id="contact">
     <h2>17. Contact</h2>
     <div class="prose">
-      <p><Fact name="name" />, <Fact name="address" />. Email: <Fact name="legalEmail" />.</p>
+      <p>Paperboat, operated by <Fact name="operators" />. Postal address for legal notices: <Fact name="address" />. Email: <Fact name="legalEmail" />.</p>
       <p>Abuse: <a href="/report-abuse/">report it here</a>. Security vulnerabilities: see <a href="/security/#report">Security</a>.</p>
     </div>
   </section>

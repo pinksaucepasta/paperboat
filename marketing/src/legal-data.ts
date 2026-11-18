@@ -5,7 +5,7 @@
 export type Legal = { slug: string; title: string; short: string; updated: string }
 
 /** Date the current text of each page was written (ISO). Change it whenever the page's meaning changes. */
-const updated = "2026-11-18"
+const updated = "2026-11-19"
 
 export const legalPages: Legal[] = [
   { slug: "terms", title: "Terms of Service", short: "Terms", updated },
@@ -20,18 +20,18 @@ export const legalPage = (slug: string) => legalPages.find((page) => page.slug =
 
 /** Facts about the operating company. Only the company can supply these; never guess them. */
 export const company = {
-  name: "TODO-USER: legal entity name",
-  address: "TODO-USER: registered address",
-  /** The country whose law governs the Terms, e.g. "India". */
-  law: "TODO-USER: governing law",
-  /** The courts with jurisdiction, e.g. "the courts of Bengaluru, India". */
-  courts: "TODO-USER: courts / venue",
-  legalEmail: "TODO-USER: legal@ address",
-  privacyEmail: "TODO-USER: privacy@ address",
+  /** Until Paperboat, Inc. (a Delaware C corporation) is formed, these two individuals operate Paperboat (user decision 2026-11-19). */
+  /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) and India's E-Commerce Rules 2020 (rule 5(3)(a)) need the trader's legal name and postal address. */
+  operators: "Pujan Modha and Anvit Dadape",
+  /** Required only where consumer law needs a geographical address (Terms, Refund Policy); never a home address. */
+  address: "TODO-USER: postal address for legal notices (not a home address)",
+  law: "the State of California, United States, without regard to its conflict-of-law rules",
+  courts: "the state and federal courts located in California",
+  legalEmail: "legal@mail.paperboat.cloud",
+  privacyEmail: "privacy@mail.paperboat.cloud",
   /** India's Consumer Protection (E-Commerce) Rules 2020 require a named grievance officer. */
   grievanceOfficer: "TODO-USER: grievance officer name",
-  /** The date these terms take effect, e.g. "20 November 2026". */
-  effective: "TODO-USER: effective date",
+  effective: "14 November 2026",
 }
 
 /** True while any company fact is still missing: the pages are then drafts. */
