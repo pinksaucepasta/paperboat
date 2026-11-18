@@ -364,6 +364,25 @@ func TestRevokeStageRefusesEverySessionAndTokenExceptTheActingOperators(t *testi
 	hashed := sha256.Sum256([]byte(secret))
 	w.exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,created_at,expires_at) VALUES ($1,$2,'ci',$3,$4,$5)`, "bg_tok_"+w.sfx, user, hashed[:], past, future)
 	w.exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,created_at,expires_at) VALUES ($1,$1,$2,'r','x','toml','{}'::jsonb,sha256(convert_to($3,'UTF8')),$4,$5)`, "bg_rcp_"+w.sfx, user, "recipe"+w.sfx, past, future)
+	// A breach exposes unused enrollment tokens and unredeemed install material: both are cancelled, a token minted
+	// after the stage began is not, and an installed machine's pairing is left alone.
+	pairing := func(id, state, installation string, created time.Time, bootstrap, install bool) {
+		cols, vals := `id,state,installation_state,generation,expires_at,created_at,updated_at`, `$1,$2,$3,1,now()+interval '1 hour',$4,now()`
+		args := []any{id, state, installation, created}
+		if bootstrap {
+			cols += `,bootstrap_owner_account,operation_id,idempotency_key,bootstrap_token_hash,bootstrap_token_ciphertext`
+			vals += `,$5,'operation_'||$1,'idem_'||$1,sha256(convert_to($1,'UTF8')),'\x0102'::bytea`
+			args = append(args, user)
+		}
+		if install {
+			cols += `,verifier_hash,user_code,requested_alias,platform,architecture,workspace_root,public_identity_key,installation_config_ciphertext`
+			vals += `,sha256(convert_to($1,'UTF8')),upper(substr(md5($1),1,8)),'a','linux','amd64','/workspace',repeat(md5($1),2),'\x0102'::bytea`
+		}
+		w.exec(`INSERT INTO paperboat.user_machine_pairings(`+cols+`) VALUES (`+vals+`)`, args...)
+	}
+	pairing("bg_pair_token_"+w.sfx, "awaiting_bootstrap", "awaiting_bootstrap", past, true, false)
+	pairing("bg_pair_new_token_"+w.sfx, "awaiting_bootstrap", "awaiting_bootstrap", future.Add(time.Hour), true, false)
+	pairing("bg_pair_install_"+w.sfx, "pending", "awaiting_approval", past, false, true)
 	actingToken, otherToken := "acting-"+w.sfx, "other-"+w.sfx
 	for _, s := range []struct{ operator, token string }{{operator, actingToken}, {other, otherToken}} {
 		w.exec(`INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,created_at,expires_at) VALUES (sha256(convert_to($1,'UTF8')),$2,sha256('c'),$3,$4)`, s.token, s.operator, past, future)
@@ -397,6 +416,22 @@ func TestRevokeStageRefusesEverySessionAndTokenExceptTheActingOperators(t *testi
 	}
 	if n := count(`SELECT count(*) FROM paperboat.cli_access_tokens WHERE token_hash=$1 AND revoked_at IS NULL`, "bg_at_"+w.sfx) + count(`SELECT count(*) FROM paperboat.cli_refresh_tokens WHERE token_hash=$1 AND state<>'revoked'`, "bg_rt_"+w.sfx) + count(`SELECT count(*) FROM paperboat.recipes WHERE id=$1 AND revoked_at IS NULL`, "bg_rcp_"+w.sfx); n != 0 {
 		t.Fatalf("%d CLI tokens or recipes still live", n)
+	}
+	pairingState := func(id string) (token, install bool, state, installation string) {
+		t.Helper()
+		if err := w.store.SQL().QueryRowContext(context.Background(), `SELECT bootstrap_token_hash IS NOT NULL, installation_config_ciphertext IS NOT NULL, state, installation_state FROM paperboat.user_machine_pairings WHERE id=$1`, id).Scan(&token, &install, &state, &installation); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if token, _, _, installation := pairingState("bg_pair_token_" + w.sfx); token || installation != "deleted" {
+		t.Fatalf("the unused enrollment token must be cancelled: token=%v installation=%s", token, installation)
+	}
+	if _, install, state, _ := pairingState("bg_pair_install_" + w.sfx); install || state != "denied" {
+		t.Fatalf("unredeemed install material must be cancelled: material=%v state=%s", install, state)
+	}
+	if token, _, _, installation := pairingState("bg_pair_new_token_" + w.sfx); !token || installation != "awaiting_bootstrap" {
+		t.Fatalf("a token minted after the stage began must stay valid: token=%v installation=%s", token, installation)
 	}
 	if _, err := tokens.Authenticate(context.Background(), secret); !errors.Is(err, apitokens.ErrInvalid) {
 		t.Fatalf("the API token must be refused after the revoke stage: %v", err)
