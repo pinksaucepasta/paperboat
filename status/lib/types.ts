@@ -14,10 +14,8 @@ export interface Env {
   MAIL_ENDPOINT?: string
   MAIL_KEY?: string
   MAIL_FROM?: string
-  /** var: this Worker's own origin (confirm and unsubscribe links) */
+  /** var: the page's origin (the API is same-origin): confirm, unsubscribe and feed links */
   PUBLIC_ORIGIN?: string
-  /** var: the static page's origin: the one browser origin allowed to call the public endpoints, and the link in mail and feed */
-  PAGE_ORIGIN?: string
 }
 
 export interface UnitSpec { id: string; name?: string; vantages: string[]; slowMs: number }
@@ -31,7 +29,8 @@ export interface Incident {
   updates: { status: string; body: string; ts: number }[]
 }
 export interface Maintenance { id: string; title: string; body: string; components: string[]; starts: number; ends: number }
-export interface UptimeDay { day: string; up: number; degraded: number; down: number }
+/** Minutes of one day by state; delayed minutes are not measured, so they are neither up nor down. */
+export interface UptimeDay { day: string; up: number; degraded: number; down: number; delayed: number }
 export interface PublicComponent {
   id: string; name: string; note: string; state: Shown; since: number
   units: { id: string; name: string; state: State }[]
