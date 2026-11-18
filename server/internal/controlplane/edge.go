@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -62,6 +63,9 @@ type EdgeService struct {
 	fairUse                 config.FairUse
 	relayVolume             *bandwidthgate.Gate
 	workspaceGate           *bandwidthgate.Gate // whether a workspace used its included traffic (terminals)
+	relayCountsMu           sync.Mutex
+	relayCounts             map[string]int // relays carrying each account on more than one (relaysPerAccount)
+	relayCountsAt           time.Time
 	audit                   *audit.Writer
 	signer                  *mint.Provider
 	certificateDistribution http.Handler

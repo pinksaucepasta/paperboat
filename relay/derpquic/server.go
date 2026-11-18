@@ -68,7 +68,7 @@ type Server struct {
 	handoverTimer                                        *time.Timer
 	accounts                                             map[string]*budget
 	accountRate                                          float64            // bytes per second an account may use here
-	slowAccounts                                         map[string]float64 // accounts held to less, in bytes per second
+	accountSpeeds                                        map[string]float64 // accounts held to less, in bytes per second
 	connections                                          map[*quic.Conn]struct{}
 	wssConnections                                       map[*peerConn]struct{}
 	draining                                             bool
@@ -455,7 +455,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 				}
 			}
 		}
-		s.accounts[g.AccountID] = newBudget(s.rateForLocked(g.AccountID))
+		s.accounts[g.AccountID] = newBudgetBurst(s.rateForLocked(g.AccountID), accountBurst(s.rateForLocked(g.AccountID)))
 	}
 	return nil
 }
@@ -584,9 +584,10 @@ func (s *Server) SetAccountSpeed(mbit float64) error {
 	return nil
 }
 
-// SetSlowAccounts replaces the accounts held to a slower speed than the normal one (each with its Mbit/s; those that carried their
-// plan's included relay bytes this month); an empty set returns every account to the normal speed.
-func (s *Server) SetSlowAccounts(accounts map[string]float64) error {
+// SetAccountSpeeds replaces the accounts held to less than the normal speed (each with its Mbit/s here: the plan's slower speed once
+// the account carried the plan's included relay bytes this month, and its speed divided among the relays that carry it, so an account's
+// speed is one bucket across relays); an empty set returns every account to the normal speed.
+func (s *Server) SetAccountSpeeds(accounts map[string]float64) error {
 	if len(accounts) > MaxConnections {
 		return ErrProtocol
 	}
@@ -599,7 +600,7 @@ func (s *Server) SetSlowAccounts(accounts map[string]float64) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.slowAccounts = slow
+	s.accountSpeeds = slow
 	s.applyAccountRatesLocked()
 	return nil
 }
@@ -620,7 +621,7 @@ func speedBytes(mbit float64) float64 {
 }
 
 func (s *Server) rateForLocked(account string) float64 {
-	if slow, ok := s.slowAccounts[account]; ok {
+	if slow, ok := s.accountSpeeds[account]; ok {
 		return min(s.accountRate, slow)
 	}
 	return s.accountRate
@@ -628,7 +629,8 @@ func (s *Server) rateForLocked(account string) float64 {
 
 func (s *Server) applyAccountRatesLocked() {
 	for account, b := range s.accounts {
-		b.setRate(s.rateForLocked(account))
+		rate := s.rateForLocked(account)
+		b.setRate(rate, accountBurst(rate))
 	}
 }
 

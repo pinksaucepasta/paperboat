@@ -36,13 +36,16 @@ export const formatSpeed = (mbit: number) => (mbit < 1 ? `${Math.round(mbit * 10
 export function fairUse(billing: BillingWorkspace) {
   const ownEdges = Boolean(billing.limits?.publications.self_hosted)
   const relay = { mbit: billing.relay_mbit, included: billing.relay_included_bytes, slowMbit: billing.relay_slow_mbit }
-  if (ownEdges) return { ownEdges, relay, amount: 0, used: billing.usage_bytes, share: 0, throttled: false, mbit: 0, ends: undefined }
+  // A paid team's amounts are per seat, pooled in the team: "100 GB × 4 seats".
+  const seats = billing.allowance_seats ? { count: billing.allowance_seats, perSeat: billing.allowance_per_seat_bytes ?? 0 } : undefined
+  if (ownEdges) return { ownEdges, relay, seats, amount: 0, used: billing.usage_bytes, share: 0, throttled: false, mbit: 0, ends: undefined }
   if (billing.allowance_bytes === null) return undefined
   const amount = billing.allowance_bytes + billing.topup_bytes_purchased
   const used = billing.usage_bytes
   return {
     ownEdges,
     relay,
+    seats,
     amount,
     used,
     share: amount > 0 ? Math.min(1, used / amount) : 1,

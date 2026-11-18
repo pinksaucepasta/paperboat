@@ -14,7 +14,7 @@ var ErrBillingPolicyUnconfigured = errors.New("workspace accounting period is am
 
 func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Workspace) error {
 	at := time.Now().UTC()
-	policy, err := workspaceUsagePolicyTx(ctx, tx, w.ID, at)
+	policy, err := workspaceUsagePolicyTx(ctx, tx, w.ID, at, s.throttle.TeamPerSeatBytes)
 	if err != nil {
 		return err
 	}
@@ -22,11 +22,19 @@ func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Wo
 	if err != nil {
 		return err
 	}
+	if err = syncTeamIncludedTx(ctx, tx, w.ID, policy, &window); err != nil {
+		return err
+	}
 	w.AllowancePeriodStart = window.budget
 	w.AllowancePeriodEnd = policy.end
 	w.RelayMbit, w.RelayIncludedBytes, w.RelaySlowMbit = s.throttle.RelayMbit, s.throttle.RelayFreeIncludedBytes, s.throttle.RelayFreeSlowMbit
 	if window.paid {
 		w.RelayIncludedBytes, w.RelaySlowMbit = s.throttle.RelayIncludedBytes, s.throttle.RelaySlowMbit
+	}
+	if policy.seats > 0 {
+		// A paid team pools per seat: the allowances of both edges and relays are the per-seat amounts times its seats.
+		w.AllowanceSeats, w.AllowancePerSeatBytes = int(policy.seats), s.throttle.TeamPerSeatBytes
+		w.RelayIncludedBytes *= policy.seats
 	}
 	w.AllowanceBytes = nil
 	var allowance sql.NullInt64
@@ -96,12 +104,15 @@ func (s *WorkspaceService) workspaceBandwidthTx(ctx context.Context, tx *db.Tx, 
 	if tx == nil || workspaceID == "" || bytes < 0 {
 		return 0, false, ErrBillingPolicyUnconfigured
 	}
-	policy, err := workspaceUsagePolicyTx(ctx, tx, workspaceID, at)
+	policy, err := workspaceUsagePolicyTx(ctx, tx, workspaceID, at, s.throttle.TeamPerSeatBytes)
 	if err != nil {
 		return 0, false, err
 	}
 	window, err := usageWindowTx(ctx, tx, workspaceID, policy, at)
 	if err != nil {
+		return 0, false, err
+	}
+	if err = syncTeamIncludedTx(ctx, tx, workspaceID, policy, &window); err != nil {
 		return 0, false, err
 	}
 	var consumed int64

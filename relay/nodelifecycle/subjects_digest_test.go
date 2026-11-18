@@ -42,7 +42,7 @@ func TestObservationSendsSubjectsOnlyWhenTheSetChanged(t *testing.T) {
 			return
 		}
 		gen := in.Generation
-		out := Lease{AccountMbit: 10, SlowAccounts: []SlowAccount{{Account: "account_slow", Mbit: 0.512}}, NodeID: in.NodeID, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
+		out := Lease{AccountMbit: 10, AccountSpeeds: []AccountSpeed{{Account: "account_slow", Mbit: 0.512}}, NodeID: in.NodeID, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
 		mu.Lock()
 		if r.URL.Path == "/v1/relay/nodes/start" {
 			gen = in.Expected + 1
