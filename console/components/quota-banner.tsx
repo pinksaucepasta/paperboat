@@ -2,14 +2,14 @@
 
 import Link from "next/link"
 import { GaugeIcon } from "@phosphor-icons/react"
-import { allowanceWindow, billingQuery } from "@/lib/billing"
+import { allowanceWindow, billingQuery, formatSpeed } from "@/lib/billing"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { useTimeFormat } from "@/lib/use-time-format"
 
 /**
- * Shown on every page while this workspace's fair-use bandwidth is used up: public traffic through Paperboat's
- * edges runs slower until the period ends. Nothing is stopped; direct connections, relays and your own edges are
- * not affected. One sentence and what can be done about it.
+ * Shown on every page while this workspace's included public traffic is used up: speed through Paperboat's edges is
+ * reduced until the period ends. Nothing is cut off; direct connections, relays and your own edges are not
+ * affected. One sentence and what can be done about it.
  */
 export function QuotaBanner() {
   const workspace = useWorkspace()
@@ -28,11 +28,11 @@ export function QuotaBanner() {
       <GaugeIcon weight="fill" className="size-4 shrink-0 text-muted-foreground" />
       <p className="min-w-0 flex-1">
         <span className="font-medium">
-          {workspace.name} used its fair-use traffic. Public traffic is slowed to {data.throttle_mbit} Mbit/s
+          {workspace.name} used its included public traffic. Speed is reduced to {formatSpeed(data.throttle_mbit)}
           {end ? ` until ${time.date(end, "day")}` : ""}.
         </span>{" "}
         <span className="text-muted-foreground">
-          Nothing is stopped.{!canBuy && " Ask an owner or admin to add bandwidth."}
+          Never cut off, never billed extra.{!canBuy && " Ask an owner or admin to add bandwidth."}
         </span>
         {canBuy && (
           <span className="ml-3 inline-flex items-center gap-3">

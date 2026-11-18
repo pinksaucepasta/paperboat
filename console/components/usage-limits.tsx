@@ -22,7 +22,7 @@ import {
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
-import { allowanceWindow, billingQuery, fairUse, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
+import { allowanceWindow, billingQuery, fairUse, formatSpeed, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"
@@ -69,7 +69,7 @@ export function UsageLimits() {
   }
 
   return (
-    // Machines and the fair-use traffic first, then bandwidth across the other half.
+    // Machines and the included public traffic first, then bandwidth across the other half.
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card
         label="Machines"
@@ -80,7 +80,7 @@ export function UsageLimits() {
         {summary.data && <Machines summary={summary.data} />}
       </Card>
       <Card
-        label="Fair-use traffic"
+        label="Public traffic"
         loading={!workspace || billing.isPending}
         failed={billing.isError}
         skeleton={<AllowanceSkeleton />}
@@ -218,36 +218,33 @@ function Stat({
 }
 
 /**
- * Edge traffic (public previews, tunnels, browser terminals) is "Unlimited*": the fair-use amount and what is used
- * of it, and past it the slower speed with the date full speed returns. Direct, relay and self-hosted traffic are
- * not counted here.
+ * Public traffic through Paperboat's edges (previews, tunnels, browser terminals): the included amount and what is used of it, and
+ * past it the reduced speed with the date full speed returns. Direct, relay and self-hosted traffic are not counted here.
  */
 function Allowance({ billing }: { billing: BillingWorkspace }) {
   const fair = fairUse(billing)
   const time = useTimeFormat()
-  if (!fair) {
+  if (!fair || fair.ownEdges) {
     return (
       <div className="flex flex-1 flex-col gap-3">
         <span className="flex items-baseline gap-2">
-          <Figure>{formatBytes(billing.usage_bytes)}</Figure>
-          <span className="text-sm text-muted-foreground">used</span>
+          <Figure>{fair?.ownEdges ? "Unlimited" : formatBytes(billing.usage_bytes)}</Figure>
+          <span className="text-sm text-muted-foreground">{fair?.ownEdges ? "your own edges" : "used"}</span>
         </span>
-        <span className="mt-auto text-xs text-muted-foreground">No limit</span>
+        <span className="mt-auto text-xs text-muted-foreground">{fair?.ownEdges ? "Never counted or limited by Paperboat" : "No limit"}</span>
       </div>
     )
   }
   return (
     <div className="flex flex-1 flex-col gap-3" data-fair-use-card data-throttled={fair.throttled}>
       <span className="flex items-baseline gap-2">
-        <Figure>Unlimited*</Figure>
-        <span className="text-sm text-muted-foreground">
-          {fair.throttled ? `${fair.mbit} Mbit/s` : "full speed"}
-        </span>
+        <Figure>{formatBytes(fair.used)}</Figure>
+        <span className="text-sm text-muted-foreground">{fair.throttled ? `at ${formatSpeed(fair.mbit)}` : "full speed"}</span>
       </span>
       <div className="mt-auto flex flex-col gap-2.5">
         <div
           role="meter"
-          aria-label="Fair-use traffic used"
+          aria-label="Included public traffic used"
           aria-valuemin={0}
           aria-valuemax={fair.amount}
           aria-valuenow={Math.min(fair.used, fair.amount)}
@@ -256,7 +253,7 @@ function Allowance({ billing }: { billing: BillingWorkspace }) {
           <div className={fair.throttled ? "bg-muted-foreground" : "bg-primary"} style={{ width: `${fair.share * 100}%` }} />
         </div>
         <div className="flex items-center justify-between gap-3 whitespace-nowrap text-xs text-muted-foreground">
-          <span className="truncate tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)} fair use`}</span>
+          <span className="truncate tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)} included`}</span>
           {fair.ends && (
             <span className="shrink-0">
               {fair.throttled ? "Full speed" : "Resets"} {time.date(fair.ends, "day")}
