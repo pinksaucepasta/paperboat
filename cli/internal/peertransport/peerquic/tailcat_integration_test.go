@@ -144,12 +144,7 @@ func TestTailcatQUIC(t *testing.T) {
 		}
 		for peer, client := range clients {
 			t.Logf("round=%d peer=%d handshake", round, peer)
-			socket, err := client.Dial(ctx)
-			if err != nil {
-				cleanup()
-				t.Fatal(err)
-			}
-			outgoing, e := peerquic.DialPacket(ctx, &measuredTailcatPacket{Packet: socket, maximum: &maximum}, clientTLS, config)
+			outgoing, e := dialTailcatPeer(ctx, client, &maximum, clientTLS, config)
 			if e != nil {
 				cleanup()
 				t.Fatal(e)
@@ -375,4 +370,27 @@ func TestTailcatPacketContract(t *testing.T) {
 		t.Fatalf("capacity recovery: %v", e)
 	}
 	_ = p.Close()
+}
+
+// dialTailcatPeer opens a flow and dials QUIC on it, retrying on a fresh flow when the handshake goes silent for
+// the dial's one-second limit: right after the previous round closed, the first flight can meet a server that has
+// not admitted the new flow yet, and the retry that follows succeeds in milliseconds (SessionConfig.HandshakeTimeout;
+// the native owner redials the same way). A hosted Windows runner lost that first flight now and then (2026-11-17).
+func dialTailcatPeer(ctx context.Context, client *tailnet.UDPClient, maximum *atomic.Uint32, clientTLS *tls.Config, config peerquic.SessionConfig) (*peerquic.Session, error) {
+	var last error
+	for attempt := 0; attempt < 3 && ctx.Err() == nil; attempt++ {
+		socket, err := client.Dial(ctx)
+		if err != nil {
+			return nil, err
+		}
+		session, err := peerquic.DialPacket(ctx, &measuredTailcatPacket{Packet: socket, maximum: maximum}, clientTLS, config)
+		if err == nil {
+			return session, nil
+		}
+		last = err
+	}
+	if last == nil {
+		return nil, ctx.Err()
+	}
+	return nil, last
 }
