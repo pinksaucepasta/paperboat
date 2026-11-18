@@ -188,38 +188,3 @@ func TestBoundPairWithAWorkingPathRenewsOnTheIdleCadence(t *testing.T) {
 		t.Fatalf("a lost path renewed after %v, want before the relay observation ends", got)
 	}
 }
-
-// A workspace whose hosted relay allowance is used up gets no relay grants. Its engines in regional recovery renewed
-// every ~12 s (before the relays' fresh observations ended) for as long as that lasted, ~4 requests a minute per
-// engine; they back off like any engine with no usable relay instead.
-func TestRecoveryDoesNotRenewForObservationsOfRelaysTheWorkspaceMayNotUse(t *testing.T) {
-	a, c, signer, _ := networkTestAuthority(t)
-	now := time.Now()
-	c.IssuedAt = now.Unix()
-	c.ExpiresAt = c.IssuedAt + 3600
-	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
-	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
-		t.Fatal(err)
-	}
-	a.regional = &RegionalCandidates{IssuedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Hour).Unix(), Nodes: []RegionalNode{{
-		NodeID: "relay_denied", NodeGeneration: 1, ProcessEpoch: "epoch_denied", Region: "test", FailureDomain: "rack",
-		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
-		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,
-	}}}
-	a.mu.Lock()
-	a.relay.mu.Lock()
-	a.relay.recovery = a.newRegionalRecoveryLocked()
-	a.relay.recovery.peerID = c.Peers[0].Identity.EndpointID
-	a.relay.recovery.repair.Store(true)
-	a.relay.mu.Unlock()
-	a.mu.Unlock()
-	if got := a.nextRefresh(nil, 0, 0); got > 10*time.Second {
-		t.Fatalf("with usable relays recovery renews before the observations end, got %v", got)
-	}
-	a.setRelayDenial(&api.APIError{})
-	for range 20 {
-		if got := a.nextRefresh(nil, 0, 10); got < regionalUnusableRetryMaximum/2 {
-			t.Fatalf("a denied workspace renewed after %v, want about %v", got, regionalUnusableRetryMaximum)
-		}
-	}
-}

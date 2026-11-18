@@ -21,7 +21,7 @@ func (e *sshTargetNotReadyError) Error() string {
 // sshTargetHealth returns sshTargetNotReadyError when the daemon's snapshot reports the machine's SSH as
 // not ready with a health item, and nil otherwise (including when the daemon cannot be asked).
 func sshTargetHealth(ctx context.Context, machineID, alias string) error {
-	ctx, cancel := context.WithTimeout(ctx, relayDenialLookupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, daemonSnapshotLookupTimeout)
 	defer cancel()
 	snapshot, err := readDaemonSnapshot(ctx)
 	if err != nil {

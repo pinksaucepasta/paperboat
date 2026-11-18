@@ -32,10 +32,6 @@ type PeerNetworkConfigurationResult struct {
 	ConfigurationDelta *peernetwork.ConfigurationDelta `json:"configuration_delta"`
 	CandidateSet       string                          `json:"candidate_set"`
 	RelayGrants        []string                        `json:"relay_grants"`
-	// RelayDenied names why hosted relay grants were withheld ("bandwidth_quota_exhausted");
-	// BillingURL is the console page for adding bandwidth. Direct connections are unaffected.
-	RelayDenied string `json:"relay_denied"`
-	BillingURL  string `json:"billing_url"`
 }
 
 // PeerNetworkConfigurationRequest asks for the signed peer-network configuration. Endpoints are the engine's
@@ -58,15 +54,6 @@ type PeerNetworkConfigurationRequest struct {
 
 // PeerNetworkAuthorityUntilRevoked is the authority this client asks for.
 const PeerNetworkAuthorityUntilRevoked = "until_revoked_v1"
-
-// RelayDenial is the typed error for a refresh that withheld hosted relays, or nil.
-func (r PeerNetworkConfigurationResult) RelayDenial() *APIError {
-	if r.RelayDenied != "bandwidth_quota_exhausted" {
-		return nil
-	}
-	details := map[string]any{"billing_url": r.BillingURL}
-	return &APIError{Status: http.StatusConflict, Code: r.RelayDenied, Message: apiErrorMessageFor(r.RelayDenied, http.StatusConflict, details), Details: details}
-}
 
 const MaxAdmittedNetworkScopes = peernetwork.MaxAdmittedScopes
 

@@ -576,7 +576,7 @@ const envNeedsOnlineMessage = "ENV needs Paperboat online: this computer has no 
 
 // paperboatUnreachable asks the local daemon whether the control plane is unavailable.
 func paperboatUnreachable(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, relayDenialLookupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, daemonSnapshotLookupTimeout)
 	defer cancel()
 	snapshot, err := readDaemonSnapshot(ctx)
 	if err != nil {

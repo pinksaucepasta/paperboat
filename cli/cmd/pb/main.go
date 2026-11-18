@@ -55,7 +55,6 @@ func mainExit() (exitCode int) {
 		defer close(signalDone)
 		select {
 		case <-interrupts:
-			userInterrupted.Store(true)
 			cancel()
 		case <-ctx.Done():
 		}
@@ -193,7 +192,6 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 		outcome = "success"
 		return 0
 	}
-	err = planLimitRefusal(preferenceContext, err)
 	failure := classifyCommandFailure(err)
 	switch failure.kind {
 	case commandCanceled, commandInteractiveCanceled:

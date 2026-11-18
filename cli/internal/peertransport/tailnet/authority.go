@@ -121,7 +121,6 @@ type Authority struct {
 	closed       bool
 	expired      bool
 	lastVerified time.Time
-	relayDenied  *api.APIError
 	done         chan struct{}
 	server       *UDPServer
 	clientEngine *mesh.Server
@@ -390,20 +389,6 @@ func (a *Authority) PrepareKey(rotate bool) (string, uint64, error) {
 }
 func (a *Authority) state(update func(*config.PeerNetworkState) error) error {
 	return a.options.Store.UpdatePeerNetworkState(a.options.Issuer, a.options.Self.AccountID, a.options.Self.EndpointID, update)
-}
-
-// RelayDenial reports why the latest refresh withheld hosted relay grants (the workspace
-// allowance is used up), or nil. Direct connections keep working; only relayed paths stop.
-func (a *Authority) RelayDenial() *api.APIError {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.relayDenied
-}
-
-func (a *Authority) setRelayDenial(denial *api.APIError) {
-	a.mu.Lock()
-	a.relayDenied = denial
-	a.mu.Unlock()
 }
 
 // Apply validates and persists authority before changing traffic admission.

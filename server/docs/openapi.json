@@ -19041,8 +19041,7 @@
             "type": "string",
             "enum": [
               "no_eligible_path",
-              "destination_offline",
-              "relay_quota_exhausted"
+              "destination_offline"
             ]
           },
           "total_bytes": {
@@ -59557,8 +59556,7 @@
                     "type": "string",
                     "enum": [
                       "no_eligible_path",
-                      "destination_offline",
-                      "relay_quota_exhausted"
+                      "destination_offline"
                     ]
                   },
                   "committed_bytes": {

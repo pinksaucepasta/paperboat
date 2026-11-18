@@ -27,7 +27,6 @@ export const transferModes: Record<TransferMode, { label: string; detail: string
 export const pauseReasons: Record<string, string> = {
   no_eligible_path: "These machines can’t connect directly and you have no relay of your own.",
   destination_offline: "The receiving machine is offline.",
-  relay_quota_exhausted: "This workspace’s hosted bandwidth is used up.",
 }
 
 type Preferences = Schemas["AccountPreferences"]

@@ -789,20 +789,6 @@ func (r *cliNativeRuntime) Close() error {
 	return errors.Join(result)
 }
 
-// RelayDenial is the plan-limit refusal of the latest network refresh, or nil.
-func (t *PeerTerminalTunnel) RelayDenial() *api.APIError {
-	if t == nil {
-		return nil
-	}
-	t.nativeMu.Lock()
-	runtime := t.nativeRuntime
-	t.nativeMu.Unlock()
-	if runtime == nil || runtime.authority == nil {
-		return nil
-	}
-	return runtime.authority.RelayDenial()
-}
-
 // NativeTransport is what the daemon's native runtime knows about its paths (F21-06): the path to each
 // machine with an active native connection (direct, peer_relay or regional_relay, by machine ID) and the
 // regional relay selection with the reason and probe failures of its last change. Zero when no native
