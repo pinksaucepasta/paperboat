@@ -102,6 +102,10 @@ type Config struct {
 	PickupThreshold float64
 	PickupTimeout   time.Duration
 	OnlineWindow    time.Duration
+	// MintDrain is how long after the run starts the old mint keys are withdrawn: every credential a machine holds
+	// was signed before the new key became active, and lives at most one hour (helper identity, machine control), so
+	// withdrawing sooner makes machines refuse their own credentials until they renew. Zero withdraws at once.
+	MintDrain time.Duration
 	// Batch bounds the rows one step touches.
 	Batch int
 	Now   func() time.Time
@@ -118,6 +122,9 @@ func New(cfg Config) (*Service, error) {
 	}
 	if !secrets.ValidRing(cfg.EncryptionKey) {
 		return nil, errors.New("break-glass: the encryption key ring has an empty key")
+	}
+	if cfg.MintDrain < 0 {
+		return nil, errors.New("break-glass: the mint drain cannot be negative")
 	}
 	if cfg.PickupThreshold <= 0 || cfg.PickupThreshold > 1 || cfg.PickupTimeout <= 0 || cfg.OnlineWindow <= 0 || cfg.Batch <= 0 {
 		return nil, errors.New("break-glass pickup and batch settings must be positive")
@@ -150,6 +157,7 @@ type Preview struct {
 	MintActive          string         `json:"mint_active_key"`
 	MintKeys            []string       `json:"mint_keys_published"`
 	MintToWithdraw      []string       `json:"mint_keys_to_withdraw"`
+	MintDrainMinutes    int            `json:"mint_withdraw_after_minutes"`
 	EncryptionKeys      []string       `json:"encryption_key_ids"`
 	SessionKeys         []string       `json:"session_key_ids"`
 	FloorNow            string         `json:"client_update_floor_now"`
@@ -214,6 +222,7 @@ func (s *Service) keyChecks(ctx context.Context, p Preview) (Preview, error) {
 	var published []string
 	p.MintActive, published = s.cfg.Mint.KeyIDs()
 	p.MintKeys, p.MintToWithdraw, p.SessionKeys = published, []string{}, []string{}
+	p.MintDrainMinutes = int(s.cfg.MintDrain / time.Minute)
 	for _, id := range published {
 		if id != p.MintActive {
 			p.MintToWithdraw = append(p.MintToWithdraw, id)
