@@ -7,7 +7,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "test": "node --test test/*.test.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit && tsc --noEmit -p src"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.3.0",
