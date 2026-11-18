@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { ListPager } from "@/components/list-pager"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AnnouncementLink } from "@/components/announcement-banner"
 import { useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
@@ -84,13 +85,15 @@ function RequestList({
   const kind = kinds.find((entry) => entry.id === chosen)?.id ?? kinds[0]?.id
   if (!kind) {
     return (
-      <div className="flex flex-col items-center gap-1 px-4 py-6 text-center">
-        <BellIcon className="size-6 text-muted-foreground" />
-        <p className="font-medium">Nothing waiting</p>
-        <p className="text-muted-foreground">
-          Files teammates send you, team invitations, machine requests and news from Paperboat show up here.
-        </p>
-      </div>
+      <Empty className="py-16">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <BellIcon />
+          </EmptyMedia>
+          <EmptyTitle>Nothing waiting</EmptyTitle>
+          <EmptyDescription>Requests and news from Paperboat show up here.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
   // Answering the last row of the last page leaves that page empty: show the one before it.
