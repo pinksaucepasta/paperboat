@@ -249,6 +249,25 @@ var policies = []policy{
 		count(func(c config.Retention) int { return c.SupportReportsPerAccount })},
 }
 
+// deletedTeamTables hold what a deleted team had: people, invitations, settings, audit destinations and credentials.
+// team_members' and team_resource_bindings' dependents (grants, terminal and machine grants, ENV vault members) and a
+// config default's adoptions cascade with them. The teams row, billing records and everything with its own window stay
+// (retention_postgres_test lists every table with a team_id and says which).
+var deletedTeamTables = []string{
+	"team_members", "team_resource_bindings", "team_invitations", "team_config_defaults", "team_network_preferences",
+	"team_receipt_smtp", "team_machine_requests", "team_jit_requests", "team_sso_domains", "team_identity_state",
+	"team_directory_group_roles", "terminal_browser_access_policies", "browser_viewer_policies", "audit_stream_destinations",
+	"team_buckets", "workspace_policies",
+}
+
+func init() {
+	for _, table := range deletedTeamTables {
+		policies = append(policies, policy{"deleted_team_" + table,
+			batchOf(table, `team_id IN (SELECT team_id FROM paperboat.teams WHERE deleted_at < now()-make_interval(secs=>$2))`),
+			seconds(func(c config.Retention) time.Duration { return c.DeletedTeams })})
+	}
+}
+
 // Result is the rows one pass deleted, per policy.
 type Result map[string]int64
 
