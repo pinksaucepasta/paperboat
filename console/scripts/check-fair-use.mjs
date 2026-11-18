@@ -22,7 +22,7 @@ const billing = () => {
     relay_mbit: 10, relay_included_bytes: 100 * GB, relay_slow_mbit: 1,
     topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], granted: false, throttled: state === "throttled", throttle_lifted: false, throttle_mbit: 1,
     limits: state === "own"
-      ? { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: null, self_hosted: true }, browser_terminals: { used: 0, limit: null, self_hosted: true }, public_tcp: { used: 0, limit: null, self_hosted: true } }
+      ? { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: null, self_hosted: true }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: null, self_hosted: true } }
       : { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: 100 }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: 1 } },
   }
 }
