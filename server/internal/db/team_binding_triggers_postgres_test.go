@@ -10,10 +10,22 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
-// Deleting a team at its plan ceiling (12,001 bindings) ran three row-level triggers once per binding: 5.4 s unloaded,
-// holding locks (migration 416). They now run once per statement. This fills a team to that size with real access
-// sessions to revoke, times the bulk delete, and checks that no trigger on the table fires per row on a delete.
-func TestCeilingSizedTeamBindingDeleteRunsStatementTriggersOnPostgres(t *testing.T) {
+// ceilingTeam is a team at its plan ceiling: 20 machine bindings among 12,001 bindings (2,000 ended terminal sessions,
+// 9,981 previews), and a session of the team for each machine, none granted, so any change of the team's bindings
+// revokes them.
+type ceilingTeam struct {
+	t           *testing.T
+	ctx         context.Context
+	store       *DB
+	user, team  string
+	exec        func(query string, args ...any)
+	value       func(query string, args ...any) int64
+	addSessions func(round string)
+	revoked     func() int64
+}
+
+func newCeilingTeam(t *testing.T) ceilingTeam {
+	t.Helper()
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("requires isolated PostgreSQL")
@@ -22,7 +34,7 @@ func TestCeilingSizedTeamBindingDeleteRunsStatementTriggersOnPostgres(t *testing
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	t.Cleanup(cancel)
 	store, err := Open(config.Database{Driver: "postgres", DSN: dsn})
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +100,15 @@ SELECT 'external_issuer','session_'||$4||$1||g,$1||'_m_'||g,$1,$1||'_env_'||g,$2
 		return value(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND state='revoked' AND revocation_reason='machine_permission_revoked'`, user)
 	}
 	addSessions("u")
+	return ceilingTeam{t: t, ctx: ctx, store: store, user: user, team: team, exec: exec, value: value, addSessions: addSessions, revoked: revoked}
+}
+
+// Deleting a team at its plan ceiling (12,001 bindings) ran three row-level triggers once per binding: 5.4 s unloaded,
+// holding locks (migration 416). They now run once per statement. This fills a team to that size with real access
+// sessions to revoke, times the bulk delete, and checks that no trigger on the table fires per row on a delete.
+func TestCeilingSizedTeamBindingDeleteRunsStatementTriggersOnPostgres(t *testing.T) {
+	c := newCeilingTeam(t)
+	ctx, store, user, team, exec, value, addSessions, revoked := c.ctx, c.store, c.user, c.team, c.exec, c.value, c.addSessions, c.revoked
 	if n := value(`SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$1`, team); n != 12001 {
 		t.Fatalf("bindings = %d", n)
 	}
@@ -122,5 +143,33 @@ WHERE tgrelid='paperboat.team_resource_bindings'::regclass AND NOT tgisinternal 
 	}
 	if perRow != 0 {
 		t.Fatalf("%d row-level triggers fire on a team_resource_bindings delete; they must be statement-level", perRow)
+	}
+}
+
+// What production runs is not a delete: DeleteTeamTx and RemoveMemberTx deactivate bindings with one UPDATE
+// (active=false) over the team's, or the member's, rows (teams/lifecycle.go revokeDepartingResourcesTx). At the plan
+// ceiling that statement must stay fast and still revoke the sessions it invalidates.
+func TestCeilingSizedTeamDeactivationRunsStatementTriggersOnPostgres(t *testing.T) {
+	c := newCeilingTeam(t)
+	const departing = `UPDATE paperboat.team_resource_bindings b SET active=false,generation=b.generation+1
+WHERE b.team_id=$1 AND b.active AND ($2='' OR (b.owner_account=$2 AND b.resource_kind<>'env'
+AND NOT (b.resource_kind='machine' AND EXISTS(SELECT 1 FROM paperboat.user_machines m WHERE m.id=b.resource_id AND m.owner_team_id=$1))))`
+	for i, step := range []struct{ name, account string }{{"member removal", c.user}, {"team deletion", ""}} {
+		if i > 0 { // the first step revokes the fixture's own sessions
+			c.addSessions(step.name)
+		}
+		before := c.revoked()
+		started := time.Now()
+		c.exec(departing, c.team, step.account)
+		elapsed := time.Since(started)
+		t.Logf("%s: deactivated %d bindings in %v", step.name, c.value(`SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$1 AND NOT active`, c.team), elapsed)
+		if got := c.revoked() - before; got != 20 {
+			t.Fatalf("%s revoked %d sessions, want 20", step.name, got)
+		}
+		if elapsed > time.Second {
+			t.Fatalf("%s at the plan ceiling took %v", step.name, elapsed)
+		}
+		// Back to active for the next step.
+		c.exec(`UPDATE paperboat.team_resource_bindings SET active=true WHERE team_id=$1 AND resource_kind<>'terminal_session'`, c.team)
 	}
 }
