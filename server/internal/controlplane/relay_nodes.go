@@ -369,7 +369,7 @@ const maxRelayObservationDocument = 16 << 20
 
 func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeObservation
-	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) {
+	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) || s.refuseBelowFloor(w, r, "relay", in.Metrics) {
 		return
 	}
 	out, err := s.ObserveRelayNode(r.Context(), in)

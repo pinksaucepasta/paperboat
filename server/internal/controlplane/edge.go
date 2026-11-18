@@ -49,6 +49,7 @@ var (
 )
 
 type EdgeService struct {
+	updateFloors            map[string]NodeUpdateFloor
 	nodeCredentials         nodeauth.Resolver
 	store                   *db.DB
 	credential              string
@@ -795,6 +796,9 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Metrics = usableMetrics(r.Context(), input.NodeID, input.Metrics)
+	if s.refuseBelowFloor(w, r, "edge", input.Metrics) {
+		return
+	}
 	if err := s.Heartbeat(r.Context(), input); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			// 409 is the re-register directive: every released edge registers again on it, then retries the

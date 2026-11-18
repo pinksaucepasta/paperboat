@@ -17,6 +17,42 @@ type ClientUpdatePolicyAPI interface {
 	Put(context.Context, string, string, string, clientupdate.Input) (clientupdate.Policy, error)
 }
 
+// componentUpdatePolicy serves the floor named by ?component= (pb when absent): pb, pbh, edge or relay.
+func componentUpdatePolicy(opts Options, handler func(ClientUpdatePolicyAPI) http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		policy := opts.ClientUpdatePolicy
+		if component := r.URL.Query().Get("component"); component != "" && component != "pb" {
+			policy = opts.NodeUpdatePolicies[component]
+		}
+		if policy == nil {
+			writeError(w, r, http.StatusBadRequest, "validation_failed", "component must be pb, pbh, edge or relay.")
+			return
+		}
+		handler(policy)(w, r)
+	}
+}
+
+// adminClientUpdatePolicyGet adds the newest published release, so admin can flag outdated nodes. The public
+// GET keeps its released shape.
+func adminClientUpdatePolicyGet(s ClientUpdatePolicyAPI) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		p, e := s.Get(r.Context())
+		if e != nil {
+			writeError(w, r, 503, "client_update_policy_unavailable", "Client update policy is temporarily unavailable.", e)
+			return
+		}
+		out := struct {
+			clientupdate.Policy
+			LatestVersion string `json:"latest_version,omitempty"`
+		}{Policy: p}
+		if latest, ok := s.(interface{ Latest() (string, error) }); ok {
+			out.LatestVersion, _ = latest.Latest()
+		}
+		writeJSON(w, 200, SuccessResponse{Data: out})
+	}
+}
+
 func clientUpdatePolicyGet(s ClientUpdatePolicyAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -61,7 +97,7 @@ func clientUpdatePolicyPut(s ClientUpdatePolicyAPI) http.HandlerFunc {
 		out, e := s.Put(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), r.Header.Get("Operator-Reason"), input)
 		switch {
 		case expectedHTTPErrorOnly(e, clientupdate.ErrFloorUnavailable):
-			writeError(w, r, 400, "validation_failed", "The requested global floor is not available on all published platforms. Publish a candidate at or above this version for every supported platform before setting the floor.")
+			writeError(w, r, 400, "validation_failed", "The requested floor is newer than the release published for every platform of this component. Publish a release at or above this version first.")
 			return
 		case expectedHTTPErrorOnly(e, clientupdate.ErrInvalid):
 			writeError(w, r, 400, "validation_failed", "Use a valid date version available on every published platform, a reason of at most 256 bytes, and an expected revision. Clearing requires an empty reason and no enforcement date.")
