@@ -32,6 +32,11 @@ func browserLoginFixture(t *testing.T, issuer string) (string, config.ProfileSto
 	t.Helper()
 	dir := t.TempDir()
 	isolateCommandCredentialLocation(t, dir)
+	// Login asks this computer's own daemon whether it still awaits enrollment, and answers a new approval if so. On a
+	// development host with a paired-but-unenrolled daemon that made these tests fail while CI, with no daemon, passed.
+	oldAwaiting := loginDaemonAwaitingEnrollment
+	loginDaemonAwaitingEnrollment = func(context.Context) bool { return false }
+	t.Cleanup(func() { loginDaemonAwaitingEnrollment = oldAwaiting })
 	path := filepath.Join(dir, "config.json")
 	c, e := config.Load(path)
 	if e != nil {
