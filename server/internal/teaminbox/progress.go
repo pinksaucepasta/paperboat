@@ -18,7 +18,7 @@ type Progress struct {
 var (
 	transferModes  = map[string]bool{"automatic": true, "unlimited": true}
 	transferStates = map[string]bool{"sending": true, "paused": true, "done": true, "failed": true}
-	pauseReasons   = map[string]bool{"no_eligible_path": true, "destination_offline": true, "relay_quota_exhausted": true}
+	pauseReasons   = map[string]bool{"no_eligible_path": true, "destination_offline": true}
 )
 
 const progressMinInterval = time.Second

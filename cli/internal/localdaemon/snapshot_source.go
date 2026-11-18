@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/networkmonitor"
@@ -27,7 +26,6 @@ import (
 // It embeds the inventory so the local API still finds its refresh method.
 type snapshotSource struct {
 	*Inventory
-	denial    func() *api.APIError
 	transport func() tunnel.NativeTransport
 	network   *networkStatus
 	steps     *health.Registry
@@ -108,17 +106,8 @@ func (s snapshotSource) decorate(snapshot localapi.Snapshot) localapi.Snapshot {
 		hideBehindNetworkDown(&snapshot)
 	}
 	applySteps(&snapshot, s.steps)
-	if s.denial == nil {
-		return snapshot
-	}
-	if denial := s.denial(); denial != nil && denial.Code == localapi.RelayQuotaCode {
-		snapshot.Health = append(snapshot.Health, localapi.HealthItem{Code: localapi.RelayQuotaCode, Severity: "warning", Title: denial.Message, Recovery: RelayQuotaRecovery, ETag: localapi.RelayQuotaCode})
-	}
 	return snapshot
 }
-
-// RelayQuotaRecovery is the action for an exhausted hosted relay allowance.
-const RelayQuotaRecovery = "Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period. Direct connections keep working."
 
 // RelayFailoverCode is the health item for a regional relay failover or an unusable relay.
 const RelayFailoverCode = "relay_failover"

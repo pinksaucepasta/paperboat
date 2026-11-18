@@ -34,12 +34,11 @@ type UsageReport struct {
 }
 
 type UsageReceipt struct {
-	QuotaExhausted bool
-	Disposition    string
-	OperationID    string
-	DeltaBytes     int64
-	ObservedBytes  int64
-	Duplicate      bool
+	Disposition   string
+	OperationID   string
+	DeltaBytes    int64
+	ObservedBytes int64
+	Duplicate     bool
 }
 
 type ScopedBandwidthDebiter interface {
@@ -77,7 +76,7 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 			if !sameUsageReport(existing, report) {
 				return ErrUsageOperationConflict
 			}
-			result = UsageReceipt{QuotaExhausted: existing.QuotaExhausted, Disposition: existing.Disposition, OperationID: report.OperationID, DeltaBytes: existing.DeltaBytes, ObservedBytes: existing.ObservedBytes, Duplicate: true}
+			result = UsageReceipt{Disposition: existing.Disposition, OperationID: report.OperationID, DeltaBytes: existing.DeltaBytes, ObservedBytes: existing.ObservedBytes, Duplicate: true}
 			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -120,13 +119,12 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8) ON CONFLICT (edge_node_id, counter_epoch, env
 				if !sameUsageReport(stored, report) {
 					return ErrUsageOperationConflict
 				}
-				result = UsageReceipt{QuotaExhausted: stored.QuotaExhausted, Disposition: stored.Disposition, OperationID: report.OperationID, DeltaBytes: stored.DeltaBytes, ObservedBytes: stored.ObservedBytes, Duplicate: true}
+				result = UsageReceipt{Disposition: stored.Disposition, OperationID: report.OperationID, DeltaBytes: stored.DeltaBytes, ObservedBytes: stored.ObservedBytes, Duplicate: true}
 				return nil
 			}
 			return fmt.Errorf("persist usage receipt: %w", err)
 		}
 		disposition := "accounted"
-		quotaExhausted := false
 		if scoped != nil && now.Sub(report.IntervalEnd) > accountingauthority.DeliveryWindow {
 			disposition = "expired_not_billed"
 			if _, err := tx.Exec(ctx, `UPDATE control_usage_receipts SET disposition=$2 WHERE operation_id=$1`, report.OperationID, disposition); err != nil {
@@ -148,12 +146,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8) ON CONFLICT (edge_node_id, counter_epoch, env
 				return err
 			}
 			if delta > 0 {
-				_, exhausted, err := scoped.DebitWorkspaceBandwidthTx(ctx, tx, workspace, delta, report.IntervalEnd)
-				if err != nil {
-					return err
-				}
-				quotaExhausted = exhausted
-				if _, err = tx.Exec(ctx, `UPDATE control_usage_receipts SET quota_exhausted=$2 WHERE operation_id=$1`, report.OperationID, exhausted); err != nil {
+				if _, _, err := scoped.DebitWorkspaceBandwidthTx(ctx, tx, workspace, delta, report.IntervalEnd); err != nil {
 					return err
 				}
 			}
@@ -174,7 +167,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8) ON CONFLICT (edge_node_id, counter_epoch, env
 		if _, err := tx.Exec(ctx, `SELECT paperboat.project_edge_bandwidth($1)`, report.OperationID); err != nil {
 			return fmt.Errorf("record resource bandwidth: %w", err)
 		}
-		result = UsageReceipt{QuotaExhausted: quotaExhausted, Disposition: disposition, OperationID: report.OperationID, DeltaBytes: delta, ObservedBytes: report.Bytes}
+		result = UsageReceipt{Disposition: disposition, OperationID: report.OperationID, DeltaBytes: delta, ObservedBytes: report.Bytes}
 		return nil
 	})
 	if err == nil {
@@ -198,7 +191,7 @@ func validateUsageReport(r UsageReport) error {
 	return nil
 }
 
-func sameUsageReport(existing dbsqlc.ControlUsageReceipt, r UsageReport) bool {
+func sameUsageReport(existing dbsqlc.GetControlUsageReceiptRow, r UsageReport) bool {
 	return existing.AuthorityID == r.AuthorityID && existing.EdgeNodeID == r.EdgeNodeID && existing.CounterEpoch == r.CounterEpoch &&
 		existing.EnvironmentID == r.EnvironmentID && existing.RouteID == r.RouteID &&
 		existing.RouteRevision == r.RouteRevision && existing.Direction == r.Direction &&

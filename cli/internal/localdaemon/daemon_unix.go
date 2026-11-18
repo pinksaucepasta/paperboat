@@ -37,7 +37,6 @@ type DaemonConfig struct {
 	ProbePeer        func(context.Context, localapi.Peer, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error)
 	InspectorRequest func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
 	RelayInventory   func(context.Context) (localapi.RelayInventory, error)
-	RelayDenial      func() *api.APIError
 	// NativeTransport reports the native runtime's paths and relay status for pb status (F21-06).
 	NativeTransport         func() tunnel.NativeTransport
 	InvalidatePeerAuthority func(string)
@@ -172,7 +171,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		return err
 	}
 	defer stopNetwork()
-	source := snapshotSource{Inventory: inventory, denial: config.RelayDenial, transport: config.NativeTransport, network: network, steps: config.Steps}
+	source := snapshotSource{Inventory: inventory, transport: config.NativeTransport, network: network, steps: config.Steps}
 	diagnosticAPI.snapshots = source
 	vaultCustody := localapi.NewVaultCustodyStore()
 	defer func() { runErr = daemonCleanupFailure(runErr, vaultCustody.Close()) }()
