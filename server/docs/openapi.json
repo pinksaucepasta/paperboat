@@ -9940,7 +9940,10 @@
           "granted",
           "throttled",
           "throttle_lifted",
-          "throttle_mbit"
+          "throttle_mbit",
+          "relay_mbit",
+          "relay_included_bytes",
+          "relay_slow_mbit"
         ],
         "properties": {
           "limits": {
@@ -10245,6 +10248,19 @@
           "throttle_mbit": {
             "type": "number",
             "description": "The speed in Mbit/s a throttled workspace's edge traffic runs at."
+          },
+          "relay_mbit": {
+            "type": "number",
+            "description": "The speed in Mbit/s of one account on a Paperboat relay. Relays are never cut off and do not count against the edge allowance."
+          },
+          "relay_included_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Relayed bytes an account carries a month at relay_mbit before relay_slow_mbit applies (the plan's tier)."
+          },
+          "relay_slow_mbit": {
+            "type": "number",
+            "description": "The speed in Mbit/s of an account on a Paperboat relay after relay_included_bytes in the month."
           },
           "seats_granted": {
             "type": "integer",

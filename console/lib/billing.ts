@@ -35,12 +35,14 @@ export const formatSpeed = (mbit: number) => (mbit < 1 ? `${Math.round(mbit * 10
  */
 export function fairUse(billing: BillingWorkspace) {
   const ownEdges = Boolean(billing.limits?.publications.self_hosted)
-  if (ownEdges) return { ownEdges, amount: 0, used: billing.usage_bytes, share: 0, throttled: false, mbit: 0, ends: undefined }
+  const relay = { mbit: billing.relay_mbit, included: billing.relay_included_bytes, slowMbit: billing.relay_slow_mbit }
+  if (ownEdges) return { ownEdges, relay, amount: 0, used: billing.usage_bytes, share: 0, throttled: false, mbit: 0, ends: undefined }
   if (billing.allowance_bytes === null) return undefined
   const amount = billing.allowance_bytes + billing.topup_bytes_purchased
   const used = billing.usage_bytes
   return {
     ownEdges,
+    relay,
     amount,
     used,
     share: amount > 0 ? Math.min(1, used / amount) : 1,
