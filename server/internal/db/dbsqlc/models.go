@@ -1972,6 +1972,13 @@ type OperatorInfrastructureOperation struct {
 	CreatedAt      time.Time
 }
 
+type OperatorInvitation struct {
+	OperatorID string
+	TokenHash  []byte
+	ExpiresAt  time.Time
+	CreatedAt  time.Time
+}
+
 type OperatorRecoveryCode struct {
 	OperatorID string
 	CodeHash   []byte

@@ -323,7 +323,9 @@ func (s *fakeSource) Close() error {
 
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	// The poll returns the moment the condition holds, so a long bound costs nothing; a loaded macOS runner under
+	// -race took over a second to run the controller goroutine (2026-11-18).
+	deadline := time.Now().Add(10 * time.Second)
 	for !condition() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
