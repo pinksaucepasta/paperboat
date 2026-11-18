@@ -35,8 +35,10 @@ type regionalRelay struct {
 
 // regionalDisagreement bounds how long regional status may lag the relay that carries the session. The handshake
 // reaches the server on b as soon as it probes there; recovery reports b only once its probes to the candidates the
-// server does not hold have timed out (regionalProbeTimeout, 5 s). One second covers the exchange that follows.
-const regionalDisagreement = 6 * time.Second
+// server does not hold have timed out (regionalProbeTimeout, 5 s) and the exchange that follows has run. That
+// exchange is a second QUIC round trip through two relays, which a hosted Windows runner delayed past a one second
+// margin in several runs (2026-11-17); four seconds still catches a status that never agrees.
+const regionalDisagreement = 9 * time.Second
 
 func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false) }
 
