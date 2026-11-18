@@ -164,7 +164,8 @@ details.incident > summary::-webkit-details-marker { display: none; }
 .dialog-close-row { display: flex; justify-content: flex-end; margin: -8px -8px 0 0; }
 .icon-btn { width: 44px; height: 44px; font-size: 1.5rem; color: var(--fog); border-radius: var(--radius); }
 .icon-btn:hover { background: var(--surface); }
-.sub-form { display: grid; gap: var(--s2); margin-top: var(--s5); }
+.sub-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s2); margin-top: var(--s4); }
+.sub-row, .sub-feed { min-width: 0; }
 .sub-form label, .sub-feed-label { font-size: var(--text-small); font-weight: 500; color: var(--ink); }
 .sub-row, .sub-feed { display: flex; gap: var(--s2); align-items: center; }
 .sub-feed { margin-top: var(--s5); padding-top: var(--s5); border-top: 1px solid var(--rule); }
