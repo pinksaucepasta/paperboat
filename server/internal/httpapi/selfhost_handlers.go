@@ -93,6 +93,10 @@ func selfhostError(w http.ResponseWriter, r *http.Request, e error) {
 		status, code, message = 409, "ingress_unverified", e.Error()
 	case expectedHTTPErrorOnly(e, selfhost.ErrLimit):
 		status, code, message = 429, "selfhost_limit", e.Error()
+	case expectedHTTPErrorOnly(e, selfhost.ErrUpdateRunning):
+		status, code, message = 409, "update_running", e.Error()
+	case expectedHTTPErrorOnly(e, selfhost.ErrUpdateUnavailable):
+		status, code, message = 503, "release_unavailable", "No published self-host release to update to; retry shortly."
 	case expectedHTTPErrorOnly(e, selfhost.ErrIncompatibleTopology):
 		status, code, message = 409, "selfhost_topology_incompatible", e.Error()
 	}
@@ -192,6 +196,15 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 			}
 			if e == nil {
 				out, e = h.Service.SetPlacement(r.Context(), actor, kind, id, in.InstallationID)
+			}
+		}
+	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/update"):
+		// The target is the newest self-host release published for every architecture (the floor's ceiling).
+		e = selfhost.ErrUpdateUnavailable
+		if floor := h.Floors["edge"]; floor != nil {
+			var target string
+			if target, e = floor.Latest(); e == nil {
+				out, e = h.Service.RequestUpdate(r.Context(), actor, r.PathValue("installationID"), operator, target)
 			}
 		}
 	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/verify-ingress"):
