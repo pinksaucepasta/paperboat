@@ -481,6 +481,8 @@ func TestTunnelErrorsNameTheSubdomainProblem(t *testing.T) {
 		{tunnelv1.ErrSubdomainReserved, http.StatusBadRequest, "subdomain_reserved"},
 		{fmt.Errorf("%w: use 3 to 63 lowercase letters", tunnelv1.ErrSubdomainInvalid), http.StatusBadRequest, "invalid_subdomain"},
 		{tunnelv1.ErrAddressBlocked, http.StatusForbidden, "address_blocked"},
+		{tunnelv1.ErrAddressUnavailable, http.StatusBadRequest, "address_not_available"},
+		{tunnelv1.ErrAddressChangePending, http.StatusConflict, "address_change_pending"},
 	} {
 		service := &tunnelAPIStub{patchErr: tc.err}
 		request := tunnelHandlerRequest(http.MethodPatch, "/v1/tunnels/tun_1", []byte(`{"subdomain":"helloworld"}`))

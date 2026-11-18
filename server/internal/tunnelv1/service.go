@@ -245,6 +245,9 @@ func (s *Service) ListTunnels(ctx context.Context, request previewtunnelapi.Requ
 	for _, row := range rows {
 		page.Items = append(page.Items, tunnelView(row))
 	}
+	if err := s.addAddressChanges(ctx, request.Actor.AccountID, page.Items); err != nil {
+		return TunnelPage{}, err
+	}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		cursor, cursorErr := s.cursors.Encode(workspaceCursorPrincipal(ctx, request.Actor.AccountID), ListPosition{CreatedAt: last.CreatedAt, ID: last.ID})
@@ -268,7 +271,29 @@ func (s *Service) GetTunnel(ctx context.Context, request previewtunnelapi.Reques
 	if err != nil {
 		return TunnelView{}, err
 	}
-	return tunnelView(tunnel), nil
+	views := []TunnelView{tunnelView(tunnel)}
+	if err := s.addAddressChanges(ctx, request.Actor.AccountID, views); err != nil {
+		return TunnelView{}, err
+	}
+	return views[0], nil
+}
+
+// addAddressChanges sets AddressChange on the views of tunnels that are moving to a new address or whose last move failed.
+func (s *Service) addAddressChanges(ctx context.Context, accountID string, views []TunnelView) error {
+	ids := make([]string, len(views))
+	for i := range views {
+		ids[i] = views[i].ID
+	}
+	changes, err := s.repository.AddressChanges(ctx, accountID, ids)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		if change, ok := changes[views[i].ID]; ok {
+			views[i].AddressChange = &change
+		}
+	}
+	return nil
 }
 
 func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input PatchTunnelRequest) (MutationResult, error) {

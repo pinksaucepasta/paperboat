@@ -136,3 +136,89 @@ func TestSQLRepositoryChangesTunnelAddressOnPostgres(t *testing.T) {
 		t.Fatalf("renaming a blocked address = %v, want ErrAddressBlocked", err)
 	}
 }
+
+// A self-hosted workspace's tunnel has no managed address: the change and the availability check say so.
+func TestSQLRepositoryRefusesAnAddressChangeInASelfHostedWorkspaceOnPostgres(t *testing.T) {
+	f := newTRK07PostgresFixture(t)
+	ctx := context.Background()
+	account := f.accounts[0]
+	tunnelID := "tun_addr_sh_" + f.suffix
+	created := f.createTunnel(t, account, "mch_trk07_primary_"+f.suffix, tunnelID, "addr-sh-"+f.suffix)
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only','{}') ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode='self-hosted-only'`, account); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1 AND capability='tunnel'`, account)
+	})
+	if _, err := f.changeAddress(t, account, tunnelID, "hello"+f.suffix[len(f.suffix)-6:], created.Tunnel.Generation); !errors.Is(err, ErrAddressUnavailable) {
+		t.Fatalf("changing the address of a self-hosted tunnel = %v, want ErrAddressUnavailable", err)
+	}
+	if c, err := f.repository.CheckAddress(ctx, account, tunnelID, "helloworld"); err != nil || !c.SelfHosted {
+		t.Fatalf("availability for a self-hosted tunnel = %+v, %v", c, err)
+	}
+}
+
+// Two tunnels racing for one name: exactly one gets it, the other is told it is taken, and an expired move of one
+// tunnel is never taken over by the other (the settle worker undoes it first).
+func TestSQLRepositoryAddressClaimsRaceToOneWinnerOnPostgres(t *testing.T) {
+	f := newTRK07PostgresFixture(t)
+	ctx := context.Background()
+	accountA, hostA := f.accounts[0], "mch_trk07_primary_"+f.suffix
+	accountB, hostB := f.addAccount(t, "race")
+	tail := strings.ReplaceAll(f.suffix, "_", "")
+	tail = tail[len(tail)-6:]
+	a := f.createTunnel(t, accountA, hostA, "tun_race_a_"+f.suffix, "race-a-"+f.suffix)
+	b := f.createTunnel(t, accountB, hostB, "tun_race_b_"+f.suffix, "race-b-"+f.suffix)
+	label := "contested" + tail
+	errs := make(chan error, 2)
+	start := make(chan struct{})
+	for _, c := range []struct {
+		account, tunnel string
+		generation      int64
+	}{{accountA, a.Tunnel.ID, a.Tunnel.Generation}, {accountB, b.Tunnel.ID, b.Tunnel.Generation}} {
+		go func() {
+			<-start
+			_, err := f.changeAddress(t, c.account, c.tunnel, label, c.generation)
+			errs <- err
+		}()
+	}
+	close(start)
+	first, second := <-errs, <-errs
+	if (first == nil) == (second == nil) {
+		t.Fatalf("both or neither tunnel got the name: %v, %v", first, second)
+	}
+	if loser := errors.Join(first, second); !errors.Is(loser, ErrSubdomainTaken) {
+		t.Fatalf("the loser = %v, want ErrSubdomainTaken", loser)
+	}
+	var owners int
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.managed_hostnames WHERE hostname=$1`, label+".tunnels.example.test").Scan(&owners); err != nil || owners != 1 {
+		t.Fatalf("owners of the name = %d, %v", owners, err)
+	}
+
+	// A move of tunnel A past its deadline still holds its name against B's claim until the settle worker undoes it.
+	other := "expired" + tail
+	host := other + ".tunnels.example.test"
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,operation_id,kind,until) VALUES($1,$2,'op_expired_'||$3,'incoming',now()-interval '1 minute')`, host, a.Tunnel.ID, f.suffix); err != nil {
+		t.Fatal(err)
+	}
+	var bGeneration int64
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.tunnels WHERE id=$1`, b.Tunnel.ID).Scan(&bGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.changeAddress(t, accountB, b.Tunnel.ID, other, bGeneration); !errors.Is(err, ErrSubdomainTaken) {
+		t.Fatalf("claiming a name another tunnel's expired move still holds = %v, want ErrSubdomainTaken", err)
+	}
+	if err := f.repository.SettleAddressMoves(ctx, AddressSettleRecord{Now: time.Now().UTC(), Limit: 10, Policy: AddressPolicy{MoveTimeout: time.Minute, Cooldown: time.Hour}, ActorID: "settler", ActorType: "system", RequestID: "req_race", CorrelationID: "corr_race"}); err != nil {
+		t.Fatal(err)
+	}
+	var held int
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.tunnel_address_holds WHERE hostname=$1`, host).Scan(&held); err != nil || held != 0 {
+		t.Fatalf("holds on the name after the settle = %d, %v", held, err)
+	}
+	if err := f.database.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.tunnels WHERE id=$1`, b.Tunnel.ID).Scan(&bGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.changeAddress(t, accountB, b.Tunnel.ID, other, bGeneration); err != nil || got.Tunnel.StableEndpoint != "https://"+host {
+		t.Fatalf("claiming the name once its move was undone = %q, %v", got.Tunnel.StableEndpoint, err)
+	}
+}

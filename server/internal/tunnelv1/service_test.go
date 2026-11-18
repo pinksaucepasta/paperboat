@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,9 @@ type fakeTunnelRepository struct {
 	patchResult      MutationRecord
 	checkedLabel     string
 	addressTaken     bool
+	addressSelfHost  bool
 	addressErr       error
+	addressChanges   map[string]tunnelshared.AddressChange
 	stateResult      MutationRecord
 	facts            HealthFacts
 	factsErr         error
@@ -112,10 +115,14 @@ func (f *fakeTunnelRepository) SettleAddressMoves(context.Context, AddressSettle
 	return nil
 }
 
+func (f *fakeTunnelRepository) AddressChanges(context.Context, string, []string) (map[string]tunnelshared.AddressChange, error) {
+	return f.addressChanges, nil
+}
+
 func (f *fakeTunnelRepository) CheckAddress(_ context.Context, _, _, label string) (AddressCheck, error) {
 	f.checkedLabel = label
 	host := label + ".tunnels.example.test"
-	return AddressCheck{Host: host, Current: "https://"+host == f.tunnel.StableEndpoint, Free: !f.addressTaken}, f.addressErr
+	return AddressCheck{Host: host, Current: "https://"+host == f.tunnel.StableEndpoint, Free: !f.addressTaken, SelfHosted: f.addressSelfHost}, f.addressErr
 }
 
 func (f *fakeTunnelRepository) Transition(_ context.Context, input StateRecord) (MutationRecord, error) {

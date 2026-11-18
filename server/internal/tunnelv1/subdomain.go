@@ -19,6 +19,9 @@ var (
 	ErrSubdomainTaken = errors.New("subdomain is already taken")
 	// ErrAddressBlocked: an operator blocked this tunnel's address; renaming would evade the block.
 	ErrAddressBlocked = errors.New("tunnel address is blocked")
+	// ErrAddressUnavailable: the tunnel has no managed address to change (a self-hosted workspace serves it on its own
+	// domains).
+	ErrAddressUnavailable = errors.New("tunnel has no managed address to change")
 	// ErrAddressChangePending: the tunnel is already moving to another address; it finishes or fails first.
 	ErrAddressChangePending = errors.New("an address change is already in progress")
 )
@@ -63,12 +66,17 @@ type SubdomainCheck struct {
 	Message   string `json:"message,omitempty"`
 }
 
+// selfHostedAddressMessage is what a self-hosted workspace's tunnel answers to an address change: where its address
+// is set instead.
+const selfHostedAddressMessage = "This tunnel is served on your own domain, so it has no Paperboat address to change. " +
+	"Add a hostname under a verified workspace domain instead: pb domain add, pb domain verify, then pb tunnel domain add <tunnel> <hostname> --route <route>."
+
 // addressHost is label under the base domain of a tunnel's current stable endpoint (https://<label>.<base>).
 func addressHost(stableEndpoint, label string) (string, error) {
 	host := strings.TrimPrefix(stableEndpoint, "https://")
 	_, base, ok := strings.Cut(host, ".")
 	if !ok || base == "" {
-		return "", fmt.Errorf("%w: stable endpoint has no base domain", ErrInvalidInput)
+		return "", ErrAddressUnavailable
 	}
 	return label + "." + base, nil
 }
@@ -99,6 +107,8 @@ func (s *Service) CheckSubdomain(ctx context.Context, request previewtunnelapi.R
 	switch {
 	case err != nil:
 		return SubdomainCheck{}, err
+	case check.SelfHosted:
+		result.Reason, result.Message = "unavailable", selfHostedAddressMessage
 	case check.Current:
 		result.Reason, result.Message = "current", "This is already the tunnel's address."
 	case !check.Free:

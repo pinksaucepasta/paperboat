@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 )
 
 // AddressCheck is CheckAddress's answer: Host is the label under the tunnel's base domain, Current that the tunnel
@@ -19,6 +20,9 @@ type AddressCheck struct {
 	Host    string
 	Current bool
 	Free    bool
+	// SelfHosted: the tunnel's workspace serves its tunnels on its own edges and domains, so it has no managed
+	// address to change.
+	SelfHosted bool
 }
 
 // CheckAddress reads the stored (unmasked) endpoint. A tunnel's hostname is reserved in managed_hostnames for its
@@ -29,9 +33,10 @@ func (r *SQLRepository) CheckAddress(ctx context.Context, accountID, tunnelID, l
 	err := r.db.Pool().QueryRow(ctx, `SELECT h.host, h.host=substring(t.stable_endpoint from 9),
  NOT EXISTS(SELECT 1 FROM paperboat.managed_hostnames WHERE hostname=h.host AND NOT (resource_kind='tunnel' AND resource_id=t.id))
  AND NOT EXISTS(SELECT 1 FROM paperboat.publication_blocks WHERE hostname=h.host AND blocked)
- AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds WHERE hostname=h.host AND until>now() AND (tunnel_id<>t.id OR kind='incoming'))
+ AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds WHERE hostname=h.host AND until>now() AND (tunnel_id<>t.id OR kind='incoming')),
+ paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only'
 FROM paperboat.tunnels t, LATERAL (SELECT $3::text||substring(t.stable_endpoint from position('.' in t.stable_endpoint)) AS host) h
-WHERE t.id=$2 AND t.account_id=$1`, accountID, tunnelID, label).Scan(&check.Host, &check.Current, &check.Free)
+WHERE t.id=$2 AND t.account_id=$1`, accountID, tunnelID, label).Scan(&check.Host, &check.Current, &check.Free, &check.SelfHosted)
 	return check, translate(err)
 }
 
@@ -77,11 +82,14 @@ func startAddressMoveTx(ctx context.Context, tx *db.Tx, tunnel dbsqlc.Tunnel, ne
 	case newBlocked || inManagedNames:
 		return tunnel, false, ErrSubdomainTaken
 	}
-	// A live hold of another tunnel (a move in progress to the name, or its previous owner's cooldown) blocks the
-	// claim; an expired hold, or one of this tunnel's own (it may take its old name back), is replaced.
+	// A hold of another tunnel blocks the claim: a move in progress to the name is never taken over, not even one past
+	// its deadline (SettleAddressMoves undoes it and fails its operation first, so no operation can report a change
+	// that did not happen), and a cooldown only once it has ended. The tunnel's own holds (it may take its old name
+	// back) are replaced.
 	claimed, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,operation_id,kind,until) VALUES($1,$2,$5,'incoming',$3)
 ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=EXCLUDED.operation_id,kind='incoming',until=EXCLUDED.until,created_at=$4
-WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, newHost, tunnel.ID, now.Add(policy.MoveTimeout), now, operationID)
+WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id
+ OR (paperboat.tunnel_address_holds.kind='retired' AND paperboat.tunnel_address_holds.until<=$4)`, newHost, tunnel.ID, now.Add(policy.MoveTimeout), now, operationID)
 	if err != nil {
 		return tunnel, false, translate(err)
 	}
@@ -216,18 +224,37 @@ func (r *SQLRepository) SettleAddressMoves(ctx context.Context, input AddressSet
 
 func (r *SQLRepository) settleAddressMove(ctx context.Context, newHost string, input AddressSettleRecord) error {
 	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		return settleAddressMoveTx(ctx, tx, newHost, input, false)
+		return settleAddressMoveTx(ctx, tx, newHost, input, "")
 	})
-	if errors.Is(err, ErrSubdomainTaken) || errors.Is(err, ErrConflict) || errors.Is(err, ErrAddressBlocked) {
-		// The new name cannot be taken any more (another resource claimed it meanwhile): undo the move.
+	if reason := undoReason(err); reason != "" {
+		// The new name cannot be taken any more (blocked, or claimed by another resource meanwhile): undo the move.
 		err = r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			return settleAddressMoveTx(ctx, tx, newHost, input, true)
+			return settleAddressMoveTx(ctx, tx, newHost, input, reason)
 		})
 	}
 	return translate(err)
 }
 
-func settleAddressMoveTx(ctx context.Context, tx *db.Tx, newHost string, input AddressSettleRecord, undo bool) error {
+// The error codes of an undone move's operation (the console shows them next to the address).
+const (
+	moveNotReady = "tunnel_address_not_ready" // the edges did not serve the new name before the deadline
+	moveTaken    = "subdomain_taken"
+	moveBlocked  = "address_blocked"
+	movePaused   = "tunnel_paused"
+	moveDeleted  = "tunnel_deleted"
+)
+
+func undoReason(err error) string {
+	switch {
+	case errors.Is(err, ErrAddressBlocked):
+		return moveBlocked
+	case errors.Is(err, ErrSubdomainTaken), errors.Is(err, ErrConflict):
+		return moveTaken
+	}
+	return ""
+}
+
+func settleAddressMoveTx(ctx context.Context, tx *db.Tx, newHost string, input AddressSettleRecord, undoCode string) error {
 	if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 		return err
 	}
@@ -250,23 +277,23 @@ WHERE h.hostname=$1 AND h.kind='incoming' FOR UPDATE OF h SKIP LOCKED`, newHost)
 		return translate(err)
 	}
 	oldHost := strings.TrimPrefix(tunnel.StableEndpoint, "https://")
-	failOperation := func() error {
-		_, err := tx.Exec(ctx, `UPDATE paperboat.operations SET state='failed',phase='failed',progress=100,retrying=false,next_retry_at=NULL,error_code='tunnel_address_not_ready',completed_at=$2,updated_at=$2
-WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now)
+	failOperation := func(code string) error {
+		_, err := tx.Exec(ctx, `UPDATE paperboat.operations SET state='failed',phase='failed',progress=100,retrying=false,next_retry_at=NULL,error_code=$3,completed_at=$2,updated_at=$2
+WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now, code)
 		return translate(err)
 	}
 	if tunnel.DesiredState == DesiredDeleted {
 		// Nothing serves the tunnel any more; the move is moot.
-		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND kind='incoming'`, newHost); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, newHost, tunnelID); err != nil {
 			return translate(err)
 		}
-		return failOperation()
+		return failOperation(moveDeleted)
 	}
-	if tunnel.DesiredState != DesiredActive {
-		undo = true // a paused tunnel has no edge to confirm the new name: undo now instead of waiting out the timeout
+	if tunnel.DesiredState != DesiredActive && undoCode == "" {
+		undoCode = movePaused // a paused tunnel has no edge to confirm the new name: undo now instead of waiting out the timeout
 	}
 	ready := false
-	if !undo {
+	if undoCode == "" {
 		if err := tx.QueryRow(ctx, `SELECT coalesce(bool_and(paperboat.endpoint_route_ready(er.id,$3)),false)
 FROM paperboat.tunnel_routes tr JOIN paperboat.endpoint_routes er ON er.tunnel_route_id=tr.id
 WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.match_hostname=$2 AND tr.desired_state='active' AND tr.deleted_at IS NULL`,
@@ -274,7 +301,7 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 			return translate(err)
 		}
 	}
-	if !ready && !undo && input.Now.Before(until) {
+	if !ready && undoCode == "" && input.Now.Before(until) {
 		return nil
 	}
 	tunnel, err = queries.BumpTunnelGenerationForResourceV1(ctx, dbsqlc.BumpTunnelGenerationForResourceV1Params{TunnelID: tunnelID, AccountID: accountID, Now: input.Now})
@@ -288,13 +315,16 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 		}
 	} else {
 		eventType, outcome = "tunnel.address_change_failed", "unchanged"
-		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND kind='incoming'`, newHost); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, newHost, tunnelID); err != nil {
 			return translate(err)
 		}
 		if err := touchAddressRoutesTx(ctx, tx, tunnelID, oldHost, input.ActorID, input.Now); err != nil {
 			return err
 		}
-		if err := failOperation(); err != nil {
+		if undoCode == "" {
+			undoCode = moveNotReady
+		}
+		if err := failOperation(undoCode); err != nil {
 			return err
 		}
 	}
@@ -310,4 +340,42 @@ WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.
 	}
 	metadata["generation"] = tunnel.Generation
 	return insertAudit(ctx, queries, auditID, accountID, input.ActorID, input.ActorType, eventType, "update", outcome, tunnelID, "", input.RequestID, input.CorrelationID, "", input.Now, metadata)
+}
+
+// AddressChanges returns the address change in progress, or the one that failed last, of each tunnel of the account
+// that has one (keyed by tunnel id). A failure counts until the tunnel's next patch operation: any later change
+// to the tunnel (or a new address change) replaces it.
+func (r *SQLRepository) AddressChanges(ctx context.Context, accountID string, tunnelIDs []string) (map[string]tunnelshared.AddressChange, error) {
+	if len(tunnelIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.Pool().Query(ctx, `SELECT h.tunnel_id,'moving',h.hostname,'',h.created_at
+FROM paperboat.tunnel_address_holds h JOIN paperboat.tunnels t ON t.id=h.tunnel_id
+WHERE t.account_id=$1 AND h.tunnel_id=ANY($2::text[]) AND h.kind='incoming'
+UNION ALL
+SELECT o.resource_id,'failed',coalesce(a.hostname,''),o.error_code,o.completed_at
+FROM (SELECT DISTINCT ON (resource_id) resource_id,state,error_code,completed_at FROM paperboat.operations
+ WHERE account_id=$1 AND resource_kind='tunnel' AND resource_id=ANY($2::text[]) AND operation_type='tunnel.patch'
+ ORDER BY resource_id,created_at DESC) o
+LEFT JOIN LATERAL (SELECT metadata->>'hostname' AS hostname FROM paperboat.audit_events
+ WHERE resource_id=o.resource_id AND event_type='tunnel.address_change_failed' ORDER BY created_at DESC LIMIT 1) a ON true
+WHERE o.state='failed' AND o.error_code IN ('tunnel_address_not_ready','subdomain_taken','address_blocked','tunnel_paused','tunnel_deleted')`, accountID, tunnelIDs)
+	if err != nil {
+		return nil, translate(err)
+	}
+	defer rows.Close()
+	changes := map[string]tunnelshared.AddressChange{}
+	for rows.Next() {
+		var id string
+		var change tunnelshared.AddressChange
+		var at *time.Time
+		if err := rows.Scan(&id, &change.State, &change.Hostname, &change.ReasonCode, &at); err != nil {
+			return nil, translate(err)
+		}
+		if at != nil {
+			change.UpdatedAt = at.UTC()
+		}
+		changes[id] = change
+	}
+	return changes, translate(rows.Err())
 }

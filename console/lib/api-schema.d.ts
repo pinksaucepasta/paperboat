@@ -10179,6 +10179,7 @@ export interface components {
             updated_at: string;
             /** @description Owning team slug when team-owned; absent for Personal. Independent of viewer audience and persistence account. */
             owner_team_id?: string;
+            address_change?: components["schemas"]["AddressChange"];
         } & (unknown & unknown);
         TunnelPage: {
             items: components["schemas"]["Tunnel"][];
@@ -10217,7 +10218,7 @@ export interface components {
             /** @enum {string} */
             access_mode?: "public" | "private";
             expires_at?: string | null;
-            /** @description Moves the tunnel's public address to <subdomain> under its current base domain. 3-63 lowercase letters, digits or hyphens, not only digits, not a reserved name, unique across all accounts. Make before break: the new address is published next to the old one and the old one stops once every live edge serves the new one (the operation stays running until then; if the edges do not confirm within the move timeout the change is undone and the operation fails with tunnel_address_not_ready). The old address then stays reserved to the tunnel for a cooldown. Applies to managed HTTP addresses; a tunnel nothing serves moves at once. Rate limited per account. Errors: invalid_subdomain, subdomain_reserved (400), subdomain_taken, address_change_pending (409), address_blocked (403), rate_limited (429). */
+            /** @description Moves the tunnel's public address to <subdomain> under its current base domain. 3-63 lowercase letters, digits or hyphens, not only digits, not a reserved name, unique across all accounts. Make before break: the new address is published next to the old one and the old one stops once every live edge serves the new one (the operation stays running until then; if the edges do not confirm within the move timeout the change is undone and the operation fails with tunnel_address_not_ready). The old address then stays reserved to the tunnel for a cooldown. Applies to managed HTTP addresses; a tunnel nothing serves moves at once. Rate limited per account. Errors: address_not_available (a self-hosted workspace's tunnel has no Paperboat address; attach a custom domain), invalid_subdomain, subdomain_reserved (400), subdomain_taken, address_change_pending (409), address_blocked (403), rate_limited (429). */
             subdomain?: string;
         };
         TunnelStateMutationRequest: Record<string, never>;
@@ -14241,12 +14242,29 @@ export interface components {
              * @description Why it is not available.
              * @enum {string}
              */
-            reason?: "invalid" | "reserved" | "taken" | "current";
+            reason?: "invalid" | "reserved" | "taken" | "current" | "unavailable";
             /** @description Plain-words reason, safe to show. */
             message?: string;
         };
         TunnelSubdomainAvailabilityResponse: {
             data: components["schemas"]["TunnelSubdomainAvailability"];
+        };
+        /** @description A tunnel's address change in progress, or its last one that failed (until the tunnel's next patch operation). */
+        AddressChange: {
+            /**
+             * @description moving: the new address is published next to the current one and the edges have not all confirmed it; failed: the move was undone and the current address is unchanged.
+             * @enum {string}
+             */
+            state: "moving" | "failed";
+            /** @description The address the tunnel is moving (or tried to move) to. */
+            hostname: string;
+            /**
+             * @description Why a failed move was undone.
+             * @enum {string}
+             */
+            reason_code?: "tunnel_address_not_ready" | "subdomain_taken" | "address_blocked" | "tunnel_paused" | "tunnel_deleted";
+            /** Format: date-time */
+            updated_at: string;
         };
     };
     responses: {

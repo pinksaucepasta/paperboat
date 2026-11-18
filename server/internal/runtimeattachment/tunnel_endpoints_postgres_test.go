@@ -601,6 +601,21 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if started.Tunnel.StableEndpoint != "https://"+oldHost || holds() != "incoming:"+renamed {
 		t.Fatalf("after the change started: address %q holds %q; want the old address and the new name held", started.Tunnel.StableEndpoint, holds())
 	}
+	addressChange := func() string {
+		t.Helper()
+		changes, err := repo.AddressChanges(f.ctx, f.account, []string{tunnel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, ok := changes[tunnel]
+		if !ok {
+			return ""
+		}
+		return c.State + ":" + c.Hostname + ":" + c.ReasonCode
+	}
+	if got := addressChange(); got != "moving:"+renamed+":" {
+		t.Fatalf("address change while moving = %q", got)
+	}
 	rows = snapshot()
 	if len(rows) != 1 || rows[0].PublicHost != oldHost || !strings.Contains(rows[0].DomainBindings, renamed) || rows[0].ObservedState != "pending" || rows[0].RouteGeneration != before+1 {
 		t.Fatalf("edge snapshot while the address moves = %+v, want the old host with %q as a second name", rows, renamed)
@@ -648,6 +663,9 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	}
 	allReady()
 	settle(time.Now().UTC())
+	if got := addressChange(); got != "" {
+		t.Fatalf("address change after the move finished = %q", got)
+	}
 	if endpoint() != "https://"+renamed || holds() != "retired:"+oldHost {
 		t.Fatalf("after the edges confirmed: address %q holds %q; want the new address and the old name held", endpoint(), holds())
 	}
@@ -677,6 +695,9 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state||'/'||coalesce(error_code,'') FROM operations WHERE id=$1`, "op_addr-never-"+endpointID[:8]+"-"+f.prefix).Scan(&opState); err != nil {
 		t.Fatal(err)
 	}
+	if got, want := addressChange(), "failed:never-"+endpointID[:8]+".tunnels.example.test:tunnel_address_not_ready"; got != want {
+		t.Fatalf("address change after the undone move = %q, want %q", got, want)
+	}
 	if endpoint() != "https://"+renamed || holds() != "retired:"+oldHost || opState != "failed/tunnel_address_not_ready" {
 		t.Fatalf("undone move: address %q holds %q operation %q", endpoint(), holds(), opState)
 	}
@@ -703,6 +724,9 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 		var opState string
 		if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT state FROM operations WHERE id=$1`, "op_addr-"+label+"-"+f.prefix).Scan(&opState); err != nil {
 			t.Fatal(err)
+		}
+		if got, want := addressChange(), "failed:"+label+".tunnels.example.test:tunnel_"+state; got != want {
+			t.Fatalf("%s during a move: address change %q, want %q", state, got, want)
 		}
 		if strings.Contains(holds(), "incoming") || opState != "failed" || endpoint() != "https://"+renamed {
 			t.Fatalf("%s during a move: holds %q operation %q address %q", state, holds(), opState, endpoint())

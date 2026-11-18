@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 )
 
 func TestValidateSubdomain(t *testing.T) {
@@ -77,6 +78,31 @@ func TestPatchTunnelRejectsInvalidAndReservedSubdomainBeforeTheRepository(t *tes
 		if !errors.Is(err, want) || repository.patch.TunnelID != "" {
 			t.Fatalf("%q: err=%v patch reached repository=%+v", label, err, repository.patch)
 		}
+	}
+}
+
+// A self-hosted workspace's tunnel has no managed address: the answer says where its address is set instead.
+func TestCheckSubdomainSaysASelfHostedTunnelHasNoManagedAddress(t *testing.T) {
+	repository := &fakeTunnelRepository{tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", StableEndpoint: "https://eager.tunnels.example.test"}, addressSelfHost: true}
+	service := testService(t, repository, sequentialID())
+	got, err := service.CheckSubdomain(context.Background(), testRequest(false), "tun_1", "helloworld")
+	if err != nil || got.Available || got.Reason != "unavailable" || !strings.Contains(got.Message, "pb tunnel domain add") {
+		t.Fatalf("CheckSubdomain = %+v, %v", got, err)
+	}
+}
+
+// The tunnel views carry the address change in progress (or the failed one) the repository reports.
+func TestGetTunnelCarriesTheAddressChange(t *testing.T) {
+	change := tunnelshared.AddressChange{State: "moving", Hostname: "helloworld.tunnels.example.test"}
+	repository := &fakeTunnelRepository{tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", StableEndpoint: "https://eager.tunnels.example.test"}, addressChanges: map[string]tunnelshared.AddressChange{"tun_1": change}}
+	service := testService(t, repository, sequentialID())
+	got, err := service.GetTunnel(context.Background(), testRequest(false), "tun_1")
+	if err != nil || got.AddressChange == nil || *got.AddressChange != change {
+		t.Fatalf("GetTunnel address change = %+v, %v", got.AddressChange, err)
+	}
+	repository.addressChanges = nil
+	if got, err := service.GetTunnel(context.Background(), testRequest(false), "tun_1"); err != nil || got.AddressChange != nil {
+		t.Fatalf("a tunnel with no change = %+v, %v", got.AddressChange, err)
 	}
 }
 

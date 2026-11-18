@@ -103,7 +103,8 @@ export const tunnelQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.tunnel(id),
     queryFn: ({ signal }) => api<Tunnel>(tunnelPath(id), { signal }),
-    refetchInterval: 10_000,
+    // An address change settles within seconds: follow it closely while it is moving.
+    refetchInterval: (query) => (query.state.data?.address_change?.state === "moving" ? 3_000 : 10_000),
   })
 
 export const tunnelHealthQuery = (id: string) =>
@@ -353,3 +354,19 @@ export const saveIpRules = (kind: "tunnel" | "preview", id: string, rules: IPRul
     headers: { "content-type": "application/json" },
     body: JSON.stringify(rules),
   })
+
+/** Why a move to a new address was undone, in words (the codes are the server's operation error codes). */
+export function addressChangeReason(code: string | undefined): string {
+  switch (code) {
+    case "subdomain_taken":
+      return "Someone took that name meanwhile."
+    case "address_blocked":
+      return "That name is blocked."
+    case "tunnel_paused":
+      return "The tunnel was paused."
+    case "tunnel_deleted":
+      return "The tunnel was deleted."
+    default:
+      return "Not every Paperboat edge served the new address in time."
+  }
+}

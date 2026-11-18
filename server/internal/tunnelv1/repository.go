@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 )
 
 var (
@@ -66,6 +67,8 @@ type TunnelRepository interface {
 	// endpoint, not the masked one a self-hosted workspace shows) and whether it could take it.
 	CheckAddress(ctx context.Context, accountID, tunnelID, label string) (AddressCheck, error)
 	SettleAddressMoves(ctx context.Context, input AddressSettleRecord) error
+	// AddressChanges returns the address change in progress, or the last one that failed, per tunnel id.
+	AddressChanges(ctx context.Context, accountID string, tunnelIDs []string) (map[string]tunnelshared.AddressChange, error)
 	Transition(context.Context, StateRecord) (MutationRecord, error)
 	ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error)
 	HealthFacts(ctx context.Context, accountID, tunnelID string, now time.Time) (HealthFacts, error)
@@ -487,6 +490,13 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 		}
 		var newHost string
 		if input.Subdomain != nil {
+			var selfHosted bool
+			if err := tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only' FROM paperboat.tunnels t WHERE t.id=$1`, current.ID).Scan(&selfHosted); err != nil {
+				return translate(err)
+			}
+			if selfHosted {
+				return ErrAddressUnavailable
+			}
 			if newHost, err = addressHost(current.StableEndpoint, *input.Subdomain); err != nil {
 				return err
 			}
