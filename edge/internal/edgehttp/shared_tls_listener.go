@@ -264,10 +264,10 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 			authorizedHTTPS = true
 		}
 	}
-	// A route that exists but is withheld only for bandwidth quota still gets TLS: the HTTP layer
-	// answers it with the typed refusal (429, bandwidth_quota_exhausted) rather than a dead connection.
+	// A route an operator took down still gets TLS: the HTTP layer answers it with the takedown page
+	// (451 or 403) rather than a dead connection.
 	if !authorizedHTTPS && https {
-		if denied, ok := l.authority.(interface{ QuotaDenied(string) bool }); ok && denied.QuotaDenied(host) {
+		if taken, ok := l.authority.(interface{ Withheld(string) bool }); ok && taken.Withheld(host) {
 			authorizedHTTPS = true
 		}
 	}

@@ -60,14 +60,11 @@ type Lease struct {
 	CapacityLimit uint64                      `json:"capacity_limit"`
 	Revocations   []Revocation                `json:"revocations"`
 	PeerRelay     *derpquic.ServiceDescriptor `json:"peer_relay,omitempty"`
-	// QuotaDenied lists accounts the control plane reports out of bandwidth allowance; the relay
-	// refuses them (derpquic.ErrQuota) until a later observation no longer lists them.
-	QuotaDenied []string `json:"quota_denied,omitempty"`
 	// PoolHandover lists accounts whose pool no longer includes this relay and when to close their carriers; nil
 	// (absent) keeps the list the relay holds, an empty list clears it.
 	PoolHandover *[]PoolHandover `json:"pool_handover,omitempty"`
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
-	// no stored set for this process or its digest differs. Such an answer carries no quota list.
+	// no stored set for this process or its digest differs.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
 	// JWKS is the issuer trust document (keys plus withdrawn_key_ids); the relay trusts exactly its keys,
 	// so a rotation or withdrawal applies within one observation.
@@ -348,7 +345,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	subjects := server.AuthoritySubjects()
 	digest := subjectsDigest(subjects)
-	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest, "quota_denied_supported": true}
+	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest}
 	body["metrics"] = c.metrics(stats)
 	full := digest != c.sentSubjects
 	if full {
@@ -391,17 +388,11 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		}
 	}
 	if out.SubjectsRequired {
-		// The control plane lost or never had this set: send it in full next time, and keep the
-		// quota list, which such an answer does not carry.
+		// The control plane lost or never had this set: send it in full next time.
 		c.sentSubjects = ""
-		out.QuotaDenied, out.SubjectsRequired = c.lease.QuotaDenied, false
-	} else {
-		if full {
-			c.sentSubjects = digest
-		}
-		if server.SetQuotaDenied(out.QuotaDenied) != nil {
-			return ErrControl
-		}
+		out.SubjectsRequired = false
+	} else if full {
+		c.sentSubjects = digest
 	}
 	c.lease = out
 	return nil

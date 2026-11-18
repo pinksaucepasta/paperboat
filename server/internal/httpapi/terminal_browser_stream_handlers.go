@@ -12,7 +12,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/browserterminal"
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
-	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 type browserMachineSignerReader interface {
@@ -37,7 +36,7 @@ func terminalBrowserTicket(gateway *browserterminal.Gateway, signer browserMachi
 	}
 }
 func writeTerminalBrowserTicket(w http.ResponseWriter, r *http.Request, signer browserMachineSignerReader, ticket browserterminal.Ticket, streamURL string, decision browserterminal.Decision, err error) {
-	if writePlanLimitReached(w, r, err) || writeBrowserTerminalQuotaExhausted(w, r, err) {
+	if writePlanLimitReached(w, r, err) {
 		return
 	}
 	var pending browserterminal.TooManyPendingTicketsError
@@ -101,19 +100,4 @@ func inspectorBrowserTicket(gateway *browserterminal.Gateway, signer browserMach
 			writeTerminalBrowserTicket(w, r, signer, ticket, streamURL, decision, err)
 		}
 	}
-}
-
-// writeBrowserTerminalQuotaExhausted answers a terminal ticket refused at the hosted allowance
-// cap with 429, the code the console's terminal stops reconnecting on.
-func writeBrowserTerminalQuotaExhausted(w http.ResponseWriter, r *http.Request, err error) bool {
-	var quota *usermachines.BandwidthQuotaError
-	if !errors.As(err, &quota) {
-		return false
-	}
-	details := map[string]any{}
-	if quota.BillingURL != "" {
-		details["billing_url"] = quota.BillingURL
-	}
-	writeErrorDetails(w, r, http.StatusTooManyRequests, "bandwidth_quota_exhausted", "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade, or wait for the next allowance period.", details)
-	return true
 }

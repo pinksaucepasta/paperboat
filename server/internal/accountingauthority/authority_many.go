@@ -2,6 +2,7 @@ package accountingauthority
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -90,10 +91,8 @@ func recordNodeTx(ctx context.Context, tx *db.Tx, node string, bindings []Bindin
 			}
 			workspaces[key] = w
 		}
-		if w.exhausted != nil {
-			errs[i] = w.exhausted
-			continue
-		}
+		// A throttled binding is admitted like any other (its bytes are still recorded); the answer tells the caller.
+		errs[i] = w.exhausted
 		candidates = append(candidates, i)
 	}
 	if len(candidates) == 0 {
@@ -126,8 +125,8 @@ func admitWorkspaceTx(ctx context.Context, tx *db.Tx, b Binding, customerOwned b
 		return nil, err
 	}
 	if exhausted {
-		w.exhausted = quotaExhaustedTx(ctx, tx, w.id, b.IssuedAt)
-		if _, ok := w.exhausted.(*QuotaExhaustedError); !ok {
+		w.exhausted = throttledTx(ctx, tx, w.id, b.IssuedAt)
+		if _, ok := w.exhausted.(*ThrottledError); !ok {
 			return nil, w.exhausted
 		}
 	}
@@ -233,7 +232,7 @@ RETURNING authority_id,environment_id,route_id,route_revision`, node, authority,
 	// A row the conflict clause refused (another workspace or actor holds that authority) is not admitted.
 	for _, i := range candidates {
 		b := bindings[i]
-		if !stored[bindingKey(b.ID, b.Environment, b.Route, b.Revision)] && errs[i] == nil {
+		if !stored[bindingKey(b.ID, b.Environment, b.Route, b.Revision)] && (errs[i] == nil || errors.Is(errs[i], ErrThrottled)) {
 			errs[i] = ErrUnavailable
 		}
 	}

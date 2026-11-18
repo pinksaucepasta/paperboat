@@ -377,13 +377,9 @@ func closeBrowserTerminal(browser *websocket.Conn, reason terminalend.Reason) {
 	_ = browser.Close(websocket.StatusCode(reason.CloseCode()), string(reason))
 }
 
-// browserTerminalEnd names the typed close for how an attached terminal ended: the workspace's allowance cut it, or
-// the control plane ended the admission and said why. Any other end (a dropped connection, the host going away) is a
+// browserTerminalEnd names the typed close for how an attached terminal ended: the control plane ended the admission and said why. Any other end (a dropped connection, the host going away) is a
 // plain drop: the console reconnects and learns the reason from the next ticket.
 func browserTerminalEnd(cause error, admission control.BrowserTerminalAdmission) (terminalend.Reason, bool) {
-	if errors.Is(cause, ErrIngressQuotaExhausted) {
-		return terminalend.BandwidthQuotaExhausted, true
-	}
 	if admission.EndReason != nil {
 		if reason := admission.EndReason(); reason != "" {
 			return reason, true
@@ -409,14 +405,13 @@ func (e browserTerminalRefusal) Unwrap() error { return e.cause }
 // failure is never hidden by a normal participant departure.
 func browserTerminalExpected(err error) bool {
 	return requestErrorLeaves(err, func(leaf error) bool {
-		// The allowance cut is a plan limit the server already reported, not an edge failure.
-		if leaf == context.Canceled || leaf == ErrBrowserTerminalHubEnded || leaf == ErrIngressQuotaExhausted {
+		if leaf == context.Canceled || leaf == ErrBrowserTerminalHubEnded {
 			return true
 		}
 		// The control plane's own answers about the user's access are not edge failures; it reported them.
 		if refused, ok := leaf.(*control.BrowserTerminalRefused); ok {
 			switch refused.Reason {
-			case terminalend.NoAccess, terminalend.Ended, terminalend.Revoked, terminalend.Expired, terminalend.Limit, terminalend.BandwidthQuotaExhausted, terminalend.TooManyPending:
+			case terminalend.NoAccess, terminalend.Ended, terminalend.Revoked, terminalend.Expired, terminalend.Limit, terminalend.TooManyPending:
 				return true
 			}
 		}

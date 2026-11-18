@@ -21,7 +21,7 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 		"host offline":     "connector_offline",
 		"edge unreachable": "edge_unavailable", "dns pending": "dns_pending", "certificate pending": "certificate_pending",
 		"origin refused": "origin_refused", "origin timeout": "origin_timeout", "origin tls": "origin_tls", "origin redirect loop": "origin_redirect_loop", "origin certificate changed": "origin_certificate_changed", "insecure remote origin": "origin_tls_unverified",
-		"route rejected": "route_rejected", "bandwidth exhausted": "bandwidth_exhausted",
+		"route rejected": "route_rejected", "bandwidth throttled": "bandwidth_throttled",
 	}
 	for name, tc := range map[string]struct {
 		summary      string
@@ -54,12 +54,12 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Origin.Code }, wantAction: "pb tunnel route update <tunnel> nas --tls-verification pinned"},
 		"route rejected": {summary: "route_unavailable", facts: healthyConnector, wantCode: "route_unavailable",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Route.Code }, wantAction: "pb tunnel route update", wantRetrying: true},
-		"bandwidth exhausted": {summary: "ready", facts: healthyConnector, bandwidth: true, wantCode: "bandwidth_exhausted",
+		"bandwidth throttled": {summary: "ready", facts: healthyConnector, bandwidth: true, wantCode: "bandwidth_throttled",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Access.Code }, wantAction: "Billing"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			facts := tc.facts
-			facts.BandwidthExhausted = tc.bandwidth
+			facts.BandwidthThrottled = tc.bandwidth
 			repository := &fakeTunnelRepository{facts: facts, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: DesiredActive, AccessMode: AccessPrivate, SummaryCode: tc.summary, Generation: 1}}
 			status, err := testService(t, repository, sequentialID()).Status(context.Background(), testRequest(false), "tun_1")
 			if err != nil {
@@ -80,7 +80,7 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 
 func TestStatusKeepsTheDesiredStateExplanationsAheadOfLiveFacts(t *testing.T) {
 	for state, want := range map[string]string{DesiredPaused: "tunnel_paused", DesiredDeleted: "tunnel_deleted"} {
-		repository := &fakeTunnelRepository{facts: HealthFacts{BandwidthExhausted: false}, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: state, AccessMode: AccessPrivate, SummaryCode: "pending", Generation: 1}}
+		repository := &fakeTunnelRepository{facts: HealthFacts{BandwidthThrottled: false}, tunnel: dbsqlc.Tunnel{ID: "tun_1", AccountID: "acct_1", DesiredState: state, AccessMode: AccessPrivate, SummaryCode: "pending", Generation: 1}}
 		status, err := testService(t, repository, sequentialID()).Status(context.Background(), testRequest(false), "tun_1")
 		if err != nil || status.OverallCode != want {
 			t.Fatalf("%s: status=%+v err=%v", state, status, err)

@@ -7,38 +7,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
-// ErrBandwidthQuotaExhausted refuses a console browser terminal, which always reaches the
-// machine through the edge, because the paying workspace's relay and edge allowance is used up.
-// CLI descriptors are never refused for bandwidth: the server cannot know whether the connection
-// will be direct (always free); relay grants and the edge enforce the cap where bytes flow.
-var ErrBandwidthQuotaExhausted = errors.New("workspace bandwidth allowance is exhausted")
-
-// BandwidthQuotaError is ErrBandwidthQuotaExhausted with the console page where the payer adds
-// bandwidth or upgrades; BillingURL is empty when the deployment has no console origin.
-type BandwidthQuotaError struct{ BillingURL string }
-
-func (e *BandwidthQuotaError) Error() string        { return ErrBandwidthQuotaExhausted.Error() }
-func (e *BandwidthQuotaError) Is(target error) bool { return target == ErrBandwidthQuotaExhausted }
-
-// Unwrap exposes the sentinel, so callers that match error leaves by identity see the refusal.
-func (e *BandwidthQuotaError) Unwrap() error { return ErrBandwidthQuotaExhausted }
-
-// ConfigureRuntimeQuota makes console browser terminals admission-checked and accounted against
-// the paying workspace. Nil leaves them unmetered.
-// billingURL is the console's Billing page, returned with a refusal; it may be empty.
-func (s *Service) ConfigureRuntimeQuota(quota accountingauthority.QuotaChecker, billingURL string) {
-	s.runtimeQuota, s.runtimeBillingURL = quota, billingURL
+// ConfigureRuntimeQuota makes console browser terminals accounted against the paying workspace.
+// Nil leaves them unmetered. A terminal is never refused for bandwidth: past the workspace's fair-use
+// amount the edge carries it at the throttled rate.
+func (s *Service) ConfigureRuntimeQuota(quota accountingauthority.QuotaChecker) {
+	s.runtimeQuota = quota
 }
 
 // admitRuntimeIngress records the payer of one edge browser-terminal session under its usage
-// authority, so the edge's usage reports for it debit the right workspace, and refuses the
-// session when that workspace is out of allowance. A team machine is paid by the team, counted
+// authority, so the edge's usage reports for it debit the right workspace. A team machine is paid by the team, counted
 // for the acting member; a personal machine is paid by its owner, also when a guest connects.
 func (s *Service) admitRuntimeIngress(ctx context.Context, route dbsqlc.ControlRoute, machine dbsqlc.UserMachine, actor, accessSessionID string, expires time.Time) error {
 	if s.runtimeQuota == nil {
@@ -52,8 +34,8 @@ func (s *Service) admitRuntimeIngress(ctx context.Context, route dbsqlc.ControlR
 		binding.User, binding.Team = actor, machine.OwnerTeamID.String
 	}
 	err := accountingauthority.Record(ctx, s.db, binding, s.runtimeQuota)
-	if errors.Is(err, accountingauthority.ErrQuotaExhausted) {
-		return &BandwidthQuotaError{BillingURL: s.runtimeBillingURL}
+	if errors.Is(err, accountingauthority.ErrThrottled) {
+		return nil
 	}
 	if errors.Is(err, accountingauthority.ErrUnavailable) {
 		return ErrProvisioningUnavailable
@@ -61,7 +43,7 @@ func (s *Service) admitRuntimeIngress(ctx context.Context, route dbsqlc.ControlR
 	return err
 }
 
-// AdmitBrowserTerminalIngress records and admission-checks one console browser terminal
+// AdmitBrowserTerminalIngress records one console browser terminal
 // attachment that the edge serves over the machine's runtime route: the attachment ID is the
 // usage authority the edge reports under, nodeID the admitting edge. Payer as for descriptors.
 func (s *Service) AdmitBrowserTerminalIngress(ctx context.Context, attachmentID, machineID, actor, nodeID string, expires time.Time) error {
@@ -82,42 +64,6 @@ func (s *Service) AdmitBrowserTerminalIngress(ctx context.Context, attachmentID,
 		actor = machine.UserID
 	}
 	return s.admitRuntimeIngress(ctx, route, machine, actor, attachmentID, expires)
-}
-
-// CheckBrowserTerminalBandwidth refuses a console browser terminal ticket when the machine's
-// paying workspace is out of hosted allowance, so the console can name the plan limit before
-// it opens a WebSocket (a browser cannot read the edge's handshake refusal). It records
-// nothing: the edge admission still records and checks the attachment. Customer-owned edges
-// never consume the allowance.
-func (s *Service) CheckBrowserTerminalBandwidth(ctx context.Context, machineID, nodeID string) error {
-	if s.runtimeQuota == nil {
-		return nil
-	}
-	// READ COMMITTED: the allowance check locks the workspace's period row and queues behind other reports; serializable aborted them.
-	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var workspace string
-		err := tx.QueryRow(ctx, `SELECT w.id FROM paperboat.user_machines m
-			JOIN billing_workspaces w ON (m.owner_team_id IS NOT NULL AND w.team_id=m.owner_team_id AND w.user_id IS NULL)
-				OR (m.owner_team_id IS NULL AND w.user_id=m.user_id AND w.team_id IS NULL)
-			WHERE m.id=$1 AND m.deleted_at IS NULL
-				AND NOT EXISTS(SELECT 1 FROM selfhost_installations WHERE node_id=$2 AND scope_kind IN ('account','team'))`,
-			machineID, nodeID).Scan(&workspace)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// No billing workspace yet (nothing used) or a customer-owned edge.
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		exhausted, err := s.runtimeQuota.CheckWorkspaceBandwidthTx(ctx, tx, workspace, s.now().UTC())
-		if err != nil {
-			return err
-		}
-		if exhausted {
-			return &BandwidthQuotaError{BillingURL: s.runtimeBillingURL}
-		}
-		return nil
-	})
 }
 
 // CheckBrowserTerminalLimit refuses opening one more console browser terminal past the plan's

@@ -56,7 +56,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
 	quota := &runtimeQuotaFixture{exhausted: true}
-	service.ConfigureRuntimeQuota(quota, "https://console.example.test/billing")
+	service.ConfigureRuntimeQuota(quota)
 	// At the cap a CLI descriptor is still issued: the server cannot know whether the
 	// connection will be direct, and direct machine-to-machine traffic is always free.
 	team := "team_ts_" + suffix

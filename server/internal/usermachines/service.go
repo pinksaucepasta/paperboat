@@ -249,7 +249,6 @@ type Policy struct {
 type Service struct {
 	inventoryFlights            inventoryFlights
 	runtimeQuota                accountingauthority.QuotaChecker
-	runtimeBillingURL           string
 	nameRandom                  io.Reader
 	db                          *db.DB
 	audit                       *audit.Writer

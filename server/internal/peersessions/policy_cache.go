@@ -44,8 +44,7 @@ type policyDoc struct {
 	liveKey    string
 	self       networkBinding
 	peers      []networkPeer
-	expiry     time.Time         // the configuration's refresh hint (exp), as built
-	teamOf     map[string]string // machine id -> owning team ("" personal), for the relay quota decision
+	expiry     time.Time // the configuration's refresh hint (exp), as built
 	validUntil time.Time
 	keys       []string // sorted (policyKeys): put binary-searches it
 }

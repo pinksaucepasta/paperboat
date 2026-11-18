@@ -56,16 +56,12 @@ func closeFailure(code int, reason string, clean bool) error {
 	switch ended {
 	case terminalend.Ended:
 		state = "closed"
-	case terminalend.NoAccess, terminalend.Revoked, terminalend.Limit, terminalend.BandwidthQuotaExhausted:
+	case terminalend.NoAccess, terminalend.Revoked, terminalend.Limit:
 		state = "denied"
 	case terminalend.Moved:
 		state = "reconnecting" // pb update moved the terminal: the new generation serves already
 	}
-	message := ""
-	if ended == terminalend.BandwidthQuotaExhausted {
-		message = "This workspace's hosted relay and edge bandwidth is used up. Add bandwidth or upgrade under Billing in the Paperboat console, or wait for the next allowance period."
-	}
-	return &terminalConnectError{state: state, code: string(ended), message: message, details: map[string]any{"close": code, "clean": clean}}
+	return &terminalConnectError{state: state, code: string(ended), details: map[string]any{"close": code, "clean": clean}}
 }
 
 // innermostConnectError prefers the most specific outcome: a transport failure wrapping the socket's

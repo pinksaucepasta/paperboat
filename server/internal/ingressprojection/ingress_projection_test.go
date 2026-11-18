@@ -95,20 +95,15 @@ func TestIngressProjectionPreservesAliasPublicationFence(t *testing.T) {
 	}
 }
 
-func isExhausted(err error) bool { _, ok := quotaExhaustion(err); return ok }
-
-func TestQuotaFilteringRequiresExactExpectedResult(t *testing.T) {
-	if _, ok := quotaExhaustion(accountingauthority.ErrQuotaExhausted); !ok {
-		t.Fatal("direct quota exhaustion should omit the projection")
-	}
+func TestThrottleRequiresExactExpectedResult(t *testing.T) {
 	resets := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
-	if at, ok := quotaExhaustion(&accountingauthority.QuotaExhaustedError{ResetsAt: resets}); !ok || !at.Equal(resets) {
-		t.Fatalf("typed exhaustion = %v %v, want its reset time", at, ok)
+	if th, ok := throttleOf(&accountingauthority.ThrottledError{Workspace: "personal:a", ResetsAt: resets}); !ok || !th.ResetsAt.Equal(resets) || th.Workspace != "personal:a" {
+		t.Fatalf("typed throttle = %v %v, want its workspace and reset time", th, ok)
 	}
-	if isExhausted(errors.Join(accountingauthority.ErrQuotaExhausted, syscall.EIO)) {
-		t.Fatal("mixed quota and operational failure was treated as expected exhaustion")
+	if _, ok := throttleOf(errors.Join(&accountingauthority.ThrottledError{}, syscall.EIO)); ok {
+		t.Fatal("mixed throttle and operational failure was treated as an expected throttle")
 	}
-	if isExhausted(syscall.EIO) {
-		t.Fatal("operational failure was treated as expected exhaustion")
+	if _, ok := throttleOf(syscall.EIO); ok {
+		t.Fatal("operational failure was treated as a throttle")
 	}
 }

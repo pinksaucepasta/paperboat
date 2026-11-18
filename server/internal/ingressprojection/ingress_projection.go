@@ -30,9 +30,9 @@ type SQLIngressSource struct {
 	DB    *db.DB
 	Clock wire.Clock
 	Quota accountingauthority.QuotaChecker
-	// QuotaDenied, when set, receives each public route left out of a projection solely
-	// because its workspace is out of bandwidth allowance (never an authority).
-	QuotaDenied *[]wire.IngressQuotaDenial
+	// Throttled, when set, receives each admitted public route whose workspace used its fair-use
+	// bandwidth: the route stays in the projection and the edge slows it (never an authority).
+	Throttled *[]wire.IngressThrottle
 	// ReadOnly projects without retaining accounting bindings: a replacement server's warm-up primes the queries
 	// and must not take the edges' accounting locks while the serving server answers their pulls (2026-11-12 19:54Z
 	// and 19:57Z: the old server's desired-state answers waited on the warm-up's locks and 40001s, edges hit 2 s).
@@ -271,13 +271,11 @@ func (s SQLIngressSource) scanIngressRows(ctx context.Context, now time.Time, qu
 	return out, nil
 }
 
-// quotaExhaustion reports an exact quota answer (never one joined with another failure) and the
-// allowance's reset time when the answer carries it.
-func quotaExhaustion(err error) (time.Time, bool) {
-	if quota, ok := err.(*accountingauthority.QuotaExhaustedError); ok {
-		return quota.ResetsAt, true
-	}
-	return time.Time{}, err == accountingauthority.ErrQuotaExhausted
+// throttleOf reports an exact throttle answer (never one joined with another failure): the workspace
+// and the allowance's reset time.
+func throttleOf(err error) (*accountingauthority.ThrottledError, bool) {
+	t, ok := err.(*accountingauthority.ThrottledError)
+	return t, ok
 }
 
 func completeIngressProjection(d *wire.IngressDecision, now time.Time) error {
@@ -406,16 +404,16 @@ JOIN tunnel_routes r ON r.id=q.route JOIN tunnels t ON t.id=r.tunnel_id`, hosts,
 		d := decisions[i]
 		b := d.Binding
 		if err = results[k]; err != nil {
-			if resetsAt, exhausted := quotaExhaustion(err); exhausted {
-				if s.QuotaDenied != nil {
-					*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})
+			t, throttled := throttleOf(err)
+			if !throttled {
+				if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
+					return nil, err
 				}
 				continue
 			}
-			if err = s.rowFailed(ctx, "accounting", b.RouteID, err); err != nil {
-				return nil, err
+			if s.Throttled != nil {
+				*s.Throttled = append(*s.Throttled, wire.IngressThrottle{Hostname: b.Hostname, Workspace: t.Workspace, ResetsAt: t.ResetsAt})
 			}
-			continue
 		}
 		admitted = append(admitted, d)
 	}

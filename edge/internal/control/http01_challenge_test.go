@@ -23,7 +23,7 @@ func TestIngressSnapshotCarriesHTTP01ResponsesToEdgeHandler(t *testing.T) {
 	response := connectorprotocol.HTTP01Response{Hostname: "app.customer.test", Token: http01FixtureToken, KeyAuthorization: http01FixtureToken + ".thumb"}
 	var served []connectorprotocol.HTTP01Response
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "quota_denied": []any{}, "http01_responses": served})
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "throttled": []any{}, "http01_responses": served})
 	}))
 	defer server.Close()
 	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})

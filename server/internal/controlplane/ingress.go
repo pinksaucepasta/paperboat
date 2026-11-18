@@ -49,21 +49,21 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusConflict, state, false, 0)
 		return
 	}
-	decisions, denied, blocked, ipRules, offline, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch, false)
+	decisions, throttled, blocked, ipRules, offline, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch, false)
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if len(denied) > 4096 {
-		denied = denied[:4096]
+	if len(throttled) > 4096 {
+		throttled = throttled[:4096]
 	}
 	var responses []wire.HTTP01Response
 	// The field exists only where http-01 is configured (staging).
 	if s.http01 != nil {
 		responses = s.http01.ForEdge(input.NodeID)
 	}
-	version := wire.IngressVersion(decisions, denied, blocked, ipRules, offline, responses)
+	version := wire.IngressVersion(decisions, throttled, blocked, ipRules, offline, responses)
 	if input.Version == version {
 		expires := make([]time.Time, len(decisions))
 		for i, d := range decisions {
@@ -72,29 +72,29 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
 		return
 	}
-	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied, "blocked": blocked, "ip_rules": ipRules, "offline": offline}
+	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "throttled": throttled, "blocked": blocked, "ip_rules": ipRules, "offline": offline}
 	if s.http01 != nil {
 		snapshotBody["http01_responses"] = responses
 	}
 	writeEdgeJSON(w, http.StatusOK, snapshotBody)
 }
 
-// ingressProjection is the database work behind one desired-state answer: the node's decisions, the quota
-// denials and takedowns that withhold some of them, the owners' IP rules and the previews whose owner is offline.
-func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string, readOnly bool) (decisions []wire.IngressDecision, denied []wire.IngressQuotaDenial, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, offline []wire.IngressOffline, err error) {
+// ingressProjection is the database work behind one desired-state answer: the node's decisions, the throttles
+// and takedowns that withhold some of them, the owners' IP rules and the previews whose owner is offline.
+func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string, readOnly bool) (decisions []wire.IngressDecision, throttled []wire.IngressThrottle, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, offline []wire.IngressOffline, err error) {
 	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
-	decisions, err = (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied, ReadOnly: readOnly}).Edge(ctx, nodeID, epoch)
+	decisions, err = (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, Throttled: &throttled, ReadOnly: readOnly}).Edge(ctx, nodeID, epoch)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &denied); err != nil {
+	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 	offline, err = offlineOwnerPreviews(ctx, s.store, nodeID)
-	return decisions, denied, blocked, ipRules, offline, err
+	return decisions, throttled, blocked, ipRules, offline, err
 }
 
 // offlineOwnerPreviews lists the hostnames of active foreground previews whose owner machine is offline or
@@ -210,19 +210,16 @@ func (s *EdgeService) ingressNodeState(ctx context.Context, nodeID string) (stri
 	return ingressNodeVerifiedEdge, nil
 }
 
-// withholdBlocked removes the decisions and quota denials of hostnames an operator took down
+// withholdBlocked removes the decisions and throttles of hostnames an operator took down
 // (publication_blocks) and returns those hostnames, so the edge answers the takedown page without
-// contacting the origin. A name is listed only when this edge has a decision or denial for it. The
+// contacting the origin. A name is listed only when this edge has a decision for it. The
 // hostnames of previews and tunnels owned by a banned account or team are listed whether or not
 // this edge holds a decision for them: their machines lost access, so a decision may be gone already,
 // and the edge must still answer the takedown page rather than "this address does not exist".
-func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.IngressDecision, denied *[]wire.IngressQuotaDenial) ([]wire.IngressBlock, error) {
-	names := make([]string, 0, len(*decisions)+len(*denied))
+func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.IngressDecision, throttled *[]wire.IngressThrottle) ([]wire.IngressBlock, error) {
+	names := make([]string, 0, len(*decisions))
 	for _, d := range *decisions {
 		names = append(names, d.Binding.Hostname)
-	}
-	for _, d := range *denied {
-		names = append(names, d.Hostname)
 	}
 	blocked := []wire.IngressBlock{}
 	taken := map[string]bool{}
@@ -263,7 +260,7 @@ func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.Ingres
 	// to the bound: a name beyond it is still withheld above and answers "does not exist" rather than being served.
 	blocked = capBlocked(blocked)
 	*decisions = slices.DeleteFunc(*decisions, func(d wire.IngressDecision) bool { return taken[d.Binding.Hostname] })
-	*denied = slices.DeleteFunc(*denied, func(d wire.IngressQuotaDenial) bool { return taken[d.Hostname] })
+	*throttled = slices.DeleteFunc(*throttled, func(d wire.IngressThrottle) bool { return taken[d.Hostname] })
 	return blocked, nil
 }
 
