@@ -46,7 +46,7 @@ func TestClientUpdatePolicyPostgres(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() {
-		_, err := store.Pool().Exec(ctx, `UPDATE paperboat.client_update_policy SET revision=$1, minimum_version=$2, reason=$3, enforce_at=$4 WHERE singleton`, original.Revision, original.MinimumVersion, original.Reason, original.EnforceAt)
+		_, err := store.Pool().Exec(ctx, `UPDATE paperboat.client_update_policy SET revision=$1, minimum_version=$2, reason=$3, enforce_at=$4 WHERE component='pb'`, original.Revision, original.MinimumVersion, original.Reason, original.EnforceAt)
 		if err != nil {
 			t.Error(err)
 		}
@@ -65,6 +65,25 @@ func TestClientUpdatePolicyPostgres(t *testing.T) {
 	}
 	if created.Revision != original.Revision+1 {
 		t.Fatal(created)
+	}
+	// Each component has its own floor: setting edge's leaves pb's alone, and pb's never reaches edge.
+	edge := NewNode(store, audit.NewWriter(store), "", "edge")
+	edge.ceiling = func() (string, error) { return "2026.10.8.10", nil }
+	edgeBefore, e := edge.Get(ctx)
+	if e != nil || edgeBefore.MinimumVersion == created.MinimumVersion {
+		t.Fatalf("edge floor = %+v, %v", edgeBefore, e)
+	}
+	defer func() {
+		if _, err := store.Pool().Exec(ctx, `UPDATE paperboat.client_update_policy SET revision=$1, minimum_version=$2, reason=$3, enforce_at=$4 WHERE component='edge'`, edgeBefore.Revision, edgeBefore.MinimumVersion, edgeBefore.Reason, edgeBefore.EnforceAt); err != nil {
+			t.Error(err)
+		}
+	}()
+	edgeSet, e := edge.Put(ctx, actor, "set-edge-key", "test_reference", Input{ExpectedRevision: edgeBefore.Revision, MinimumVersion: "2026.10.8.5", Reason: "edge test"})
+	if e != nil || edgeSet.MinimumVersion != "2026.10.8.5" {
+		t.Fatalf("edge put = %+v, %v", edgeSet, e)
+	}
+	if pb, e := New(store, nil, "").Get(ctx); e != nil || pb.MinimumVersion != created.MinimumVersion {
+		t.Fatalf("pb floor after edge change = %+v, %v", pb, e)
 	}
 
 	// A committed write is immediately visible without querying. Concurrent
@@ -207,7 +226,7 @@ func TestClientUpdatePolicyPostgres(t *testing.T) {
 		t.Fatalf("old replay rolled gate back: %+v err=%v", latest, err)
 	}
 	var count int
-	if e = store.Pool().QueryRow(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE actor_user_id=$1 AND event_type='client_update_policy.changed'`, actor).Scan(&count); e != nil || count != 3 {
+	if e = store.Pool().QueryRow(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE actor_user_id=$1 AND event_type='client_update_policy.changed'`, actor).Scan(&count); e != nil || count != 4 { // 3 pb changes + 1 edge
 		t.Fatalf("audit count %d %v", count, e)
 	}
 }

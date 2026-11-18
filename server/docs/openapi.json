@@ -908,6 +908,18 @@
             "type": "string",
             "format": "date-time",
             "description": "When the server's node last reported in; absent before its first report."
+          },
+          "version": {
+            "type": "string",
+            "description": "Release the node last reported; absent before its first report."
+          },
+          "update_available": {
+            "type": "string",
+            "description": "A newer published self-host release the node can update to."
+          },
+          "update_required": {
+            "type": "string",
+            "description": "Present when the node is below its component's update floor: why, and how to update."
           }
         }
       },
@@ -21042,6 +21054,22 @@
             }
           }
         }
+      },
+      "AdminClientUpdatePolicy": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ClientUpdatePolicy"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "latest_version": {
+                "type": "string",
+                "description": "Newest release published for every platform of this component."
+              }
+            }
+          }
+        ]
       }
     },
     "responses": {
@@ -52559,7 +52587,7 @@
                   ],
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/ClientUpdatePolicy"
+                      "$ref": "#/components/schemas/AdminClientUpdatePolicy"
                     }
                   }
                 }
@@ -52573,7 +52601,24 @@
             "description": "Policy or operator audit unavailable"
           }
         },
-        "x-operator-capability": "admin"
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "name": "component",
+            "in": "query",
+            "required": false,
+            "description": "pb (default), pbh, edge or relay.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pb",
+                "pbh",
+                "edge",
+                "relay"
+              ]
+            }
+          }
+        ]
       },
       "put": {
         "operationId": "admin_put_client_update_policy",
@@ -52610,6 +52655,21 @@
           },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "component",
+            "in": "query",
+            "required": false,
+            "description": "pb (default), pbh, edge or relay.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pb",
+                "pbh",
+                "edge",
+                "relay"
+              ]
+            }
           }
         ],
         "requestBody": {

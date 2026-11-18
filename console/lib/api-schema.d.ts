@@ -9589,6 +9589,12 @@ export interface components {
              * @description When the server's node last reported in; absent before its first report.
              */
             last_heartbeat_at?: string;
+            /** @description Release the node last reported; absent before its first report. */
+            version?: string;
+            /** @description A newer published self-host release the node can update to. */
+            update_available?: string;
+            /** @description Present when the node is below its component's update floor: why, and how to update. */
+            update_required?: string;
         };
         SelfhostPolicy: {
             /**
@@ -14862,6 +14868,10 @@ export interface components {
         };
         AnnouncementsReadInput: {
             ids: string[];
+        };
+        AdminClientUpdatePolicy: components["schemas"]["ClientUpdatePolicy"] & {
+            /** @description Newest release published for every platform of this component. */
+            latest_version?: string;
         };
     };
     responses: {
@@ -31460,7 +31470,10 @@ export interface operations {
     };
     admin_get_client_update_policy: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description pb (default), pbh, edge or relay. */
+                component?: "pb" | "pbh" | "edge" | "relay";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -31474,7 +31487,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        data: components["schemas"]["ClientUpdatePolicy"];
+                        data: components["schemas"]["AdminClientUpdatePolicy"];
                     };
                 };
             };
@@ -31496,7 +31509,10 @@ export interface operations {
     };
     admin_put_client_update_policy: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description pb (default), pbh, edge or relay. */
+                component?: "pb" | "pbh" | "edge" | "relay";
+            };
             header: {
                 "Operator-Target": string;
                 "Operator-Reason": string;

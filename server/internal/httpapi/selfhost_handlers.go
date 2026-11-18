@@ -2,17 +2,62 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
-type SelfhostHandlers struct{ Service *selfhost.Service }
+type SelfhostHandlers struct {
+	Service *selfhost.Service
+	// Floors is the update policy of each node component ("edge", "relay"); nil marks nothing.
+	Floors map[string]NodeUpdatePolicy
+}
+
+// NodeUpdatePolicy is one node component's update floor and newest published release (clientupdate.NewNode).
+type NodeUpdatePolicy interface {
+	Get(context.Context) (clientupdate.Policy, error)
+	Latest() (string, error)
+}
+
+// markUpdates flags each installation whose node runs an older release than published (UpdateAvailable) or
+// one below the update floor (UpdateRequired, with the message the node itself is told). A floor or release
+// that cannot be read marks nothing.
+func (h *SelfhostHandlers) markUpdates(ctx context.Context, list []selfhost.Installation) {
+	for i := range list {
+		var component string
+		switch list[i].Capability {
+		case "tunnel":
+			component = "edge"
+		case "relay":
+			component = "relay"
+		default:
+			continue
+		}
+		floor := h.Floors[component]
+		current, ok := clientupdate.ParseVersion(list[i].Version)
+		if floor == nil || !ok {
+			continue
+		}
+		if latest, err := floor.Latest(); err == nil {
+			if newest, ok := clientupdate.ParseVersion(latest); ok && clientupdate.Compare(current, newest) < 0 {
+				list[i].UpdateAvailable = latest
+			}
+		}
+		if policy, err := floor.Get(ctx); err == nil && clientupdate.RequiresUpdate(policy, list[i].Version, time.Now()) {
+			list[i].UpdateRequired = controlplane.UpdateRequiredMessage(component, list[i].Version, policy)
+		}
+	}
+}
 
 func selfhostJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -119,7 +164,10 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 		var options selfhost.InventoryOptions
 		options, e = selfhostInventoryOptions(r)
 		if e == nil {
-			out, e = h.Service.ListScopedInventory(r.Context(), actor, scope, operator, options)
+			var inventory selfhost.InstallationInventory
+			inventory, e = h.Service.ListScopedInventory(r.Context(), actor, scope, operator, options)
+			h.markUpdates(r.Context(), inventory.Installations)
+			out = inventory
 		}
 	case r.Method == "GET" && r.PathValue("installationID") != "":
 		out, e = h.Service.GetInstallation(r.Context(), actor, r.PathValue("installationID"), operator)

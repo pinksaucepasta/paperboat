@@ -583,6 +583,7 @@ type ClientUpdatePolicy struct {
 	MinimumVersion string
 	Reason         string
 	EnforceAt      sql.NullTime
+	Component      string
 }
 
 type ClientUpdatePolicyRequest struct {

@@ -79,12 +79,14 @@ type ReadinessChecker interface {
 var ErrNotReady = errors.New("server is not ready")
 
 type Options struct {
-	Activity               *activity.Service
-	TeamIdentity           *teamidentity.Service
-	AuditStreams           *auditstream.Service
-	Recordings             *recordings.Service
-	TeamBuckets            *teambucket.Service
-	ClientUpdatePolicy     ClientUpdatePolicyAPI
+	Activity           *activity.Service
+	TeamIdentity       *teamidentity.Service
+	AuditStreams       *auditstream.Service
+	Recordings         *recordings.Service
+	TeamBuckets        *teambucket.Service
+	ClientUpdatePolicy ClientUpdatePolicyAPI
+	// NodeUpdatePolicies is the update floor of each node component: "pbh", "edge", "relay".
+	NodeUpdatePolicies     map[string]ClientUpdatePolicyAPI
 	OperatorInfrastructure *operatorinfra.Service
 	ServerNodes            *servernodes.Enroller
 	// Database serves replica-safe reads and the commit position of writes (commit_position.go).
@@ -209,8 +211,8 @@ func NewRouter(opts Options) http.Handler {
 		if opts.ClientUpdatePolicy != nil {
 			mux.HandleFunc("GET /v1/client/update-policy", clientUpdatePolicyGet(opts.ClientUpdatePolicy))
 			if opts.OperatorAuth != nil {
-				mux.Handle("GET /v1/admin/client-update-policy", operatorRoute(opts, clientUpdatePolicyGet(opts.ClientUpdatePolicy)))
-				mux.Handle("PUT /v1/admin/client-update-policy", operatorRoute(opts, clientUpdatePolicyPut(opts.ClientUpdatePolicy)))
+				mux.Handle("GET /v1/admin/client-update-policy", operatorRoute(opts, componentUpdatePolicy(opts, adminClientUpdatePolicyGet)))
+				mux.Handle("PUT /v1/admin/client-update-policy", operatorRoute(opts, componentUpdatePolicy(opts, clientUpdatePolicyPut)))
 			}
 		}
 		if opts.ManagedSSH != nil && opts.OperatorAuth != nil {

@@ -582,7 +582,14 @@ func New(opts Options) (*App, error) {
 	}
 	telemetryMetrics := telemetry.NewMetrics()
 	serverdiagnostics.Bind(telemetryMetrics)
+	nodeFloors := map[string]*clientupdate.Service{}
+	nodeFloorAPIs := map[string]httpapi.ClientUpdatePolicyAPI{}
+	for _, component := range []string{"pbh", "edge", "relay"} {
+		nodeFloors[component] = clientupdate.NewNode(store, auditWriter, opts.Config.ReleaseDirectory, component)
+		nodeFloorAPIs[component] = nodeFloors[component]
+	}
 	if edgeControlService != nil {
+		edgeControlService.SetUpdateFloors(map[string]controlplane.NodeUpdateFloor{"edge": nodeFloors["edge"], "relay": nodeFloors["relay"]})
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
 		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
 	}
@@ -756,6 +763,7 @@ func New(opts Options) (*App, error) {
 	accountDeletionOutbox := accountDeletion.Worker(workOSVerifier(opts.Config), subscriptionCanceller)
 	router := httpapi.NewRouter(httpapi.Options{
 		ClientUpdatePolicy:       clientupdate.New(store, auditWriter, opts.Config.ReleaseDirectory),
+		NodeUpdatePolicies:       nodeFloorAPIs,
 		SupportReports:           supportService,
 		OperatorInfrastructure:   infrastructureService,
 		ServerNodes:              newServerNodeEnroller(store, opts.Config),
@@ -773,7 +781,7 @@ func New(opts Options) (*App, error) {
 		IPRules:                  accessrules.New(store),
 		OperatorBilling:          billing.NewOperatorService(store, priceReader),
 		OperatorAudit:            auditWriter,
-		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService},
+		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService, Floors: map[string]httpapi.NodeUpdatePolicy{"edge": nodeFloors["edge"], "relay": nodeFloors["relay"]}},
 		Config:                   opts.Config,
 		Logger:                   opts.Logger,
 		ReadinessChecker:         checker,

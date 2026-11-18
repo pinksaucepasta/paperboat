@@ -91,6 +91,13 @@ func TestControlAnswersAreOutcomesNotFailures(t *testing.T) {
 			}
 		})
 	}
+	// Below the update floor the heartbeat is refused with 426: a typed answer the worker logs with how to update.
+	t.Run("update required", func(t *testing.T) {
+		client, _, _ := newClient(t, "https://control.test", answering(http.StatusUpgradeRequired, `{"code":"update_required","message":"Update required"}`))
+		if err := calls["heartbeat"](context.Background(), client); !errors.Is(err, ErrUpdateRequired) {
+			t.Fatalf("426 heartbeat = %v, want ErrUpdateRequired", err)
+		}
+	})
 	t.Run("caller gave up", func(t *testing.T) {
 		client, outcomes, failures := newClient(t, "https://control.test", roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			<-r.Context().Done()
