@@ -25,6 +25,13 @@ import (
 
 const contentType = "application/offset+octet-stream"
 
+// replayedHeader marks a create response the receiver served from a previous
+// identical request (same batch content or a journaled outcome) rather than a
+// fresh insert. A replayed create starts with one HEAD: the journal path can
+// hold the original outcome with a stale offset, while recoverBatch re-reads
+// the live rows (but shares the same marker, so it is not distinguished).
+const replayedHeader = "X-Paperboat-Replayed"
+
 const operationRecoveryWindow = 10 * time.Second
 
 type Auth struct {
@@ -253,7 +260,13 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 	}
 	payload, _ := json.Marshal(map[string]any{"batch_id": batchID, "source_machine_id": c.binding.SourceMachineID, "destination_machine_id": c.binding.DestinationMachineID, "initiating_user_id": c.binding.InitiatingUserID, "session_id": sessionID, "files": files})
 	var batch Batch
-	if err := c.retryJSONRequest(ctx, http.MethodPost, c.Endpoint, operationID("create", batchID), "application/json", 0, payload, &batch); err != nil {
+	// The create response already carries the receiver's durable offset per
+	// transfer: a fresh (non-replayed) create starts from it with no HEAD.
+	// A replayed create may carry a stale journal outcome (see
+	// serveCollection/recoverBatch), so it starts with one HEAD as before.
+	createHeader, err := c.retryJSONRequestHeader(ctx, http.MethodPost, c.Endpoint, operationID("create", batchID), "application/json", 0, payload, &batch)
+	replayedCreate := err == nil && createHeader.Get(replayedHeader) == "true"
+	if err != nil {
 		if c.native {
 			if errors.Is(ctx.Err(), context.Canceled) || (!retryableTransferFailure(err) && !receiverBusy(err)) {
 				return Batch{BatchID: batchID}, err
@@ -282,6 +295,16 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 	if workers > 2 {
 		workers = 2
 	}
+	// trustedInitial is the first-attempt offset per transfer from the create
+	// response (-1: HEAD once, i.e. a replayed create or an out-of-range
+	// offset). uploadNative validates the offset again before trusting it.
+	trustedInitial := make([]int64, len(sources))
+	for i := range sources {
+		trustedInitial[i] = -1
+		if !replayedCreate && batch.Transfers[i].CommittedOffset >= 0 && batch.Transfers[i].CommittedOffset <= sources[i].Size {
+			trustedInitial[i] = batch.Transfers[i].CommittedOffset
+		}
+	}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	jobs := make(chan int)
@@ -292,7 +315,7 @@ func (c *Client) sendBatchPlaintext(ctx context.Context, batchID, sessionID stri
 		go func() {
 			defer wg.Done()
 			for index := range jobs {
-				if err := c.uploadOne(workCtx, batch.Transfers[index], sources[index]); err != nil {
+				if err := c.uploadOne(workCtx, batch.Transfers[index], sources[index], trustedInitial[index]); err != nil {
 					errs <- err
 					cancel()
 					return
@@ -478,9 +501,9 @@ func (c *Client) requestWithHeaders(ctx context.Context, method, target, operati
 	return nil, errors.New("file transfer authorization retry exhausted")
 }
 
-func (c *Client) uploadOne(ctx context.Context, manifest Manifest, source Source) error {
+func (c *Client) uploadOne(ctx context.Context, manifest Manifest, source Source, initialOffset int64) error {
 	if c.native {
-		return c.uploadNative(ctx, manifest, source)
+		return c.uploadNative(ctx, manifest, source, initialOffset)
 	}
 	for attempts := 0; attempts < 4; attempts++ {
 		offset, err := c.Offset(ctx, manifest.TransferID)
@@ -611,12 +634,21 @@ func (c *Client) patchRequest(ctx context.Context, id string, offset int64, sour
 }
 
 func (c *Client) jsonRequest(ctx context.Context, method, url, operation, mediaType string, offset int64, body io.Reader, target any) error {
+	_, err := c.jsonRequestHeader(ctx, method, url, operation, mediaType, offset, body, target)
+	return err
+}
+
+// jsonRequestHeader is jsonRequest that also reports the successful
+// attempt's response header, so callers can read transport metadata (the
+// create response's replay marker) the decoded body does not carry.
+func (c *Client) jsonRequestHeader(ctx context.Context, method, url, operation, mediaType string, offset int64, body io.Reader, target any) (http.Header, error) {
 	response, err := c.request(ctx, method, url, operation, mediaType, offset, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	header := response.Header.Clone()
 	if response.Body == nil {
-		return responseFailure(errors.New("file transfer response body is missing"))
+		return header, responseFailure(errors.New("file transfer response body is missing"))
 	}
 	var decodeErr error
 	if target != nil {
@@ -625,9 +657,9 @@ func (c *Client) jsonRequest(ctx context.Context, method, url, operation, mediaT
 		decodeErr = decoder.Decode(target)
 	}
 	if cause := errors.Join(decodeErr, response.Body.Close()); cause != nil {
-		return responseFailure(cause)
+		return header, responseFailure(cause)
 	}
-	return nil
+	return header, nil
 }
 
 func closeResponseBody(response *http.Response) error {
@@ -638,6 +670,14 @@ func closeResponseBody(response *http.Response) error {
 }
 
 func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, mediaType string, offset int64, body []byte, target any) error {
+	_, err := c.retryJSONRequestHeader(ctx, method, url, operation, mediaType, offset, body, target)
+	return err
+}
+
+// retryJSONRequestHeader is retryJSONRequest that also reports the successful
+// attempt's response header. Only the create path needs it (the replay
+// marker); every other caller keeps the headerless form.
+func (c *Client) retryJSONRequestHeader(ctx context.Context, method, url, operation, mediaType string, offset int64, body []byte, target any) (http.Header, error) {
 	// Initial connection and authorization use the caller and HTTP deadlines.
 	// The recovery budget bounds replay after a failure, not first connection
 	// establishment while the peer acquires newly granted authority.
@@ -654,19 +694,19 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 		if body != nil {
 			reader = bytes.NewReader(body)
 		}
-		err := c.jsonRequest(retryCtx, method, url, operation, mediaType, offset, reader, target)
+		header, err := c.jsonRequestHeader(retryCtx, method, url, operation, mediaType, offset, reader, target)
 		if err == nil {
-			return nil
+			return header, nil
 		}
 		if c.native {
 			if !retryableTransferFailure(err) && !receiverBusy(err) {
-				return err
+				return nil, err
 			}
 			c.noteWaiting(err)
 		} else {
 			var remote *Error
 			if errors.As(err, &remote) && !transientHTTPStatus(remote.StatusCode) {
-				return err
+				return nil, err
 			}
 		}
 		if cancel == nil {
@@ -684,9 +724,9 @@ func (c *Client) retryJSONRequest(ctx context.Context, method, url, operation, m
 		}
 		if waitErr := wait(retryCtx, attempt); waitErr != nil {
 			if ctx.Err() != nil {
-				return callerContextError(ctx)
+				return nil, callerContextError(ctx)
 			}
-			return err
+			return nil, err
 		}
 	}
 }

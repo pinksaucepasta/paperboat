@@ -47,7 +47,7 @@ func NewNativeClient(endpoint string, auth Auth, binding Binding, open func(cont
 	return &NativeClient{Client: client}, nil
 }
 
-func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Source) error {
+func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Source, initialOffset int64) error {
 	state := newNativeRecovery(ctx)
 	ctx = context.WithValue(ctx, nativeRecoveryKey{}, state)
 	// A folder streams from a tar-writer goroutine; a terminal outcome releases it (and the in-flight file fd) now
@@ -57,9 +57,16 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 	if source.guard == nil {
 		source.guard = &sourceGuard{reader: source.Reader}
 	}
+	// The first attempt starts from the create response's committed offset, so
+	// a fresh batch sends with no HEAD; a replayed create passes -1 and keeps
+	// the old HEAD-once behaviour. Out-of-range offsets HEAD once too.
+	first := initialOffset
+	if first < 0 || first > source.Size {
+		first = -1
+	}
 	// A successful PATCH returns the committed offset, so the next chunk follows
 	// without a HEAD; the offset is asked again only after a failure.
-	var previous, committed int64 = -1, -1
+	var previous, committed int64 = -1, first
 	// attemptFrom is where the last request started; a later HEAD past it means that request committed
 	// checkpoints before it failed, which counts as progress for the recovery window and the renewal budget.
 	// reported keeps the progress callback from going backwards when a cut stream resumes from the receiver's offset.

@@ -119,6 +119,10 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	if !jsonOutput {
 		fmt.Fprintf(cobraCommand.ErrOrStderr(), "Sending to %s (%s)\n", destination.Alias, destination.ID)
 	}
+	if destination.ID != sourceMachineID && dependencies.peerLocal != nil {
+		// The destination is known: its peer session dial overlaps hashing and the prepare call.
+		warmPeerSessionBeforeDescriptor(ctx.Context, dependencies.peerLocal, destination.ID, destination.EnvironmentID, destination.InstallationGeneration)
+	}
 	preparedPaths := make([]string, len(paths))
 	for i, path := range paths {
 		preparedPaths[i], err = sendSourcePath(path)
@@ -156,9 +160,26 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 	}
 	requestID := "request_" + requestUUID.String()
 	operationID := newIdempotencyKey()
-	acceptance, err := retryWhileMachineOffline(ctx.Context, func() (api.TeamInboxRequest, error) {
-		return client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: serverclock.Now().UTC().Add(10 * time.Minute)}, operationID)
-	})
+	var acceptance api.TeamInboxRequest
+	var prepared_ *api.SendPrepareResponse
+	if destination.ID == sourceMachineID {
+		// This computer is the destination: no descriptor, only the inbox request.
+		acceptance, err = retryWhileMachineOffline(ctx.Context, func() (api.TeamInboxRequest, error) {
+			return client.CreateTeamInboxRequest(ctx.Context, api.TeamInboxRequest{RequestID: requestID, SourceMachineID: sourceMachineID, DestinationMachineID: destination.ID, BatchID: batchID, Files: requestFiles, ExpiresAt: serverclock.Now().UTC().Add(10 * time.Minute)}, operationID)
+		})
+	} else {
+		// One round trip replaces creating the inbox request, reading the transfer-mode preference and issuing the
+		// descriptor: each was a full trip to a control plane that can be 150 ms away.
+		var response api.SendPrepareResponse
+		response, err = retryWhileMachineOffline(ctx.Context, func() (api.SendPrepareResponse, error) {
+			return client.PrepareSend(ctx.Context, api.SendPrepareRequest{DestinationMachineID: destination.ID, SourceMachineID: sourceMachineID, SessionID: sessionID, RequestID: requestID, OperationID: operationID, BatchID: batchID, Files: requestFiles, ExpiresAt: serverclock.Now().UTC().Add(10 * time.Minute), TransferMode: unlimitedFlagMode(cobraCommand), DeclaredBytes: batchTotal(prepared.Sources)})
+		})
+		acceptance, prepared_ = response.Request, &response
+		if acceptance.Status == "consumed" {
+			// A retried call after a lost answer: the approval was consumed by the first one and the descriptor is minted again.
+			acceptance.Status = "approved"
+		}
+	}
 	if err != nil {
 		if limit := serverTransferLimit(err, prepared.Sources); limit != nil {
 			return limit
@@ -202,12 +223,22 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		if acceptance.Status == "not_required" {
 			descriptorRequestID, descriptorDigest = "", ""
 		}
-		declared := api.TransferDeclaration{Mode: sendTransferMode(ctx.Context, cobraCommand, client), Bytes: batchTotal(prepared.Sources)}
-		descriptor, err := retryWhileMachineOffline(ctx.Context, func() (api.FileTransfer, error) {
-			return client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
-		})
-		if err != nil {
-			return friendlyCommandError(err)
+		mode := prepared_.FileTransferMode
+		if mode == "" {
+			mode = "automatic"
+		}
+		declared := api.TransferDeclaration{Mode: mode, Bytes: batchTotal(prepared.Sources)}
+		var descriptor api.FileTransfer
+		if prepared_.Descriptor != nil {
+			descriptor = *prepared_.Descriptor
+		} else {
+			// Manual approval finished after the prepare call: the descriptor of the now-approved request.
+			descriptor, err = retryWhileMachineOffline(ctx.Context, func() (api.FileTransfer, error) {
+				return client.MachineFileTransferDescriptorForRequest(ctx.Context, destination.ID, sourceMachineID, sessionID, descriptorRequestID, descriptorDigest, declared)
+			})
+			if err != nil {
+				return friendlyCommandError(err)
+			}
 		}
 		target := &resolver.FileTransferTarget{
 			Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID,
@@ -408,4 +439,12 @@ func sendSourcePath(path string) (string, error) {
 		return filepath.Clean(path), nil
 	}
 	return filepath.Abs(path)
+}
+
+// unlimitedFlagMode is what a send declares to the server: "unlimited" for --unlimited, else "" (the account's preference).
+func unlimitedFlagMode(command *cobra.Command) string {
+	if unlimited, _ := command.Flags().GetBool("unlimited"); unlimited {
+		return "unlimited"
+	}
+	return ""
 }

@@ -82,7 +82,7 @@ func TestSendOfflineStoresCiphertextForEveryRecipientMachine(t *testing.T) {
 		case r.URL.Path == "/v1/machines":
 			machine := api.UserMachine{ID: "machine_destination", Alias: "offline-recipient", Platform: "linux", State: "offline", Online: false, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: false}}}
 			writeAPIData(t, w, api.UserMachinePage{Items: []api.UserMachine{machine}, Pagination: api.Pagination{Limit: 200, Total: 1}})
-		case r.URL.Path == "/v1/team-inbox/requests":
+		case r.URL.Path == "/v1/sends/prepare":
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Error(err)
 				w.WriteHeader(400)
@@ -94,7 +94,7 @@ func TestSendOfflineStoresCiphertextForEveryRecipientMachine(t *testing.T) {
 			}
 			request.ManifestDigest = storedfiles.ManifestDigest(files)
 			request.Status, request.TeamID, request.Stored = "pending", "team_1", true
-			writeAPIData(t, w, request)
+			writeAPIData(t, w, api.SendPrepareResponse{Request: request})
 		case strings.HasSuffix(r.URL.Path, "/stored/recipients"):
 			writeAPIData(t, w, map[string]any{"recipients": []wire.Recipient{{MachineID: "machine_destination", HostPublic: firstKey.PublicKey().Bytes()}, {MachineID: "machine_other", HostPublic: secondKey.PublicKey().Bytes()}}})
 		case strings.HasSuffix(r.URL.Path, "/stored/metadata"):
