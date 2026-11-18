@@ -36,7 +36,7 @@ const localOf = (iso?: string) => {
 }
 
 /** Who gets it: everyone, a plan, or one team or user found by search. */
-function AudiencePicker({ kind, value, onKind, onValue }: { kind: Audience; value: string; onKind: (k: Audience) => void; onValue: (v: string) => void }) {
+export function AudiencePicker({ kind, value, onKind, onValue, options = audiences }: { kind: string; value: string; onKind: (k: string) => void; onValue: (v: string) => void; options?: [string, string][] }) {
   const [q, setQ] = useState("")
   const products = useAllPages<Products["products"][number]>(kind === "plan" ? "/v1/admin/billing/products" : null, (page) => (page as unknown as Products).products)
   const path = kind === "team" ? "teams" : "accounts"
@@ -45,7 +45,7 @@ function AudiencePicker({ kind, value, onKind, onValue }: { kind: Audience; valu
   const plans: [string, string][] = [["free", "Free (no paid personal plan)"], ...(products.data?.items ?? []).filter((p) => p.active).map((p): [string, string] => [p.code, `${p.display_name} (${p.code})`])]
   return (
     <div className="flex flex-col gap-3" data-audience-picker>
-      <SelectField label="Who gets it" value={kind} onChange={(k) => { onKind(k as Audience); onValue(""); setQ("") }} options={audiences} />
+      <SelectField label="Who gets it" value={kind} onChange={(k) => { onKind(k); onValue(""); setQ("") }} options={options} />
       {kind === "plan" && <SelectField label="Plan" value={value} onChange={onValue} options={[["", products.isPending ? "Loading…" : "Choose a plan"], ...plans]} />}
       {(kind === "team" || kind === "user") && (
         <div className="flex flex-col gap-1.5">
@@ -133,7 +133,7 @@ export function AnnouncementDialog({ existing, control }: { existing?: Announcem
           <label className="flex items-center gap-2 pb-1 text-sm"><Checkbox checked={dismissible} onCheckedChange={(v) => setDismissible(v === true)} />Users can dismiss it</label>
         </div>
       )}
-      <AudiencePicker kind={audience} value={value} onKind={setAudience} onValue={setValue} />
+      <AudiencePicker kind={audience} value={value} onKind={(k) => setAudience(k as Audience)} onValue={setValue} />
       <TextField label="Starts" optional type="datetime-local" value={starts} onChange={setStarts} hint="Empty starts now." />
       <TextField label="Ends" optional type="datetime-local" value={ends} onChange={setEnds} hint={timesOk ? "Empty keeps it until you retract it." : "It must end after it starts."} />
       <div className="flex flex-col gap-1.5">
