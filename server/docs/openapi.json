@@ -920,6 +920,10 @@
           "update_required": {
             "type": "string",
             "description": "Present when the node is below its component's update floor: why, and how to update."
+          },
+          "update": {
+            "$ref": "#/components/schemas/SelfhostUpdateStatus",
+            "description": "The node's latest update request; absent when Update was never pressed."
           }
         }
       },
@@ -21070,6 +21074,47 @@
             }
           }
         ]
+      },
+      "SelfhostUpdateStatus": {
+        "type": "object",
+        "required": [
+          "id",
+          "target_version",
+          "state",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "target_version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "downloading",
+              "verifying",
+              "swapping",
+              "checking",
+              "succeeded",
+              "rolled_back",
+              "failed"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "description": "The step's detail; for rolled_back and failed, the exact reason."
+          },
+          "support_reference": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "responses": {
@@ -64074,6 +64119,282 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/selfhost/installations/{installationID}/update": {
+      "post": {
+        "operationId": "post_v1_selfhost_installations_installation_id_update",
+        "summary": "Ask the node to update to the newest self-host release at its next check-in",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "installationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The update request in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostUpdateStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/selfhost/installations/{installationID}/update": {
+      "post": {
+        "operationId": "admin_post_selfhost_installation_update",
+        "summary": "Ask a global node to update to the newest self-host release at its next check-in",
+        "security": [
+          {
+            "operatorCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "installationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Exact address for enrollment or installation ID for deletion."
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Opaque audit reason reference."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Stable key for retrying the exact mutation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The update request in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostUpdateStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Separate operator identity and staff role are required. Scope is forced global; ordinary account roles never authorize this route.",
+        "x-operator-capability": "admin"
+      }
+    },
+    "/v1/selfhost/update/check": {
+      "post": {
+        "operationId": "selfhost_update_check",
+        "summary": "pbh check-in: report its release and learn a requested update",
+        "security": [
+          {
+            "bearerSelfhostRuntime": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The update request in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "update": {
+                          "$ref": "#/components/schemas/SelfhostUpdateStatus"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "426": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/selfhost/update/report": {
+      "post": {
+        "operationId": "selfhost_update_report",
+        "summary": "pbh reports one step of its running update",
+        "security": [
+          {
+            "bearerSelfhostRuntime": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "state"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "support_reference": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
