@@ -61,12 +61,25 @@ export function sessionId() {
 
 /** The page a route template names, e.g. `/machines/[machineId]/terminals`; never a real id, name or query. */
 export function routePath(pathname: string, params: Record<string, string | string[] | undefined>) {
-  let out = pathname
+  const names = new Map<string, string>()
   for (const [key, value] of Object.entries(params)) {
-    if (key === "tab" || value === undefined) continue
-    for (const v of [value].flat()) out = out.replace("/" + v, `/[${key}]`)
+    if (key === "tab") continue
+    for (const v of [value ?? []].flat()) names.set(v, key).set(encodeURIComponent(v), key)
   }
-  return out
+  const decoded = (segment: string) => {
+    try {
+      return decodeURIComponent(segment)
+    } catch {
+      return segment
+    }
+  }
+  return pathname
+    .split("/")
+    .map((segment) => {
+      const key = names.get(segment) ?? names.get(decoded(segment))
+      return key ? `[${key}]` : segment
+    })
+    .join("/")
 }
 
 /** Properties every event carries: the session, the page and the client class. `$current_url` is origin + route, no query. */

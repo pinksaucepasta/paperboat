@@ -91,7 +91,7 @@ function ConsoleView({ days }: { days: Days }) {
         <Headline label="Daily active" value={d.daily_active.value} previous={d.daily_active.previous} />
         <Headline label="Weekly active" value={d.weekly_active.value} previous={d.weekly_active.previous} />
         <Headline label="Paid conversions" value={d.paid.value} previous={d.paid.previous} />
-        {r.size > 0 && <Headline label="Week-1 retention" suffix="%" value={percent(r.retained, r.size)} previous={percent(r.previous_retained, r.previous_size)} note={`${r.retained} of ${r.size} accounts`} />}
+        {r.size > 0 && <Headline label="Week-1 retention" suffix="%" points value={percent(r.retained, r.size)} previous={percent(r.previous_retained, r.previous_size)} note={`${r.retained} of ${r.size} accounts`} />}
       </div>
       {d.funnel.length > 0 && (
         <Panel title="Activation">

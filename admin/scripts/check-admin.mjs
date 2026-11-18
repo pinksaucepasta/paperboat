@@ -436,7 +436,7 @@ try {
     await p.getByRole("button", { name: "Console" }).click()
     await p.waitForSelector('[data-analytics-app="console"]')
     const product = await text('[data-analytics-app="console"]')
-    expect(product.includes("Weekly active") && product.includes("↑ 50%") && product.includes("63%"), "active accounts and week-1 retention")
+    expect(product.includes("Weekly active") && product.includes("↑ 50%") && product.includes("63%") && product.includes("↑ 30 pts"), "active accounts and week-1 retention")
     expect((await text("[data-dropoff]")).includes("Used a terminal, command, transfer or tunnel"), "the step with the largest loss is highlighted")
     expect((await text("[data-adoption]")).includes("Terminals") && (await text("[data-adoption]")).includes("35%"), "feature use as a share of active accounts")
     await p.screenshot({ path: `${shots}/analytics-console-light.png`, fullPage: true })

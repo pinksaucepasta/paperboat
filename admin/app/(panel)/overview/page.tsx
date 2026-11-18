@@ -78,8 +78,8 @@ function Insights() {
         <p className="py-6 text-center text-sm text-muted-foreground" data-analytics-state="not-configured">
           PostHog isn’t set up on this server (PAPERBOAT_POSTHOG_*).
         </p>
-      ) : site.isError ? (
-        <ErrorBlock what="analytics" error={site.error} retry={() => site.refetch()} />
+      ) : site.isError || product.isError ? (
+        <ErrorBlock what="analytics" error={(site.error ?? product.error)!} retry={() => { site.refetch(); product.refetch() }} />
       ) : !site.data || !product.data ? (
         <div className="grid grid-cols-3 gap-3">
           {["Visitors", "Signups", "Weekly active"].map((label) => (

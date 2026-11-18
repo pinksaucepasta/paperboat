@@ -5,8 +5,13 @@ import { Time } from "@/components/time"
 import { cn } from "@/lib/utils"
 
 /** ↑/↓ percent against the range before, "new" when there was nothing before, nothing when both are zero. */
-export function Delta({ value, previous }: { value: number; previous: number }) {
+export function Delta({ value, previous, points }: { value: number; previous: number; points?: boolean }) {
   if (value === 0 && previous === 0) return null
+  if (points) {
+    const diff = value - previous
+    if (diff === 0) return <span className="text-muted-foreground">no change</span>
+    return <span className={diff > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}>{diff > 0 ? "↑" : "↓"} {Math.abs(diff)} pts</span>
+  }
   if (previous === 0) return <span className="text-muted-foreground">new</span>
   const change = Math.round(((value - previous) / previous) * 100)
   if (change === 0) return <span className="text-muted-foreground">no change</span>
@@ -14,9 +19,9 @@ export function Delta({ value, previous }: { value: number; previous: number }) 
 }
 
 /** A headline number with its change against the previous range (and an optional extra line). */
-export function Headline({ label, value, previous, note, suffix = "" }: { label: string; value: number; previous: number; note?: React.ReactNode; suffix?: string }) {
+export function Headline({ label, value, previous, note, suffix = "", points }: { label: string; value: number; previous: number; note?: React.ReactNode; suffix?: string; points?: boolean }) {
   return (
-    <Stat label={label} value={`${value}${suffix}`} note={<span className="flex flex-wrap gap-x-2"><Delta value={value} previous={previous} />{note}</span>} />
+    <Stat label={label} value={`${value}${suffix}`} note={<span className="flex flex-wrap gap-x-2"><Delta value={value} previous={previous} points={points} />{note}</span>} />
   )
 }
 
@@ -46,7 +51,7 @@ export function Trend({ title, days }: { title: string; days: { day: string; vis
   const peak = Math.max(1, ...days.map((d) => d.visitors))
   return (
     <Panel title={title}>
-      <ul className="flex h-32 items-end gap-0.5 border-b border-divider" aria-label={title}>
+      <ul role="img" className="flex h-32 items-end gap-0.5 border-b border-divider" aria-label={`${title}: ${days.map((d) => `${d.day} ${d.visitors}`).join(", ")}`}>
         {days.map((d) => (
           <li key={d.day} title={`${d.day}: ${d.visitors}`} className="flex-1 rounded-t-sm bg-primary/70" style={{ height: `${Math.max(2, (d.visitors / peak) * 100)}%` }} />
         ))}
