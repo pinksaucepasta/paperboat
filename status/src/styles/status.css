@@ -179,3 +179,4 @@ details.incident > summary::-webkit-details-marker { display: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 main, footer { position: relative; z-index: 1; }
 .banner .line .ico { position: relative; top: -0.6px; } /* optical: Figtree's cap-height centre sits a little above its line box centre */
+.how { padding: 16px; } .how h1 { margin-bottom: 8px; } .how ul { display: grid; gap: 8px; color: var(--text); } .how b { color: var(--ink); font-weight: 500; }

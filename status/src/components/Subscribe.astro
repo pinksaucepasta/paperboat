@@ -1,7 +1,7 @@
 <dialog id="subscribe" class="dialog" aria-labelledby="subscribe-title">
   <form method="dialog" class="dialog-close-row"><button class="icon-btn" aria-label="Close">×</button></form>
   <h2 id="subscribe-title">Subscribe to updates</h2>
-  <p class="muted">Get notified when we create, update or resolve an incident, or plan maintenance.</p>
+  <p class="muted">Get notified about incidents and maintenance.</p>
   <form id="subscribe-form" class="sub-form" novalidate>
     <label for="subscribe-email">Email</label>
     <div class="sub-row">
@@ -18,7 +18,7 @@
     </div>
     <p id="webhook-message" class="muted" role="status" aria-live="polite"></p>
     <div id="webhook-secret" class="webhook-secret" hidden>
-      <p class="muted">Save these now; the secret is shown once. Each delivery carries an <code>x-paperboat-signature</code> header, <code>t=&lt;unix seconds&gt;,v1=&lt;hex HMAC-SHA256 of "t.body" with the secret&gt;</code>. Your address must answer the verification request with 200 and <code>&#123;"challenge": "..."&#125;</code>.</p>
+      <p class="muted">Save these now; the secret is shown once. Deliveries are signed in <code>x-paperboat-signature</code> as <code>t=&lt;unix&gt;,v1=&lt;HMAC-SHA256 of "t.body"&gt;</code>. Answer the verification request with <code>&#123;"challenge": "…"&#125;</code>.</p>
       <label>Secret <input id="webhook-secret-value" readonly /></label>
       <label>Removal token <input id="webhook-token-value" readonly /></label>
     </div>
