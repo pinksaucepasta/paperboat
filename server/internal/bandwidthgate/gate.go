@@ -59,21 +59,33 @@ func New(store *db.DB) *Gate {
 }
 
 // accountPaid is whether account $1 is on a paid plan: its personal workspace has a paid period, or it is an active member of a
-// team with a paid entitlement.
-const accountPaid = `(EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=$1 AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())
+// team with a paid entitlement (the plan whose slower relay speed applies to it).
+const accountPaid = `(` + personalPaid + `
  OR EXISTS(SELECT 1 FROM paperboat.team_members m WHERE m.account_id=$1 AND m.active AND paperboat.team_paid_entitled(m.team_id)))`
 
-// NewRelayVolume is a gate with the same cache and fail-safe rules whose question is another: has the account carried at least its
-// plan's included bytes (freeIncluded, or paidIncluded on a paid plan) through Paperboat's managed relays this calendar month (UTC)?
-// A relay then holds it to the plan's slow speed. A failed lookup answers "not over" (full speed), so a slow database never slows an
-// account on its own.
-func NewRelayVolume(store *db.DB, freeIncluded, paidIncluded int64) *Gate {
+// personalPaid is whether account $1's personal workspace has a paid period.
+const personalPaid = `EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=$1 AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())`
+
+// relayBytes is the managed-relay bytes of workspace expression $w in the calendar month (UTC) of $4.
+func relayBytes(workspace string) string {
+	return `(SELECT coalesce(sum(e.upload_bytes+e.download_bytes),0) FROM paperboat.resource_bandwidth_events e WHERE e.workspace_id=` + workspace + `
+ AND e.mode='relay' AND e.hosting='managed' AND e.interval_end >= date_trunc('month',$4::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')`
+}
+
+// NewRelayVolume is a gate with the same cache and fail-safe rules whose question is another: has the account used up its relay
+// allowance this calendar month (UTC)? Its personal workspace has carried its plan's included bytes through Paperboat's managed relays
+// (freeIncluded, or perSeat on a paid plan), or a paid team it belongs to has carried perSeat times its seats, pooled over all its
+// members. A relay then holds the account to the plan's slow speed. A failed lookup answers "not over" (full speed), so a slow
+// database never slows an account on its own.
+func NewRelayVolume(store *db.DB, freeIncluded, perSeat int64) *Gate {
 	g := &Gate{store: store, timeout: defaultLookupTimeout}
 	g.lookup = func(ctx context.Context, account string, at time.Time) (bool, error) {
 		var over bool
-		err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(upload_bytes+download_bytes),0) >= CASE WHEN `+accountPaid+` THEN $2::bigint ELSE $3::bigint END
-FROM paperboat.resource_bandwidth_events
-WHERE actor_account_id=$1 AND mode='relay' AND hosting='managed' AND interval_end >= date_trunc('month',$4::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, account, paidIncluded, freeIncluded, at).Scan(&over)
+		err := store.SQL().QueryRowContext(ctx, `SELECT `+relayBytes(`'personal:'||$1`)+` >= CASE WHEN `+personalPaid+` THEN $2::bigint ELSE $3::bigint END
+ OR EXISTS(SELECT 1 FROM paperboat.team_members m JOIN paperboat.billing_workspaces tw ON tw.team_id=m.team_id AND tw.user_id IS NULL
+  WHERE m.account_id=$1 AND m.active AND paperboat.team_paid_entitled(m.team_id)
+  AND `+relayBytes(`'team:'||m.team_id`)+` >= $2::bigint * greatest(coalesce((SELECT g.amount FROM paperboat.billing_workspace_grants g WHERE g.workspace_id='team:'||m.team_id AND g.kind='seats' AND g.revoked_at IS NULL AND (g.ends_at IS NULL OR g.ends_at>now()) ORDER BY g.created_at DESC LIMIT 1),tw.quantity),1))`,
+			account, perSeat, freeIncluded, at).Scan(&over)
 		return over, err
 	}
 	return g

@@ -189,16 +189,30 @@ const (
 type budget struct {
 	mu     sync.Mutex
 	rate   float64
+	burst  float64
 	at     time.Time
 	tokens float64
 }
 
-func newBudget(bytesPerSecond float64) *budget { return &budget{rate: bytesPerSecond} }
+func newBudget(bytesPerSecond float64) *budget {
+	return newBudgetBurst(bytesPerSecond, budgetBurstBytes)
+}
 
-// setRate changes the refill rate; tokens already held stay (the burst bounds them).
-func (b *budget) setRate(bytesPerSecond float64) {
+func newBudgetBurst(bytesPerSecond, burst float64) *budget {
+	return &budget{rate: bytesPerSecond, burst: burst}
+}
+
+// accountBurst is the burst of an account's budget: a quarter second of its speed (at least what carries one packet), so the total an
+// account moves in a window stays within its speed plus that, and a capped account does not start with seconds of free traffic.
+func accountBurst(bytesPerSecond float64) float64 {
+	return min(float64(budgetBurstBytes), max(bytesPerSecond/4, 2*budgetMinimumCost))
+}
+
+// setRate changes the refill rate and the burst; tokens already held are cut to the new burst.
+func (b *budget) setRate(bytesPerSecond, burst float64) {
 	b.mu.Lock()
-	b.rate = bytesPerSecond
+	b.rate, b.burst = bytesPerSecond, burst
+	b.tokens = min(b.tokens, burst)
 	b.mu.Unlock()
 }
 
@@ -207,9 +221,9 @@ func (b *budget) allow(now time.Time, size int) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.at.IsZero() {
-		b.tokens = budgetBurstBytes
+		b.tokens = b.burst
 	} else {
-		b.tokens = min(budgetBurstBytes, b.tokens+now.Sub(b.at).Seconds()*b.rate)
+		b.tokens = min(b.burst, b.tokens+now.Sub(b.at).Seconds()*b.rate)
 	}
 	b.at = now
 	if b.tokens < cost {
