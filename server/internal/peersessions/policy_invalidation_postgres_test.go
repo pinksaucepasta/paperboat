@@ -111,6 +111,7 @@ func TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres(t *testing.T) {
 		none  bool
 	}{
 		{"identity key material", `UPDATE paperboat.peer_network_identities SET disco_public_key=decode(repeat('05',32),'hex') WHERE endpoint_id=$1`, []any{host}, []string{"account:" + owner, host}, false},
+		{"identity home relay", `UPDATE paperboat.peer_network_identities SET home_relay='relay_x' WHERE endpoint_id=$1`, []any{host}, []string{"account:" + owner, host}, false},
 		{"identity relay revocation generation only", `UPDATE paperboat.peer_network_identities SET relay_revocation_generation=relay_revocation_generation+1 WHERE endpoint_id=$1`, []any{host}, []string{host}, true},
 		{"identity configuration request's own write", `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE endpoint_id=$1`, []any{host}, []string{host}, true},
 		{"certificate revoked", `UPDATE paperboat.peer_endpoint_certificates SET revoked_at=now(),revocation_reason='endpoint_removed' WHERE endpoint_id=$1`, []any{cli}, []string{"account:" + owner, cli}, false},
