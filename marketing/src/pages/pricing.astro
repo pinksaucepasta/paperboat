@@ -10,8 +10,8 @@ import { faq, featureGroups, planNames } from "../pricing-data"
 import { breadcrumbSchema, faqSchema } from "../schema"
 
 const speedRows = [
-  ["Our edges (previews, tunnels)", `${plans[0].bandwidth}, then ${speeds.after[0]}`, `${plans[1].bandwidth}, then ${speeds.after[1]}`],
-  ["Our relays", `${speeds.relay} for ${plans[0].bandwidth}, then ${speeds.after[0]}`, `${speeds.relay} for ${plans[1].bandwidth}, then ${speeds.after[1]}`],
+  ["Our edges (previews, tunnels)", `${plans[0].bandwidth}/mo, then ${speeds.after[0]}`, `${plans[1].bandwidth}/mo, then ${speeds.after[1]}`],
+  ["Our relays", `${speeds.relay} for ${plans[0].bandwidth}/mo, then ${speeds.after[0]}`, `${speeds.relay} for ${plans[1].bandwidth}/mo, then ${speeds.after[1]}`],
   ["Browser terminals", "Never slowed", "Never slowed"],
   ["Your own edges and relays", "Unlimited", "Unlimited"],
   ["Direct traffic between your machines", "Unlimited", "Unlimited"],
@@ -24,7 +24,7 @@ const speedRows = [
   schema={[breadcrumbSchema(Astro.site, [["Pricing", "/pricing/"]]), faqSchema(faq)]}
 >
   <Head title="Free for personal use" eyebrow="Pricing">
-    <p>Every feature is on every plan, and nothing is ever cut off. Pro adds more full-speed traffic, and Team adds people.</p>
+    <p>Every feature is on every plan, and nothing is ever cut off. Pro adds more bandwidth, and Team adds people.</p>
   </Head>
 
   <section class="section plans-section" aria-label="Plans">
@@ -39,7 +39,7 @@ const speedRows = [
       <header class="section-head">
         <h2 class="h2" id="bandwidth-title">Never cut off</h2>
         <p class="lede">
-          Traffic through our servers never stops. After your plan's full-speed amount it's slowed until the month resets. Through
+          Traffic through our servers never stops. When you use your plan's bandwidth, it's slowed until the month resets. Through
           <a href="/features/self-hosting/">your own relays and edges</a>, it's never counted.
         </p>
       </header>
@@ -53,16 +53,16 @@ const speedRows = [
       </div>
       <div class="cols cols-3 rules">
         <div class="stack">
-          <h3 class="h3">Need more speed?</h3>
-          <p class="rule-text">On Pro and Team, add {topUp.size} at full speed for {topUp.price}, as often as you like.</p>
+          <h3 class="h3">Need more?</h3>
+          <p class="rule-text">On Pro and Team, add {topUp.size} for {topUp.price}, as often as you like.</p>
         </div>
         <div class="stack">
           <h3 class="h3">On a team</h3>
-          <p class="rule-text">Every seat brings {plans[1].bandwidth} at full speed. Extra traffic you add is shared by the whole team.</p>
+          <p class="rule-text">Every seat brings {plans[1].bandwidth} a month. Bandwidth you add is shared by the whole team.</p>
         </div>
         <div class="stack">
           <h3 class="h3">Always told</h3>
-          <p class="rule-text"><code>pb</code> and the console show how much full-speed traffic is left, and where to add more.</p>
+          <p class="rule-text"><code>pb</code> and the console show how much bandwidth is left, and where to add more.</p>
         </div>
       </div>
     </div>

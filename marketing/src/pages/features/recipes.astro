@@ -5,12 +5,11 @@ import Term from "../../components/Term.astro"
 import { installerBase } from "../../site"
 
 const recipeFile = [
-  'tags = ["ci"]',
-  "max_machines = 20",
+  'tags = ["sandbox"]',
   'remove_after_offline = "30m"',
   "",
   "[env]",
-  'vaults = ["canary-env"]',
+  'vaults = ["sandbox-env"]',
   "",
   "[[preview]]",
   "port = 3000",
@@ -23,69 +22,82 @@ const faq = [
     a: "A machine's tags and what it may reach, the ENV vaults it reads, the repository it takes its config from, the previews and tunnels it opens, and when it is removed.",
   },
   {
+    q: "How many machines can use one recipe?",
+    a: "As many as you start. Set <code>max_machines</code> if you want a ceiling.",
+  },
+  {
     q: "Where does the token go?",
-    a: "Save it as a secret named <code>PB_RECIPE</code> in your CI or cloud provider. It is shown once. Paperboat keeps only a fingerprint of it, so we can check it but never use it.",
+    a: "Save it as a secret named <code>PB_RECIPE</code> in your CI, your cloud provider or your sandbox platform. It is shown once.",
   },
   {
     q: "Can Paperboat read the vaults a recipe uses?",
-    a: '<a href="/features/env/">ENV</a> vaults stay end-to-end encrypted. The key to read them is in the token, which only you and your machines have.',
+    a: 'No. <a href="/features/env/">ENV</a> vaults stay end-to-end encrypted. The key to read them is in the token, which only you and your machines have.',
   },
   {
     q: "What if a token leaks?",
-    a: "Revoke the recipe, or rotate it to get a new token while machines that already joined keep working. A leaked token can only do what the recipe allows.",
+    a: "Rotate the recipe to get a new token, or revoke it. A token can only do what its recipe allows.",
   },
   {
-    q: "Does it ask for a password?",
-    a: "No. A recipe install never stops at a prompt, which is what CI runners and cloud VMs need.",
+    q: "Does the install ask for anything?",
+    a: "No. A recipe install never stops at a prompt, so it runs anywhere nobody is watching.",
   },
 ]
 ---
 
 <Feature
   slug="recipes"
-  title="Set up new machines in one command | Paperboat"
-  description="A recipe pairs and sets up a new machine in one command: tags, access, secrets, config and previews. Built for CI and VMs."
-  headline="A new machine, ready in one line"
+  title="Set up any number of machines in one command | Paperboat"
+  description="Set up one machine or hundreds with one command: access, secrets, config and previews, reachable from the start."
+  headline="Every new machine, ready from the start"
   faq={faq}
   related={["env", "teams", "config-sync"]}
   compare={["tailscale"]}
 >
   <p slot="lede">
-    Write down once what a machine needs. Every CI runner, VM or container that runs the install line joins your account set up and ready, with
-    nobody there to click.
+    Spin up a sandbox for development, an agent, a pull request review or a test run, or a hundred of them. Each one joins your account set up
+    the way you want, and you can reach it from the first second.
   </p>
-  <Term slot="aside" title="ci.toml" lines={recipeFile} />
+  <Term slot="aside" title="sandbox.toml" lines={recipeFile} />
 
-  <Beat id="create-title" title="Create it once">
-    <p>Turn the file into a recipe and keep the token as a secret. Change the file later and machines pick up the change.</p>
-    <Term slot="visual" lines={["$ pb recipe create -f ci.toml", "Recipe ci created in workspace acme.", "Token (shown once; save it as PB_RECIPE)"]} />
+  <Beat id="create-title" title="Write it once">
+    <p>Say what every machine of a kind needs: its tags, who can reach it, its secrets, its config, a preview. Then turn it into a recipe.</p>
+    <Term slot="visual" lines={["$ pb recipe create -f sandbox.toml", "Recipe sandbox created in workspace acme.", "Token (shown once; save it as PB_RECIPE)"]} />
   </Beat>
 
-  <Beat id="run-title" title="Run it anywhere" flip>
-    <p>One line in a CI job, a cloud-init script or a Dockerfile. No prompt, no browser, no password.</p>
-    <Term slot="visual" title="ci-runner-7" lines={["$ curl -fsSL \\", `    ${installerBase}/recipe | bash`, "✓ Paired as ci-runner-7", "✓ Secrets loaded from canary-env", "✓ Preview live for 2 hours"]} />
+  <Beat id="many-title" title="One line, any number of machines" flip>
+    <p>Put the same line in a sandbox template, a CI job, a cloud-init script or a Dockerfile. Start one machine or a hundred; each is set up the same way.</p>
+    <Term slot="visual" title="sandbox-7" lines={["$ curl -fsSL \\", `    ${installerBase}/recipe | bash`, "✓ Paired as sandbox-7", "✓ Secrets loaded from sandbox-env", "✓ Preview live for 2 hours"]} />
   </Beat>
 
-  <Beat id="clean-title" title="Gone when it's gone">
-    <p>A runner that disappears is removed by itself after the time you set, so your machine list stays clean.</p>
-    <Term slot="visual" lines={["$ pb recipe show ci", "Machines (2 of 20)", "  ci-runner-7   online", "  ci-runner-6   offline   removed in 12m"]} />
+  <Beat id="reach-title" title="Reachable from the first second">
+    <p>The moment a machine is up, open its terminal, its ports or its preview link. Nothing to pair by hand, nothing to wait for.</p>
+    <Term slot="visual" lines={["$ pb connect sandbox-7", "ana@sandbox-7:~/app$"]} />
   </Beat>
 
-  <section class="section section-rule" aria-labelledby="details-title">
+  <Beat id="clean-title" title="Gone when it's gone" flip>
+    <p>A sandbox that disappears is removed by itself after the time you set, so your machine list stays clean.</p>
+    <Term slot="visual" lines={["$ pb recipe show sandbox", "Machines (2)", "  sandbox-7   online", "  sandbox-6   offline   removed in 12m"]} />
+  </Beat>
+
+  <section class="section section-rule" aria-labelledby="uses-title">
     <div class="wrap">
-      <h2 class="visually-hidden" id="details-title">Details</h2>
-      <div class="points points-3">
+      <h2 class="visually-hidden" id="uses-title">What people use recipes for</h2>
+      <div class="points">
         <div>
-          <h3 class="h3">Limited by design</h3>
-          <p>A recipe's machines reach only what the recipe allows, whoever holds the token.</p>
+          <h3 class="h3">Development sandboxes</h3>
+          <p>A fresh machine per branch or per developer, with the secrets and config already there.</p>
         </div>
         <div>
-          <h3 class="h3">Secrets with nobody online</h3>
-          <p>New machines read their vaults at 3 a.m. without your laptop being awake.</p>
+          <h3 class="h3">Agents</h3>
+          <p>Give each coding agent its own machine that can reach only what the recipe allows.</p>
         </div>
         <div>
-          <h3 class="h3">Clear errors</h3>
-          <p>A typo in the file is caught before anything is created, with the line and a suggestion.</p>
+          <h3 class="h3">Pull request reviews</h3>
+          <p>Every pull request gets a machine and a preview link reviewers can open right away.</p>
+        </div>
+        <div>
+          <h3 class="h3">Tests and CI</h3>
+          <p>Runners join, run, and clean themselves up, with secrets loaded and nobody online.</p>
         </div>
       </div>
     </div>

@@ -107,7 +107,7 @@ export const features: Feature[] = [
     slug: "recipes",
     icon: "list-checks",
     name: "Recipes",
-    line: "Set up a new machine with one command: paired, tagged, ready.",
+    line: "Set up one machine or hundreds with one command, ready from the start.",
     command: "pb recipe create -f ci.toml",
     group: "Set up and share",
   },

@@ -27,11 +27,11 @@ const addresses: [string, string][] = [
 ]
 
 const recipe = [
-  "# PB_RECIPE is saved as a CI secret",
+  "# in your sandbox template",
   "$ curl -fsSL \\",
   `    ${installerBase}/recipe | bash`,
-  "✓ Paired as ci-runner-7",
-  "✓ Secrets loaded from canary-env",
+  "✓ Paired as sandbox-7",
+  "✓ Secrets loaded from sandbox-env",
   `✓ Preview live for 2 hours`,
 ]
 
@@ -130,13 +130,14 @@ const versus = compares.filter((item) => ["tailscale", "ngrok", "cloudflare-tunn
   <section class="section section-rule" aria-labelledby="recipe-title">
     <div class="wrap pair pair-flip">
       <div class="pair-text">
-        <h2 class="h2" id="recipe-title">A new machine, ready in one line</h2>
+        <h2 class="h2" id="recipe-title">Every new machine, ready from the start</h2>
         <p>
-          Write down once what a machine needs: its tags, its secrets, a preview. Then every CI runner or new VM is set up with one command.
+          Spin up one sandbox or a hundred, for development, agents, pull request reviews or tests. Each joins set up your way, and you can reach
+          it from the first second.
         </p>
         <a class="more" href="/features/recipes/">Recipes <span aria-hidden="true">→</span></a>
       </div>
-      <Term lines={recipe} title="ci-runner-7" />
+      <Term lines={recipe} title="sandbox-7" />
     </div>
   </section>
 
@@ -158,7 +159,7 @@ const versus = compares.filter((item) => ["tailscale", "ngrok", "cloudflare-tunn
       <header class="split-head">
         <h2 class="h2" id="price-title">Free for personal use</h2>
         <div class="split-side">
-          <p>Every feature is free for personal use, and nothing is ever cut off. Pay for more full-speed traffic, or for a team.</p>
+          <p>Every feature is free for personal use, and nothing is ever cut off. Pay for more bandwidth, or for a team.</p>
           <a class="more" href="/pricing/">Pricing <span aria-hidden="true">→</span></a>
         </div>
       </header>

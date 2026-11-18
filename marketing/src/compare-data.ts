@@ -130,7 +130,7 @@ export const sections: Section[] = [
     id: "setup",
     title: "New machines",
     sentence: "Bring a new machine in, set up and ready.",
-    rows: [{ id: "setup_one_line", label: "Set up a machine in one command" }],
+    rows: [{ id: "setup_one_line", label: "Set up any number of machines in one command" }],
   },
   {
     id: "encryption",
@@ -221,13 +221,13 @@ export const paperboat = {
     api_tokens: ["Yes, scoped API tokens that expire"],
     selfhost: ["Relays and tunnel servers"],
     platforms: ["Linux, macOS and Windows"],
-    pricing_model: ["By full-speed traffic through our servers; Team per seat"],
-    free_tier: ["Every feature; 5 GB at full speed, then slowed, never cut off"],
+    pricing_model: ["By bandwidth through our servers; Team per seat"],
+    free_tier: ["Every feature, 5 GB/mo, never cut off"],
   }),
   pricing: [
-    "Free: $0, every feature for personal use, 5 GB at full speed a month, then 512 kbit/s",
-    "Pro: $8 a month or $80 a year, 100 GB at full speed, then 1 Mbit/s",
-    "Team: $15 per seat a month or $150 a year, 100 GB per seat at full speed; 14-day trial",
+    "Free: $0, every feature for personal use, 5 GB/mo, then 512 kbit/s",
+    "Pro: $8 a month or $80 a year, 100 GB/mo, then 1 Mbit/s",
+    "Team: $15 per seat a month or $150 a year, 100 GB/mo per seat; 14-day trial",
     "Direct traffic between your machines is never counted",
   ],
 }
@@ -387,7 +387,7 @@ const vscodeSources = {
 /** Paperboat's side of the differences that recur, written once. */
 const ours = {
   extras:
-    "Paperboat records its terminals on every plan, encrypted on the machine, and plays them back in the console or your terminal. A recipe sets up a new machine in one command: its access, secrets, config and previews.",
+    "Paperboat records its terminals on every plan, encrypted on the machine, and plays them back in the console or your terminal. A recipe sets up one machine or hundreds with one command, with their access, secrets, config and previews, reachable from the start.",
   terminals:
     "Paperboat terminals run on the machine and keep running when your laptop sleeps or the network drops. When you come back, from the same computer, another one or a browser, you see what happened while you were away, and you can let someone watch or type along.",
   previews:
@@ -605,7 +605,7 @@ export const products: Product[] = [
         title: "How you pay",
         body: [
           "ngrok plans add charges per user, per active domain hour and for data and requests beyond what is included.",
-          "Paperboat plans differ only in how much traffic runs at full speed through its edges and relays, and nothing is ever cut off. Previews, tunnels and domains have no separate charges, and direct traffic between your machines is free.",
+          "Paperboat plans differ only in bandwidth through its edges and relays, and nothing is ever cut off. Previews, tunnels and domains have no separate charges, and direct traffic between your machines is free.",
         ],
       },
     ],

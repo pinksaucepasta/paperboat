@@ -7,8 +7,8 @@ import { auditRetention, consoleUrl, plans, publicTcp, speeds, ssoMinSeats, topU
 
 const forWhom = ["For personal use", "Personal use, more traffic", "For teams"]
 const rows: [string, (i: number) => string][] = [
-  ["Full speed a month", (i) => plans[i].bandwidth],
-  ["Then", (i) => speeds.after[i]],
+  ["Bandwidth", (i) => plans[i].bandwidth.replace(" a seat", "/mo a seat").replace(/GB$/, "GB/mo")],
+  ["After that", (i) => speeds.after[i]],
   ["Machines", (i) => plans[i].machines],
   ["Previews and tunnels", (i) => plans[i].publications],
   ["Public TCP addresses", (i) => publicTcp[i].replace(" per seat", " a seat")],
@@ -17,7 +17,7 @@ const rows: [string, (i: number) => string][] = [
 ]
 const extras = [
   ["Every feature", "Self-hosted relays and edges"],
-  ["Everything in Free", `Extra full speed, ${topUp.price} per ${topUp.size}`, "Invoices"],
+  ["Everything in Free", `Extra bandwidth, ${topUp.price} per ${topUp.size}`, "Invoices"],
   ["Members and roles", "Session recordings in your S3 bucket", `SSO and SCIM from ${ssoMinSeats} seats`, "Audit log export"],
 ]
 const actions = [
