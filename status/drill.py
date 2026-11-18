@@ -37,14 +37,34 @@ def wait(url, log, want_component, want_state, limit, others_ok):
     return None, sorted(moved)
 
 
+def wait_all(url, log, limit):
+    start = time.monotonic()
+    while time.monotonic() - start < limit:
+        delayed, s = states(url)
+        log.append({"t": datetime.now(timezone.utc).isoformat(timespec="seconds"), "delayed": delayed, **s})
+        if s and not delayed and all(v == "operational" for v in s.values()):
+            return True, []
+        time.sleep(POLL)
+    return False, []
+
+
+def write(out, rows, log):
+    with open(out, "w") as f:
+        f.write(f"# Status page drill {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC\n\n")
+        f.write("| Component | Service stopped | Red after (s) | Green after start (s) | Other components moved | Result |\n|---|---|---|---|---|---|\n")
+        for c, u, r, g, o, good in rows:
+            f.write(f"| {c} | {u} | {r} | {g} | {', '.join(o) or 'none'} | {'PASS' if good else 'FAIL'} |\n")
+        f.write("\n## Samples\n\n```\n" + "\n".join(json.dumps(x) for x in log) + "\n```\n")
+
+
 def main():
     url, host, out, *pairs = sys.argv[1:]
     targets = [p.split("=", 1) for p in pairs]
     log, rows = [], []
     ok = True
     for component, unit in targets:
-        _, s = states(url)
-        assert s and all(v == "operational" for v in s.values()), f"not green before {component}: {s}"
+        settled, moved = wait_all(url, log, GREEN_LIMIT)  # a service is stopped only from a settled, fully green page
+        assert settled, f"the page was not fully green before stopping {component}"
         ssh(host, f"systemctl --user stop {unit}")
         red, moved_red = wait(url, log, component, "major", RED_LIMIT, "operational")
         ssh(host, f"systemctl --user start {unit}")
@@ -53,14 +73,7 @@ def main():
         good = red is not None and green is not None and not others
         ok &= good
         rows.append((component, unit, red, green, others, good))
-        # everything must be green again before the next service is stopped
-        wait(url, log, component, "operational", GREEN_LIMIT, "operational")
-    with open(out, "w") as f:
-        f.write(f"# Status page drill {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC\n\n")
-        f.write("| Component | Service stopped | Red after (s) | Green after start (s) | Other components moved | Result |\n|---|---|---|---|---|---|\n")
-        for c, u, r, g, o, good in rows:
-            f.write(f"| {c} | {u} | {r} | {g} | {', '.join(o) or 'none'} | {'PASS' if good else 'FAIL'} |\n")
-        f.write("\n## Samples\n\n```\n" + "\n".join(json.dumps(x) for x in log) + "\n```\n")
+        write(out, rows, log)
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 
