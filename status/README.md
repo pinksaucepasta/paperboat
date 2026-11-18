@@ -6,7 +6,7 @@ Public status for Paperboat, built to never show a wrong status.
 |---|---|---|
 | `worker/` | Cloudflare Worker + D1: signed probe ingest, the state machine (`src/decide.ts`), incidents, RSS, email subscribe, a once-a-minute cron that also runs the Worker's own checks | `deploy.sh` |
 | `site/` | static page (Cloudflare Pages, git-connected, `build.sh`) | every push touching `status/site` |
-| `config/components.json` | components, their units (checks or regions) and which vantage points report each | with the Worker |
+| `config/components.ts` | components, their units (checks or regions) and which vantage points report each | with the Worker |
 | `../tools/probe/status_report.py`, `status_run.py` | the probe: user-path checks, own-internet check, signed report; `canary.py` calls it on oracle, `deploy/paperboat-status-probe.timer` runs it on anvit | on the probe hosts |
 | `../admin/app/(panel)/status` | admin Status section (optional: says so without STATUS_API_URL and STATUS_ADMIN_TOKEN) | with the admin panel |
 | `drill.py` | stop/start drill against a staging stack | manual |
