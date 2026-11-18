@@ -13,6 +13,7 @@ case \$1 in
   --workspace) [ -z "\${FAKE_TEAM_FAIL:-}" ] || { echo 'team machine unreachable' >&2; exit 1; }; shift 2; exec "\$0" "\$@" ;;
   exec) [ -z "\${FAKE_FAIL:-}" ] || { echo 'machine unreachable' >&2; exit 1; }; shift 3; "\$@" ;;
   ssh) shift 3; "\$@" ;;
+  machine) echo '{"data":{"items":[{"name":"b"},{"name":"a"}]}}' ;;
   send) cp "\$2" "\$HOME/inbox/" ;;
   inbox) echo '{"data":{"path":"'"\$HOME"'/inbox"}}' ;;
   preview) [ "\$2" = stop ] || echo '{"data":{"id":"p1","endpoint":"http://127.0.0.1:$port"}}' ;;
@@ -23,7 +24,7 @@ for _ in $(seq 50); do curl -fs "http://127.0.0.1:$port/" >/dev/null 2>&1 && bre
 export RUN_A="env PATH=$d/bin:$PATH HOME=$d/home CANARY_T=fixture" RUN_B="env PATH=$d/bin:$PATH HOME=$d/home CANARY_T=fixture" PB=pb
 export CANARY_A=a CANARY_B=b CANARY_PORT=$port CANARY_TUNNEL_URL=http://127.0.0.1:$port PROBE_STEP_TIMEOUT=10 CANARY_ENV_NAME=CANARY_T CANARY_ENV_VALUE=fixture
 out=$("$here/probe.sh") || { echo "healthy run failed: $out"; exit 1; }
-[ "$(grep -c '"ok":true' <<<"$out")" = 8 ] || { echo "healthy run: $out"; exit 1; }
+[ "$(grep -c '"ok":true' <<<"$out")" = 9 ] || { echo "healthy run: $out"; exit 1; }
 [ -z "$(ls "$d/home/inbox")" ] || { echo "received file left in the Inbox"; exit 1; }
 # A value that did not arrive fails the env_exec step only (and never prints the expected value).
 if out=$(CANARY_ENV_VALUE=other "$here/probe.sh"); then echo "wrong ENV value passed: $out"; exit 1; fi
@@ -31,7 +32,7 @@ grep -q '"step":"env_exec","ok":false' <<<"$out" && [ "$(grep -c '"ok":false' <<
 if out=$(FAKE_FAIL=1 "$here/probe.sh"); then echo "broken exec passed: $out"; exit 1; fi
 grep -q '"step":"exec_a_to_b","ok":false,"seconds":[0-9]*,"error":"machine unreachable"' <<<"$out"
 grep -q '"step":"exec_b_to_a","ok":false' <<<"$out"
-[ "$(grep -c '"ok":true' <<<"$out")" = 5 ] || { echo "broken exec run: $out"; exit 1; }
+[ "$(grep -c '"ok":true' <<<"$out")" = 6 ] || { echo "broken exec run: $out"; exit 1; }
 # A team machine is probed in the team workspace when configured; its failure fails team_exec only.
 out=$(CANARY_TEAM=t CANARY_TEAM_MACHINE=c "$here/probe.sh") || { echo "team run failed: $out"; exit 1; }
 grep -q '"step":"team_exec","ok":true' <<<"$out" || { echo "team step missing: $out"; exit 1; }
@@ -43,4 +44,7 @@ grep -q '"step":"edges","ok":true' <<<"$out" || { echo "edges step missing: $out
 # A step list runs only those steps, and the tunnel URL is not needed when the tunnel step is not wanted.
 out=$(PROBE_STEPS="exec_a_to_b exec_b_to_a" CANARY_TUNNEL_URL= "$here/probe.sh") || { echo "step list run failed: $out"; exit 1; }
 [ "$(grep -c '"ok":true' <<<"$out")" = 2 ] && [ "$(grep -c '"step"' <<<"$out")" = 2 ] || { echo "step list: $out"; exit 1; }
+# Steps driven from B run only when named, and pass with the same fake machines.
+out=$(PROBE_STEPS="exec_b_to_a ssh_b_to_a send_b_to_a api_auth_b" CANARY_TUNNEL_URL= "$here/probe.sh") || { echo "B-driven run failed: $out"; exit 1; }
+[ "$(grep -c '"ok":true' <<<"$out")" = 4 ] || { echo "B-driven steps: $out"; exit 1; }
 echo "probe self-check ok"

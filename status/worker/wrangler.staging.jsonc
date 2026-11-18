@@ -1,0 +1,8 @@
+// The drill's staging Worker (wrangler dev --local): the same code with the staging catalog. See ../README.md "Drill".
+{
+  "name": "paperboat-status-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "paperboat-status-staging", "database_id": "local" }],
+  "alias": { "../../config/components.json": "../../config/components.staging.json" }
+}
