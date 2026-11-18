@@ -40,7 +40,7 @@ describe("a hung endpoint", () => {
     const { state } = await prefetchMachinesPage()
     expect(Date.now() - started).toBeLessThan(4_000)
     expect(JSON.stringify(state)).toContain("u1")
-    expect(aborted.length).toBe(7)
+    expect(aborted.length).toBe(8)
   })
 
   test("a browser read stops when its query is cancelled", async () => {

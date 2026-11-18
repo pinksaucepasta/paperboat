@@ -41,6 +41,8 @@ await ctx.route("**/api/v1/**", async (route) => {
   const url = new URL(route.request().url())
   const path = url.pathname.replace("/api/v1/", "")
   const method = route.request().method()
+  // No operator announcement: they have their own check (check-announcements.ts) and must not change these counts.
+  if (path === "announcements" && method === "GET") return json(route, { banner: null, notices: [], unread: 0 })
   if (path === "team-inbox/requests" && method === "GET") {
     const all = Array.from({ length: state.files }, (_, i) => fileRequest(i + 1))
     const { rows, pagination } = paged(all, url.searchParams)
@@ -86,7 +88,8 @@ const waitBell = async (text) => bell.filter({ hasText: text }).waitFor({ timeou
 
 state.files = 0, state.invitations = 0, state.machines = []
 await page.goto(`${origin}/`, { waitUntil: "networkidle" })
-log((await bell.count()) === 0, "no bell while nothing waits")
+const plainBell = page.getByRole("button", { name: "Requests", exact: true })
+log((await bell.count()) === 0 && (await plainBell.count()) === 1, "the bell is there, with no badge, while nothing waits")
 
 // Reload with things waiting.
 state.files = 13, state.invitations = 1, state.machines = ["m-one", "m-two"]
@@ -130,7 +133,7 @@ state.files = 0, state.machines = []
 await page.keyboard.press("Escape")
 await refresh()
 await page.reload({ waitUntil: "networkidle" })
-log((await bell.count()) === 0, "bell is gone again when nothing waits")
+log((await bell.count()) === 0 && (await plainBell.count()) === 1, "the badge is gone again when nothing waits")
 
 await browser.close()
 process.exit(failed ? 1 : 0)

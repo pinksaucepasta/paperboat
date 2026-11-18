@@ -236,6 +236,10 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.NodeCapacityDaily })},
 	{"node_capacity", batchOf("node_capacity", `reported_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.NodeCapacityDaily })},
+	// An announcement ended or retracted, or an open-ended notice that started that long ago (the bell shows the newest
+	// few); its receipts cascade. An open-ended banner stays until it is retracted.
+	{"announcements", batchOf("announcements", `coalesce(retracted_at, ends_at, CASE WHEN kind='notice' THEN starts_at END) < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.EndedAnnouncements })},
 	{"support_reports_expired", batchOf("support_report_occurrences", `expires_at < now()`), none},
 	// A group's expires_at is its newest occurrence's, so it goes after the occurrences it explains.
 	{"support_report_groups_expired", batchOf("support_report_groups", `expires_at < now()`), none},

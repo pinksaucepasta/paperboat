@@ -87,6 +87,10 @@ const world = {
     { id: "ipb_1", cidr: "198.51.100.0/24", reason: "ABUSE-3", created_by: "operator_root", created_at: "2026-11-15T08:00:00Z", running: true },
     { id: "ipb_0", cidr: "192.0.2.7/32", reason: "ABUSE-1", created_by: "operator_root", created_at: "2026-11-10T08:00:00Z", expires_at: "2026-11-11T08:00:00Z", running: false },
   ],
+  announcements: [
+    { id: "ann_2", kind: "banner", title: "Paperboat is in beta", body: "Tell us what breaks.", severity: "info", dismissible: true, audience_kind: "all", starts_at: "2026-11-16T08:00:00Z", created_by: "operator_root", created_at: "2026-11-16T08:00:00Z", updated_at: "2026-11-16T08:00:00Z", state: "live", reads: 0, dismissals: 12 },
+    { id: "ann_1", kind: "notice", title: "Relays in Singapore", body: "", audience_kind: "plan", audience_value: "pro_monthly", starts_at: "2026-11-10T08:00:00Z", ends_at: "2026-11-11T08:00:00Z", created_by: "operator_root", created_at: "2026-11-10T08:00:00Z", updated_at: "2026-11-10T08:00:00Z", state: "ended", severity: "info", dismissible: true, reads: 31, dismissals: 0 },
+  ],
   floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
   requests: [],
 }
@@ -125,6 +129,18 @@ function mutate(method, p, json) {
   if (area === "teams" && (action === "ban" || action === "unban")) {
     world.teamBan = action === "ban" ? { reason: writes.at(-1).reason, at: new Date().toISOString() } : undefined
     return { resource_id: id, state: action === "ban" ? "suspended" : "active", version: json.revision + 1 }
+  }
+  if (area === "announcements") {
+    const now = new Date().toISOString()
+    const live = world.announcements.find((a) => a.id === id)
+    if (id && !live) return { __status: 404, code: "not_found", message: "The announcement was not found.", reference: "support_fixture_ann" }
+    if (action === "retract") return Object.assign(live, { state: "retracted", retracted_at: now })
+    const clash = json.kind === "banner" && world.announcements.find((a) => a.id !== id && a.kind === "banner" && a.state === "live" && a.audience_kind === json.audience_kind && (a.audience_value ?? "") === (json.audience_value ?? ""))
+    if (clash) return { __status: 409, code: "operator_conflict", message: `The banner "${clash.title}" already runs for this audience in that time.`, reference: "support_fixture_clash" }
+    const fields = { ...json, link_url: json.link_url || undefined, audience_value: json.audience_value || undefined, severity: json.severity ?? "info", dismissible: json.dismissible ?? true }
+    if (live) return Object.assign(live, fields, { updated_at: now })
+    world.announcements.unshift({ id: `ann_${world.announcements.length + 5}`, ...fields, starts_at: json.starts_at ?? now, created_by: "operator_root", created_at: now, updated_at: now, state: json.starts_at && json.starts_at > now ? "scheduled" : "live", reads: 0, dismissals: 0 })
+    return world.announcements[0]
   }
   if (p === "/v1/admin/ip-blocks") {
     world.ipBlocks.unshift({ id: `ipb_${world.ipBlocks.length + 5}`, cidr: json.cidr.includes("/") ? json.cidr : `${json.cidr}/32`, reason: writes.at(-1).reason, created_by: "operator_root", created_at: new Date().toISOString(), ...(json.ends_at ? { expires_at: json.ends_at } : {}), running: true })
@@ -203,6 +219,10 @@ function route(req, url) {
     const id = p.split("/")[4]
     const sessions = world.operatorSessions[id] ?? []
     return { operator_id: id, email: world.operators.find((o) => o.id === id)?.email ?? "", total: sessions.length, sessions }
+  }
+  if (p === "/v1/admin/announcements") {
+    const state = url.searchParams.get("state")
+    return page(world.announcements.filter((a) => !state || a.state === state), "announcements", undefined, url)
   }
   if (p === "/v1/admin/ip-blocks") {
     const state = url.searchParams.get("state")
@@ -1228,6 +1248,59 @@ try {
     await submit(l, "Lift block")
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Lift the block on 2001:db8:44::/48"]'))
     expect(lastWrite().path.endsWith("/remove") && lastWrite().target === lastWrite().path.split("/")[4], `lift write ${JSON.stringify(lastWrite())}`)
+  })
+  await step("announcements: listed with state and seen counts; a notice for one user is written with a live preview, edited and retracted; two live banners for one audience are refused; each write has its target, reference and key", async () => {
+    await p.goto(`${ORIGIN}/announcements`)
+    await waitReady("announcements")
+    const table = '[data-table="announcements"]'
+    expect((await text(table)).includes("Paperboat is in beta") && (await text(table)).includes("12 dismissed") && (await text(table)).includes("31 read"), "the announcements are not listed with their counts")
+    await p.click("[data-filter-button]")
+    await p.getByRole("menuitem", { name: "State" }).click()
+    await p.getByRole("menuitemradio", { name: "Live", exact: true }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-table="announcements"]')?.textContent?.includes("Relays in Singapore") && document.querySelector('[data-filter-chip="State"]'))
+    await p.getByRole("button", { name: "Remove State filter" }).click()
+    await p.getByRole("button", { name: "New announcement" }).click()
+    const d = dialog("New announcement")
+    await d.getByLabel("Title").fill("Your plan was upgraded")
+    await d.locator("#announcement-body").fill("Thanks for being early.")
+    await d.getByLabel("Link").fill("/billing")
+    expect((await d.locator('[data-preview="notice"]').innerText()).includes("Your plan was upgraded"), "the preview does not follow the title")
+    await d.getByLabel("Who gets it").selectOption("user")
+    await d.getByLabel("Search users").fill("person3")
+    await d.getByRole("button", { name: /person3@example.test/ }).click()
+    expect(await d.getByRole("button", { name: "Send", exact: true }).isDisabled(), "send is enabled before the audit reference is given")
+    await p.setViewportSize({ width: 1280, height: 1500 })
+    await p.screenshot({ path: `${shots}/announcement-dialog.png` })
+    await p.setViewportSize({ width: 1280, height: 800 })
+    await submit(d, "Send")
+    await p.waitForFunction(() => document.querySelector('[data-table="announcements"]')?.textContent?.includes("Your plan was upgraded"))
+    const w = lastWrite()
+    expect(w.method === "POST" && w.path === "/v1/admin/announcements" && w.target === "announcements" && w.reason === "TICKET-42" && w.key.length >= 8 && w.body.kind === "notice" && w.body.audience_kind === "user" && w.body.audience_value === "usr_003" && w.body.link_url === "/billing", `create write ${JSON.stringify(w)}`)
+    await p.locator(`${table} tbody tr`, { hasText: "Your plan was upgraded" }).locator("[data-row-menu]").click()
+    await p.getByRole("menuitem", { name: "Edit…", exact: true }).click()
+    const e = dialog("Edit announcement")
+    expect(await e.getByLabel("Where").isDisabled(), "the kind can change on edit")
+    await e.getByLabel("Title").fill("Your plan was upgraded to Pro")
+    await submit(e, "Save")
+    await p.waitForFunction(() => document.querySelector('[data-table="announcements"]')?.textContent?.includes("upgraded to Pro"))
+    expect(lastWrite().method === "PUT" && lastWrite().target === lastWrite().path.split("/")[4] && lastWrite().body.title === "Your plan was upgraded to Pro", `edit write ${JSON.stringify(lastWrite())}`)
+    await p.getByRole("button", { name: "New announcement" }).click()
+    const b = dialog("New announcement")
+    await b.getByLabel("Where").selectOption("banner")
+    await b.getByLabel("Title").fill("A second ribbon")
+    await p.setViewportSize({ width: 1280, height: 1500 })
+    await p.screenshot({ path: `${shots}/announcement-banner-dialog.png` })
+    await p.setViewportSize({ width: 1280, height: 800 })
+    await submit(b, "Send")
+    await b.getByText("already runs for this audience").waitFor()
+    await b.getByRole("button", { name: "Cancel" }).click()
+    await rowAction(`${table} tbody tr:has-text("upgraded to Pro")`, "Retract")
+    await submit(dialog("Retract “Your plan was upgraded to Pro”"), "Retract")
+    await p.waitForFunction(() => [...document.querySelectorAll('[data-table="announcements"] tbody tr')].some((r) => r.textContent.includes("upgraded to Pro") && r.textContent.includes("retracted")))
+    expect(lastWrite().path.endsWith("/retract") && lastWrite().target === lastWrite().path.split("/")[4], `retract write ${JSON.stringify(lastWrite())}`)
+    await p.setViewportSize({ width: 390, height: 844 })
+    await p.screenshot({ path: `${shots}/announcements-phone.png` })
+    await p.setViewportSize({ width: 1280, height: 800 })
   })
   await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
     await p.goto(`${ORIGIN}/operators`)

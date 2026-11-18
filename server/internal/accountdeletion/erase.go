@@ -100,6 +100,8 @@ var eraseSteps = []struct{ name, query string }{
 	{"billing checkout reservations", `DELETE FROM billing_checkout_reservations WHERE user_id=$1`},
 
 	{"favorites", `DELETE FROM user_favorites WHERE user_id=$1`},
+	{"announcement receipts", `DELETE FROM announcement_receipts WHERE user_id=$1`},
+	{"announcements for the account", `DELETE FROM announcements WHERE audience_kind='user' AND audience_value=$1`},
 	{"transfer destination defaults", `DELETE FROM user_transfer_destination_defaults WHERE user_id=$1`},
 	{"browser viewer policies", `DELETE FROM browser_viewer_policies WHERE owner_account_id=$1`},
 	{"identity links", `DELETE FROM user_identities WHERE user_id=$1`},

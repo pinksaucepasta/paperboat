@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
+	"github.com/pinksaucepasta/paperboat/server/internal/announcements"
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
@@ -140,6 +141,7 @@ type Options struct {
 	Recipes                  *recipes.Service
 	AccountDeletion          *accountdeletion.Service
 	AccountPreferences       *accountprefs.Service
+	Announcements            *announcements.Service
 	ControlDiagnostics       *controlplane.DiagnosticsService
 	OperationRecovery        *controlplane.OperationRecoveryService
 	PeerIdentity             *peeridentity.Service
@@ -966,6 +968,11 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 		}
 		mux.Handle("GET /v1/me/preferences", withAuth(accountPreferencesGet(opts.AccountPreferences)))
 		mux.Handle("PATCH /v1/me/preferences", withAuth(requireCSRF(opts.Auth, accountPreferencesPatch(opts.AccountPreferences))))
+	}
+	if opts.Announcements != nil && opts.Auth != nil {
+		mux.Handle("GET /v1/announcements", requireAuth(opts.Auth, announcementsGet(opts.Announcements)))
+		mux.Handle("POST /v1/announcements/read", requireAuth(opts.Auth, requireCSRF(opts.Auth, announcementsRead(opts.Announcements))))
+		mux.Handle("POST /v1/announcements/{announcement_id}/dismiss", requireAuth(opts.Auth, requireCSRF(opts.Auth, announcementsDismiss(opts.Announcements))))
 	}
 	if opts.AccountDeletion != nil && opts.Auth != nil {
 		mux.Handle("GET /v1/account/deletion-preview", accountDeletionBrowserOnly(opts.AccountDeletion, requireAuth(opts.Auth, accountDeletionPreview(opts.AccountDeletion))))

@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
+	"github.com/pinksaucepasta/paperboat/server/internal/announcements"
 	"github.com/pinksaucepasta/paperboat/server/internal/apitokens"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auditstream"
@@ -809,6 +810,7 @@ func New(opts Options) (*App, error) {
 		Recipes:                  recipeService,
 		AccountDeletion:          accountDeletion,
 		AccountPreferences:       accountprefs.New(store),
+		Announcements:            announcements.New(store),
 		ControlDiagnostics:       controlDiagnostics,
 		OperationRecovery:        operationRecovery,
 		PeerIdentity:             peerIdentityService,

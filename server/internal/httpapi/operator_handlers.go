@@ -98,6 +98,10 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/accounts/{account_id}/sessions/revoke":                          {"admin", "account_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/grant":                        {"admin", "workspace_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/revoke":                       {"admin", "workspace_id", ""},
+	"GET /v1/admin/announcements":                                                   {"admin", "", "announcements"},
+	"POST /v1/admin/announcements":                                                  {"admin", "", "announcements"},
+	"PUT /v1/admin/announcements/{announcement_id}":                                 {"admin", "announcement_id", ""},
+	"POST /v1/admin/announcements/{announcement_id}/retract":                        {"admin", "announcement_id", ""},
 	"GET /v1/admin/ip-blocks":                                                       {"admin", "", "ip-blocks"},
 	"POST /v1/admin/ip-blocks":                                                      {"admin", "", "ip-blocks"},
 	"POST /v1/admin/ip-blocks/{block_id}/remove":                                    {"admin", "block_id", ""},
@@ -319,6 +323,9 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerOperatorMoney(mux, opts)
 	registerOperatorInfrastructure(mux, opts)
 	registerServerNodes(mux, opts)
+	if opts.Announcements != nil {
+		registerOperatorAnnouncements(mux, opts)
+	}
 	if opts.Operator == nil {
 		return
 	}

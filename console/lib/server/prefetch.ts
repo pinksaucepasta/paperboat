@@ -67,6 +67,7 @@ type Session = {
   billing?: unknown
   products?: { items: unknown[] }
   clientConfig?: unknown
+  announcements?: unknown
 }
 
 /**
@@ -81,22 +82,25 @@ const session = cache(async () => {
       ? "billing/workspaces/personal"
       : `billing/workspaces/teams/${encodeURIComponent(workspace)}`
   // The client configuration names the machines' domain, which every address shows.
-  const [me, workspaces, billing, products, clientConfig] = await Promise.all([
+  const [me, workspaces, billing, products, clientConfig, announcements] = await Promise.all([
     get("me"),
     get<NonNullable<Session["workspaces"]>>("workspaces"),
     get(billingPath),
     get<{ items: unknown[] }>(`${billingPath}/products`),
     get("client-configuration"),
+    // Optional: the banner and the bell ride with the session, so no page asks for them again.
+    get("announcements"),
   ])
   const confirmed = workspaces?.items.some((item) => item.id === workspace)
   return confirmed
-    ? { workspace, me, workspaces, billing, products, clientConfig }
-    : { workspace, me, workspaces, clientConfig }
+    ? { workspace, me, workspaces, billing, products, clientConfig, announcements }
+    : { workspace, me, workspaces, clientConfig, announcements }
 })
 
-function seed(queryClient: QueryClient, workspace: string, { me, workspaces, billing, products, clientConfig }: Session) {
+function seed(queryClient: QueryClient, workspace: string, { me, workspaces, billing, products, clientConfig, announcements }: Session) {
   if (me) queryClient.setQueryData(queryKeys.me, me)
   if (clientConfig) queryClient.setQueryData(queryKeys.clientConfig, clientConfig)
+  if (announcements) queryClient.setQueryData(queryKeys.announcements, announcements)
   if (workspaces) queryClient.setQueryData(queryKeys.workspaces, workspaces.items)
   if (billing) queryClient.setQueryData(queryKeys.billing(workspace), billing)
   if (products) queryClient.setQueryData(queryKeys.billingProducts(workspace), products.items)

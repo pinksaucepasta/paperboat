@@ -9,11 +9,12 @@ import type { MachineAdmission, TeamInvitation, TeamSummary } from "@/lib/teams"
 /** Rows per page in the Requests list. */
 export const requestsPageSize = 10
 
-export type RequestKind = "files" | "invitations" | "machines"
+export type RequestKind = "files" | "invitations" | "machines" | "announcements"
 export const requestKinds: { id: RequestKind; label: string }[] = [
   { id: "files", label: "Files" },
   { id: "invitations", label: "Invitations" },
   { id: "machines", label: "Machines" },
+  { id: "announcements", label: "Announcements" },
 ]
 
 /** A machine a member asked to add to a team you own or administer. */
