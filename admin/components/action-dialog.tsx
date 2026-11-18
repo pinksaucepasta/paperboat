@@ -82,6 +82,7 @@ export function ActionDialog<R>(props: Props<R>) {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (!canSubmit) return
     setBusy(true)
     setError(undefined)
     try {

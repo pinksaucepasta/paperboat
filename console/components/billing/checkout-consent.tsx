@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { clientConfigQuery, useApiQuery } from "@/lib/api"
 
@@ -10,7 +11,12 @@ import { clientConfigQuery, useApiQuery } from "@/lib/api"
  * the buyer ticked, sent with the purchase, or null while unticked.
  */
 export function CheckoutConsent({ terms, onChange }: { terms: string | null; onChange: (terms: string | null) => void }) {
-  const consent = useApiQuery(clientConfigQuery).data?.purchase_consent
+  const config = useApiQuery(clientConfigQuery)
+  const consent = config.data?.purchase_consent
+  // A version ticked before the wording changed is no longer what the buyer read.
+  useEffect(() => {
+    if (terms !== null && consent && terms !== consent.version) onChange(null)
+  }, [terms, consent, onChange])
   return (
     <label className="flex items-start gap-2 py-2 text-xs text-muted-foreground">
       <Checkbox
@@ -19,7 +25,7 @@ export function CheckoutConsent({ terms, onChange }: { terms: string | null; onC
         checked={terms !== null}
         onCheckedChange={(on) => onChange(on && consent ? consent.version : null)}
       />
-      <span>{consent?.text ?? "Loading the terms…"}</span>
+      <span>{consent?.text ?? (config.isError ? "The terms could not be loaded. Reload the page to buy." : "Loading the terms…")}</span>
     </label>
   )
 }

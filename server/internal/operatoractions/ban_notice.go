@@ -31,8 +31,8 @@ func (s *Service) noticeBannedTx(ctx context.Context, tx *db.Tx, account, banID,
 	message := transactionalmail.Message{
 		From: s.mail.From, To: []string{address}, Subject: "Paperboat: " + subject + " was banned",
 		HTML: fmt.Sprintf("<p>Paperboat banned %s because it broke the Terms of Service or the Acceptable Use Policy. Sign-in sessions and tokens ended, machines can no longer connect, and public links stopped. Your data is kept.</p>"+
-			"<p>Reference: %s.</p><p>If you think we got it wrong, %s and quote that reference. A person reviews every appeal, and we restore what we blocked if it was a mistake.</p>",
-			html.EscapeString(subject), html.EscapeString(reason), appeal),
+			"<p>Reason: %s. Reference for an appeal: %s.</p><p>If you think we got it wrong, %s and quote that reference. A person reviews every appeal, and we restore what we blocked if it was a mistake.</p>",
+			html.EscapeString(subject), html.EscapeString(reason), html.EscapeString(banID), appeal),
 	}
 	_, err = transactionalmail.EnqueueOnceTx(ctx, tx, "account-banned:"+banID, message)
 	return err

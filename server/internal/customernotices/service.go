@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/announcements"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -135,20 +134,21 @@ func (s *Service) Send(ctx context.Context, actor, key string, in Input) (Notice
 	hash := hex.EncodeToString(sum[:])
 	id := "notice_" + uuid.NewString()
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var oldHash string
-		err := tx.QueryRow(ctx, `SELECT id,request_hash FROM paperboat.customer_notices WHERE created_by=$1 AND idempotency_key=$2`, actor, key).Scan(&id, &oldHash)
-		if err == nil {
+		// One statement decides the race between two requests with the same key: the loser reads the winner's row.
+		inserted, err := tx.Exec(ctx, `INSERT INTO paperboat.customer_notices(id,kind,audience_kind,audience_value,subject,html,request_hash,late,created_by,idempotency_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (created_by,idempotency_key) DO NOTHING`,
+			id, in.Kind, in.AudienceKind, in.AudienceValue, subject, body, hash, late, actor, key)
+		if err != nil {
+			return err
+		}
+		if inserted.RowsAffected() == 0 {
+			var oldHash string
+			if err = tx.QueryRow(ctx, `SELECT id,request_hash FROM paperboat.customer_notices WHERE created_by=$1 AND idempotency_key=$2`, actor, key).Scan(&id, &oldHash); err != nil {
+				return err
+			}
 			if oldHash != hash {
 				return fmt.Errorf("%w: this Idempotency-Key was used for a different notice", ErrConflict)
 			}
 			return nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO paperboat.customer_notices(id,kind,audience_kind,audience_value,subject,html,request_hash,late,created_by,idempotency_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-			id, in.Kind, in.AudienceKind, in.AudienceValue, subject, body, hash, late, actor, key); err != nil {
-			return err
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: audit.ActorAdmin, EventType: "operator.customer_notice_send", ResourceType: "customer_notice", ResourceID: id, IdempotencyKey: key,
 			Metadata: map[string]any{"kind": in.Kind, "audience_kind": in.AudienceKind, "audience_value": in.AudienceValue, "recipients": out.Recipients, "late": late}})

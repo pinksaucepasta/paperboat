@@ -56,6 +56,7 @@ export function NoticeDialog() {
     queryFn: () => operatorAction<Notice>("POST", "/v1/admin/notices", { target: "notices", reason: "preview", key: crypto.randomUUID() }, { ...JSON.parse(settled), dry_run: true }),
   })
   const current = settled === JSON.stringify(input) && audienceReady ? preview.data : undefined
+  const inSync = settled === JSON.stringify(input)
   const ready = current !== undefined && current.recipients > 0
   return (
     <ActionDialog
@@ -102,7 +103,7 @@ export function NoticeDialog() {
         <Label>Preview</Label>
         {!audienceReady ? (
           <span className="text-sm text-muted-foreground">Choose who gets it.</span>
-        ) : preview.isError && !current ? (
+        ) : preview.isError && !current && inSync ? (
           <span className="text-sm text-destructive" role="status">{(preview.error as Error).message}</span>
         ) : current ? (
           <div className="flex flex-col gap-2">
