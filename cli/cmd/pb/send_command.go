@@ -227,6 +227,10 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		if mode == "" {
 			mode = "automatic"
 		}
+		if prepared_.Descriptor == nil {
+			// Approval finished minutes after prepare: the account preference may have changed since.
+			mode = sendTransferMode(ctx.Context, cobraCommand, client)
+		}
 		declared := api.TransferDeclaration{Mode: mode, Bytes: batchTotal(prepared.Sources)}
 		var descriptor api.FileTransfer
 		if prepared_.Descriptor != nil {

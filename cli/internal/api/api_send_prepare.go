@@ -37,7 +37,7 @@ type SendPrepareResponse struct {
 }
 
 // PrepareSend answers 201 with an inline descriptor for an approved or no-approval request, 202 with no descriptor
-// while approval is pending, and 201 with stored=true and no descriptor for a stored send. The server's stable error
+// while approval is pending or for a stored send (stored=true). The server's stable error
 // codes are kept in the returned *APIError, so callers branch exactly as for the calls this folds (machine_offline is
 // waited out by retryWhileMachineOffline). Repeating a lost answer is safe: the operation ID resolves to the same request.
 func (c *Client) PrepareSend(ctx context.Context, in SendPrepareRequest) (SendPrepareResponse, error) {

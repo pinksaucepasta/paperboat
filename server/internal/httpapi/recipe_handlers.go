@@ -51,9 +51,6 @@ func recipeRoute(r *http.Request, own string) bool {
 	if p == "/v1/native-private-access/grants" {
 		return true
 	}
-	if p == "/v1/sends/prepare" {
-		return true
-	}
 	// Read access to a config repository: the handler allows only the recipe's own [config] repository.
 	if strings.HasPrefix(p, "/v1/config-repositories/") && strings.HasSuffix(p, "/read-access") {
 		return true

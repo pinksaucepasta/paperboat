@@ -32,7 +32,7 @@ type sendPrepareRequest struct {
 	DeclaredBytes   int64            `json:"declared_bytes"`
 }
 
-// sendPrepareResponse folds the resolve, inbox and descriptor answers. The
+// sendPrepareResponse folds the inbox and descriptor answers. The
 // descriptor is null for pending and stored requests.
 type sendPrepareResponse struct {
 	Request          teaminbox.Request                    `json:"request"`
@@ -40,7 +40,7 @@ type sendPrepareResponse struct {
 	Descriptor       *usermachines.FileTransferDescriptor `json:"descriptor"`
 }
 
-// sendPrepare resolves destination_ref, defaults the transfer mode, creates
+// sendPrepare defaults the transfer mode, creates
 // the Team Inbox request and, for an approved or no-approval request, mints
 // the file-transfer descriptor inline. One HTTP auth, one round trip; the
 // database work is the same sequence the four separate calls run.
@@ -70,6 +70,11 @@ func sendPrepare(machines *usermachines.Service, inbox *teaminbox.Service, prefs
 			}
 			mode = preferences.FileTransferMode
 		}
+		if mode != accountprefs.TransferModeAutomatic && mode != accountprefs.TransferModeUnlimited {
+			// Validated before the request exists, so a pending or stored send never echoes a mode the descriptor would refuse.
+			writeError(w, r, http.StatusBadRequest, "invalid_transfer_intent", "transfer_mode must be automatic or unlimited.")
+			return
+		}
 		created, err := inbox.Create(r.Context(), teaminbox.RequestInput{
 			RequestID: in.RequestID, OperationID: in.OperationID, SenderAccount: p.User.ID,
 			SourceMachineID: in.SourceMachineID, DestinationMachineID: destinationID,
@@ -84,11 +89,7 @@ func sendPrepare(machines *usermachines.Service, inbox *teaminbox.Service, prefs
 			// Stored sends keep their existing upload branch; pending sends poll
 			// the existing request route, then mint the existing descriptor
 			// route once approved. Neither carries a descriptor.
-			status := http.StatusCreated
-			if created.Status == "pending" {
-				status = http.StatusAccepted
-			}
-			writeJSON(w, status, SuccessResponse{Data: out})
+			writeJSON(w, http.StatusAccepted, SuccessResponse{Data: out})
 			return
 		}
 		requestID, manifestDigest := created.RequestID, created.ManifestDigest

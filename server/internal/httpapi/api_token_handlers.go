@@ -255,9 +255,6 @@ func scopedTokenRoute(r *http.Request) bool {
 	if p == "/v1/native-private-access/grants" {
 		return true
 	}
-	if p == "/v1/sends/prepare" {
-		return true
-	}
 	parts := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
 	switch {
 	case len(parts) == 3 && parts[0] == "machines" && (parts[2] == "exec-descriptor" || parts[2] == "file-transfer-descriptor" || parts[2] == "ssh-certificate" || parts[2] == "ssh-descriptor" ||

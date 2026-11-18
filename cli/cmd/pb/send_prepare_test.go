@@ -173,7 +173,7 @@ func TestSendPreparePendingPollsThenFetchesTheDescriptor(t *testing.T) {
 	}
 	for _, path := range reached {
 		switch path {
-		case "GET /v1/machines", "POST /v1/sends/prepare", "GET /v1/team-inbox/requests/request_pending", "POST /v1/machines/machine_destination/file-transfer-descriptor":
+		case "GET /v1/machines", "POST /v1/sends/prepare", "GET /v1/me/preferences", "GET /v1/team-inbox/requests/request_pending", "POST /v1/machines/machine_destination/file-transfer-descriptor":
 		default:
 			t.Fatalf("pending send reached %s", path)
 		}
