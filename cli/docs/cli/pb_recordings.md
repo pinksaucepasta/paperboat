@@ -44,6 +44,7 @@ pb recordings [flags]
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb recordings export](pb_recordings_export.md)	 - Write a recording as an asciicast v2 file
+* [pb recordings key](pb_recordings_key.md)	 - Manage a team's recording key
 * [pb recordings list](pb_recordings_list.md)	 - List the recordings you may see
 * [pb recordings play](pb_recordings_play.md)	 - Replay a recording in this terminal
 * [pb recordings start](pb_recordings_start.md)	 - Start recording the terminal session you are attached to
