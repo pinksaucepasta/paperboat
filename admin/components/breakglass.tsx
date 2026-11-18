@@ -26,7 +26,7 @@ const stageTitles: Record<Stage["name"], [string, string]> = {
   revoke: ["Sign everyone out", "Every browser, CLI, API token and recipe session ends, except yours."],
   reseal: ["Re-seal secrets", "Stored secrets move to the newest encryption key."],
   floor: ["Raise the update floor", "Clients older than the floor are told to update."],
-  retire: ["Retire old keys", "The old CAs and old mint keys are removed and refused. Machines drop them on their next fetch."],
+  retire: ["Retire old keys", "The old CAs are removed at once. The old mint keys are withdrawn about an hour after the run starts, once machine credentials signed by them have expired."],
 }
 
 const counts = (detail: Record<string, unknown>) =>
@@ -148,7 +148,7 @@ function PreviewView({ preview, onStarted }: { preview: Preview; onStarted: () =
           ["Sessions and tokens revoked", `${total(preview.sessions_and_tokens_to_revoke)} (${Object.entries(preview.sessions_and_tokens_to_revoke).map(([k, v]) => `${k.replaceAll("_", " ")} ${v}`).join(", ")})`],
           ["Other operator sessions revoked", String(preview.other_operator_sessions_to_revoke)],
           ["Stored secrets re-sealed", String(total(preview.sealed_rows_to_reseal))],
-          ["Mint keys withdrawn", preview.mint_keys_to_withdraw.join(", ") || "none"],
+          ["Mint keys withdrawn", preview.mint_keys_to_withdraw.length ? `${preview.mint_keys_to_withdraw.join(", ")}, ${preview.mint_withdraw_after_minutes} minutes after the run starts (machines renew their credentials first)` : "none"],
           ["Client update floor now", preview.client_update_floor_now || "none"],
         ]}
       />

@@ -53,8 +53,11 @@ starts. The stages, in order, each audited (`breakglass.stage_started`, `breakgl
    other operator session ends, except the operator who started the run;
 5. reseal: every stored ciphertext moves to the newest encryption key (rows no key opens are counted, not fatal);
 6. floor (optional): the client update floor is raised;
-7. retire: the old CAs are removed at once, old mint keys are withdrawn (`mint_withdrawn_keys`), and the stage ends
-   when machines fetched the CA set without them.
+7. retire: the old CAs are removed at once and the stage waits until machines fetched the CA set without them; the
+   old mint keys are withdrawn (`mint_withdrawn_keys`) `mint_drain` (65 minutes) after the run began, because machines
+   hold credentials signed by them for up to an hour and are refused by the server until they renew (a drill that
+   withdrew them at once left both machines offline). To cut that window short, revoke the key by hand (Emergency
+   revocation above) and accept that machines are offline until their next renewal.
 
 The run is one database row advanced by a worker, so a crash resumes it. When it is done, remove the old mint, session
 and encryption keys from the server configuration and deploy, and rotate the third-party credentials the panel lists.
