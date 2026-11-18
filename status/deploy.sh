@@ -44,7 +44,7 @@ env = {"PROBE_KEYS": secret(json.dumps(keys)), "ADMIN_TOKEN": secret(read("admin
 if os.path.exists(f"{cfg}/mail.key") and endpoint and sender:
     env |= {"MAIL_KEY": secret(read("mail.key")), "MAIL_ENDPOINT": plain(endpoint), "MAIL_FROM": plain(sender)}
 print(json.dumps({
-    "build_config": {"build_command": "bun run build", "destination_dir": "dist", "root_dir": "status"},
+    "build_config": {"build_command": "(cd ../marketing && bun install --frozen-lockfile) && bun run build", "destination_dir": "dist", "root_dir": "status"},
     # preview deployments (branches named in the project's source settings) get the same database and secrets: they exist to prove a build
     "deployment_configs": {k: {"d1_databases": {"DB": {"id": db}}, "compatibility_date": "2026-11-01", "env_vars": env} for k in ("production", "preview")},
 }))
