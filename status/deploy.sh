@@ -39,7 +39,8 @@ read = lambda n: open(f"{cfg}/{n}").read().strip()
 secret = lambda v: {"type": "secret_text", "value": v}
 plain = lambda v: {"type": "plain_text", "value": v}
 keys = {os.path.basename(p)[6:-4]: open(p).read().strip() for p in glob.glob(f"{cfg}/probe-*.key")}
-env = {"PROBE_KEYS": secret(json.dumps(keys)), "ADMIN_TOKEN": secret(read("admin.token")), "PUBLIC_ORIGIN": plain(f"https://{host}"), "STATUS_API_BASE": None}
+env = {"PROBE_KEYS": secret(json.dumps(keys)), "ADMIN_TOKEN": secret(read("admin.token")), "PUBLIC_ORIGIN": plain(f"https://{host}"), "STATUS_API_BASE": None,
+       "PAPERBOAT_SITE_URL": plain("https://" + host.split(".", 1)[1])}  # the page links the Paperboat site (build-time)
 if os.path.exists(f"{cfg}/mail.key") and endpoint and sender:
     env |= {"MAIL_KEY": secret(read("mail.key")), "MAIL_ENDPOINT": plain(endpoint), "MAIL_FROM": plain(sender)}
 print(json.dumps({
