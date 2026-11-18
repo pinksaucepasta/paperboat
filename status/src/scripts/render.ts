@@ -57,7 +57,6 @@ export function renderBanner(root: HTMLElement, o: Overall, p: Payload | null) {
     card.append(body)
   }
   root.replaceChildren(card)
-  root.setAttribute("aria-live", "polite")
 }
 
 function issue(i: Incident, names: Map<string, string>, now: number): HTMLElement {
@@ -84,7 +83,7 @@ export function renderMaintenance(root: HTMLElement, items: Maintenance[], names
   for (const m of shown) {
     const box = el("div", "item")
     const state = m.starts <= now ? "In progress" : "Scheduled"
-    const row = el("div", "item-title"); row.append(el("span", "pill", state), document.createTextNode(` ${m.title}`))
+    const row = el("div", "item-title"); row.append(el("span", `pill`, state), document.createTextNode(` ${m.title}`))
     const win = el("p", "item-meta"); win.append(time(m.starts), " to ", time(m.ends), ` · ${m.components.map((c) => names.get(c) ?? c).join(", ")}`)
     box.append(row, win)
     if (m.body) box.append(el("p", "issue-text", m.body))

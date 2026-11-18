@@ -66,11 +66,11 @@ function Components({ s, value, onChange }: { s: Snapshot; value: string[]; onCh
   )
 }
 
-function Notes({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+function Notes({ value, onChange, label, max = 4000 }: { value: string; onChange: (v: string) => void; label: string; max?: number }) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label>{label}</Label>
-      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={4} maxLength={4000} />
+      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={4} maxLength={max} />
     </div>
   )
 }
@@ -142,7 +142,7 @@ function NewMaintenance({ s, refresh }: { s: Snapshot; refresh: () => void }) {
       <TextField label="Starts" type="datetime-local" value={starts} onChange={setStarts} />
       <TextField label="Ends" type="datetime-local" value={ends} onChange={setEnds} hint="At most 7 days. Downtime in the window does not count against uptime." />
       <Components s={s} value={components} onChange={setComponents} />
-      <Notes label="Details" value={body} onChange={setBody} />
+      <Notes label="Details" value={body} onChange={setBody} max={2000} />
     </FormDialog>
   )
 }

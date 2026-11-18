@@ -54,7 +54,7 @@ origin() { on A "mkdir -p canary-www && echo $marker >canary-www/index.html && c
 exec_ab() { on A "$pb exec $b -- echo $marker" >"$tmp/got" && want; }
 exec_ba() { on B "$pb exec $a -- echo $marker" >"$tmp/got" && want; }
 env_exec() { # A runs a command on B: the managed ENV value must arrive (never printed)
-  : "${CANARY_ENV_NAME:?}" "${CANARY_ENV_VALUE:?}"
+  [ -n "${CANARY_ENV_NAME:-}" ] && [ -n "${CANARY_ENV_VALUE:-}" ] || { echo "CANARY_ENV_NAME and CANARY_ENV_VALUE are not set" >&2; return 1; }
   on A "$pb exec $b -- printenv $CANARY_ENV_NAME" >"$tmp/got" 2>"$tmp/execerr" || { tail -c 200 "$tmp/execerr" >&2; return 1; }
   [ "$(cat "$tmp/got")" = "$CANARY_ENV_VALUE" ] || { echo "$CANARY_ENV_NAME did not arrive on $b" >&2; tail -c 200 "$tmp/execerr" >&2; return 1; }
 }
