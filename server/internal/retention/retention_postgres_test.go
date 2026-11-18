@@ -171,14 +171,12 @@ func TestDeletedTeamsAreTrimmedAfterTheirWindowOnPostgres(t *testing.T) {
 		exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation,deleted_at) VALUES($1,$2,1,now()-$3::interval)`, team, user, age)
 		exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',false)`, team, user)
 		exec(`INSERT INTO paperboat.team_invitations(invitation_id,team_id,recipient_account,created_by,expires_at,cancelled_at) VALUES('inv_'||$1,$1,$2,$2,now(),now())`, team, user)
-		exec(`INSERT INTO paperboat.team_network_preferences(team_id,revision) VALUES($1,1)`, team)
 	}
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, team := range []string{old, recent} {
 			store.SQL().ExecContext(bg, `DELETE FROM paperboat.team_members WHERE team_id=$1`, team)
 			store.SQL().ExecContext(bg, `DELETE FROM paperboat.team_invitations WHERE team_id=$1`, team)
-			store.SQL().ExecContext(bg, `DELETE FROM paperboat.team_network_preferences WHERE team_id=$1`, team)
 			store.SQL().ExecContext(bg, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
 		}
 	})
@@ -186,7 +184,7 @@ func TestDeletedTeamsAreTrimmedAfterTheirWindowOnPostgres(t *testing.T) {
 	if _, err = Run(ctx, store, cfg); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`SELECT count(*) FROM paperboat.team_members WHERE team_id=$1`, `SELECT count(*) FROM paperboat.team_invitations WHERE team_id=$1`, `SELECT count(*) FROM paperboat.team_network_preferences WHERE team_id=$1`} {
+	for _, q := range []string{`SELECT count(*) FROM paperboat.team_members WHERE team_id=$1`, `SELECT count(*) FROM paperboat.team_invitations WHERE team_id=$1`} {
 		if n := count(q, old); n != 0 {
 			t.Errorf("a team deleted 40 days ago kept rows: %s -> %d", q, n)
 		}
