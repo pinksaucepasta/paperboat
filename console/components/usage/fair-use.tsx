@@ -63,13 +63,15 @@ export function FairUse() {
             <div className={cn(fair.throttled ? "bg-muted-foreground" : "bg-primary")} style={{ width: `${fair.share * 100}%` }} />
           </div>
           <p className="text-sm text-muted-foreground">
-            {formatBytes(fair.amount)} a month of public traffic included{until && !fair.throttled ? `, resets ${until}` : ""}. Previews, tunnels and
+            {formatBytes(fair.amount)} a month of public traffic included
+            {fair.seats ? ` (${formatBytes(fair.seats.perSeat)} × ${fair.seats.count} seat${fair.seats.count === 1 ? "" : "s"}, shared by the team)` : ""}
+            {until && !fair.throttled ? `, resets ${until}` : ""}. Previews, tunnels and
             console terminals count. After that, speed is
             reduced to {formatSpeed(fair.mbit)} until your next billing date. Never cut off, never billed extra.
           </p>
           <p className="text-xs text-muted-foreground">
             Relays never count against this and are never cut off: {formatSpeed(fair.relay.mbit)} for the first {formatBytes(fair.relay.included)}{" "}
-            a month, then {formatSpeed(fair.relay.slowMbit)}. Direct connections are not counted. Run your own edge or relay (free, open source): no
+            a month{fair.seats ? " (also per seat, shared by the team)" : ""}, then {formatSpeed(fair.relay.slowMbit)}. Direct connections are not counted. Run your own edge or relay (free, open source): no
             limits.
           </p>
         </>

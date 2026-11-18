@@ -11895,6 +11895,13 @@ export interface components {
             throttle_lifted: boolean;
             /** @description The speed in Mbit/s a throttled workspace's edge traffic runs at. */
             throttle_mbit: number;
+            /** @description A paid team's seats that its included public traffic is for (allowance_bytes is allowance_per_seat_bytes times this, pooled in the team workspace). */
+            allowance_seats?: number;
+            /**
+             * Format: int64
+             * @description A paid team's included public traffic per seat and month.
+             */
+            allowance_per_seat_bytes?: number;
             /** @description The speed in Mbit/s of one account on a Paperboat relay. Relays are never cut off and do not count against the edge allowance. */
             relay_mbit: number;
             /**

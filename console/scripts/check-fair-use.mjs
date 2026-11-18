@@ -14,12 +14,13 @@ const freePort = () => new Promise((resolve) => { const s = net().listen(0, "127
 const GB = 1e9
 let state = "under"
 const billing = () => {
-  const used = { under: 40 * GB, nearly: 85 * GB, throttled: 104 * GB, own: 3 * GB }[state]
+  const used = { under: 40 * GB, nearly: 85 * GB, throttled: 104 * GB, own: 3 * GB, team: 150 * GB }[state]
   const ends = new Date(Date.now() + 9 * 86400_000).toISOString()
   return {
     id: "personal:usr_1", state: "active", seats_bought: 1, members: 1, can_manage: true, cancel_at_period_end: false, seats_used: 1,
-    usage_bytes: used, allowance_bytes: 100 * GB, allowance_period_start: new Date(Date.now() - 21 * 86400_000).toISOString(), allowance_period_end: ends,
-    relay_mbit: 10, relay_included_bytes: 100 * GB, relay_slow_mbit: 1,
+    usage_bytes: used, allowance_bytes: state === "team" ? 400 * GB : 100 * GB,
+    ...(state === "team" ? { allowance_seats: 4, allowance_per_seat_bytes: 100 * GB } : {}), allowance_period_start: new Date(Date.now() - 21 * 86400_000).toISOString(), allowance_period_end: ends,
+    relay_mbit: 10, relay_included_bytes: state === "team" ? 400 * GB : 100 * GB, relay_slow_mbit: 1,
     topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], granted: false, throttled: state === "throttled", throttle_lifted: false, throttle_mbit: 1,
     limits: state === "own"
       ? { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: null, self_hosted: true }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: null, self_hosted: true } }
@@ -62,7 +63,7 @@ try {
   for (let i = 0; i < 120; i++) { if (await fetch(origin + "/auth/sign-in").then(() => true, () => false)) break; await new Promise((r) => setTimeout(r, 1000)) }
   browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {})
   for (const [name, width] of [["desktop", 1440], ["phone", 390]]) {
-    for (const s of ["under", "nearly", "throttled", "own"]) {
+    for (const s of ["under", "nearly", "throttled", "own", "team"]) {
       state = s
       const context = await browser.newContext({ viewport: { width, height: 900 } })
       await context.addCookies([{ name: "pb-dev-session", value: "stub", url: origin }])
@@ -73,7 +74,9 @@ try {
       const text = ((await panel?.innerText()) ?? "").replace(/\s+/g, " ")
       const text0 = text
       check(`${name}/${s}: no asterisks`, !/\*/.test(text0))
-      if (s === "own") {
+      if (s === "team") {
+        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of public traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB included/.test(text) && /first 400 GB a month \(also per seat, shared by the team\)/.test(text), text.slice(0, 160))
+      } else if (s === "own") {
         check(`${name}/${s}: it says Unlimited (your own edges) and that nothing is counted`, /Unlimited \(your own edges\)/.test(text) && /never counted or limited by Paperboat/.test(text), text.slice(0, 90))
         check(`${name}/${s}: no upsell, no banner`, (await panel.$$eval("a", (a) => a.length)) === 0 && !(await page.$("[data-quota-banner]")))
       } else {

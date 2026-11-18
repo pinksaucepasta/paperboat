@@ -53,8 +53,8 @@ type Config struct {
 	Version string
 }
 
-// SlowAccount is an account the relay holds to a slower speed.
-type SlowAccount struct {
+// AccountSpeed is an account the relay holds to less than the default speed.
+type AccountSpeed struct {
 	Account string  `json:"account"`
 	Mbit    float64 `json:"mbit"`
 }
@@ -70,11 +70,11 @@ type Lease struct {
 	// PoolHandover lists accounts whose pool no longer includes this relay and when to close their carriers; nil
 	// (absent) keeps the list the relay holds, an empty list clears it.
 	PoolHandover *[]PoolHandover `json:"pool_handover,omitempty"`
-	// AccountMbit and SlowAccounts are the speeds the control plane sets for this relay (none on a customer-owned relay, which is
-	// never limited): the relay caps each account at AccountMbit and the listed ones at their own Mbit/s until a later observation
-	// no longer lists them.
-	AccountMbit  float64       `json:"account_mbit"`
-	SlowAccounts []SlowAccount `json:"slow_accounts,omitempty"`
+	// AccountMbit and AccountSpeeds are the speeds the control plane sets for this relay (none on a customer-owned relay, which is
+	// never limited): the relay caps each account at AccountMbit and the listed ones at their own Mbit/s (a slower plan tier, or a
+	// share of the speed among the relays that carry the account) until a later observation no longer lists them.
+	AccountMbit   float64        `json:"account_mbit"`
+	AccountSpeeds []AccountSpeed `json:"account_speeds,omitempty"`
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
 	// no stored set for this process or its digest differs.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
@@ -400,18 +400,18 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		}
 	}
 	if out.SubjectsRequired {
-		// The control plane lost or never had this set: send it in full next time, and keep the slow list, which such an
+		// The control plane lost or never had this set: send it in full next time, and keep the speed list, which such an
 		// answer does not carry.
 		c.sentSubjects = ""
-		out.SlowAccounts, out.SubjectsRequired = c.lease.SlowAccounts, false
+		out.AccountSpeeds, out.SubjectsRequired = c.lease.AccountSpeeds, false
 	} else if full {
 		c.sentSubjects = digest
 	}
-	slow := make(map[string]float64, len(out.SlowAccounts))
-	for _, a := range out.SlowAccounts {
+	slow := make(map[string]float64, len(out.AccountSpeeds))
+	for _, a := range out.AccountSpeeds {
 		slow[a.Account] = a.Mbit
 	}
-	if server.SetAccountSpeed(out.AccountMbit) != nil || server.SetSlowAccounts(slow) != nil {
+	if server.SetAccountSpeed(out.AccountMbit) != nil || server.SetAccountSpeeds(slow) != nil {
 		return ErrControl
 	}
 	c.lease = out

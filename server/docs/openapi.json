@@ -10200,6 +10200,15 @@
             "type": "number",
             "description": "The speed in Mbit/s a throttled workspace's edge traffic runs at."
           },
+          "allowance_seats": {
+            "type": "integer",
+            "description": "A paid team's seats that its included public traffic is for (allowance_bytes is allowance_per_seat_bytes times this, pooled in the team workspace)."
+          },
+          "allowance_per_seat_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A paid team's included public traffic per seat and month."
+          },
           "relay_mbit": {
             "type": "number",
             "description": "The speed in Mbit/s of one account on a Paperboat relay. Relays are never cut off and do not count against the edge allowance."
