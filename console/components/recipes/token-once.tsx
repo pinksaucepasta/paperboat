@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 
 /** The install lines for a recipe's token; `base` is the server's installer address (client configuration). */
 export const installLines = (base: string, token: string) => ({
-  posix: `curl -fsSL ${base} | PB_RECIPE=${token} sh`,
+  posix: `curl -fsSL ${base} | PB_RECIPE='${token}' sh`,
   windows: `$env:PB_RECIPE='${token}'; irm ${base} | iex`,
   actions: `- run: curl -fsSL ${base} | sh\n  env: { PB_RECIPE: "\${{ secrets.PB_RECIPE }}" }`,
 })

@@ -706,6 +706,7 @@ jobs:
           mkdir "$sums"
           cp "$RUNNER_TEMP/candidate-artifacts/"* "$sums/"
           key="$RUNNER_TEMP/release-signing-key"
+          trap 'rm -f "$key"' EXIT
           (umask 077 && printf '%s\n' "$PAPERBOAT_RELEASE_SIGNING_KEY" > "$key")
           # The installers carry the public key; this refuses a release neither of them can verify.
           sh tools/sign-release-assets.sh "$sums" "$RELEASE_VERSION" "$key" tools/install.sh tools/install.ps1
