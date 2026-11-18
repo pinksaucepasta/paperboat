@@ -7,8 +7,8 @@ import { localDomain } from "../../site"
 
 const addresses: [string, string][] = [
   [`3000.studio.${localDomain}`, "Port 3000 on studio"],
-  [`studio.${localDomain}:3000`, "The same, port last"],
   [`grafana.homelab.${localDomain}`, "A port you named"],
+  [`jellyfin.${localDomain}`, "A short name of its own"],
   [`studio.${localDomain}`, "Everything studio serves"],
 ]
 
@@ -52,8 +52,21 @@ const faq = [
   <Addresses slot="aside" rows={addresses} />
 
   <Beat id="names-title" title="Give a port a name">
-    <p>Name a port once and the name works on every computer you and your team use.</p>
-    <Term slot="visual" lines={["$ pb port name set grafana 3000 \\", "    --machine homelab", `✓ grafana.homelab.${localDomain}`]} />
+    <p>
+      Name a port once and the name works on every computer you and your team use. Want it shorter? Give it a name of its own:
+      <code>jellyfin.{localDomain}</code> opens the same app as <code>jellyfin.homelab.{localDomain}</code>.
+    </p>
+    <Term
+      slot="visual"
+      lines={[
+        "$ pb port name set jellyfin 8096 \\",
+        "    --machine homelab",
+        `# https://jellyfin.homelab.${localDomain}`,
+        "$ pb port name set jellyfin 8096 \\",
+        "    --machine homelab --top-level",
+        `# https://jellyfin.${localDomain}`,
+      ]}
+    />
   </Beat>
 
   <Beat id="proxy-title" title="Apps behind Coolify too" flip>
