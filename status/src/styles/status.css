@@ -1,5 +1,5 @@
 /*
- * The status page. Brand tokens, fonts and base styles come from the marketing site's global.css (ground, paper, ink, fog, rule,
+ * The status page. Brand tokens, fonts and base styles come from brand/styles/brand.css (ground, paper, ink, fog, rule,
  * cobalt, Figtree/Geist); only what a status page adds is here. Light only. Every state has a shape and a word, never colour alone.
  */
 :root {
@@ -163,3 +163,6 @@ details.incident > summary::-webkit-details-marker { display: none; }
 .webhook-secret label { display: grid; gap: 4px; font-size: var(--text-small); font-weight: 500; color: var(--ink); }
 .webhook-secret[hidden] { display: none; }
 .dialog code { font-family: var(--font-mono); font-size: var(--text-small); }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+main, footer { position: relative; z-index: 1; }
