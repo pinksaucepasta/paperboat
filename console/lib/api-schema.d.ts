@@ -3073,6 +3073,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sends/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare a file send in one call
+         * @description Takes the destination machine ID, defaults an empty transfer_mode from the sender's account preferences, creates the Team Inbox request, and mints the file-transfer descriptor inline when the request is approved or needs no approval. Pending and stored requests return 202 without a descriptor: pending ones poll GET /v1/team-inbox/requests/{request_id} and then POST /v1/machines/{machine_id}/file-transfer-descriptor. Stored requests use the existing stored upload branch.
+         */
+        post: operations["create_send_prepare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{machine_id}/connection-readiness": {
         parameters: {
             query?: {
@@ -9085,6 +9105,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/money": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Founders money report from Stripe: MRR, ARR, movement, revenue, dunning, balance
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. MRR follows Stripe's definition (active and past_due subscriptions, normalised to a month, after running discounts). Cached two minutes. Amounts are in the smallest unit of `currency`.
+         */
+        get: operations["get_v1_admin_money"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/money/lists/{list}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A full list behind a money card
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time. trials: `at` is the trial end, `mrr` what it becomes.
+         */
+        get: operations["get_v1_admin_money_lists_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/money/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent Stripe events
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Newest first; follow next_cursor.
+         */
+        get: operations["get_v1_admin_money_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tunnels/{tunnel_id}/subdomain-availability": {
         parameters: {
             query?: never;
@@ -13873,6 +13953,37 @@ export interface components {
         } & {
             [key: string]: unknown;
         });
+        SendPrepareRequest: {
+            /** @description Exact machine ID. Alias resolution is the client's. */
+            destination_machine_id: string;
+            source_machine_id: string;
+            session_id?: string;
+            request_id: string;
+            /** @description Idempotency key: a byte-identical retry returns the same request. */
+            operation_id: string;
+            batch_id: string;
+            files: {
+                basename: string;
+                size: number;
+                sha256: string;
+            }[];
+            /** Format: date-time */
+            expires_at: string;
+            /** @description automatic or unlimited; empty reads the sender's account preference. */
+            transfer_mode?: string;
+            /** @description Prepared batch total; must equal the accepted inbox request's total for team sends. */
+            declared_bytes: number;
+        };
+        SendPrepareResult: {
+            request: components["schemas"]["TeamInboxRequest"];
+            /** @enum {string} */
+            file_transfer_mode: "automatic" | "unlimited";
+            /** @description Null for pending and stored requests. */
+            descriptor: components["schemas"]["FileTransfer"] | null;
+        };
+        SendPrepareResponse: {
+            data: components["schemas"]["SendPrepareResult"];
+        };
         TeamInboxRequest: {
             stored: boolean;
             stored_uploaded: boolean;
@@ -14379,6 +14490,134 @@ export interface components {
                 override?: number;
             };
             grants: components["schemas"]["OperatorEntitlementGrant"][];
+        };
+        OperatorMoneyPair: {
+            /** Format: int64 */
+            value: number;
+            /** Format: int64 */
+            previous: number;
+        };
+        OperatorMoneyFlow: {
+            /** Format: int64 */
+            count: number;
+            /** Format: int64 */
+            mrr: number;
+            /** Format: int64 */
+            previous_count?: number;
+            /** Format: int64 */
+            previous_mrr?: number;
+        };
+        OperatorMoneyRow: {
+            customer: string;
+            workspace?: string;
+            plan?: string;
+            /** Format: int64 */
+            seats: number;
+            /** Format: int64 */
+            mrr: number;
+            state?: string;
+            /** Format: int64 */
+            amount?: number;
+            /** Format: int64 */
+            attempts?: number;
+            /** Format: int64 */
+            at?: number;
+        };
+        OperatorMoneyRowList: {
+            total: number;
+            rows: components["schemas"]["OperatorMoneyRow"][];
+        };
+        OperatorMoneyRowPage: {
+            rows: components["schemas"]["OperatorMoneyRow"][];
+            total: number;
+            next_after?: string;
+        };
+        OperatorMoneyReport: {
+            /** Format: date-time */
+            observed_at: string;
+            days: number;
+            /** @description Lower-case ISO code the sums are in; amounts are in its smallest unit. */
+            currency: string;
+            partial: boolean;
+            skipped_currency: number;
+            mrr: components["schemas"]["OperatorMoneyPair"];
+            arr: components["schemas"]["OperatorMoneyPair"];
+            subscribers: components["schemas"]["OperatorMoneyPair"];
+            trend: {
+                day: string;
+                /** Format: int64 */
+                mrr: number;
+            }[];
+            plans: {
+                plan: string;
+                /** Format: int64 */
+                subscriptions: number;
+                /** Format: int64 */
+                seats: number;
+                /** Format: int64 */
+                mrr: number;
+            }[];
+            movement: {
+                new: components["schemas"]["OperatorMoneyFlow"];
+                churned: components["schemas"]["OperatorMoneyFlow"];
+                upgraded: components["schemas"]["OperatorMoneyFlow"];
+                downgraded: components["schemas"]["OperatorMoneyFlow"];
+                logo_churn_percent: number;
+                previous_logo_churn_percent: number;
+                revenue_churn_percent: number;
+                previous_revenue_churn_percent: number;
+                changes_unavailable: boolean;
+            };
+            trials: {
+                /** Format: int64 */
+                active: number;
+                /** Format: int64 */
+                ending_soon: number;
+                started: components["schemas"]["OperatorMoneyPair"];
+            };
+            cash?: {
+                collected: components["schemas"]["OperatorMoneyPair"];
+                refunds: components["schemas"]["OperatorMoneyPair"];
+                net: components["schemas"]["OperatorMoneyPair"];
+                failed_payments: components["schemas"]["OperatorMoneyPair"];
+            };
+            dunning: {
+                /** Format: int64 */
+                count: number;
+                /** Format: int64 */
+                at_risk_mrr: number;
+                rows: components["schemas"]["OperatorMoneyRow"][];
+            };
+            customers: components["schemas"]["OperatorMoneyRowList"];
+            renewals: components["schemas"]["OperatorMoneyRowList"];
+            /** Format: int64 */
+            ending: number;
+            balance?: {
+                /** Format: int64 */
+                available: number;
+                /** Format: int64 */
+                pending: number;
+                next_payout?: {
+                    /** Format: int64 */
+                    amount: number;
+                    /** Format: int64 */
+                    arrival: number;
+                    status: string;
+                };
+            };
+            errors?: {
+                [key: string]: string;
+            };
+        };
+        OperatorMoneyEventPage: {
+            events: {
+                id: string;
+                type: string;
+                /** Format: int64 */
+                created: number;
+                object_id?: string;
+            }[];
+            next_cursor?: string;
         };
         TunnelSubdomainAvailability: {
             subdomain: string;
@@ -21209,6 +21448,49 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    create_send_prepare: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendPrepareRequest"];
+            };
+        };
+        responses: {
+            /** @description Approved or no-approval send: request plus inline file-transfer descriptor. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendPrepareResponse"];
+                };
+            };
+            /** @description Pending manual approval or stored send: request without a descriptor. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendPrepareResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     get_v1_user_machines_machine_id_connection_readiness: {
@@ -36223,6 +36505,190 @@ export interface operations {
                 };
             };
             /** @description Analytics not configured (analytics_not_configured) or provider unavailable (analytics_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_money: {
+        parameters: {
+            query?: {
+                days?: 7 | 30;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMoneyReport"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_money_lists_list: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path: {
+                list: "customers" | "past_due" | "renewals" | "trials";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMoneyRowPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_money_events: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMoneyEventPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stripe not configured (money_not_configured) or Stripe unavailable (money_unavailable); evidence, provider or audit unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

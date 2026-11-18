@@ -3073,6 +3073,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sends/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare a file send in one call
+         * @description Takes the destination machine ID, defaults an empty transfer_mode from the sender's account preferences, creates the Team Inbox request, and mints the file-transfer descriptor inline when the request is approved or needs no approval. Pending and stored requests return 202 without a descriptor: pending ones poll GET /v1/team-inbox/requests/{request_id} and then POST /v1/machines/{machine_id}/file-transfer-descriptor. Stored requests use the existing stored upload branch.
+         */
+        post: operations["create_send_prepare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{machine_id}/connection-readiness": {
         parameters: {
             query?: {
@@ -9145,6 +9165,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tunnels/{tunnel_id}/subdomain-availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tunnel_id: components["parameters"]["TunnelID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Check whether a tunnel can take a subdomain
+         * @description Says whether the owner's tunnel could take ?subdomain= as its public address now (valid, not reserved, not taken by any account). Rate limited per account together with address changes.
+         */
+        get: operations["get_v1_tunnels_tunnel_id_subdomain_availability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -10285,6 +10327,7 @@ export interface components {
             updated_at: string;
             /** @description Owning team slug when team-owned; absent for Personal. Independent of viewer audience and persistence account. */
             owner_team_id?: string;
+            address_change?: components["schemas"]["AddressChange"];
         } & (unknown & unknown);
         TunnelPage: {
             items: components["schemas"]["Tunnel"][];
@@ -10323,6 +10366,8 @@ export interface components {
             /** @enum {string} */
             access_mode?: "public" | "private";
             expires_at?: string | null;
+            /** @description Moves the tunnel's public address to <subdomain> under its current base domain. 3-63 lowercase letters, digits or hyphens, not only digits, not a reserved name, unique across all accounts. Make before break: the new address is published next to the old one and the old one stops once every live edge serves the new one (the operation stays running until then; if the edges do not confirm within the move timeout the change is undone and the operation fails with tunnel_address_not_ready). The old address then stays reserved to the tunnel for a cooldown. Applies to managed HTTP addresses; a tunnel nothing serves moves at once. Rate limited per account. Errors: address_not_available (a self-hosted workspace's tunnel has no Paperboat address; attach a custom domain), invalid_subdomain, subdomain_reserved (400), subdomain_taken, address_change_pending (409), address_blocked (403), rate_limited (429). */
+            subdomain?: string;
         };
         TunnelStateMutationRequest: Record<string, never>;
         PreviewTunnelEventActor: {
@@ -13908,6 +13953,37 @@ export interface components {
         } & {
             [key: string]: unknown;
         });
+        SendPrepareRequest: {
+            /** @description Exact machine ID. Alias resolution is the client's. */
+            destination_machine_id: string;
+            source_machine_id: string;
+            session_id?: string;
+            request_id: string;
+            /** @description Idempotency key: a byte-identical retry returns the same request. */
+            operation_id: string;
+            batch_id: string;
+            files: {
+                basename: string;
+                size: number;
+                sha256: string;
+            }[];
+            /** Format: date-time */
+            expires_at: string;
+            /** @description automatic or unlimited; empty reads the sender's account preference. */
+            transfer_mode?: string;
+            /** @description Prepared batch total; must equal the accepted inbox request's total for team sends. */
+            declared_bytes: number;
+        };
+        SendPrepareResult: {
+            request: components["schemas"]["TeamInboxRequest"];
+            /** @enum {string} */
+            file_transfer_mode: "automatic" | "unlimited";
+            /** @description Null for pending and stored requests. */
+            descriptor: components["schemas"]["FileTransfer"] | null;
+        };
+        SendPrepareResponse: {
+            data: components["schemas"]["SendPrepareResult"];
+        };
         TeamInboxRequest: {
             stored: boolean;
             stored_uploaded: boolean;
@@ -14542,6 +14618,37 @@ export interface components {
                 object_id?: string;
             }[];
             next_cursor?: string;
+        };
+        TunnelSubdomainAvailability: {
+            subdomain: string;
+            available: boolean;
+            /**
+             * @description Why it is not available.
+             * @enum {string}
+             */
+            reason?: "invalid" | "reserved" | "taken" | "current" | "unavailable";
+            /** @description Plain-words reason, safe to show. */
+            message?: string;
+        };
+        TunnelSubdomainAvailabilityResponse: {
+            data: components["schemas"]["TunnelSubdomainAvailability"];
+        };
+        /** @description A tunnel's address change in progress, or its last one that failed (until the tunnel's next patch operation). */
+        AddressChange: {
+            /**
+             * @description moving: the new address is published next to the current one and the edges have not all confirmed it; failed: the move was undone and the current address is unchanged.
+             * @enum {string}
+             */
+            state: "moving" | "failed";
+            /** @description The address the tunnel is moving (or tried to move) to. */
+            hostname: string;
+            /**
+             * @description Why a failed move was undone.
+             * @enum {string}
+             */
+            reason_code?: "tunnel_address_not_ready" | "subdomain_taken" | "address_blocked" | "tunnel_paused" | "tunnel_deleted";
+            /** Format: date-time */
+            updated_at: string;
         };
     };
     responses: {
@@ -21341,6 +21448,49 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    create_send_prepare: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendPrepareRequest"];
+            };
+        };
+        responses: {
+            /** @description Approved or no-approval send: request plus inline file-transfer descriptor. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendPrepareResponse"];
+                };
+            };
+            /** @description Pending manual approval or stored send: request without a descriptor. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendPrepareResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     get_v1_user_machines_machine_id_connection_readiness: {
@@ -36547,6 +36697,36 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    get_v1_tunnels_tunnel_id_subdomain_availability: {
+        parameters: {
+            query: {
+                subdomain: string;
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                tunnel_id: components["parameters"]["TunnelID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Availability of the subdomain. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TunnelSubdomainAvailabilityResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
 }
