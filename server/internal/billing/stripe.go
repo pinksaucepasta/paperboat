@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 	"io"
 	"net/http"
 	"net/url"
@@ -80,7 +81,7 @@ type HTTPStripeClient struct {
 }
 
 func (c HTTPStripeClient) CreateCustomer(ctx context.Context, workspaceID, email, key string) (string, error) {
-	v := url.Values{"email": {email}, "metadata[workspace_id]": {workspaceID}}
+	v := url.Values{"email": {email}, "metadata[workspace_id]": {workspaceID}, "invoice_settings[footer]": {legalconsent.InvoiceFooter()}}
 	var out struct {
 		ID       string `json:"id"`
 		Livemode bool   `json:"livemode"`

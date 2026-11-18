@@ -76,6 +76,8 @@ type TeamCreateRequest struct {
 	Interval    string `json:"interval"`
 	SuccessURL  string `json:"success_url"`
 	CancelURL   string `json:"cancel_url"`
+	// TermsVersion is the no-refund consent version the buyer accepted (the server refuses without it).
+	TermsVersion string `json:"terms_version"`
 }
 
 // TeamCheckout is the Stripe Checkout address that completes Team creation.

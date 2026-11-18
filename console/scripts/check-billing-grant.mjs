@@ -51,7 +51,7 @@ function route(url) {
   const p = url.pathname
   if (p === "/v1/me") return { id: "u", email: "owner@example.test", display_name: "Owner", status: "active", role: "user", workos_subject: "wo_u" }
   if (p === "/v1/workspaces") return { items: [{ id: "personal", name: "Personal", kind: "personal", role: "owner" }, { id: "tg", name: "Team G", kind: "team", role: "owner" }] }
-  if (p === "/v1/client-configuration") return {}
+  if (p === "/v1/client-configuration") return { purchase_consent: { version: "2026-11-19", text: "Start the service now." } }
   if (p === "/v1/billing/workspaces/personal") return states[world.mode]("personal")
   if (p === "/v1/billing/workspaces/teams/tg") return states[world.mode]("team")
   if (p === "/v1/billing/workspaces/personal/products") return { items: personalProducts, pagination: { limit: 50, offset: 0, total: personalProducts.length, next_offset: null } }

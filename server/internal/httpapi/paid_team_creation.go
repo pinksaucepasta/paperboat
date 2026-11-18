@@ -24,7 +24,13 @@ func paidTeamCreation(s *billing.WorkspaceService, origins []string) http.Handle
 			writeError(w, r, 400, "validation_failed", "Provide matching operation and idempotency IDs and configured console return URLs.")
 			return
 		}
+		if refuseWithoutConsent(w, r, in.TermsVersion) {
+			return
+		}
 		out, err := s.CreatePaidTeam(r.Context(), p.User.ID, p.User.PrimaryEmail, in)
+		if err == nil {
+			err = s.RecordTerms(r.Context(), key, p.User.ID, "team_create")
+		}
 		switch {
 		case errors.Is(err, billing.ErrTeamCreationInvalid):
 			writeError(w, r, 400, "validation_failed", "Provide an available team slug, at least one seat and month or year interval.")

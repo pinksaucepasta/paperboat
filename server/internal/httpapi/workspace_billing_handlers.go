@@ -120,6 +120,7 @@ func workspaceBillingMutation(s *billing.WorkspaceService, origins []string, por
 			SuccessURL     string `json:"success_url"`
 			CancelURL      string `json:"cancel_url"`
 			ReturnURL      string `json:"return_url"`
+			TermsVersion   string `json:"terms_version"`
 		}
 		if !decodeStrictJSON(w, r, &in) {
 			return
@@ -144,8 +145,14 @@ func workspaceBillingMutation(s *billing.WorkspaceService, origins []string, por
 			writeJSON(w, 200, SuccessResponse{Data: map[string]string{"url": out.URL}})
 			return
 		}
+		if refuseWithoutConsent(w, r, in.TermsVersion) {
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/topups") {
 			out, err := s.Topup(r.Context(), p.User.ID, r.PathValue("team_id"), in.ProductCode, key, in.SuccessURL, in.CancelURL, in.ProductVersion, in.Quantity)
+			if err == nil {
+				err = s.RecordTerms(r.Context(), key, p.User.ID, "topup")
+			}
 			if err != nil {
 				workspaceBillingError(w, r, err)
 				return
@@ -154,6 +161,9 @@ func workspaceBillingMutation(s *billing.WorkspaceService, origins []string, por
 			return
 		}
 		out, err := s.Checkout(r.Context(), p.User.ID, p.User.PrimaryEmail, r.PathValue("team_id"), in.ProductCode, key, in.SuccessURL, in.CancelURL, in.ProductVersion)
+		if err == nil {
+			err = s.RecordTerms(r.Context(), key, p.User.ID, "checkout")
+		}
 		if err != nil {
 			workspaceBillingError(w, r, err)
 			return
@@ -193,4 +203,13 @@ func stripeWorkspaceWebhook(s *billing.WorkspaceService, secret string) http.Han
 		}
 		writeJSON(w, 200, SuccessResponse{Data: map[string]string{"status": status}})
 	}
+}
+
+// refuseWithoutConsent answers 400 unless the purchase request carries the current no-refund consent version.
+func refuseWithoutConsent(w http.ResponseWriter, r *http.Request, version string) bool {
+	if billing.CheckTermsVersion(version) == nil {
+		return false
+	}
+	writeError(w, r, 400, "terms_consent_required", "Accept the current no-refund terms to buy. Reload the page if the wording changed.")
+	return true
 }

@@ -14,13 +14,14 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
 func TestTeamHTTPPrincipalAndStrictBody(t *testing.T) {
 	service := billing.NewWorkspaceService(nil, nil, "")
 	handler := paidTeamCreation(service, []string{"https://console.example.test"})
-	valid := `{"operation_id":"op_a","team_id":"team-a","seats":1,"interval":"month","success_url":"https://console.example.test/success","cancel_url":"https://console.example.test/cancel"}`
+	valid := `{"operation_id":"op_a","team_id":"team-a","seats":1,"interval":"month","success_url":"https://console.example.test/success","cancel_url":"https://console.example.test/cancel","terms_version":"` + legalconsent.Version + `"}`
 	for _, tc := range []struct {
 		name, body, key string
 		authenticated   bool
@@ -33,6 +34,8 @@ func TestTeamHTTPPrincipalAndStrictBody(t *testing.T) {
 		{"missing idempotency header", valid, "", true, 400},
 		{"different idempotency header", valid, "op_b", true, 400},
 		{"external return origin", strings.ReplaceAll(valid, "console.example.test", "attacker.example.test"), "op_a", true, 400},
+		{"no consent", strings.Replace(valid, legalconsent.Version, "", 1), "op_a", true, 400},
+		{"old consent version", strings.Replace(valid, legalconsent.Version, "2020-01-01", 1), "op_a", true, 400},
 		{"valid purchase reaches billing provider guard", valid, "op_a", true, 503},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -249,7 +249,7 @@ function CreateTeamForm() {
   const [id, setId] = useState("")
   const [seats, setSeats] = useState(1)
   const [period, setPeriod] = useState<"month" | "year">("month")
-  const [agreed, setAgreed] = useState(false)
+  const [terms, setTerms] = useState<string | null>(null)
   const paid = billingLive.paidTeamCreate
   const personal = useApiQuery(workspacesQuery).data?.find((workspace) => workspace.kind === "personal")
   const trial = teamTrialDays(useApiQuery(billingQuery(personal)).data)
@@ -258,7 +258,7 @@ function CreateTeamForm() {
   const valid = teamIdPattern.test(id)
   const create = useMutation({
     mutationFn: async () => {
-      if (paid) return window.location.assign(await createPaidTeam(id, seats, period, key))
+      if (paid) return window.location.assign(await createPaidTeam(id, seats, period, key, terms!))
       const team = await createTeam(id)
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey })
       setWorkspace(team.team_id)
@@ -269,7 +269,7 @@ function CreateTeamForm() {
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault()
-        if (valid && (!paid || agreed)) create.mutate()
+        if (valid && (!paid || terms !== null)) create.mutate()
       }}
     >
       <Field className="gap-1.5">
@@ -332,14 +332,14 @@ function CreateTeamForm() {
             : `${notLiveTitle}: teams are created free for now.`}
         </span>
       </Field>
-      {paid && <CheckoutConsent checked={agreed} onChange={setAgreed} />}
+      {paid && <CheckoutConsent terms={terms} onChange={setTerms} />}
       {create.isError && (
         <p className="text-sm text-destructive">
           <ErrorMessage error={create.error} />
         </p>
       )}
       <DialogFooter>
-        <Button type="submit" size="lg" disabled={!valid || (paid && !agreed) || create.isPending}>
+        <Button type="submit" size="lg" disabled={!valid || (paid && terms === null) || create.isPending}>
           {create.isPending
             ? "Creating…"
             : paid && trial

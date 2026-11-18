@@ -216,7 +216,7 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
   const subscribe = billing.granted
   const products = useApiQuery(billingProductsQuery(workspace))
   const [interval, setPeriod] = useState<BillingInterval>("month")
-  const [agreed, setAgreed] = useState(false)
+  const [terms, setTerms] = useState<string | null>(null)
   if (products.isPending) return <Skeleton className="h-24 w-full" />
   if (products.isError)
     return (
@@ -245,9 +245,9 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
       }
     >
       {shown.map((product) => (
-        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} agreed={agreed} verb={subscribe ? "Subscribe" : "Upgrade"} />
+        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} terms={terms} verb={subscribe ? "Subscribe" : "Upgrade"} />
       ))}
-      <CheckoutConsent checked={agreed} onChange={setAgreed} />
+      <CheckoutConsent terms={terms} onChange={setTerms} />
     </Section>
   )
 }
@@ -256,13 +256,13 @@ function PlanOffer({
   workspace,
   product,
   canManage,
-  agreed,
+  terms,
   verb,
 }: {
   workspace: Workspace
   product: BillingProduct
   canManage: boolean
-  agreed: boolean
+  terms: string | null
   verb: string
 }) {
   const queryClient = useQueryClient()
@@ -270,7 +270,7 @@ function PlanOffer({
   // any definite answer starts a fresh attempt.
   const [key, setKey] = useState(idempotencyKey)
   const checkout = useMutation({
-    mutationFn: () => startCheckout(workspace, product, key),
+    mutationFn: () => startCheckout(workspace, product, key, terms!),
     onSuccess: (url) => window.location.assign(url),
     onError: (error) => {
       if (error instanceof ApiError && error.code === "provider_outcome_unknown") return
@@ -293,8 +293,8 @@ function PlanOffer({
           </span>
         </span>
         <Button
-          disabled={!canManage || !agreed || checkout.isPending}
-          title={canManage ? (agreed ? undefined : "Tick the box below to continue.") : "Only the workspace owner can change billing."}
+          disabled={!canManage || terms === null || checkout.isPending}
+          title={canManage ? (terms !== null ? undefined : "Tick the box below to continue.") : "Only the workspace owner can change billing."}
           onClick={() => checkout.mutate()}
         >
           {checkout.isPending && <CircleNotchIcon className="animate-spin" />}
