@@ -7,14 +7,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 )
@@ -30,36 +34,9 @@ func TargetName(version, arch string) string {
 // Verify checks bundle (a local file) against the TUF target for version and arch in the repository at
 // repositoryURL (…/tuf), whose metadata is trusted from root. cacheDir keeps the client's metadata between runs.
 func Verify(ctx context.Context, repositoryURL string, root []byte, cacheDir, version, arch, bundle string, client *http.Client) error {
-	if err := ctx.Err(); err != nil {
+	info, _, err := Target(ctx, repositoryURL, root, cacheDir, version, arch, client)
+	if err != nil {
 		return err
-	}
-	cfg, err := config.New(strings.TrimRight(repositoryURL, "/")+"/metadata/", root)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrSignature, err)
-	}
-	cfg.LocalMetadataDir, cfg.LocalTargetsDir = filepath.Join(cacheDir, "metadata"), filepath.Join(cacheDir, "targets")
-	cfg.PrefixTargetsWithHash = true
-	cfg.MaxRootRotations, cfg.RootMaxLength, cfg.TimestampMaxLength, cfg.SnapshotMaxLength, cfg.TargetsMaxLength = 32, 128<<10, 64<<10, 256<<10, 512<<10
-	for _, dir := range []string{cfg.LocalMetadataDir, cfg.LocalTargetsDir} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	if client != nil {
-		if err := cfg.SetDefaultFetcherHTTPClient(client); err != nil {
-			return err
-		}
-	}
-	tuf, err := updater.New(cfg)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrSignature, err)
-	}
-	if err := tuf.Refresh(); err != nil {
-		return fmt.Errorf("%w: refresh signed metadata: %w", ErrSignature, err)
-	}
-	info, err := tuf.GetTargetInfo(TargetName(version, arch))
-	if err != nil || info == nil {
-		return fmt.Errorf("%w: %s is not a signed target", ErrSignature, TargetName(version, arch))
 	}
 	file, err := os.Open(bundle)
 	if err != nil {
@@ -75,4 +52,51 @@ func Verify(ctx context.Context, repositoryURL string, root []byte, cacheDir, ve
 		return fmt.Errorf("%w: length or sha256 differs", ErrSignature)
 	}
 	return nil
+}
+
+// Target refreshes the signed metadata and returns the bundle's target and the download URL signed into it
+// (the GitHub release that carries the bundle). The URL is only where the bytes are; Verify checks them.
+func Target(ctx context.Context, repositoryURL string, root []byte, cacheDir, version, arch string, client *http.Client) (*metadata.TargetFiles, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	cfg, err := config.New(strings.TrimRight(repositoryURL, "/")+"/metadata/", root)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %w", ErrSignature, err)
+	}
+	cfg.LocalMetadataDir, cfg.LocalTargetsDir = filepath.Join(cacheDir, "metadata"), filepath.Join(cacheDir, "targets")
+	cfg.PrefixTargetsWithHash = true
+	cfg.MaxRootRotations, cfg.RootMaxLength, cfg.TimestampMaxLength, cfg.SnapshotMaxLength, cfg.TargetsMaxLength = 32, 128<<10, 64<<10, 256<<10, 512<<10
+	for _, dir := range []string{cfg.LocalMetadataDir, cfg.LocalTargetsDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, "", err
+		}
+	}
+	if client != nil {
+		if err := cfg.SetDefaultFetcherHTTPClient(client); err != nil {
+			return nil, "", err
+		}
+	}
+	tuf, err := updater.New(cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %w", ErrSignature, err)
+	}
+	if err := tuf.Refresh(); err != nil {
+		return nil, "", fmt.Errorf("%w: refresh signed metadata: %w", ErrSignature, err)
+	}
+	info, err := tuf.GetTargetInfo(TargetName(version, arch))
+	if err != nil || info == nil {
+		return nil, "", fmt.Errorf("%w: %s is not a signed target", ErrSignature, TargetName(version, arch))
+	}
+	var custom struct {
+		URL string `json:"url"`
+	}
+	file := path.Base(TargetName(version, arch))
+	if info.Custom == nil || json.Unmarshal(*info.Custom, &custom) != nil {
+		return nil, "", fmt.Errorf("%w: %s names no download URL", ErrSignature, TargetName(version, arch))
+	}
+	if parsed, err := url.Parse(custom.URL); err != nil || parsed.Scheme != "https" || parsed.Host == "" || path.Base(parsed.Path) != file {
+		return nil, "", fmt.Errorf("%w: %s names an invalid download URL", ErrSignature, TargetName(version, arch))
+	}
+	return info, custom.URL, nil
 }
