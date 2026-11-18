@@ -7,13 +7,13 @@ import { api, idempotencyKey, type Data, type Schemas, type Workspace } from "@/
 import type { components } from "@/lib/api-schema"
 
 /** `limit` is null where the plan is unlimited (public_tcp: only on your own tunnel edge). */
-type Limit = { used: number; limit: number | null; granted?: boolean }
+type Limit = { used: number; limit: number | null; granted?: boolean; self_hosted?: boolean }
 export type BillingWorkspace = components["schemas"]["BillingWorkspace"]
 
-/** "6 of 1,000", or "6 · Unlimited" when the plan has no limit. */
-export const formatLimit = ({ used, limit, granted }: Limit) =>
+/** "6 of 1,000", "6 · Unlimited", or "6 · Unlimited (your own edges)" when the workspace runs its own edges. */
+export const formatLimit = ({ used, limit, granted, self_hosted }: Limit) =>
   limit === null
-    ? `${used.toLocaleString("en-US")} · Unlimited`
+    ? `${used.toLocaleString("en-US")} · Unlimited${self_hosted ? " (your own edges)" : ""}`
     : `${used.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")}${granted ? " · Granted" : ""}`
 
 /** The fair-use sentence: "5.0 GB of 100 GB used", with what support granted when some of it is. */
@@ -24,16 +24,23 @@ export const formatAllowance = (billing: BillingWorkspace) =>
         billing.allowance_granted_bytes ? ` · ${formatBytes(billing.allowance_granted_bytes)} granted` : ""
       }`
 
+/** "512 kbit/s", "1 Mbit/s". */
+export const formatSpeed = (mbit: number) => (mbit < 1 ? `${Math.round(mbit * 1000)} kbit/s` : `${mbit} Mbit/s`)
+
 /**
- * Edge traffic (public previews, tunnels, browser terminals) is "Unlimited*": past the fair-use amount it is slowed to
- * `mbit` Mbit/s until the period ends, never stopped. The amount is the plan's plus what support granted and what was
- * topped up. Undefined when the workspace has no fair-use amount.
+ * Public traffic through Paperboat's edges (previews, tunnels, browser terminals) is included up to an amount a month; past
+ * it speed is reduced to `mbit` Mbit/s until the period ends, never cut off or billed extra. The amount is the plan's plus
+ * what support granted and what was topped up. `ownEdges`: the workspace runs its own edges, so nothing is counted or limited.
+ * Undefined when the workspace has no included amount.
  */
 export function fairUse(billing: BillingWorkspace) {
+  const ownEdges = Boolean(billing.limits?.publications.self_hosted)
+  if (ownEdges) return { ownEdges, amount: 0, used: billing.usage_bytes, share: 0, throttled: false, mbit: 0, ends: undefined }
   if (billing.allowance_bytes === null) return undefined
   const amount = billing.allowance_bytes + billing.topup_bytes_purchased
   const used = billing.usage_bytes
   return {
+    ownEdges,
     amount,
     used,
     share: amount > 0 ? Math.min(1, used / amount) : 1,

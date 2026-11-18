@@ -82,7 +82,7 @@ func TestBandwidthThrottleTransitionLiftAndResetPostgres(t *testing.T) {
 		}
 		return out
 	}
-	const eighty, slowed, back = "80% of fair-use traffic used", "Public traffic slowed to 1 Mbit/s", "Full speed is back"
+	const eighty, slowed, back = "80% of included traffic used", "Public traffic reduced to 1 Mbit/s", "Full speed is back"
 
 	debit(79, at)
 	if throttled(at) || len(titles()) != 0 {

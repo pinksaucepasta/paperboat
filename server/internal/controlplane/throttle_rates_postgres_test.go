@@ -46,7 +46,7 @@ func TestThrottleRatesFollowThePlanAndTheEdgesCarryingTheWorkspacePostgres(t *te
 	carry := func(workspace, node, route string) {
 		t.Helper()
 		exec(`INSERT INTO usage_accounting_authorities(authority_id,edge_node_id,environment_id,route_id,route_revision,workspace_id,admitted_at,admission_expires_at,retain_until)
- VALUES($1,$2,$3,$4,1,$5,now(),now()+interval '1 minute',now()+interval '1 day')`, "tr_a_"+route+"_"+x, node, "env_"+x, route, workspace)
+ VALUES($1,$2,$3,$4,1,$5,now()-interval '1 hour',now()+interval '1 minute',now()+interval '1 day')`, "tr_a_"+route+"_"+x, node, "env_"+x, route, workspace)
 	}
 	service := &EdgeService{store: store}
 	service.SetFairUse(config.Default().Billing.FairUse)
