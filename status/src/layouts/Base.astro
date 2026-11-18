@@ -28,6 +28,12 @@ const { title, description } = Astro.props
     <Subscribe />
     <script>
       import "../scripts/subscribe.ts"
+      // status.<domain> sits beside <domain>: point the logo and the footer's Paperboat link at the site.
+      const h = location.hostname
+      if (h.startsWith("status.")) {
+        const site = `${location.protocol}//${h.slice("status.".length)}${location.port ? `:${location.port}` : ""}/`
+        document.querySelectorAll<HTMLAnchorElement>(".top .lockup, [data-site-link]").forEach((a) => (a.href = site))
+      }
     </script>
   </body>
 </html>
