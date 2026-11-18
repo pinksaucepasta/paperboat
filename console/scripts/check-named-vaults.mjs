@@ -118,7 +118,8 @@ try {
     await dialog().waitFor({ state: "detached", ...long })
     await page.getByRole("heading", { name: `Vault ${vault}` }).waitFor(long)
     check((await pressed(vault)) === "true", "the new vault is not selected")
-    await page.getByText("No variables yet.").waitFor(long)
+    // The Team vaults rows below also say this: the first match is the variables list above them.
+    await page.getByText("No variables yet.").first().waitFor(long)
     await page.getByText("No recipe reads this vault.").waitFor()
     const made = await api(`workspaces/${ws}/env-vaults/${vault}`)
     check(made.status() === 200, `the server answers ${made.status()} for the vault`)
@@ -151,7 +152,7 @@ try {
   await step("a variable is removed from the vault", async () => {
     await page.getByRole("button", { name: `Remove ${variable}` }).click()
     await dialog().getByRole("button", { name: "Remove", exact: true }).click()
-    await page.getByText("No variables yet.").waitFor(long)
+    await page.getByText("No variables yet.").first().waitFor(long)
   })
   await step("the vault is deleted after its name is typed, and Default is shown again", async () => {
     await button("Delete").click()
