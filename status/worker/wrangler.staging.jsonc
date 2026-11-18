@@ -4,5 +4,5 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "d1_databases": [{ "binding": "DB", "database_name": "paperboat-status-staging", "database_id": "local" }],
-  "alias": { "../../config/components.json": "../../config/components.staging.json" }
+  "alias": { "../../config/components.json": "../config/components.staging.json" }
 }

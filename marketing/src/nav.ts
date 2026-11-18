@@ -1,4 +1,4 @@
-import { consoleUrl, sourceUrl } from "./site"
+import { consoleUrl, sourceUrl, statusUrl } from "./site"
 import { compares } from "./compare-data"
 import { features, useCases } from "./features"
 import { legalPages } from "./legal-data"
@@ -31,6 +31,7 @@ export const footerColumns: { title: string; links: NavLink[] }[] = [
       { href: "/docs/", label: "Docs" },
       { href: sourceUrl, label: "Source code" },
       { href: consoleUrl, label: "Sign in" },
+      ...(statusUrl ? [{ href: "/status/", label: "Status" }] : []),
     ],
   },
   { title: "Features", links: featureLinks },

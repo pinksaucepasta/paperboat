@@ -14,8 +14,10 @@ export interface Env {
   MAIL_ENDPOINT?: string
   MAIL_KEY?: string
   MAIL_FROM?: string
-  /** var: the page's public origin, used in mail and feed links */
+  /** var: this Worker's own origin (confirm and unsubscribe links) */
   PUBLIC_ORIGIN?: string
+  /** var: the static page's origin: the one browser origin allowed to call the public endpoints, and the link in mail and feed */
+  PAGE_ORIGIN?: string
 }
 
 export interface UnitSpec { id: string; name?: string; vantages: string[]; slowMs: number }
