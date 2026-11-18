@@ -4,7 +4,8 @@
 -- for a cooldown ('retired', until it may be taken by another resource) so a visitor with the old link cannot
 -- land on someone else's tunnel. No foreign key to tunnels: a tunnel is never hard-deleted, the settle worker
 -- drops the hold of a deleted one.
-SET lock_timeout = '5s';
+SET LOCAL lock_timeout = '5s';
+SELECT pg_advisory_xact_lock(1885686843);
 
 CREATE TABLE paperboat.tunnel_address_holds (
     hostname text PRIMARY KEY CHECK (hostname = lower(hostname) AND hostname ~ '^[a-z0-9-]+[.][a-z0-9.-]+$'),
@@ -42,6 +43,8 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose Down
+SET LOCAL lock_timeout = '5s';
+SELECT pg_advisory_xact_lock(1885686843);
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.claim_managed_hostname(host text, kind text, resource text, service_port integer DEFAULT 0) RETURNS void
 LANGUAGE plpgsql SET search_path TO paperboat,pg_catalog AS $$

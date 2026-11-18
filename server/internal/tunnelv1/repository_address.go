@@ -159,10 +159,14 @@ WHERE tunnel_id=$1 AND match_hostname=$2 AND deleted_at IS NULL`, tunnel.ID, old
 	if _, err := tx.Exec(ctx, `DELETE FROM paperboat.tunnel_address_holds WHERE hostname=$1 AND tunnel_id=$2 AND kind='incoming'`, newHost, tunnel.ID); err != nil {
 		return tunnel, translate(err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,kind,until) VALUES($1,$2,'retired',$3)
+	retired, err := tx.Exec(ctx, `INSERT INTO paperboat.tunnel_address_holds(hostname,tunnel_id,kind,until) VALUES($1,$2,'retired',$3)
 ON CONFLICT(hostname) DO UPDATE SET tunnel_id=EXCLUDED.tunnel_id,operation_id=NULL,kind='retired',until=EXCLUDED.until,created_at=$4
-WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, oldHost, tunnel.ID, now.Add(policy.Cooldown), now); err != nil {
+WHERE paperboat.tunnel_address_holds.tunnel_id=EXCLUDED.tunnel_id OR paperboat.tunnel_address_holds.until<=$4`, oldHost, tunnel.ID, now.Add(policy.Cooldown), now)
+	if err != nil {
 		return tunnel, translate(err)
+	}
+	if retired.RowsAffected() != 1 {
+		return tunnel, ErrConflict // another tunnel holds the old name: moving off it without its cooldown would hand it over
 	}
 	tunnel.StableEndpoint = "https://" + newHost
 	return tunnel, nil
