@@ -39,6 +39,11 @@ func TestNativeClientExplicitCancellationRemovesKnownTransfer(t *testing.T) {
 		case http.MethodPost:
 			_ = json.NewEncoder(w).Encode(Batch{BatchID: manifest.BatchID, Transfers: []Manifest{manifest}})
 		case http.MethodHead:
+			w.Header().Set("Upload-Offset", "0")
+		case http.MethodPatch:
+			// The first offset comes from the create response, so this first
+			// PATCH is the first request: cancel here, as the HEAD did before
+			// the initial HEAD was dropped.
 			cancel()
 			w.Header().Set("Upload-Offset", "0")
 		case http.MethodDelete:
@@ -178,9 +183,9 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 			if !outage && (len(offsets) != 3 || offsets[1] != protocol.FileTransferChunkBytes) {
 				t.Fatalf("lost commit resent bytes: %v", offsets)
 			}
-			// The offset is asked at the start and after the lost response only;
-			// each successful PATCH returns the next one.
-			if !outage && heads != 2 {
+			// The offset comes from the create response, so it is asked only after
+			// the lost response; each successful PATCH returns the next one.
+			if !outage && heads != 1 {
 				t.Fatalf("offset queried %d times for 3 chunks", heads)
 			}
 		})

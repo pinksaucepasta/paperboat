@@ -24,9 +24,7 @@ func TestSendUnlimitedDeclaresItsModeAndRefusalReadsAsAdvice(t *testing.T) {
 		switch request.Method + " " + request.URL.Path {
 		case "GET /v1/machines":
 			writeAPIData(t, writer, api.UserMachinePage{Items: []api.UserMachine{{ID: "machine_host", EnvironmentID: "environment_host", Alias: "hn", State: "ready", Online: true, Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/root", InstallationGeneration: 1, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: true}}}}, Pagination: api.Pagination{Limit: 200, Total: 1}})
-		case "POST /v1/team-inbox/requests":
-			writeAPIData(t, writer, api.TeamInboxRequest{Status: "not_required"})
-		case "POST /v1/machines/machine_host/file-transfer-descriptor":
+		case "POST /v1/sends/prepare":
 			body, _ := io.ReadAll(request.Body)
 			declared = string(body)
 			writer.Header().Set("Content-Type", "application/json")

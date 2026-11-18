@@ -150,7 +150,7 @@ func TestUploadNativeFolderAbortClosesStream(t *testing.T) {
 	manifest := Manifest{TransferID: "ft_folder_abort", BatchID: "fb_folder_abort",
 		SourceMachineID: "machine_source", DestinationMachineID: "machine_destination",
 		InitiatingUserID: "user_1", Basename: item.Basename, Size: item.Size}
-	err = client.uploadNative(context.Background(), manifest, item)
+	err = client.uploadNative(context.Background(), manifest, item, -1)
 	if err == nil || !strings.Contains(err.Error(), "offset_conflict") {
 		t.Fatalf("uploadNative err = %v, want offset_conflict", err)
 	}

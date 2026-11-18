@@ -32,7 +32,7 @@ func TestSendUsesRenewedCredentialWhileWaitingForApproval(t *testing.T) {
 		case "/v1/machines":
 			machine := api.UserMachine{ID: "machine_destination", Alias: "destination", State: "ready", Online: true, Capabilities: api.MachineCapabilities{FileReceive: api.MachineCapability{Configured: true, Observed: true}}}
 			writeAPIData(t, w, api.UserMachinePage{Items: []api.UserMachine{machine}, Pagination: api.Pagination{Limit: 200, Total: 1}})
-		case "/v1/team-inbox/requests":
+		case "/v1/sends/prepare":
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				t.Error(err)
@@ -52,7 +52,7 @@ func TestSendUsesRenewedCredentialWhileWaitingForApproval(t *testing.T) {
 				w.WriteHeader(500)
 				return
 			}
-			writeAPIData(t, w, api.TeamInboxRequest{RequestID: "request_fixture", Status: "pending"})
+			writeAPIData(t, w, api.SendPrepareResponse{Request: api.TeamInboxRequest{RequestID: "request_fixture", Status: "pending"}})
 		case "/v1/team-inbox/requests/request_fixture":
 			if r.Header.Get("Authorization") != "Bearer renewed_fixture" {
 				w.Header().Set("Content-Type", "application/json")
