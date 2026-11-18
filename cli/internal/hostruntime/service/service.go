@@ -543,17 +543,16 @@ func renderLaunchd(config Config) ([]byte, error) {
 const UpdateNice = "10"
 const UpdateIOClass = "idle"
 
-// restartBackoff is every Paperboat unit's restart pacing. A crash-looping unit backs off: RestartSec grows
-// over RestartSteps to RestartMaxDelaySec (systemd >= 254, src/core/service.c service_restart_usec_nth), plus
-// a random extra delay so machines that crash together (a bad release) do not restart together
-// (RestartRandomizedDelaySec, systemd >= 262). Older systemd ignores both and keeps RestartSec, which must
-// stay above 2 s: 5 starts in 10 s (the default start limit) would leave the unit failed for good. Prior art:
-// tailscale util/backoff/backoff.go (capped growth, jittered).
+// restartBackoff is every Paperboat unit's restart pacing. RestartSec=5s is the floor every systemd honours (a
+// fixed, sane delay, as tailscaled.service's Restart=on-failure is plain): it must stay above 2 s, because 5
+// starts in 10 s (systemd's default start limit) would leave a crash-looping unit failed for good. systemd >= 254
+// also knows RestartSteps and RestartMaxDelaySec, which grow the delay from RestartSec to the maximum over the
+// steps (src/core/service.c service_restart_usec_nth); older systemd (Ubuntu 22.04 has 249, Debian 12 has 252)
+// ignores those two keys and keeps the fixed delay. Only keys 249 already parses may differ in meaning there.
 var restartBackoff = []*unit.UnitOption{
 	unit.NewUnitOption("Service", "RestartSec", "5s"),
 	unit.NewUnitOption("Service", "RestartSteps", "3"),
 	unit.NewUnitOption("Service", "RestartMaxDelaySec", "30s"),
-	unit.NewUnitOption("Service", "RestartRandomizedDelaySec", "5s"),
 }
 
 func renderSystemd(config Config) ([]byte, error) {

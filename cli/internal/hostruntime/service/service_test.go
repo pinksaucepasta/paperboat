@@ -55,16 +55,21 @@ func TestSystemdDefinitionSignalsWorkerBeforeForceCleaningCgroup(t *testing.T) {
 	}
 }
 
-// A crash-looping hostd or worker restarts with a growing, jittered delay capped at 30 s, and never fast enough
-// to reach systemd's default start limit (5 starts in 10 s), which would leave it failed until someone restarts it.
-func TestSystemdRestartBacksOffWithJitterWithinTheStartLimit(t *testing.T) {
-	for _, kind := range []string{HostdKind, WorkerKind} {
+// A crash-looping unit restarts with a growing delay capped at 30 s (systemd >= 254; older systemd keeps the fixed
+// 5 s), and never fast enough to reach systemd's default start limit (5 starts in 10 s), which would leave it failed
+// until someone restarts it. Only keys that systemd 249 parses or ignores appear: a key none of our systemd knows
+// (RestartRandomizedDelaySec) would be logged as unknown on every start.
+func TestSystemdRestartBacksOffWithinTheStartLimit(t *testing.T) {
+	for _, kind := range []string{HostdKind, WorkerKind, UpdaterKind, CarrierKind, SessionOwnerKind, HostKind} {
 		body, err := renderSystemd(Config{Kind: kind, User: "paperboat", Group: "paperboat", Executable: "/usr/local/libexec/paperboat/pb"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		definition := string(body)
-		for _, line := range []string{"RestartSec=5s\n", "RestartSteps=3\n", "RestartMaxDelaySec=30s\n", "RestartRandomizedDelaySec=5s\n"} {
+		if strings.Contains(definition, "RestartRandomizedDelaySec") {
+			t.Fatalf("%s unit has a restart key no supported systemd knows:\n%s", kind, definition)
+		}
+		for _, line := range []string{"RestartSec=5s\n", "RestartSteps=3\n", "RestartMaxDelaySec=30s\n", "StartLimitIntervalSec=0\n"} {
 			if !strings.Contains(definition, line) {
 				t.Fatalf("%s unit lacks %q:\n%s", kind, strings.TrimSpace(line), definition)
 			}
