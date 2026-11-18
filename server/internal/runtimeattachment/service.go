@@ -252,6 +252,9 @@ WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, acti
 		thumb := "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])
 		out.EdgeCandidates = candidates
 		for i, edge := range selected {
+			if edge.terminal {
+				out.TerminalEdgeNodeIDs = append(out.TerminalEdgeNodeIDs, edge.node)
+			}
 			prior := previous[edge.node]
 			same := prior.Binding.InstallationGeneration == request.InstallationGeneration && prior.Binding.ProcessGeneration == request.WorkerGeneration && prior.Binding.EdgeProcessEpoch == edge.epoch && prior.Binding.MachineIdentityPublicKey == publicKey && prior.RouteRevision == uint64(revision) && prior.Binding.EdgeCarrierServerSPKISHA256 == edge.pin
 			rowGeneration := prior.AttachmentGeneration
@@ -302,9 +305,6 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 				return err
 			}
 			out.Place(i, admission)
-			if edge.terminal {
-				out.TerminalEdgeNodeIDs = append(out.TerminalEdgeNodeIDs, edge.node)
-			}
 		}
 		// Keep a working active carrier during replacement, but immediately
 		// retire one whose authority is no longer valid.
