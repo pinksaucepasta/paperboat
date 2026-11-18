@@ -6,12 +6,10 @@ import Base from "../../layouts/Base.astro"
   <section class="card how">
     <h1 class="card-title">How we measure</h1>
     <ul>
-      <li><b>Checks.</b> Real actions, every minute, from independent locations: sign-in and API, sessions between machines, relays, edges, file transfers, the console, releases and the website.</li>
-      <li><b>Down</b> only when two locations each fail three checks in a row. <b>Degraded</b> when only some parts fail or checks are slow.</li>
-      <li><b>Back to normal</b> after five passes in a row.</li>
-      <li><b>No fresh data</b> for 3 minutes shows "Status data delayed", never green.</li>
-      <li><b>Uptime</b> counts a major-outage minute as down and a degraded minute as 30% down. Minutes without data are left out. Each figure covers the period tracked so far.</li>
-      <li>These are aggregate figures; your own experience may differ.</li>
+      <li><b>Checks:</b> real actions, every minute, from independent locations.</li>
+      <li><b>Down:</b> two locations each fail three checks in a row. <b>Degraded:</b> some parts fail or are slow.</li>
+      <li><b>Back to normal:</b> five passes in a row. No data for 3 minutes shows "Status data delayed", never green.</li>
+      <li><b>Uptime:</b> a major-outage minute counts as down, a degraded minute as 30% down; minutes without data are left out.</li>
     </ul>
   </section>
   <div class="center"><a class="btn btn-quiet" href="/">Back to status</a></div>
