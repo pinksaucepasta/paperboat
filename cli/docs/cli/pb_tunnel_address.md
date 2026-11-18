@@ -9,9 +9,12 @@ the first label of the address under the same base domain: helloworld makes hell
 It is 3 to 63 lowercase letters, digits or hyphens, not starting or ending with a hyphen and not only
 digits. Some names are reserved, and a name another tunnel uses is refused with the reason.
 
-The previous address stops working as soon as the change applies, and anyone may take it afterwards, so
-update every link, webhook and bookmark that uses it. Routes, connectors and access rules stay with the
-tunnel. Address changes are rate limited per account.
+The new address is published first and the previous one keeps serving until every Paperboat edge serves the
+new one (usually seconds, at most five minutes; a change the edges do not confirm in time is undone and
+reported as failed; with --wait pass --timeout 6m for slow edges). This holds for the managed HTTP address;
+a TLS or TCP route, or a tunnel nothing serves yet, moves at once. Then the previous address stops working and stays reserved for you for a day before
+anyone else may take it, so update every link, webhook and bookmark that uses it. Routes, connectors and
+access rules stay with the tunnel. Address changes are rate limited per account.
 
 A change returns once the request is accepted, and the tunnel may still be connecting. Pass
 --wait to wait (at most --timeout, default 2m, 1s to 10m) until it finishes, or check pb tunnel
