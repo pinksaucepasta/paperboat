@@ -1,7 +1,6 @@
 // Local demo data for the page: 90 days of uptime, incidents in three months, upcoming maintenance, and fresh passing reports.
 // usage: node dev/seed.mjs [degraded-unit] > seed.sql   (then wrangler d1 execute --local --file seed.sql; GET /cdn-cgi/handler/scheduled)
-import { readFileSync } from "node:fs"
-const catalog = JSON.parse(readFileSync(new URL("../config/components.json", import.meta.url)))
+import catalog from "../config/components.ts"
 const now = Date.now(), DAY = 86_400_000, q = (s) => `'${String(s).replace(/'/g, "''")}'`
 const out = []
 let n = 7
