@@ -1,10 +1,11 @@
 import { esc, mailEnabled, sendConfirmation, sendIncident } from "./mail.ts"
-import { cloudflareReport, verifyProbe } from "./probe.ts"
+import { verifyProbe } from "./probe.ts"
 import { feed } from "./rss.ts"
-import { buildSnapshot, catalog, evaluate, readSnapshot, saveReport } from "./store.ts"
+import { admitProbe, buildSnapshot, catalog, readSnapshot, saveReport } from "./store.ts"
 import { INCIDENT_STATUSES, type Env, type Incident } from "./types.ts"
 
 const FRESH_MS = 180_000
+export type Ctx = { waitUntil(promise: Promise<unknown>): void }
 const json = (body: unknown, status = 200, cache = "no-store") =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": cache } })
 const fail = (status: number, error: string) => json({ error }, status)
@@ -30,13 +31,13 @@ const componentIds = (v: unknown): string[] | null =>
   Array.isArray(v) && v.every((x) => typeof x === "string" && catalog.components.some((c) => c.id === x)) ? (v as string[]) : null
 const text = (v: unknown, max: number) => (typeof v === "string" && v.trim().length > 0 && v.length <= max ? v.trim() : null)
 
-async function notify(env: Env, ctx: ExecutionContext, incident: Incident, update: { status: string; body: string }) {
+async function notify(env: Env, ctx: Ctx, incident: Incident, update: { status: string; body: string }) {
   if (!mailEnabled(env)) return
   const subs = (await env.DB.prepare("SELECT email, token FROM subscribers WHERE confirmed = 1").all<{ email: string; token: string }>()).results
   ctx.waitUntil(sendIncident(env, subs, incident, update, `inc-${incident.id}-${update.status}-${incident.updated}`).then(() => undefined, () => undefined))
 }
 
-async function admin(request: Request, env: Env, ctx: ExecutionContext, path: string, now: number): Promise<Response> {
+async function admin(request: Request, env: Env, ctx: Ctx, path: string, now: number): Promise<Response> {
   if (!(await adminAuthorized(env, request))) return fail(401, "unauthorized")
   const db = env.DB
   if (request.method === "GET" && path === "/api/admin/state") return json((await buildSnapshot(db, now)))
@@ -103,15 +104,14 @@ async function subscribe(request: Request, env: Env, now: number): Promise<Respo
   if (row?.confirmed === 1) return json({ ok: true }) // never reveals who is subscribed
   if (row && now - row.last_mail < 600_000) return json({ ok: true })
   const token = row?.token ?? crypto.randomUUID().replace(/-/g, "")
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO subscribers (email, token, confirmed, created, last_mail) VALUES (?, ?, 0, ?, ?) ON CONFLICT(email) DO UPDATE SET last_mail = excluded.last_mail").bind(email, token, now, now),
-    env.DB.prepare("INSERT INTO kv (k, v) VALUES (?, '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1").bind(day),
-  ])
+  await env.DB.prepare("INSERT INTO subscribers (email, token, confirmed, created, last_mail) VALUES (?, ?, 0, ?, ?) ON CONFLICT(email) DO UPDATE SET last_mail = excluded.last_mail").bind(email, token, now, now).run()
   try { await sendConfirmation(env, email, token) } catch { return fail(502, "the confirmation email could not be sent, try again later") }
+  // The daily quota counts mails that were actually sent: a provider outage must not use it up.
+  await env.DB.prepare("INSERT INTO kv (k, v) VALUES (?, '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1").bind(day).run()
   return json({ ok: true })
 }
 
-async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function route(request: Request, env: Env, ctx: Ctx): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, now = Date.now()
   if (path === "/api/status" && request.method === "GET") {
     const snap = await readSnapshot(env.DB)
@@ -120,14 +120,17 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
   if (path === "/api/feed.xml" && request.method === "GET") {
     const snap = await readSnapshot(env.DB)
-    return new Response(feed(env.PAGE_ORIGIN ?? env.PUBLIC_ORIGIN ?? "", snap?.public.incidents ?? []), { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=60" } })
+    return new Response(feed(env.PUBLIC_ORIGIN ?? "", snap?.public.incidents ?? []), { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=60" } })
   }
   if (path === "/api/probe" && request.method === "POST") {
     const body = await request.text()
     if (body.length > 64_000) return fail(413, "too large")
     const parsed = await verifyProbe(env, request, body, now)
     if (typeof parsed === "string") return fail(401, parsed)
-    await saveReport(env.DB, parsed.vantage, now, parsed.netOk, parsed.build, parsed.results)
+    const admitted = await admitProbe(env.DB, parsed.vantage, now, parsed.probeTs)
+    if (admitted === "replayed") return fail(409, "replayed")
+    if (admitted === "rate") return fail(429, "too many reports")
+    await saveReport(env.DB, parsed.vantage, now, parsed.probeTs, parsed.netOk, parsed.build, parsed.results)
     return json({ ok: true })
   }
   if (path === "/api/subscribe" && request.method === "POST") return subscribe(request, env, now)
@@ -142,34 +145,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   return fail(404, "not found")
 }
 
-/** The page is a separate Pages origin: it may read the status and subscribe, nothing else (admin and probe use bearer/HMAC, not cookies). */
-const PUBLIC_PATHS = new Set(["/api/status", "/api/feed.xml", "/api/subscribe"])
-function cors(env: Env, request: Request, path: string, res: Response): Response {
-  if (!env.PAGE_ORIGIN || !PUBLIC_PATHS.has(path)) return res
-  const out = new Response(res.body, res)
-  out.headers.set("access-control-allow-origin", env.PAGE_ORIGIN)
-  out.headers.set("vary", "origin")
-  return out
-}
-
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const path = new URL(request.url).pathname
-    if (request.method === "OPTIONS" && PUBLIC_PATHS.has(path) && env.PAGE_ORIGIN)
-      return cors(env, request, path, new Response(null, { status: 204, headers: { "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "content-type", "access-control-max-age": "600" } }))
-    try { return cors(env, request, path, await route(request, env, ctx)) } catch (e) {
-      console.error("status worker", e instanceof Error ? e.message : e)
-      return fail(500, "internal error")
-    }
-  },
-  /** Every minute: the Worker's own vantage point reports, then every unit is decided again and the snapshot rebuilt. */
-  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
-    const now = Date.now()
-    if (env.NET_CHECK_URL) { // a deployment without NET_CHECK_URL (the staging drill) has no Worker vantage point
-      const own = await cloudflareReport(env)
-      await saveReport(env.DB, own.vantage, now, own.netOk, own.build, own.results)
-    }
-    await evaluate(env.DB, now)
-    await buildSnapshot(env.DB, now)
-  },
+/** The whole API: one entry for the Pages Function (functions/api/[[path]].ts) and the local dev Worker. */
+export async function handle(request: Request, env: Env, ctx: Ctx): Promise<Response> {
+  try { return await route(request, env, ctx) } catch (e) {
+    console.error("status api", e instanceof Error ? e.message : e)
+    return fail(500, "internal error")
+  }
 }

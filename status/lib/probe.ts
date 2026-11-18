@@ -10,7 +10,7 @@ export async function sign(key: string, message: string): Promise<string> {
   return [...mac].map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-export interface Parsed { vantage: string; netOk: boolean; build: string; results: Reported }
+export interface Parsed { vantage: string; probeTs: number; netOk: boolean; build: string; results: Reported }
 
 /** A probe write is `HMAC-SHA256(vantage key, "<vantage>\n<timestamp>\n<body>")` in x-status-signature. Returns the parsed body or an error. */
 export async function verifyProbe(env: Env, request: Request, body: string, now: number): Promise<Parsed | string> {
@@ -30,26 +30,45 @@ export async function verifyProbe(env: Env, request: Request, body: string, now:
         results[r.unit] = [r.ok ? 1 : 0, Math.max(0, Math.round(Number(r.ms) || 0)), typeof r.error === "string" ? r.error.slice(0, 160) : undefined]
     }
   }
-  return { vantage, netOk: data.net_ok === true, build: typeof data.build === "string" ? data.build : "", results }
+  return { vantage, probeTs: data.ts, netOk: data.net_ok === true, build: typeof data.build === "string" ? data.build : "", results }
 }
 
-/** The Worker's own vantage point: plain HTTP fetches of the CHECKS targets, after its own internet check (rule 2). */
+const MAX_BODY = 65_536
+
+/** At most MAX_BODY bytes of the body, as text: a check URL that streams forever cannot exhaust the Worker. */
+async function bodyHead(res: Response): Promise<string> {
+  const reader = res.body?.getReader()
+  if (!reader) return ""
+  const chunks: Uint8Array[] = []
+  let size = 0
+  while (size < MAX_BODY) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    size += value.length
+  }
+  await reader.cancel().catch(() => undefined)
+  return new TextDecoder().decode(await new Blob(chunks as BlobPart[]).arrayBuffer()).slice(0, MAX_BODY)
+}
+
+/** The cron Worker's own vantage point: plain HTTP fetches of the CHECKS targets, after its own internet check (rule 2). */
 export async function cloudflareReport(env: Env): Promise<Parsed> {
   const netOk = await fetch(env.NET_CHECK_URL ?? "", { method: "HEAD", signal: AbortSignal.timeout(5000) }).then((r) => r.ok, () => false)
   const results: Reported = {}
   if (netOk) {
-    const checks = JSON.parse(env.CHECKS ?? "[]") as { unit: string; url: string; expect?: string }[]
+    let checks: { unit: string; url: string; expect?: string; redirect?: boolean }[] = []
+    try { checks = JSON.parse(env.CHECKS ?? "[]") } catch { /* a malformed CHECKS secret means this vantage reports nothing; the other vantage points still decide */ }
     await Promise.all(checks.filter((c) => unitKnown(c.unit)).map(async (c) => {
       const start = Date.now()
       try {
         const res = await fetch(c.url, { signal: AbortSignal.timeout(10_000), redirect: "manual" })
-        const text = c.expect ? await res.text() : ""
-        const ok = res.status >= 200 && res.status < 400 && (!c.expect || text.includes(c.expect))
+        const text = c.expect ? await bodyHead(res) : ""
+        const ok = (res.status >= 200 && res.status < (c.redirect ? 400 : 300)) && (!c.expect || text.includes(c.expect))
         results[c.unit] = [ok ? 1 : 0, Date.now() - start, ok ? undefined : `status ${res.status}`]
       } catch (e) {
         results[c.unit] = [0, Date.now() - start, e instanceof Error ? e.name : "error"]
       }
     }))
   }
-  return { vantage: "cloudflare", netOk, build: "worker", results }
+  return { vantage: "cloudflare", probeTs: Date.now(), netOk, build: "worker", results }
 }
