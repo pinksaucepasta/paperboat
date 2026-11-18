@@ -1,17 +1,30 @@
 #!/bin/sh
-# Served at the configured installer origin with release values filled in.
+# The fixed Paperboat self-host installer: one file for every release. It finds the newest `selfhost-<version>` GitHub
+# release, downloads the package for this CPU with that release's SHA256SUMS and SHA256SUMS.sig, verifies the signature
+# with the key embedded below, and only then checks the package hash. No Paperboat server is involved.
+# Environment (optional): PB_VERSION installs that self-host version, PB_REPO is the owner/repo that publishes releases.
 set -eu
+repository=${PB_REPO:-pinksaucepasta/paperboat}
+# The release signing key (ssh-keygen -Y verify allowed_signers line); the private half is only in CI.
+allowed_signers='paperboat-release namespaces="paperboat-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAonuBw7PaD+214NxAVb1UwkLzJYWq0VRmpbM2EXsBhg'
+docker_install_url='https://get.docker.com'
+case $repository in */*/*|*[!A-Za-z0-9_./-]*|/*|*/) echo 'PB_REPO must look like owner/repo.' >&2; exit 2;; esac
 case "$(uname -s)" in Linux) ;; *) echo 'Paperboat self-host currently requires Linux with systemd.' >&2; exit 1;; esac
 case "$(uname -m)" in
- x86_64) package_arch=amd64; package_url='{{PACKAGE_URL_AMD64}}'; package_sha256='{{PACKAGE_SHA256_AMD64}}';;
- aarch64|arm64) package_arch=arm64; package_url='{{PACKAGE_URL_ARM64}}'; package_sha256='{{PACKAGE_SHA256_ARM64}}';;
+ x86_64) package_arch=amd64;;
+ aarch64|arm64) package_arch=arm64;;
  *) echo 'Unsupported self-host architecture.' >&2; exit 1;;
 esac
-case "$package_url" in https://*) ;; *) echo 'Self-host release is not configured.' >&2; exit 1;; esac
-if [ ${#package_sha256} -ne 64 ]; then echo 'Self-host release digest is not configured.' >&2; exit 1; fi
-case "$package_sha256" in *[!0-9a-f]*) echo 'Invalid release digest.' >&2; exit 1;; esac
-for tool in curl tar sha256sum install systemctl timeout; do command -v "$tool" >/dev/null 2>&1 || { echo "Required tool unavailable: $tool" >&2; exit 1; }; done
-if [ "$(id -u)" -eq 0 ]; then elevate=''; else command -v sudo >/dev/null 2>&1 || { echo 'sudo is required to install the system service.' >&2; exit 1; }; elevate=sudo; $elevate -v; fi
+# A missing download tool is an error that says what to install (Tailscale scripts/installer.sh 399-407).
+command -v curl >/dev/null 2>&1 || { echo 'The installer needs curl to download files.' >&2; echo 'Please install curl to proceed.' >&2; exit 1; }
+for tool in tar sha256sum install systemctl timeout; do command -v "$tool" >/dev/null 2>&1 || { echo "Required tool unavailable: $tool" >&2; exit 1; }; done
+# Root helper found like NetBird's installer (release_files/install.sh 25-30): sudo, else doas, unless already root.
+elevate=
+if [ "$(id -u)" -ne 0 ]; then
+ if command -v sudo >/dev/null 2>&1; then elevate=sudo; $elevate -v
+ elif command -v doas >/dev/null 2>&1; then elevate=doas
+ else echo 'sudo or doas is required to install the system service.' >&2; exit 1; fi
+fi
 install_tmp=$(mktemp -d)
 previous_active=false
 mutation_started=false
@@ -46,7 +59,41 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
-curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --proto-redir '=https' --connect-timeout 10 --max-time 120 --max-filesize 134217728 "$package_url" -o "$install_tmp/package.tar.gz"
+fetch() { curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --proto-redir '=https' --connect-timeout 15 --max-time "$2" --max-filesize "$3" "$1" -o "$4"; }
+# The newest self-host release is the highest `selfhost-<version>` tag; these releases are never marked Latest.
+version=${PB_VERSION:-}
+if [ -z "$version" ]; then
+ curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --proto-redir '=https' --connect-timeout 15 --max-time 60 "https://api.github.com/repos/$repository/git/matching-refs/tags/selfhost-" -o "$install_tmp/tags" || { echo 'Could not reach GitHub to find the latest self-host release; check your network and rerun.' >&2; exit 1; }
+ version=$(grep -o 'refs/tags/selfhost-[0-9][0-9.]*' "$install_tmp/tags" | sed 's#refs/tags/selfhost-##' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -n 1)
+ [ -n "$version" ] || { echo "$repository has no published self-host release yet." >&2; exit 1; }
+fi
+case $version in 20[0-9][0-9].[0-9][0-9].[0-9][0-9].*) ;; *) echo "$version is not a release version like 2026.11.18.1." >&2; exit 1;; esac
+case ${version#????.??.??.} in 0) ;; ''|0*|*[!0123456789]*) echo "$version is not a release version like 2026.11.18.1." >&2; exit 1;; esac
+tag=selfhost-$version
+release_url="https://github.com/$repository/releases/download/$tag"
+fetch "$release_url/SHA256SUMS" 60 1048576 "$install_tmp/SHA256SUMS" || { echo "Could not download SHA256SUMS for $tag; check the version and your network." >&2; exit 1; }
+fetch "$release_url/SHA256SUMS.sig" 60 65536 "$install_tmp/SHA256SUMS.sig" || { echo "Could not download SHA256SUMS.sig for $tag." >&2; exit 1; }
+# A missing ssh-keygen is installed with the system package manager, as NetBird and Tailscale install gnupg
+# (NetBird add_apt_repo, Tailscale scripts/installer.sh 545-548); verification is never skipped.
+if ! command -v ssh-keygen >/dev/null 2>&1; then
+ echo 'ssh-keygen is missing; installing OpenSSH to verify the release signature.' >&2
+ if command -v apt-get >/dev/null 2>&1; then $elevate apt-get update -qq && $elevate env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-client
+ elif command -v dnf >/dev/null 2>&1; then $elevate dnf install -y openssh
+ elif command -v yum >/dev/null 2>&1; then $elevate yum install -y openssh
+ elif command -v apk >/dev/null 2>&1; then $elevate apk add --no-cache openssh-keygen
+ elif command -v pacman >/dev/null 2>&1; then $elevate pacman -S --noconfirm openssh
+ elif command -v zypper >/dev/null 2>&1; then $elevate zypper --non-interactive install openssh
+ else false; fi || { echo 'ssh-keygen is required to verify the release signature and could not be installed here; install OpenSSH (openssh-client) and rerun.' >&2; exit 1; }
+ command -v ssh-keygen >/dev/null 2>&1 || { echo 'ssh-keygen is still missing after installing OpenSSH.' >&2; exit 1; }
+fi
+printf '%s\n' "$allowed_signers" > "$install_tmp/allowed_signers"
+ssh-keygen -Y verify -f "$install_tmp/allowed_signers" -I paperboat-release -n paperboat-release -s "$install_tmp/SHA256SUMS.sig" < "$install_tmp/SHA256SUMS" > /dev/null 2>&1 || { echo 'The release signature on SHA256SUMS is not valid (needs ssh-keygen from OpenSSH 8.0 or newer); nothing was installed.' >&2; exit 1; }
+[ "$(sed -n 1p "$install_tmp/SHA256SUMS")" = "# paperboat-release $tag" ] || { echo "SHA256SUMS is signed for a different release than $tag." >&2; exit 1; }
+package=paperboat-selfhost-linux-$package_arch.tar.gz
+package_sha256=$(awk -v a="$package" '$2 == a { print $1; n++ } END { if (n != 1) exit 1 }' "$install_tmp/SHA256SUMS") || { echo "SHA256SUMS does not list $package exactly once." >&2; exit 1; }
+if [ ${#package_sha256} -ne 64 ]; then echo 'Invalid release digest.' >&2; exit 1; fi
+case "$package_sha256" in *[!0-9a-f]*) echo 'Invalid release digest.' >&2; exit 1;; esac
+fetch "$release_url/$package" 120 134217728 "$install_tmp/package.tar.gz"
 printf '%s  %s\n' "$package_sha256" "$install_tmp/package.tar.gz" | sha256sum --check --status || { echo 'Release integrity check failed; installation unchanged.' >&2; exit 1; }
 # Accept only the exact package members, even though the digest binds the archive.
 tar -tzf "$install_tmp/package.tar.gz" > "$install_tmp/members"
@@ -56,8 +103,6 @@ for binary in pbh; do [ -f "$install_tmp/$binary" ] && [ ! -L "$install_tmp/$bin
 # The helper owns the supported-host policy; refuse before privileged changes.
 "$install_tmp/pbh" check-host
 if ! command -v docker >/dev/null 2>&1; then
- docker_install_url='{{DOCKER_INSTALL_URL}}'
- case "$docker_install_url" in https://*) ;; *) echo 'Docker installer source is not configured; installation unchanged.' >&2; exit 1;; esac
  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 "$docker_install_url" -o "$install_tmp/docker-install.sh"
  echo 'Installing Docker from the configured official source.'
  $elevate sh "$install_tmp/docker-install.sh"
