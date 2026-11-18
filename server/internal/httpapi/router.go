@@ -151,6 +151,7 @@ type Options struct {
 	MachineServices          *machineservices.Service
 	MachineLatency           machineLatencyService
 	ManagedSSH               *managedssh.Service
+	BreakGlass               BreakGlassAPI
 	DiagnosticUploads        *diagnosticuploads.Service
 	OverrideHandler          http.Handler
 	ReleaseFiles             http.Handler
@@ -215,6 +216,12 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.ManagedSSH != nil && opts.OperatorAuth != nil {
 			mux.Handle("POST /v1/admin/managed-ssh/accounts/{account_id}/rotate-user-ca", operatorRoute(opts, managedSSHRotateUserCA(opts.ManagedSSH)))
+		}
+		if opts.BreakGlass != nil && opts.OperatorAuth != nil {
+			mux.Handle("GET /v1/admin/breakglass/preview", operatorRoute(opts, breakGlassPreview(opts.BreakGlass)))
+			mux.Handle("POST /v1/admin/breakglass/runs", operatorRoute(opts, breakGlassStart(opts.BreakGlass)))
+			mux.Handle("GET /v1/admin/breakglass/runs/{run_id}", operatorRoute(opts, breakGlassGet(opts.BreakGlass)))
+			mux.Handle("POST /v1/admin/breakglass/runs/{run_id}/cancel", operatorRoute(opts, breakGlassCancel(opts.BreakGlass)))
 		}
 		registerOperatorRoutes(mux, opts)
 		registerOperatorAuthentication(mux, opts)
