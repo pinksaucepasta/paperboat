@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
@@ -477,7 +478,8 @@ func serveNotFoundPage(conn net.Conn, config *tls.Config, browser *BrowserAccess
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "close")
 		if browser != nil {
-			browser.unknownName(w, r, host)
+			peer, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+			browser.unknownName(w, r.WithContext(control.WithClientIP(r.Context(), peer)), host)
 			return
 		}
 		writeErrorPage(w, http.StatusNotFound, notFoundMessage)

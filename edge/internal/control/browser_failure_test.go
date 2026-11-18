@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -147,5 +148,26 @@ func TestControlDocumentParserCauseDoesNotExposeInput(t *testing.T) {
 	_, err = signer.SignDistributionRequest(context.Background(), http.MethodPost, CertificateDistributionPullPath, nil)
 	if !errors.Is(err, ErrDistributionProofInvalid) || !errors.Is(err, syscall.EIO) {
 		t.Fatal("entropy failure cause lost")
+	}
+}
+
+// The control plane limits anonymous begins per visitor address and cannot see it from the edge's own connection, so
+// the edge sends the address it resolved behind its trusted proxies in the begin body.
+func TestBrowserBeginCarriesTheVisitorAddress(t *testing.T) {
+	var bodies []string
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		return response(http.StatusOK, `{"transaction_id":"transaction_1","state":"state_1","expires_at":"2026-10-08T00:00:00Z"}`), nil
+	})
+	access := &BrowserAccessClient{HTTP: client, NodeID: "edge_1", ProcessEpoch: "epoch_01"}
+	if _, err := access.Begin(WithClientIP(context.Background(), "198.51.100.7"), "app.example.test", "/"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := access.Begin(context.Background(), "app.example.test", "/"); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || !strings.Contains(bodies[0], `"client_ip":"198.51.100.7"`) || strings.Contains(bodies[1], "client_ip") {
+		t.Fatalf("begin bodies = %v", bodies)
 	}
 }

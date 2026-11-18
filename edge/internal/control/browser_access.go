@@ -54,12 +54,22 @@ type BrowserAccessClient struct {
 	ProcessEpoch string
 }
 
+type clientIPKey struct{}
+
+// WithClientIP records the visitor's address, as the edge resolved it behind its trusted proxies, for a sign-in begin:
+// the control plane rate-limits anonymous begins per client address and cannot see it from the edge's own connection.
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPKey{}, ip)
+}
+
 func (c *BrowserAccessClient) Begin(ctx context.Context, host, path string) (BrowserBegin, error) {
 	var out BrowserBegin
+	clientIP, _ := ctx.Value(clientIPKey{}).(string)
 	err := c.call(ctx, "begin", struct {
 		Host       string `json:"host"`
 		ReturnPath string `json:"return_path"`
-	}{host, path}, &out)
+		ClientIP   string `json:"client_ip,omitempty"`
+	}{host, path, clientIP}, &out)
 	return out, err
 }
 func (c *BrowserAccessClient) Redeem(ctx context.Context, transaction, state, handoff, host string) (BrowserSession, error) {

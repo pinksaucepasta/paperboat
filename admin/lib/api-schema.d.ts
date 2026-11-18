@@ -9249,6 +9249,8 @@ export interface components {
         BrowserAccessBeginRequest: {
             host: string;
             return_path: string;
+            /** @description The visitor's address as the edge resolved it; sign-in starts are rate-limited per address. */
+            client_ip?: string;
         };
         BrowserAccessBeginResult: {
             transaction_id: string;

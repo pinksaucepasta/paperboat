@@ -552,6 +552,7 @@ func New(opts Options) (*App, error) {
 				return nil, err
 			}
 			browserService.MachineServiceDomain = opts.Config.Preview.BaseDomain
+			browserService.ConfigureBegin(opts.Config.RateLimits)
 			browserAccessHandlers = &httpapi.BrowserAccessHandlers{Lazy: lazyActivator, Access: browserService, Ingress: &browseringress.Service{DB: store, Access: browserService, Quota: workspaceBilling, Visitor: mintKeys, Issuer: config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)}, Edge: previewEdgeVerifier, Machine: previewAttachmentMachineVerifier}
 		}
 		privateAccessProduction, productionErr := privateaccess.NewProduction(

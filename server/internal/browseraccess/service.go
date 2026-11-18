@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
@@ -46,6 +48,8 @@ var (
 type BeginRequest struct {
 	Host       string `json:"host"`
 	ReturnPath string `json:"return_path"`
+	// ClientIP is the visitor's address as the edge resolved it (the edge is authenticated; a browser never calls Begin).
+	ClientIP string `json:"client_ip,omitempty"`
 }
 type BeginResult struct {
 	TransactionID string    `json:"transaction_id"`
@@ -125,6 +129,10 @@ type Service struct {
 	trustedOrigin        string
 	MachineServiceDomain string
 	now                  func() time.Time
+	// Begin is anonymous and writes a row for any well-formed name: both limiters (per visitor address and global) run
+	// before the insert, and maxLive caps the unexpired rows.
+	beginClient, beginGlobal *ratelimit.Limiter
+	maxLive                  int
 }
 
 func NewService(store *db.DB, trustedLoginOrigin string) (*Service, error) {
@@ -142,7 +150,35 @@ func newService(store *db.DB, trustedLoginOrigin string, developmentHTTP bool) (
 	if err != nil || (u.Scheme != "https" && !(developmentHTTP && u.Scheme == "http")) || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, fmt.Errorf("trusted login origin: %w", ErrInvalid)
 	}
-	return &Service{sessionPolicy: config.DefaultBrowserSessions(), db: store, trustedOrigin: u.Scheme + "://" + u.Host, now: func() time.Time { return time.Now().UTC() }}, nil
+	s := &Service{sessionPolicy: config.DefaultBrowserSessions(), db: store, trustedOrigin: u.Scheme + "://" + u.Host, now: func() time.Time { return time.Now().UTC() }}
+	s.ConfigureBegin(config.Default().RateLimits)
+	return s, nil
+}
+
+// ConfigureBegin sets the sign-in start limits; call it before serving requests.
+func (s *Service) ConfigureBegin(l config.RateLimits) {
+	s.beginClient = ratelimit.New(l.BrowserBeginPerMinute, l.BrowserBeginBurst, l.MaxClients)
+	s.beginGlobal = ratelimit.New(l.BrowserBeginGlobalPerMinute, l.BrowserBeginGlobalBurst, 1)
+	s.maxLive = l.BrowserBeginMaxLive
+}
+
+// beginAllowed takes a token for the visitor's address (an IPv6 address counts as its /64) and one for all visitors.
+func (s *Service) beginAllowed(clientIP string) bool {
+	key := "unknown"
+	if addr, err := netip.ParseAddr(clientIP); err == nil {
+		addr = addr.Unmap()
+		if addr.Is6() {
+			prefix, _ := addr.Prefix(64)
+			key = prefix.String()
+		} else {
+			key = addr.String()
+		}
+	}
+	if ok, _ := s.beginClient.Allow(key); !ok {
+		return false
+	}
+	ok, _ := s.beginGlobal.Allow("all")
+	return ok
 }
 
 // pendingBeginsPerResource bounds unauthenticated sign-in transactions open at once for one resource.
@@ -167,6 +203,12 @@ func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, erro
 	}
 	now := s.now()
 	out := BeginResult{TransactionID: id, State: state, ExpiresAt: now.Add(transactionTTL)}
+	if !s.beginAllowed(in.ClientIP) {
+		// Past a limit nothing is stored and the answer has the shape of any other, so a flood cannot tell it was limited.
+		// The only difference left is for a visitor who then signs in: Issue finds no transaction (404) where a stored
+		// decoy is denied (200, denied), which tells that visitor, and only for their own address, that it was limited.
+		return out, nil
+	}
 	h := digest(state)
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		target, e := resolveBeginTarget(ctx, tx, host, requestPath, now)
@@ -175,6 +217,9 @@ func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, erro
 		}
 		// SKIP LOCKED: concurrent Begins share the bounded expiry sweep instead of queueing on each other's rows.
 		if _, e := tx.Exec(ctx, `DELETE FROM browser_access_transactions WHERE transaction_id IN (SELECT transaction_id FROM browser_access_transactions WHERE expires_at<=$1 ORDER BY expires_at LIMIT 256 FOR UPDATE SKIP LOCKED)`, now); e != nil {
+			return e
+		}
+		if e := s.makeRoomForBegin(ctx, tx, now); e != nil {
 			return e
 		}
 		// The cap and its lock are per target resource: a sign-in burst at one tunnel or preview never refuses or
@@ -193,6 +238,27 @@ func (s *Service) Begin(ctx context.Context, in BeginRequest) (BeginResult, erro
 		return e
 	})
 	return out, err
+}
+
+// makeRoomForBegin keeps the table at most maxLive unexpired rows: past that, the oldest rows go, decoys (names no
+// resource owns) before real sign-ins, so a flood of random names never displaces a visitor's pending login.
+func (s *Service) makeRoomForBegin(ctx context.Context, tx *db.Tx, now time.Time) error {
+	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('browser_begin:all'))`); e != nil {
+		return e
+	}
+	// The count stops 4096 past the cap, which is how far one Begin brings a table down that a lowered cap left over it.
+	var live int
+	if e := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM browser_access_transactions WHERE expires_at>$1 LIMIT $2) t`, now, s.maxLive+4096).Scan(&live); e != nil {
+		return e
+	}
+	if live < s.maxLive {
+		return nil
+	}
+	evicted, e := tx.Exec(ctx, `DELETE FROM browser_access_transactions WHERE transaction_id IN (SELECT transaction_id FROM browser_access_transactions WHERE expires_at>$1 ORDER BY (resource_kind='machine_service_pending') DESC, created_at LIMIT $2 FOR UPDATE SKIP LOCKED)`, now, live-s.maxLive+256)
+	if e == nil && evicted.RowsAffected() == 0 {
+		return ErrCapacity
+	}
+	return e
 }
 
 type authority struct {

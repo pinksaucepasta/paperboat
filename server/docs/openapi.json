@@ -1877,6 +1877,11 @@
             "type": "string",
             "maxLength": 2048,
             "pattern": "^/(?!/)"
+          },
+          "client_ip": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The visitor's address as the edge resolved it; sign-in starts are rate-limited per address."
           }
         }
       },

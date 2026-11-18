@@ -586,6 +586,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	r = r.WithContext(control.WithClientIP(r.Context(), p.clientIP(r)))
 	// Tickets use the selected edge's own TLS hostname so browser DNS caches
 	// cannot send a fresh admission to the former active edge. The path names
 	// only a candidate route; the one-use ticket and current node/epoch are
