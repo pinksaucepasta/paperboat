@@ -3,8 +3,9 @@
 import { TrashIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { ApiError, useApiQuery } from "@/lib/api"
+import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
 import { policyQuery, savePolicy, validatePolicy, type Policy } from "@/lib/policy"
 import {
   createRecordingKey,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/recordings"
 import type { Team } from "@/lib/teams"
 import { ChangesDialog } from "@/components/access/changes-dialog"
+import { EnvUnlock } from "@/components/environment/env-unlock"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { RecordingAccess } from "@/components/recordings/recording-access"
 import { Row, Section, SettingRow } from "@/components/section"
@@ -81,6 +83,8 @@ function KeySection({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }),
   })
   const [replacing, setReplacing] = useState(false)
+  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
+  const [asked, setAsked] = useState(false)
   const setUp = admin && state && !state.key && (
     <Button size="lg" disabled={create.isPending || sealable.length === 0} onClick={() => create.mutate()}>
       {create.isPending ? "Setting up…" : "Set up"}
@@ -89,7 +93,7 @@ function KeySection({
   // Replacing needs this person's own copy of the current key: it signs the new one.
   const replaceable = admin && state?.key && state.my_key?.generation === state.key.generation
   const replace = replaceable && (
-    <Button variant="outline" size="lg" onClick={() => setReplacing(true)} data-recording-key-replace>
+    <Button variant="outline" size="lg" onClick={() => (unlocked ? setReplacing(true) : setAsked(true))} data-recording-key-replace>
       Replace key
     </Button>
   )
@@ -99,7 +103,7 @@ function KeySection({
         {!state ? (
           <Skeleton className="my-0.5 h-4 w-24" />
         ) : state.key ? (
-          <span data-recording-key="ready">Ready</span>
+          <span data-recording-key="ready" data-generation={state.key.generation}>Ready <span className="text-muted-foreground">(generation {state.key.generation})</span></span>
         ) : (
           <span data-recording-key="missing">Not set up</span>
         )}
@@ -109,6 +113,7 @@ function KeySection({
           Add a replay rule first. The key is encrypted for each person who can replay.
         </p>
       )}
+      {asked && !unlocked && <EnvUnlock title="Unlock your vault to replace the recording key. It signs the new key in this browser." />}
       {replacing && state && (
         <ConfirmAction
           open
