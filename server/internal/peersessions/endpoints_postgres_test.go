@@ -321,15 +321,24 @@ func TestHomeRelayReachesPeersOnPostgres(t *testing.T) {
 	if got := delivered(); got != relays[0] || f.topic(t) != before+1 {
 		t.Fatalf("after the first report: delivered %q, topic moves %d", got, f.topic(t)-before)
 	}
-	report("renewal", "")
+	report("again", relays[0])
 	report("not_ours", "relay_other_"+f.suffix)
 	report("unknown", "relay_missing_"+f.suffix)
 	if got := delivered(); got != relays[0] || f.topic(t) != before+1 {
-		t.Fatalf("a renewal or a relay not the account's changed the home: %q, topic moves %d", got, f.topic(t)-before)
+		t.Fatalf("a repeat or a relay not the account's changed the home: %q, topic moves %d", got, f.topic(t)-before)
 	}
 	report("moved", relays[1])
 	if got := delivered(); got != relays[1] || f.topic(t) != before+2 {
 		t.Fatalf("after the machine moved relay: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	// A machine homed on no relay says so, and peers stop sending to the one it left at once.
+	report("none", "")
+	if got := delivered(); got != "" || f.topic(t) != before+3 {
+		t.Fatalf("after the machine reported no home: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	report("back", relays[0])
+	if got := delivered(); got != relays[0] || f.topic(t) != before+4 {
+		t.Fatalf("after the machine was homed again: delivered %q, topic moves %d", got, f.topic(t)-before)
 	}
 	if _, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: "long_" + f.suffix, UserID: f.account, EndpointID: peer, HomeRelay: strings.Repeat("r", 129)}); err == nil {
 		t.Fatal("an oversized home relay was accepted")

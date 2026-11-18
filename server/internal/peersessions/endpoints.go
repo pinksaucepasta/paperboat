@@ -48,9 +48,9 @@ func normalizeEndpoints(reported []string) ([]string, error) {
 const endpointPublishInterval = time.Minute
 
 // endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump): it
-// stores the reported set ($4, NULL when none was sent) and a machine's home relay ($6, kept when NULL or not an
-// eligible relay of the account, so a machine cannot send peers to a relay that is not theirs; shortcut: a machine
-// that reports none or loses every relay keeps its last home here until its next report names one: a window of one renewal; peers ignore a home their own engine lacks).
+// stores the reported set ($4, NULL when none was sent) and a machine's home relay ($6): NULL (the machine is homed on
+// no relay) clears it at once, a relay that is not an eligible relay of the account keeps the old one, so a machine cannot
+// send peers to a relay that is not theirs. Only a machine's row holds one.
 // When
 // the latest set differs from the delivered one it is published now if the last publication is older than $5
 // seconds, else held back until then (endpoints_due_at); a set equal to the delivered one clears a held-back one.
@@ -60,7 +60,8 @@ const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_gen
  published_endpoints=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` THEN coalesce($4::text[],endpoints) ELSE published_endpoints END,
  endpoints_published_at=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` THEN $1 ELSE endpoints_published_at END,
  endpoints_due_at=CASE WHEN ` + endpointsDiffer + ` AND NOT ` + endpointsOpen + ` THEN endpoints_published_at+make_interval(secs=>$5) END,
- home_relay=CASE WHEN role='machine' AND EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes t WHERE t.id=$6::text AND paperboat.node_pool_eligible(t.id,$2,'relay')) THEN $6::text ELSE home_relay END
+ home_relay=CASE WHEN role<>'machine' THEN home_relay WHEN $6::text IS NULL THEN NULL
+  WHEN EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes t WHERE t.id=$6::text AND paperboat.node_pool_eligible(t.id,$2,'relay')) THEN $6::text ELSE home_relay END
  WHERE user_id=$2 AND endpoint_id=$3 RETURNING config_generation`
 
 const (

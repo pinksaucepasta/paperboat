@@ -53,8 +53,8 @@ type NetworkConfigRequest struct {
 	AdmittedScopes                  []AdmittedScope
 	// Endpoints are the engine's own candidate endpoints (ip:port); nil when the request reports none.
 	Endpoints []string
-	// HomeRelay is the node id of the regional relay a machine is homed on; empty when not reported. Only an
-	// eligible relay of the account is stored (endpointsUpdate).
+	// HomeRelay is the node id of the regional relay a machine is homed on; empty when it is homed on none, which clears
+	// the stored one. Only an eligible relay of the account is stored (endpointsUpdate).
 	HomeRelay string
 	// Authority is AuthorityUntilRevoked when the daemon keeps verified peer state until it is revoked; empty for
 	// daemons that let every scope end with the document.
