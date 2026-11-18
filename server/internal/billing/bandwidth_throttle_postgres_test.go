@@ -101,6 +101,10 @@ func TestBandwidthThrottleTransitionLiftAndResetPostgres(t *testing.T) {
 	if err != nil || !overview.Throttled || overview.ThrottleLifted || overview.AllowanceBytes == nil || *overview.AllowanceBytes != 100 || overview.UsageBytes != 105 {
 		t.Fatalf("overview = %+v (%v), want throttled, 100 allowance, 105 observed", overview, err)
 	}
+	// The plan's relay tier is on the overview: paid is 10 Mbit/s for the first 100 GB a month, then 1 Mbit/s.
+	if overview.RelayMbit != 10 || overview.RelayIncludedBytes != 100_000_000_000 || overview.RelaySlowMbit != 1 || overview.ThrottleMbit != 1 {
+		t.Fatalf("relay tier = %v Mbit/s, %d bytes, then %v; edge %v", overview.RelayMbit, overview.RelayIncludedBytes, overview.RelaySlowMbit, overview.ThrottleMbit)
+	}
 
 	// An operator's lift ends the throttle while it runs; revoking it throttles again. It is audited by the operator action.
 	var grant planlimits.Grant

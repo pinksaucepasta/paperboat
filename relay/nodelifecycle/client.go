@@ -52,6 +52,13 @@ type Config struct {
 	// Version is the relay's software release, reported with each observation.
 	Version string
 }
+
+// SlowAccount is an account the relay holds to a slower speed.
+type SlowAccount struct {
+	Account string  `json:"account"`
+	Mbit    float64 `json:"mbit"`
+}
+
 type Lease struct {
 	NodeID        string                      `json:"node_id"`
 	Generation    uint64                      `json:"node_generation"`
@@ -63,12 +70,11 @@ type Lease struct {
 	// PoolHandover lists accounts whose pool no longer includes this relay and when to close their carriers; nil
 	// (absent) keeps the list the relay holds, an empty list clears it.
 	PoolHandover *[]PoolHandover `json:"pool_handover,omitempty"`
-	// AccountMbit, SlowMbit and SlowAccounts are the fair-use speeds the control plane sets for this relay (0 on a customer-owned
-	// relay, which is never limited): the relay caps each account at AccountMbit and the listed ones at SlowMbit until a later
-	// observation no longer lists them.
-	AccountMbit  float64  `json:"account_mbit"`
-	SlowMbit     float64  `json:"slow_mbit"`
-	SlowAccounts []string `json:"slow_accounts,omitempty"`
+	// AccountMbit and SlowAccounts are the speeds the control plane sets for this relay (none on a customer-owned relay, which is
+	// never limited): the relay caps each account at AccountMbit and the listed ones at their own Mbit/s until a later observation
+	// no longer lists them.
+	AccountMbit  float64       `json:"account_mbit"`
+	SlowAccounts []SlowAccount `json:"slow_accounts,omitempty"`
 	// SubjectsRequired asks for the full subjects list on the next observation: the control plane has
 	// no stored set for this process or its digest differs.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
@@ -401,7 +407,11 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	} else if full {
 		c.sentSubjects = digest
 	}
-	if server.SetAccountSpeeds(out.AccountMbit, out.SlowMbit) != nil || server.SetSlowAccounts(out.SlowAccounts) != nil {
+	slow := make(map[string]float64, len(out.SlowAccounts))
+	for _, a := range out.SlowAccounts {
+		slow[a.Account] = a.Mbit
+	}
+	if server.SetAccountSpeed(out.AccountMbit) != nil || server.SetSlowAccounts(slow) != nil {
 		return ErrControl
 	}
 	c.lease = out

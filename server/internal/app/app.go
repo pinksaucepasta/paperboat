@@ -582,7 +582,7 @@ func New(opts Options) (*App, error) {
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
 		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
 		edgeControlService.SetFairUse(opts.Config.Billing.FairUse)
-		edgeControlService.SetRelayVolumeGate(bandwidthgate.NewRelayVolume(store, opts.Config.Billing.FairUse.RelayIncludedBytes))
+		edgeControlService.SetRelayVolumeGate(bandwidthgate.NewRelayVolume(store, opts.Config.Billing.FairUse.RelayFreeIncludedBytes, opts.Config.Billing.FairUse.RelayIncludedBytes))
 	}
 	telemetryHealth, telemetryErr := telemetry.NewHealthTracker(time.Now)
 	if telemetryErr != nil {

@@ -67,8 +67,8 @@ type Server struct {
 	handover                                             map[string]time.Time
 	handoverTimer                                        *time.Timer
 	accounts                                             map[string]*budget
-	accountRate, slowRate                                float64 // bytes per second an account, and a slow account, may use here
-	slowAccounts                                         map[string]bool
+	accountRate                                          float64            // bytes per second an account may use here
+	slowAccounts                                         map[string]float64 // accounts held to less, in bytes per second
 	connections                                          map[*quic.Conn]struct{}
 	wssConnections                                       map[*peerConn]struct{}
 	draining                                             bool
@@ -129,7 +129,7 @@ func NewServer(v Verifier) (*Server, error) {
 		return nil, err
 	}
 	v.Keys = nil
-	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), slowRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
+	s := &Server{connectionLimit: MaxConnections, verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
 	s.keys.Store(&keys)
 	return s, nil
 }
@@ -569,33 +569,33 @@ func (s *Server) writePackets(p *peerConn) {
 	}
 }
 
-// SetAccountSpeeds sets the speed one account may use on this relay, shared by all its carriers (a token bucket per account:
-// Tailscale's DERP applies one per client the same way, derpserver.go rateLimit), and the lower speed of the accounts
-// SetSlowAccounts names. Traffic above it is dropped and the carrier stays up, so the account's own transport slows down.
-// 0 lifts a cap to the relay's own overload ceiling (a customer-owned relay is never limited by Paperboat).
-func (s *Server) SetAccountSpeeds(mbit, slowMbit float64) error {
-	if mbit < 0 || mbit > MaxAccountMbit || slowMbit < 0 || slowMbit > MaxAccountMbit {
+// SetAccountSpeed sets the speed one account may use on this relay, shared by all its carriers (a token bucket per account:
+// Tailscale's DERP applies one per client the same way, derpserver.go rateLimit). Traffic above it is dropped and the carrier stays
+// up, so the account's own transport slows down. 0 lifts the cap to the relay's own overload ceiling (a customer-owned relay is
+// never limited by Paperboat).
+func (s *Server) SetAccountSpeed(mbit float64) error {
+	if mbit < 0 || mbit > MaxAccountMbit {
 		return ErrProtocol
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.accountRate, s.slowRate = speedBytes(mbit), speedBytes(slowMbit)
+	s.accountRate = speedBytes(mbit)
 	s.applyAccountRatesLocked()
 	return nil
 }
 
-// SetSlowAccounts replaces the set of accounts held to the lower speed (those that carried the month's included relay bytes);
-// an empty set returns every account to the normal one.
-func (s *Server) SetSlowAccounts(accounts []string) error {
+// SetSlowAccounts replaces the accounts held to a slower speed than the normal one (each with its Mbit/s; those that carried their
+// plan's included relay bytes this month); an empty set returns every account to the normal speed.
+func (s *Server) SetSlowAccounts(accounts map[string]float64) error {
 	if len(accounts) > MaxConnections {
 		return ErrProtocol
 	}
-	slow := make(map[string]bool, len(accounts))
-	for _, account := range accounts {
-		if account == "" || len(account) > 256 {
+	slow := make(map[string]float64, len(accounts))
+	for account, mbit := range accounts {
+		if account == "" || len(account) > 256 || mbit <= 0 || mbit > MaxAccountMbit {
 			return ErrProtocol
 		}
-		slow[account] = true
+		slow[account] = speedBytes(mbit)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -620,8 +620,8 @@ func speedBytes(mbit float64) float64 {
 }
 
 func (s *Server) rateForLocked(account string) float64 {
-	if s.slowAccounts[account] {
-		return min(s.accountRate, s.slowRate)
+	if slow, ok := s.slowAccounts[account]; ok {
+		return min(s.accountRate, slow)
 	}
 	return s.accountRate
 }

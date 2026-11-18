@@ -67,7 +67,9 @@ export function FairUse() {
             reduced to {formatSpeed(fair.mbit)} until your next billing date. Never cut off, never billed extra.
           </p>
           <p className="text-xs text-muted-foreground">
-            Direct connections and relays are not counted. Run your own edge or relay (free, open source): no limits.
+            Relays never count against this and are never cut off: {formatSpeed(fair.relay.mbit)} for the first {formatBytes(fair.relay.included)}{" "}
+            a month, then {formatSpeed(fair.relay.slowMbit)}. Direct connections are not counted. Run your own edge or relay (free, open source): no
+            limits.
           </p>
         </>
       )}

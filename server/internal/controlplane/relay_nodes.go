@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
@@ -59,6 +60,13 @@ type relayNodeObservation struct {
 	// Metrics is the relay's version, CPU, memory and bytes forwarded; optional, an older relay sends none.
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 }
+
+// relaySlowAccount is one account a relay holds to a slower speed.
+type relaySlowAccount struct {
+	Account string  `json:"account"`
+	Mbit    float64 `json:"mbit"`
+}
+
 type relayNodeLeaseDocument struct {
 	NodeID        string                `json:"node_id"`
 	Generation    int64                 `json:"node_generation"`
@@ -71,12 +79,11 @@ type relayNodeLeaseDocument struct {
 	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
 	// relay's list as it is (the read failed); an empty list clears it.
 	PoolHandover *[]relayPoolHandover `json:"pool_handover,omitempty"`
-	// AccountMbit is the fair-use speed of one account on this relay in Mbit/s, and SlowMbit its speed once the account has
-	// carried the month's included relay bytes (SlowAccounts lists those among the connected ones, until a later observation
-	// no longer does). Both are 0 on a customer-owned relay: Paperboat never limits it. They never carry authority.
-	AccountMbit  float64  `json:"account_mbit"`
-	SlowMbit     float64  `json:"slow_mbit"`
-	SlowAccounts []string `json:"slow_accounts,omitempty"`
+	// AccountMbit is the speed of one account on this relay in Mbit/s, and SlowAccounts the connected accounts that carried their
+	// plan's included relay bytes this month, each with its plan's slower speed (until a later observation no longer lists it).
+	// Both are empty on a customer-owned relay: Paperboat never limits it. They never carry authority.
+	AccountMbit  float64            `json:"account_mbit"`
+	SlowAccounts []relaySlowAccount `json:"slow_accounts,omitempty"`
 	// SubjectsRequired asks a relay that sent SubjectsDigest for its full list; no revocations are given with it.
 	// Only relays that sent a digest are ever sent the field.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
@@ -248,7 +255,7 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 	if err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, nodeID).Scan(&customerOwned); err != nil || customerOwned {
 		return err
 	}
-	out.AccountMbit, out.SlowMbit = s.fairUse.RelayMbit, s.fairUse.RelaySlowMbit
+	out.AccountMbit = s.fairUse.RelayMbit
 	if s.relayVolume == nil {
 		return nil
 	}
@@ -260,7 +267,21 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 			accounts = append(accounts, subject.AccountID)
 		}
 	}
-	out.SlowAccounts = s.relayVolume.DeniedAmong(ctx, accounts, now, relayVolumeFreshLookups)
+	slow := s.relayVolume.DeniedAmong(ctx, accounts, now, relayVolumeFreshLookups)
+	if len(slow) == 0 {
+		return nil
+	}
+	paid, err := bandwidthgate.PaidAccounts(ctx, s.store, slow)
+	if err != nil {
+		return nil // fail-safe: a failed plan lookup leaves the accounts at full speed this round
+	}
+	for _, account := range slow {
+		mbit := s.fairUse.RelayFreeSlowMbit
+		if paid[account] {
+			mbit = s.fairUse.RelaySlowMbit
+		}
+		out.SlowAccounts = append(out.SlowAccounts, relaySlowAccount{Account: account, Mbit: mbit})
+	}
 	return nil
 }
 
