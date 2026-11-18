@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,6 +12,9 @@ import (
 )
 
 func TestPairWithoutSystemdChangesNothingAndPrintsTheForegroundCommand(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("systemd and its foreground hint exist only on Linux")
+	}
 	old := hostruntimecmd.NoSystemd
 	hostruntimecmd.NoSystemd = func() bool { return true }
 	t.Cleanup(func() { hostruntimecmd.NoSystemd = old })
