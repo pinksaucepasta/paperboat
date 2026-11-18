@@ -427,9 +427,13 @@ func verifyRetiredDeclaration(installer *service.Installer, d Descriptor) (bool,
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return false, ErrInvalid
 	}
-	// Custody, not this build's render: a retiree's unit is an earlier build's render,
-	// so comparing it refused retirement whenever a release changed the unit.
+	// Custody and identity, not this build's render: a retiree's unit is an earlier
+	// build's render, so comparing it refused retirement whenever a release changed the
+	// unit. The generation is in the unit's arguments on every platform.
 	if err := validateRetiredDeclaration(path, info, d); err != nil {
+		return false, err
+	}
+	if err := installer.VerifyDefinitionNames(d.Generation); err != nil {
 		return false, err
 	}
 	return true, nil

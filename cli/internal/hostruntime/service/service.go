@@ -437,6 +437,21 @@ func (i *Installer) VerifyPublishedDefinition() error {
 	return nil
 }
 
+// VerifyDefinitionNames accepts a declaration, whichever build rendered it, that names
+// every given token: a declaration of unknown content, or one for another owner, is refused.
+func (i *Installer) VerifyDefinitionNames(tokens ...string) error {
+	actual, err := readNativeDefinition(i.definitionPath)
+	if err != nil {
+		return err
+	}
+	for _, token := range tokens {
+		if token == "" || !bytes.Contains(actual, []byte(token)) {
+			return ErrInvalidDefinition
+		}
+	}
+	return nil
+}
+
 // Render returns the declaration this build renders for the installer's config.
 func (i *Installer) Render() ([]byte, error) { return i.render() }
 

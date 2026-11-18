@@ -76,4 +76,11 @@ func TestRetirementAcceptsTheUnitAnEarlierBuildRendered(t *testing.T) {
 	if err != nil || !present {
 		t.Fatalf("an earlier build's unit was refused at retirement: present=%v err=%v", present, err)
 	}
+	// Custody is not enough: a unit that does not name this owner is refused.
+	if err = os.WriteFile(installer.DefinitionPath(), []byte("[Service]\nExecStart=/bin/true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if present, err = verifyRetiredDeclaration(installer, old); err == nil || present {
+		t.Fatalf("a unit that does not name the owner was accepted: present=%v err=%v", present, err)
+	}
 }
