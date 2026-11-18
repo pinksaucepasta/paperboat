@@ -8,6 +8,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/mintwithdrawal"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
@@ -66,7 +67,42 @@ func (s *Service) advanceAccounts(ctx context.Context, stage *StageState, having
 		}
 		add(stage.Detail, key, 1)
 	}
-	return len(ids), nil
+	return len(ids), s.wake(ctx, ids)
+}
+
+// wake tells every machine of the accounts to fetch its CA set now. Without it a host refreshes on its own timer
+// (ten minutes), and every pickup wait would last that long.
+func (s *Service) wake(ctx context.Context, accountIDs []string) error {
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	return s.cfg.Store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id FROM paperboat.user_machines WHERE user_id = ANY($1) AND revoked_at IS NULL AND deleted_at IS NULL`, accountIDs)
+		if err != nil {
+			return err
+		}
+		var machines []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			machines = append(machines, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil || len(machines) == 0 {
+			return err
+		}
+		for len(machines) > 0 { // Publish takes at most 1024 machines
+			n := min(len(machines), 1000)
+			if err := machineevents.Publish(ctx, tx, machines[:n], machineevents.TopicMachineAccess); err != nil {
+				return err
+			}
+			machines = machines[n:]
+		}
+		return nil
+	})
 }
 
 // publish adds the pending CA to every account that has only an active one. Accounts already mid-rotation (a
@@ -112,7 +148,7 @@ func (s *Service) switchAccounts(ctx context.Context, stage *StageState) (bool, 
 		}
 		add(stage.Detail, "switched", 1)
 	}
-	return len(ids) == 0, nil
+	return len(ids) == 0, s.wake(ctx, ids)
 }
 
 // pickupSince is when the keys a stage waits for were published: the end of publish for the pickup stage, the end of
