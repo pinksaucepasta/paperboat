@@ -14,6 +14,8 @@ import {
   recordingKeyQuery,
   recordingMessage,
   recordingRules,
+  keyHeld,
+  resetRecordingKey,
   rotateRecordingKey,
   subjectLabel,
   type RecordingAction,
@@ -39,7 +41,7 @@ import { ErrorMessage } from "@/components/error-reference"
  * Team → Recordings (the personal workspace's key is set up in PersonalRecordingSetup): the team recording key, who may start recordings by hand, and the policy rules that record
  * sessions or allow replay. Owners and admins change them; auditors see them.
  */
-export function RecordingSettings({ team, emails, admin }: { team: Team; emails: Map<string, string>; admin: boolean }) {
+export function RecordingSettings({ team, emails, admin, owner }: { team: Team; emails: Map<string, string>; admin: boolean; owner: boolean }) {
   const key = useApiQuery(recordingKeyQuery(team.team_id))
   const policy = useApiQuery(policyQuery(team.team_id))
   if (key.error instanceof ApiError && key.error.code === "team_plan_required")
@@ -55,7 +57,7 @@ export function RecordingSettings({ team, emails, admin }: { team: Team; emails:
   return (
     <div className="flex flex-col gap-10" data-recording-settings>
       <RecordingAccess teamId={team.team_id} />
-      <KeySection teamId={team.team_id} state={key.data} emails={emails} admin={admin} />
+      <KeySection teamId={team.team_id} state={key.data} emails={emails} admin={admin} owner={owner} />
       <ManualStartSection teamId={team.team_id} state={key.data} admin={admin} />
       <RulesSection policy={policy.data} admin={admin} />
     </div>
@@ -70,11 +72,13 @@ function KeySection({
   state,
   emails,
   admin,
+  owner,
 }: {
   teamId: string
   state: RecordingKeyState | undefined
   emails: Map<string, string>
   admin: boolean
+  owner: boolean
 }) {
   const queryClient = useQueryClient()
   const sealable = (state?.viewers ?? []).filter((viewer): viewer is Required<RecordingViewer> => Boolean(viewer.sharing_public_key))
@@ -83,6 +87,7 @@ function KeySection({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }),
   })
   const [replacing, setReplacing] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   const [asked, setAsked] = useState(false)
   const setUp = admin && state && !state.key && (
@@ -92,13 +97,20 @@ function KeySection({
   )
   // Replacing needs this person's own copy of the current key: it signs the new one.
   const replaceable = admin && state?.key && state.my_key?.generation === state.key.generation
+  // Resetting is for a key nobody holds any more, and only the team owner's ENV key can sign it.
+  const resettable = owner && state?.key?.reset_public_key && !keyHeld(state)
+  const reset = resettable && (
+    <Button variant="outline" size="lg" onClick={() => (unlocked ? setResetting(true) : setAsked(true))} data-recording-key-reset>
+      Reset key
+    </Button>
+  )
   const replace = replaceable && (
     <Button variant="outline" size="lg" onClick={() => (unlocked ? setReplacing(true) : setAsked(true))} data-recording-key-replace>
       Replace key
     </Button>
   )
   return (
-    <Section title="Recording key" action={setUp || replace || undefined}>
+    <Section title="Recording key" action={setUp || replace || reset || undefined}>
       <Row label="Status">
         {!state ? (
           <Skeleton className="my-0.5 h-4 w-24" />
@@ -113,7 +125,7 @@ function KeySection({
           Add a replay rule first. The key is encrypted for each person who can replay.
         </p>
       )}
-      {asked && !unlocked && <EnvUnlock title="Unlock your vault to replace the recording key. It signs the new key in this browser." />}
+      {asked && !unlocked && <EnvUnlock title="Unlock your vault to change the recording key. It signs the new key in this browser." />}
       {replacing && state && (
         <ConfirmAction
           open
@@ -122,8 +134,20 @@ function KeySection({
           description="New recordings are sealed to a new key, made and signed in this browser. Everyone who can replay keeps access and older recordings stay readable. Machines accept the new key only because your current key signed it."
           action="Replace key"
           pending="Replacing…"
-          confirmName={`REPLACE ${teamId}`}
+          confirmName={teamId}
           mutation={{ mutationFn: () => rotateRecordingKey(teamId, state), onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }) }}
+        />
+      )}
+      {resetting && state && (
+        <ConfirmAction
+          open
+          onOpenChange={(open) => !open && setResetting(false)}
+          title="Reset the recording key?"
+          description="Nobody holds the current recording key, so nobody can replace it. This makes a new key, signed in this browser with your ENV key as the team owner. Recordings made before can never be opened again, by anyone, you included. Everyone who can replay gets a copy of the new key. Machines accept it only because your signature verifies under the key they pinned for this team."
+          action="Reset key, discard old recordings"
+          pending="Resetting…"
+          confirmName={teamId}
+          mutation={{ mutationFn: () => resetRecordingKey(teamId, state), onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }) }}
         />
       )}
       {create.isError && <p className="border-b border-divider py-3 text-sm text-destructive">{<ErrorMessage error={create.error} message={recordingMessage(create.error)} />}</p>}
