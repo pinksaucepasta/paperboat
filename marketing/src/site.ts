@@ -90,4 +90,3 @@ export const publicTcp = ["1", "10", "10 per seat"] as const
 export const teamTrial =
   "Team starts with a 14-day trial. Your card is taken at the start and billing begins on day 15. We remind you 3 days before, and cancelling during the trial costs nothing."
 
-export { boatPath } from "./brand"

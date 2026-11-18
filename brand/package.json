@@ -1,0 +1,11 @@
+{
+  "name": "@paperboat/brand",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Paperboat brand: tokens, fonts, base styles, the mark and lockup, favicons. Imported by the marketing site and the status page; copied by nobody.",
+  "dependencies": {
+    "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0"
+  }
+}
