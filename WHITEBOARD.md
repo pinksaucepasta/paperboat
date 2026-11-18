@@ -297,11 +297,8 @@ the useful set for tunnels and custom domains.
 
 ## Held for after launch — decided 2026-11-18
 
-- **Server breach readiness** (decided 2026-11-18): one break-glass operator action that rotates every account's
-  SSH CA, the machine-trusted signing keys and session keys and signs out every browser, CLI, API and recipe session,
-  with progress in the admin panel; key rollover that machines accept without a reinstall; a timed staging drill.
-  Later, when revenue allows: CA and signing keys in a KMS/HSM so a breach cannot copy them. Before launch we only
-  check that release signing cannot be done from the prod server and write the private runbook.
+- **KMS/HSM for CA and signing keys** (decided 2026-11-18): when revenue allows, hold the CA and signing keys in a KMS/HSM so a
+  breach cannot copy them.
 - **Status page:** move to a hosted provider (incident.io / Atlassian Statuspage) when revenue allows; swap the adapter.
 - **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
   release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach
