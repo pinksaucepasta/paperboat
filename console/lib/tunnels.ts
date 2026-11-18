@@ -103,7 +103,8 @@ export const tunnelQuery = (id: string) =>
   queryOptions({
     queryKey: tunnelKeys.tunnel(id),
     queryFn: ({ signal }) => api<Tunnel>(tunnelPath(id), { signal }),
-    refetchInterval: 10_000,
+    // An address change settles within seconds: follow it closely while it is moving.
+    refetchInterval: (query) => (query.state.data?.address_change?.state === "moving" ? 3_000 : 10_000),
   })
 
 export const tunnelHealthQuery = (id: string) =>
@@ -244,8 +245,26 @@ export function opensInBrowser(file: { name: string; type: string }) {
 export const pauseTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/pause`, "POST", { etag: tunnel.etag })
 export const resumeTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/resume`, "POST", { etag: tunnel.etag })
 export const deleteTunnel = (tunnel: Tunnel) => change(tunnelPath(tunnel.id), "DELETE", { etag: tunnel.etag })
-export const patchTunnel = (tunnel: Tunnel, patch: { name?: string; access_mode?: Tunnel["access_mode"] }) =>
-  change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
+export const patchTunnel = (
+  tunnel: Tunnel,
+  patch: { name?: string; access_mode?: Tunnel["access_mode"]; subdomain?: string },
+) => change<Tunnel>(tunnelPath(tunnel.id), "PATCH", { etag: tunnel.etag, body: patch })
+
+/** The server's rule for a tunnel address label (tunnelv1 validateSubdomain): 3–63 lowercase letters, digits, hyphens. */
+export const subdomainPattern = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/
+
+/** Whether the tunnel could take `subdomain` as its address now: valid, not reserved, not taken by any account. */
+export const subdomainAvailabilityQuery = (id: string, subdomain: string) =>
+  queryOptions({
+    queryKey: ["tunnel", id, "subdomain", subdomain] as const,
+    queryFn: ({ signal }) =>
+      api<Data<"/v1/tunnels/{tunnel_id}/subdomain-availability">>(
+        `${tunnelPath(id)}/subdomain-availability?${new URLSearchParams({ subdomain })}`,
+        { signal },
+      ),
+    retry: false,
+    staleTime: 10_000,
+  })
 
 export type RouteInput = {
   name: string
@@ -336,45 +355,18 @@ export const saveIpRules = (kind: "tunnel" | "preview", id: string, rules: IPRul
     body: JSON.stringify(rules),
   })
 
-export type HistoryPart = "events" | "logs"
-export type HistoryEvent = Data<"/v1/tunnels/{tunnel_id}/events">["items"][number]
-export type HistoryLog = Data<"/v1/tunnels/{tunnel_id}/logs">["items"][number]
-export type HistoryPage = { items: (HistoryEvent | HistoryLog)[]; next_cursor?: string }
-export const historyPageSize = 20
-
-/** One page of a tunnel's or preview's events or logs. The server pages forward by cursor and sends no total. */
-export const historyQuery = (kind: "tunnel" | "preview", id: string, part: HistoryPart, cursor: string) =>
-  queryOptions({
-    queryKey: ["history", kind, id, part, cursor] as const,
-    queryFn: ({ signal }) =>
-      api<HistoryPage>(
-        `${kind === "tunnel" ? tunnelPath(id) : previewPath(id)}/${part}?${new URLSearchParams({
-          limit: String(historyPageSize),
-          ...(cursor && { cursor }),
-        })}`,
-        { signal },
-      ),
-    refetchInterval: cursor ? false : 15_000,
-  })
-
-const eventWords: Record<string, string> = {
-  "tunnel.created": "Tunnel created",
-  "tunnel.updated": "Tunnel changed",
-  "preview.created": "Preview started",
-  "preview.ready": "Preview ready",
-  "preview.failed": "Preview failed to start",
-  "preview.lease_renewed": "Preview extended",
-  "preview.stopped": "Preview stopped",
-  "preview.expired": "Preview ended",
-  "preview.owner_lost": "Machine went away",
-  "preview.dispatch_uncertain": "Start not confirmed",
-  "operation.cancelled": "Change canceled",
-}
-
-/** An event type in plain words; unlisted ones read as their last part ("domain.bound" → "Bound"). */
-export function eventLabel(type: string) {
-  const known = eventWords[type]
-  if (known) return known
-  const last = (type.split(".").pop() ?? type).replace(/_/g, " ")
-  return last.charAt(0).toUpperCase() + last.slice(1)
+/** Why a move to a new address was undone, in words (the codes are the server's operation error codes). */
+export function addressChangeReason(code: string | undefined): string {
+  switch (code) {
+    case "subdomain_taken":
+      return "Someone took that name meanwhile."
+    case "address_blocked":
+      return "That name is blocked."
+    case "tunnel_paused":
+      return "The tunnel was paused."
+    case "tunnel_deleted":
+      return "The tunnel was deleted."
+    default:
+      return "Not every Paperboat edge served the new address in time."
+  }
 }

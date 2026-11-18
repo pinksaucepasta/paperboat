@@ -3,6 +3,7 @@
 import {
   ArrowSquareOutIcon,
   CaretDownIcon,
+  CircleNotchIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
@@ -12,18 +13,19 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useApiQuery, useMachines } from "@/lib/api"
-import { hostOf, patchTunnel, tunnelHealthQuery, tunnelQuery, type Tunnel } from "@/lib/tunnels"
+import { toast } from "sonner"
+import { addressChangeReason, hostOf, patchTunnel, tunnelHealthQuery, tunnelQuery, type Tunnel } from "@/lib/tunnels"
 import { CopyRow } from "@/components/copy-button"
 import { Detail } from "@/components/machine-overview"
 import { CrumbLink, Crumb, PageHeader } from "@/components/page-header"
 import { Time } from "@/components/time"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
+import { ChangeAddress } from "@/components/tunnels/tunnel-address"
 import { TunnelTitle } from "@/components/tunnels/tunnel-rename"
 import { IpRules } from "@/components/tunnels/ip-rules"
 import { ShareWithTeam } from "@/components/tunnels/share-with-team"
-import { ResourceHistory } from "@/components/tunnels/resource-history"
 import { TunnelHostnames } from "@/components/tunnels/tunnel-hostnames"
 import { TunnelStatus, tunnelState } from "@/components/tunnels/tunnel-status"
 import {
@@ -209,8 +211,6 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
 
       {!tunnel.owner_team_id && <ShareWithTeam kind="tunnel" id={tunnel.id} />}
 
-      <ResourceHistory kind="tunnel" id={tunnel.id} />
-
       <DangerZone
         title="Delete tunnel"
         description="Its address and public hostnames stop working for good."
@@ -272,11 +272,50 @@ function FloodNotice({ tunnel }: { tunnel: Tunnel }) {
 /** The managed address, copied on click. It is generated; only the tunnel's name changes. */
 function AddressValue({ tunnel }: { tunnel: Tunnel }) {
   const host = hostOf(tunnel.stable_endpoint)
+  const change = tunnel.address_change
+  useAddressMoveDone(tunnel)
   return (
-    <CopyRow value={host} className="-ml-2.5 min-w-0 font-mono text-code">
-      {host}
-    </CopyRow>
+    <div className="flex min-w-0 flex-col gap-1" data-address-change={change?.state ?? "none"}>
+      <div className="flex min-w-0 items-center gap-1">
+        <CopyRow value={host} className="-ml-2.5 min-w-0 font-mono text-code">
+          {host}
+        </CopyRow>
+        <ChangeAddress tunnel={tunnel} disabled={change?.state === "moving"} />
+      </div>
+      {change?.state === "moving" && (
+        <p className="flex items-center gap-1.5 text-sm text-muted-foreground" role="status">
+          <CircleNotchIcon className="size-3.5 shrink-0 animate-spin" aria-hidden />
+          <span className="min-w-0 break-words">
+            Moving to <span className="font-mono text-code">{change.hostname}</span>… The current address keeps
+            working until every edge serves the new one.
+          </span>
+        </p>
+      )}
+      {change?.state === "failed" && (
+        <p className="flex items-start gap-1.5 text-sm text-destructive" role="alert">
+          <WarningCircleIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 break-words">
+            Moving to <span className="font-mono text-code">{change.hostname}</span> failed.{" "}
+            {addressChangeReason(change.reason_code)} The address is unchanged.
+          </span>
+        </p>
+      )}
+    </div>
   )
+}
+
+/** Says once that a move finished: the tunnel was moving, and now has its new address. */
+function useAddressMoveDone(tunnel: Tunnel) {
+  const before = useRef<{ moving: string | null; host: string }>({ moving: null, host: hostOf(tunnel.stable_endpoint) })
+  const host = hostOf(tunnel.stable_endpoint)
+  const moving = tunnel.address_change?.state === "moving" ? tunnel.address_change.hostname : null
+  useEffect(() => {
+    const previous = before.current
+    if (previous.moving && !moving && host !== previous.host) {
+      toast.success("Address changed", { description: `The tunnel is now at ${host}.` })
+    }
+    before.current = { moving, host }
+  }, [moving, host])
 }
 
 const audiences = { public: "Anyone with the address", private: "Only you" } as const

@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 )
 
 var (
@@ -62,6 +63,12 @@ type TunnelRepository interface {
 	List(context.Context, string, *ListPosition, int) ([]dbsqlc.Tunnel, error)
 	Count(context.Context, string) (int, error)
 	Patch(context.Context, PatchRecord) (MutationRecord, error)
+	// CheckAddress says what the tunnel's address would be with this label (under the base domain of its stored
+	// endpoint, not the masked one a self-hosted workspace shows) and whether it could take it.
+	CheckAddress(ctx context.Context, accountID, tunnelID, label string) (AddressCheck, error)
+	SettleAddressMoves(ctx context.Context, input AddressSettleRecord) error
+	// AddressChanges returns the address change in progress, or the last one that failed, per tunnel id.
+	AddressChanges(ctx context.Context, accountID string, tunnelIDs []string) (map[string]tunnelshared.AddressChange, error)
 	Transition(context.Context, StateRecord) (MutationRecord, error)
 	ReconcileExpired(context.Context, ExpiryRecord) ([]MutationRecord, error)
 	HealthFacts(ctx context.Context, accountID, tunnelID string, now time.Time) (HealthFacts, error)
@@ -94,14 +101,17 @@ type CreateRecord struct {
 }
 
 type PatchRecord struct {
-	OperationID        string
-	AuditEventID       string
-	TunnelID           string
-	AccountID          string
-	Name               *string
-	AccessMode         *string
-	ExpiresAt          *time.Time
-	ExpirySet          bool
+	OperationID  string
+	AuditEventID string
+	TunnelID     string
+	AccountID    string
+	Name         *string
+	AccessMode   *string
+	ExpiresAt    *time.Time
+	ExpirySet    bool
+	// Subdomain is the validated new label; the repository derives the host from the tunnel's current base domain.
+	Subdomain          *string
+	AddressPolicy      AddressPolicy
 	ExpectedGeneration int64
 	IdempotencyKey     string
 	RequestHash        [sha256.Size]byte
@@ -478,7 +488,21 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				return fmt.Errorf("%w: remove TCP and catch-all routes before changing tunnel access mode", ErrInvalidInput)
 			}
 		}
-		changed := patchChanges(current, input)
+		var newHost string
+		if input.Subdomain != nil {
+			var selfHosted bool
+			if err := tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only' FROM paperboat.tunnels t WHERE t.id=$1`, current.ID).Scan(&selfHosted); err != nil {
+				return translate(err)
+			}
+			if selfHosted {
+				return ErrAddressUnavailable
+			}
+			newHost = addressHost(current.StableEndpoint, *input.Subdomain)
+		}
+		moveAddress := newHost != "" && "https://"+newHost != current.StableEndpoint
+		oldEndpoint := current.StableEndpoint
+		addressMoving := false
+		changed := patchChanges(current, input) || moveAddress
 		now := r.now().UTC()
 		if changed {
 			updated, updateErr := updateTunnelFields(ctx, tx, input, now)
@@ -486,6 +510,11 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				return updateErr
 			}
 			current = updated
+			if moveAddress {
+				if current, addressMoving, err = startAddressMoveTx(ctx, tx, current, newHost, input.ActorID, operation.ID, input.AddressPolicy, now); err != nil {
+					return err
+				}
+			}
 			if err := createResourceConfigGeneration(ctx, queries, current, input.ActorID, now); err != nil {
 				return err
 			}
@@ -511,6 +540,21 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 				"generation": current.Generation, "desired_state": current.DesiredState,
 			}); err != nil {
 			return err
+		}
+		if moveAddress {
+			// A move that keeps the old address up until the edges serve the new one is completed (or undone) later by
+			// SettleAddressMoves, which records the outcome.
+			event := "tunnel.address_changed"
+			if addressMoving {
+				event = "tunnel.address_change_started"
+			}
+			if err := insertAudit(ctx, queries, input.AuditEventID+".address", input.AccountID, auditActorID(input.ActorID, input.AuditActorID), input.ActorType,
+				event, "update", "changed", current.ID, input.IdempotencyKey, input.RequestID,
+				input.CorrelationID, input.SourceMachineID, now, map[string]any{
+					"generation": current.Generation, "previous_hostname": strings.TrimPrefix(oldEndpoint, "https://"), "hostname": newHost,
+				}); err != nil {
+				return err
+			}
 		}
 		result = MutationRecord{Tunnel: current, Operation: operation, Changed: changed}
 		return nil

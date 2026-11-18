@@ -54,12 +54,31 @@ resource. For current health use pb tunnel status; for history use pb tunnel log
   pb tunnel show tunnel_abc123 --json`},
 	"pb tunnel rename": {
 		Long: `Rename a durable tunnel, selected by ID or current name. The name is only a label: the
-tunnel's address, routes, connectors and access rules do not change.
+tunnel's address, routes, connectors and access rules do not change. To change the address
+itself, use pb tunnel address.
 
 ` + waitNote,
 		Example: `
   pb tunnel rename web website
   pb tunnel rename tunnel_abc123 web --wait`},
+	"pb tunnel address": {
+		Long: `Change the public address of a durable tunnel, selected by ID or name. The subdomain becomes
+the first label of the address under the same base domain: helloworld makes helloworld.<base domain>.
+It is 3 to 63 lowercase letters, digits or hyphens, not starting or ending with a hyphen and not only
+digits. Some names are reserved, and a name another tunnel uses is refused with the reason.
+
+The new address is published first and the previous one keeps serving until every Paperboat edge serves the
+new one (usually seconds, at most five minutes; a change the edges do not confirm in time is undone and
+reported as failed; with --wait pass --timeout 6m for slow edges). Until then the new address may answer
+"not found" on some edges. This holds for the managed HTTP address; a TLS or TCP route, or a tunnel nothing
+serves yet, moves at once. Then the previous address stops working and stays reserved to the tunnel for a
+cooldown (a day by default) before anyone else may take it, so update every link, webhook and bookmark that
+uses it. Routes, connectors and access rules stay with the tunnel. Address changes are rate limited per account.
+
+` + waitNote,
+		Example: `
+  pb tunnel address web helloworld
+  pb tunnel address tunnel_abc123 helloworld --wait`},
 	"pb tunnel extend": {
 		Long: `Move a durable tunnel's expiry to now plus --duration, for example 24h. Use it when
 pb tunnel status says the tunnel expired; it serves again once the change applies.

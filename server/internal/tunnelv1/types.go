@@ -51,6 +51,8 @@ type PatchTunnelRequest struct {
 	Name       *string
 	AccessMode *string
 	ExpiresAt  *time.Time
+	// Subdomain, when set, moves the tunnel's public address to <Subdomain>.<base domain>.
+	Subdomain *string
 	// ExpirySet distinguishes an omitted expires_at field from an explicit
 	// null, which removes an existing expiry.
 	ExpirySet bool
@@ -93,6 +95,10 @@ type Config struct {
 	NewEndpointID    func() (string, error)
 	PublicTCPPortMin int32
 	PublicTCPPortMax int32
+	// ReservedSubdomains are the labels an owner may not choose as a tunnel address.
+	ReservedSubdomains []string
+	// AddressPolicy bounds an address change (move timeout, cooldown of the old name); required to change an address.
+	AddressPolicy AddressPolicy
 	// BandwidthDenied, when set, reports whether the account's workspaces are out of bandwidth
 	// allowance so status can say so. It must fail open.
 	BandwidthDenied func(ctx context.Context, accountID string, at time.Time) bool

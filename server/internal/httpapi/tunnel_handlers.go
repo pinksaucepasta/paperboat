@@ -15,6 +15,7 @@ import (
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
@@ -189,7 +190,9 @@ func tunnelGet(service tunnelv1.API) http.HandlerFunc {
 	}
 }
 
-func tunnelPatch(service tunnelv1.API, identities machineRequestVerifier) http.HandlerFunc {
+// tunnelPatch applies one tunnel patch. An address change (subdomain) also takes a token from addressLimiter,
+// keyed by the account, so a client cannot churn or scan the public names; a nil limiter allows everything.
+func tunnelPatch(service tunnelv1.API, identities machineRequestVerifier, addressLimiter *ratelimit.Limiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, ok := readTunnelRequestBody(w, r)
 		if !ok {
@@ -224,6 +227,12 @@ func tunnelPatch(service tunnelv1.API, identities machineRequestVerifier) http.H
 		if !ok {
 			return
 		}
+		if patch.Subdomain != nil {
+			if ok, wait := addressLimiter.Allow("tunnel-address:" + request.Actor.AccountID); !ok {
+				writeRateLimited(w, r, wait)
+				return
+			}
+		}
 		patch.MutationInput = tunnelv1.MutationInput{ExpectedGeneration: generation, IdempotencyKey: idempotencyKey, RequestHash: hash}
 		result, err := service.PatchTunnel(r.Context(), request, tunnelIDFromPath(r), patch)
 		if err != nil {
@@ -231,6 +240,29 @@ func tunnelPatch(service tunnelv1.API, identities machineRequestVerifier) http.H
 			return
 		}
 		writeTunnelMutation(w, result, result.Replayed, false)
+	}
+}
+
+// tunnelSubdomainAvailability tells the owner whether the tunnel could take ?subdomain= as its address; a per-account
+// limiter (the address changes' rates) bounds it, since it answers which public names are taken.
+func tunnelSubdomainAvailability(service tunnelv1.API, addressLimiter *ratelimit.Limiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		request, ok := tunnelRequestFromHTTP(w, r)
+		if !ok {
+			return
+		}
+		// Its own bucket per account: typing ahead in the console must not use up the budget of the change itself.
+		if ok, wait := addressLimiter.Allow("tunnel-address-check:" + request.Actor.AccountID); !ok {
+			writeRateLimited(w, r, wait)
+			return
+		}
+		value, err := service.CheckSubdomain(r.Context(), request, tunnelIDFromPath(r), r.URL.Query().Get("subdomain"))
+		if err != nil {
+			writeTunnelError(w, r, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: value})
 	}
 }
 
@@ -334,6 +366,7 @@ type tunnelOriginDocument struct {
 
 type tunnelPatchDocument struct {
 	Name       *string         `json:"name"`
+	Subdomain  *string         `json:"subdomain"`
 	AccessMode *string         `json:"access_mode"`
 	ExpiresAt  json.RawMessage `json:"expires_at"`
 	raw        map[string]json.RawMessage
@@ -351,7 +384,7 @@ func (d *tunnelPatchDocument) UnmarshalJSON(data []byte) error {
 	}
 	for key := range fields {
 		switch key {
-		case "name", "access_mode", "expires_at":
+		case "name", "access_mode", "subdomain", "expires_at":
 		default:
 			return errors.New("unknown tunnel patch field")
 		}
@@ -380,7 +413,10 @@ func (d tunnelPatchDocument) request() (tunnelv1.PatchTunnelRequest, error) {
 	if raw, ok := d.raw["access_mode"]; ok && string(bytes.TrimSpace(raw)) == "null" {
 		return tunnelv1.PatchTunnelRequest{}, fmt.Errorf("%w: access_mode cannot be null", tunnelv1.ErrInvalidInput)
 	}
-	return tunnelv1.PatchTunnelRequest{Name: d.Name, AccessMode: d.AccessMode, ExpiresAt: expiresAt, ExpirySet: expirySet}, nil
+	if raw, ok := d.raw["subdomain"]; ok && string(bytes.TrimSpace(raw)) == "null" {
+		return tunnelv1.PatchTunnelRequest{}, fmt.Errorf("%w: subdomain cannot be null", tunnelv1.ErrInvalidInput)
+	}
+	return tunnelv1.PatchTunnelRequest{Name: d.Name, AccessMode: d.AccessMode, Subdomain: d.Subdomain, ExpiresAt: expiresAt, ExpirySet: expirySet}, nil
 }
 
 func tunnelRequestFromHTTP(w http.ResponseWriter, r *http.Request) (previewtunnelapi.RequestContext, bool) {
@@ -511,9 +547,30 @@ func writeTunnelError(w http.ResponseWriter, r *http.Request, err error) {
 		writePreviewTunnelError(w, r, http.StatusConflict, "tunnel_deleted", "The tunnel is deleted and cannot be changed.", "unchanged", false, "create_new_tunnel", err)
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrOperationInProgress):
 		writePreviewTunnelError(w, r, http.StatusConflict, "operation_in_progress", "An earlier tunnel operation is still in progress.", "uncertain", true, "inspect_operation", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrSubdomainInvalid):
+		writePreviewTunnelError(w, r, http.StatusBadRequest, "invalid_subdomain", subdomainRule(err), "unchanged", false, "choose_another_subdomain", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrSubdomainReserved):
+		writePreviewTunnelError(w, r, http.StatusBadRequest, "subdomain_reserved", "This name is reserved. Choose another.", "unchanged", false, "choose_another_subdomain", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrSubdomainTaken):
+		writePreviewTunnelError(w, r, http.StatusConflict, "subdomain_taken", "This name is already taken. Choose another.", "unchanged", false, "choose_another_subdomain", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrAddressUnavailable):
+		writePreviewTunnelError(w, r, http.StatusBadRequest, "address_not_available", "This tunnel is served on your own domain, so it has no Paperboat address to change. Add a hostname under a verified workspace domain instead: pb domain add, pb domain verify, then pb tunnel domain add <tunnel> <hostname> --route <route>.", "unchanged", false, "use_custom_domain", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrAddressChangePending):
+		writePreviewTunnelError(w, r, http.StatusConflict, "address_change_pending", "This tunnel is already moving to a new address. Wait for it to finish, then try again.", "unchanged", false, "retry_later", err)
+	case expectedHTTPErrorOnly(err, tunnelv1.ErrAddressBlocked):
+		writePreviewTunnelError(w, r, http.StatusForbidden, "address_blocked", "This tunnel's address is blocked by Paperboat and cannot be changed.", "unchanged", false, "contact_support", err)
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrInvalidInput):
 		writePreviewTunnelError(w, r, http.StatusBadRequest, "invalid_request", "Tunnel request is invalid.", "unchanged", false, "fix_request", err)
 	default:
 		writePreviewTunnelError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", "uncertain", true, "retry", err)
 	}
+}
+
+// subdomainRule is the validation message after "subdomain is invalid: ".
+func subdomainRule(err error) string {
+	_, rule, ok := strings.Cut(err.Error(), tunnelv1.ErrSubdomainInvalid.Error()+": ")
+	if !ok || rule == "" {
+		return "This name is not valid. Choose another."
+	}
+	return strings.ToUpper(rule[:1]) + rule[1:] + "."
 }

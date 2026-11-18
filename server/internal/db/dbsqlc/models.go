@@ -3017,6 +3017,15 @@ type Tunnel struct {
 	OwnerTeamID           sql.NullString
 }
 
+type TunnelAddressHold struct {
+	Hostname    string
+	TunnelID    string
+	OperationID sql.NullString
+	Kind        string
+	Until       time.Time
+	CreatedAt   time.Time
+}
+
 type TunnelCertificateDistributionAction struct {
 	ActionKey          string
 	EdgeNodeID         string

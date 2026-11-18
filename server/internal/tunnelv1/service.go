@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
+	tunnelshared "github.com/pinksaucepasta/paperboat/shared/tunnelv1"
 
 	"errors"
 	"fmt"
@@ -38,6 +39,8 @@ type Service struct {
 	publicTCPPortMin int32
 	publicTCPPortMax int32
 	bandwidthDenied  func(ctx context.Context, accountID string, at time.Time) bool
+	reserved         map[string]struct{}
+	addressPolicy    AddressPolicy
 }
 
 // API is the narrow lifecycle surface consumed by the HTTP router. Route,
@@ -47,6 +50,7 @@ type API interface {
 	ListTunnels(context.Context, previewtunnelapi.RequestContext, string, int) (TunnelPage, error)
 	GetTunnel(context.Context, previewtunnelapi.RequestContext, string) (TunnelView, error)
 	PatchTunnel(context.Context, previewtunnelapi.RequestContext, string, PatchTunnelRequest) (MutationResult, error)
+	CheckSubdomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, label string) (SubdomainCheck, error)
 	PauseTunnel(context.Context, previewtunnelapi.RequestContext, string, MutationInput) (MutationResult, error)
 	ResumeTunnel(context.Context, previewtunnelapi.RequestContext, string, MutationInput) (MutationResult, error)
 	DeleteTunnel(context.Context, previewtunnelapi.RequestContext, string, MutationInput) (MutationResult, error)
@@ -82,7 +86,11 @@ func NewService(repository TunnelRepository, config Config) (*Service, error) {
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, errors.New("public TCP port range is invalid")
 	}
-	return &Service{repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthDenied: config.BandwidthDenied}, nil
+	reserved, err := reservedSet(config.ReservedSubdomains)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{addressPolicy: config.AddressPolicy, reserved: reserved, repository: repository, endpoint: config.EndpointBuilder, cursors: cursors, now: now, newID: idGenerator, newEndpointID: endpointIDGenerator, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax, bandwidthDenied: config.BandwidthDenied}, nil
 }
 
 // NewEndpointBuilder creates a deployment-specific stable hostname builder.
@@ -238,6 +246,9 @@ func (s *Service) ListTunnels(ctx context.Context, request previewtunnelapi.Requ
 	for _, row := range rows {
 		page.Items = append(page.Items, tunnelView(row))
 	}
+	if err := s.addAddressChanges(ctx, request.Actor.AccountID, page.Items); err != nil {
+		return TunnelPage{}, err
+	}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		cursor, cursorErr := s.cursors.Encode(workspaceCursorPrincipal(ctx, request.Actor.AccountID), ListPosition{CreatedAt: last.CreatedAt, ID: last.ID})
@@ -261,7 +272,36 @@ func (s *Service) GetTunnel(ctx context.Context, request previewtunnelapi.Reques
 	if err != nil {
 		return TunnelView{}, err
 	}
-	return tunnelView(tunnel), nil
+	views := []TunnelView{tunnelView(tunnel)}
+	if err := s.addAddressChanges(ctx, request.Actor.AccountID, views); err != nil {
+		return TunnelView{}, err
+	}
+	return views[0], nil
+}
+
+// addAddressChanges sets AddressChange on the views of tunnels that are moving to a new address or whose last move failed.
+// A page can hold tunnels of several owners (a team's, one shared with the viewer): each owner's are asked for together.
+func (s *Service) addAddressChanges(ctx context.Context, _ string, views []TunnelView) error {
+	byOwner := map[string][]string{}
+	for i := range views {
+		byOwner[views[i].AccountID] = append(byOwner[views[i].AccountID], views[i].ID)
+	}
+	changes := map[string]tunnelshared.AddressChange{}
+	for owner, ids := range byOwner {
+		found, err := s.repository.AddressChanges(ctx, owner, ids)
+		if err != nil {
+			return err
+		}
+		for id, change := range found {
+			changes[id] = change
+		}
+	}
+	for i := range views {
+		if change, ok := changes[views[i].ID]; ok {
+			views[i].AddressChange = &change
+		}
+	}
+	return nil
 }
 
 func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input PatchTunnelRequest) (MutationResult, error) {
@@ -275,6 +315,9 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 	if shared && input.AccessMode != nil && strings.TrimSpace(*input.AccessMode) == AccessPublic {
 		return MutationResult{}, ErrMachinePublicationDenied
 	}
+	if shared && input.Subdomain != nil {
+		return MutationResult{}, previewtunnelapi.ErrForbidden // a machine grant manages a tunnel; its owner picks the address
+	}
 	now := s.now().UTC()
 	if err := validateMutationInput(input.MutationInput, true); err != nil {
 		return MutationResult{}, err
@@ -285,6 +328,11 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 			return MutationResult{}, err
 		}
 		input.Name = &name
+	}
+	if input.Subdomain != nil {
+		if err := validateSubdomain(*input.Subdomain, s.reserved); err != nil {
+			return MutationResult{}, err
+		}
 	}
 	if input.AccessMode != nil {
 		if strings.TrimSpace(*input.AccessMode) == "" {
@@ -299,7 +347,7 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(now) {
 		return MutationResult{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidInput)
 	}
-	if input.Name == nil && input.AccessMode == nil && !input.ExpirySet {
+	if input.Name == nil && input.AccessMode == nil && input.Subdomain == nil && !input.ExpirySet {
 		return MutationResult{}, fmt.Errorf("%w: patch must contain a mutable field", ErrInvalidInput)
 	}
 	request, normalizeErr := normalizeRequestContext(request, s.newID)
@@ -317,7 +365,7 @@ func (s *Service) PatchTunnel(ctx context.Context, request previewtunnelapi.Requ
 	}
 	result, err := s.repository.Patch(ctx, PatchRecord{
 		OperationID: operationID, AuditEventID: auditID, TunnelID: tunnelID, AccountID: request.Actor.AccountID,
-		Name: input.Name, AccessMode: input.AccessMode, ExpiresAt: input.ExpiresAt, ExpirySet: input.ExpirySet,
+		Name: input.Name, AccessMode: input.AccessMode, Subdomain: input.Subdomain, AddressPolicy: s.addressPolicy, ExpiresAt: input.ExpiresAt, ExpirySet: input.ExpirySet,
 		ExpectedGeneration: input.ExpectedGeneration, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash,
 		ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor), RequestID: request.RequestID,
 		CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: now,
@@ -443,6 +491,23 @@ func (s *Service) ReconcileExpired(ctx context.Context, input ExpiryReconcileReq
 		results = append(results, s.mutationView(record, request.RequestID))
 	}
 	return results, nil
+}
+
+// SettleAddressMoves finishes (or undoes) the address changes in progress: see SQLRepository.SettleAddressMoves.
+func (s *Service) SettleAddressMoves(ctx context.Context, input ExpiryReconcileRequest) error {
+	if input.Limit == 0 {
+		input.Limit = 100
+	}
+	if input.Now.IsZero() {
+		input.Now = s.now().UTC()
+	}
+	if input.ActorType == "" {
+		input.ActorType = "system"
+	}
+	return s.repository.SettleAddressMoves(ctx, AddressSettleRecord{
+		Now: input.Now, Limit: input.Limit, Policy: s.addressPolicy, ActorID: input.ActorID, ActorType: input.ActorType,
+		RequestID: input.RequestID, CorrelationID: input.CorrelationID, NewID: s.newID,
+	})
 }
 
 func (s *Service) authorize(request previewtunnelapi.RequestContext, requireHost bool, action string) error {

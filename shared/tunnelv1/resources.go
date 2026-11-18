@@ -30,6 +30,20 @@ type Tunnel struct {
 	SummaryCode      string     `json:"summary_code"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	// AddressChange is present while the tunnel is moving to a new address, and after a move that was undone, until
+	// the next change to the tunnel's operations.
+	AddressChange *AddressChange `json:"address_change,omitempty"`
+}
+
+// AddressChange is the state of a tunnel's last address change: State "moving" (the new address is published
+// next to the current one and the edges have not all confirmed it yet) or "failed" (the move was undone; the
+// current address is unchanged). Hostname is the address it moves (or tried to move) to; ReasonCode, on a failed
+// move, says why: tunnel_address_not_ready, subdomain_taken, address_blocked, tunnel_paused or tunnel_deleted.
+type AddressChange struct {
+	State      string    `json:"state"`
+	Hostname   string    `json:"hostname"`
+	ReasonCode string    `json:"reason_code,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type TunnelPage struct {

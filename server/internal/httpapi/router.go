@@ -323,7 +323,9 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("DELETE /v1/domains/{domain_id}", domainWrite("remove"))
 			}
 			mux.Handle("GET /v1/tunnels/{tunnel_id}", tunnelRead(tunnelGet(opts.Tunnels)))
-			mux.Handle("PATCH /v1/tunnels/{tunnel_id}", machine(tunnelPatch(opts.Tunnels, opts.Enrollment)))
+			addressLimiter := ratelimit.New(opts.Config.RateLimits.TunnelAddressPerMinute, opts.Config.RateLimits.TunnelAddressBurst, opts.Config.RateLimits.MaxClients)
+			mux.Handle("PATCH /v1/tunnels/{tunnel_id}", machine(tunnelPatch(opts.Tunnels, opts.Enrollment, addressLimiter)))
+			mux.Handle("GET /v1/tunnels/{tunnel_id}/subdomain-availability", tunnelWrite(tunnelSubdomainAvailability(opts.Tunnels, addressLimiter)))
 			mux.Handle("DELETE /v1/tunnels/{tunnel_id}", machine(tunnelDelete(opts.Tunnels, opts.Enrollment)))
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/pause", machine(tunnelPause(opts.Tunnels, opts.Enrollment)))
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/resume", machine(tunnelResume(opts.Tunnels, opts.Enrollment)))

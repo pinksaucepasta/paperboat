@@ -265,6 +265,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team sso status](pb_team_sso_status.md) | Show SSO connection, verified domains, Require SSO and exemptions |
 | [pb team transfer](pb_team_transfer.md) | Transfer team ownership |
 | [pb tunnel](pb_tunnel.md) | Manage durable tunnels or start an ephemeral tunnel |
+| [pb tunnel address](pb_tunnel_address.md) | Change a durable tunnel's public address |
 | [pb tunnel create](pb_tunnel_create.md) | Create a durable tunnel |
 | [pb tunnel delete](pb_tunnel_delete.md) | Delete endpoints and routes while preserving user DNS records |
 | [pb tunnel doctor](pb_tunnel_doctor.md) | Diagnose tunnel health |

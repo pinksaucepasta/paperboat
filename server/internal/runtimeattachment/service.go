@@ -676,7 +676,7 @@ func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdg
 		}
 		for _, o := range observations {
 			if endpointRoutes[o.RouteID] {
-				if _, err := endpoints.ObserveTx(ctx, tx, edge.NodeID, edge.ProcessEpoch, o); err != nil {
+				if _, err := endpoints.ObserveTx(ctx, tx, edge.NodeID, edge.ProcessEpoch, o, 0); err != nil {
 					return err
 				}
 				continue

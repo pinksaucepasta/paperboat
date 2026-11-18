@@ -63,3 +63,45 @@ func TestRouteWorkerWaitsForManagedCertificate(t *testing.T) {
 		t.Fatalf("custom on-demand route changed: %v", err)
 	}
 }
+
+// The new address of a tunnel being moved rides along as a domain binding next to the primary managed name: the
+// route is not ready on an edge that cannot serve TLS for it, while a customer's own domain binding is not gated.
+func TestRouteWorkerWaitsForTheCertificateOfAMovedAddress(t *testing.T) {
+	public, thumb := durableWorkerIdentity(t)
+	assignment := durableWorkerAssignment(public, thumb, "route_move", "assignment_move", route.TunnelHTTPSWSS)
+	assignment.MatchType = route.MatchManagedExact
+	assignment.PublicHost, assignment.MatchHostname = "old.tunnels.example.test", "old.tunnels.example.test"
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"*.tunnels.example.test"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &workerCertificateSource{certificate: &tls.Certificate{Certificate: [][]byte{der}}}
+	worker := &RouteWorker{Certificates: source, Ready: func(context.Context, []route.RouteRule) error { return nil }}
+	moved := func(host string) error {
+		assignment.DomainBindings = []control.DomainBinding{{ID: "mvbinding", Hostname: host, MatchType: route.MatchExact, Generation: 2}}
+		return worker.probeCanonicalGroup(context.Background(), []control.RouteAssignment{assignment})
+	}
+	if err := moved("new.tunnels.example.test"); err != nil {
+		t.Fatalf("moved address covered by the wildcard: %v", err)
+	}
+	// A wildcard that does not cover the moved name (here: another parent domain) is a customer domain, not gated.
+	if err := moved("app.customer.example"); err != nil {
+		t.Fatalf("customer domain binding gated on the platform certificate: %v", err)
+	}
+	// Without the certificate the primary name already fails; a one-name coverage certificate for the primary only
+	// must not authorize the moved name.
+	cert = &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{"old.tunnels.example.test"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
+	der, err = x509.CreateCertificate(rand.Reader, cert, cert, pub, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.certificate = &tls.Certificate{Certificate: [][]byte{der}}
+	if err := moved("new.tunnels.example.test"); err == nil {
+		t.Fatal("a certificate that does not cover the moved address authorized readiness")
+	}
+}

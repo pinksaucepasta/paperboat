@@ -91,11 +91,19 @@ AND g.activation_state='pending' AND g.generation=(`+newest+`)`, machineID, tunn
 	}
 	// The route's id is the tunnel route's id, so the edge, the agent and accounting name it the same
 	// way on both paths; its revision follows the route generation.
-	if _, err := tx.Exec(ctx, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,revision,tunnel_route_id)
+	// A route whose revision or hostname changed is no longer observed ready by the edges holding it: each edge must
+	// fetch the change and observe the new revision (ObserveTx drops observations of an older one) before the route
+	// counts as ready; an address change waits for exactly that before it retires the old name. The assignment itself
+	// keeps its generation, so the edge keeps admitting and serving the route while it stages the change.
+	if _, err := tx.Exec(ctx, `WITH changed AS (
+INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,revision,tunnel_route_id)
 SELECT tr.id,e.id,lower(substring(t.stable_endpoint from 9)),tr.protocol,tr.generation,tr.id
 FROM endpoints e JOIN tunnels t ON t.id=e.tunnel_id JOIN tunnel_routes tr ON tr.tunnel_id=t.id AND tr.desired_state='active' AND tr.deleted_at IS NULL
 WHERE e.kind='tunnel' AND e.agent_machine_id=$1 AND ($2='' OR e.tunnel_id=$2)
-ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision WHERE endpoint_routes.revision<>EXCLUDED.revision`, machineID, tunnelID); err != nil {
+ON CONFLICT(id) DO UPDATE SET revision=EXCLUDED.revision,hostname=EXCLUDED.hostname WHERE endpoint_routes.revision<>EXCLUDED.revision OR endpoint_routes.hostname<>EXCLUDED.hostname
+RETURNING id)
+UPDATE endpoint_edge_assignments x SET observed_ready=false
+FROM changed c WHERE x.route_id=c.id AND x.desired='active'`, machineID, tunnelID); err != nil {
 		return err
 	}
 	return reconcile()

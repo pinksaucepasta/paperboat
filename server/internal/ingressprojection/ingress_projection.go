@@ -123,6 +123,11 @@ LEFT JOIN LATERAL (
    AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact'
    AND d.hostname<>COALESCE(r.match_hostname,substring(t.stable_endpoint from 9))
    AND (r.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))
+ UNION ALL
+ -- The name an address change is moving the tunnel to is served next to the old one until every edge confirms it
+ -- (tunnelv1.SettleAddressMoves); like the route's snapshot binding of the same name, it sits under the platform wildcard.
+ SELECT h.hostname,'mv'||substr(md5(h.hostname),1,24),r.generation FROM tunnel_address_holds h
+ WHERE h.tunnel_id=t.id AND h.kind='incoming' AND r.protocol='http' AND r.match_type='managed'
 ) publication ON true
 JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id AND ra.edge_node_id=x.edge_node_id
  AND ra.edge_process_epoch=x.edge_process_epoch

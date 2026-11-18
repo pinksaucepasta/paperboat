@@ -53,6 +53,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
+* [pb tunnel address](pb_tunnel_address.md)	 - Change a durable tunnel's public address
 * [pb tunnel create](pb_tunnel_create.md)	 - Create a durable tunnel
 * [pb tunnel delete](pb_tunnel_delete.md)	 - Delete endpoints and routes while preserving user DNS records
 * [pb tunnel doctor](pb_tunnel_doctor.md)	 - Diagnose tunnel health

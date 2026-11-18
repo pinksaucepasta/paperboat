@@ -4433,6 +4433,9 @@
           "owner_team_id": {
             "type": "string",
             "description": "Owning team slug when team-owned; absent for Personal. Independent of viewer audience and persistence account."
+          },
+          "address_change": {
+            "$ref": "#/components/schemas/AddressChange"
           }
         },
         "allOf": [
@@ -4641,6 +4644,13 @@
                 "type": "null"
               }
             ]
+          },
+          "subdomain": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
+            "description": "Moves the tunnel's public address to <subdomain> under its current base domain. 3-63 lowercase letters, digits or hyphens, not only digits, not a reserved name, unique across all accounts. Make before break: the new address is published next to the old one and the old one stops once every live edge serves the new one (the operation stays running until then; if the edges do not confirm within the move timeout the change is undone and the operation fails with tunnel_address_not_ready). The old address then stays reserved to the tunnel for a cooldown. Applies to managed HTTP addresses; a tunnel nothing serves moves at once. Rate limited per account. Errors: address_not_available (a self-hosted workspace's tunnel has no Paperboat address; attach a custom domain), invalid_subdomain, subdomain_reserved (400), subdomain_taken, address_change_pending (409), address_blocked (403), rate_limited (429)."
           }
         }
       },
@@ -20641,6 +20651,88 @@
         "required": [
           "events"
         ]
+      },
+      "TunnelSubdomainAvailability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subdomain",
+          "available"
+        ],
+        "properties": {
+          "subdomain": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "invalid",
+              "reserved",
+              "taken",
+              "current",
+              "unavailable"
+            ],
+            "description": "Why it is not available."
+          },
+          "message": {
+            "type": "string",
+            "description": "Plain-words reason, safe to show."
+          }
+        }
+      },
+      "TunnelSubdomainAvailabilityResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TunnelSubdomainAvailability"
+          }
+        }
+      },
+      "AddressChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "hostname",
+          "updated_at"
+        ],
+        "description": "A tunnel's address change in progress, or its last one that failed (until the tunnel's next patch operation).",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "moving",
+              "failed"
+            ],
+            "description": "moving: the new address is published next to the current one and the edges have not all confirmed it; failed: the move was undone and the current address is unchanged."
+          },
+          "hostname": {
+            "type": "string",
+            "description": "The address the tunnel is moving (or tried to move) to."
+          },
+          "reason_code": {
+            "type": "string",
+            "enum": [
+              "tunnel_address_not_ready",
+              "subdomain_taken",
+              "address_blocked",
+              "tunnel_paused",
+              "tunnel_deleted"
+            ],
+            "description": "Why a failed move was undone."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "responses": {
@@ -62914,6 +63006,74 @@
         ],
         "x-operator-capability": "billing",
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Newest first; follow next_cursor."
+      }
+    },
+    "/v1/tunnels/{tunnel_id}/subdomain-availability": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TunnelID"
+        }
+      ],
+      "get": {
+        "summary": "Check whether a tunnel can take a subdomain",
+        "description": "Says whether the owner's tunnel could take ?subdomain= as its public address now (valid, not reserved, not taken by any account). Rate limited per account together with address changes.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:write"
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability of the subdomain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelSubdomainAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_tunnels_tunnel_id_subdomain_availability",
+        "parameters": [
+          {
+            "name": "subdomain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ]
       }
     }
   }

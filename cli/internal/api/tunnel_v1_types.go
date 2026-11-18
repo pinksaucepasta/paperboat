@@ -52,9 +52,11 @@ type TunnelCreateInput struct {
 }
 
 type TunnelPatchInput struct {
-	Name       *string    `json:"name,omitempty"`
-	AccessMode *string    `json:"access_mode,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	Name       *string `json:"name,omitempty"`
+	AccessMode *string `json:"access_mode,omitempty"`
+	// Subdomain moves the tunnel's public address to <subdomain> under the same base domain; the server validates it.
+	Subdomain *string    `json:"subdomain,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 type TunnelMutation struct {

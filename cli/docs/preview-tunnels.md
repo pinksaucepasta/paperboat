@@ -90,10 +90,14 @@ pb tunnel create api --port 8080 --domain api.example.com --wait --json
 
 A tunnel's public address is generated for you from the name generator (three
 readable words and four digits under the deployment's public base domain, for example
-`calm-summer-beach-3476.pprbt.app`). It is stable for the life of the tunnel and never
+`calm-summer-beach-3476.pprbt.app`). It stays the same until you change it with `pb tunnel address`, and never
 derives from the name you type. The name is only a label: `pb tunnel rename api web-api`
 changes it without touching the address, names need not be unique, and `pb tunnel list`
-and `pb tunnel show` print the address next to the name. A preview's name cannot be
+and `pb tunnel show` print the address next to the name. To pick the address itself,
+run `pb tunnel address api helloworld`: the first label becomes `helloworld` under the
+same base domain, the new address is published first and the old one stops working once every
+edge serves the new one (it stays reserved to the tunnel for a day), a name another tunnel
+uses or a reserved name is refused, and changes are rate limited. A preview's name cannot be
 changed. To serve from your own address, attach a custom domain (below).
 
 Inspect the durable resource and live health:

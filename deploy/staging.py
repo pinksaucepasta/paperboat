@@ -11,6 +11,7 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   seed                 account, paid entitlement and a console session for the staging test account (idempotent)
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
   edge <image>         register and run the managed staging edge (carrier on TCP 18445)
+  edge-b <image>       the same for a second managed edge (carrier on TCP 18455, HTTPS probe port 18456)
   relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside anvit) for the staging account
   reset                new empty database; the regional certificate is kept (Let's Encrypt limits duplicates)
   status | down | logs
@@ -345,11 +346,24 @@ def sealed_credential(credential):
     return (nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)).hex()
 
 
-def edge(image):
+# The second managed staging edge (`edge-b`): another node of the same pool with its own container, state and ports, so
+# a rename can be proved on both edges. The platform wildcard certificate is distributed to every ready managed edge.
+EDGE_B = {"node": "stg_managed_edge_b", "name": "pb-stg-edge-b", "dir": "edge-b", "port": 18455, "quic": 18458, "https": 18456, "http": 18457}
+
+
+def edge(image, second=False):
     """Managed staging edge, authenticated like operatorinfra.MutateNode(enroll).
     Unchanged deployments keep their running process and certificate distribution epoch.
-    Managed ingress uses container port 443; host port 18446 is only for external probes.
+    Managed ingress uses container port 443; host port 18446 (18456 for the second edge) is only for external probes.
     No HTTP/3 (UDP is closed)."""
+    EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = globals()["EDGE_NAME"], globals()["EDGE_DIR"], globals()["EDGE_PORT"], globals()["EDGE_QUIC_PORT"]
+    https_port, http_port, edge_node = 18446, 18447, "stg_managed_edge"
+    # A machine carries to a second edge only in another failure domain (runtimeattachment/service.go).
+    failure_domain = REGION
+    if second:
+        EDGE_NAME, EDGE_DIR, EDGE_PORT, EDGE_QUIC_PORT = EDGE_B["name"], EDGE_B["dir"], EDGE_B["port"], EDGE_B["quic"]
+        https_port, http_port, edge_node = EDGE_B["https"], EDGE_B["http"], EDGE_B["node"]
+        failure_domain = REGION + "-b"
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
     host = f"{REGION}.{domain()}"
@@ -360,7 +374,7 @@ def edge(image):
     raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
     raw_pub = seed.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     cert_pem, key_pem, pin = carrier_certificate(host)
-    node, install = "stg_managed_edge", "stg_managed_pool"
+    node, install = edge_node, "stg_managed_pool"
     credential, usage = secrets.token_urlsafe(32), "managed:" + node
     # Keep the carrier pin and runtime authority stable across edge() reruns.
     existing = remote(f"test -f {EDGE_DIR}/managed && echo yes", check=False).strip() == "yes"
@@ -392,7 +406,7 @@ def edge(image):
             "public_https_cert_file": "/state/pub.crt", "public_https_key_file": "/state/pub.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:443",
-            "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
+            "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": f"0.0.0.0:{http_port}",
             "preview_base_domain": public_base, "tunnel_base_domain": public_base,
             "runtime_base_domain": f"rt.{domain()}",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 2048, "control_interval": 5_000_000_000,
@@ -422,9 +436,9 @@ except (OSError,subprocess.CalledProcessError,KeyError):
         "ON CONFLICT(id) DO UPDATE SET enabled=true")
     sql(f"INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,region,failure_domain,"
         f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},'{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
-        f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],2048,now(),now()+interval '1 hour',decode('{pin}','hex')) "
+        f"'registered','{REGION}','{failure_domain}',ARRAY['edge'],ARRAY['http2','http3'],2048,now(),now()+interval '1 hour',decode('{pin}','hex')) "
         "ON CONFLICT(id) DO UPDATE SET capacity_limit=excluded.capacity_limit,"
-        "carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
+        "failure_domain=excluded.failure_domain,carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
         "carrier_endpoint_quic_port=excluded.carrier_endpoint_quic_port")
     sql(f"INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) "
         f"VALUES('{node}','{REGION}',decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),'{{}}') "
@@ -442,7 +456,7 @@ except (OSError,subprocess.CalledProcessError,KeyError):
         raise SystemExit("staging: expected one staging server Docker network")
     if not unchanged:
         remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
-               f"--network {shell_quote(network)} -p 18446:443 -p 18447:18447 {image} {args}")
+               f"--network {shell_quote(network)} -p {https_port}:443 -p {http_port}:{http_port} {image} {args}")
     networks = json.loads(remote(f"docker inspect -f '{{{{json .NetworkSettings.Networks}}}}' {EDGE_NAME}"))
     if network not in networks:
         remote(f"docker network connect {shell_quote(network)} {EDGE_NAME}")
@@ -515,7 +529,7 @@ def reset():
 
 
 COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "build-edge": (lambda commit: build(commit, "edge"), 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
-            "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
+            "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "edge-b": (lambda image: print(json.dumps(edge(image, True))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 
 if __name__ == "__main__":
