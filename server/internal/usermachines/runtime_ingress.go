@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
-	"net/url"
 	"strings"
 )
 
@@ -16,15 +15,10 @@ func (s *Service) runtimeIngressURL(ctx context.Context, environmentID, publicHo
 	return value, err
 }
 
-// nativeFileTransferEndpoint is the descriptor endpoint a native client streams to: the ingress authority and the
-// receiver's own path. A self-hosted ingress URL carries the edge-only /v1/runtime/<host> prefix, which the
-// receiver would answer with 404 (the edge strips it for browser and relay traffic, never for a native stream).
+// nativeFileTransferEndpoint is the descriptor endpoint a native client streams to: the machine's ingress host and
+// the receiver's own path.
 func nativeFileTransferEndpoint(httpIngressURL string) string {
-	u, err := url.Parse(httpIngressURL)
-	if err != nil {
-		return httpIngressURL + "/v1/file-transfers"
-	}
-	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/v1/file-transfers"}).String()
+	return strings.TrimRight(httpIngressURL, "/") + "/v1/file-transfers"
 }
 
 func runtimeWebsocketBase(httpBase string) string {

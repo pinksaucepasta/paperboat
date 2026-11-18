@@ -368,10 +368,7 @@ func dispatchEndpoint(base string) (string, error) {
 		return "", ErrRouteUnavailable
 	}
 	if parsed.Path != "" && parsed.Path != "/" {
-		logical, ok := strings.CutPrefix(parsed.Path, "/v1/runtime/")
-		if !ok || logical == "" || strings.ContainsAny(logical, "/:@?#") {
-			return "", ErrRouteUnavailable
-		}
+		return "", ErrRouteUnavailable
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/v1/preview-launches"
 	parsed.RawPath = ""

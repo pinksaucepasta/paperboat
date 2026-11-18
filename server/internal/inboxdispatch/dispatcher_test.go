@@ -201,12 +201,12 @@ func TestOfflineMachineAndMalformedRequestsDoNotReachTheNetwork(t *testing.T) {
 	if machine.calls() != 0 {
 		t.Fatalf("machine was called %d times", machine.calls())
 	}
-	for _, base := range []string{"ftp://x", "https://user:pw@host", "https://host?x=1", "https://host/v1/runtime/a/b", "https://host/other"} {
+	for _, base := range []string{"ftp://x", "https://user:pw@host", "https://host?x=1", "https://host/v1/runtime/a/b", "https://host/other", "https://edge.example.test/v1/runtime/host-1"} {
 		if _, err := inboxEndpoint(base, "0123456789abcdef", false); err == nil {
 			t.Errorf("base %q accepted", base)
 		}
 	}
-	if got, err := inboxEndpoint("https://edge.example.test/v1/runtime/host-1", "0123456789abcdef", false); err != nil || got != "https://edge.example.test/v1/runtime/host-1/v1/inbox-files/0123456789abcdef" {
+	if got, err := inboxEndpoint("https://host.example.test", "0123456789abcdef", false); err != nil || got != "https://host.example.test/v1/inbox-files/0123456789abcdef" {
 		t.Fatalf("endpoint = %q %v", got, err)
 	}
 	if _, err := inboxEndpoint("https://host", "../x", false); err == nil {

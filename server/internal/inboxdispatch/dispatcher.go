@@ -358,8 +358,7 @@ type readCloser struct {
 	io.Closer
 }
 
-// inboxEndpoint builds the machine's file URL from its ingress base: the base may be a bare host or
-// the logical runtime path of a self-hosted edge, never anything with credentials or a query.
+// inboxEndpoint builds the machine's file URL from its ingress base: a bare host, never anything with credentials, a path or a query.
 func inboxEndpoint(base, fileID string, collection bool) (string, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(base), "/"))
 	if err != nil {
@@ -369,10 +368,7 @@ func inboxEndpoint(base, fileID string, collection bool) (string, error) {
 		return "", errors.New("machine route is invalid")
 	}
 	if parsed.Path != "" && parsed.Path != "/" {
-		logical, ok := strings.CutPrefix(parsed.Path, "/v1/runtime/")
-		if !ok || logical == "" || strings.ContainsAny(logical, "/:@?#") {
-			return "", errors.New("machine route is invalid")
-		}
+		return "", errors.New("machine route is invalid")
 	}
 	if collection {
 		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/v1/inbox-files"

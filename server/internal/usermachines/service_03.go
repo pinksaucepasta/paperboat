@@ -498,11 +498,7 @@ func machineTerminalEndpoints(wss string) terminalprotocol.TerminalEndpoints {
 	if u.Port() == "" {
 		host += ":443"
 	}
-	endpoint := "wss://" + u.Host + strings.TrimRight(u.Path, "/") + "/v1/runtime"
-	if u.Path != "" {
-		return terminalprotocol.TerminalEndpoints{WSS: endpoint}
-	}
-	return terminalprotocol.TerminalEndpoints{QUIC: "quic://" + host, WSS: endpoint}
+	return terminalprotocol.TerminalEndpoints{QUIC: "quic://" + host, WSS: "wss://" + u.Host + "/v1/runtime"}
 }
 
 func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.CredentialInput, terminalSessionID string, includeFiles bool) (access.CLICredentials, machineCredentialKind, error) {
