@@ -9169,9 +9169,11 @@ export interface components {
                 terminal: {
                     /** @constant */
                     protocol: "paperboat.terminal.v1";
-                    session_id: string;
-                    /** @enum {unknown} */
-                    role: "viewer" | "interactive";
+                    endpoints: {
+                        quic?: string;
+                        /** Format: uri */
+                        wss?: string;
+                    };
                     auth: {
                         /** @constant */
                         method: "bearer";
@@ -9181,6 +9183,8 @@ export interface components {
                         scopes: ("terminal:view" | "terminal:control")[];
                         access_session_id: string;
                     };
+                    session_id: string;
+                    cwd: string;
                 };
             };
         };
@@ -10059,10 +10063,13 @@ export interface components {
             };
             capabilities?: ("terminal" | "file_transfer" | "preview" | "activity")[];
             terminal?: {
-                /** Format: uri */
-                endpoint: string;
-                /** Format: uri */
-                http_endpoint?: string;
+                /** @constant */
+                protocol: "paperboat.terminal.v1";
+                endpoints: {
+                    quic?: string;
+                    /** Format: uri */
+                    wss?: string;
+                };
                 auth: components["schemas"]["TerminalAuth"];
                 session_id: string;
                 cwd: string;
@@ -10081,6 +10088,7 @@ export interface components {
             scopes: [
                 "terminal:operate"
             ];
+            access_session_id?: string;
         } | {
             /** @constant */
             method: "bearer";
@@ -10090,6 +10098,7 @@ export interface components {
             scopes: [
                 "terminal:operate"
             ];
+            access_session_id?: string;
         };
         FileTransfer: {
             /** Format: uri */
