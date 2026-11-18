@@ -15,6 +15,11 @@ type ClientConfiguration struct {
 	CLIVerificationURL    string `json:"cli_verification_url"`
 	MachinesURL           string `json:"machines_url"`
 	ConsoleURL            string `json:"console_url"`
+	// PurchaseConsent is the no-refund wording a buyer accepts before paying, and its version.
+	PurchaseConsent struct {
+		Version string `json:"version"`
+		Text    string `json:"text"`
+	} `json:"purchase_consent"`
 }
 
 func FetchClientConfiguration(ctx context.Context, do func(context.Context, string, string, any, any) error) (ClientConfiguration, error) {

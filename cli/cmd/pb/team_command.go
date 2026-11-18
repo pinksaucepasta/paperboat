@@ -114,7 +114,7 @@ var teamCreatePollInterval = time.Duration(config.DefaultPollIntervalSeconds) * 
 // startPaidTeamCreate reserves the Team and returns the Checkout that pays for
 // its seats. The operation ID is derived from the request, so repeating the same
 // command after a lost response reuses the same order instead of creating another.
-func startPaidTeamCreate(ctx context.Context, client *api.Client, team string, seats int, interval string) (api.TeamCheckout, error) {
+func startPaidTeamCreate(ctx context.Context, client *api.Client, team string, seats int, interval string, acceptTerms bool) (api.TeamCheckout, error) {
 	configuration, err := client.ClientConfiguration(ctx)
 	if err != nil {
 		return api.TeamCheckout{}, err
@@ -123,10 +123,17 @@ func startPaidTeamCreate(ctx context.Context, client *api.Client, team string, s
 	if err != nil || console.Host == "" || console.Scheme != "https" && console.Scheme != "http" {
 		return api.TeamCheckout{}, errors.New("the Paperboat server did not publish its console address; update pb or contact the server operator")
 	}
+	consent := configuration.PurchaseConsent
+	if consent.Version == "" || consent.Text == "" {
+		return api.TeamCheckout{}, errors.New("the Paperboat server did not publish its purchase terms; update pb or contact the server operator")
+	}
+	if !acceptTerms {
+		return api.TeamCheckout{}, commandRejection{reason: commandRejectTermsNotAccepted, detail: consent.Text}
+	}
 	back := console.String() + "/team"
 	sum := sha256.Sum256([]byte(fmt.Sprintf("team-create\x00%s\x00%d\x00%s", team, seats, interval)))
 	operation := "operation_" + hex.EncodeToString(sum[:16])
-	return client.CreateTeam(ctx, api.TeamCreateRequest{OperationID: operation, TeamID: team, Seats: seats, Interval: interval, SuccessURL: back + "?created=" + url.QueryEscape(team), CancelURL: back})
+	return client.CreateTeam(ctx, api.TeamCreateRequest{OperationID: operation, TeamID: team, Seats: seats, Interval: interval, SuccessURL: back + "?created=" + url.QueryEscape(team), CancelURL: back, TermsVersion: consent.Version})
 }
 
 func teamCreateCommand() *cobra.Command {
@@ -142,11 +149,12 @@ func teamCreateCommand() *cobra.Command {
 		if interval != "month" && interval != "year" {
 			return localArgumentError("--interval must be month or year")
 		}
+		acceptTerms, _ := c.Flags().GetBool("accept-terms")
 		client, err := backendForCommand(c)
 		if err != nil {
 			return err
 		}
-		checkout, err := startPaidTeamCreate(c.Context(), client, args[0], seats, interval)
+		checkout, err := startPaidTeamCreate(c.Context(), client, args[0], seats, interval, acceptTerms)
 		if err != nil {
 			return teamCreateFailure(err)
 		}
@@ -170,6 +178,7 @@ func teamCreateCommand() *cobra.Command {
 	}}
 	c.Flags().Int("seats", 1, "seats to buy, including the owner's (1-128)")
 	c.Flags().String("interval", "month", "billing interval: month or year")
+	c.Flags().Bool("accept-terms", false, "agree to the no-refund terms the command prints; required to pay")
 	c.Flags().Bool("no-wait", false, "print the Checkout link and return without waiting for payment")
 	c.Flags().Duration("wait-timeout", 15*time.Minute, "how long to wait for payment before returning")
 	c.Flags().Bool("json", false, "print canonical JSON")

@@ -26,12 +26,15 @@ status. Every change to the team needs the generation printed here.`,
 browser when it can, and then waits until payment completes and the team exists. The owner uses
 one of the seats.
 
+Paying needs your agreement to the no-refund terms: without --accept-terms the command prints
+them and stops. Add --accept-terms to agree and continue.
+
 Use --no-wait to print the link and return. Ctrl+C or --wait-timeout stops only the waiting; the
 team is still created once you pay, and pb team get shows it. Running the same command again
 reuses the same order instead of billing twice.`,
 		Example: `
-  pb team create acme --seats 5
-  pb team create acme --seats 5 --interval year --no-wait
+  pb team create acme --seats 5 --accept-terms
+  pb team create acme --seats 5 --interval year --no-wait --accept-terms
   pb team create acme --json`},
 	"pb team invite": {
 		Long: `Invite a person by email address. They do not need an account yet: they sign in, verify

@@ -448,7 +448,7 @@ func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
 		case "GET /v1/client-configuration":
-			_, _ = w.Write([]byte(`{"data":{"version":"1","machines_url":"https://console.example.test/machines","cli_verification_url":"https://console.example.test/cli","console_url":"https://console.example.test/"}}`))
+			_, _ = w.Write([]byte(`{"data":{"version":"1","machines_url":"https://console.example.test/machines","cli_verification_url":"https://console.example.test/cli","console_url":"https://console.example.test/","purchase_consent":{"version":"2026-11-19","text":"No refunds."}}}`))
 		case "POST /v1/teams":
 			var input map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -481,7 +481,7 @@ func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	writeTestProfile(t, dir, configPath, server.URL)
-	args := []string{"team", "create", "acme", "--seats", "3", "--interval", "year", "--server", server.URL, "--config", configPath}
+	args := []string{"team", "create", "acme", "--seats", "3", "--interval", "year", "--accept-terms", "--server", server.URL, "--config", configPath}
 	var output bytes.Buffer
 	if code := run(t.Context(), args, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%s", code, output.String())
@@ -507,7 +507,7 @@ func TestTeamCreateNamesAReservedTeamAndNoWaitStopsAtCheckout(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/client-configuration":
-			_, _ = w.Write([]byte(`{"data":{"version":"1","machines_url":"https://console.example.test/machines","cli_verification_url":"https://console.example.test/cli","console_url":"https://console.example.test"}}`))
+			_, _ = w.Write([]byte(`{"data":{"version":"1","machines_url":"https://console.example.test/machines","cli_verification_url":"https://console.example.test/cli","console_url":"https://console.example.test","purchase_consent":{"version":"2026-11-19","text":"No refunds."}}}`))
 		case "/v1/teams":
 			if reserved {
 				w.WriteHeader(409)
@@ -526,7 +526,7 @@ func TestTeamCreateNamesAReservedTeamAndNoWaitStopsAtCheckout(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	writeTestProfile(t, dir, configPath, server.URL)
-	base := []string{"team", "create", "acme", "--no-wait", "--server", server.URL, "--config", configPath}
+	base := []string{"team", "create", "acme", "--no-wait", "--accept-terms", "--server", server.URL, "--config", configPath}
 	var output bytes.Buffer
 	if code := run(t.Context(), append(base, "--json"), &output, &output); code != 0 || !strings.Contains(output.String(), `"state":"awaiting_payment"`) || !strings.Contains(output.String(), "pay_2") {
 		t.Fatalf("no-wait exit=%d output=%s", code, output.String())

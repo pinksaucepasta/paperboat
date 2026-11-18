@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
 )
 
 func TestTopupHTTPRequiresIntegerQuantity(t *testing.T) {
@@ -21,7 +22,7 @@ func TestTopupHTTPRequiresIntegerQuantity(t *testing.T) {
 		{"missing", "", 400}, {"zero", `,"quantity":0`, 400}, {"negative", `,"quantity":-1`, 400}, {"fraction", `,"quantity":1.5`, 400}, {"above-max", `,"quantity":101`, 400}, {"integer", `,"quantity":3`, 503},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := `{"product_code":"topup","product_version":1,"success_url":"https://dashboard.example.test/billing?done=1","cancel_url":"https://dashboard.example.test/billing"` + tc.quantity + `}`
+			body := `{"product_code":"topup","product_version":1,"success_url":"https://dashboard.example.test/billing?done=1","cancel_url":"https://dashboard.example.test/billing","terms_version":"` + legalconsent.Version + `"` + tc.quantity + `}`
 			r := httptest.NewRequest(http.MethodPost, "/v1/billing/workspaces/personal/topups", strings.NewReader(body))
 			r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_fixture"}}))
 			r.Header.Set("Idempotency-Key", "op_fixture")
@@ -32,5 +33,22 @@ func TestTopupHTTPRequiresIntegerQuantity(t *testing.T) {
 				t.Fatalf("quantity HTTP status=%d want=%d", w.Code, tc.want)
 			}
 		})
+	}
+}
+
+// A purchase without the current no-refund consent is refused before anything reaches billing.
+func TestTopupHTTPRefusesWithoutConsent(t *testing.T) {
+	handler := workspaceBillingMutation(billing.NewWorkspaceService(nil, nil, ""), []string{"https://dashboard.example.test"}, false)
+	for _, terms := range []string{``, `,"terms_version":"2020-01-01"`} {
+		body := `{"product_code":"topup","product_version":1,"quantity":3,"success_url":"https://dashboard.example.test/billing?done=1","cancel_url":"https://dashboard.example.test/billing"` + terms + `}`
+		r := httptest.NewRequest(http.MethodPost, "/v1/billing/workspaces/personal/topups", strings.NewReader(body))
+		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "usr_fixture"}}))
+		r.Header.Set("Idempotency-Key", "op_fixture")
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 400 || !strings.Contains(w.Body.String(), "terms_consent_required") {
+			t.Fatalf("terms %q: %d %s", terms, w.Code, w.Body.String())
+		}
 	}
 }
