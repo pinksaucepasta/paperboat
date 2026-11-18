@@ -157,7 +157,7 @@ func run(args []string) error {
 		version := fs.String("version", "", "self-host release version")
 		artifacts := fs.String("artifacts", "", "directory holding paperboat-selfhost-linux-{amd64,arm64}.tar.gz")
 		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *repo == "" || *version == "" || *artifacts == "" {
-			return errors.New("usage: paperboat-tuf add-selfhost -repository DIR -version VERSION -artifacts DIR")
+			return errors.New("usage: paperboat-tuf add-selfhost -repository DIR -version VERSION -artifacts DIR (bytes are served from the GitHub release selfhost-VERSION)")
 		}
 		return addSelfhost(*repo, *version, *artifacts)
 	case "status":
