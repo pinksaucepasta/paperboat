@@ -69,7 +69,10 @@ for _ in \$(seq 20); do f=\$(find \"\$i\" -name '$marker.txt' -print -quit); [ -
 cat \"\$f\"; rm -f \"\$f\"" >"$tmp/got" && want
 }
 send_ab() { send_dir A B "$a" "$b"; }
-send_ba() { send_dir B A "$b" "$a"; }
+send_ba() { # B sends a file to A and A's daemon must acknowledge delivery (the host that runs B has no access to A's Inbox)
+  on B "echo $marker >/tmp/$marker.txt && $pb send /tmp/$marker.txt --to $a; rc=\$?; rm -f /tmp/$marker.txt; exit \$rc" >"$tmp/got" 2>&1 && grep -q "delivered to" "$tmp/got" ||
+    { echo "no delivery acknowledgement from $a: $(tail -c 150 "$tmp/got")" >&2; return 1; }
+}
 ssh_ba() { on B "$pb ssh $a -- echo $marker" >"$tmp/got" && want; }
 api_auth() { # X peer: an authenticated read of the account's machines from machine X must list the other canary machine
   on "$1" "$pb machine list --json" >"$tmp/got" 2>"$tmp/execerr" || { tail -c 200 "$tmp/execerr" >&2; return 1; }
