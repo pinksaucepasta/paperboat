@@ -411,6 +411,10 @@ func TestResealStageMovesEverySealedValueToTheNewestKeyAndReportsUnreadableRows(
 		t.Fatal(err)
 	}
 	w.exec(`INSERT INTO paperboat.operator_totp(operator_id,secret_cipher,confirmed_at) VALUES ($1,$2,now())`, totpOwner, sealed)
+	// Everything stored before this build is in main's layout (nonce, sealed value: no key id): dropping the 12-byte
+	// stamp of a value sealed by the old key gives exactly that layout.
+	legacyOwner := w.operator("legacy")
+	w.exec(`INSERT INTO paperboat.operator_totp(operator_id,secret_cipher,confirmed_at) VALUES ($1,$2,now())`, legacyOwner, sealed[12:])
 	w.exec(`INSERT INTO paperboat.operator_totp(operator_id,secret_cipher,confirmed_at) VALUES ($1,$2,now())`, broken, bytes.Repeat([]byte{9}, 64))
 	w.clock = w.clock.Add(time.Minute)
 	w.fetching = []machine{m}
@@ -425,9 +429,15 @@ func TestResealStageMovesEverySealedValueToTheNewestKeyAndReportsUnreadableRows(
 	if n := detailInt(stageOf(run, StageReseal).Detail, "undecryptable"); n < 1 {
 		t.Fatalf("the unreadable row must be reported, got %d", n)
 	}
-	var cipher []byte
+	var cipher, legacy []byte
 	if err := w.store.SQL().QueryRowContext(context.Background(), `SELECT secret_cipher FROM paperboat.operator_totp WHERE operator_id=$1`, totpOwner).Scan(&cipher); err != nil {
 		t.Fatal(err)
+	}
+	if err := w.store.SQL().QueryRowContext(context.Background(), `SELECT secret_cipher FROM paperboat.operator_totp WHERE operator_id=$1`, legacyOwner).Scan(&legacy); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := secrets.Decrypt(newKey, legacy); secrets.NeedsReseal(ring, legacy) || err != nil || got != "JBSWY3DPEHPK3PXP" {
+		t.Fatalf("a value in main's layout must be re-sealed to the newest key: %q %v", got, err)
 	}
 	if secrets.NeedsReseal(ring, cipher) {
 		t.Fatal("the TOTP secret is still under the old key")
