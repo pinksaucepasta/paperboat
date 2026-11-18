@@ -155,6 +155,11 @@ func (s *WorkspaceService) materializePaidTeam(ctx context.Context, event Stripe
 		if err := teams.AuditTx(ctx, tx, actor, req.Input.TeamID, "create", key, nil); err != nil {
 			return err
 		}
+		if req.TrialDays > 0 {
+			if err := s.noticeTeamTrialStartedTx(ctx, tx, actor, key, req, sub); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, `UPDATE billing_team_orders SET state='paid',provider_session_id=$2,updated_at=now() WHERE operation_id=$1`, key, id); err != nil {
 			return err
 		}
