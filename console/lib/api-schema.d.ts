@@ -9311,6 +9311,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/selfhost/installations/{installationID}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the node to update to the newest self-host release at its next check-in */
+        post: operations["post_v1_selfhost_installations_installation_id_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/selfhost/installations/{installationID}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask a global node to update to the newest self-host release at its next check-in
+         * @description Separate operator identity and staff role are required. Scope is forced global; ordinary account roles never authorize this route.
+         */
+        post: operations["admin_post_selfhost_installation_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/selfhost/update/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** pbh check-in: report its release and learn a requested update */
+        post: operations["selfhost_update_check"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/selfhost/update/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** pbh reports one step of its running update */
+        post: operations["selfhost_update_report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9595,6 +9666,8 @@ export interface components {
             update_available?: string;
             /** @description Present when the node is below its component's update floor: why, and how to update. */
             update_required?: string;
+            /** @description The node's latest update request; absent when Update was never pressed. */
+            update?: components["schemas"]["SelfhostUpdateStatus"];
         };
         SelfhostPolicy: {
             /**
@@ -14872,6 +14945,17 @@ export interface components {
         AdminClientUpdatePolicy: components["schemas"]["ClientUpdatePolicy"] & {
             /** @description Newest release published for every platform of this component. */
             latest_version?: string;
+        };
+        SelfhostUpdateStatus: {
+            id: string;
+            target_version: string;
+            /** @enum {string} */
+            state: "requested" | "downloading" | "verifying" | "swapping" | "checking" | "succeeded" | "rolled_back" | "failed";
+            /** @description The step's detail; for rolled_back and failed, the exact reason. */
+            detail?: string;
+            support_reference?: string;
+            /** Format: date-time */
+            updated_at: string;
         };
     };
     responses: {
@@ -37357,6 +37441,137 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    post_v1_selfhost_installations_installation_id_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installationID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The update request in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostUpdateStatus"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    admin_post_selfhost_installation_update: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Exact address for enrollment or installation ID for deletion. */
+                "Operator-Target": string;
+                /** @description Opaque audit reason reference. */
+                "Operator-Reason": string;
+                /** @description Stable key for retrying the exact mutation. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                installationID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The update request in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostUpdateStatus"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    selfhost_update_check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The update request in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            update?: components["schemas"]["SelfhostUpdateStatus"];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            426: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    selfhost_update_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id: string;
+                    state: string;
+                    detail?: string;
+                    support_reference?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

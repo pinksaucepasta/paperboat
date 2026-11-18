@@ -2572,6 +2572,18 @@ type SelfhostPoolPolicy struct {
 	InstallationIds []string
 }
 
+type SelfhostUpdateRequest struct {
+	NodeID           string
+	ID               string
+	TargetVersion    string
+	RequestedBy      string
+	State            string
+	Detail           string
+	SupportReference string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type Session struct {
 	ID                           string
 	UserID                       string
