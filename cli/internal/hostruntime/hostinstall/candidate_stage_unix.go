@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,8 +22,6 @@ const candidateOutputLimit = 16 << 10
 // cappedBuffer collects at most renderOutputLimit bytes: a runaway candidate fails its write instead of
 // exhausting the root helper's memory.
 type cappedBuffer struct{ bytes.Buffer }
-
-var errCandidateReportTooLarge = errors.New("the new version's report is too large")
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > renderOutputLimit {
@@ -75,7 +72,7 @@ func stageCandidateWith(ctx context.Context, pin string, request Request, carrie
 	}
 	var staged StagedCandidate
 	// The candidate's report is another build's output: unknown fields are ignored.
-	if err := json.NewDecoder(io.LimitReader(bytes.NewReader(out), candidateOutputLimit)).Decode(&staged); err != nil {
+	if err := decodeBounded(out, candidateOutputLimit, &staged); err != nil {
 		return StagedCandidate{}, errors.Join(ErrInvalidRequest, err)
 	}
 	return staged, nil
@@ -166,10 +163,10 @@ func renderCandidateWith(ctx context.Context, executable string, request Request
 		return CandidateRender{}, hostInstallFailure("the new version could not render its own services", err)
 	}
 	var render CandidateRender
-	if err := json.NewDecoder(io.LimitReader(bytes.NewReader(out), renderOutputLimit)).Decode(&render); err != nil {
+	if err := decodeBounded(out, renderOutputLimit, &render); err != nil {
 		return CandidateRender{}, errors.Join(ErrInvalidRequest, err)
 	}
-	if len(render.Guard) == 0 || !request.EnrollmentPending && (len(render.Hostd) == 0 || len(render.HostdPending) == 0 || len(render.Updater) == 0 || len(render.Host) == 0 || len(render.Carrier) == 0) {
+	if len(render.Guard) == 0 || (!request.EnrollmentPending && (len(render.Hostd) == 0 || len(render.HostdPending) == 0 || len(render.Updater) == 0 || len(render.Host) == 0 || len(render.Carrier) == 0)) {
 		return CandidateRender{}, ErrInvalidRequest
 	}
 	return render, nil

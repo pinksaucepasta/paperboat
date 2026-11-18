@@ -262,6 +262,10 @@ func activateCarrierGeneration(c CarrierConfig) error {
 	if written.Instance != c.Instance || written.Generation != c.Generation || written.Source != c.Source {
 		return ErrInvalidRequest
 	}
+	// Activation is the commit point: the pin the descriptor names is checked again, not trusted from staging.
+	if err := written.Source.Verify(written.Executable); err != nil {
+		return err
+	}
 	return atomicfile.Write(carrierConfigPath(c.Instance), body, atomicfile.Options{Mode: 0640, OwnerUID: 0, OwnerGID: c.GID})
 }
 

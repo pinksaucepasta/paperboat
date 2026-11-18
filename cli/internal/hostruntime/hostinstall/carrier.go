@@ -331,7 +331,9 @@ const carrierDescriptorLimit = 32 << 10
 
 func decodeCarrier(body []byte) (CarrierConfig, error) {
 	var c CarrierConfig
-	err := decodeInstallJSON(strings.NewReader(string(body)), &c, carrierDescriptorLimit)
+	// Another build wrote this descriptor (the candidate's, read by the build that stages it): unknown fields are
+	// ignored, and Validate still checks every value this build understands.
+	err := decodeBounded(body, carrierDescriptorLimit, &c)
 	return c, err
 }
 

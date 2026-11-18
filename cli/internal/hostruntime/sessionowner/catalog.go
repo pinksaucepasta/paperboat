@@ -429,11 +429,12 @@ func verifyRetiredDeclaration(installer *service.Installer, d Descriptor) (bool,
 	}
 	// Custody and identity, not this build's render: a retiree's unit is an earlier
 	// build's render, so comparing it refused retirement whenever a release changed the
-	// unit. The generation is in the unit's arguments on every platform.
+	// unit. The unit must still carry the owner's --generation argument (every platform renders it); the path
+	// already binds the instance. This is identity for a disable/uninstall, never a decision to execute.
 	if err := validateRetiredDeclaration(path, info, d); err != nil {
 		return false, err
 	}
-	if err := installer.VerifyDefinitionNames(d.Generation); err != nil {
+	if err := installer.VerifyDefinitionNames("--generation", d.Generation); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -291,3 +291,23 @@ func (e *SuppliedExecutableError) Error() string {
 	return "the executable " + e.Path + " " + e.Reason + "; " + e.Fix + ", then run `pb install` again"
 }
 func (e *SuppliedExecutableError) Is(target error) bool { return target == ErrInvalidRequest }
+
+var errCandidateReportTooLarge = errors.New("the new version's report is too large")
+
+var errReportTrailing = errors.New("the report holds more than one value")
+
+// decodeBounded decodes the one JSON value in body, which must fit maximum bytes, ignoring unknown fields: the
+// value is another build's output. A value cut at the limit or followed by anything else is refused.
+func decodeBounded(body []byte, maximum int, target any) error {
+	if len(body) > maximum {
+		return errCandidateReportTooLarge
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return errReportTrailing
+	}
+	return nil
+}
