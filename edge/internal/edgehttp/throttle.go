@@ -82,3 +82,25 @@ func (t *Throttles) Wait(ctx context.Context, hostname string, n int) error {
 	}
 	return nil
 }
+
+// Reserve takes n bytes of hostname's traffic from its workspace's bucket and returns how long the caller should wait before
+// sending them (zero when the workspace is not throttled). The tokens are taken at once: a caller that sends early anyway leaves
+// the workspace in debt, which later traffic repays.
+func (t *Throttles) Reserve(hostname string, n int) time.Duration {
+	now := time.Now()
+	limiter, ok := t.pacer(hostname, now)
+	if !ok {
+		return 0
+	}
+	var delay time.Duration
+	for n > 0 {
+		chunk := min(n, limiter.Burst())
+		delay = max(delay, limiter.ReserveN(now, chunk).DelayFrom(now))
+		n -= chunk
+	}
+	return delay
+}
+
+// Charge counts n bytes of hostname's traffic against its workspace's bucket without waiting: interactive frames pass at once
+// and their bytes are repaid by the bulk traffic behind them.
+func (t *Throttles) Charge(hostname string, n int) { _ = t.Reserve(hostname, n) }

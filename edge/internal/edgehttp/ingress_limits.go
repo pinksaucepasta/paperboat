@@ -134,6 +134,14 @@ func (r *DataCarrierRouteRegistry) AcquireIngress(ctx context.Context, decision 
 	return r.ingressLimits.acquire(decision, r.usage), nil
 }
 
+// Throttles is the registry's throttle state, shared with the browser terminal bridge.
+func (r *DataCarrierRouteRegistry) Throttles() *Throttles {
+	if r == nil || r.ingressLimits == nil {
+		return nil
+	}
+	return r.ingressLimits.Throttles
+}
+
 // SetThrottled makes the registry's ingress carry the listed workspaces' traffic at the throttled rate.
 func (r *DataCarrierRouteRegistry) SetThrottled(entries []connectorprotocol.IngressThrottle) {
 	if r != nil && r.ingressLimits != nil {
