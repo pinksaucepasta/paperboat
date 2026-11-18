@@ -45,6 +45,9 @@ func normalizeEndpoints(reported []string) ([]string, error) {
 // endpointPublishInterval is how often an identity's delivered endpoints may change: a set reported inside it is
 // held back until the interval has passed since the last publication and then published by the server itself
 // (PublishDueEndpoints), so a flapping NAT publishes peer_network at most once per interval and the latest set wins.
+// An identity whose delivered set is empty has nothing to protect: its next set is published at once. A carrier
+// restarted by an update reports an empty set first (its engine has found no candidate yet) and its real set a moment
+// later; held back, that set left every peer without a direct path to it for the whole interval.
 const endpointPublishInterval = time.Minute
 
 // endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump): it
@@ -61,7 +64,7 @@ const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_gen
 
 const (
 	endpointsDiffer = `coalesce($4::text[],endpoints,'{}') IS DISTINCT FROM coalesce(published_endpoints,'{}')`
-	endpointsOpen   = `(endpoints_published_at IS NULL OR endpoints_published_at<=$1::timestamptz-make_interval(secs=>$5))`
+	endpointsOpen   = `(endpoints_published_at IS NULL OR coalesce(published_endpoints,'{}')='{}' OR endpoints_published_at<=$1::timestamptz-make_interval(secs=>$5))`
 )
 
 // dueEndpointsBatch bounds one PublishDueEndpoints statement.

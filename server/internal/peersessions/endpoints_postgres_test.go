@@ -258,3 +258,36 @@ func TestPeerEndpointsReachEveryRecipientCoalescedOnPostgres(t *testing.T) {
 		t.Fatalf("after the candidates vanished: delivered %v, topic moves %d", got[peer], f.topic(t)-flapped)
 	}
 }
+
+// A carrier replaced by an update reports an empty candidate set first (its engine has found none yet) and its real set a
+// moment later. The empty set is delivered, so the real one must follow at once: held back for the interval, every peer
+// (this machine's own daemon included) had no direct path to it for a minute after every update.
+func TestEndpointsAfterAnEmptyDeliveredSetAreDeliveredAtOnceOnPostgres(t *testing.T) {
+	f := newEndpointsFixture(t)
+	peer := f.account + "_m_1"
+	clock := time.Now().UTC()
+	f.service.now = func() time.Time { return clock }
+
+	f.configure(t, "before_update", 1, []string{"203.0.113.7:41641"})
+	f.configure(t, "peer_sees_it", 0, nil)
+	clock = clock.Add(endpointPublishInterval + time.Second)
+	f.configure(t, "carrier_restarted", 1, []string{})
+	f.configure(t, "peer_sees_empty", 0, nil)
+	if got, _ := f.peerEndpoints(t); len(got[peer]) != 0 {
+		t.Fatalf("the empty set was not delivered: %v", got[peer])
+	}
+	// The real set arrives two seconds later, inside the interval of the empty set's publication.
+	clock = clock.Add(2 * time.Second)
+	f.configure(t, "carrier_serving", 1, []string{"203.0.113.7:42000"})
+	f.configure(t, "peer_sees_new", 0, nil)
+	if got, _ := f.peerEndpoints(t); fmt.Sprint(got[peer]) != "[203.0.113.7:42000]" {
+		t.Fatalf("the set after an empty one was held back: delivered %v, want [203.0.113.7:42000]", got[peer])
+	}
+	// A set that changes again inside the interval is still held back: the flapping guard is unchanged.
+	clock = clock.Add(2 * time.Second)
+	f.configure(t, "flap", 1, []string{"203.0.113.7:42001"})
+	f.configure(t, "peer_after_flap", 0, nil)
+	if got, _ := f.peerEndpoints(t); fmt.Sprint(got[peer]) != "[203.0.113.7:42000]" {
+		t.Fatalf("a non-empty change inside the interval was delivered: %v", got[peer])
+	}
+}
