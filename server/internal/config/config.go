@@ -51,10 +51,13 @@ type Reporting struct {
 	IssueURL           string        `json:"issue_url"`
 }
 
-// Analytics locates the PostHog project the operator panel reads (never the capture keys the sites use).
+// Analytics locates the PostHog project the operator panel reads, and where the server captures its own events:
+// the capture host (the ingestion origin) and the project's public capture key, both or neither.
 type Analytics struct {
-	PostHogHost      string `json:"posthog_host"`
-	PostHogProjectID string `json:"posthog_project_id"`
+	PostHogHost        string `json:"posthog_host"`
+	PostHogProjectID   string `json:"posthog_project_id"`
+	PostHogCaptureHost string `json:"posthog_capture_host"`
+	PostHogCaptureKey  string `json:"posthog_capture_key"`
 }
 
 type Config struct {

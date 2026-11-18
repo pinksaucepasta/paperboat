@@ -57,3 +57,24 @@ func TestPostHogAnalyticsConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestPostHogCaptureConfig(t *testing.T) {
+	load := func(env map[string]string) (Config, error) {
+		c := Default()
+		err := overlayEnv(&c, func(n string) (string, bool) { v, ok := env[n]; return v, ok }, os.ReadFile)
+		return c, err
+	}
+	for name, env := range map[string]map[string]string{
+		"host without key": {"PAPERBOAT_POSTHOG_CAPTURE_HOST": "https://ingest.example.test"},
+		"key without host": {"PAPERBOAT_POSTHOG_CAPTURE_KEY": "phc_public"},
+		"plain http":       {"PAPERBOAT_POSTHOG_CAPTURE_HOST": "http://ingest.example.test", "PAPERBOAT_POSTHOG_CAPTURE_KEY": "phc_public"},
+	} {
+		if c, err := load(env); err != nil || c.validateOperatorIntegrations() == nil {
+			t.Errorf("%s: accepted (%v)", name, err)
+		}
+	}
+	c, err := load(map[string]string{"PAPERBOAT_POSTHOG_CAPTURE_HOST": "https://ingest.example.test", "PAPERBOAT_POSTHOG_CAPTURE_KEY": "phc_public"})
+	if err != nil || c.validateOperatorIntegrations() != nil || c.Analytics.PostHogCaptureKey != "phc_public" {
+		t.Fatalf("a capture host and key together are valid: %v", err)
+	}
+}

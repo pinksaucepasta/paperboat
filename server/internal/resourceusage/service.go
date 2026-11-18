@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
@@ -106,6 +107,8 @@ type Service struct {
 	Now   func() time.Time
 	// Debiter is optional: without it native usage is history only.
 	Debiter BandwidthDebiter
+	// Analytics is optional (nil: off): first uses of a feature go to product analytics.
+	Analytics *posthogcapture.Client
 }
 
 func New(store *db.DB) *Service { return &Service{Store: store} }

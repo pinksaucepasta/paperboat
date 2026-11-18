@@ -51,15 +51,22 @@ func (c Config) validateOperatorIntegrations() error {
 // validateAnalytics: the PostHog read integration is all or nothing, over HTTPS, with a numeric project id.
 func (c Config) validateAnalytics() error {
 	a, key := c.Analytics, c.Secrets.PostHogPersonalKey
+	if (a.PostHogCaptureHost == "") != (a.PostHogCaptureKey == "") || a.PostHogCaptureHost != "" && !httpsOrigin(a.PostHogCaptureHost) || strings.ContainsAny(a.PostHogCaptureKey, " \t\r\n") {
+		return errors.New("PostHog capture needs an HTTPS origin and the project's capture key together")
+	}
 	if a.PostHogHost == "" && a.PostHogProjectID == "" && key == "" {
 		return nil
 	}
-	u, err := url.Parse(a.PostHogHost)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" ||
+	if !httpsOrigin(a.PostHogHost) ||
 		!analyticsProjectID.MatchString(a.PostHogProjectID) || len(key) < 1 || len(key) > 512 || strings.ContainsAny(key, " \t\r\n") {
 		return errors.New("PostHog analytics needs an HTTPS origin, a numeric project id (or @current) and a personal API key together")
 	}
 	return nil
+}
+
+func httpsOrigin(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && (u.Path == "" || u.Path == "/")
 }
 
 // A numeric project id, or @current: PostHog resolves it to the one project a project-scoped personal key belongs to.

@@ -64,6 +64,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 	"github.com/pinksaucepasta/paperboat/server/internal/posthogquery"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdispatch"
@@ -695,6 +696,9 @@ func New(opts Options) (*App, error) {
 	}
 	operatorService.SetNodeCapacity(opts.Config.NodeCapacity)
 	resourceUsageService := resourceusage.New(store)
+	// Product analytics: off unless a capture host and key are configured; never blocks a request.
+	analyticsCapture := posthogcapture.New(posthogcapture.Config{Host: opts.Config.Analytics.PostHogCaptureHost, Key: opts.Config.Analytics.PostHogCaptureKey})
+	resourceUsageService.Analytics = analyticsCapture
 	resourceUsageService.Debiter = workspaceBilling
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
 	teamBuckets := teambucket.New(store, opts.Config.Secrets.EncryptionKey)
@@ -864,6 +868,9 @@ func New(opts Options) (*App, error) {
 		}
 	}
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_workspace_domains", workspaceDomainWorker.Worker(opts.Config.TerminalSessions.WorkerInterval, 50), progress))
+	if analyticsCapture != nil {
+		serverWorkers = append(serverWorkers, analyticsCapture.Run, func(ctx context.Context) error { return posthogcapture.Tail(ctx, analyticsCapture, store.Pool()) })
+	}
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_recipe_machines", periodicPreviewTunnelWorker(time.Minute, recipeService.CollectMachines), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)

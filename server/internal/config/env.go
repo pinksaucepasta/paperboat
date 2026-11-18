@@ -105,6 +105,8 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	}
 	setString("PAPERBOAT_POSTHOG_HOST", &c.Analytics.PostHogHost)
 	setString("PAPERBOAT_POSTHOG_PROJECT_ID", &c.Analytics.PostHogProjectID)
+	setString("PAPERBOAT_POSTHOG_CAPTURE_HOST", &c.Analytics.PostHogCaptureHost)
+	setString("PAPERBOAT_POSTHOG_CAPTURE_KEY", &c.Analytics.PostHogCaptureKey)
 	if err := setSecret("PAPERBOAT_POSTHOG_PERSONAL_API_KEY", &c.Secrets.PostHogPersonalKey); err != nil {
 		return err
 	}

@@ -15,7 +15,12 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 )
+
+// usageFeatures are the consumers whose first use the product analytics counts (feature_used), by the name the
+// admin adoption view shows. A nil Analytics client ignores them.
+var usageFeatures = map[string]string{peerconsumer.Terminal: "terminal", peerconsumer.Exec: "exec", peerconsumer.FileTransfer: "transfer"}
 
 var ErrDenied = errors.New("usage reporting authority unavailable")
 
@@ -176,6 +181,9 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 				return fmt.Errorf("persist native usage: %w", err)
 			}
 			receipt.Accepted++
+			if feature := usageFeatures[r.Consumer]; feature != "" && actor.Valid {
+				s.Analytics.CaptureDaily(posthogcapture.Event{Name: "feature_used", Distinct: actor.String, Props: map[string]string{"feature": feature}})
+			}
 		}
 		if err := recordNativeReportingStatus(ctx, tx, machine, generation, batch, len(receipt.RejectedIndices), now); err != nil {
 			return err
