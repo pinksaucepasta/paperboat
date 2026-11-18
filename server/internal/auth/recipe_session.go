@@ -61,6 +61,9 @@ func (s *DeviceService) StartRecipeSession(ctx context.Context, in RecipeSession
 	if in.Label == "" || len(in.Label) > s.cfg.MaxClientLabelLength || strings.TrimSpace(in.OS) == "" || !slices.Contains([]string{"desktop", "server", "container"}, in.DeviceType) {
 		return RecipeSession{}, &DeviceError{Code: "validation_failed"}
 	}
+	if err := s.checkNetwork(ctx, audit.ClientFrom(ctx).IP); err != nil {
+		return RecipeSession{}, err
+	}
 	if err := planlimits.AllowSDKRequest(in.TokenID, in.TokenID, "sessions"); err != nil {
 		return RecipeSession{}, err
 	}

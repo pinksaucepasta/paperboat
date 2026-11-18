@@ -8,6 +8,7 @@ import {
   RocketLaunchIcon,
   LaptopIcon,
   LifebuoyIcon,
+  ProhibitIcon,
   BugIcon,
   DatabaseIcon,
   WarningIcon,
@@ -37,6 +38,7 @@ export const sections: Section[] = [
   { href: "/infrastructure", title: "Servers", icon: HardDrivesIcon, roles: ["admin", "operations"] },
   { href: "/billing", title: "Billing", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
+  { href: "/ip-blocks", title: "IP blocks", icon: ProhibitIcon, roles: ["admin"] },
   { href: "/operators", title: "Operators", icon: UserGearIcon, roles: ["admin"] },
   { href: "/audit", title: "Audit log", icon: ClockCounterClockwiseIcon, roles: ["admin"] },
 ]
@@ -48,7 +50,7 @@ const groups: { label?: string; hrefs: Section["href"][] }[] = [
   { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
   { label: "Support", hrefs: ["/support", "/sentry", "/abuse"] },
   { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/backups", "/releases"] },
-  { label: "Admin", hrefs: ["/operators", "/audit"] },
+  { label: "Admin", hrefs: ["/ip-blocks", "/operators", "/audit"] },
 ]
 
 /** The sidebar's groups, each holding only the pages this role can open. */

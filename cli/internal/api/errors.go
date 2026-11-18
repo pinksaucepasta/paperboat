@@ -194,6 +194,7 @@ var publicAPIMessages = map[string]string{
 	"clock_skew":                      "This computer's clock is off by more than a minute. Paperboat corrects for it and retries. Turn on automatic time (NTP) in the system settings; a clock set back by minutes can keep other machines from connecting to this one until it catches up.",
 	"update_required":                 "This Paperboat version is no longer supported. Run `pb update` to continue.",
 	"access_denied":                   "Access was denied. Sign in with an authorized account.",
+	"ip_blocked":                      "Sign-in from this network is blocked. Contact Paperboat support and quote the reference shown with this error.",
 	"authorization_pending":           "Authorization is pending. Complete sign-in in the browser.",
 	"account_deletion_console_only":   "Deleting an account is done in the Paperboat console. Run `pb account delete` for the link.",
 	"team_limit":                      "Team capacity reached. Remove an entry the team no longer uses, then retry.",

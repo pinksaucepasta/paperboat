@@ -202,3 +202,32 @@ func TestSubscriptionCancelScheduledByPortalCancelAtIsReflected(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPStripeClientSchedulesCancellationAtPeriodEnd(t *testing.T) {
+	var forms []url.Values
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		forms, paths = append(forms, r.PostForm), append(paths, r.Method+" "+r.URL.Path)
+		if r.URL.Path == "/v1/subscriptions/sub_gone" {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":{"type":"invalid_request_error","code":"resource_missing","message":"No such subscription"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"sub_team","livemode":false,"cancel_at_period_end":true}`)
+	}))
+	defer srv.Close()
+	client := HTTPStripeClient{BaseURL: srv.URL, APIKey: "sk_test_secret", Client: srv.Client()}
+	if err := client.ScheduleCancelAtPeriodEnd(context.Background(), "sub_team"); err != nil {
+		t.Fatal(err)
+	}
+	if paths[0] != "POST /v1/subscriptions/sub_team" || forms[0].Get("cancel_at_period_end") != "true" || len(forms[0]) != 1 {
+		t.Fatalf("request %v %v", paths, forms)
+	}
+	if err := client.ScheduleCancelAtPeriodEnd(context.Background(), "sub_gone"); err != nil {
+		t.Fatalf("a subscription Stripe no longer has is already ended: %v", err)
+	}
+}

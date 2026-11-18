@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { DataTable } from "@/components/data-table"
+import { BanState } from "@/components/ban-state"
 import { Filters, Mono, SearchBox, StatusBadge } from "@/components/filters"
 import { Page } from "@/components/page"
 import type { Data } from "@/lib/api"
@@ -17,7 +18,7 @@ export default function TeamsPage() {
     <Page title="Teams">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="Search teams" placeholder="Team or owner id" value={q} onChange={setQ} />
-        <Filters items={[{ label: "Suspension", value: suspended, onChange: setSuspended, options: [["false", "Not suspended"], ["true", "Suspended"]] }]} />
+        <Filters items={[{ label: "Ban", value: suspended, onChange: setSuspended, options: [["false", "Not banned"], ["true", "Banned"]] }]} />
       </div>
       <DataTable
         what="teams"
@@ -28,7 +29,7 @@ export default function TeamsPage() {
         columns={[
           { header: "Team", cell: (t) => <Link className="font-medium underline-offset-2 hover:underline" href={`/teams/${encodeURIComponent(t.id)}`}><Mono>{t.id}</Mono></Link> },
           { header: "Owner", className: "hidden md:table-cell", cell: (t) => <Link className="font-medium underline-offset-2 hover:underline" href={`/users/${encodeURIComponent(t.owner_account)}`}><Mono>{t.owner_account}</Mono></Link> },
-          { header: "Status", cell: (t) => <StatusBadge state={t.suspended ? "suspended" : "active"} /> },
+          { header: "Status", cell: (t) => <BanState banned={t.suspended} state="active" reason={t.ban_reason} /> },
           { header: "Billing", className: "hidden md:table-cell", cell: (t) => (t.billing_state ? <StatusBadge state={t.billing_state} /> : "—") },
         ]}
       />

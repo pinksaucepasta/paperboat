@@ -45,6 +45,12 @@ type Input struct {
 	Amount      int64  `json:"amount,omitempty"`
 	EndsAt      string `json:"ends_at,omitempty"`
 	GrantID     string `json:"grant_id,omitempty"`
+	// IP blocks: ip_block_add takes CIDR (an address or range) and an optional EndsAt.
+	CIDR string `json:"cidr,omitempty"`
+	// Subscriptions and BlockIPs only ride an account_ban: what happens to the account's paid subscriptions (keep, period_end
+	// or immediate; empty keeps them) and the networks to block along with it.
+	Subscriptions string   `json:"subscriptions,omitempty"`
+	BlockIPs      []string `json:"block_ips,omitempty"`
 }
 type Result struct {
 	ResourceID string `json:"resource_id"`
@@ -57,6 +63,8 @@ type Result struct {
 	Revoked    int64      `json:"revoked,omitempty"`
 	// GrantID is the entitlement the action created or ended.
 	GrantID string `json:"grant_id,omitempty"`
+	// Teams counts the teams an account ban suspended along with it, or the unban restored.
+	Teams int64 `json:"teams,omitempty"`
 }
 type Service struct {
 	store       *db.DB
@@ -112,11 +120,26 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 		}
 		switch kind {
 		case "account_ban", "account_unban":
+			if err = lockSignInTx(ctx, tx, target); err != nil {
+				return err
+			}
 			if err = accountAction(ctx, tx, actorID, target, kind == "account_ban", input.Revision, &result); err != nil {
+				return err
+			}
+			if kind == "account_ban" {
+				err = s.banAccount(ctx, tx, actorID, target, reason, input, &result)
+			} else {
+				err = s.unbanAccount(ctx, tx, actorID, target, &result)
+			}
+			if err != nil {
 				return err
 			}
 		case "entitlement_grant", "entitlement_revoke":
 			if err = entitlementAction(ctx, tx, actorID, kind, target, reason, input, &result); err != nil {
+				return err
+			}
+		case "ip_block_add", "ip_block_remove":
+			if err = ipBlockAction(ctx, tx, actorID, kind, target, reason, input, &result); err != nil {
 				return err
 			}
 		case "plan_grant", "plan_revoke":
@@ -137,6 +160,14 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 				state = "suspended"
 			}
 			result = Result{ResourceID: target, State: state, Version: generation}
+			if kind == "team_ban" {
+				err = s.banTeam(ctx, tx, actorID, target, reason, input)
+			} else {
+				err = s.unbanTeam(ctx, tx, actorID, target)
+			}
+			if err != nil {
+				return err
+			}
 		case "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
 			if err = staffAction(ctx, tx, actorID, kind, target, input, &result); err != nil {
 				return err
@@ -374,7 +405,7 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 func validKind(v string) bool {
 	switch v {
-	case "account_ban", "account_unban", "account_sessions_revoke", "plan_grant", "plan_revoke", "entitlement_grant", "entitlement_revoke", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
+	case "account_ban", "account_unban", "account_sessions_revoke", "plan_grant", "plan_revoke", "entitlement_grant", "entitlement_revoke", "ip_block_add", "ip_block_remove", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock", "operator_create", "operator_disable", "operator_enable", "operator_mfa_reset", "operator_sessions_revoke":
 		return true
 	}
 	return false
@@ -383,7 +414,7 @@ func allowed(role, kind string) bool {
 	if isStaffKind(kind) {
 		return role == "admin"
 	}
-	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || isGrantKind(kind) || isEntitlementKind(kind) || kind == "team_ban" || kind == "team_unban" {
+	if kind == "account_ban" || kind == "account_unban" || kind == "account_sessions_revoke" || isGrantKind(kind) || isEntitlementKind(kind) || isIPBlockKind(kind) || kind == "team_ban" || kind == "team_unban" {
 		return role == "admin"
 	}
 	return role == "admin" || role == "operations"
@@ -400,6 +431,9 @@ func resourceType(kind string) string {
 	}
 	if isGrantKind(kind) || isEntitlementKind(kind) {
 		return "billing_workspace"
+	}
+	if isIPBlockKind(kind) {
+		return "ip_block"
 	}
 	if strings.HasPrefix(kind, "team_") {
 		return "team"

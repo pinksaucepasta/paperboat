@@ -16,10 +16,13 @@ import (
 
 // Outbox job kinds. The target is the WorkOS subject, the Stripe subscription, or the mail's fixed name.
 const (
-	jobWorkOSUser      = "workos_user"
-	jobStripeCancel    = "stripe_subscription"
-	jobConfirmation    = "confirmation_mail"
-	confirmationMailID = "account-deleted"
+	jobWorkOSUser   = "workos_user"
+	jobStripeCancel = "stripe_subscription"
+	// JobStripeCancelAtPeriodEnd and JobStripeCancelNow are queued by an operator's ban of an account or team.
+	JobStripeCancelAtPeriodEnd = "stripe_cancel_at_period_end"
+	JobStripeCancelNow         = jobStripeCancel
+	jobConfirmation            = "confirmation_mail"
+	confirmationMailID         = "account-deleted"
 )
 
 // eraseSteps are the personal rows the deletion removes, revokes or stops. Each is scoped to the
@@ -335,7 +338,7 @@ func queueProviderJobsTx(ctx context.Context, tx *db.Tx, userID, subject, email 
 }
 
 func queueJobTx(ctx context.Context, tx *db.Tx, userID, kind, target, recipient string) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO account_deletion_jobs (id,user_id,kind,target,recipient) VALUES ($1,$2,$3,$4,$5)`,
+	if _, err := tx.Exec(ctx, `INSERT INTO account_deletion_jobs (id,user_id,kind,target,recipient) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id,kind,target) DO NOTHING`,
 		uuid.NewString(), userID, kind, target, recipient); err != nil {
 		return fmt.Errorf("account deletion: queue %s: %w", kind, err)
 	}

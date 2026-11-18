@@ -9,10 +9,11 @@ import (
 
 // fakeProviders records provider calls. While a failure is set, the matching call fails.
 type fakeProviders struct {
-	workosErr   error
-	stripeErr   error
-	workosCalls []string
-	stripeCalls []string
+	workosErr      error
+	stripeErr      error
+	workosCalls    []string
+	stripeCalls    []string
+	scheduledCalls []string
 }
 
 func (f *fakeProviders) DeleteWorkOSUser(_ context.Context, subject string) error {
@@ -22,6 +23,11 @@ func (f *fakeProviders) DeleteWorkOSUser(_ context.Context, subject string) erro
 
 func (f *fakeProviders) CancelSubscription(_ context.Context, id string) error {
 	f.stripeCalls = append(f.stripeCalls, id)
+	return f.stripeErr
+}
+
+func (f *fakeProviders) ScheduleCancelAtPeriodEnd(_ context.Context, id string) error {
+	f.scheduledCalls = append(f.scheduledCalls, id)
 	return f.stripeErr
 }
 
@@ -132,5 +138,47 @@ func TestAccountDeletionOutboxBackoffIsBounded(t *testing.T) {
 	}
 	if got := outbox.backoff(50); got != maxJobBackoff {
 		t.Fatalf("late retry waits %s, want %s", got, maxJobBackoff)
+	}
+}
+
+// A ban queues subscriptions to end with the paid period (or now); the outbox runs them against the provider and retries a
+// failure, and a deletion that queues the same subscription afterwards does not clash with the ban's job.
+func TestBanJobsEndSubscriptionsAtPeriodEndOrNow(t *testing.T) {
+	f := newFixture(t)
+	user := f.user("banjobs")
+	f.exec(`DELETE FROM account_deletion_jobs`)
+	for _, j := range [][2]string{{"stripe_cancel_at_period_end", "sub_end_" + user.ID}, {"stripe_subscription", "sub_now_" + user.ID}} {
+		f.exec(`INSERT INTO account_deletion_jobs(id,user_id,kind,target) VALUES('adj_'||$1||$3,$1,$2,$3)`, user.ID, j[0], j[1])
+	}
+	providers := &fakeProviders{stripeErr: errors.New("provider down")}
+	outbox := f.svc.Worker(providers, providers)
+	f.dispatchAll(outbox, 1)
+	if got := f.count(`SELECT count(*) FROM account_deletion_jobs WHERE user_id=$1 AND state='queued' AND attempts=1`, user.ID); got != 2 {
+		t.Fatalf("%d jobs waiting for a retry, want 2", got)
+	}
+	providers.stripeErr = nil
+	f.dispatchAll(outbox, 2)
+	if len(providers.scheduledCalls) < 1 || providers.scheduledCalls[len(providers.scheduledCalls)-1] != "sub_end_"+user.ID {
+		t.Fatalf("period-end calls %v", providers.scheduledCalls)
+	}
+	if len(providers.stripeCalls) < 1 || providers.stripeCalls[len(providers.stripeCalls)-1] != "sub_now_"+user.ID {
+		t.Fatalf("cancel-now calls %v", providers.stripeCalls)
+	}
+	if got := f.count(`SELECT count(*) FROM account_deletion_jobs WHERE user_id=$1 AND state='done'`, user.ID); got != 2 {
+		t.Fatalf("%d jobs done, want 2", got)
+	}
+}
+
+// An account whose subscription an operator's ban already queued for cancellation can still be deleted.
+func TestDeletionQueuesASubscriptionABanAlreadyQueued(t *testing.T) {
+	f := newFixture(t)
+	user := f.user("bandelete")
+	f.seedPersonal(user)
+	f.exec(`INSERT INTO account_deletion_jobs(id,user_id,kind,target) VALUES('adj_ban_'||$1,$1,'stripe_subscription','sub_'||$1)`, user.ID)
+	if err := f.svc.Delete(f.t.Context(), user, time.Now(), user.PrimaryEmail); err != nil {
+		t.Fatalf("deleting an account with a banned subscription job: %v", err)
+	}
+	if got := f.count(`SELECT count(*) FROM account_deletion_jobs WHERE user_id=$1 AND kind='stripe_subscription'`, user.ID); got != 1 {
+		t.Fatalf("%d cancel jobs for the subscription, want 1", got)
 	}
 }

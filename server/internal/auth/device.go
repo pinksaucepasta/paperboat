@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/ipblocks"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
@@ -162,6 +163,17 @@ func NewDeviceService(store *db.DB, auditWriter *audit.Writer, cfg config.CLIAut
 	return &DeviceService{db: store, audit: auditWriter, cfg: cfg, keys: keys, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// checkNetwork refuses a CLI login from a network an operator blocked (the address is the trusted client address).
+func (s *DeviceService) checkNetwork(ctx context.Context, network string) error {
+	if err := ipblocks.Check(ctx, s.db.Pool(), network); err != nil {
+		if errors.Is(err, ipblocks.ErrBlocked) {
+			return &DeviceError{Code: "ip_blocked"}
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *DeviceService) SetEnroller(enroller DeviceEnroller) { s.enroller = enroller }
 
 func (s *DeviceService) Authorize(ctx context.Context, in DeviceAuthorizationInput) (DeviceAuthorization, error) {
@@ -183,6 +195,9 @@ func (s *DeviceService) Authorize(ctx context.Context, in DeviceAuthorizationInp
 	u, err := url.Parse(verification)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return DeviceAuthorization{}, errors.New("verification URL is invalid")
+	}
+	if err := s.checkNetwork(ctx, in.Network); err != nil {
+		return DeviceAuthorization{}, err
 	}
 	if err := s.takeRate(ctx, "network:"+s.hash(in.Network), s.cfg.NetworkRequestsPerMinute); err != nil {
 		return DeviceAuthorization{}, err
@@ -212,6 +227,9 @@ func (s *DeviceService) Authorize(ctx context.Context, in DeviceAuthorizationInp
 func (s *DeviceService) Poll(ctx context.Context, in DeviceTokenInput) (TokenSet, error) {
 	if in.ClientID != s.cfg.ClientID {
 		return TokenSet{}, &DeviceError{Code: "invalid_client"}
+	}
+	if err := s.checkNetwork(ctx, in.Network); err != nil {
+		return TokenSet{}, err
 	}
 	if strings.TrimSpace(in.DeviceCode) == "" {
 		return TokenSet{}, &DeviceError{Code: "invalid_grant"}

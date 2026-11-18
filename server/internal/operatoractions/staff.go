@@ -2,6 +2,8 @@ package operatoractions
 
 import (
 	"context"
+	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -15,7 +17,7 @@ func isStaffKind(kind string) bool { return strings.HasPrefix(kind, "operator_")
 
 // auditResource is what the audit event is about: for an invitation the new operator, otherwise the target.
 func auditResource(kind, target string, result Result) string {
-	if kind == "operator_create" {
+	if kind == "operator_create" || kind == "ip_block_add" {
 		return result.ResourceID
 	}
 	return target
@@ -24,6 +26,23 @@ func auditResource(kind, target string, result Result) string {
 // inputFits refuses what a kind does not take: an operator action has no revision, no legal flag, and only the
 // fields of its own kind; every other kind needs a revision and none of the operator fields.
 func inputFits(kind string, in Input) bool {
+	switch kind {
+	case "ip_block_add":
+		rest := in
+		rest.CIDR, rest.EndsAt = "", ""
+		return in.CIDR != "" && reflect.DeepEqual(rest, Input{})
+	case "ip_block_remove":
+		return reflect.DeepEqual(in, Input{})
+	}
+	if in.Legal && kind != "publication_block" && kind != "publication_unblock" {
+		return false // only a hostname takedown has a legal flag
+	}
+	if in.CIDR != "" || (kind != "account_ban" && len(in.BlockIPs) > 0) || (kind != "account_ban" && kind != "team_ban" && in.Subscriptions != "") {
+		return false
+	}
+	if in.Subscriptions != "" && !slices.Contains([]string{"keep", "period_end", "immediate"}, in.Subscriptions) || len(in.BlockIPs) > MaxBanIPBlocks {
+		return false
+	}
 	if isEntitlementKind(kind) {
 		return in.Revision == 0 && !in.Legal && in.Email == "" && in.Role == "" && in.SessionID == "" && in.ProductCode == "" && in.Days == 0 && in.Quantity == 0 &&
 			(kind == "entitlement_grant") == (in.Entitlement != "") && (kind == "entitlement_grant" || (in.Amount == 0 && in.EndsAt == "")) && (kind == "entitlement_revoke") == (in.GrantID != "")

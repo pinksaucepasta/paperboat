@@ -192,6 +192,31 @@ tunnel, terminal and seat admission, the bandwidth gate, and the usage the custo
 from one place, `internal/planlimits`; an override that lowers a limit below current use deletes nothing, it only refuses new
 use. A seats override sets what invitations may fill; it does not grow the team's public TCP pool (override `public_tcp` too) and directory sync still buys seats from the bought count. SDK limits are the same for every plan and cannot be overridden. Each write needs the operator's reference and an
 idempotency key and is audited as `operator.entitlement_grant` or `operator.entitlement_revoke` in the same transaction.
+Bans (`POST /v1/admin/accounts/{id}/ban`, `.../unban`, `POST /v1/admin/teams/{id}/ban`, `.../unban`; admin only, typed id in the panel,
+`revision` = the version or generation just read, the reference in `Operator-Reason` is the ban's recorded reason). An account ban, in one
+transaction: the account is suspended and every browser session, CLI login, API/recipe token and machine access session ends (existing
+`revokeUserAuthority`); its peer certificates are revoked so its machines lose network access (the status change also advances the relay
+revocation generation); every team it owns is suspended with it (members lose access; each gets its own ban row, `cause_ban_id` = the
+account's); a `bans` row keeps the reference, the WorkOS subject and the canonical e-mail (case-insensitive, `+suffix` removed), and
+sign-in or sign-up with that subject, that e-mail or that account answers 403 `account_banned` and creates nothing. Optional body
+`subscriptions`: `keep` (default), `period_end` (Stripe `cancel_at_period_end`) or `immediate` (cancel now): queued in the deletion
+outbox (`account_deletion_jobs`, kinds `stripe_cancel_at_period_end` / `stripe_subscription`) for the account's personal and its owned
+teams' subscriptions, run after commit with retries. Optional `block_ips` (up to 20 addresses or ranges): blocked with the same
+reference. The data stays. The edge answers the takedown page (403 `publication_blocked`) for the hostnames (and custom domains) of the banned account's and
+banned teams' previews and tunnels (`blocked[]` in the ingress snapshot, within one 5 s poll; a name beyond the edge's 4096-entry bound is withheld and answers "does not exist").
+A ban waits for a sign-in in flight (same canonical e-mail lock) and then revokes the session it created; banning an account that is already banned is a conflict (unban first). Unban lifts the ban rows (the account's
+and the team bans it caused), restores sign-in, and does not undo cancelled subscriptions or network blocks; the owner's machines join
+again with a new `pb login`. A team ban (`team_ban`) suspends the team, records the reference and takes `subscriptions` the same way.
+The admin panel shows "Banned" and the reference on the user and team pages and lists, and filters on it.
+
+IP blocks (`GET/POST /v1/admin/ip-blocks`, `POST /v1/admin/ip-blocks/{id}/remove`; admin only): a block is an address or CIDR (IPv4
+not wider than /8, IPv6 not wider than /16) with the operator's reference and an optional end (`ends_at`). While one runs, sign-up,
+sign-in (WorkOS callback) and CLI login (device authorize and token poll, API-token sessions) from inside it answer 403 `ip_blocked`;
+existing sessions are not cut by address. Operator login is deliberately not blocked by address, so an operator can always lift a block; blocked attempts leave no audit row (the recent-addresses list shows only addresses of sign-ins that happened). The address is the trusted client address the server derives behind its proxy
+(`PAPERBOAT_TRUSTED_PROXY_CIDRS`; the rightmost `X-Forwarded-For` entry inside the trusted ranges, never a client-supplied header).
+`GET /v1/admin/accounts/{id}/ips` (admin only) lists the addresses of the account's recent sign-ins, sign-ups and CLI logins, read from
+`audit_events.client_ip`, so they exist for as long as the audit log keeps events (the plan's audit retention); each is marked when
+a running block contains it. Blocks and ranges are audited (`operator.ip_block_add`, `operator.ip_block_remove`).
 Relay drain stops new scheduling; resume requires a new heartbeat before ready.
 Tunnel disable/enable uses the normal configuration-generation and operation
 pipeline, so acceptance is distinct from runtime convergence. Team suspension

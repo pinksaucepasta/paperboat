@@ -212,7 +212,10 @@ func (s *EdgeService) ingressNodeState(ctx context.Context, nodeID string) (stri
 
 // withholdBlocked removes the decisions and quota denials of hostnames an operator took down
 // (publication_blocks) and returns those hostnames, so the edge answers the takedown page without
-// contacting the origin. A name is listed only when this edge has a decision or denial for it.
+// contacting the origin. A name is listed only when this edge has a decision or denial for it. The
+// hostnames of previews and tunnels owned by a banned account or team are listed whether or not
+// this edge holds a decision for them: their machines lost access, so a decision may be gone already,
+// and the edge must still answer the takedown page rather than "this address does not exist".
 func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.IngressDecision, denied *[]wire.IngressQuotaDenial) ([]wire.IngressBlock, error) {
 	names := make([]string, 0, len(*decisions)+len(*denied))
 	for _, d := range *decisions {
@@ -222,29 +225,105 @@ func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.Ingres
 		names = append(names, d.Hostname)
 	}
 	blocked := []wire.IngressBlock{}
-	if len(names) == 0 {
-		return blocked, nil
+	taken := map[string]bool{}
+	if len(names) > 0 {
+		rows, err := store.Pool().Query(ctx, `SELECT hostname, legal FROM publication_blocks WHERE blocked AND hostname = ANY($1::text[])`, names)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b wire.IngressBlock
+			if err := rows.Scan(&b.Hostname, &b.Legal); err != nil {
+				return nil, err
+			}
+			taken[b.Hostname] = true
+			blocked = append(blocked, b)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
-	rows, err := store.Pool().Query(ctx, `SELECT hostname, legal FROM publication_blocks WHERE blocked AND hostname = ANY($1::text[])`, names)
+	// A banned owner's name is never served: those among this edge's decisions are withheld whatever the list's size.
+	withheld, err := bannedAmong(ctx, store, names)
+	if err != nil {
+		return nil, err
+	}
+	listed, err := bannedOwnerHostnames(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	for _, host := range append(withheld, listed...) {
+		if !taken[host] {
+			taken[host] = true
+			blocked = append(blocked, wire.IngressBlock{Hostname: host})
+		}
+	}
+	// The edge refuses a snapshot whose list is longer than its bound (and keeps serving the last one), so the list is cut
+	// to the bound: a name beyond it is still withheld above and answers "does not exist" rather than being served.
+	blocked = capBlocked(blocked)
+	*decisions = slices.DeleteFunc(*decisions, func(d wire.IngressDecision) bool { return taken[d.Binding.Hostname] })
+	*denied = slices.DeleteFunc(*denied, func(d wire.IngressQuotaDenial) bool { return taken[d.Hostname] })
+	return blocked, nil
+}
+
+// maximumBlocked is the edge's bound on the takedown list (edge/internal/control: maximumIngressDecisions).
+const maximumBlocked = 4096
+
+// capBlocked keeps the first maximumBlocked takedowns: the operator's hostname blocks come first in the list.
+func capBlocked(blocked []wire.IngressBlock) []wire.IngressBlock {
+	if len(blocked) > maximumBlocked {
+		return blocked[:maximumBlocked]
+	}
+	return blocked
+}
+
+const bannedOwnerHostnamesSQL = `SELECT DISTINCT hostname FROM (
+ SELECT r.hostname FROM endpoint_routes r JOIN endpoints e ON e.id=r.endpoint_id AND e.desired_state='active'
+  JOIN bans b ON b.lifted_at IS NULL AND ((b.subject_kind='user' AND b.subject_id=e.account_id) OR (b.subject_kind='team' AND b.subject_id=e.owner_team_id))
+ UNION ALL
+ SELECT substring(p.endpoint from 9) FROM preview_leases p
+  JOIN bans b ON b.lifted_at IS NULL AND ((b.subject_kind='user' AND b.subject_id=p.account_id) OR (b.subject_kind='team' AND b.subject_id=p.owner_team_id))
+  WHERE p.terminal_state='active' AND p.endpoint LIKE 'https://%'
+ UNION ALL
+ SELECT d.hostname FROM tunnel_domains d JOIN tunnels t ON t.id=d.tunnel_id AND t.account_id=d.account_id
+  JOIN bans b ON b.lifted_at IS NULL AND ((b.subject_kind='user' AND b.subject_id=t.account_id) OR (b.subject_kind='team' AND b.subject_id=t.owner_team_id))
+  WHERE d.deleted_at IS NULL
+ UNION ALL
+ SELECT d.hostname FROM preview_domains d JOIN preview_leases p ON p.id=d.preview_id AND p.account_id=d.account_id
+  JOIN bans b ON b.lifted_at IS NULL AND ((b.subject_kind='user' AND b.subject_id=p.account_id) OR (b.subject_kind='team' AND b.subject_id=p.owner_team_id))
+  WHERE p.terminal_state='active' AND d.deleted_at IS NULL
+) h WHERE hostname IS NOT NULL`
+
+// bannedOwnerHostnames lists the hostnames of the previews and tunnels of accounts and teams under a running ban, up to the
+// edge's bound.
+func bannedOwnerHostnames(ctx context.Context, store *db.DB) ([]string, error) {
+	return hostnames(ctx, store, bannedOwnerHostnamesSQL+` ORDER BY hostname LIMIT $1`, maximumBlocked)
+}
+
+// bannedAmong returns those of names whose owner is under a running ban.
+func bannedAmong(ctx context.Context, store *db.DB, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	return hostnames(ctx, store, bannedOwnerHostnamesSQL+` AND hostname = ANY($1::text[])`, names)
+}
+
+func hostnames(ctx context.Context, store *db.DB, query string, arg any) ([]string, error) {
+	rows, err := store.Pool().Query(ctx, query, arg)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	taken := map[string]bool{}
+	var out []string
 	for rows.Next() {
-		var b wire.IngressBlock
-		if err := rows.Scan(&b.Hostname, &b.Legal); err != nil {
+		var host string
+		if err := rows.Scan(&host); err != nil {
 			return nil, err
 		}
-		taken[b.Hostname] = true
-		blocked = append(blocked, b)
+		out = append(out, host)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	*decisions = slices.DeleteFunc(*decisions, func(d wire.IngressDecision) bool { return taken[d.Binding.Hostname] })
-	*denied = slices.DeleteFunc(*denied, func(d wire.IngressQuotaDenial) bool { return taken[d.Hostname] })
-	return blocked, nil
+	return out, rows.Err()
 }
 
 // ownerIPRules lists the owner's IP allow and deny lists (access_ip_rules) for the hostnames of this

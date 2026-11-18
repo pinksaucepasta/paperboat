@@ -3,7 +3,8 @@
 import Link from "next/link"
 import { use } from "react"
 import { ErrorBlock } from "@/components/error-block"
-import { Copyable, StatusBadge } from "@/components/filters"
+import { BanState } from "@/components/ban-state"
+import { Copyable } from "@/components/filters"
 import { Facts, ObjectTitle, Page, Panel } from "@/components/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Time } from "@/components/time"
@@ -11,6 +12,7 @@ import { useApiQuery, type Data } from "@/lib/api"
 import { MachinesOf } from "@/components/machines-of"
 import { UserActions } from "@/components/account-actions"
 import { PlanGrant } from "@/components/plan-grant"
+import { RecentAddresses } from "@/components/recent-addresses"
 
 type Account = Data<"/v1/admin/accounts/{account_id}">
 
@@ -35,7 +37,7 @@ export default function UserPage({ params }: { params: Promise<{ id: string }> }
           <ObjectTitle
             detail={
               <>
-                <StatusBadge state={a.status} />
+                <BanState banned={a.status === "suspended"} state={a.status} reason={a.ban_reason} />
                 {a.display_name && <span>{a.display_name}</span>}
                 <span>
                   Joined <Time iso={a.created_at} />
@@ -56,7 +58,8 @@ export default function UserPage({ params }: { params: Promise<{ id: string }> }
           <Panel title="Machines">
             <MachinesOf owner={{ account: a.id }} />
           </Panel>
-          <UserActions id={a.id} email={a.primary_email} status={a.status} version={a.version} />
+          <RecentAddresses id={a.id} />
+          <UserActions id={a.id} email={a.primary_email} status={a.status} reason={a.ban_reason} version={a.version} />
         </>
       )}
     </Page>

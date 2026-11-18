@@ -95,6 +95,10 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/accounts/{account_id}/sessions/revoke":                          {"admin", "account_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/grant":                        {"admin", "workspace_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/revoke":                       {"admin", "workspace_id", ""},
+	"GET /v1/admin/ip-blocks":                                                       {"admin", "", "ip-blocks"},
+	"POST /v1/admin/ip-blocks":                                                      {"admin", "", "ip-blocks"},
+	"POST /v1/admin/ip-blocks/{block_id}/remove":                                    {"admin", "block_id", ""},
+	"GET /v1/admin/accounts/{account_id}/ips":                                       {"admin", "account_id", ""},
 	"GET /v1/admin/billing/workspaces/{workspace_id}/entitlements":                  {"admin", "workspace_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/entitlements":                 {"admin", "workspace_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/entitlements/revoke":          {"admin", "workspace_id", ""},
@@ -331,6 +335,8 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/teams/{team_id}", "team", "team_id"},
 		{"GET /v1/admin/billing/workspaces/{workspace_id}", "billing", "workspace_id"},
 		{"GET /v1/admin/billing/workspaces/{workspace_id}/entitlements", "entitlements", "workspace_id"},
+		{"GET /v1/admin/ip-blocks", "ip_blocks", ""},
+		{"GET /v1/admin/accounts/{account_id}/ips", "account_ips", "account_id"},
 		{"GET /v1/admin/infrastructure", "infrastructure", ""},
 		{"GET /v1/admin/infrastructure/capacity", "capacity", ""},
 		{"GET /v1/admin/control-operations/{operation_id}", "control_operation", "operation_id"},
@@ -358,7 +364,7 @@ func operatorRead(service *operator.Service, kind, param string) http.Handler {
 		if keys, ok := operatorListFilters[kind]; ok {
 			target = operatorFilterTarget(r.URL.Query(), keys)
 		}
-		if kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" {
+		if kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "ip_blocks" {
 			target = r.URL.Query().Get("state")
 		}
 		if kind == "infrastructure" {
@@ -433,6 +439,8 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 			{"POST /v1/admin/billing/workspaces/{workspace_id}/revoke", "plan_revoke", "workspace_id"},
 			{"POST /v1/admin/billing/workspaces/{workspace_id}/entitlements", "entitlement_grant", "workspace_id"},
 			{"POST /v1/admin/billing/workspaces/{workspace_id}/entitlements/revoke", "entitlement_revoke", "workspace_id"},
+			{"POST /v1/admin/ip-blocks", "ip_block_add", ""},
+			{"POST /v1/admin/ip-blocks/{block_id}/remove", "ip_block_remove", "block_id"},
 			{"POST /v1/admin/teams/{team_id}/ban", "team_ban", "team_id"},
 			{"POST /v1/admin/teams/{team_id}/unban", "team_unban", "team_id"},
 			{"POST /v1/admin/relays/{node_id}/drain", "relay_drain", "node_id"},

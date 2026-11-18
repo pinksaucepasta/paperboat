@@ -134,3 +134,113 @@ func TestOwnerIPRulesFollowTheirResource(t *testing.T) {
 		t.Fatalf("rules = %+v", rules)
 	}
 }
+
+// The hostnames of a banned account's and a banned team's tunnels and previews are listed for the edge, which answers the
+// takedown page for them even when no decision is left; a lifted ban, another owner and a removed endpoint list nothing.
+func TestWithholdBlockedListsBannedOwnersHostnames(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	owner, other, team, machine, otherMachine := "user_ban_"+suffix, "user_free_"+suffix, "team-ban-"+suffix, "host_ban_"+suffix, "host_free_"+suffix
+	hosts := map[string]string{"banned": "banned-" + suffix + ".example.test", "team": "teamed-" + suffix + ".example.test", "free": "free-" + suffix + ".example.test", "lifted": "lifted-" + suffix + ".example.test", "removed": "removed-" + suffix + ".example.test"}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.bans WHERE subject_id = ANY($1)`, []string{owner, other, team})
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.endpoints WHERE account_id = ANY($1)`, []string{owner, other})
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.tunnels WHERE account_id = ANY($1)`, []string{owner, other})
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.user_machines WHERE id = ANY($1)`, []string{machine, otherMachine})
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.users WHERE id = ANY($1)`, []string{owner, other})
+	})
+	for _, u := range []string{owner, other} {
+		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,$1||'@test.invalid',false,'active')`, u)
+	}
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, other)
+	for _, m := range [][2]string{{machine, owner}, {otherMachine, other}} {
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'a'||substr(md5($1),1,12),'linux','amd64','/workspace','offline','released')`, m[0], m[1], "env_"+m[0])
+	}
+	n := 0
+	endpoint := func(name, account, agent, team, state string, host string) {
+		t.Helper()
+		var teamID any
+		if team != "" {
+			teamID = team
+		}
+		n++
+		stable := fmt.Sprintf("%08d-0000-4000-8000-%s", n, suffix[len(suffix)-12:])
+		exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$3,'active','public',1,$4,$5,$6,$2,now(),now())`, "tn_"+name+suffix, account, "ban-"+name+suffix, "endpoint_"+stable, "https://"+stable+".tunnels.example.test", agent)
+		exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,owner_team_id,agent_machine_id,access_mode,lifetime,desired_state,tunnel_id) VALUES($1,'tunnel',$2,$3,$4,'public','persistent',$5,$6)`, "ep_"+name+suffix, account, teamID, agent, state, "tn_"+name+suffix)
+		exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol) VALUES($1,$2,$3,'http')`, "route_"+name+suffix, "ep_"+name+suffix, host)
+	}
+	endpoint("banned", owner, machine, "", "active", hosts["banned"])
+	endpoint("removed", owner, machine, "", "removed", hosts["removed"])
+	endpoint("team", other, otherMachine, team, "active", hosts["team"])
+	endpoint("free", other, otherMachine, "", "active", hosts["free"])
+	endpoint("lifted", other, otherMachine, "", "active", hosts["lifted"])
+	// A tunnel's own verified custom domain is a hostname of its owner too.
+	custom := map[string]string{"banned": "blog-" + suffix + ".example.test", "free": "shop-" + suffix + ".example.test"}
+	for name, host := range custom {
+		exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000','x','x')`, "tr_"+name+suffix, "tn_"+name+suffix, host)
+		exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target) VALUES($1,$2,$3,$4,$5,'exact','ref','verified','target.example.test')`, "td_"+name+suffix, map[string]string{"banned": owner, "free": other}[name], "tn_"+name+suffix, "tr_"+name+suffix, host)
+	}
+	exec(`INSERT INTO paperboat.bans(id,subject_kind,subject_id,reason,banned_by) VALUES('ban_u_'||$1,'user',$2,'case','operator_x'),('ban_t_'||$1,'team',$3,'case','operator_x')`, suffix, owner, team)
+	exec(`INSERT INTO paperboat.bans(id,subject_kind,subject_id,reason,banned_by,lifted_at,lifted_by) VALUES('ban_l_'||$1,'user',$2,'case','operator_x',now(),'operator_x')`, suffix, other)
+
+	decision := func(host string) wire.IngressDecision {
+		var d wire.IngressDecision
+		d.Binding.Hostname = host
+		return d
+	}
+	// This edge holds decisions for a banned name, a free one and a lifted one: only the banned one is withheld.
+	decisions := []wire.IngressDecision{decision(hosts["banned"]), decision(hosts["free"]), decision(hosts["lifted"]), decision(hosts["team"])}
+	var denied []wire.IngressQuotaDenial
+	blocked, err := withholdBlocked(ctx, store, &decisions, &denied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 2 || decisions[0].Binding.Hostname != hosts["free"] || decisions[1].Binding.Hostname != hosts["lifted"] {
+		t.Fatalf("decisions left: %v", decisions)
+	}
+	got := map[string]bool{}
+	for _, b := range blocked {
+		got[b.Hostname] = b.Legal
+	}
+	if _, ok := got[hosts["banned"]]; !ok || got[hosts["banned"]] {
+		t.Fatalf("a banned account's tunnel is not listed as a plain takedown: %v", got)
+	}
+	if _, ok := got[custom["banned"]]; !ok {
+		t.Fatalf("a banned account's tunnel custom domain is not listed: %v", got)
+	}
+	if _, ok := got[custom["free"]]; ok {
+		t.Fatalf("another owner's custom domain is listed: %v", got)
+	}
+	if _, ok := got[hosts["team"]]; !ok {
+		t.Fatalf("a banned team's tunnel is not listed: %v", got)
+	}
+	for _, name := range []string{"free", "lifted", "removed"} {
+		if _, ok := got[hosts[name]]; ok {
+			t.Fatalf("%s is listed: %v", name, got)
+		}
+	}
+}
+
+// The takedown list never passes the edge's bound (the edge refuses a longer one and keeps serving its last snapshot).
+func TestCapBlockedKeepsTheEdgesBound(t *testing.T) {
+	long := make([]wire.IngressBlock, maximumBlocked+500)
+	for i := range long {
+		long[i].Hostname = fmt.Sprintf("h%d.example.test", i)
+	}
+	got := capBlocked(long)
+	if len(got) != maximumBlocked || got[0].Hostname != "h0.example.test" {
+		t.Fatalf("capped to %d", len(got))
+	}
+	if short := capBlocked(long[:10]); len(short) != 10 {
+		t.Fatalf("a short list was cut to %d", len(short))
+	}
+}

@@ -50,6 +50,9 @@ type Account struct {
 	Version            int64     `json:"version"`
 	BillingWorkspaceID string    `json:"billing_workspace_id,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
+	// BanReason (the operator's reference) and BannedAt are set while an operator's ban is running.
+	BanReason string     `json:"ban_reason,omitempty"`
+	BannedAt  *time.Time `json:"banned_at,omitempty"`
 }
 
 type TeamMember struct {
@@ -71,6 +74,8 @@ type Team struct {
 	MembersNextAfter   string       `json:"members_next_after,omitempty"`
 	BillingWorkspaceID string       `json:"billing_workspace_id,omitempty"`
 	BillingState       string       `json:"billing_state,omitempty"`
+	BanReason          string       `json:"ban_reason,omitempty"`
+	BannedAt           *time.Time   `json:"banned_at,omitempty"`
 }
 
 func (s *Service) SetHostStaleAfter(value time.Duration) error {
@@ -161,12 +166,14 @@ type AccountPage struct {
 	NextAfter string    `json:"next_after,omitempty"`
 }
 type TeamSummary struct {
-	ID                 string `json:"id"`
-	OwnerAccount       string `json:"owner_account"`
-	Generation         int64  `json:"generation"`
-	Suspended          bool   `json:"suspended"`
-	BillingWorkspaceID string `json:"billing_workspace_id,omitempty"`
-	BillingState       string `json:"billing_state,omitempty"`
+	ID                 string     `json:"id"`
+	OwnerAccount       string     `json:"owner_account"`
+	Generation         int64      `json:"generation"`
+	Suspended          bool       `json:"suspended"`
+	BillingWorkspaceID string     `json:"billing_workspace_id,omitempty"`
+	BillingState       string     `json:"billing_state,omitempty"`
+	BanReason          string     `json:"ban_reason,omitempty"`
+	BannedAt           *time.Time `json:"banned_at,omitempty"`
 }
 type TeamPage struct {
 	Counted
@@ -290,11 +297,11 @@ func allowed(role auth.Role, kind string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "operators"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "operators" || kind == "ip_blocks"
 }
 
 func safeID(v string) bool {
@@ -363,6 +370,10 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return s.readCapacity(ctx, tx, after, limit)
 	case "entitlements":
 		return readEntitlements(ctx, tx, target)
+	case "account_ips":
+		return readAccountIPs(ctx, tx, target)
+	case "ip_blocks":
+		return readIPBlocks(ctx, tx, target, after, limit)
 	case "operators":
 		return readOperators(ctx, tx, after, limit)
 	case "operator_sessions":
@@ -376,14 +387,16 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 
 func readAccount(ctx context.Context, tx *db.Tx, id string) (Account, error) {
 	var v Account
-	err := tx.QueryRow(ctx, `SELECT u.id,u.primary_email,u.display_name,u.status,u.version,coalesce(w.id,''),u.created_at FROM users u LEFT JOIN billing_workspaces w ON w.user_id=u.id WHERE u.id=$1`, id).Scan(&v.ID, &v.PrimaryEmail, &v.DisplayName, &v.Status, &v.Version, &v.BillingWorkspaceID, &v.CreatedAt)
+	err := tx.QueryRow(ctx, `SELECT u.id,u.primary_email,u.display_name,u.status,u.version,coalesce(w.id,''),u.created_at,coalesce(b.reason,''),b.banned_at FROM users u LEFT JOIN billing_workspaces w ON w.user_id=u.id
+ LEFT JOIN bans b ON b.subject_kind='user' AND b.subject_id=u.id AND b.lifted_at IS NULL WHERE u.id=$1`, id).Scan(&v.ID, &v.PrimaryEmail, &v.DisplayName, &v.Status, &v.Version, &v.BillingWorkspaceID, &v.CreatedAt, &v.BanReason, &v.BannedAt)
 	return v, scanErr(err)
 }
 
 func readTeam(ctx context.Context, tx *db.Tx, id, after string, limit int) (_ Team, resultErr error) {
 	v := Team{Members: []TeamMember{}}
 	var deleted sql.NullTime
-	err := tx.QueryRow(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,t.deleted_at,coalesce(w.id,''),coalesce(w.state,'') FROM teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id WHERE t.team_id=$1`, id).Scan(&v.ID, &v.OwnerAccount, &v.Generation, &v.Suspended, &deleted, &v.BillingWorkspaceID, &v.BillingState)
+	err := tx.QueryRow(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,t.deleted_at,coalesce(w.id,''),coalesce(w.state,''),coalesce(b.reason,''),b.banned_at FROM teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id
+ LEFT JOIN bans b ON b.subject_kind='team' AND b.subject_id=t.team_id AND b.lifted_at IS NULL WHERE t.team_id=$1`, id).Scan(&v.ID, &v.OwnerAccount, &v.Generation, &v.Suspended, &deleted, &v.BillingWorkspaceID, &v.BillingState, &v.BanReason, &v.BannedAt)
 	if err != nil {
 		return v, scanErr(err)
 	}
@@ -545,21 +558,21 @@ func readAccounts(ctx context.Context, tx *db.Tx, target, after string, limit in
 	if err != nil || !oneOf(f["status"], "active", "suspended") {
 		return AccountPage{}, ErrInvalid
 	}
-	where := ` users u LEFT JOIN billing_workspaces w ON w.user_id=u.id WHERE u.role<>'system_worker'
+	where := ` users u LEFT JOIN billing_workspaces w ON w.user_id=u.id LEFT JOIN bans b ON b.subject_kind='user' AND b.subject_id=u.id AND b.lifted_at IS NULL WHERE u.role<>'system_worker'
  AND ($1='' OR u.primary_email ILIKE $1 ESCAPE '\' OR u.display_name ILIKE $1 ESCAPE '\' OR u.id ILIKE $1 ESCAPE '\') AND ($2='' OR u.status=$2)`
 	args := []any{contains(f["q"]), f["status"]}
 	p := AccountPage{Accounts: make([]Account, 0, limit)}
 	if p.Counted, err = countRows(ctx, tx, where, args...); err != nil {
 		return p, err
 	}
-	rows, err := tx.Query(ctx, `SELECT u.id,u.primary_email,u.display_name,u.status,u.version,coalesce(w.id,''),u.created_at FROM`+where+` AND u.id>$3 ORDER BY u.id LIMIT $4`, append(args, after, limit+1)...)
+	rows, err := tx.Query(ctx, `SELECT u.id,u.primary_email,u.display_name,u.status,u.version,coalesce(w.id,''),u.created_at,coalesce(b.reason,''),b.banned_at FROM`+where+` AND u.id>$3 ORDER BY u.id LIMIT $4`, append(args, after, limit+1)...)
 	if err != nil {
 		return p, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
 	for rows.Next() {
 		var v Account
-		if err := rows.Scan(&v.ID, &v.PrimaryEmail, &v.DisplayName, &v.Status, &v.Version, &v.BillingWorkspaceID, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.PrimaryEmail, &v.DisplayName, &v.Status, &v.Version, &v.BillingWorkspaceID, &v.CreatedAt, &v.BanReason, &v.BannedAt); err != nil {
 			return p, err
 		}
 		if len(p.Accounts) == limit {
@@ -577,21 +590,21 @@ func readTeams(ctx context.Context, tx *db.Tx, target, after string, limit int) 
 	if err != nil || !oneOf(f["suspended"], "true", "false") {
 		return TeamPage{}, ErrInvalid
 	}
-	where := ` teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id WHERE t.deleted_at IS NULL
+	where := ` teams t LEFT JOIN billing_workspaces w ON w.team_id=t.team_id LEFT JOIN bans b ON b.subject_kind='team' AND b.subject_id=t.team_id AND b.lifted_at IS NULL WHERE t.deleted_at IS NULL
  AND ($1='' OR t.team_id ILIKE $1 ESCAPE '\' OR t.owner_account ILIKE $1 ESCAPE '\') AND ($2='' OR t.suspended=($2='true'))`
 	args := []any{contains(f["q"]), f["suspended"]}
 	p := TeamPage{Teams: make([]TeamSummary, 0, limit)}
 	if p.Counted, err = countRows(ctx, tx, where, args...); err != nil {
 		return p, err
 	}
-	rows, err := tx.Query(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,coalesce(w.id,''),coalesce(w.state,'') FROM`+where+` AND t.team_id>$3 ORDER BY t.team_id LIMIT $4`, append(args, after, limit+1)...)
+	rows, err := tx.Query(ctx, `SELECT t.team_id,t.owner_account,t.generation,t.suspended,coalesce(w.id,''),coalesce(w.state,''),coalesce(b.reason,''),b.banned_at FROM`+where+` AND t.team_id>$3 ORDER BY t.team_id LIMIT $4`, append(args, after, limit+1)...)
 	if err != nil {
 		return p, err
 	}
 	defer func() { resultErr = closeRowsError(rows, resultErr) }()
 	for rows.Next() {
 		var v TeamSummary
-		if err := rows.Scan(&v.ID, &v.OwnerAccount, &v.Generation, &v.Suspended, &v.BillingWorkspaceID, &v.BillingState); err != nil {
+		if err := rows.Scan(&v.ID, &v.OwnerAccount, &v.Generation, &v.Suspended, &v.BillingWorkspaceID, &v.BillingState, &v.BanReason, &v.BannedAt); err != nil {
 			return p, err
 		}
 		if len(p.Teams) == limit {

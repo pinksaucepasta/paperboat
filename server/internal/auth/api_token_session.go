@@ -43,6 +43,9 @@ func (s *DeviceService) StartAPITokenSession(ctx context.Context, in APITokenSes
 	access, refresh := randomToken(32), randomToken(32)
 	sessionID := newID("session")
 	scopes := normalizedScopes(s.cfg.AllowedScopes)
+	if err := s.checkNetwork(ctx, audit.ClientFrom(ctx).IP); err != nil {
+		return TokenSet{}, err
+	}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var expires time.Time
 		err := tx.QueryRow(ctx, `SELECT expires_at FROM api_tokens WHERE id=$1 AND account_id=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, in.TokenID, in.Account).Scan(&expires)

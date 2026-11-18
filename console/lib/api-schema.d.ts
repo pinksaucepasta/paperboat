@@ -5003,6 +5003,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/ip-blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator IP blocks
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only. Blocks of client networks, newest first; running means not lifted and not past its end.
+         */
+        get: operations["get_v1_admin_ip_blocks"];
+        put?: never;
+        /**
+         * Operator IP block
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation (Operator-Target ip-blocks), an opaque evidence reference and stable idempotency key. Blocks sign-up, sign-in and CLI login from an address or range (the trusted client address, never a raw X-Forwarded-For); sessions that already exist are not cut. A block of the same range that is running is a conflict; one that ended is replaced.
+         */
+        post: operations["post_v1_admin_ip_blocks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ip-blocks/{block_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator IP block lift
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Lifts a running block now; an empty body. A block that ended or was lifted is 404.
+         */
+        post: operations["post_v1_admin_ip_blocks_block_id_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/accounts/{account_id}/ips": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator account recent addresses
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only: the addresses (not ports) of the account's recent sign-ins, sign-ups and CLI logins from the audit log, newest first, at most 25, each marked when a running block contains it. Unknown account 404.
+         */
+        get: operations["get_v1_admin_accounts_account_id_ips"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/accounts/{account_id}/ban": {
         parameters: {
             query?: never;
@@ -11774,6 +11838,13 @@ export interface components {
             billing_workspace_id?: string;
             /** Format: date-time */
             created_at: string;
+            /** @description The operator's reference for the running ban; absent when not banned. */
+            ban_reason?: string;
+            /**
+             * Format: date-time
+             * @description When the running ban began; absent when not banned.
+             */
+            banned_at?: string;
         };
         OperatorTeamMember: {
             account_id: string;
@@ -11796,6 +11867,13 @@ export interface components {
             members_next_after?: string;
             billing_workspace_id?: string;
             billing_state: string;
+            /** @description The operator's reference for the running ban; absent when not banned. */
+            ban_reason?: string;
+            /**
+             * Format: date-time
+             * @description When the running ban began; absent when not banned.
+             */
+            banned_at?: string;
         };
         OperatorBilling: {
             id: string;
@@ -11891,6 +11969,13 @@ export interface components {
             suspended: boolean;
             billing_workspace_id?: string;
             billing_state: string;
+            /** @description The operator's reference for the running ban; absent when not banned. */
+            ban_reason?: string;
+            /**
+             * Format: date-time
+             * @description When the running ban began; absent when not banned.
+             */
+            banned_at?: string;
         };
         OperatorTeamPage: {
             teams: components["schemas"]["OperatorTeamSummary"][];
@@ -12036,6 +12121,13 @@ export interface components {
             days?: number;
             /** @description plan_grant for a team plan only: the seats. */
             quantity?: number;
+            /**
+             * @description account ban / team ban only: what happens to the paid subscriptions of the account (and the teams it owns) or of the team: keep them (default), end them with the paid period, or end them now. Provider work runs after the ban commits, with retries.
+             * @enum {string}
+             */
+            subscriptions?: "keep" | "period_end" | "immediate";
+            /** @description account ban only: addresses or CIDR ranges to block along with the account (sign-up, sign-in and CLI login from them is refused). */
+            block_ips?: string[];
         };
         OperatorActionResult: {
             resource_id: string;
@@ -12053,6 +12145,11 @@ export interface components {
             revoked?: number;
             /** @description entitlement grant created or ended. */
             grant_id?: string;
+            /**
+             * Format: int64
+             * @description account ban: the teams suspended along with the account; account unban: the teams restored.
+             */
+            teams?: number;
         };
         OperatorObservationLayer: {
             states: components["schemas"]["OperatorStateCount"][];
@@ -14151,6 +14248,50 @@ export interface components {
             errors?: {
                 [key: string]: string;
             };
+        };
+        OperatorIPBlockInput: {
+            /** @description ip_block add only: an address or a CIDR range (IPv4 not wider than /8, IPv6 not wider than /16). */
+            cidr?: string;
+            /**
+             * Format: date-time
+             * @description ip_block add only: when the block ends by itself; omit to block until lifted.
+             */
+            ends_at?: string;
+        };
+        OperatorIPBlock: {
+            id: string;
+            cidr: string;
+            /** @description The operator's reference. */
+            reason: string;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: date-time */
+            revoked_at?: string;
+            /** @description Not lifted and not past its end. */
+            running: boolean;
+        };
+        OperatorIPBlockPage: {
+            blocks: components["schemas"]["OperatorIPBlock"][];
+            next_after?: string;
+            /** @description Rows matching the filter, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
+        };
+        OperatorRecentIP: {
+            ip: string;
+            /** Format: date-time */
+            last_seen: string;
+            /** Format: int64 */
+            count: number;
+            /** @description A running block contains the address. */
+            blocked: boolean;
+        };
+        OperatorAccountIPs: {
+            account_id: string;
+            ips: components["schemas"]["OperatorRecentIP"][];
         };
         OperatorEntitlementInput: {
             /**
@@ -25695,6 +25836,280 @@ export interface operations {
             };
             /** @description Stale resource revision or conflicting idempotency request */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_ip_blocks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+                state?: "running" | "ended";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorIPBlockPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_ip_blocks: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorIPBlockInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_ip_blocks_block_id_remove: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorIPBlockInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_accounts_account_id_ips: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorAccountIPs"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

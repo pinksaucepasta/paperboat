@@ -3,7 +3,8 @@
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { DataTable } from "@/components/data-table"
-import { Filters, Mono, SearchBox, StatusBadge } from "@/components/filters"
+import { BanState } from "@/components/ban-state"
+import { Filters, Mono, SearchBox } from "@/components/filters"
 import { Page } from "@/components/page"
 import { Time } from "@/components/time"
 import type { Data } from "@/lib/api"
@@ -20,7 +21,7 @@ export default function UsersPage() {
     <Page title="Users">
       <div className="flex flex-wrap items-center gap-2">
         <SearchBox label="Search users" placeholder="Email, name or id" value={q} onChange={setQ} />
-        <Filters items={[{ label: "Status", value: status, onChange: setStatus, options: [["active", "Active"], ["suspended", "Suspended"]] }]} />
+        <Filters items={[{ label: "Status", value: status, onChange: setStatus, options: [["active", "Active"], ["suspended", "Banned"]] }]} />
       </div>
       <DataTable
         what="users"
@@ -31,7 +32,7 @@ export default function UsersPage() {
         columns={[
           { header: "Email", cell: (a) => <Link className="font-medium underline-offset-2 hover:underline" href={`/users/${encodeURIComponent(a.id)}`}>{a.primary_email}</Link> },
           { header: "Name", className: "hidden md:table-cell", cell: (a) => a.display_name },
-          { header: "Status", cell: (a) => <StatusBadge state={a.status} /> },
+          { header: "Status", cell: (a) => <BanState banned={a.status === "suspended"} state={a.status} reason={a.ban_reason} /> },
           { header: "ID", className: "hidden md:table-cell", cell: (a) => <Mono>{a.id}</Mono> },
           { header: "Created", className: "hidden lg:table-cell", cell: (a) => <Time iso={a.created_at} /> },
         ]}

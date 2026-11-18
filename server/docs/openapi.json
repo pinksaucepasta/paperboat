@@ -10891,6 +10891,15 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "ban_reason": {
+            "type": "string",
+            "description": "The operator's reference for the running ban; absent when not banned."
+          },
+          "banned_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the running ban began; absent when not banned."
           }
         },
         "required": [
@@ -10976,6 +10985,15 @@
           },
           "billing_state": {
             "type": "string"
+          },
+          "ban_reason": {
+            "type": "string",
+            "description": "The operator's reference for the running ban; absent when not banned."
+          },
+          "banned_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the running ban began; absent when not banned."
           }
         },
         "required": [
@@ -11364,6 +11382,15 @@
           },
           "billing_state": {
             "type": "string"
+          },
+          "ban_reason": {
+            "type": "string",
+            "description": "The operator's reference for the running ban; absent when not banned."
+          },
+          "banned_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the running ban began; absent when not banned."
           }
         },
         "required": [
@@ -11962,6 +11989,24 @@
             "minimum": 0,
             "maximum": 128,
             "description": "plan_grant for a team plan only: the seats."
+          },
+          "subscriptions": {
+            "type": "string",
+            "enum": [
+              "keep",
+              "period_end",
+              "immediate"
+            ],
+            "description": "account ban / team ban only: what happens to the paid subscriptions of the account (and the teams it owns) or of the team: keep them (default), end them with the paid period, or end them now. Provider work runs after the ban commits, with retries."
+          },
+          "block_ips": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "description": "account ban only: addresses or CIDR ranges to block along with the account (sign-up, sign-in and CLI login from them is refused)."
           }
         },
         "required": [
@@ -11998,6 +12043,11 @@
           "grant_id": {
             "type": "string",
             "description": "entitlement grant created or ended."
+          },
+          "teams": {
+            "type": "integer",
+            "format": "int64",
+            "description": "account ban: the teams suspended along with the account; account unban: the teams restored."
           }
         },
         "required": [
@@ -19699,6 +19749,137 @@
           "retention",
           "adoption"
         ]
+      },
+      "OperatorIPBlockInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "ip_block add only: an address or a CIDR range (IPv4 not wider than /8, IPv6 not wider than /16)."
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ip_block add only: when the block ends by itself; omit to block until lifted."
+          }
+        }
+      },
+      "OperatorIPBlock": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "cidr",
+          "reason",
+          "created_by",
+          "created_at",
+          "running"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cidr": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "The operator's reference."
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Not lifted and not past its end."
+          }
+        }
+      },
+      "OperatorIPBlockPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blocks",
+          "total"
+        ],
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorIPBlock"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filter, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OperatorRecentIP": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ip",
+          "last_seen",
+          "count",
+          "blocked"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "A running block contains the address."
+          }
+        }
+      },
+      "OperatorAccountIPs": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "ips"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorRecentIP"
+            }
+          }
+        }
       },
       "OperatorEntitlementInput": {
         "type": "object",
@@ -41705,6 +41886,447 @@
             }
           }
         }
+      }
+    },
+    "/v1/admin/ip-blocks": {
+      "get": {
+        "operationId": "get_v1_admin_ip_blocks",
+        "summary": "Operator IP blocks",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorIPBlockPage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "enum": [
+                "running",
+                "ended"
+              ]
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only. Blocks of client networks, newest first; running means not lifted and not past its end."
+      },
+      "post": {
+        "operationId": "post_v1_admin_ip_blocks",
+        "summary": "Operator IP block",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale resource revision or conflicting idempotency request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorActionResult"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation (Operator-Target ip-blocks), an opaque evidence reference and stable idempotency key. Blocks sign-up, sign-in and CLI login from an address or range (the trusted client address, never a raw X-Forwarded-For); sessions that already exist are not cut. A block of the same range that is running is a conflict; one that ended is replaced.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorIPBlockInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/ip-blocks/{block_id}/remove": {
+      "post": {
+        "operationId": "post_v1_admin_ip_blocks_block_id_remove",
+        "summary": "Operator IP block lift",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale resource revision or conflicting idempotency request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorActionResult"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "block_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Lifts a running block now; an empty body. A block that ended or was lifted is 404.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorIPBlockInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/accounts/{account_id}/ips": {
+      "get": {
+        "operationId": "get_v1_admin_accounts_account_id_ips",
+        "summary": "Operator account recent addresses",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorAccountIPs"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Admin only: the addresses (not ports) of the account's recent sign-ins, sign-ups and CLI logins from the audit log, newest first, at most 25, each marked when a running block contains it. Unknown account 404."
       }
     },
     "/v1/admin/accounts/{account_id}/ban": {

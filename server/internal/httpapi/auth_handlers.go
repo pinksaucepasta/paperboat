@@ -73,6 +73,14 @@ func writeWorkOSCallbackFailure(w http.ResponseWriter, r *http.Request, err erro
 	if writeEmailPolicyError(w, r, err) {
 		return
 	}
+	if errors.Is(err, auth.ErrAccountBanned) {
+		writeError(w, r, http.StatusForbidden, "account_banned", "This account cannot sign in. Contact support and quote the reference.", err)
+		return
+	}
+	if errors.Is(err, auth.ErrIPBlocked) {
+		writeError(w, r, http.StatusForbidden, "ip_blocked", "Sign-in from this network is blocked. Contact support and quote the reference.", err)
+		return
+	}
 	var verification *auth.WorkOSVerificationError
 	if errors.Is(err, auth.ErrWorkOSImpersonation) || errors.As(err, &verification) && verification.HTTPStatus == http.StatusBadRequest {
 		logHTTPRejection(r, http.StatusUnauthorized, "auth_callback_failed", err)

@@ -129,6 +129,12 @@ func auditMetadata(kind, reason string, in Input, result Result) map[string]any 
 	if kind == "entitlement_revoke" {
 		metadata["grant_id"] = result.GrantID
 	}
+	if kind == "ip_block_add" {
+		metadata["cidr"], metadata["ends_at"] = in.CIDR, in.EndsAt
+	}
+	if kind == "account_ban" {
+		metadata["subscriptions"], metadata["block_ips"] = in.Subscriptions, in.BlockIPs
+	}
 	if kind == "plan_grant" {
 		metadata["product_code"], metadata["days"], metadata["quantity"], metadata["expires_at"] = in.ProductCode, in.Days, in.Quantity, result.ExpiresAt
 	}

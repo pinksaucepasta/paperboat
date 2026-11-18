@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/ipblocks"
 	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 )
@@ -176,8 +177,14 @@ func (s *Service) VerifyCallback(ctx context.Context, input CallbackInput) (User
 	var created bool
 	err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
+		if err := ipblocks.Check(ctx, tx, audit.ClientFrom(ctx).IP); err != nil {
+			return mapIPBlocked(err)
+		}
 		canonical, accountID, err := resolveWorkOSIdentity(ctx, tx, profile)
 		if err != nil {
+			return err
+		}
+		if err = checkNotBanned(ctx, tx, accountID, canonical, profile.Subject); err != nil {
 			return err
 		}
 		// resolveWorkOSIdentity names an id that does not exist yet for a first sign-in: this is where an account is created.

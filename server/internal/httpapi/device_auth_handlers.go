@@ -275,6 +275,9 @@ func writeDeviceError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case "device_request_expired", "device_request_consumed":
 		status = http.StatusGone
 		message = "Authorization request is no longer available."
+	case "ip_blocked":
+		status = http.StatusForbidden
+		message = "Sign-in from this network is blocked. Contact support and quote the reference."
 	case "workspace_forbidden":
 		status = http.StatusForbidden
 		message = "You cannot add machines to that workspace."

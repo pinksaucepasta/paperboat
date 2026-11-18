@@ -8,6 +8,7 @@ import { ErrorBlock } from "@/components/error-block"
 import { MachinesOf } from "@/components/machines-of"
 import { TeamActions } from "@/components/account-actions"
 import { PlanGrant } from "@/components/plan-grant"
+import { BanState } from "@/components/ban-state"
 import { Copyable, StatusBadge } from "@/components/filters"
 import { Facts, ObjectTitle, Page, Panel } from "@/components/page"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -45,7 +46,7 @@ function TeamView({ id }: { id: string }) {
         </div>
       ) : (
         <>
-          <ObjectTitle detail={<StatusBadge state={t.suspended ? "suspended" : "active"} />}>{t.id}</ObjectTitle>
+          <ObjectTitle detail={<BanState banned={t.suspended} state="active" reason={t.ban_reason} />}>{t.id}</ObjectTitle>
           <Facts
             rows={[
               ["Team id", <Copyable key="i" value={t.id} />],
@@ -76,7 +77,7 @@ function TeamView({ id }: { id: string }) {
           <Panel title="Machines">
             <MachinesOf owner={{ team: t.id }} />
           </Panel>
-          <TeamActions id={t.id} suspended={t.suspended} generation={t.generation} />
+          <TeamActions id={t.id} suspended={t.suspended} reason={t.ban_reason} generation={t.generation} />
         </>
       )}
     </Page>

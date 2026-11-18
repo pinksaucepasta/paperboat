@@ -38,6 +38,7 @@ const accounts = Array.from({ length: 120 }, (_, i) => ({
   primary_email: `person${i}@example.test`,
   display_name: `Person ${i}`,
   status: i % 17 === 0 ? "suspended" : "active",
+  ...(i % 17 === 0 ? { ban_reason: "ABUSE-9", banned_at: "2026-11-12T08:00:00Z" } : {}),
   version: 1,
   billing_workspace_id: `bw_${i}`,
   created_at: "2026-11-10T08:00:00Z",
@@ -81,6 +82,11 @@ const world = {
   operatorSessions: { operator_agent: ["a", "b"].map((c) => fixtureSession(c)) },
   grants: {},
   entitlementGrants: {},
+  teamBan: undefined,
+  ipBlocks: [
+    { id: "ipb_1", cidr: "198.51.100.0/24", reason: "ABUSE-3", created_by: "operator_root", created_at: "2026-11-15T08:00:00Z", running: true },
+    { id: "ipb_0", cidr: "192.0.2.7/32", reason: "ABUSE-1", created_by: "operator_root", created_at: "2026-11-10T08:00:00Z", expires_at: "2026-11-11T08:00:00Z", running: false },
+  ],
   floor: { schema: "paperboat.client-update-policy/v1", revision: 2, minimum_version: "", reason: "" },
   requests: [],
 }
@@ -108,6 +114,25 @@ function mutate(method, p, json) {
     const grant = { id: `grant_${grants.length + 1}`, workspace_id: workspace, kind: json.entitlement, amount: json.amount, ends_at: json.ends_at, reason: "x", created_by: "operator_root", created_at: new Date().toISOString(), running: true }
     grants.push(grant)
     return { resource_id: workspace, state: "granted", version: 0, grant_id: grant.id }
+  }
+  if (area === "accounts" && (action === "ban" || action === "unban")) {
+    const account = accounts.find((a) => a.id === id)
+    for (const ip of action === "ban" ? (json.block_ips ?? []) : []) world.ipBlocks.unshift({ id: `ipb_${world.ipBlocks.length + 5}`, cidr: ip.includes("/") ? ip : `${ip}/32`, reason: writes.at(-1).reason, created_by: "operator_root", created_at: new Date().toISOString(), running: true })
+    if (action === "ban") Object.assign(account, { status: "suspended", ban_reason: writes.at(-1).reason, banned_at: new Date().toISOString(), version: account.version + 1 })
+    else Object.assign(account, { status: "active", ban_reason: undefined, banned_at: undefined, version: account.version + 1 })
+    return { resource_id: id, state: action === "ban" ? "suspended" : "active", version: account.version, teams: action === "ban" ? 1 : 0 }
+  }
+  if (area === "teams" && (action === "ban" || action === "unban")) {
+    world.teamBan = action === "ban" ? { reason: writes.at(-1).reason, at: new Date().toISOString() } : undefined
+    return { resource_id: id, state: action === "ban" ? "suspended" : "active", version: json.revision + 1 }
+  }
+  if (p === "/v1/admin/ip-blocks") {
+    world.ipBlocks.unshift({ id: `ipb_${world.ipBlocks.length + 5}`, cidr: json.cidr.includes("/") ? json.cidr : `${json.cidr}/32`, reason: writes.at(-1).reason, created_by: "operator_root", created_at: new Date().toISOString(), ...(json.ends_at ? { expires_at: json.ends_at } : {}), running: true })
+    return { resource_id: world.ipBlocks[0].id, state: "blocked" }
+  }
+  if (area === "ip-blocks" && action === "remove") {
+    Object.assign(world.ipBlocks.find((b) => b.id === id), { running: false, revoked_at: new Date().toISOString() })
+    return { resource_id: id, state: "lifted" }
   }
   const grantRoute = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/(grant|revoke)$/.exec(p)
   if (grantRoute) {
@@ -179,9 +204,18 @@ function route(req, url) {
     const sessions = world.operatorSessions[id] ?? []
     return { operator_id: id, email: world.operators.find((o) => o.id === id)?.email ?? "", total: sessions.length, sessions }
   }
+  if (p === "/v1/admin/ip-blocks") {
+    const state = url.searchParams.get("state")
+    return page(world.ipBlocks.filter((b) => !state || (state === "running") === b.running), "blocks", undefined, url)
+  }
+  if (/^\/v1\/admin\/accounts\/[^/]+\/ips$/.test(p)) {
+    const blocked = (ip) => world.ipBlocks.some((b) => b.running && b.cidr.startsWith(ip.split(".").slice(0, 3).join(".")))
+    return { account_id: p.split("/")[4], ips: [{ ip: "203.0.113.9", last_seen: "2026-11-17T09:00:00Z", count: 3 }, { ip: "198.51.100.4", last_seen: "2026-11-16T09:00:00Z", count: 1 }].map((v) => ({ ...v, blocked: blocked(v.ip) })) }
+  }
   if (p.startsWith("/v1/admin/accounts/")) return accounts.find((a) => a.id === decodeURIComponent(p.split("/").pop())) ?? 404
-  if (p === "/v1/admin/teams") return { teams: [{ id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, billing_workspace_id: "bw_t", billing_state: "active" }], total: 1 }
-  if (p === "/v1/admin/teams/team_a") return { id: "team_a", owner_account: "usr_001", generation: 2, suspended: false, members: [{ account_id: "usr_001", role: "admin", active: true, generation: 1 }], members_total: 1, members_truncated: false, billing_workspace_id: "bw_t", billing_state: "active" }
+  const teamBan = () => ({ suspended: Boolean(world.teamBan), generation: world.teamBan ? 3 : 2, ...(world.teamBan ? { ban_reason: world.teamBan.reason, banned_at: world.teamBan.at } : {}) })
+  if (p === "/v1/admin/teams") return { teams: [{ id: "team_a", owner_account: "usr_001", ...teamBan(), billing_workspace_id: "bw_t", billing_state: "active" }], total: 1 }
+  if (p === "/v1/admin/teams/team_a") return { id: "team_a", owner_account: "usr_001", ...teamBan(), members: [{ account_id: "usr_001", role: "admin", active: true, generation: 1 }], members_total: 1, members_truncated: false, billing_workspace_id: "bw_t", billing_state: "active" }
   if (p === "/v1/admin/machines") {
     const owner = url.searchParams.get("account")
     const q = url.searchParams.get("q") ?? ""
@@ -1009,6 +1043,99 @@ try {
     expect(!(await dialog("Override a limit of personal:usr_001").getByLabel("Limit").locator("option").allInnerTexts()).includes("Seats"), "a person is offered seats")
     await dialog("Override a limit of personal:usr_001").getByRole("button", { name: "Cancel" }).click()
   })
+  await step("ban: an account is banned with its typed id, its subscriptions choice and the addresses to block, shows Banned with the reference, and is unbanned", async () => {
+    await p.goto(`${ORIGIN}/users/usr_001`)
+    await p.waitForSelector("[data-recent-addresses]")
+    expect((await p.locator("[data-recent-addresses] li").count()) === 2, "the recent addresses are not listed")
+    await p.getByRole("button", { name: "Ban account" }).click()
+    const d = dialog("Ban person1@example.test")
+    await d.getByLabel("Paid subscriptions").selectOption("period_end")
+    await d.getByRole("checkbox", { name: /203\.0\.113\.9/ }).check()
+    await d.getByLabel("Also block a range").fill("192.0.2.0/24")
+    await d.getByLabel("Reference", { exact: true }).fill("TICKET-61")
+    expect(await d.getByRole("button", { name: "Ban account", exact: true }).isDisabled(), "a ban must need the typed id")
+    await d.getByLabel(/Type/).fill("usr_001")
+    await d.getByRole("button", { name: "Ban account", exact: true }).click()
+    await p.waitForFunction(() => document.querySelector('[data-state-word="banned"]') && document.body.textContent.includes("TICKET-61"))
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/accounts/usr_001/ban" && w.target === "usr_001" && w.reason === "TICKET-61" && w.body.revision === 1 && w.body.subscriptions === "period_end" && JSON.stringify(w.body.block_ips) === JSON.stringify(["203.0.113.9", "192.0.2.0/24"]), `ban write ${JSON.stringify(w)}`)
+    await p.waitForFunction(() => /blocked/i.test(document.querySelector('[data-ip="203.0.113.9"]')?.textContent ?? ""))
+    await p.waitForFunction(() => !document.querySelector("[data-action-dialog]"))
+    await p.getByRole("button", { name: "Unban account" }).click()
+    const u = dialog("Unban person1@example.test")
+    await u.getByLabel("Reference", { exact: true }).fill("TICKET-62")
+    await u.getByLabel(/Type/).fill("usr_001")
+    await u.getByRole("button", { name: "Unban account", exact: true }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-state-word="banned"]'))
+    expect(lastWrite().path === "/v1/admin/accounts/usr_001/unban" && lastWrite().body.revision === 2, `unban write ${JSON.stringify(lastWrite())}`)
+  })
+  await step("ban: lists show Banned with the reference and filter on it; a team is banned and unbanned the same way", async () => {
+    await p.goto(`${ORIGIN}/users`)
+    await waitReady("users")
+    await p.click("[data-filter-button]")
+    await p.getByRole("menuitem", { name: "Status" }).click()
+    await p.getByRole("menuitemradio", { name: "Banned", exact: true }).click()
+    await p.waitForFunction(() => document.querySelector('[data-filter-chip="Status"]') && document.querySelectorAll('[data-table="users"] [data-state-word="banned"]').length > 0)
+    const rows = await text('[data-table="users"]')
+    expect(rows.includes("ABUSE-9") && !rows.includes("person1@example.test"), `banned list ${rows.slice(0, 200)}`)
+    await p.goto(`${ORIGIN}/teams/team_a`)
+    await p.waitForSelector("[data-team-actions]")
+    await p.getByRole("button", { name: "Ban team" }).click()
+    const d = dialog("Ban team_a")
+    expect((await d.getByLabel("Also block a range").count()) === 0, "a team ban offers networks")
+    await d.getByLabel("Paid subscriptions").selectOption("immediate")
+    await d.getByLabel("Reference", { exact: true }).fill("TICKET-63")
+    await d.getByLabel(/Type/).fill("team_a")
+    await d.getByRole("button", { name: "Ban team", exact: true }).click()
+    await p.waitForFunction(() => document.querySelector('[data-state-word="banned"]') && document.body.textContent.includes("TICKET-63"))
+    expect(lastWrite().path === "/v1/admin/teams/team_a/ban" && lastWrite().body.revision === 2 && lastWrite().body.subscriptions === "immediate" && !("block_ips" in lastWrite().body), `team ban ${JSON.stringify(lastWrite())}`)
+    await p.goto(`${ORIGIN}/teams`)
+    await waitReady("teams")
+    expect((await text('[data-table="teams"]')).includes("TICKET-63"), "the banned team is not shown in the list")
+    await p.goto(`${ORIGIN}/teams/team_a`)
+    await p.waitForSelector("[data-team-actions]")
+    await p.waitForFunction(() => !document.querySelector("[data-action-dialog]"))
+    await p.getByRole("button", { name: "Unban team" }).click()
+    const u = dialog("Unban team_a")
+    await u.getByLabel("Reference", { exact: true }).fill("TICKET-64")
+    await u.getByLabel(/Type/).fill("team_a")
+    await u.getByRole("button", { name: "Unban team", exact: true }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-state-word="banned"]'))
+  })
+  await step("IP blocks: the list pages and filters, a network is blocked with an end date and lifted; each write has its target, reference and key", async () => {
+    await p.goto(`${ORIGIN}/ip-blocks`)
+    await waitReady("IP blocks")
+    expect((await text('[data-table="IP blocks"]')).includes("198.51.100.0/24") && (await text('[data-table="IP blocks"]')).includes("192.0.2.7/32"), "the blocks are not listed")
+    await p.click("[data-filter-button]")
+    await p.getByRole("menuitem", { name: "State" }).click()
+    await p.getByRole("menuitemradio", { name: "Running", exact: true }).click()
+    await p.waitForFunction(() => !document.querySelector('[data-table="IP blocks"]')?.textContent?.includes("192.0.2.7/32") && document.querySelector('[data-filter-chip="State"]'))
+    await p.getByRole("button", { name: "Remove State filter" }).click()
+    await p.getByRole("button", { name: "Block a network" }).click()
+    const d = dialog("Block a network")
+    await d.getByLabel("Address or range").fill("2001:db8:44::/48")
+    const ends = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 16)
+    await d.getByLabel("Ends").fill(ends)
+    await submit(d, "Block network")
+    await p.waitForFunction(() => document.querySelector('[data-table="IP blocks"]')?.textContent?.includes("2001:db8:44::/48"))
+    const w = lastWrite()
+    expect(w.path === "/v1/admin/ip-blocks" && w.target === "ip-blocks" && w.reason === "TICKET-42" && w.body.cidr === "2001:db8:44::/48" && /^\d{4}-\d\d-\d\dT/.test(w.body.ends_at), `block write ${JSON.stringify(w)}`)
+    const bad = await (async () => {
+      await p.getByRole("button", { name: "Block a network" }).click()
+      const b = dialog("Block a network")
+      await b.getByLabel("Address or range").fill("not an address")
+      await b.getByLabel("Reference", { exact: true }).fill("TICKET-65")
+      const disabled = await b.getByRole("button", { name: "Block network", exact: true }).isDisabled()
+      await b.getByRole("button", { name: "Cancel" }).click()
+      return disabled
+    })()
+    expect(bad, "an invalid address can be submitted")
+    await p.locator('[data-table="IP blocks"] tbody tr', { hasText: "2001:db8:44::/48" }).getByRole("button", { name: "Lift" }).click()
+    const l = dialog(/Lift the block on 2001:db8:44::\/48/.source ? "Lift the block on 2001:db8:44::/48" : "")
+    await submit(l, "Lift block")
+    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Lift the block on 2001:db8:44::/48"]'))
+    expect(lastWrite().path.endsWith("/remove") && lastWrite().target === lastWrite().path.split("/")[4], `lift write ${JSON.stringify(lastWrite())}`)
+  })
   await step("operators: you are marked and have no buttons on your own row; inviting shows the setup token once and lists the invitation", async () => {
     await p.goto(`${ORIGIN}/operators`)
     await waitReady("operators")
@@ -1137,7 +1264,7 @@ try {
   await step("a support-role operator sees no write buttons", async () => {
     await p.goto(`${ORIGIN}/users/usr_001`)
     await p.waitForSelector('[data-table="machines"][data-state="ready"]')
-    expect((await p.getByRole("button", { name: /Suspend account|Rotate SSH user CA|Sign out everywhere|Grant a plan|Grant bandwidth|Override a limit/ }).count()) === 0, "support sees account writes")
+    expect((await p.getByRole("button", { name: /Ban account|Unban account|Rotate SSH user CA|Sign out everywhere|Grant a plan|Grant bandwidth|Override a limit/ }).count()) === 0, "support sees account writes")
     await p.goto(`${ORIGIN}/billing`)
     await p.getByRole("tab", { name: "Plans" }).click()
     await waitReady("plans and prices")

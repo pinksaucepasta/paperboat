@@ -29,9 +29,11 @@ type WorkOSUsers interface {
 	DeleteWorkOSUser(ctx context.Context, subject string) error
 }
 
-// Subscriptions cancels a Stripe subscription now. A subscription that no longer exists counts as cancelled.
+// Subscriptions cancels a Stripe subscription now, or schedules its end at the end of the paid period (an operator's ban).
+// A subscription that no longer exists counts as cancelled.
 type Subscriptions interface {
 	CancelSubscription(ctx context.Context, subscriptionID string) error
+	ScheduleCancelAtPeriodEnd(ctx context.Context, subscriptionID string) error
 }
 
 // Outbox runs the provider work queued by account deletion. Every job is retried with backoff and
@@ -114,6 +116,11 @@ func (o *Outbox) run(ctx context.Context, j job) error {
 			return errors.New("Stripe is not configured")
 		}
 		return o.stripe.CancelSubscription(ctx, j.target)
+	case JobStripeCancelAtPeriodEnd:
+		if o.stripe == nil {
+			return errors.New("Stripe is not configured")
+		}
+		return o.stripe.ScheduleCancelAtPeriodEnd(ctx, j.target)
 	case jobConfirmation:
 		return o.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			_, err := transactionalmail.EnqueueOnceTx(ctx, tx, "account-deleted:"+j.userID, transactionalmail.Message{
