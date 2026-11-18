@@ -22,7 +22,7 @@ type ProcessNotifier struct {
 }
 
 // stableAfterReady is how long a ready process must keep running before systemd's restart backoff is reset
-// (RESTART_RESET=1, systemd >= 258; older ones ignore it). Resetting at READY would keep a process that
+// (RESTART_RESET=1: a systemd that does not know the field ignores it). Resetting at READY would keep a process that
 // crashes right after start at the shortest restart delay forever.
 const stableAfterReady = time.Minute
 
