@@ -31,6 +31,12 @@ type Installation struct {
 	EnrollmentState string `json:"enrollment_state"`
 	// LastHeartbeat is when the server's node last reported in; absent before its first report.
 	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
+	// Version is the release the node last reported; empty before its first report.
+	Version string `json:"version,omitempty"`
+	// UpdateAvailable is a newer published release; UpdateRequired says why and how to update when Version is
+	// below the update floor (both set by the HTTP layer from the release and the floor).
+	UpdateAvailable string `json:"update_available,omitempty"`
+	UpdateRequired  string `json:"update_required,omitempty"`
 }
 type Policy struct {
 	Mode            string   `json:"mode"`
