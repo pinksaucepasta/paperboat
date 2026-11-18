@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for status_report.py: checks against a local server, step mapping, signing, and the 'my internet is down' rule."""
-import json, socket, sys, tempfile, threading, unittest
+import base64, hashlib, json, socket, ssl, subprocess, sys, tempfile, threading, unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -73,6 +73,39 @@ class Checks(unittest.TestCase):
         self.assertFalse(self.run_one(kind="http", url=f"http://127.0.0.1:{port}/")["ok"])
 
 
+class PinnedRelay(unittest.TestCase):
+    """A relay's certificate is private: the check must trust exactly its key, and fail closed otherwise."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        key, crt = f"{cls.dir}/k.pem", f"{cls.dir}/c.pem"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", crt, "-days", "2", "-subj", "/CN=relay.example.test"], check=True, capture_output=True)
+        der = subprocess.run(f"openssl x509 -in {crt} -pubkey -noout | openssl pkey -pubin -outform der", shell=True, check=True, capture_output=True).stdout
+        cls.pin = "sha256//" + base64.b64encode(hashlib.sha256(der).digest()).decode()
+        cls.server = HTTPServer(("127.0.0.1", 0), Handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); context.load_cert_chain(crt, key)
+        cls.server.socket = context.wrap_socket(cls.server.socket, server_side=True)
+        cls.url = f"https://127.0.0.1:{cls.server.server_port}/relay"
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def check(self, **extra):
+        return sr.run_checks([{"unit": "relay_x", "kind": "relay", "url": self.url, **extra}])[0]
+
+    def test_the_right_key_passes(self):
+        self.assertTrue(self.check(pin=self.pin)["ok"])
+
+    def test_another_key_fails(self):
+        self.assertFalse(self.check(pin="sha256//" + base64.b64encode(b"x" * 32).decode())["ok"])
+
+    def test_without_a_pin_a_private_certificate_is_not_trusted(self):
+        self.assertFalse(self.check()["ok"])
+
+
 class Reporting(unittest.TestCase):
     def cfg(self):
         key = tempfile.NamedTemporaryFile("w", delete=False); key.write("secret\n"); key.close()
@@ -84,6 +117,22 @@ class Reporting(unittest.TestCase):
                  {"step": "ssh_a_to_b", "ok": False, "seconds": 45, "error": "boom"}]
         got = sr.step_results(steps, {"exec_a_to_b": "exec", "ssh_a_to_b": "ssh"})
         self.assertEqual([(r["unit"], r["ok"], r["ms"]) for r in got], [("exec", True, 2000), ("ssh", False, 45000)])
+
+    def test_a_failed_or_timed_out_runner_fails_every_unit_it_should_have_covered(self):
+        steps = [{"step": "exec_a_to_b", "ok": True, "seconds": 1}, {"step": "probe", "ok": False, "seconds": 120, "error": "probe.sh did not finish"}]
+        got = {r["unit"]: r["ok"] for r in sr.step_results(steps, {"exec_a_to_b": "exec", "ssh_a_to_b": "ssh", "send_a_to_b": "send"})}
+        self.assertEqual(got, {"exec": True, "ssh": False, "send": False})
+
+    def test_a_malformed_curl_answer_is_unreachable_not_a_crash(self):
+        with patch.object(sr, "curl", side_effect=ValueError("not enough values to unpack")):
+            self.assertFalse(sr.internet_ok(["http://a.test", "http://b.test"]))
+
+    def test_a_bug_in_checking_sends_a_heartbeat_that_vouches_for_nothing(self):
+        sent = []
+        with patch.object(sr, "internet_ok", side_effect=RuntimeError("boom")), \
+                patch.object(sr, "post", side_effect=lambda cfg, results, net_ok: sent.append((results, net_ok))):
+            self.assertIsNone(sr.report(self.cfg()))
+        self.assertEqual(sent, [([], False)])
 
     def test_signature_matches_the_worker_formula(self):
         import hashlib, hmac

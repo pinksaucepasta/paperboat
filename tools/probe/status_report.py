@@ -5,7 +5,8 @@ A vantage point checks its own internet first and again after any failure; if th
 so a broken probe host can never make a service look down. Config (JSON, path in STATUS_PROBE_CONFIG; never committed):
   url        the Worker's /api/probe endpoint        vantage   this host's name in status/config/components.json
   key_file   file holding the vantage's signing key  net_urls  two or more URLs that must answer for "my internet works"
-  checks     [{unit, kind: http|relay|tuf|tcp, url|host+port, expect?, redirect? (a 3xx is healthy), resolve_all? (every DNS address)}]  steps     {probe.sh step name: unit} for canary steps run on this host
+  checks     [{unit, kind: http|relay|tuf|tcp, url|host+port, expect?, redirect? (a 3xx is healthy), resolve_all? (every DNS address),
+              pin? (sha256//<base64 public key hash>: for a relay, whose certificate is private; without it the certificate is verified normally)}]  steps     {probe.sh step name: unit} for canary steps run on this host
 Used by canary.py (oracle, with its steps) and status_run.py (anvit and staging).
 """
 import hashlib, hmac, json, os, socket, subprocess, sys, time, urllib.request
@@ -15,13 +16,13 @@ from datetime import datetime, timezone
 CHECK_TIMEOUT = 10
 
 
-def curl(url, resolve=None, insecure=False):
+def curl(url, resolve=None, pin=None):
     """(http_code, seconds, body) or raises RuntimeError with the curl error."""
     cmd = ["curl", "-sS", "--max-time", str(CHECK_TIMEOUT), "-o", "-", "-w", "\n%{http_code} %{time_total}"]
     if resolve:
         cmd += ["--resolve", resolve]
-    if insecure:
-        cmd.append("-k")
+    if pin:  # a relay's certificate is private: trust exactly its key, never "any certificate" (pinning is checked even with -k)
+        cmd += ["-k", "--pinnedpubkey", pin]
     done = subprocess.run(cmd + [url], capture_output=True, timeout=CHECK_TIMEOUT + 5)
     if done.returncode != 0:
         raise RuntimeError(done.stderr.decode(errors="replace").strip()[-150:] or f"curl exit {done.returncode}")
@@ -37,7 +38,7 @@ def one(check):
         if kind == "tcp":
             socket.create_connection((check["host"], int(check["port"])), timeout=5).close()
             return True, round((time.monotonic() - start) * 1000), ""
-        code, seconds, body = curl(check["url"], check.get("resolve"), kind == "relay")
+        code, seconds, body = curl(check["url"], check.get("resolve"), check.get("pin"))
         ms = round(seconds * 1000)
         if kind == "relay":  # a relay's TLS port answers an unauthenticated GET with 401; 503 means full or draining
             ok = code == 401 and "relay authorization required" in body
@@ -78,7 +79,7 @@ def internet_ok(net_urls):
     def reach(url):
         try:
             return 200 <= curl(url)[0] < 400
-        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        except Exception:  # any failure, however odd its shape, means "not reachable"
             return False
     with ThreadPoolExecutor(max_workers=4) as pool:  # two answers, so one captive-portal or one dead URL cannot decide it
         return len(net_urls) >= 2 and sum(pool.map(reach, net_urls)) >= 2
@@ -86,8 +87,12 @@ def internet_ok(net_urls):
 
 def step_results(steps, mapping):
     """probe.sh steps (JSON lines already parsed) -> results for the units they stand for."""
-    return [{"unit": mapping[s["step"]], "ok": s["ok"], "ms": int(s.get("seconds", 0)) * 1000, "error": s.get("error", "")[:150]}
-            for s in steps if s["step"] in mapping]
+    out = [{"unit": mapping[s["step"]], "ok": s["ok"], "ms": int(s.get("seconds", 0)) * 1000, "error": s.get("error", "")[:150]}
+           for s in steps if s["step"] in mapping]
+    broken = next((s for s in steps if s["step"] in ("probe", "account") and not s["ok"]), None)
+    if broken:  # the runner itself failed or timed out: no step it should have run can be vouched for
+        out += [{"unit": u, "ok": False, "ms": 0, "error": broken.get("error", "probe did not finish")[:150]} for u in set(mapping.values()) if not any(r["unit"] == u for r in out)]
+    return out
 
 
 def body_and_signature(cfg, results, net_ok, now=None):
@@ -101,7 +106,7 @@ def body_and_signature(cfg, results, net_ok, now=None):
 def post(cfg, results, net_ok):
     try:
         body, sig = body_and_signature(cfg, results, net_ok)
-    except OSError as error:
+    except (OSError, KeyError) as error:
         print(f"status key file unreadable: {error}", file=sys.stderr)
         return False
     request = urllib.request.Request(cfg["url"], data=body.encode(), method="POST",
@@ -117,10 +122,14 @@ def post(cfg, results, net_ok):
 
 def report(cfg, extra_results=()):
     """Run this host's checks and post them; returns what was posted (None when the host's internet is down)."""
-    net_ok = internet_ok(cfg["net_urls"])
-    results = run_checks(cfg.get("checks", [])) + list(extra_results) if net_ok else []
-    if net_ok and any(not r["ok"] for r in results):  # a drop during the run must not read as an outage
+    try:
         net_ok = internet_ok(cfg["net_urls"])
+        results = run_checks(cfg.get("checks", [])) + list(extra_results) if net_ok else []
+        if net_ok and any(not r["ok"] for r in results):  # a drop during the run must not read as an outage
+            net_ok = internet_ok(cfg["net_urls"])
+    except Exception as error:  # a bug in this host's own checking: say so with a heartbeat that vouches for nothing
+        print(f"status probe failed: {error}", file=sys.stderr)
+        net_ok, results = False, []
     if not post(cfg, results if net_ok else [], net_ok):  # a rotated key or a down Worker must not pass silently
         print(f"status report not accepted by {cfg['url']}", file=sys.stderr)
     return results if net_ok else None
