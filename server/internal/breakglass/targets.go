@@ -1,6 +1,6 @@
 package breakglass
 
-// sealedTargets are every column holding a ciphertext of the encryption key ring (the 20 tables
+// sealedTargets are every column holding a ciphertext of the encryption key ring (the tables
 // server/internal/secrets callers write). Re-sealing needs only the table, a ctid and the column: none of them has
 // associated data or a keyed companion column. Two ciphertext holders are left alone on purpose: the receipt of an
 // operator infrastructure enrollment embeds its credential ciphertext in JSON (an idempotency replay window, it

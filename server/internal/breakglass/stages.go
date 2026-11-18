@@ -140,7 +140,7 @@ func (s *Service) pickup(ctx context.Context, since time.Time, onlyPending bool)
 	}
 	rows, err := s.cfg.Store.Pool().Query(ctx, `SELECT f.machine_id, m.platform, f.fetched_at, f.fetched_at >= $2
 		FROM paperboat.managed_ssh_ca_fetches f JOIN paperboat.user_machines m ON m.id = f.machine_id
-		WHERE f.fetched_at >= $1`+filter+` ORDER BY f.fetched_at >= $2, f.machine_id`, since.Add(-s.cfg.OnlineWindow), since)
+		WHERE m.revoked_at IS NULL AND m.deleted_at IS NULL AND f.fetched_at >= $1`+filter+` ORDER BY f.fetched_at >= $2, f.machine_id`, since.Add(-s.cfg.OnlineWindow), since)
 	if err != nil {
 		return state, err
 	}
