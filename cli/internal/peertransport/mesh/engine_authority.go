@@ -77,9 +77,9 @@ func (s *Server) ReplaceAllowedPeers(peers map[key.NodePublic]netip.Addr) error 
 		return nil
 	}
 	b.allowedPeers = peers
-	for k := range b.peerRegions {
+	for k := range b.replyRoutes {
 		if _, ok := peers[k]; !ok {
-			delete(b.peerRegions, k)
+			b.dropReplyRouteLocked(k)
 		}
 	}
 	// Replace the filter without reusing conntrack state from the old grants.

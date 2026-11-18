@@ -181,27 +181,68 @@ func TestTheDERPMapHoldsOnlyTheGivenRelays(t *testing.T) {
 	}
 }
 
-// A peer's signed home relay outranks a region learned from an answer: a matching answer that arrives on another
-// relay (the peer still holds a connection there) does not move a peer whose home the configuration gives.
-func TestSignedHomeOutranksAnAnsweredRegion(t *testing.T) {
+// startRoutesServer starts an engine homed on region two with regions one and three also in its map, and one admitted
+// peer per name; routeTTL is how long its reply routes are fresh.
+func startRoutesServer(t *testing.T, routeTTL time.Duration, peers ...key.NodePublic) (s *Server, one, two, three *tailcfg.DERPRegion) {
+	t.Helper()
 	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
-	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
-	peer := key.NewNode().Public()
-	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::60"),
-		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::61")}}
-	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
+	one, two, three = regions.Regions[1], relayRegionCopy(regions.Regions[1], 2), relayRegionCopy(regions.Regions[1], 3)
+	allowed := map[key.NodePublic]netip.Addr{}
+	for i, p := range peers {
+		allowed[p] = netip.AddrFrom16([16]byte{0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0, 15: byte(i + 1)})
+	}
+	s = &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::ff"), AllowedPeers: allowed}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one, three}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	s.lb.routeTTL = routeTTL
+	return s, one, two, three
+}
+
+// peerHome is the signed home the engine stores for peer.
+func peerHome(s *Server, peer key.NodePublic) tailcfg.DERPRegionID {
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	return s.lb.contacts[peer].Home
+}
+
+// nodeRegion is the HomeDERP of peer's netmap node, the region magicsock sends by.
+func nodeRegion(s *Server, peer key.NodePublic) tailcfg.DERPRegionID {
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	if n := s.lb.clients[peer]; n != nil {
+		return n.HomeDERP
+	}
+	return 0
+}
+
+func awaitRegion(t *testing.T, s *Server, peer key.NodePublic, want tailcfg.DERPRegionID, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		if got, node := s.lb.peerDERPRegion(peer), nodeRegion(s, peer); got == want && node == want {
+			return
+		} else if time.Now().After(deadline) {
+			t.Fatalf("peer is on region %d (netmap node %d), want %d", got, node, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// An answer or a ping that arrives on another relay is a reply route: the peer is reached there while it is fresh, and
+// its signed home is never rewritten (magicsock keeps derpRoute apart from derpAddr). A handshake answered on region two
+// while the peer's home is one does not move the home.
+func TestAnsweredRegionIsAReplyRouteNotTheHome(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, _ := startRoutesServer(t, time.Hour, peer)
 	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
-		t.Fatalf("signed home not applied: %d", got)
-	}
+	awaitRegion(t, s, peer, one.RegionID, time.Second)
 	w := &meowWait{ready: make(chan struct{}), nonce: [meowNonceLen]byte{3}}
 	s.peerReadyMu.Lock()
 	s.peerReady = map[key.NodePublic]*meowWait{peer: w}
@@ -212,33 +253,158 @@ func TestSignedHomeOutranksAnAnsweredRegion(t *testing.T) {
 	default:
 		t.Fatal("the answer did not complete the handshake")
 	}
-	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
-		t.Fatalf("an answered region (%d) outranked the signed home (%d)", got, one.RegionID)
+	awaitRegion(t, s, peer, two.RegionID, time.Second)
+	if got := peerHome(s, peer); got != one.RegionID {
+		t.Fatalf("the answer rewrote the stored home: %d, want %d", got, one.RegionID)
 	}
 }
 
-// An answer that arrives while a renewal installs the peer's signed home never leaves its learned region in place of it,
-// whichever of the two takes the locks first (learnPeerRelayRegion checks and writes under one hold).
-func TestAnsweredRegionRacingASignedHomeNeverOverwritesIt(t *testing.T) {
-	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
-	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
+// A ping reply (setPeerRelayRegion, as onDERPRecv calls it) never changes the stored home, and a renewal repeating the
+// signed contact neither undoes the route nor moves the home.
+func TestPingReplyNeverChangesTheStoredHome(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, _ := startRoutesServer(t, time.Hour, peer)
+	contact := PeerContact{Disco: key.NewDisco().Public(), Home: one.RegionID}
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.lb.setPeerRelayRegion(peer, two.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil { // the unchanged renewal
+			t.Fatal(err)
+		}
+	}
+	if got := peerHome(s, peer); got != one.RegionID {
+		t.Fatalf("a ping reply changed the stored home to %d", got)
+	}
+	awaitRegion(t, s, peer, two.RegionID, time.Second)
+}
+
+// A reply route expires back to the signed home, in the netmap magicsock sends by as well as in the handshake.
+func TestReplyRouteExpiresBackToTheHome(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, _ := startRoutesServer(t, 300*time.Millisecond, peer)
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerRelayRegion(peer, two.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.lb.peerDERPRegion(peer); got != two.RegionID {
+		t.Fatalf("fresh route not used: %d", got)
+	}
+	awaitRegion(t, s, peer, one.RegionID, 5*time.Second)
+	// Another ping renews it.
+	if err := s.SetPeerRelayRegion(peer, two.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, two.RegionID, time.Second)
+}
+
+// Without a signed home a route is the fallback however old (magicsock fallbackDERPRegionForPeer): the engine's own
+// home is only a guess, so expiry must not trade the peer's last working relay for it.
+func TestReplyRouteWithoutASignedHomeOutlivesItsTTL(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, _, _, three := startRoutesServer(t, 100*time.Millisecond, peer)
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public()}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerRelayRegion(peer, three.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	awaitRegion(t, s, peer, three.RegionID, time.Second)
+}
+
+// A peer that restarts on another relay reports a new signed home; a route heard before it is older news.
+func TestNewSignedHomeDropsTheOlderReplyRoute(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, three := startRoutesServer(t, time.Hour, peer)
+	disco := key.NewDisco().Public()
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: disco, Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerRelayRegion(peer, two.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: disco, Home: three.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, three.RegionID, time.Second)
+}
+
+// Recovery selections (Server.SetPeerRelayRegion) still work: they steer the peer, refuse a region this engine lacks or a
+// peer it has not admitted, and survive the peer being re-added.
+func TestRecoveryPinIsAReplyRoute(t *testing.T) {
+	peer, stranger := key.NewNode().Public(), key.NewNode().Public()
+	s, one, _, three := startRoutesServer(t, time.Hour, peer)
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerRelayRegion(peer, three.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, three.RegionID, time.Second)
+	if s.SetPeerRelayRegion(peer, 99) == nil || s.SetPeerRelayRegion(stranger, three.RegionID) == nil {
+		t.Fatal("a region this engine lacks or an unadmitted peer was accepted")
+	}
+	if got := peerHome(s, peer); got != one.RegionID {
+		t.Fatalf("a recovery pin changed the stored home to %d", got)
+	}
+}
+
+// A machine that reports no home drops what its peers held as its home; a route pinned since stays.
+func TestSignedHomeClearedByTheServerFallsBackToTheEnginesOwn(t *testing.T) {
+	peer, pinned := key.NewNode().Public(), key.NewNode().Public()
+	s, one, two, three := startRoutesServer(t, time.Hour, peer, pinned)
+	disco := map[key.NodePublic]key.DiscoPublic{peer: key.NewDisco().Public(), pinned: key.NewDisco().Public()}
+	renew := func(home tailcfg.DERPRegionID) {
+		t.Helper()
+		if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: disco[peer], Home: home}, pinned: {Disco: disco[pinned], Home: home}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	renew(one.RegionID)
+	awaitRegion(t, s, peer, one.RegionID, time.Second)
+	if err := s.SetPeerRelayRegion(pinned, three.RegionID); err != nil {
+		t.Fatal(err)
+	}
+	renew(0)
+	awaitRegion(t, s, peer, two.RegionID, time.Second) // this engine's own home answers
+	awaitRegion(t, s, pinned, three.RegionID, time.Second)
+}
+
+// A signed home whose relay this engine no longer has is not reinstalled on a peer by later renewals (the server keeps
+// naming a decommissioned relay): the peer is reached on this engine's own home.
+func TestSignedHomeOfAWithdrawnRelayIsNotReinstalled(t *testing.T) {
+	peer := key.NewNode().Public()
+	s, one, two, _ := startRoutesServer(t, time.Hour, peer)
+	contact := PeerContact{Disco: key.NewDisco().Public(), Home: one.RegionID}
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil {
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, one.RegionID, time.Second)
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil { // the unchanged renewal
+		t.Fatal(err)
+	}
+	awaitRegion(t, s, peer, two.RegionID, time.Second)
+}
+
+// A reply route racing a home change never rewrites the stored home, and the peer ends on one of the two regions.
+func TestReplyRouteRacingAHomeChangeKeepsTheHome(t *testing.T) {
 	const peers = 40
 	keys := make([]key.NodePublic, peers)
-	allowed := map[key.NodePublic]netip.Addr{}
 	contacts := map[key.NodePublic]PeerContact{}
 	for i := range keys {
 		keys[i] = key.NewNode().Public()
-		allowed[keys[i]] = netip.AddrFrom16([16]byte{0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0, 15: byte(i + 1)})
 		contacts[keys[i]] = PeerContact{Disco: key.NewDisco().Public()}
 	}
-	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::80"), AllowedPeers: allowed}
-	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+	s, one, two, _ := startRoutesServer(t, time.Hour, keys...)
 	if err := s.SetPeerContacts(contacts); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +415,7 @@ func TestAnsweredRegionRacingASignedHomeNeverOverwritesIt(t *testing.T) {
 		next := maps.Clone(contacts)
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go func() { defer wg.Done(); _ = s.lb.learnPeerRelayRegion(peer, two.RegionID) }()
+		go func() { defer wg.Done(); _ = s.lb.setPeerRelayRegion(peer, two.RegionID) }()
 		go func() {
 			defer wg.Done()
 			if err := s.SetPeerContacts(next); err != nil {
@@ -257,92 +423,11 @@ func TestAnsweredRegionRacingASignedHomeNeverOverwritesIt(t *testing.T) {
 			}
 		}()
 		wg.Wait()
-		if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
-			t.Fatalf("peer %v is on region %d, want its signed home %d", peer.ShortString(), got, one.RegionID)
+		if got := peerHome(s, peer); got != one.RegionID {
+			t.Fatalf("stored home %d, want %d", got, one.RegionID)
 		}
-	}
-}
-
-// A machine that reports no home (it lost its relays) drops the signed pin its peers held; a region pinned since stays.
-func TestSignedHomeClearedByTheServerDropsThePin(t *testing.T) {
-	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
-	one, two, three := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2), relayRegionCopy(regions.Regions[1], 3)
-	peer, pinned := key.NewNode().Public(), key.NewNode().Public()
-	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::90"),
-		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::91"), pinned: netip.MustParseAddr("fd7a:115c:a1e0::92")}}
-	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one, three}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	disco := map[key.NodePublic]key.DiscoPublic{peer: key.NewDisco().Public(), pinned: key.NewDisco().Public()}
-	renew := func(home tailcfg.DERPRegionID) {
-		t.Helper()
-		if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: disco[peer], Home: home}, pinned: {Disco: disco[pinned], Home: home}}); err != nil {
-			t.Fatal(err)
+		if got := s.lb.peerDERPRegion(peer); got != one.RegionID && got != two.RegionID {
+			t.Fatalf("peer is on region %d", got)
 		}
-	}
-	renew(one.RegionID)
-	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
-		t.Fatalf("signed home not applied: %d", got)
-	}
-	if err := s.SetPeerRelayRegion(pinned, three.RegionID); err != nil { // an explicit pin newer than the signed home
-		t.Fatal(err)
-	}
-	renew(0)
-	s.lb.mu.Lock()
-	signed := s.lb.signedRegionLocked(peer)
-	s.lb.mu.Unlock()
-	if signed != 0 {
-		t.Fatalf("a cleared signed home %d is still pinned", signed)
-	}
-	if got := s.lb.peerDERPRegion(peer); got != two.RegionID { // this engine's own home answers
-		t.Fatalf("handshakes go to region %d after the home cleared, want the engine's own %d", got, two.RegionID)
-	}
-	if got := s.lb.peerDERPRegion(pinned); got != three.RegionID {
-		t.Fatalf("a region pinned since was dropped: %d", got)
-	}
-}
-
-// A signed home whose relay this engine no longer has is not reinstalled on a peer by later renewals (the server keeps
-// naming a decommissioned relay): signedRegionLocked drops it with the region.
-func TestSignedHomeOfAWithdrawnRelayIsNotReinstalled(t *testing.T) {
-	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
-	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
-	peer := key.NewNode().Public()
-	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::70"),
-		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::71")}}
-	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	contact := PeerContact{Disco: key.NewDisco().Public(), Home: one.RegionID}
-	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil {
-		t.Fatal(err)
-	}
-	signed := func() tailcfg.DERPRegionID {
-		s.lb.mu.Lock()
-		defer s.lb.mu.Unlock()
-		return s.lb.signedRegionLocked(peer)
-	}
-	if got := signed(); got != one.RegionID {
-		t.Fatalf("signed region %d, want %d", got, one.RegionID)
-	}
-	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil { // the unchanged renewal
-		t.Fatal(err)
-	}
-	if got := signed(); got != 0 {
-		t.Fatalf("a withdrawn relay's region %d is still the signed home", got)
-	}
-	if got := s.lb.peerDERPRegion(peer); got != two.RegionID {
-		t.Fatalf("handshakes go to region %d, a withdrawn relay's, not the remaining %d", got, two.RegionID)
 	}
 }

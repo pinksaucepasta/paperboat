@@ -89,6 +89,9 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	if len(regions) != 0 {
 		b.homeDERP = regions[0].RegionID
 	}
+	for k := range b.clients { // a region this engine lost or gained changes where peers are reached
+		b.syncClientRegionLocked(k)
+	}
 	b.updateServerMapLocked()
 	homeMoved, report := b.homeDERP != previousHome, b.onLocalEndpoints
 	b.mu.Unlock()
@@ -202,43 +205,27 @@ func (s *Server) SetPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPRegionID
 	return s.lb.setPeerRelayRegion(peer, id)
 }
 
+// setPeerRelayRegion pins peer's reply route to region id: an answer's arrival region, the region a peer pinged us on, a
+// recovery selection. It never changes the peer's home (its signed region, peer_contacts.go); sends take the route while it
+// is fresh (replyRouteTTL) and the home after.
 func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPRegionID) error {
 	b.policyMu.Lock()
 	defer b.policyMu.Unlock()
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.setPeerRelayRegionLocked(peer, id)
-}
-
-// learnPeerRelayRegion records the region an answer from peer arrived on, unless the signed configuration gives peer's
-// home relay and this engine has it: that outranks a learned region (magicsock: a control-plane HomeDERP outranks a learned derpRoute). The check and the write share
-// one policyMu and b.mu hold, so a SetPeerContacts that installs a signed home meanwhile cannot be overwritten by the
-// answer that was read before it.
-func (b *locoBackend) learnPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPRegionID) error {
-	b.policyMu.Lock()
-	defer b.policyMu.Unlock()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if home := b.contacts[peer].Home; home != 0 && b.dm.Regions[home].HasDERP() {
-		return nil
-	}
-	return b.setPeerRelayRegionLocked(peer, id)
-}
-
-// setPeerRelayRegionLocked is setPeerRelayRegion with policyMu and b.mu held.
-func (b *locoBackend) setPeerRelayRegionLocked(peer key.NodePublic, id tailcfg.DERPRegionID) error {
 	if !b.dm.Regions[id].HasDERP() {
 		return errors.New("mesh: unknown relay region")
 	}
-	n := b.clients[peer]
-	if n == nil {
+	if b.clients[peer] == nil {
 		return errors.New("mesh: peer is not admitted")
 	}
-	n = n.Clone()
-	n.HomeDERP = id
-	b.setClientLocked(peer, n)
-	mak.Set(&b.peerRegions, peer, id)
-	b.updateServerMapLocked()
+	b.dropReplyRouteLocked(peer)
+	route := &replyRoute{region: id, at: time.Now()}
+	route.timer = time.AfterFunc(b.routeTTLValue(), func() { b.expireReplyRoute(peer, route) })
+	mak.Set(&b.replyRoutes, peer, route)
+	if b.syncClientRegionLocked(peer) {
+		b.updateServerMapLocked()
+	}
 	return nil
 }
 

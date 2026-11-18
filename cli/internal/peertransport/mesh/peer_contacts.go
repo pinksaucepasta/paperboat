@@ -30,7 +30,8 @@ type PeerContact struct {
 	Endpoints []netip.AddrPort
 	// Home is the relay region the peer reported it is homed on (0: not reported). As magicsock installs a
 	// peer's HomeDERP from the control plane (wgengine/magicsock/endpoint.go updateFromNode), a new value
-	// replaces the region this engine remembered, so a peer that restarted on the other relay is reached there.
+	// replaces the reply route this engine remembered (replyRoutes), so a peer that restarted on the other relay is
+	// reached there. Only a renewal changes it: answers and pings set reply routes, never the home.
 	Home tailcfg.DERPRegionID
 }
 
@@ -80,21 +81,8 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 	b.contacts = next // addClientLocked reads the new endpoints from here
 	changed := false
 	for k, c := range next {
-		// Only a changed report moves the peer: an unchanged one must not undo a region learned since from an
-		// answer (setPeerRelayRegion), which is newer.
-		cleared := false
-		if c.Home != previous[k].Home {
-			if b.dm.Regions[c.Home].HasDERP() {
-				if b.peerRegions == nil {
-					b.peerRegions = make(map[key.NodePublic]tailcfg.DERPRegionID)
-				}
-				b.peerRegions[k] = c.Home
-			} else if c.Home == 0 && b.peerRegions[k] == previous[k].Home {
-				// The machine is homed on none: its signed pin goes (magicsock clears derpAddr on HomeDERP 0); a region
-				// learned or pinned since, which differs from it, stays.
-				delete(b.peerRegions, k)
-				cleared = true
-			}
+		if c.Home != 0 && c.Home != previous[k].Home {
+			b.dropReplyRouteLocked(k) // a new home is newer than any route heard before it (magicsock updateFromNode); no home is no news
 		}
 		addr, allowed := b.allowedPeers[k]
 		if !allowed {
@@ -104,16 +92,12 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		if n == nil {
 			b.addClientLocked(k, c.Disco, addr)
 			changed = true
-		} else if home := b.signedRegionLocked(k); n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) || (home != 0 && n.HomeDERP != home) || (cleared && n.HomeDERP != 0) {
+		} else if region := b.peerRegionLocked(k); n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) || n.HomeDERP != region {
 			// Update a live peer in place, as magicsock's updateFromNode does.
 			updated := n.Clone()
 			updated.DiscoKey = c.Disco
 			updated.Endpoints = slices.Clone(c.Endpoints)
-			if home != 0 {
-				updated.HomeDERP = home
-			} else if cleared {
-				updated.HomeDERP = 0 // peerDERPRegion then answers with this engine's own home
-			}
+			updated.HomeDERP = region
 			b.setClientLocked(k, updated)
 			changed = true
 		}
@@ -131,10 +115,7 @@ func (b *locoBackend) addClientLocked(k key.NodePublic, disco key.DiscoPublic, a
 	}
 	id := b.nextClientID
 	b.nextClientID++
-	home := b.derpRegionIDLocked()
-	if region := b.peerRegions[k]; b.dm.Regions[region].HasDERP() {
-		home = region
-	}
+	home := b.peerRegionLocked(k)
 	b.setClientLocked(k, &tailcfg.Node{
 		ID:         id,
 		StableID:   tailcfg.StableNodeID(fmt.Sprint(id)),
@@ -260,11 +241,81 @@ const directPingFirstRetry, directPingMaxRetry = 250 * time.Millisecond, 2 * tim
 // of QUIC's 1 s handshake budget.
 const newHandshakeHold = 500 * time.Millisecond
 
-// signedRegionLocked is the home region the signed configuration gave peer, or 0 when this engine no longer has
-// that relay (a decommissioned relay's region must not be reinstalled on every renewal).
-func (b *locoBackend) signedRegionLocked(peer key.NodePublic) tailcfg.DERPRegionID {
-	if home := b.peerRegions[peer]; b.dm.Regions[home].HasDERP() {
+// replyRouteTTL is how long a reply route is preferred to the peer's signed home. Tailscale's derpRoute has no expiry (it is
+// only a fallback there); here a route may come from a peer pinging us on a relay it cannot be reached through otherwise,
+// so it holds while the peer keeps showing it (each ping, answer or pin renews it) and not past a signed home that says better.
+const replyRouteTTL = 5 * time.Minute
+
+// replyRoute is a peer's reply route (replyRoutes).
+type replyRoute struct {
+	region tailcfg.DERPRegionID
+	at     time.Time
+	timer  *time.Timer
+}
+
+func (b *locoBackend) routeTTLValue() time.Duration {
+	if b.routeTTL > 0 {
+		return b.routeTTL
+	}
+	return replyRouteTTL
+}
+
+// peerRegionLocked is the relay region peer is reached on: its fresh reply route; else its signed home, if this engine
+// has that relay (a decommissioned relay's region is never reinstalled); else its last reply route, however old, as
+// magicsock falls back to a learned derpRoute when the home is unknown (derp.go fallbackDERPRegionForPeer); else this
+// engine's own home. b.mu must be held.
+func (b *locoBackend) peerRegionLocked(peer key.NodePublic) tailcfg.DERPRegionID {
+	route := b.replyRoutes[peer]
+	if route != nil && !b.dm.Regions[route.region].HasDERP() {
+		route = nil
+	}
+	if route != nil && time.Since(route.at) < b.routeTTLValue() {
+		return route.region
+	}
+	if home := b.contacts[peer].Home; b.dm.Regions[home].HasDERP() {
 		return home
 	}
-	return 0
+	if route != nil {
+		return route.region
+	}
+	return b.derpRegionIDLocked()
+}
+
+// syncClientRegionLocked points peer's netmap node, which is what magicsock sends by, at peerRegionLocked and reports
+// whether it moved; the caller republishes the map. b.mu must be held.
+func (b *locoBackend) syncClientRegionLocked(peer key.NodePublic) bool {
+	n := b.clients[peer]
+	if n == nil {
+		return false
+	}
+	region := b.peerRegionLocked(peer)
+	if n.HomeDERP == region {
+		return false
+	}
+	n = n.Clone()
+	n.HomeDERP = region
+	b.setClientLocked(peer, n)
+	return true
+}
+
+// dropReplyRouteLocked forgets peer's reply route. b.mu must be held.
+func (b *locoBackend) dropReplyRouteLocked(peer key.NodePublic) {
+	if route := b.replyRoutes[peer]; route != nil && route.timer != nil {
+		route.timer.Stop()
+	}
+	delete(b.replyRoutes, peer)
+}
+
+// expireReplyRoute returns peer to its home when route, its reply route when the timer was set, ran out unrenewed.
+func (b *locoBackend) expireReplyRoute(peer key.NodePublic, route *replyRoute) {
+	b.policyMu.Lock()
+	defer b.policyMu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed || b.replyRoutes[peer] != route {
+		return
+	}
+	if b.syncClientRegionLocked(peer) {
+		b.updateServerMapLocked()
+	}
 }

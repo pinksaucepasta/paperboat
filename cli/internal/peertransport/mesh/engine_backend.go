@@ -91,11 +91,16 @@ type locoBackend struct {
 
 	mu      sync.Mutex
 	clients map[key.NodePublic]*tailcfg.Node // for the server
-	// peerRegions is each admitted peer's last chosen relay region. A retired lease re-adds its peer; the
-	// peer keeps its rendezvous, as magicsock keeps a peer's derpRoute across WireGuard resets
-	// (wgengine/magicsock/derp.go). Re-added on the default home, a dial attempt lost the relay its
-	// predecessor had found (a test Mac 2026-11-05).
-	peerRegions map[key.NodePublic]tailcfg.DERPRegionID
+	// replyRoutes is each admitted peer's reply route: the relay region it was last heard on or pinned to (setPeerRelayRegion),
+	// kept apart from its home, the signed region in contacts (peer_contacts.go). Tailscale keeps the two apart too: a peer's
+	// netmap HomeDERP is endpoint.derpAddr, a learned route is Conn.derpRoute, and neither replaces the other
+	// (wgengine/magicsock/derp.go, endpoint.go updateFromNode). A route is preferred while fresh (replyRouteTTL), then the
+	// peer is reached on its home again. A retired lease re-adds its peer and keeps the route, as magicsock keeps a derpRoute
+	// across WireGuard resets (a test Mac 2026-11-05).
+	replyRoutes map[key.NodePublic]*replyRoute
+	// routeTTL overrides replyRouteTTL (tests).
+	routeTTL time.Duration
+	closed   bool
 	// clientByAddr indexes clients by address for the per-packet peer lookup; it changes only
 	// through setClientLocked and deleteClientLocked.
 	clientByAddr map[netip.Addr]key.NodePublic
@@ -142,6 +147,12 @@ func (b *locoBackend) peerDERPRegion(peer key.NodePublic) tailcfg.DERPRegionID {
 
 func (b *locoBackend) Close() error {
 	b.closeOnce.Do(func() {
+		b.mu.Lock()
+		b.closed = true
+		for peer := range b.replyRoutes {
+			b.dropReplyRouteLocked(peer)
+		}
+		b.mu.Unlock()
 		if b.ns != nil {
 			b.ns.Close()
 		}
