@@ -22,13 +22,17 @@ export async function saveReport(db: D1Database, vantage: string, now: number, p
     .run()
 }
 
-/** What a probe write must clear: the signed time must be newer than the last accepted one (replay), and posts are at least RATE_MS apart. */
+/**
+ * What a probe write must clear: a signed time already stored for this vantage is a replay (an exact copy), and posts are at least
+ * RATE_MS apart on the server's clock. Ordering is not judged on the probe's own clock, so a clock that ran ahead and was corrected
+ * cannot lock a healthy probe out.
+ */
 export const RATE_MS = 20_000
 export async function admitProbe(db: D1Database, vantage: string, now: number, probeTs: number): Promise<"ok" | "replayed" | "rate"> {
-  const last = await db.prepare("SELECT MAX(probe_ts) AS probe_ts, MAX(ts) AS ts FROM reports WHERE vantage = ?").bind(vantage).first<{ probe_ts: number | null; ts: number | null }>()
-  if (last?.probe_ts != null && probeTs <= last.probe_ts) return "replayed"
-  if (last?.ts != null && now - last.ts < RATE_MS) return "rate"
-  return "ok"
+  const dup = await db.prepare("SELECT 1 AS x FROM reports WHERE vantage = ? AND probe_ts = ?").bind(vantage, probeTs).first()
+  if (dup) return "replayed"
+  const last = await db.prepare("SELECT MAX(ts) AS ts FROM reports WHERE vantage = ?").bind(vantage).first<{ ts: number | null }>()
+  return last?.ts != null && now - last.ts < RATE_MS ? "rate" : "ok"
 }
 
 interface Row { vantage: string; ts: number; results: string }
@@ -41,9 +45,13 @@ interface Row { vantage: string; ts: number; results: string }
 export async function evaluate(db: D1Database, now: number): Promise<Record<string, Evidence[]>> {
   const rows = (await db.prepare("SELECT vantage, ts, results FROM reports WHERE net_ok = 1 AND ts >= ? ORDER BY ts").bind(now - WINDOW_MS).all<Row>()).results
   const prev = new Map((await db.prepare("SELECT unit, state FROM unit_state").all<{ unit: string; state: string }>()).results.map((r) => [r.unit, r.state as State]))
-  const counted = Number((await db.prepare("SELECT v FROM kv WHERE k = 'uptime_minute'").first<{ v: string }>())?.v ?? 0)
   const thisMinute = minute(now)
-  const parsed = rows.map((r) => ({ vantage: r.vantage, ts: r.ts, results: JSON.parse(r.results) as Reported }))
+  // The minute is claimed in one conditional write, so two overlapping runs (or a cron retry) count the uptime once between them.
+  await db.prepare("INSERT OR IGNORE INTO kv (k, v) VALUES ('uptime_minute', '0')").run()
+  const claimed = (await db.prepare("UPDATE kv SET v = ? WHERE k = 'uptime_minute' AND CAST(v AS INTEGER) < ?").bind(String(thisMinute), thisMinute).run()).meta.changes === 1
+  const parsed = rows.flatMap((r) => {
+    try { return [{ vantage: r.vantage, ts: r.ts, results: JSON.parse(r.results) as Reported }] } catch { console.error("status: skipping an unreadable report row"); return [] } // one bad row must not stop every decision
+  })
   const writes: D1PreparedStatement[] = []
   const evidence: Record<string, Evidence[]> = {}
   const day = dayOf(now)
@@ -59,7 +67,7 @@ export async function evaluate(db: D1Database, now: number): Promise<Record<stri
           return hit ? [{ ts: r.ts, ok: hit[0] === 1, ms: hit[1] }] : []
         }),
       }))
-      const old = prev.get(unit.id) ?? "operational"
+      const old = prev.get(unit.id) ?? "delayed" // a unit never seen before is not green until it has passed (rule 3)
       const d = decideUnit(old, now, series, unit.slowMs)
       evidence[unit.id] = d.evidence
       states.push(d.state)
@@ -67,14 +75,16 @@ export async function evaluate(db: D1Database, now: number): Promise<Record<stri
     }
     const state = decideComponent(states)
     if (prev.get(`comp:${comp.id}`) !== state) writes.push(setState(`comp:${comp.id}`, state))
-    if (thisMinute > counted && !(await inMaintenance(db, comp.id, now))) {
+    if (claimed && !(await inMaintenance(db, comp.id, now))) {
       const col = { operational: "up", degraded: "degraded", major: "down", delayed: "delayed" }[state]
       writes.push(db.prepare(`INSERT INTO uptime_day (component, day, ${col}) VALUES (?, ?, 1) ON CONFLICT(component, day) DO UPDATE SET ${col} = ${col} + 1`).bind(comp.id, day))
     }
   }
   const put = (k: string, v: string) => db.prepare("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v)
   writes.push(db.prepare("DELETE FROM reports WHERE ts < ?").bind(now - 3_600_000))
-  writes.push(put("evidence", JSON.stringify(evidence)), put("evaluated_at", String(now)), put("uptime_minute", String(Math.max(counted, thisMinute))))
+  writes.push(put("evidence", JSON.stringify(evidence)), put("evaluated_at", String(now)))
+  writes.push(db.prepare("DELETE FROM uptime_day WHERE day < ?").bind(dayOf(now - (HISTORY_DAYS + 10) * DAY)))
+  writes.push(db.prepare("DELETE FROM kv WHERE (k LIKE 'sub:%' AND k < ?) OR (k LIKE 'idem:%' AND CAST(json_extract(v, '$.ts') AS INTEGER) < ?)").bind(`sub:${dayOf(now - 7 * DAY)}`, now - 86_400_000))
   await db.batch(writes)
   return evidence
 }
@@ -88,7 +98,7 @@ async function inMaintenance(db: D1Database, component: string, now: number) {
  * The snapshot the page reads. `at` is the last time units were decided, never the time of this rebuild: an admin write
  * (incident, maintenance) refreshes the incident text but cannot make old decisions look fresh.
  */
-export async function buildSnapshot(db: D1Database, now: number): Promise<Snapshot> {
+export async function buildSnapshot(db: D1Database, now: number, built = Date.now()): Promise<Snapshot> {
   const since = now - HISTORY_DAYS * DAY
   const [states, days, incidents, updates, maint, evid, heart, subs, evaluated] = await Promise.all([
     db.prepare("SELECT unit, state, since FROM unit_state").all<{ unit: string; state: State; since: number }>(),
@@ -133,7 +143,8 @@ export async function buildSnapshot(db: D1Database, now: number): Promise<Snapsh
       subscribers: subs?.n ?? 0,
     },
   }
-  await db.prepare("INSERT INTO snapshot (id, at, body) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET at = excluded.at, body = excluded.body").bind(snapshot.at, JSON.stringify(snapshot)).run()
+  // A build that started earlier never overwrites one that started later: it may have read before a newer write committed.
+  await db.prepare("INSERT INTO snapshot (id, at, built, body) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET at = excluded.at, built = excluded.built, body = excluded.body WHERE excluded.built >= snapshot.built").bind(snapshot.at, built, JSON.stringify(snapshot)).run()
   return snapshot
 }
 

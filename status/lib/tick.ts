@@ -15,6 +15,6 @@ export async function tick(env: Env, now = Date.now()): Promise<void> {
       console.error("status cron vantage", e instanceof Error ? e.message : e)
     }
   }
-  await evaluate(env.DB, now)
+  await evaluate(env.DB, now) // if this throws the cron run fails visibly and the page goes 'delayed' by itself; nothing refreshes `at`
   await buildSnapshot(env.DB, now)
 }
