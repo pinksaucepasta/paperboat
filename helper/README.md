@@ -11,9 +11,9 @@ from its official source when missing), and public inbound connectivity.
 ## Install
 
 ```sh
-curl -fsSL https://get.pprbt.dev/selfhost/install | sh                    # relay (default)
-curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable tunnel
-curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable both
+curl -fsSL https://get.pprbt.dev/selfhost | sh                    # relay (default)
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable tunnel
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable both
 ```
 
 It prints a claim address and a single-use code that lasts fifteen minutes. Paste both into the dashboard.

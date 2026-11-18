@@ -4,14 +4,16 @@ Ubuntu 22.04/24.04 or Debian 12 on amd64/arm64, systemd and public inbound conne
 first; no account, team, or global scope is assigned by installation.
 
 ```sh
-curl -fsSL https://get.pprbt.dev/selfhost/install | sh
+curl -fsSL https://get.pprbt.dev/selfhost | sh
 # Choose tunnel or both instead of the default relay:
-curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable tunnel
-curl -fsSL https://get.pprbt.dev/selfhost/install | sh -s -- --enable both
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable tunnel
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable both
 ```
 
-The installer downloads the configured immutable package, verifies its SHA256,
-installs `pbh`, installs Docker from the configured official source when missing, pulls
+The installer is one fixed script. It finds the newest `selfhost-<version>` GitHub release, downloads the package
+for this CPU with the release's `SHA256SUMS` and `SHA256SUMS.sig`, verifies the signature with the release key
+embedded in the script (installing `ssh-keygen` from OpenSSH through the system package manager when it is missing;
+it never skips verification), checks the package SHA256, installs `pbh`, installs Docker from the configured official source when missing, pulls
 the selected relay/edge images (an unreachable registry or wrong architecture stops the
 install before anything changes) and enables a protected system service. The helper runs
 the images with host networking and a protected state mount; runtime binaries are not

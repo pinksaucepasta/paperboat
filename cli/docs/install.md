@@ -9,13 +9,13 @@ them from; there is no separate client and server.
 Linux and macOS:
 
 ```sh
-curl -fsSL https://get.pprbt.dev/install | sh
+curl -fsSL https://get.pprbt.dev | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://get.pprbt.dev/install.ps1 | iex
+irm https://get.pprbt.dev | iex
 ```
 
 The installer puts `pb` on the machine, starts its background service, and signs the machine in. On a
@@ -36,19 +36,22 @@ pb doctor
 pb machine add --name studio
 ```
 
-This prints an install command for Linux/macOS and one for Windows. Both carry the same one-time token.
-Run the one for the new machine within ten minutes (the default lifetime; `expires_at` is in
+This prints an install command for Linux/macOS and one for Windows (PowerShell). Both carry the same one-time token
+in the environment (`PB_TOKEN`), never in the address. Run the one for the new machine within ten minutes (the default lifetime; `expires_at` is in
 `pb machine add --json`). The token enrolls that one machine, then stops working.
 
 ## What the installer checks
 
-Before it runs anything, the installer checks the exact download it is about to execute: its URL,
-version, length and SHA-256 are fixed inside the installer itself. The first installation therefore
-trusts the installer's HTTPS origin. Once installed, `pb` verifies every later update against signed
-(TUF) release metadata, with rollback protection. The technical contract is in
-[tuf-release.md](tuf-release.md).
+The installer is one fixed script in the Paperboat repository (`cli/tools/install.sh`, `install.ps1`); no Paperboat
+server takes part in the first install. It resolves the latest GitHub release, downloads `pb` with that release's
+`SHA256SUMS` and `SHA256SUMS.sig`, and verifies the signature with the release key embedded in the script before it
+trusts any hash. Then it checks the download against `SHA256SUMS` and refuses on any mismatch. `ssh-keygen` does the
+verification; when it is missing the installer installs OpenSSH with your package manager (or the Windows OpenSSH
+client) and never skips the check. Set `PB_VERSION` to install one release instead of the latest, and `PB_RECIPE` to
+pair from a recipe. Once installed, `pb` verifies every later update against signed (TUF) release metadata, with
+rollback protection. The technical contract is in [tuf-release.md](tuf-release.md).
 
-The Windows executables are not Authenticode-signed; their trust comes from the same pinned hash.
+The Windows executables are not Authenticode-signed; their trust comes from the release signature.
 Windows SmartScreen may warn if you download `pb.exe` by hand in a browser. The PowerShell command above
 does not trigger it.
 

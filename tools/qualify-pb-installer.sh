@@ -1,6 +1,6 @@
 #!/bin/sh
 # S3-02 on Linux: the published `pb` one-liner installs the official release on a fresh host.
-#   PAPERBOAT_INSTALLER_URL=https://<get host>/install tools/qualify-pb-installer.sh \
+#   PAPERBOAT_INSTALLER_URL=https://<get host> tools/qualify-pb-installer.sh \
 #     --base ubuntu:24.04 --expect-version 2026.10.19.7 [--platform linux/amd64]
 # Fresh host = throwaway systemd container (tools/fresh-host.sh). Everything is removed on exit.
 set -eu

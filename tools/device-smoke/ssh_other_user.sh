@@ -43,9 +43,7 @@ fresh() { # fresh CONTAINER NAME PACKAGES
   NAME=\$name TOKEN=/tmp/\$ct-token python3 - <<'PY'
 import json, os, re, subprocess
 added = json.loads(subprocess.run([os.path.expanduser("~/.local/bin/pb"), "machine", "add", "--name", os.environ["NAME"], "--json"], capture_output=True, text=True, check=True).stdout)
-url = re.search(r"'(https?://[^']+)'", added["data"]["linux_macos_command"]).group(1)
-script = subprocess.run(["curl", "-fsSL", url], capture_output=True, text=True, check=True).stdout
-token = re.search(r"PAPERBOAT_ENROLLMENT_TOKEN='([A-Za-z0-9]+)'", script).group(1)
+token = re.search(r"PB_TOKEN='([A-Za-z0-9]+)'", added["data"]["linux_macos_command"]).group(1)
 with open(os.open(os.environ["TOKEN"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     f.write(token)
 PY

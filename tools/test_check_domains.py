@@ -18,7 +18,7 @@ class DomainCheckTest(unittest.TestCase):
 
     def test_documentation_and_build_configuration_are_not_scanned(self):
         self.assertEqual(check_domains.violations({
-            "README.md": "curl https://get.pprbt.dev/install | sh",
+            "README.md": "curl https://get.pprbt.dev | sh",
             "cli/docs/pb.1": "ppr.boats",
             "server/docs/runbooks/x.txt": "api.pprbt.dev",
             "cli/Makefile": "DEFAULT_SERVER_URL ?= https://api.pprbt.dev",
