@@ -61,13 +61,18 @@ func TestClientUpdatePolicyOperatorPostgres(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		for _, q := range []string{`DELETE FROM paperboat.client_update_policy_requests WHERE actor_id=$1`} {
+		// The first-operator bootstrap is one row for the whole database: a test that consumes it must give it back, or
+		// every later test that sets up its own first operator gets 409 setup_complete (only a table reset in between
+		// hid it). The immutable audit rows stay; they reference the account by id only, with no foreign key.
+		for _, q := range []string{
+			`DELETE FROM paperboat.client_update_policy_requests WHERE actor_id=$1`,
+			`DELETE FROM paperboat.operator_bootstrap WHERE operator_id=$1`,
+			`DELETE FROM paperboat.operator_accounts WHERE id=$1`,
+		} {
 			if _, err = store.Pool().Exec(ctx, q, actor); err != nil {
 				t.Error(err)
 			}
 		}
-		// Retain immutable audits and their account/bootstrap references for
-		// the test lead to remove by dropping this isolated database.
 	}()
 	opts := Options{OperatorAuth: op, OperatorAudit: audit.NewWriter(store), ClientUpdatePolicy: policy, Config: config.Config{HTTP: config.HTTPConfig{AllowedOrigins: []string{"https://console.example.test"}, RequestTimeout: 5 * time.Second, MaxBodyBytes: 8192}}}
 	router := NewRouter(opts)
