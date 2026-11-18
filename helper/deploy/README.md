@@ -13,7 +13,7 @@ curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable both
 The installer is one fixed script. It finds the newest `selfhost-<version>` GitHub release, downloads the package
 for this CPU with the release's `SHA256SUMS` and `SHA256SUMS.sig`, verifies the signature with the release key
 embedded in the script (installing `ssh-keygen` from OpenSSH through the system package manager when it is missing;
-it never skips verification), checks the package SHA256, installs `pbh`, installs Docker from the configured official source when missing, pulls
+it never skips verification), checks the package SHA256, installs `pbh`, installs Docker Engine from Docker's official apt repository (its signing key pinned to Docker's published fingerprint, no script run) when Docker is missing or leaves an installed Docker 20.10 or newer alone, pulls
 the selected relay/edge images (an unreachable registry or wrong architecture stops the
 install before anything changes) and enables a protected system service. The helper runs
 the images with host networking and a protected state mount; runtime binaries are not
@@ -157,9 +157,7 @@ arguments; public browser traffic still has the edge trust boundary described ab
 
 Container image references are supplied by the package build using
 `PAPERBOAT_SELFHOST_RELAY_IMAGE` and `PAPERBOAT_SELFHOST_EDGE_IMAGE`; the
-initial public-address API uses `PAPERBOAT_SELFHOST_ADDRESS_URL`. The installer
-renderer supplies `DOCKER_INSTALL_URL` alongside package URLs and SHA256 values.
-An operator can explicitly pass `--relay-image` and `--edge-image` to `pbh install`.
+initial public-address API uses `PAPERBOAT_SELFHOST_ADDRESS_URL`. An operator can explicitly pass `--relay-image` and `--edge-image` to `pbh install`.
 Image configuration is atomic and owner-only; the claim and certificate identity
 remain owned by the shared installation supervisor.
 
