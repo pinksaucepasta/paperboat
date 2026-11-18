@@ -306,9 +306,13 @@ func TestAnEmptySetNeverReplacesDeliveredEndpointsDuringAHandoverOnPostgres(t *t
 		t.Fatalf("a restart that found the same endpoints moved the topic %d times", f.topic(t)-before)
 	}
 	// A non-empty set that changes again inside the interval is still held back: the flapping guard is unchanged.
+	f.configure(t, "moved", 1, []string{"203.0.113.7:42001"})
+	if got := delivered("peer_after_move"); got != "[203.0.113.7:42001]" {
+		t.Fatalf("a change after a quiet interval was held back: %s", got)
+	}
 	clock = clock.Add(2 * time.Second)
-	f.configure(t, "flap", 1, []string{"203.0.113.7:42001"})
-	if got := delivered("peer_after_flap"); got != "[203.0.113.7:42000]" {
+	f.configure(t, "flap", 1, []string{"203.0.113.7:42002"})
+	if got := delivered("peer_after_flap"); got != "[203.0.113.7:42001]" {
 		t.Fatalf("a non-empty change inside the interval was delivered: %s", got)
 	}
 }
