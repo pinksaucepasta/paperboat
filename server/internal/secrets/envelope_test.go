@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"testing"
 )
@@ -106,5 +107,35 @@ func TestValidRingRefusesEmptyKeys(t *testing.T) {
 		if got := ValidRing(ring); got != want {
 			t.Errorf("ValidRing(%q) = %v, want %v", ring, got, want)
 		}
+	}
+}
+
+// A ciphertext written by main's envelope code (nonce, then the sealed value: no key id), produced by running
+// origin/main's secrets.Encrypt("main-written-encryption-key-0123456789-0123", "ssh CA seed written by main").
+// Every ciphertext already stored is in this layout; it must open under a ring whose newest key is a new one, and
+// resealing must give the stamped layout that names the newest key.
+func TestCiphertextWrittenByMainOpensAndIsResealed(t *testing.T) {
+	const mainKey = "main-written-encryption-key-0123456789-0123"
+	const newKey = "next-encryption-key-0123456789-0123456789-0"
+	fromMain, err := hex.DecodeString("73316c228dd8a6fdf762099200aabb4a96c0fc13bfcead8878dafa78ea027deb1677ccc38cbdeb4219b784b741c9cc29b59a9156daff24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ring := range []string{mainKey, newKey + "," + mainKey} {
+		got, err := Decrypt(ring, fromMain)
+		if err != nil || got != "ssh CA seed written by main" {
+			t.Fatalf("ring %q: %q %v", ring, got, err)
+		}
+	}
+	ring := newKey + "," + mainKey
+	if !NeedsReseal(ring, fromMain) {
+		t.Fatal("a ciphertext in main's layout must need resealing")
+	}
+	resealed, err := Reseal(ring, fromMain)
+	if err != nil || NeedsReseal(ring, resealed) || len(resealed) != len(fromMain)+12 {
+		t.Fatalf("resealed: %d bytes, %v", len(resealed), err)
+	}
+	if got, err := Decrypt(newKey, resealed); err != nil || got != "ssh CA seed written by main" {
+		t.Fatalf("the new key alone: %q %v", got, err)
 	}
 }
