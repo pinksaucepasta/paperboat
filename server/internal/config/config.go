@@ -256,6 +256,27 @@ type Billing struct {
 	TeamTrialDays int `json:"team_trial_days"`
 	// Limits are the per-plan count limits (user decision 2026-10-23), the one place they live.
 	Limits PlanLimits `json:"limits"`
+	// FairUse is what happens to public traffic past a plan's included amount: slowed, never cut off or billed.
+	FairUse FairUse `json:"fair_use"`
+}
+
+// FairUse holds the slowdown speeds (user decision 2026-11-19, numbers pending the user's final ones). The included amounts
+// are the plans' allowances (PersonalAllowanceBytes, the products' allowance_bytes).
+type FairUse struct {
+	// EdgeFreeBytesPerSecond and EdgeBytesPerSecond are the speed of a Free, and of a Pro or Team, workspace's public traffic
+	// across all its Paperboat edges together once its included amount is used up, until its next billing date. The edges
+	// each get a share (controlplane: rate divided by the edges carrying the workspace).
+	EdgeFreeBytesPerSecond int64 `json:"edge_free_bytes_per_second"`
+	EdgeBytesPerSecond     int64 `json:"edge_bytes_per_second"`
+	// RelayMbit is the speed cap of one account on one Paperboat relay while it is within RelayIncludedBytes of relayed
+	// traffic in the month; past it the cap is RelaySlowMbit until the month ends. Relayed traffic is never billed.
+	RelayMbit          float64 `json:"relay_mbit"`
+	RelayIncludedBytes int64   `json:"relay_included_bytes"`
+	RelaySlowMbit      float64 `json:"relay_slow_mbit"`
+}
+
+func (f FairUse) valid() bool {
+	return f.EdgeFreeBytesPerSecond >= 1024 && f.EdgeBytesPerSecond >= f.EdgeFreeBytesPerSecond && f.RelaySlowMbit > 0 && f.RelayMbit >= f.RelaySlowMbit && f.RelayIncludedBytes > 0
 }
 
 // PlanLimit is one count limit per plan. Free and Pro apply to a personal workspace. Teams are
@@ -278,6 +299,10 @@ type PlanLimits struct {
 	// ViewersPerSharedTerminal caps one shared terminal's viewers (abuse protection; the shared
 	// terminal itself counts as one session, its viewers do not).
 	ViewersPerSharedTerminal int `json:"viewers_per_shared_terminal"`
+	// SelfHostedCeiling is the internal anti-abuse ceiling on live previews and tunnels, and on open console terminals, of a
+	// workspace whose edges are all self-hosted. It protects the database and the projections, is never shown as a plan limit,
+	// and is the only limit such a workspace meets (user decision 2026-11-19).
+	SelfHostedCeiling int `json:"self_hosted_ceiling"`
 	// PublicTCP bounds concurrent public raw-TCP tunnels (user decision 2026-10-27).
 	PublicTCP PublicTCPLimit `json:"public_tcp"`
 }
@@ -624,7 +649,7 @@ func Default() Config {
 		},
 		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, TunnelAddressPerMinute: 6, TunnelAddressBurst: 10, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, RelayMbit: 20, RelayIncludedBytes: 50_000_000_000, RelaySlowMbit: 2}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
@@ -828,7 +853,10 @@ func (c Config) Validate() error {
 	if !c.Billing.Limits.SDK.valid() {
 		errs = append(errs, fmt.Errorf("billing.limits.sdk: positive token limits and account limits at least as large are required"))
 	}
-	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 || l.PublicTCP.Free < 1 || l.PublicTCP.Pro < l.PublicTCP.Free || l.PublicTCP.TeamPerSeat < 1 {
+	if !c.Billing.FairUse.valid() {
+		errs = append(errs, fmt.Errorf("billing fair-use speeds are invalid"))
+	}
+	if l := c.Billing.Limits; !l.Machines.valid() || !l.Publications.valid() || !l.BrowserTerminals.valid() || l.ViewersPerSharedTerminal < 1 || l.SelfHostedCeiling < l.Publications.TeamCeiling || l.PublicTCP.Free < 1 || l.PublicTCP.Pro < l.PublicTCP.Free || l.PublicTCP.TeamPerSeat < 1 {
 		errs = append(errs, fmt.Errorf("billing.limits: each plan limit needs free > 0, pro >= free and team_ceiling >= pro, and viewers_per_shared_terminal > 0"))
 	}
 	if c.UserMachines.ExpiredAccessSessionRetention < time.Hour {

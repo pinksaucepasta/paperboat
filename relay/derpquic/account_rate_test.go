@@ -7,12 +7,12 @@ import (
 	"tailscale.com/types/key"
 )
 
-// An account's fair-use speed on a relay is one token bucket shared by all its carriers: configured in Mbit/s,
-// applied live to the account's existing bucket, lifted (to the relay's own ceiling) by 0, and bounded.
-func TestAccountMbitSetsTheSharedBudgetRate(t *testing.T) {
+// An account's fair-use speed on a relay is one token bucket shared by all its carriers: configured in Mbit/s, lower for the
+// accounts named slow, applied live to the account's existing bucket, lifted (to the relay's own ceiling) by 0, and bounded.
+func TestAccountSpeedsSetTheSharedBudgetRate(t *testing.T) {
 	f := newFixture(t)
 	s, address, _ := f.start("127.0.0.1:0")
-	if err := s.SetAccountMbit(20); err != nil {
+	if err := s.SetAccountSpeeds(20, 2); err != nil {
 		t.Fatal(err)
 	}
 	ka, kb := key.NewNode().Public(), key.NewNode().Public()
@@ -38,8 +38,27 @@ func TestAccountMbitSetsTheSharedBudgetRate(t *testing.T) {
 	if sent > 2_500_000+budgetBurstBytes || sent < 2_500_000 {
 		t.Fatalf("one second at 20 Mbit/s forwarded %d bytes", sent)
 	}
-	// Changing the cap applies to the existing budget; 0 lifts it to the relay's ceiling.
-	if err := s.SetAccountMbit(0); err != nil {
+	// Naming the account slow lowers its existing budget to the second tier; unnaming returns it.
+	if err := s.SetSlowAccounts([]string{"fair"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.AccountMbit("fair"); got != 2 {
+		t.Fatalf("a slow account is held to %v Mbit/s, want 2", got)
+	}
+	if got := s.AccountMbit("someone else"); got != 20 {
+		t.Fatalf("another account is held to %v Mbit/s, want 20", got)
+	}
+	budget.mu.Lock()
+	slow := budget.rate
+	budget.mu.Unlock()
+	if slow != 2e6/8 {
+		t.Fatalf("the existing budget refills at %v bytes/s, want 250000", slow)
+	}
+	if err := s.SetSlowAccounts(nil); err != nil || s.AccountMbit("fair") != 20 {
+		t.Fatalf("clearing the slow list did not restore the normal speed: %v %v", err, s.AccountMbit("fair"))
+	}
+	// 0 lifts the cap to the relay's ceiling.
+	if err := s.SetAccountSpeeds(0, 0); err != nil {
 		t.Fatal(err)
 	}
 	budget.mu.Lock()
@@ -49,7 +68,7 @@ func TestAccountMbitSetsTheSharedBudgetRate(t *testing.T) {
 		t.Fatalf("lifted cap = %v bytes/s, want the ceiling %d", lifted, accountBytesPerSecond)
 	}
 	for _, bad := range []float64{-1, MaxAccountMbit + 1} {
-		if s.SetAccountMbit(bad) == nil {
+		if s.SetAccountSpeeds(bad, 0) == nil || s.SetAccountSpeeds(0, bad) == nil {
 			t.Fatalf("account cap %v accepted", bad)
 		}
 	}

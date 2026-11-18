@@ -71,6 +71,12 @@ type relayNodeLeaseDocument struct {
 	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
 	// relay's list as it is (the read failed); an empty list clears it.
 	PoolHandover *[]relayPoolHandover `json:"pool_handover,omitempty"`
+	// AccountMbit is the fair-use speed of one account on this relay in Mbit/s, and SlowMbit its speed once the account has
+	// carried the month's included relay bytes (SlowAccounts lists those among the connected ones, until a later observation
+	// no longer does). Both are 0 on a customer-owned relay: Paperboat never limits it. They never carry authority.
+	AccountMbit  float64  `json:"account_mbit"`
+	SlowMbit     float64  `json:"slow_mbit"`
+	SlowAccounts []string `json:"slow_accounts,omitempty"`
 	// SubjectsRequired asks a relay that sent SubjectsDigest for its full list; no revocations are given with it.
 	// Only relays that sent a digest are ever sent the field.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
@@ -193,10 +199,11 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	}
 	now := s.clock().UTC()
 	var required bool
+	var set relaySubjectSet
 	// The repeatable-read SELECT ... FOR UPDATE fails with 40001 when the relay's row changed after the
 	// snapshot (a relay restart's StartRelayNode, a second server during a rollout); replay it like InTx does.
 	err := db.RetrySerializable(ctx, func() (err error) {
-		out, _, required, err = s.observeRelayNodeTx(ctx, in, now)
+		out, set, required, err = s.observeRelayNodeTx(ctx, in, now)
 		return err
 	})
 	if err != nil {
@@ -204,6 +211,9 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	}
 	s.countRelayObservation(in, required)
 	s.recordNodeMetrics(ctx, "relay", in.NodeID, in.ProcessEpoch, in.CapacityUsed, in.Metrics)
+	if err := s.relayFairUse(ctx, in.NodeID, set, now, &out); err != nil {
+		return relayNodeLeaseDocument{}, err
+	}
 	out.PoolHandover = s.relayPoolHandovers(ctx, in.NodeID)
 	return out, nil
 }
@@ -233,6 +243,33 @@ SELECT account_id,floor(extract(epoch from close_at))::bigint FROM paperboat.rel
 	}
 	return &list
 }
+
+// relayFairUse puts the fair-use speeds in a Paperboat-operated relay's lease: one cap for every account and the slow tier for the
+// connected accounts past the month's included relay bytes (read after the commit and outside the transaction: cached, bounded,
+// fail-safe). A customer-owned relay gets none, so it is never limited.
+func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relaySubjectSet, now time.Time, out *relayNodeLeaseDocument) error {
+	var customerOwned bool
+	if err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, nodeID).Scan(&customerOwned); err != nil || customerOwned {
+		return err
+	}
+	out.AccountMbit, out.SlowMbit = s.fairUse.RelayMbit, s.fairUse.RelaySlowMbit
+	if s.relayVolume == nil {
+		return nil
+	}
+	accounts := make([]string, 0, len(set.list))
+	listed := map[string]bool{}
+	for _, subject := range set.list {
+		if !listed[subject.AccountID] {
+			listed[subject.AccountID] = true
+			accounts = append(accounts, subject.AccountID)
+		}
+	}
+	out.SlowAccounts = s.relayVolume.DeniedAmong(ctx, accounts, now, relayVolumeFreshLookups)
+	return nil
+}
+
+// relayVolumeFreshLookups bounds the uncached usage reads one relay observation may cost.
+const relayVolumeFreshLookups = 64
 
 // observeRelayNodeTx is one attempt of ObserveRelayNode's transaction; RetrySerializable may replay it.
 func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObservation, now time.Time) (out relayNodeLeaseDocument, set relaySubjectSet, required bool, err error) {

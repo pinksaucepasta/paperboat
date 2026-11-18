@@ -55,7 +55,7 @@ func (s *ingressMemoryStream) Close() error      { s.closed = true; return nil }
 func (s *ingressMemoryStream) CloseWrite() error { return nil }
 
 func testIngressLimits(byteRate rate.Limit) *IngressLimits {
-	return &IngressLimits{Publication: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Account: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Throttled: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}}
+	return &IngressLimits{Publication: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Account: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}}
 }
 
 // Section 5 of the edge abuse plan: popularity is not abuse. Any number of concurrent streams and
@@ -238,16 +238,16 @@ func TestIngressOutlivesAuthorityWindowUntilDisconnectedAndReleasesCapacity(t *t
 // rate (its streams stay open and the bytes pass), another workspace runs at full speed, and the pace ends at
 // the reset time or when the server stops listing the workspace.
 func TestThrottledWorkspaceIsPacedAcrossItsRoutesAndRecovers(t *testing.T) {
-	limits := &IngressLimits{Publication: IngressLimitConfig{ByteRate: 1 << 30, ByteBurst: 1 << 20}, Account: IngressLimitConfig{ByteRate: 1 << 30, ByteBurst: 1 << 20}, Throttled: IngressLimitConfig{ByteRate: 64 << 10, ByteBurst: ingressPacingChunk}}
+	limits := &IngressLimits{Publication: IngressLimitConfig{ByteRate: 1 << 30, ByteBurst: 1 << 20}, Account: IngressLimitConfig{ByteRate: 1 << 30, ByteBurst: 1 << 20}}
 	limits, err := newIngressLimits(limits)
 	if err != nil {
 		t.Fatal(err)
 	}
 	throttles := limits.Throttles
 	throttles.Set([]connectorprotocol.IngressThrottle{
-		{Hostname: "a.example.test", Workspace: "personal:one"},
-		{Hostname: "b.example.test", Workspace: "personal:one"},
-		{Hostname: "c.example.test", Workspace: "team:two", ResetsAt: time.Now().Add(-time.Second)},
+		{Hostname: "a.example.test", Workspace: "personal:one", BytesPerSecond: 64 << 10},
+		{Hostname: "b.example.test", Workspace: "personal:one", BytesPerSecond: 64 << 10},
+		{Hostname: "c.example.test", Workspace: "team:two", BytesPerSecond: 64 << 10, ResetsAt: time.Now().Add(-time.Second)},
 	})
 	ctx := context.Background()
 	// Both routes of one workspace share one bucket: the burst is consumed by the first, so the second waits.
@@ -276,6 +276,12 @@ func TestThrottledWorkspaceIsPacedAcrossItsRoutesAndRecovers(t *testing.T) {
 	defer cancel()
 	if err := throttles.Wait(short, "a.example.test", 8*ingressPacingChunk); err == nil {
 		t.Fatal("a paced wait outlived its context")
+	}
+	// The server's rate for a workspace applies to its existing bucket: raised, the same bytes pass at once.
+	throttles.Set([]connectorprotocol.IngressThrottle{{Hostname: "a.example.test", Workspace: "personal:one", BytesPerSecond: 64 << 20}})
+	started = time.Now()
+	if err := throttles.Wait(ctx, "a.example.test", 64*ingressPacingChunk); err != nil || time.Since(started) > 250*time.Millisecond {
+		t.Fatalf("a raised rate did not apply to the existing bucket: %v after %v", err, time.Since(started))
 	}
 	throttles.Set(nil)
 	started = time.Now()
@@ -412,13 +418,12 @@ func TestEdgeLogsTheIngressLimitsItApplies(t *testing.T) {
 func TestRegistryThrottleSlowsALiveStreamAndLeavesOthersAlone(t *testing.T) {
 	limits := testIngressLimits(1 << 30)
 	limits.Publication.ByteBurst, limits.Account.ByteBurst = 1<<20, 1<<20
-	limits.Throttled = IngressLimitConfig{ByteRate: 64 << 10, ByteBurst: ingressPacingChunk}
 	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4, IngressLimits: limits})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer registry.Close()
-	registry.SetThrottled([]connectorprotocol.IngressThrottle{{Hostname: "slow.example.test", Workspace: "personal:one"}})
+	registry.SetThrottled([]connectorprotocol.IngressThrottle{{Hostname: "slow.example.test", Workspace: "personal:one", BytesPerSecond: 64 << 10}})
 	send := func(host string) time.Duration {
 		t.Helper()
 		_, decision := lazyRuleAndDecision(host)

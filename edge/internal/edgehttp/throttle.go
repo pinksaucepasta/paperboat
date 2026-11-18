@@ -22,27 +22,14 @@ type throttledRoute struct {
 // Full speed resumes when the server stops listing the workspace or at its reset time, whichever is first.
 type Throttles struct {
 	mu         sync.Mutex
-	config     IngressLimitConfig
 	workspaces map[string]*rate.Limiter
 	byHost     atomic.Pointer[map[string]throttledRoute]
 }
 
-func newThrottles(config IngressLimitConfig) *Throttles {
-	return &Throttles{config: config, workspaces: make(map[string]*rate.Limiter)}
-}
+func newThrottles() *Throttles { return &Throttles{workspaces: make(map[string]*rate.Limiter)} }
 
-// configure changes the throttled rate of current and future workspaces.
-func (t *Throttles) configure(config IngressLimitConfig, now time.Time) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.config = config
-	for _, limiter := range t.workspaces {
-		limiter.SetLimitAt(now, config.ByteRate)
-		limiter.SetBurstAt(now, config.ByteBurst)
-	}
-}
-
-// Set replaces the throttled set with the server's latest list. A workspace that stays listed keeps its bucket.
+// Set replaces the throttled set with the server's latest list. A workspace that stays listed keeps its bucket (and
+// its tokens) and takes the rate of its entry: the server divides the plan's rate among the edges that carry it.
 func (t *Throttles) Set(entries []connectorprotocol.IngressThrottle) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -52,7 +39,9 @@ func (t *Throttles) Set(entries []connectorprotocol.IngressThrottle) {
 		limiter := next[e.Workspace]
 		if limiter == nil {
 			if limiter = t.workspaces[e.Workspace]; limiter == nil {
-				limiter = rate.NewLimiter(t.config.ByteRate, t.config.ByteBurst)
+				limiter = rate.NewLimiter(rate.Limit(e.BytesPerSecond), ingressPacingChunk)
+			} else if limiter.Limit() != rate.Limit(e.BytesPerSecond) {
+				limiter.SetLimit(rate.Limit(e.BytesPerSecond))
 			}
 			next[e.Workspace] = limiter
 		}

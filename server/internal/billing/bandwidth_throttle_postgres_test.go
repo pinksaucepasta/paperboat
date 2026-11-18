@@ -8,6 +8,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/announcements"
 	"github.com/pinksaucepasta/paperboat/server/internal/billing"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
@@ -47,7 +48,7 @@ func TestBandwidthThrottleTransitionLiftAndResetPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,state,product_code,period_start,period_end,bandwidth_anchor) VALUES($1,$2,'active',$3,$4,$5,$4)`, workspace, user, product, start, end)
 
 	s := billing.NewWorkspaceService(store, nil, "")
-	s.SetThrottleRate(125_000)
+	s.SetThrottleRates(config.Default().Billing.FairUse)
 	debit := func(n int64, when time.Time) {
 		t.Helper()
 		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
