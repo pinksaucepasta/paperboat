@@ -646,6 +646,7 @@ VALUES ($1,$2,$3,decode(repeat('42',32),'hex'),'route.create','route',$4,'connec
 	// operation fails, instead of waiting out the timeout (or hanging).
 	for _, state := range []string{"paused", "deleted"} {
 		f.exec(t, `UPDATE tunnels SET desired_state='active',deleted_at=NULL WHERE id=$1`, tunnel)
+		sync()
 		allReady()
 		label := state + "-" + endpointID[:8]
 		patch(label)
