@@ -30,12 +30,12 @@ export function overall(p: Payload | null): Overall {
 
 export const BANNER: Record<Overall, { title: string; detail?: string }> = {
   operational: { title: "All systems operational" },
-  incident: { title: "We're aware of an issue", detail: "Details are below." },
+  incident: { title: "We're aware of an issue", detail: "Details below." },
   degraded: { title: "Some systems are degraded", detail: "We are looking into it." },
   major: { title: "We're having a major outage", detail: "We are working on it." },
   maintenance: { title: "Scheduled maintenance in progress" },
-  delayed: { title: "Status data delayed", detail: "We have not received fresh checks for over 3 minutes, so we cannot confirm anything is working. Services may be fine." },
-  unavailable: { title: "Status unavailable", detail: "This page could not load the current status. It will try again shortly." },
+  delayed: { title: "Status data delayed", detail: "No fresh checks for over 3 minutes. Services may be fine, but we can't confirm." },
+  unavailable: { title: "Status unavailable", detail: "Couldn't load the status. Retrying." },
 }
 
 /** What a component shows: its own state, or "unknown" when the whole page's data is not fresh. */
