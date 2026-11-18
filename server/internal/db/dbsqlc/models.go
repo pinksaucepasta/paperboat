@@ -294,6 +294,19 @@ type BillingWorkspace struct {
 	GrantUntil             sql.NullTime
 }
 
+type BillingWorkspaceGrant struct {
+	ID          string
+	WorkspaceID string
+	Kind        string
+	Amount      int64
+	EndsAt      sql.NullTime
+	Reason      string
+	CreatedBy   string
+	CreatedAt   time.Time
+	RevokedAt   sql.NullTime
+	RevokedBy   sql.NullString
+}
+
 type BillingWorkspaceOperation struct {
 	IdempotencyKey      string
 	WorkspaceID         string
