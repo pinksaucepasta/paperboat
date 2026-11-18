@@ -84,8 +84,18 @@ class RegistrationTest(unittest.TestCase):
         statements, commands = [], []
         def remote(command, stdin=None, **kwargs):
             commands.append(command)
+            # Answer each remote command the way a real host does (edge() inspects the server network and its own container).
+            if "{{range $name" in command:
+                return 'testnet\n'
+            if "{{json .NetworkSettings.Networks}}" in command:
+                return '{"testnet":{"IPAddress":"10.0.0.5"}}'
+            if command.startswith('python3 -c '):
+                return '\n'
             return '{"keys":[]}'
-        with patch.object(staging, 'remote', remote), patch.object(staging, 'sql', statements.append), \
+        def sql(statement):
+            statements.append(statement)
+            return 't' if statement.startswith('SELECT') else ''
+        with patch.object(staging, 'remote', remote), patch.object(staging, 'sql', sql), \
                 patch.object(staging, 'read_remote_env', lambda *_: {'PAPERBOAT_ENCRYPTION_KEY': 'test-key'}), \
                 patch.object(staging, 'domain', lambda: 'stg.example.test'), patch.object(staging, 'api_url', lambda: 'https://anvit.stg.example.test:18443'):
             function(image)
@@ -118,8 +128,12 @@ class RegistrationTest(unittest.TestCase):
 
     def test_edge_replaces_only_its_own_install_so_a_relay_survives_it(self):
         statements, _ = self.register(staging.edge, 'paperboat-edge:stg-test')
-        self.assertIn("scope_id='usr_staging' AND capability='tunnel'", statements[0])
-        self.assertNotIn("capability='relay'", '\n'.join(statements))
+        joined = '\n'.join(statements)
+        # Since 630297d61 the edge is a managed node: it registers itself and deletes no self-hosted install.
+        self.assertIn('INSERT INTO control_tunnel_nodes', joined)
+        self.assertIn("public_ingress_ipv4='10.0.0.5'", joined)
+        self.assertNotIn('DELETE FROM paperboat.selfhost_installations', joined)
+        self.assertNotIn("capability='relay'", joined)
 
 
 class CertificateEnvironmentTest(unittest.TestCase):
