@@ -54,7 +54,8 @@ func workspaceAudience(workspaceID string) (kind, id string, ok bool) {
 // noticeBandwidthWarningTx puts "80% of fair-use bandwidth used" in the workspace's bell, once per allowance period.
 func (s *WorkspaceService) noticeBandwidthWarningTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow, allowance int64) error {
 	audience, id, ok := workspaceAudience(workspaceID)
-	if !ok {
+	// A delayed usage report can debit a period that is over already: nothing to warn about then.
+	if !ok || !window.end.After(time.Now()) {
 		return nil
 	}
 	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-80:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
@@ -91,7 +92,8 @@ WHERE workspace_id=$1 AND coalesce(budget_start,period_start)<$2`, workspaceID, 
 // committed.
 func (s *WorkspaceService) noticeBandwidthThrottledTx(ctx context.Context, tx *db.Tx, workspaceID string, window usageWindow, allowance int64) error {
 	kind, id, found := strings.Cut(workspaceID, ":")
-	if !found || (kind != "personal" && kind != "team") || id == "" {
+	// A delayed usage report can debit a period that is over already: its notices would never expire.
+	if !found || (kind != "personal" && kind != "team") || id == "" || !window.end.After(time.Now()) {
 		return nil
 	}
 	period := window.budget.UTC().Format(time.RFC3339)

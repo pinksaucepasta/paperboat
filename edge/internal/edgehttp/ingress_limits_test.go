@@ -405,3 +405,53 @@ func TestEdgeLogsTheIngressLimitsItApplies(t *testing.T) {
 		t.Fatalf("a changed set must be logged: err=%v log=%q", err, logged.String())
 	}
 }
+
+// The server's throttle list reaches a live ingress stream through the registry: bytes of a listed hostname are paced at the
+// throttled rate (here 64 KiB/s, so 96 KiB takes about half a second after the first 32 KiB burst), the stream stays open
+// and delivers every byte, and a hostname that is not listed runs at full speed.
+func TestRegistryThrottleSlowsALiveStreamAndLeavesOthersAlone(t *testing.T) {
+	limits := testIngressLimits(1 << 30)
+	limits.Publication.ByteBurst, limits.Account.ByteBurst = 1<<20, 1<<20
+	limits.Throttled = IngressLimitConfig{ByteRate: 64 << 10, ByteBurst: ingressPacingChunk}
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4, IngressLimits: limits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	registry.SetThrottled([]connectorprotocol.IngressThrottle{{Hostname: "slow.example.test", Workspace: "personal:one"}})
+	send := func(host string) time.Duration {
+		t.Helper()
+		_, decision := lazyRuleAndDecision(host)
+		decision.Binding.Audience = "team"
+		decision.PrincipalID, decision.GrantID, decision.GrantGeneration, decision.MembershipGeneration = "member", "grant-"+host, 1, 1
+		lease, err := registry.AcquireIngress(context.Background(), decision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		local, remote := net.Pipe()
+		wrapped := lease.Wrap(context.Background(), local)
+		defer wrapped.Close()
+		defer remote.Close()
+		payload := make([]byte, 3*ingressPacingChunk)
+		done := make(chan error, 1)
+		go func() {
+			got := make([]byte, len(payload))
+			_, err := io.ReadFull(remote, got)
+			done <- err
+		}()
+		started := time.Now()
+		if _, err := wrapped.Write(payload); err != nil {
+			t.Fatalf("write on %s: %v", host, err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("read on %s: %v", host, err)
+		}
+		return time.Since(started)
+	}
+	if slow := send("slow.example.test"); slow < 400*time.Millisecond {
+		t.Fatalf("a throttled hostname moved 96 KiB in %v, want about 0.5 s at 64 KiB/s", slow)
+	}
+	if fast := send("fast.example.test"); fast > 300*time.Millisecond {
+		t.Fatalf("an unlisted hostname was slowed: %v", fast)
+	}
+}

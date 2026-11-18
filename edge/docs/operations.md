@@ -37,9 +37,8 @@ returning it to service. Never bypass certificate, account, route, or connector 
 Gateway deployments may set a positive `max_body_bytes` and set `max_header_bytes`
 from 1 KiB through 128 KiB. Defaults are 100 MiB and 32 KiB.
 Choose the smallest values that admit the published applications. The 4,096-entry
-admission and route registries, 4,096-report/64 MiB persisted usage queue, and 250 ms
-quota-feedback interval are fixed workload and recovery budgets rather than deployment
-settings.
+admission and route registries and the 4,096-report/64 MiB persisted usage queue are fixed
+workload and recovery budgets rather than deployment settings.
 
 TLS/SNI pass-through shares public TCP 443 with edge-terminated HTTPS. One listener
 inspects the initial ClientHello and selects the authoritative hostname's mode;
