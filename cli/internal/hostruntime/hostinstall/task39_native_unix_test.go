@@ -299,8 +299,7 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 		}
 		requests = append(requests, request)
 		t.Setenv("SUDO_UID", strconv.Itoa(request.UID))
-		t.Cleanup(func() {
-			os.Setenv("SUDO_UID", strconv.Itoa(request.UID))
+		t.Cleanup(func() { // runs before t.Setenv's restore, so SUDO_UID is still this request's
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cleanupCancel()
 			if err := Uninstall(cleanupCtx, request); err != nil {

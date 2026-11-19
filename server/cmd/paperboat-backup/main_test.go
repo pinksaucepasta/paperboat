@@ -249,16 +249,6 @@ func runBackupCommandWithWriter(t *testing.T, enabled bool, dumpMode string, rep
 func setBackupTestEnv(t *testing.T, values map[string]string) {
 	t.Helper()
 	for key, value := range values {
-		old, present := os.LookupEnv(key)
-		if err := os.Setenv(key, value); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if present {
-				_ = os.Setenv(key, old)
-			} else {
-				_ = os.Unsetenv(key)
-			}
-		})
+		t.Setenv(key, value)
 	}
 }

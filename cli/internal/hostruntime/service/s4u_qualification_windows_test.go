@@ -318,17 +318,7 @@ func TestNativePrepareS4UDPAPIQualification(t *testing.T) {
 		if err != nil || !filepath.IsAbs(localAppData) {
 			t.Fatalf("resolve enrolled owner LocalAppData: %v", err)
 		}
-		previousLocalAppData, hadLocalAppData := os.LookupEnv("LOCALAPPDATA")
-		if err := os.Setenv("LOCALAPPDATA", filepath.Clean(localAppData)); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if hadLocalAppData {
-				_ = os.Setenv("LOCALAPPDATA", previousLocalAppData)
-			} else {
-				_ = os.Unsetenv("LOCALAPPDATA")
-			}
-		}()
+		t.Setenv("LOCALAPPDATA", filepath.Clean(localAppData))
 		reportPath := requiredS4UReportPath(t)
 		workingDirectory, err := os.Getwd()
 		if err != nil || !strings.EqualFold(filepath.Clean(workingDirectory), filepath.Dir(reportPath)) {
