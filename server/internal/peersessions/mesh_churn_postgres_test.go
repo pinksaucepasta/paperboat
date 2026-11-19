@@ -2,7 +2,6 @@ package peersessions
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"reflect"
@@ -29,8 +28,7 @@ func TestOneChangeInATwoHundredMachineAccountCostsItsChangedPeersOnPostgres(t *t
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, account)
 	})
 	const machines = 200
-	net := sha256.Sum256([]byte(s))
-	seedMeshMachines(t, ctx, store, account, net[0], 0, machines-1)
+	seedMeshMachines(t, ctx, store, account, 0, machines-1)
 	service, err := NewNetworkService(store, meshTestSigner{}, "https://issuer.example.test")
 	if err != nil {
 		t.Fatal(err)

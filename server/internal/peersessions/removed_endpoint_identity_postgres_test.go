@@ -45,8 +45,6 @@ func TestRemovedEndpointsLoseTheirPeerIdentityPostgres(t *testing.T) {
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
 	var counter uint32
-	// One random base per run: a per-endpoint random offset let two endpoints of this run draw the same address.
-	base := 0x7000 + uint32(time.Now().UnixNano()%256)*16 // stays a 16-bit group
 	endpoint := func(id, role string) {
 		t.Helper()
 		counter++
@@ -60,7 +58,7 @@ func TestRemovedEndpointsLoseTheirPeerIdentityPostgres(t *testing.T) {
 		if role == "machine" {
 			machine, generation = id, 1
 		}
-		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,$3,$4,1,$5,1,$6,$7,$8::inet,now(),now())`, user, id, role, machine, generation, key, fingerprint, fmt.Sprintf("fd7a:115c:a1e0::%x", base+counter))
+		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,$3,$4,1,$5,1,$6,$7,('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, user, id, role, machine, generation, key, fingerprint)
 	}
 	machineRemoved, machineKept, cliEnded, cliKept := "peer_revoke_mr_"+x, "peer_revoke_mk_"+x, "peer_revoke_ce_"+x, "peer_revoke_ck_"+x
 	for _, id := range []string{machineRemoved, machineKept} {

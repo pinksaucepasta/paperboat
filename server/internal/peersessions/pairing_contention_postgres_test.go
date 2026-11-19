@@ -2,7 +2,6 @@ package peersessions
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"sync"
@@ -50,7 +49,6 @@ func TestPairingSurvivesConcurrentPeerConfigRefreshesOnPostgres(t *testing.T) {
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
 	// 60 paired machines with peer identities (the daemons) and 20 released machines waiting to be paired.
-	net := sha256.Sum256([]byte(s))
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state,desired_version,applied_state,applied_version,created_at,updated_at)
 SELECT $1||'_env_'||g,$1||'_env_'||g,$1,'active',1,'ready',1,now(),now() FROM generate_series(0,79) g`, account)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation)
@@ -62,7 +60,7 @@ SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,dec
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
 wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
 SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
- ('100.'||(64+$2::int)||'.'||$3::int||'.'||(1+g))::inet,now(),now() FROM generate_series(0,59) g`, account, int(net[0])%64, int(net[1]))
+ ('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now() FROM generate_series(0,59) g`, account)
 
 	service, err := NewNetworkService(store, meshTestSigner{}, "https://issuer.example.test")
 	if err != nil {

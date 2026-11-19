@@ -2,7 +2,6 @@ package peersessions
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"testing"
 	"time"
@@ -35,8 +34,7 @@ func TestTeamHostPeersChecksEachHostBindingOnceOnPostgres(t *testing.T) {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.teams WHERE team_id=$1`, team)
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=ANY($1)`, []string{owner, member})
 	})
-	net := sha256.Sum256([]byte(s))
-	seedMeshMachines(t, ctx, store, owner, net[0], 0, hosts-1)
+	seedMeshMachines(t, ctx, store, owner, 0, hosts-1)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true)`, team, owner, member)

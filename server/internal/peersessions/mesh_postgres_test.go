@@ -2,7 +2,6 @@ package peersessions
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -57,15 +56,13 @@ func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, account, other)
 	})
-	// One /64 of the peer network per fixture account for unique virtual addresses.
-	net := sha256.Sum256([]byte(s))
-	joinAccount := func(account string, net byte, from, to int) {
+	joinAccount := func(account string, from, to int) {
 		t.Helper()
-		seedMeshMachines(t, ctx, store, account, net, from, to)
+		seedMeshMachines(t, ctx, store, account, from, to)
 	}
-	join := func(from, to int) { t.Helper(); joinAccount(account, net[0], from, to) }
+	join := func(from, to int) { t.Helper(); joinAccount(account, from, to) }
 	for from := 0; from < 9000; from += 1000 { // statements of 1,000 rows stay far below the statement timeout
-		joinAccount(other, net[0]+1, from, from+999)
+		joinAccount(other, from, from+999)
 	}
 	exec(`INSERT INTO paperboat.peer_endpoint_certificate_revocations(operation_id,user_id,certificate_fingerprint,serial,reason,created_at)
 SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8')),1,'endpoint_removed',now() FROM generate_series(0,8999) g`, other)
@@ -230,7 +227,7 @@ func openMeshTestStore(t *testing.T, ctx context.Context) *db.DB {
 }
 
 // seedMeshMachines adds personal machines from..to (with environments, certificates and identities) to account.
-func seedMeshMachines(t *testing.T, ctx context.Context, store *db.DB, account string, net byte, from, to int) {
+func seedMeshMachines(t *testing.T, ctx context.Context, store *db.DB, account string, from, to int) {
 	t.Helper()
 	exec := func(query string, args ...any) {
 		t.Helper()
@@ -248,5 +245,5 @@ SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,dec
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
 wireguard_public_key,disco_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
 SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to('disco'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
- ('fd7a:115c:a1e0:'||to_hex($4::int)||'::'||to_hex(1+g))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net))
+ ('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to)
 }
