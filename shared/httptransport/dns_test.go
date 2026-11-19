@@ -182,14 +182,18 @@ func TestARequestDoesNotWaitForALookupStartedBeforeIt(t *testing.T) {
 	}
 	first := make(chan error, 1)
 	go func() { first <- get() }() // its first query is the one dropped
-	for dropped.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
+	for until := time.Now().Add(30 * time.Second); dropped.Load() == 0; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(until) {
+			t.Fatal("the first lookup's query never reached the resolver")
+		}
 	}
 	start := time.Now()
 	if err := get(); err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took > 2*time.Second {
+	// Joining the first lookup costs the resolver's whole 5 s retry timeout; the margin to it is what a stalled runner
+	// can add before a correct run is mistaken for a joined one.
+	if took := time.Since(start); took > 4*time.Second {
 		t.Fatalf("the second request waited %v for the first one's lost query", took)
 	}
 	if err := <-first; err != nil {

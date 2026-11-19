@@ -72,7 +72,7 @@ func TestAClockSetBackMakesItAskTheServerAgain(t *testing.T) {
 	_ = Offset()
 	select {
 	case <-asked:
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the server was not asked for its time after the clock step")
 	}
 	// The answer: the local clock now matches the server's, so the offset is gone.
