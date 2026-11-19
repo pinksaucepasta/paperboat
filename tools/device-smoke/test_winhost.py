@@ -1662,7 +1662,7 @@ class PolicyFamily(unittest.TestCase):
             if key == 'policy get' and '--json' in arguments:
                 key += ' --json'
             if key == 'policy test':
-                key += ' bad' if arguments[-1].endswith('lkbad.json') else ' good'
+                key += ' bad' if arguments[-1].endswith('lkbad.jsonc') else ' good'
                 self.assertTrue(pathlib.Path(arguments[-1]).exists())  # the draft is there while pb reads it
             calls.append(key)
             code, out = table[key]
