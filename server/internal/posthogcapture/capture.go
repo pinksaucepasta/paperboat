@@ -139,9 +139,15 @@ func (c *Client) Run(ctx context.Context) error {
 			for len(c.queue) > 0 {
 				batch = append(batch, <-c.queue)
 			}
-			flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestTimeout)
-			defer cancel()
-			send(flush)
+			// Whatever was queued or half-batched when the context ended goes out in batches of at most
+			// batchSize, as it would have in the loop above.
+			for len(batch) > 0 {
+				flush, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestTimeout)
+				n := min(len(batch), batchSize)
+				c.deliver(flush, batch[:n])
+				cancel()
+				batch = batch[n:]
+			}
 			return ctx.Err()
 		}
 	}

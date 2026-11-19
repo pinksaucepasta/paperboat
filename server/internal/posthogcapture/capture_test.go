@@ -107,15 +107,14 @@ func TestRunBatchesAndDropsOnFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(Config{Host: srv.URL, Key: "k"})
-	ctx, cancel := context.WithCancel(context.Background())
-	finished := make(chan struct{})
-	go func() { _ = c.Run(ctx); close(finished) }()
 	for range batchSize + 5 {
 		c.Capture(Event{Name: "e", Distinct: "acct"})
 	}
-	time.Sleep(200 * time.Millisecond)
+	// The context ends before Run reads the queue, the schedule a loaded host can produce at any point: the
+	// shutdown flush alone must still split the queued events into batches of at most batchSize.
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	<-finished
+	_ = c.Run(ctx)
 	mu.Lock()
 	defer mu.Unlock()
 	if len(sizes) != 2 || sizes[0] != batchSize || sizes[1] != 5 {
