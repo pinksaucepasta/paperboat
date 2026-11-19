@@ -22,7 +22,7 @@ export const legalPage = (slug: string) => legalPages.find((page) => page.slug =
 
 /** Facts about the operating company. Only the company can supply these; never guess them. */
 export const company = {
-  /** Until Paperboat, Inc. (a Delaware C corporation) is formed, these two individuals operate Paperboat (user decision 2026-11-19). */
+  /** The two individuals who operate Paperboat (user decision 2026-11-19). */
   /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) needs the trader's legal name and postal address. */
   operators: "Pujan Modha and Anvit Dadape",
   /** Postal address for legal notices and the DMCA agent (user, 2026-11-19). */
