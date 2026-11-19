@@ -1,3 +1,5 @@
+import { plans, speeds } from "./site"
+
 /**
  * The legal pages, and the facts only the company can supply. Every `TODO-USER` value below must be filled in
  * before launch; until then each legal page shows it highlighted and stays out of search (noindex).
@@ -36,13 +38,9 @@ export const company = {
 /** True while any company fact is still missing: the pages are then drafts. */
 export const legalDraft = Object.values(company).some((value) => value.startsWith("TODO-USER"))
 
-/**
- * Fair use for traffic through servers Paperboat runs (user-approved 2026-11-19, built by the BANDWIDTH lane): a monthly amount at
- * full speed, then a slow rate until the month resets. Edge and relay share one allowance (user correction 2026-11-19); browser
- * terminals count as edge traffic; on Team the paid allowance is per seat. Self-hosted relays and edges are not limited.
- */
+/** Fair use for the legal pages, from the plans and speeds in site.ts: edge and relay share one monthly allowance (per seat on Team). */
 export const fairUse = {
-  free: { allowance: "5 GB", slow: "512 kbit/s" },
-  paid: { allowance: "100 GB", slow: "1 Mbit/s" },
-  relaySpeed: "10 Mbit/s",
+  free: { allowance: plans[0].bandwidth, slow: speeds.after[0] },
+  paid: { allowance: plans[1].bandwidth, slow: speeds.after[1] },
+  relaySpeed: speeds.relay,
 }
