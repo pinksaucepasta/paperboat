@@ -129,6 +129,8 @@ func newWorld(t *testing.T) *world {
 	end()
 	w.exec(`DELETE FROM paperboat.managed_ssh_ca_fetches`) // machines of earlier tests do not fetch any more
 	w.exec(`DELETE FROM paperboat.mint_withdrawn_keys`)
+	// A run publishes the CA of every account in the database: accounts other tests (or earlier iterations) left would be counted.
+	w.exec(`DELETE FROM paperboat.managed_ssh_user_cas`)
 	t.Cleanup(end)
 	return w
 }
