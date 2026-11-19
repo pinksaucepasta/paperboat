@@ -79,7 +79,7 @@ export function Entitlements({ workspaceId, scope }: { workspaceId: string; scop
         {e.bandwidth.throttled && (
           <ActionDialog
             title={`Lift the throttle of ${workspaceId}`}
-            description="Edge traffic of this workspace runs at full speed until the date, or until you revoke the lift. It is recorded with your reference."
+            description="Edge and relay traffic of this workspace runs at full speed until the date, or until you revoke the lift. It is recorded with your reference."
             target={workspaceId}
             submitLabel="Lift throttle"
             valid={ending !== undefined}

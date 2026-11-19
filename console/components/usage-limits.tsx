@@ -69,7 +69,7 @@ export function UsageLimits() {
   }
 
   return (
-    // Machines and the included public traffic first, then bandwidth across the other half.
+    // Machines and the included traffic first, then bandwidth across the other half.
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card
         label="Machines"
@@ -80,7 +80,7 @@ export function UsageLimits() {
         {summary.data && <Machines summary={summary.data} />}
       </Card>
       <Card
-        label="Public traffic"
+        label="Traffic"
         loading={!workspace || billing.isPending}
         failed={billing.isError}
         skeleton={<AllowanceSkeleton />}
@@ -218,8 +218,8 @@ function Stat({
 }
 
 /**
- * Public traffic through Paperboat's edges (previews, tunnels, browser terminals): the included amount and what is used of it, and
- * past it the reduced speed with the date full speed returns. Direct, relay and self-hosted traffic are not counted here.
+ * Traffic through Paperboat's edges and relays (previews, tunnels, browser terminals, relayed connections): ONE included amount and what is
+ * used of it, and past it the reduced speed with the date full speed returns. Direct and self-hosted traffic are not counted here.
  */
 function Allowance({ billing }: { billing: BillingWorkspace }) {
   const fair = fairUse(billing)
@@ -244,7 +244,7 @@ function Allowance({ billing }: { billing: BillingWorkspace }) {
       <div className="mt-auto flex flex-col gap-2.5">
         <div
           role="meter"
-          aria-label="Included public traffic used"
+          aria-label="Included traffic used"
           aria-valuemin={0}
           aria-valuemax={fair.amount}
           aria-valuenow={Math.min(fair.used, fair.amount)}
