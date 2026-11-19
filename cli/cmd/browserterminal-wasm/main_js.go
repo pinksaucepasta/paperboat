@@ -108,6 +108,7 @@ type browserWSConn struct {
 	openOnce      sync.Once
 	doneOnce      sync.Once
 	writeMu       sync.Mutex
+	fileRecords   atomic.Bool // set by the write loop while it writes a file-transfer request: its records carry the file envelope
 	closeOnce     sync.Once
 	handlers      []js.Func
 }

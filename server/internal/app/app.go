@@ -704,6 +704,7 @@ func New(opts Options) (*App, error) {
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)
+	userMachineService.ConfigureRuntimeQuota(workspaceBilling)
 	mailService := &transactionalmail.Service{DB: store, Endpoint: opts.Config.Mail.Endpoint, Key: opts.Config.Secrets.ResendAPIKey}
 
 	operatorService := operator.NewService(store)
@@ -723,6 +724,10 @@ func New(opts Options) (*App, error) {
 		AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime,
 		MaxPerSession:     opts.Config.Billing.Limits.BrowserTerminals.TeamCeiling,
 		RecordUsageAdmission: func(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
+			// File transfers through the terminal count toward the workspace's allowance: the edge reports their bytes under this attachment.
+			if err := userMachineService.AdmitBrowserTerminalIngress(ctx, attachment, machine, actor, node, expires); err != nil {
+				return err
+			}
 			return resourceUsageService.RecordBrowserAdmission(ctx, attachment, machine, terminal, node, actor, expires)
 		},
 		RecordUsageAttached: resourceUsageService.RecordBrowserAttached,

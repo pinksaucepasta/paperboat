@@ -96,8 +96,11 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		}
 	}()
 
-	// The terminal's stream is not counted against the allowance and never slowed by it; only the workspace's terminal cap paces it
-	// (terminalPacing). Its plan limit (open browser terminals) is counted by the control plane.
+	// Typing and terminal output are not counted against the allowance and never slowed by it; only the workspace's terminal cap paces
+	// them (terminalPacing). The edge cannot see inside the terminal's end-to-end encrypted stream, so the file transfers are the records
+	// the browser marked (browserTerminalFileDiscriminator): those count toward the allowance under this attachment and are slowed by it
+	// past the allowance. The plan limit (open browser terminals) is counted by the control plane.
+	fileBytes := p.terminalFileUsage(ctx, match, admission)
 	upstreamURL := (&url.URL{Scheme: "wss", Host: host, Path: "/v1/browser-terminal"}).String()
 	upstreamHeader := make(http.Header)
 	upstreamHeader.Set("Authorization", "Bearer "+admission.Credential)
@@ -138,7 +141,7 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 			sent = reason.CloseCode()
 		}
 		return reason, typed
-	}, terminalPacing{throttles: p.config.Throttles, host: host})
+	}, terminalPacing{throttles: p.config.Throttles, host: host, fileHost: "files:" + host, fileBytes: fileBytes})
 	logBrowserTerminalEnd(ctx, ended, sent)
 	if !moved { // the end of a drain is expected, not an edge failure
 		p.observeBrowserTerminal(ctx, ended)
@@ -246,13 +249,13 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 				report(bridgeEnd{"browser_read", ErrBrowserTerminalMessage})
 				return
 			}
-			payload, err := browserTerminalTLSMessagePayload(message)
+			payload, file, err := browserTerminalTLSMessagePayload(message)
 			if err != nil {
 				report(bridgeEnd{"browser_read", err})
 				return
 			}
 			select {
-			case toHost <- payload:
+			case toHost <- terminalFrame{payload: payload, file: file}:
 			case <-ctx.Done():
 				return
 			}
@@ -292,7 +295,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 			// Wait for the writer: a browser that stops reading (a frozen or sleeping page) holds the host back
 			// through TCP instead of ending the terminal.
 			select {
-			case toBrowser <- message:
+			case toBrowser <- terminalFrame{payload: message}:
 			case <-ctx.Done():
 				return
 			}
@@ -319,7 +322,7 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 			// writer here so an ordinary burst cannot fill the small bridge
 			// multiplexing queue and force a fresh screen.
 			select {
-			case toBrowserShared <- message:
+			case toBrowserShared <- terminalFrame{payload: message}:
 			case <-ctx.Done():
 				return
 			}
@@ -435,5 +438,26 @@ func browserTerminalExpected(err error) bool {
 func (p *Policy) observeBrowserTerminal(ctx context.Context, err error) {
 	if err != nil && p.config.OnFailure != nil && !browserTerminalExpected(err) {
 		p.config.OnFailure(ctx, err)
+	}
+}
+
+// terminalFileUsage returns what records n bytes of this terminal's file transfers under its attachment, the usage authority the server
+// recorded when it admitted the ticket (nil when the edge has no meter or the attachment, environment or route is unknown).
+func (p *Policy) terminalFileUsage(ctx context.Context, match route.RouteMatch, admission control.BrowserTerminalAdmission) func(int) {
+	environment := match.Rule.Environment
+	if environment == "" && p.config.HelperAccess != nil {
+		// A runtime route's rule carries no environment; the server-signed host credential of this admission names the machine's one.
+		if claims, err := p.config.HelperAccess.VerifyHelperAccess(ctx, admission.Credential); err == nil {
+			environment = claims.EnvironmentID
+		}
+	}
+	if p.config.RuntimeUsage == nil || admission.AttachmentID == "" || environment == "" {
+		return nil
+	}
+	routeID, revision := match.Rule.RouteID, match.Rule.Revision
+	return func(n int) {
+		if err := p.config.RuntimeUsage.Record(environment, routeID, revision, uint64(n), 0, admission.AttachmentID); err != nil {
+			slog.WarnContext(ctx, "browser_terminal_file_usage_failed", "route_id", routeID, "error", err)
+		}
 	}
 }

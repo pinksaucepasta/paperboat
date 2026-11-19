@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 )
 
-// A console browser terminal is not counted toward the allowance and never slowed by it, but its workspace's terminal traffic is capped
-// (config.FairUse.TerminalMbit): an edge's snapshot lists the runtime hostname of every machine with an attached terminal on it as a
-// Terminal entry carrying this edge's share of the cap (the cap divided by the edges the workspace's terminals are attached on), whether
-// or not the workspace used its included traffic, and nothing for a terminal on another edge or one that detached.
+// A console browser terminal's typing and output are not counted toward the allowance and never slowed by it, but the workspace's
+// terminal traffic is capped (config.FairUse.TerminalMbit): an edge's snapshot lists the runtime hostname of every machine with an
+// attached terminal on it as a Terminal entry carrying this edge's share of the cap (the cap divided by the edges the workspace's
+// terminals are attached on). Its FILE transfers meet the workspace's allowance: listed under their own key only while the workspace is
+// past its included traffic. Nothing is listed for a terminal on another edge or one that detached.
 func TestAttachedTerminalsAreListedWithTheWorkspaceCapForTheEdgePostgres(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := t.Context()
@@ -56,12 +59,19 @@ func TestAttachedTerminalsAreListedWithTheWorkspaceCapForTheEdgePostgres(t *test
 	attach(within, 5, node)
 
 	service := NewEdgeService(store, "terminal-throttle-test-credential-0123456789")
-	fair := service.fairUse
-	capBytes := int64(fair.TerminalMbit * 125_000)
-	got, err := service.addTerminalCaps(ctx, node, nil)
-	if err != nil {
-		t.Fatal(err)
+	gate := bandwidthgate.New(store)
+	gate.SetLookupTimeout(5 * time.Second) // this test database is slower than production
+	service.workspaceGate = gate
+	capBytes := int64(service.fairUse.TerminalMbit * 125_000)
+	attached := func(edge string) []attachedTerminal {
+		t.Helper()
+		got, err := service.attachedTerminals(ctx, edge)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
 	}
+	got := service.addTerminalCaps(attached(node), nil)
 	if len(got) != 2 {
 		t.Fatalf("terminal caps = %+v, want both attached terminals (over its allowance or not)", got)
 	}
@@ -70,22 +80,26 @@ func TestAttachedTerminalsAreListedWithTheWorkspaceCapForTheEdgePostgres(t *test
 			t.Fatalf("entry %+v, want a terminal entry at the whole cap %d (one edge)", c, capBytes)
 		}
 	}
-	if elsewhere, _ := service.addTerminalCaps(ctx, other, nil); len(elsewhere) != 0 {
+	// File transfers through a terminal meet the workspace's ALLOWANCE: listed (under their own key) only for the workspace past it.
+	files := service.addFileThrottles(ctx, attached(node), nil)
+	if len(files) != 1 || files[0].Terminal || files[0].Workspace != "personal:"+over || files[0].Hostname != fileThrottleHost(got[0].Hostname) && files[0].Hostname != fileThrottleHost(got[1].Hostname) {
+		t.Fatalf("file throttles = %+v, want only the workspace past its included traffic", files)
+	}
+	if elsewhere := attached(other); len(elsewhere) != 0 {
 		t.Fatalf("another edge listed %+v", elsewhere)
 	}
 	// The same workspace attached on a second edge: each edge gets half of the cap.
 	exec(`INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,attached_until)
  VALUES($1,$2,1,'personal:'||$3,'terminal','term2','t','tt',ARRAY['terminal'],now(),now()+interval '5 minutes',now()+interval '7 days',$4,now()+interval '1 minute')`, "att2_"+over, "tt_m_"+over, over, other)
-	split, _ := service.addTerminalCaps(ctx, node, nil)
-	for _, c := range split {
+	for _, c := range service.addTerminalCaps(attached(node), nil) {
 		if c.Workspace == "personal:"+over && c.BytesPerSecond != capBytes/2 {
 			t.Fatalf("workspace on two edges: %+v, want half the cap %d", c, capBytes/2)
 		}
 	}
 	exec(`UPDATE native_usage_authorities SET attached_until=now()-interval '1 second' WHERE machine_id=$1`, "tt_m_"+over)
 	exec(`UPDATE native_usage_authorities SET expires_at=now()-interval '1 second',admitted_at=now()-interval '1 hour' WHERE machine_id=$1`, "tt_m_"+over)
-	detached, _ := service.addTerminalCaps(ctx, node, nil)
-	if len(detached) != 1 || detached[0].Workspace != "personal:"+within {
+	detached := attached(node)
+	if len(detached) != 1 || detached[0].workspace != "personal:"+within {
 		t.Fatalf("a detached terminal is still listed: %+v", detached)
 	}
 }
