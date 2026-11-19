@@ -5,14 +5,14 @@
 :root {
   --st-ok: #12805c;
   --st-ok-bar: #1f9d6e;
-  --st-warn: #9a5b00;
-  --st-warn-bar: #b06a00;
+  --st-warn: #8a6500;
+  --st-warn-bar: #f5b000;
   --st-bad: #b42318;
   --st-bad-bar: #d64545;
   --st-maint: var(--cobalt);
   --st-none: #d9d9d5;
   --st-ok-tint: #e8f5ef;
-  --st-warn-tint: #fdf1d8;
+  --st-warn-tint: #fff4d1;
   --st-bad-tint: #fdeaea;
   --st-maint-tint: var(--hull);
   --col: 668px;
@@ -52,8 +52,8 @@ main.col { padding-block: var(--s4) var(--s7); display: grid; gap: var(--s4); }
 .banner-title { font-family: var(--font-brand); font-size: 16px; line-height: 24px; font-weight: 500; letter-spacing: -0.01em; color: var(--ink); }
 .banner-detail { margin-left: 24px; color: var(--text); font-size: 14px; line-height: 20px; }
 .banner.is-operational .banner-head { background: var(--st-ok-tint); }
-.banner.is-incident { box-shadow: 0 0 0 1px #e8c77a; } .banner.is-incident .banner-head { background: var(--st-warn-tint); }
-.banner.is-degraded { box-shadow: 0 0 0 1px #e8c77a; } .banner.is-degraded .banner-head { background: var(--st-warn-tint); }
+.banner.is-incident { box-shadow: 0 0 0 1px #f2cf6b; } .banner.is-incident .banner-head { background: var(--st-warn-tint); }
+.banner.is-degraded { box-shadow: 0 0 0 1px #f2cf6b; } .banner.is-degraded .banner-head { background: var(--st-warn-tint); }
 .banner.is-major { box-shadow: 0 0 0 1px #efb1ab; } .banner.is-major .banner-head { background: var(--st-bad-tint); }
 .banner.is-maintenance .banner-head { background: var(--st-maint-tint); }
 .banner.is-delayed .banner-head, .banner.is-unavailable .banner-head { background: var(--surface); }

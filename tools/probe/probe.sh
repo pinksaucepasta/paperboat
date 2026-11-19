@@ -15,7 +15,10 @@
 #                        grant to that account (fixture); when set, team_exec runs A -> that machine in the team workspace
 #   ssh_b_to_a send_b_to_a api_auth_b  (opt-in) the same actions driven from B, for the vantage point that hosts B (tools/probe/status_run.py)
 #   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
-#                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
+#                        directly, so an edge that dropped out of DNS or was null-routed still fails a step.
+#                        The preview step also fetches that run's own new preview through each address and reports
+#                        one step per address, edge_<address> (a fixed preview URL would make one lost preview read as every edge down)
+#   PREVIEW_ON           A (default) or B: the machine that makes the preview (anvit's vantage point has only B); each preview gets its own short-lived origin
 set -uo pipefail
 a=${CANARY_A:?} b=${CANARY_B:?} tunnel=${CANARY_TUNNEL_URL:-} port=${CANARY_PORT:-18099}
 pb=${PB:-.local/bin/pb} limit=${PROBE_STEP_TIMEOUT:-45}
@@ -39,15 +42,17 @@ step() { # name function: the function's stdout/stderr land in $tmp/out, $tmp/er
   fi
 }
 want() { grep -qxF "$marker" "$tmp/got" || { echo "expected the run marker, got: $(head -c 120 "$tmp/got")" >&2; return 1; }; }
+fetch_via() { # ip url: this one edge address must serve the run marker
+  local host=${2#*://} port=443; host=${host%%/*}; [[ $host != *:* ]] || port=${host##*:}; host=${host%%:*}
+  curl -fsS --max-time 10 --resolve "$host:$port:$1" "$2/" >"$tmp/got" 2>"$tmp/curl" && want 2>>"$tmp/curl" ||
+    { echo "edge $1: $(tail -c 120 "$tmp/curl" | tr '\n' ' ')" >&2; return 1; }
+}
 fetch_all() { # url: every edge address in DNS must serve the run marker (DNS alone would test one at random)
   local host=${1#*://} ip bad=; host=${host%%/*}; host=${host%%:*}
   local ips; ips=$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u)
   [ -n "$ips" ] || { echo "no address for $host" >&2; return 1; }
-  for ip in $ips; do
-    curl -fsS --max-time 10 --resolve "$host:443:$ip" "$1/" >"$tmp/got" 2>"$tmp/curl" && want 2>>"$tmp/curl" ||
-      bad="$bad edge $ip: $(tail -c 120 "$tmp/curl" | tr '\n' ' ')"
-  done
-  [ -z "$bad" ] || { echo "$bad" >&2; return 1; }
+  for ip in $ips; do bad="$bad $(fetch_via "$ip" "$1" 2>&1)"; done
+  [ -z "${bad// /}" ] || { echo "$bad" >&2; return 1; }
 }
 
 origin() { on A "mkdir -p canary-www && echo $marker >canary-www/index.html && curl -fsS --max-time 5 http://127.0.0.1:$port/" >"$tmp/got" && want; }
@@ -78,25 +83,35 @@ api_auth() { # X peer: an authenticated read of the account's machines from mach
   on "$1" "$pb machine list --json" >"$tmp/got" 2>"$tmp/execerr" || { tail -c 200 "$tmp/execerr" >&2; return 1; }
   grep -qF "$2" "$tmp/got" || { echo "machine list does not show $2" >&2; return 1; }
 }
-preview() { # a new preview of A's origin, fetched from here without credentials, then stopped
-  on A "$pb preview $port --background --ttl 2m --json" >"$tmp/preview.json" || return 1
+declare -A edge_err # edge address -> why it did not serve this run's preview ("" once it did); unset when no preview was made
+preview() { # a new preview of its own origin, fetched from here without credentials (and through each edge address), then stopped
+  local side=${PREVIEW_ON:-A} p=$((30000 + RANDOM % 20000)) # its own short-lived origin in a private directory: concurrent probes never share a marker file
+  on "$side" "d=\$(mktemp -d) && echo $marker >\$d/index.html && (setsid sh -c \"timeout 90 python3 -m http.server $p --bind 127.0.0.1 --directory \$d; rm -rf \$d\" >/dev/null 2>&1 &)" || return 1
+  on "$side" "$pb preview $p --background --ttl 2m --json" >"$tmp/preview.json" || return 1
   local id url
   id=$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));d=d.get("data",d);print(d["id"])' "$tmp/preview.json") &&
     url=$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));d=d.get("data",d);print(d.get("url") or d["endpoint"])' "$tmp/preview.json") ||
     { echo "unexpected preview answer: $(head -c 200 "$tmp/preview.json")" >&2; return 1; }
-  local rc _ # a new route reaches the edges within seconds (check-edges.sh allows 30 s); 20 s bound here
-  for _ in 1 2 3 4 5 6 7 8 9 10; do fetch_all "$url" 2>"$tmp/fetch"; rc=$?; [ $rc = 0 ] && break; sleep 2; done
-  on A "$pb preview stop $id --json" >/dev/null 2>&1
+  local rc ip pending deadline=$((SECONDS + 20)) # a new route reaches the edges within seconds (check-edges.sh allows 30 s)
+  for ip in ${CANARY_EDGES:-}; do edge_err[$ip]="not tried"; done
+  while :; do
+    fetch_all "$url" 2>"$tmp/fetch"; rc=$?; pending=
+    for ip in ${CANARY_EDGES:-}; do
+      [ -z "${edge_err[$ip]}" ] || edge_err[$ip]=$(fetch_via "$ip" "$url" 2>&1 || true)
+      [ -z "${edge_err[$ip]}" ] || pending=1
+    done
+    { [ $rc = 0 ] && [ -z "$pending" ]; } || [ $SECONDS -ge $deadline ] && break
+    sleep 2
+  done
+  on "$side" "$pb preview stop $id --json" >/dev/null 2>&1
   [ $rc = 0 ] || { cat "$tmp/fetch" >&2; return 1; }
 }
+edge_result() { [ -z "${edge_err[$1]}" ] || { echo "${edge_err[$1]}" >&2; return 1; }; }
 tunnel() { [ -n "$tunnel" ] || { echo 'CANARY_TUNNEL_URL is not set' >&2; return 1; }; fetch_all "$tunnel"; }
 edges() { # fetch_all only sees the addresses in DNS; a dead edge leaves DNS within its TTL and would pass
-  local host=${tunnel#*://} ip bad=; host=${host%%/*}; host=${host%%:*}
-  for ip in ${CANARY_EDGES:?}; do
-    curl -fsS --max-time 10 --resolve "$host:443:$ip" "$tunnel/" >"$tmp/got" 2>"$tmp/curl" && want 2>>"$tmp/curl" ||
-      bad="$bad edge $ip: $(tail -c 120 "$tmp/curl" | tr '\n' ' ')"
-  done
-  [ -z "$bad" ] || { echo "$bad" >&2; return 1; }
+  local ip bad=
+  for ip in ${CANARY_EDGES:?}; do bad="$bad $(fetch_via "$ip" "$tunnel" 2>&1)"; done
+  [ -z "${bad// /}" ] || { echo "$bad" >&2; return 1; }
 }
 
 step origin origin
@@ -108,6 +123,7 @@ step env_exec env_exec
 step api_auth_a api_auth A "$b"
 step send_a_to_b send_ab
 step preview preview
+for ip in ${CANARY_EDGES:-}; do [ -z "${edge_err[$ip]+set}" ] || step "edge_$ip" edge_result "$ip"; done
 step tunnel tunnel
 [ -z "${CANARY_EDGES:-}" ] || step edges edges
 # Steps driven from machine B for a second vantage point (the host that runs B): run only when PROBE_STEPS names them.

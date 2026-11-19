@@ -5,8 +5,8 @@ export interface UptimeDay { day: string; up: number; degraded: number; down: nu
 /** Measured minutes only: delayed minutes are not in the denominator, degraded counts 30% as down (the page's footnote says so). */
 export const DEGRADED_WEIGHT = 0.3
 
-/** Under three hours of measured minutes is not enough to claim a percentage; after that it is the figure for the tracked period. */
-export const MIN_MEASURED_MINUTES = 180
+/** Less than a day of measured minutes is not enough to claim a percentage. */
+export const MIN_MEASURED_MINUTES = 1440
 
 export const uptimePercent = (days: UptimeDay[]): number | null => {
   const total = days.reduce((n, d) => n + d.up + d.degraded + d.down, 0)
