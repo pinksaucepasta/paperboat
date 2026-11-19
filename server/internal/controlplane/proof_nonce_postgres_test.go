@@ -25,7 +25,7 @@ func TestProofNonceIsUsedOnce(t *testing.T) {
 	if err := s.reserveProofNonce(ctx, signer, nonce, http.MethodPost, expires); !errors.Is(err, ErrHelperProof) {
 		t.Fatalf("replay: %v", err)
 	}
-	if err := s.reserveProofNonce(ctx, "machine:other", nonce, http.MethodPost, expires); err != nil {
+	if err := s.reserveProofNonce(ctx, signer+"_other", nonce, http.MethodPost, expires); err != nil {
 		t.Fatalf("same nonce, other signer: %v", err)
 	}
 	for name, try := range map[string]func() error{

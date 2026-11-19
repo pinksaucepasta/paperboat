@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -135,7 +134,7 @@ func TestConfigStatusRejectionClassIsBoundedAndNonSecret(t *testing.T) {
 func TestConfigAccountStatusUsesCanonicalAssignmentsConsentAndStatus(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user := "status_user_" + suffix
 	machineAEnvironment := "status_machine_a_" + suffix
 	machineEnvironment := "status_machine_" + suffix

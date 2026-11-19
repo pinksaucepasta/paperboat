@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 )
@@ -11,7 +10,7 @@ import (
 func TestConfigRepositoryReadAccessOwnerIsolationRevocationAndReadOnly(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	owner, other := "bootstrap_owner_"+suffix, "bootstrap_other_"+suffix
 	for _, user := range []string{owner, other} {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$1,$2,'active')`, user, user+"@example.test"); err != nil {

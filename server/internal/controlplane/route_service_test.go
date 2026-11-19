@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -25,11 +26,13 @@ func TestRouteIntentOwnershipAndRevisionCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewRouteService(store, nil)
-	route, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", "Preview.Example.Test.", "127.0.0.1", 8080)
-	if err != nil || route.PublicHost != "preview.example.test" || route.DesiredRevision != 1 {
+	// A host is unique across the database: a fixed one collides with the route an earlier iteration left.
+	host := fmt.Sprintf("Preview-%d.Example.Test.", time.Now().UnixNano())
+	route, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", host, "127.0.0.1", 8080)
+	if err != nil || route.PublicHost != strings.ToLower(strings.TrimSuffix(host, ".")) || route.DesiredRevision != 1 {
 		t.Fatalf("route = %#v, %v", route, err)
 	}
-	replay, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", "Preview.Example.Test.", "127.0.0.1", 8080)
+	replay, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", host, "127.0.0.1", 8080)
 	if err != nil || replay.ID != route.ID {
 		t.Fatalf("create replay = %#v, %v", replay, err)
 	}

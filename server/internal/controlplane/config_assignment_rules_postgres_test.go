@@ -14,7 +14,7 @@ import (
 func TestConfigMachineRuleTeamBeforePersonalAndOwnerRepository(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user, env, machine, team := "cfgrule_user_"+suffix, "cfgrule_env_"+suffix, "cfgrule_machine_"+suffix, "cfgrule-team-"+strings.ToLower(suffix)
 	exec := func(q string, args ...any) {
 		t.Helper()

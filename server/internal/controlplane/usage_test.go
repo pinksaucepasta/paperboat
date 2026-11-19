@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -263,6 +266,14 @@ func cleanupUsageBandwidthScope(t *testing.T, store *db.DB, userID, machineID, e
 func usageReport(operationID, epoch string, bytes int64, now time.Time) UsageReport {
 	return UsageReport{OperationID: operationID, EdgeNodeID: "node", CounterEpoch: epoch, EnvironmentID: "env", RouteID: "route", RouteRevision: 1, Direction: "ingress", Bytes: bytes, IntervalStart: now.Add(-time.Minute), IntervalEnd: now}
 }
+
+// uniqueScope names one run of one test: ids built from it cannot collide with another test's or with an earlier
+// iteration's rows under -count=N or a database that outlives the package's first run.
+func uniqueScope(t *testing.T) string {
+	return strings.ReplaceAll(t.Name(), "/", "_") + "_" + strconv.FormatInt(scopeSeq.Add(1), 36) + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+var scopeSeq atomic.Int64
 
 func openControlPlaneTestDB(t *testing.T) *db.DB {
 	t.Helper()

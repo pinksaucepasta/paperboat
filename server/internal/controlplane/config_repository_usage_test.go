@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 func TestConfigRepositoryUsageSourceAndGitTeamDefault(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	owner, member := "cfgsrc_owner_"+suffix, "cfgsrc_member_"+suffix
 	teamID := fmt.Sprintf("cfgsrc-%x", sha256.Sum256([]byte(t.Name())))[:17] // a workspace id is a lowercase slug
 	environmentID, machineID, recipeID := "cfgsrc_env_"+suffix, "cfgsrc_machine_"+suffix, "cfgsrc_recipe_"+suffix

@@ -21,7 +21,7 @@ import (
 func TestConfigAssignmentOwnershipConcurrencyAndMachineConsent(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	suffix := uniqueScope(t)
 	userA, userB := "cfg_a_"+suffix, "cfg_b_"+suffix
 	env := "cfg_env_" + suffix
 	machineID := "cfg_machine_" + suffix
@@ -151,7 +151,7 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user, environmentID := "cfg_credential_user_"+suffix, "cfg_credential_env_"+suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
 		t.Fatal(err)
@@ -313,7 +313,7 @@ func containsString(values []string, want string) bool {
 func TestConfigAssignmentEveryMachineRequiresConsent(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user := "cfg_machine_a_" + suffix
 	env := "cfg_machine_a_env_" + suffix
 	machineID := "cfg_machine_a_machine_" + suffix
@@ -357,7 +357,7 @@ func TestConfigAssignmentEveryMachineRequiresConsent(t *testing.T) {
 func TestTeamConfigDefaultUsesMemberProviderConnectionAndExplicitReplacement(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	owner, member, outsider, teamID := "cfg_owner_"+suffix, "cfg_member_"+suffix, "cfg_out_"+suffix, "cfg_team_"+suffix
 	teamID2, environmentID, machineID := teamID+"_two", "cfg_env_"+suffix, "cfg_machine_"+suffix
 	cleanupConfigTeamLifecycleFixture(t, store, []string{owner, member, outsider}, []string{teamID, teamID2}, []string{environmentID}, []string{machineID})
@@ -613,7 +613,7 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 func TestConfigPendingBootstrapCannotConsentAndProjectionDigestFencesIdentity(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user, machine, env := "projection_user_"+suffix, "projection_machine_"+suffix, "projection_env_"+suffix
 	for _, fixture := range []struct {
 		sql  string

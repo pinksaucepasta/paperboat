@@ -12,7 +12,7 @@ import (
 func TestConfigRepositoryLeaseSerializesFencesAndRevokes(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	user := "lease_user_" + suffix
 	repositoryID := "lease_repo_" + suffix
@@ -122,7 +122,7 @@ func TestConfigRepositoryLeaseSerializesFencesAndRevokes(t *testing.T) {
 func TestConfigSyncAccountSuspensionRevokesAndPreventsAuthority(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	user := "account_revoke_user_" + suffix
 	repositoryID := "account_revoke_repo_" + suffix

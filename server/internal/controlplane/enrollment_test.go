@@ -39,7 +39,7 @@ func TestHelperEnrollmentExchangeIsSingleUseAndKeyBound(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	environmentID := "env_enrollment_" + strings.ReplaceAll(t.Name(), "/", "_")
+	environmentID := "env_enrollment_" + uniqueScope(t)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ('usr_test','workos_enrollment','enrollment@example.test','active') ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestMachineControlRequestRejectsSupersededAndRevokedSessions(t *testing.T) 
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	userID, machineID, environmentID := "usr_mc_"+suffix, "mch_mc_"+suffix, "env_mc_"+suffix
 	publicKey, privateKey, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestHelperEnrollmentReissuesExpiredCredentialForSamePendingHelper(t *testin
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
-	environmentID := "env_reissue_expired_" + strings.ReplaceAll(t.Name(), "/", "_")
+	environmentID := "env_reissue_expired_" + uniqueScope(t)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ('usr_test','workos_reissue','reissue@example.test','active') ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestEnsureBootGrantReplacesExpiredGrantAndStopsAfterEnrollment(t *testing.T
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	environmentID := "env_boot_grant_" + strings.ReplaceAll(t.Name(), "/", "_")
+	environmentID := "env_boot_grant_" + uniqueScope(t)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ('usr_test','workos_boot_grant','boot-grant@example.test','active') ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestEnsureBootGrantReplacesExpiredGrantAndStopsAfterEnrollment(t *testing.T
 func TestEnsureBootGrantConcurrentCallsReplayOneGrant(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	environmentID := "env_boot_concurrent_" + strings.ReplaceAll(t.Name(), "/", "_")
+	environmentID := "env_boot_concurrent_" + uniqueScope(t)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ('usr_test','workos_boot_concurrent','boot-concurrent@example.test','active') ON CONFLICT (id) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}

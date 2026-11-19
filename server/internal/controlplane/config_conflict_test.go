@@ -11,7 +11,7 @@ import (
 func TestConfigConflictResolutionRequiresCurrentAssignmentHeadAndConflictRevision(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user := "conflict_user_" + suffix
 	environment := "conflict_env_" + suffix
 	repository := "conflict_repo_" + suffix

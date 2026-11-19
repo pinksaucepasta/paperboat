@@ -18,7 +18,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	user, environmentID := "cfg_credential_user_"+suffix, "cfg_credential_env_"+suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {
 		t.Fatal(err)

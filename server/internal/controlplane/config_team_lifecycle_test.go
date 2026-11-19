@@ -23,7 +23,7 @@ import (
 func TestTeamConfigLifecycleAuthorityCASAndAuditAtomicity(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	owner := "cfg43_lifecycle_owner_" + suffix
 	admin := "cfg43_lifecycle_admin_" + suffix
 	member := "cfg43_lifecycle_member_" + suffix
@@ -161,7 +161,7 @@ func TestTeamConfigDefaultDatabaseFailuresAreNotReportedAsForbidden(t *testing.T
 func TestTeamConfigPublicationAuditUsesAuthoritativeAdoptionAndCommitsAtomically(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	owner, member := "cfg43_publish_owner_"+suffix, "cfg43_publish_member_"+suffix
 	teamTag := fmt.Sprintf("%x", sha256.Sum256([]byte(t.Name())))[:10]
 	teamID, environmentID, machineID := "cfg43-publish-"+teamTag, "cfg43_publish_env_"+suffix, "cfg43_publish_machine_"+suffix
@@ -432,7 +432,7 @@ func assertConfigAudit(t *testing.T, store interface{ SQL() *sql.DB }, teamID, e
 func TestUnadoptedMachineIsPersonalAgain(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(t.Name(), "/", "_")
+	suffix := uniqueScope(t)
 	owner, member := "cfg_unadopt_owner_"+suffix, "cfg_unadopt_member_"+suffix
 	teamID := "cfg-unadopt-" + fmt.Sprintf("%x", sha256.Sum256([]byte(t.Name())))[:10]
 	environmentID, machineID := "cfg_unadopt_env_"+suffix, "cfg_unadopt_machine_"+suffix
