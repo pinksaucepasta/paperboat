@@ -29,7 +29,7 @@ func TestMRRNormalisesIntervalsAndSeats(t *testing.T) {
 }
 
 func TestMRRCountsOnlyActiveAndPastDue(t *testing.T) {
-	for status, want := range map[string]int64{"active": 1000, "past_due": 1000, "trialing": 0, "canceled": 0, "paused": 0, "unpaid": 0, "incomplete": 0, "incomplete_expired": 0} {
+	for status, want := range map[string]int64{"active": 1000, "past_due": 1000, "canceled": 0, "paused": 0, "unpaid": 0, "incomplete": 0, "incomplete_expired": 0} {
 		if got := (Sub{Status: status, Items: []Item{monthlyItem(1000, 1)}}).MRR(now); got != want {
 			t.Errorf("%s: MRR = %d, want %d", status, got, want)
 		}
@@ -90,12 +90,11 @@ func TestTrendRebuildsHistoryFromDates(t *testing.T) {
 		{ID: "old", Status: "active", Start: now - 100*day0, Items: []Item{monthlyItem(1000, 1)}},
 		{ID: "new", Status: "active", Start: now - 5*day0, Items: []Item{monthlyItem(2000, 1)}},
 		{ID: "gone", Status: "canceled", Start: now - 50*day0, Ended: now - 10*day0, Items: []Item{monthlyItem(4000, 1)}},
-		{ID: "trial", Status: "active", Start: now - 20*day0, TrialEnd: now - 2*day0, Items: []Item{monthlyItem(8000, 1)}},
 	}
 	for _, c := range []struct {
 		at   int64
 		want int64
-	}{{now - 60*day0, 1000}, {now - 30*day0, 1000 + 4000}, {now - 15*day0, 1000 + 4000}, {now - 9*day0, 1000}, {now - 3*day0, 1000 + 2000}, {now, 1000 + 2000 + 8000}} {
+	}{{now - 60*day0, 1000}, {now - 30*day0, 1000 + 4000}, {now - 15*day0, 1000 + 4000}, {now - 9*day0, 1000}, {now - 3*day0, 1000 + 2000}, {now, 1000 + 2000}} {
 		got, _ := MRRAt(subs, c.at, now)
 		if got != c.want {
 			t.Errorf("MRRAt(now-%dd) = %d, want %d", (now-c.at)/day0, got, c.want)
@@ -110,24 +109,18 @@ func TestMovementBetween(t *testing.T) {
 		{ID: "base2", Status: "active", Start: from - 100*day0, Items: []Item{monthlyItem(3000, 1)}},
 		{ID: "new", Status: "active", Start: from + 2*day0, Items: []Item{monthlyItem(2000, 1)}},
 		{ID: "churn", Status: "canceled", Start: from - 60*day0, Ended: from + 5*day0, Items: []Item{monthlyItem(4000, 1)}},
-		{ID: "trialnew", Status: "trialing", Start: from + 3*day0, TrialEnd: to + 3*day0, Items: []Item{monthlyItem(9000, 1)}},
-		{ID: "trialdrop", Status: "canceled", Start: from + 3*day0, TrialEnd: from + 10*day0, Ended: from + 6*day0, Items: []Item{monthlyItem(7000, 1)}},
-		{ID: "converted", Status: "active", Start: from - 10*day0, TrialEnd: from + 4*day0, Items: []Item{monthlyItem(500, 1)}},
 		{ID: "unfinished", Status: "incomplete_expired", Start: from + 1*day0, Items: []Item{monthlyItem(6000, 1)}},
 	}
 	m := MovementBetween(subs, from, to, now)
-	// At the start: base, base2 and churn pay (4000+1000+3000 = 8000 across 3); converted is still in trial.
+	// At the start: base, base2 and churn pay (4000+1000+3000 = 8000 across 3).
 	if m.StartActive != 3 || m.StartMRR != 8000 {
 		t.Errorf("start = %d subscribers, %d MRR; want 3, 8000", m.StartActive, m.StartMRR)
 	}
-	if m.New != 2 || m.NewMRR != 2500 { // new + converted; trials in progress, dropped trials and incomplete never count
-		t.Errorf("new = %d (%d MRR), want 2 (2500)", m.New, m.NewMRR)
+	if m.New != 1 || m.NewMRR != 2000 { // incomplete never counts
+		t.Errorf("new = %d (%d MRR), want 1 (2000)", m.New, m.NewMRR)
 	}
-	if m.Churned != 1 || m.ChurnedMRR != 4000 { // a trial cancelled before paying is not churn
+	if m.Churned != 1 || m.ChurnedMRR != 4000 {
 		t.Errorf("churned = %d (%d MRR), want 1 (4000)", m.Churned, m.ChurnedMRR)
-	}
-	if m.TrialsStarted != 2 { // trialnew and trialdrop started in the window; converted started 10 days before it
-		t.Errorf("trials started = %d, want 2", m.TrialsStarted)
 	}
 	if m.LogoChurnPercent != 33.3 || m.RevenueChurnPercent != 50 {
 		t.Errorf("churn = %v%% logos, %v%% revenue; want 33.3, 50", m.LogoChurnPercent, m.RevenueChurnPercent)

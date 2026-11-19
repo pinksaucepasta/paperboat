@@ -25,7 +25,6 @@ const (
 	refreshBudget = 45 * time.Second
 	previewRows   = 5
 	renewalWindow = 30 * 24 * time.Hour
-	trialSoon     = 7 * 24 * time.Hour
 	day           = 24 * time.Hour
 )
 
@@ -168,7 +167,7 @@ func (st *state) row(sub Sub, now int64) Row {
 }
 
 // Lists names the paged lists behind the cards.
-var Lists = []string{"customers", "past_due", "renewals", "trials"}
+var Lists = []string{"customers", "past_due", "renewals"}
 
 // rows builds one full list, ordered the way its card reads.
 func (st *state) rows(kind string, now int64) []Row {
@@ -218,18 +217,6 @@ func (st *state) rows(kind string, now int64) []Row {
 			}
 			r := st.row(sub, now)
 			r.Amount, r.At = sub.CycleAmount(now), sub.PeriodEnd
-			out = append(out, r)
-		}
-		sort.Slice(out, func(i, j int) bool {
-			return out[i].At < out[j].At || out[i].At == out[j].At && out[i].Customer < out[j].Customer
-		})
-	case "trials":
-		for _, sub := range st.subs {
-			if sub.Status != "trialing" {
-				continue
-			}
-			r := st.row(sub, now)
-			r.MRR, r.At = int64(math.Round(sub.monthly(now))), sub.TrialEnd
 			out = append(out, r)
 		}
 		sort.Slice(out, func(i, j int) bool {
@@ -309,7 +296,6 @@ type Report struct {
 	Trend           []TrendPoint      `json:"trend"`
 	Plans           []PlanRow         `json:"plans"`
 	Movement        MovementReport    `json:"movement"`
-	Trials          TrialsReport      `json:"trials"`
 	Cash            *CashReport       `json:"cash,omitempty"`
 	Dunning         DunningReport     `json:"dunning"`
 	Customers       RowList           `json:"customers"`
@@ -349,12 +335,6 @@ type MovementReport struct {
 	RevenueChurnPercent         float64 `json:"revenue_churn_percent"`
 	PreviousRevenueChurnPercent float64 `json:"previous_revenue_churn_percent"`
 	ChangesUnavailable          bool    `json:"changes_unavailable"`
-}
-
-type TrialsReport struct {
-	Active     int64 `json:"active"`
-	EndingSoon int64 `json:"ending_soon"`
-	Started    Pair  `json:"started"`
 }
 
 type CashReport struct {
@@ -419,15 +399,6 @@ func (s *Service) Report(ctx context.Context, days int) (Report, error) {
 	r.Movement.Churned = Flow{Count: cur.Churned, MRR: cur.ChurnedMRR, PreviousCount: &prev.Churned, PreviousMRR: &prev.ChurnedMRR}
 	r.Movement.LogoChurnPercent, r.Movement.PreviousLogoChurnPercent = cur.LogoChurnPercent, prev.LogoChurnPercent
 	r.Movement.RevenueChurnPercent, r.Movement.PreviousRevenueChurnPercent = cur.RevenueChurnPercent, prev.RevenueChurnPercent
-	r.Trials.Started = Pair{cur.TrialsStarted, prev.TrialsStarted}
-	for _, sub := range st.subs {
-		if sub.Status == "trialing" {
-			r.Trials.Active++
-			if sub.TrialEnd > nowU && sub.TrialEnd-nowU <= int64(trialSoon/time.Second) {
-				r.Trials.EndingSoon++
-			}
-		}
-	}
 
 	p := s.period(ctx, st, days, now)
 	r.Partial = r.Partial || p.partial

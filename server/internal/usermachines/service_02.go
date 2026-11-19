@@ -509,7 +509,7 @@ func (s *Service) Overview(ctx context.Context, userID string) (Overview, error)
 }
 
 func entitlementActive(state string, periodEnd, now time.Time) bool {
-	return (state == "active" || state == "trialing") && now.Before(periodEnd)
+	return state == "active" && now.Before(periodEnd)
 }
 
 type TerminalSession struct {

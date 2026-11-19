@@ -701,7 +701,6 @@ func New(opts Options) (*App, error) {
 	abuseReports.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	customerNotices := customernotices.New(store)
 	customerNotices.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
-	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)
 	userMachineService.ConfigureRuntimeQuota(workspaceBilling)

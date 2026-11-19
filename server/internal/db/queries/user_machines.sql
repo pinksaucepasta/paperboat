@@ -167,7 +167,7 @@ WHERE p.user_id = sqlc.arg(user_id)
 SELECT EXISTS (
   SELECT 1 FROM user_machine_entitlements
   WHERE user_id = sqlc.arg(user_id)
-    AND state IN ('active', 'trialing')
+    AND state = 'active'
     AND current_period_start <= now()
     AND current_period_end > now()
 );
@@ -175,7 +175,7 @@ SELECT EXISTS (
 -- name: GetActiveUserMachineSeatQuantity :one
 SELECT seat_quantity FROM user_machine_entitlements
 WHERE user_id = sqlc.arg(user_id)
-  AND state IN ('active', 'trialing')
+  AND state = 'active'
   AND current_period_start <= now()
   AND current_period_end > now();
 

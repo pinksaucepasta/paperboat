@@ -5,7 +5,7 @@
 // MRR follows Stripe's own definition (https://docs.stripe.com/billing/subscriptions/analytics/glossary and
 // https://support.stripe.com/questions/understanding-monthly-recurring-revenue-(mrr)): the sum of every active and
 // past_due subscription's recurring price normalised to one month (a 1200 yearly plan is 100), times quantity, after
-// the discounts that keep applying; trials, paused, unpaid, canceled and incomplete subscriptions, tax and one-time
+// the discounts that keep applying; paused, unpaid, canceled and incomplete subscriptions, tax and one-time
 // charges are not MRR. One-time ("once") discounts do not reduce MRR (Stripe's default); forever and still-running
 // repeating discounts do.
 package revenue
@@ -44,7 +44,7 @@ type Invoice struct {
 // Sub is one Stripe subscription reduced to what the money page uses.
 type Sub struct {
 	ID, Customer, Status, Currency string
-	Start, Ended, TrialEnd         int64
+	Start, Ended                   int64
 	PeriodEnd                      int64
 	CancelAtPeriodEnd              bool
 	Items                          []Item
@@ -120,7 +120,7 @@ func (s Sub) CycleAmount(now int64) int64 {
 	return int64(math.Round(s.monthly(now) * s.period()))
 }
 
-// mrrAt rebuilds the subscription's MRR at a past instant from its start, trial and end dates, with the discounts that
+// mrrAt rebuilds the subscription's MRR at a past instant from its start and end dates, with the discounts that
 // ran then. It values the subscription at today's price and status: a plan or pause since then is not replayed
 // (Stripe's own chart has history; we do not).
 func (s Sub) mrrAt(t, now int64) int64 {
@@ -130,18 +130,10 @@ func (s Sub) mrrAt(t, now int64) int64 {
 			return 0
 		}
 	}
-	if s.Start == 0 || s.Start > t || s.Ended != 0 && s.Ended <= t || s.TrialEnd > t {
+	if s.Start == 0 || s.Start > t || s.Ended != 0 && s.Ended <= t {
 		return 0
 	}
 	return int64(math.Round(s.monthly(t)))
-}
-
-// payingStart is when the subscription began to pay: its start, or the end of its trial.
-func (s Sub) payingStart() int64 {
-	if s.TrialEnd > s.Start {
-		return s.TrialEnd
-	}
-	return s.Start
 }
 
 // TrendPoint is the MRR at the end of one UTC day.
@@ -206,21 +198,16 @@ func MRRAt(subs []Sub, t, now int64) (mrr int64, active int64) {
 type Movement struct {
 	New, Churned          int64
 	NewMRR, ChurnedMRR    int64
-	TrialsStarted         int64
 	StartActive, StartMRR int64
 	LogoChurnPercent      float64 // churned / subscribers at the start
 	RevenueChurnPercent   float64 // churned MRR / MRR at the start
 }
 
-// MovementBetween counts subscriptions that began paying in [from, to) and paying ones that ended in it. A trial that
-// ends without ever paying is not churn.
+// MovementBetween counts subscriptions that began paying in [from, to) and paying ones that ended in it.
 func MovementBetween(subs []Sub, from, to, now int64) Movement {
 	var m Movement
 	m.StartMRR, m.StartActive = MRRAt(subs, from, now)
 	for _, s := range subs {
-		if s.Start >= from && s.Start < to && s.TrialEnd > s.Start {
-			m.TrialsStarted++
-		}
 		switch s.Status {
 		case "incomplete", "incomplete_expired":
 			continue
@@ -229,11 +216,11 @@ func MovementBetween(subs []Sub, from, to, now int64) Movement {
 		if v == 0 {
 			continue
 		}
-		if p := s.payingStart(); p >= from && p < to && (s.Ended == 0 || s.Ended > p) {
+		if p := s.Start; p >= from && p < to && (s.Ended == 0 || s.Ended > p) {
 			m.New++
 			m.NewMRR += v
 		}
-		if s.Ended >= from && s.Ended < to && s.Ended > s.payingStart() {
+		if s.Ended >= from && s.Ended < to && s.Ended > s.Start {
 			m.Churned++
 			m.ChurnedMRR += v
 		}
