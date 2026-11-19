@@ -1,9 +1,17 @@
 package hostinstall
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 func sweepTestInstance(fill byte) string {
@@ -177,5 +185,56 @@ func TestWindowsPayloadProcessesAreOnlyTheAccountsOwn(t *testing.T) {
 	// An account without a known owner still never matches a process whose user is unknown.
 	if got := windowsPayloadProcessIDs(entries, nil, []string{root}, []string{""}, image, user); len(got) != 0 {
 		t.Fatalf("an empty owner selected %v", got)
+	}
+}
+
+// The reset that follows an interrupted uninstall found a service registered without its declaration and failed
+// "remove system Paperboat runtime" every time, although the account sweep that ends the purge deletes such a
+// service by name (2026-11-19, victus).
+func TestPurgeServiceDeclarationsLeavesAnUndeclaredServiceToTheSweep(t *testing.T) {
+	directory := t.TempDir()
+	instance := sweepTestInstance('a')
+	kept := filepath.Join(directory, "PaperboatUpdated-"+instance+".json")
+	if err := os.WriteFile(kept, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var removed []string
+	err := purgeServiceDeclarations(context.Background(), directory, instance, func(_ context.Context, path string) error {
+		removed = append(removed, filepath.Base(path))
+		if strings.HasPrefix(filepath.Base(path), "PaperboatHost-") {
+			return fmt.Errorf("%w: %w", service.ErrInvalidDefinition, service.ErrUndeclaredService)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("an undeclared service failed the purge: %v", err)
+	}
+	if len(removed) != 3 {
+		t.Fatalf("the later services were not attempted: %v", removed)
+	}
+	if _, err := os.Stat(kept); !os.IsNotExist(err) {
+		t.Fatalf("a removed service kept its declaration: %v", err)
+	}
+	failure := errors.New("access denied")
+	err = purgeServiceDeclarations(context.Background(), directory, instance, func(context.Context, string) error { return failure })
+	if !errors.Is(err, failure) {
+		t.Fatalf("a real removal failure was hidden: %v", err)
+	}
+}
+
+func TestSettledLeftoversWaitsForAMarkedServiceToVanish(t *testing.T) {
+	scans := 0
+	got, err := settledLeftovers(context.Background(), time.Second, time.Millisecond, func() ([]string, error) {
+		if scans++; scans < 3 {
+			return []string{"services"}, nil
+		}
+		return nil, nil
+	})
+	if err != nil || len(got) != 0 || scans != 3 {
+		t.Fatalf("leftovers %v, scans %d, err %v: a service that vanished in a moment still failed the purge", got, scans, err)
+	}
+	got, err = settledLeftovers(context.Background(), 20*time.Millisecond, time.Millisecond, func() ([]string, error) { return []string{"services"}, nil })
+	if err != nil || len(got) != 1 {
+		t.Fatalf("a service that stays must still be reported: %v %v", got, err)
 	}
 }

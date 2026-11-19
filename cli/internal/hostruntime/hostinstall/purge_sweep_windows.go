@@ -67,7 +67,9 @@ func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, own
 		}
 	}
 	result = errors.Join(result, purgeMachineGuardWhenUnshared(ctx, layout.Instance))
-	leftovers, err := accountLeftoversKeepingCLI(ctx, layout, ownerSID, instanceRoot, keep, deferred)
+	leftovers, err := settledLeftovers(ctx, windowsAccountProcessExitTimeout, 250*time.Millisecond, func() ([]string, error) {
+		return accountLeftoversKeepingCLI(ctx, layout, ownerSID, instanceRoot, keep, deferred)
+	})
 	if err != nil {
 		result = errors.Join(result, hostInstallFailure("re-scan Paperboat installation items", err))
 	} else if len(leftovers) > 0 {

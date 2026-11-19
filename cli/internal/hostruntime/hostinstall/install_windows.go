@@ -2679,14 +2679,7 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 	if purge {
 		// Explicit removal does not restore an interrupted installation. Protected
 		// declarations plus exact SCM ownership suffice even after slots vanished.
-		for _, base := range []string{"PaperboatHost", "PaperboatLocalDaemon", "PaperboatUpdated"} {
-			path := filepath.Join(`C:\ProgramData\Paperboat\services`, base+"-"+layout.Instance+".json")
-			if err := (service.WindowsController{}).Remove(ctx, path); err != nil {
-				result = errors.Join(result, hostInstallFailure("remove Windows service "+base, err))
-			} else {
-				result = errors.Join(result, removeInstallFile(path))
-			}
-		}
+		result = errors.Join(result, purgeServiceDeclarations(ctx, `C:\ProgramData\Paperboat\services`, layout.Instance, (service.WindowsController{}).Remove))
 	} else {
 		hostd, updater, daemon, err := windowsRoleInstallers(layout, true)
 		if err != nil {
