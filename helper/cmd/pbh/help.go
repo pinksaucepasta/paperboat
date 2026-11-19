@@ -20,7 +20,6 @@ Commands:
   update          update pbh and the relay and edge to the latest signed release
   update-apply    run an update the dashboard requested (its Update button starts this)
   doctor          check that this host can serve public tunnel ports
-  configure-tls   set or rotate the browser HTTPS certificate
   uninstall       remove the service and containers
   serve           run the node in the foreground (the systemd unit runs this)
   check-host      check that this operating system and architecture are supported
@@ -37,8 +36,7 @@ node with the address and code printed here (pbh selfhost code prints a new one)
 same command upgrades in place and keeps data. Needs root (it re-runs itself with sudo) unless
 --no-service is given.
 Examples:
-  pbh install --both --endpoint-host edge.example.com
-  pbh install --edge --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
+  pbh install --both --endpoint-host edge.example.com`,
 	"logs": `Show the logs of this installation's relay and edge containers. Name relay or edge for one; without a
 name both are shown, each line marked with its component. --lines (default 200, at most 10000) and --since
 (for example 10m) bound what is read; --follow keeps streaming until interrupted. Needs root (it re-runs
@@ -66,12 +64,6 @@ readiness; use pbh doctor for the host and Dashboard → Network for registratio
 TCP 443 and the public port range, per-address connection limits, and a reachability test of a
 test port from the control plane. Each failed check names the fix. Installations without a tunnel
 need no host setup and report so. Fails when no installation exists in --state-dir.`,
-	"configure-tls": `Set or rotate the browser-trusted HTTPS certificate for this installation's endpoint hostname.
-The certificate hostname, validity, key pairing and owner-only key permissions are checked before
-anything is saved; the service then restarts, and the previous certificate is restored when it
-cannot. Carrier identity and enrollment do not change. Rerun it after each certificate renewal.
-Example:
-  pbh configure-tls --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
 	"uninstall": `Stop the service and remove its containers and the pbh executables. Protected identity,
 credentials and configuration are kept for a reinstall unless both --remove-data and
 --confirm-remove-data are given, which deletes them permanently. Remove the node from

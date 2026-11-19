@@ -72,9 +72,6 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		if !ready {
 			return nil
 		}
-		if err := syncPublicHTTPSDeployment(dir); err != nil {
-			return err
-		}
 		dirs, err := ComponentDirectories(dir)
 		if err != nil {
 			return err

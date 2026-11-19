@@ -46,7 +46,7 @@ func Serve(ctx context.Context, dir, release string, out io.Writer, observe func
 		defer cancel()
 		result = errors.Join(result, removeInstallationRuntimes(cleanup, dir, true))
 	}()
-	launcher := &Launcher{StateDir: dir, Release: release, Images: images, ReadOnlyFiles: []string{config.ControlCA, config.PublicHTTPSCertFile, config.PublicHTTPSKeyFile}}
+	launcher := &Launcher{StateDir: dir, Release: release, Images: images, ReadOnlyFiles: []string{config.ControlCA}}
 	return selfhost.RunWithLauncher(ctx, dir, launcher, out, observe)
 }
 

@@ -83,22 +83,11 @@ func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
 		}
 		return cert, certPEM, keyPEM
 	}
-	infrastructure, certPEM, keyPEM := makeCertificate("infra.example.test", net.ParseIP("127.0.0.1"))
+	infrastructure, _, _ := makeCertificate("infra.example.test", net.ParseIP("127.0.0.1"))
 	browser, _, _ := makeCertificate("route.example.test", nil)
-	directory := t.TempDir()
-	certPath, keyPath := filepath.Join(directory, "cert.pem"), filepath.Join(directory, "key.pem")
-	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
-		t.Fatal(err)
-	}
 	base := &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) { return &browser, nil }}
 	for _, host := range []string{"127.0.0.1", "infra.example.test"} {
-		server, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: host, PublicHTTPSCertFile: certPath, PublicHTTPSKeyFile: keyPath}, base)
-		if err != nil {
-			t.Fatal(err)
-		}
+		server := infrastructureTLS(host, infrastructure, base)
 		tests := []struct {
 			name string
 			cert tls.Certificate
@@ -167,7 +156,7 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 	if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath, PublicHTTPSCertFile: "/unused-public-cert", PublicHTTPSKeyFile: "/unused-public-key"}
+	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath}
 	for _, customerOwned := range []bool{true, false} {
 		deployment.SelfHosted = customerOwned
 		for _, epoch := range []string{"first", "replacement"} {

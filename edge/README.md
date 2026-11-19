@@ -44,8 +44,6 @@ relative paths, or a missing carrier listener stop startup with a typed error.
 - **Listeners:** `carrier_tcp_listen_address` and `carrier_quic_listen_address` (both
   required, distinct ports), `public_https_listen_address`, `public_http_listen_address`
   (redirects to HTTPS), and `private_https_listen_address` (loopback only).
-- **Public HTTPS certificate:** `public_https_cert_file` and `public_https_key_file`, both or
-  neither.
 - **Names:** `connector_advertise_host`, `preview_base_domain`, `tunnel_base_domain`,
   `runtime_base_domain`.
 - **Limits:** `node_capacity`, `max_body_bytes` (default 100 MiB), `max_header_bytes`

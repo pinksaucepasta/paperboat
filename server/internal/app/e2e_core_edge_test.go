@@ -127,9 +127,7 @@ func (e *e2eCore) startEdge() error {
 			{"capability": "relay", "tcp_port": atoi(e.ports.relayTCP), "quic_port": atoi(e.ports.relayQUIC), "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
 		},
 		"preview_domain": "public.example.test", "tunnel_domain": "public.example.test", "runtime_domain": "runtime.example.test",
-		"control_ca":             filepath.Join(e.work, "ca.pem"),
-		"public_https_cert_file": filepath.Join(e.work, "tls.pem"),
-		"public_https_key_file":  filepath.Join(e.work, "tls.key"),
+		"control_ca": filepath.Join(e.work, "ca.pem"),
 	})
 	if err != nil {
 		return err
