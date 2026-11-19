@@ -75,7 +75,9 @@ func (s *Service) Attach(ctx context.Context, proof previewattachment.MachinePro
 	if !validRequest(proof, request) {
 		return out, ErrInvalid
 	}
-	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// The machine's write lock, before the snapshot: two attaches of one machine, or an attach and a preview create,
+	// queue instead of failing with 40001 on its carrier row and route assignments.
+	err := s.DB.InTxUnderSessionLock(ctx, proof.MachineID, endpoints.MachineWriteLockSeed, func(ctx context.Context, tx *db.Tx) error {
 		var route, environment, host, managedHost, publicKey, mode string
 		var revision int64
 		var teamID sql.NullString
@@ -118,8 +120,8 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 		previewSessions := map[string]string{}
 		var generation uint64
 		var activeNode, activeEpoch string
-		// Locks this route's own carrier row: two attaches of the same machine can race, and the loser's 40001 is retried
-		// by InTx, the right outcome for a per-machine race (prod 2026-11-20: 10 retries in 30 min, no failure).
+		// This route's own carrier row; Attach holds the machine's write lock, so a second attach waits instead of
+		// failing here with 40001 (prod 2026-11-20: 10 in 30 min).
 		previousRows, err := tx.Query(ctx, `SELECT edge_node_id,admission,process_id,generation,active,preview_session_id,agent_capabilities FROM runtime_carrier_attachments WHERE route_id=$1 FOR UPDATE`, route)
 		if err != nil {
 			return err
