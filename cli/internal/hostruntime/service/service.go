@@ -3,11 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -433,10 +435,31 @@ func (i *Installer) VerifyPublishedDefinition() error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(actual, want) {
+	if !sameDefinition(actual, want) {
 		return ErrInvalidDefinition
 	}
 	return nil
+}
+
+// cosmeticDefinitionFields are what the Services app shows for a Windows service; they carry no identity or behavior.
+var cosmeticDefinitionFields = []string{"display_name", "description"}
+
+// sameDefinition is whether a published declaration is the one want renders. A Windows declaration written by an earlier build
+// differs from the current render only in its display labels (252b2ada1 changed them to "Paperboat (<role>)"), and every install
+// over such a build failed "invalid service definition" in the carrier check; the labels are not compared.
+func sameDefinition(actual, want []byte) bool {
+	if bytes.Equal(actual, want) {
+		return true
+	}
+	var left, right map[string]any
+	if json.Unmarshal(actual, &left) != nil || json.Unmarshal(want, &right) != nil {
+		return false // not a JSON declaration (a systemd unit or a launchd plist): byte equality is the rule
+	}
+	for _, field := range cosmeticDefinitionFields {
+		delete(left, field)
+		delete(right, field)
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 // VerifyDefinitionNames accepts a declaration, whichever build rendered it, that names
