@@ -30,16 +30,19 @@
     document.cookie = "pb-workspace=personal; Path=/"
     window.next.router.push(`/team?team=${teamId}&tab=security`)
     const tab = await until(
-      () => /Security/.test(text()) && (/Single sign-on|available from/.test(text()) ? text() : null),
+      () => /Security/.test(text()) && (/Single sign-on|add-on/.test(text()) ? text() : null),
     )
     pass("?team=…&tab=security opens the team's Security tab", Boolean(tab))
     pass("the workspace switched to the team", document.cookie.includes(`pb-workspace=${teamId}`))
-    if (!identity.eligible) {
+    if (!identity.sso_addon || !identity.scim_addon) {
+      const t = text()
+      // Each add-on opens its own part of the tab; the part without it says which add-on it needs, with a link to Billing.
       pass(
-        "below the seat minimum it says from how many seats, with Add seats",
-        text().includes(`available from ${identity.min_seats} seats`) &&
-          [...main().querySelectorAll("a")].some((a) => a.textContent.trim() === "Add seats"),
-        `${identity.seats} of ${identity.min_seats}`,
+        "a part without its add-on names the add-on and links to Billing",
+        (identity.sso_addon || t.includes("Single sign-on needs the SSO add-on")) &&
+          (identity.scim_addon || t.includes("Directory sync needs the SCIM add-on")) &&
+          [...main().querySelectorAll("a")].some((a) => a.textContent.trim() === "Add it in Billing"),
+        `sso=${identity.sso_addon} scim=${identity.scim_addon}`,
       )
     } else {
       const t = text()

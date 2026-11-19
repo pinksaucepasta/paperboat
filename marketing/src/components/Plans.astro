@@ -3,7 +3,7 @@
  * The three plans in one hairline grid, monthly or yearly (a switch above; no script). Every column
  * has the same rows in the same order, then what the plan adds, then its action at the bottom.
  */
-import { auditRetention, consoleUrl, plans, publicTcp, ssoMinSeats, topUp } from "../site"
+import { auditRetention, consoleUrl, plans, publicTcp, addonPrices, topUp } from "../site"
 
 const forWhom = ["For personal use", "Personal use, more traffic", "For teams"]
 const rows: [string, (i: number) => string][] = [
@@ -17,7 +17,7 @@ const rows: [string, (i: number) => string][] = [
 const extras = [
   ["Every feature", "Self-hosted relays and edges"],
   ["Everything in Free", `Extra bandwidth, ${topUp.price} per ${topUp.size}`, "Invoices"],
-  ["Members and roles", "Session recordings in your S3 bucket", `SSO and SCIM from ${ssoMinSeats} seats`, "Audit log export"],
+  ["Members and roles", "Session recordings in your S3 bucket", addonPrices, "Audit log export"],
 ]
 const actions = [
   { href: "/#install", label: "Install Paperboat", primary: false },

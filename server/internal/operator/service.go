@@ -96,6 +96,8 @@ type Billing struct {
 	PeriodStart       *time.Time `json:"period_start,omitempty"`
 	PeriodEnd         *time.Time `json:"period_end,omitempty"`
 	CancelAtPeriodEnd bool       `json:"cancel_at_period_end"`
+	// Addon is the team's paid SSO/SCIM add-on (sso, scim or sso_scim), empty without one.
+	Addon string `json:"addon,omitempty"`
 	// Granted is a support comp: an active plan with no Stripe subscription behind it.
 	Granted    bool      `json:"granted"`
 	Revision   int64     `json:"revision"`
@@ -434,7 +436,7 @@ func readBilling(ctx context.Context, tx *db.Tx, id string) (Billing, error) {
 	var v Billing
 	var userID, teamID, product sql.NullString
 	var start, end sql.NullTime
-	err := tx.QueryRow(ctx, `SELECT id,user_id,team_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,`+grantedSQL+`,revision,updated_at FROM billing_workspaces WHERE id=$1`, id).Scan(&v.ID, &userID, &teamID, &product, &v.State, &v.Quantity, &start, &end, &v.CancelAtPeriodEnd, &v.Granted, &v.Revision, &v.ObservedAt)
+	err := tx.QueryRow(ctx, `SELECT id,user_id,team_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,coalesce(addon,''),`+grantedSQL+`,revision,updated_at FROM billing_workspaces WHERE id=$1`, id).Scan(&v.ID, &userID, &teamID, &product, &v.State, &v.Quantity, &start, &end, &v.CancelAtPeriodEnd, &v.Addon, &v.Granted, &v.Revision, &v.ObservedAt)
 	if err != nil {
 		return v, scanErr(err)
 	}
@@ -627,7 +629,7 @@ func readWorkspaces(ctx context.Context, tx *db.Tx, state, after string, limit i
 	if err != nil {
 		return BillingPage{}, err
 	}
-	rows, err := tx.Query(ctx, `SELECT id,user_id,team_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,`+grantedSQL+`,revision,updated_at FROM billing_workspaces WHERE id>$1 AND ($2='' OR state=$2) ORDER BY id LIMIT $3`, after, state, limit+1)
+	rows, err := tx.Query(ctx, `SELECT id,user_id,team_id,product_code,state,quantity,period_start,period_end,cancel_at_period_end,coalesce(addon,''),`+grantedSQL+`,revision,updated_at FROM billing_workspaces WHERE id>$1 AND ($2='' OR state=$2) ORDER BY id LIMIT $3`, after, state, limit+1)
 	if err != nil {
 		return BillingPage{}, err
 	}
@@ -637,7 +639,7 @@ func readWorkspaces(ctx context.Context, tx *db.Tx, state, after string, limit i
 		var v Billing
 		var uid, tid, product sql.NullString
 		var start, end sql.NullTime
-		if err := rows.Scan(&v.ID, &uid, &tid, &product, &v.State, &v.Quantity, &start, &end, &v.CancelAtPeriodEnd, &v.Granted, &v.Revision, &v.ObservedAt); err != nil {
+		if err := rows.Scan(&v.ID, &uid, &tid, &product, &v.State, &v.Quantity, &start, &end, &v.CancelAtPeriodEnd, &v.Addon, &v.Granted, &v.Revision, &v.ObservedAt); err != nil {
 			return p, err
 		}
 		if uid.Valid {
