@@ -14,9 +14,12 @@ import {
   type Validation,
 } from "@/lib/policy"
 import { ChangesDialog } from "@/components/access/changes-dialog"
+import { PolicyRules } from "@/components/access/policy-rules"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { cn } from "@/lib/utils"
 
 /** The policy as a file: a plain editor with line numbers, checked by the server as you type. */
 export function PolicyEditor({
@@ -35,6 +38,7 @@ export function PolicyEditor({
   const editable = policy.can_edit === "all"
   const [checked, setChecked] = useState(text)
   const [reviewing, setReviewing] = useState(false)
+  const [view, setView] = useState<"file" | "rules">("file")
   useEffect(() => {
     const timer = setTimeout(() => setChecked(text), 800)
     return () => clearTimeout(timer)
@@ -52,6 +56,16 @@ export function PolicyEditor({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <ToggleGroup
+          aria-label="View"
+          value={[view]}
+          onValueChange={(next) => next[0] && setView(next[0] as "file" | "rules")}
+          variant="outline"
+          spacing={2}
+        >
+          <ToggleGroupItem value="file">File</ToggleGroupItem>
+          <ToggleGroupItem value="rules">Rules</ToggleGroupItem>
+        </ToggleGroup>
         <span className="flex-1">
           Version {policy.version} · saved <Time iso={policy.updated_at} relative />
           {savedBy(policy)}
@@ -79,11 +93,22 @@ export function PolicyEditor({
         )}
       </div>
       {note && <p className="text-sm text-muted-foreground">{note}</p>}
-      <p className="text-xs text-muted-foreground">
+      <p hidden={view !== "file"} className="text-xs text-muted-foreground">
         Sections: groups, tags, rules, tests and config_sync (the repository machines sync config with, for all
         machines or a tag).
       </p>
-      <CodeArea value={text} onChange={editable ? onChange : undefined} />
+      {view === "file" ? (
+        <CodeArea value={text} onChange={editable ? onChange : undefined} />
+      ) : (
+        <PolicyRules
+          workspace={workspace}
+          policy={policy}
+          text={text}
+          editable={editable}
+          onChange={onChange}
+          openFile={() => setView("file")}
+        />
+      )}
       <ValidationResult
         validation={validation.data}
         error={validation.error}
@@ -107,7 +132,7 @@ export function PolicyEditor({
   )
 }
 
-function ValidationResult({
+export function ValidationResult({
   validation,
   error,
   checking,
@@ -151,11 +176,11 @@ function ValidationResult({
 }
 
 /** A monospace textarea with a line-number gutter that scrolls with it. Read-only without `onChange`. */
-export function CodeArea({ value, onChange }: { value: string; onChange?: (value: string) => void }) {
+export function CodeArea({ value, onChange, compact }: { value: string; onChange?: (value: string) => void; compact?: boolean }) {
   const gutter = useRef<HTMLDivElement>(null)
   const lines = value.split("\n").length
   return (
-    <div className="flex h-[32rem] overflow-hidden surface rounded-lg font-mono text-xs leading-5">
+    <div className={cn("flex overflow-hidden surface rounded-lg font-mono text-xs leading-5", compact ? "h-64" : "h-[32rem]")}>
       <div
         ref={gutter}
         aria-hidden
