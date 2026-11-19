@@ -341,8 +341,23 @@ func TestWorkerLivenessReportsAFrozenWorker(t *testing.T) {
 	if !l.silent(active(1, 110), base.Add(workerFrozenAfter+time.Second)) {
 		t.Fatal("frozen heartbeat was not reported")
 	}
+	// The checker itself did not run for longer than the deadline: the whole process was frozen, not the worker.
+	base = base.Add(workerFrozenAfter + time.Second)
+	frozen := base.Add(workerFrozenAfter + 30*time.Second)
+	if l.silent(active(1, 110), frozen) {
+		t.Fatal("a whole-process freeze was reported as a hung worker")
+	}
+	// Once ticks run again a worker that is really stuck is still reported.
+	for i := time.Duration(5); i <= 120; i += 5 {
+		if l.silent(active(1, 110), frozen.Add(i*time.Second)) {
+			t.Fatalf("reported before the deadline at +%ds", i)
+		}
+	}
+	if !l.silent(active(1, 110), frozen.Add(workerFrozenAfter+5*time.Second)) {
+		t.Fatal("a stuck worker with ticking checker was not reported after the freeze")
+	}
 	// A new worker epoch (replacement) starts its own window.
-	if l.silent(active(2, 110), base.Add(workerFrozenAfter+2*time.Second)) {
+	if l.silent(active(2, 110), frozen.Add(workerFrozenAfter+10*time.Second)) {
 		t.Fatal("a new epoch inherited the old window")
 	}
 	// No active worker (candidate/empty) is never reported.

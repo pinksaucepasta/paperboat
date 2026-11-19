@@ -23,15 +23,22 @@ const workerFrozenAfter = 2 * time.Minute
 // workerLiveness reports an active worker whose heartbeat has not advanced for
 // workerFrozenAfter of hostd's own (monotonic) running time. A suspended machine
 // resumes both processes, so the heartbeat moves again before that.
+//
+// A freeze of the whole process (SIGSTOP, VM pause, memory thrash) stops the checker too: when its own
+// tick gap exceeds the deadline it restarts the clock instead of blaming the worker, as Tailscale treats a
+// wall-clock jump as the host sleeping, not a network fault (net/netmon/netmon.go, majorTimeJumpThreshold).
 type workerLiveness struct {
 	epoch     uint64
 	heartbeat int64
 	since     time.Time
+	last      time.Time
 }
 
 func (l *workerLiveness) silent(status hostdproto.Status, now time.Time) bool {
-	if status.State != hostdproto.StateActive || l.since.IsZero() || status.Epoch != l.epoch || status.LastHeartbeatUnixMilli != l.heartbeat {
-		*l = workerLiveness{epoch: status.Epoch, heartbeat: status.LastHeartbeatUnixMilli, since: now}
+	stalled := !l.last.IsZero() && now.Sub(l.last) > workerFrozenAfter
+	l.last = now
+	if stalled || status.State != hostdproto.StateActive || l.since.IsZero() || status.Epoch != l.epoch || status.LastHeartbeatUnixMilli != l.heartbeat {
+		*l = workerLiveness{epoch: status.Epoch, heartbeat: status.LastHeartbeatUnixMilli, since: now, last: now}
 		return false
 	}
 	return now.Sub(l.since) > workerFrozenAfter

@@ -217,8 +217,9 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 			return errors.Join(lost, notifier.Degraded("runtime worker exited"))
 		case <-ctx.Done():
 			return runtimeFailureIfAny("hostd draining failed", runtimeShutdownCause(ctx), notifier.Draining())
-		case now := <-livenessTicker.C:
-			if liveness.silent(server.Status(), now) {
+		case <-livenessTicker.C:
+			// The tick's own timestamp can predate a freeze; the gap check needs the time the checker really ran.
+			if liveness.silent(server.Status(), time.Now()) {
 				owned.dumpActiveStacks(ctx, os.Stderr)
 				// Alive but frozen serves nobody either (lanex2-l2, 2026-11-13: offline 2.5 h).
 				return errors.Join(runtimeFailure("the runtime worker stopped sending heartbeats", errWorkerSilent), notifier.Degraded("runtime worker stopped sending heartbeats"))
