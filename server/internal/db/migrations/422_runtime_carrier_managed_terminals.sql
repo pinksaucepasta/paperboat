@@ -4,9 +4,6 @@
 -- them. So a runtime carrier is valid on a managed edge in every mode, and on a workspace's own edge only
 -- for the tunnels and previews riding it; the route's public host is always the managed one.
 SET LOCAL lock_timeout = '5s';
--- A self-hosted-only workspace's route kept the customer alias as its host; it is the managed host now, as Attach sets
--- it, so no runtime carrier reads invalid until its daemon attaches again. One row per machine: a small table.
-UPDATE paperboat.control_routes SET public_host=managed_public_host WHERE kind='runtime_https_wss' AND public_host<>managed_public_host;
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.node_managed_edge_eligible(wanted_node text, wanted_account text, wanted_team text)
  RETURNS boolean
