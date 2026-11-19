@@ -4,7 +4,7 @@
 #   tools/remote-test.sh pbvm2 cli -run TestExec ./cmd/pb
 #   tools/remote-test.sh pbvm3 shared            # go test -p 2 ./...
 #   tools/remote-test.sh linpool-1 server -run . ./internal/edgeset/   # a GitHub runner, PostgreSQL included
-# <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit, linpool-N). The VMs have 3-4 GB
+# <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit, ana@hermes, linpool-N). The VMs have 3-4 GB
 # of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`. Where a
 # systemd user manager exists the job runs in a scope capped at 60% of RAM: a -race PostgreSQL suite once froze anvit,
 # which also hosts a prod canary machine, for two minutes (2026-11-19).
@@ -15,6 +15,7 @@
 # passwordless sudo and a postgres:17 container behind ~/.pb-test-pg-dsn already set up: start it once, reuse it for every job.
 # gcc is installed on all of them, so -race works. The cli module needs passwordless sudo on the host (root updater fixture,
 # frozen-filesystem bandwidth test): anvit has it, hermes does not.
+# ana@hermes has user-scoped Go 1.27.4 (~/go-sdk-1.27.4): fine for -race package runs, not for cli root/filesystem suites.
 set -euo pipefail
 
 usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -62,6 +63,11 @@ if [ "$module" = cli ] && ! sudo -n true 2>/dev/null; then
   echo "remote-test: warning: $(hostname) has no passwordless sudo; cli root-updater and isolated-filesystem tests will fail here, run cli on tools/ci-test.sh or anvit" >&2
 fi
 export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local
+# One build cache per lane: lanes share the host but must never share (or clean) one cache, and a
+# host disk guard only ever touches the default ~/.cache/go-build. (2026-11-19: an hourly `rm -rf`
+# of the shared default cache on pbvm2 broke in-flight builds with dozens of `could not import ...
+# no such file` failures.)
+export GOCACHE=$HOME/.cache/go-build-$lane
 cd "$HOME/pb-remote-test/$lane/$module"
 go version
 # A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.
