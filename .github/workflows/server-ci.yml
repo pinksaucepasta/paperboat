@@ -69,8 +69,7 @@ jobs:
       - name: PostgreSQL suites really ran
         run: |
           for t in TestRevokeMachineWithManyAccessSessionsOnPostgres TestWorkspaceEdgeSetPrefersNearestOnPostgres; do
-            grep -q "\"Action\":\"pass\".*\"Test\":\"$t\"" ../gotest-events/server.jsonl || { echo "$t did not pass (skipped or missing)" >&2; exit 1; }
-            echo "--- PASS: $t"
+            grep -- "\"Action\":\"pass\".*\"Test\":\"$t\"" ../gotest-events/server.jsonl || { echo "$t did not pass (skipped or missing)" >&2; exit 1; }
           done
 
   # max_pred_locks_per_transaction is restart-only and a service container cannot take server arguments, so this job
