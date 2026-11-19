@@ -8,6 +8,8 @@ services:
       POSTGRES_DB: paperboat_staging
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets: [postgres_password]
+    # pg_stat_statements: the per-statement cost of the fleet (tools/loadtest/run-fleet.sh); staging only, prod is untouched.
+    command: [postgres, -c, shared_preload_libraries=pg_stat_statements, -c, pg_stat_statements.track=all]
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U postgres -d paperboat_staging"]
