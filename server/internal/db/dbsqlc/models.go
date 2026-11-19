@@ -1075,7 +1075,6 @@ type ControlUsageReceipt struct {
 	AuthorityID    string
 	WorkspaceID    sql.NullString
 	Disposition    string
-	QuotaExhausted bool
 	ActorAccountID sql.NullString
 }
 

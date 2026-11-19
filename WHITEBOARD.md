@@ -370,7 +370,3 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 - Route the one API address to the nearest healthy region with a DNS load balancer (e.g. Cloudflare geo steering), like Tailscale's single control address. `pb` and the console stay unchanged.
 - Each region's server already reads from its own replica once it has caught up with the client's commit position (`PAPERBOAT_DATABASE_REPLICA_DSN`); writes go to the primary.
 - Server test speed: split the PostgreSQL `-race` suite across hosts and cache unchanged packages (about 25–30 min today).
-## Next server deploy after 2026-11-19: drop control_usage_receipts.quota_exhausted
-The throttle work stopped reading and writing the column (receipt queries name their columns without it) but the migration that drops it
-must ship one deploy later, because the servers of the first deploy still write it (AGENTS.md: a column the previous server reads or writes is
-dropped one deploy after). Migration to add then: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_usage_receipts DROP COLUMN quota_exhausted;` (forward-only Down).
