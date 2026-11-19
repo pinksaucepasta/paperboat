@@ -32,10 +32,16 @@ export function ShellScope({ children }: { children: React.ReactNode }) {
  * `useState` whose value survives the shell → server page swap. `key` names the state uniquely
  * (include any row id). Only a value the user set is carried over, never the initial one.
  */
-export function useShellState<T>(key: string, initial: T | (() => T)): [T, (next: SetStateAction<T>) => void] {
+export function useShellState<T>(key: string): [T | undefined, (next: SetStateAction<T | undefined>) => void]
+export function useShellState<T>(key: string, initial: T | (() => T)): [T, (next: SetStateAction<T>) => void]
+export function useShellState<T>(key: string, initial?: T | (() => T)): [T, (next: SetStateAction<T>) => void] {
   const shell = useContext(InShell)
   const [value, setValue] = useState<T>(() =>
-    !shell && held.has(key) ? (held.get(key) as T) : typeof initial === "function" ? (initial as () => T)() : initial,
+    !shell && held.has(key)
+      ? (held.get(key) as T)
+      : typeof initial === "function"
+        ? (initial as () => T)()
+        : (initial as T),
   )
   const touched = useRef(false)
   useLayoutEffect(() => {
