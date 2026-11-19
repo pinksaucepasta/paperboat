@@ -362,7 +362,7 @@ func testAutomaticPeerRelay(t *testing.T) {
 	beforeClientDERP, beforeServerDERP := clientFilter.derpData.Load(), serverFilter.derpData.Load()
 	var derpErr error
 	for time.Now().Before(derpDeadline) {
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, time.Second)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, transferAttemptTimeout)
 		derpErr = repeatTransfer(attemptCtx)
 		attemptCancel()
 		if derpErr == nil && clientFilter.derpData.Load() > beforeClientDERP && serverFilter.derpData.Load() > beforeServerDERP {
@@ -422,7 +422,7 @@ func testAutomaticPeerRelay(t *testing.T) {
 	var directErr error
 	var directRecovered bool
 	for time.Now().Before(directDeadline) {
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, time.Second)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, transferAttemptTimeout)
 		directErr = repeatTransfer(attemptCtx)
 		attemptCancel()
 		if directErr == nil && clientFilter.directData.Load() > beforeClientDirect && serverFilter.directData.Load() > beforeServerDirect {

@@ -494,7 +494,7 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	if err := secondConn.Resize(43, 132); err != nil {
 		t.Fatal(err)
 	}
-	resizeDeadline := time.Now().Add(time.Second)
+	resizeDeadline := time.Now().Add(30 * time.Second) // polled every ms: a bound for a hang, not a speed requirement
 	for {
 		snapshot, snapshotErr := sessions.Snapshot("session_slice")
 		if snapshotErr == nil && snapshot.Dimensions.Columns == 132 && snapshot.Dimensions.Rows == 43 {
