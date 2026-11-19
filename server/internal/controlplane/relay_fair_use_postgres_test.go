@@ -45,6 +45,10 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	for _, user := range []string{paid60, paid120} {
 		exec(`INSERT INTO billing_workspaces(id,user_id,state,product_code,quantity,period_start,period_end) VALUES('personal:'||$1,$1,'active','pro-month',1,now()-interval '1 hour',now()+interval '1 hour')`, user)
 	}
+	// A free personal workspace is a row too (state free): its usage period references it.
+	for _, user := range []string{free12, light} {
+		exec(`INSERT INTO billing_workspaces(id,user_id) VALUES('personal:'||$1,$1)`, user)
+	}
 	now := time.Now().UTC()
 	for _, n := range []string{node, node2, own} {
 		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,0,$3,$4)`, n, epoch, now, now.Add(time.Hour))
