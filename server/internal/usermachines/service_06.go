@@ -131,6 +131,9 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 			return err
 		})
 		if more && err == nil {
+			if s.afterFinalDeleteBatch != nil {
+				s.afterFinalDeleteBatch()
+			}
 			continue // a batch of child rows went; the machine stays a candidate for the next iteration
 		}
 		if !found {

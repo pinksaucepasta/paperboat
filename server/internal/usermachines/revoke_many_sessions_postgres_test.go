@@ -195,34 +195,47 @@ WHERE s.user_machine_id=$1 AND a.expires_at IS DISTINCT FROM least(s.expires_at,
 	// (one statement over all of them ran prod out of predicate locks), within one worker tick. A user's revoke of
 	// another machine takes the account's removal lock between two of those transactions: it must commit while the
 	// final delete is still under way, not queue behind all of it (prod: 9.9 s behind canary-a-old's final delete).
-	start = time.Now()
-	sessionsLeft := func() int {
-		return count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine(0))
+	// The final delete is held after its first batch committed (a seam between two batch transactions, no lock held):
+	// the second machine's revoke must complete while it is held, which is "it does not queue behind the whole delete".
+	held, release := make(chan struct{}), make(chan struct{})
+	var holdOnce, releaseOnce sync.Once
+	releaseDelete := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseDelete()
+	service.afterFinalDeleteBatch = func() {
+		holdOnce.Do(func() {
+			close(held)
+			<-release
+		})
 	}
-	sessionsBefore := sessionsLeft()
 	finalErr := make(chan error, 1)
 	go func() { finalErr <- service.RetryPendingRevocations(ctx) }()
-	waitFor("the final delete to remove its first batch", func() bool { return sessionsLeft() < sessionsBefore })
-	secondErr := make(chan error, 1)
-	go func() { secondErr <- service.Disconnect(ctx, user, machine(87)) }()
-	waitFor("the second revoke to commit", func() bool {
-		return count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1 AND state='disconnected'`, machine(87)) == 1
-	})
+	select {
+	case <-held:
+	case err := <-finalErr:
+		t.Fatalf("the final delete ended without a second batch (%v): the machine is too small to hold it", err)
+	case <-time.After(2 * time.Minute): // hang bound only
+		t.Fatal("timed out waiting for the final delete's first batch")
+	}
+	secondCtx, cancelSecond := context.WithTimeout(ctx, 2*time.Minute) // hang bound only: a queued revoke would sit here
+	defer cancelSecond()
+	if err := service.Disconnect(secondCtx, user, machine(87)); err != nil {
+		t.Fatalf("revoke of a second machine while the final delete is held: %v", err)
+	}
+	if count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1 AND state='disconnected'`, machine(87)) != 1 {
+		t.Fatal("the second machine is not disconnected")
+	}
 	if count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1`, machine(0)) != 1 {
-		t.Fatal("the second revoke committed only after the final delete had removed the whole machine: it queued behind all of it, not one batch")
+		t.Fatal("the first machine vanished while its final delete was held")
 	}
-	if err := <-secondErr; err != nil {
-		t.Fatalf("revoke of a second machine during the final delete: %v", err)
-	}
+	releaseDelete()
 	if err := <-finalErr; err != nil {
 		t.Fatalf("final delete: %v", err)
 	}
-	finalTook := time.Since(start)
 	if n := count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1`, machine(0)); n != 0 {
 		t.Fatal("the revoked machine was not hard-deleted in one worker tick")
 	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine(1)); n != 10 {
 		t.Fatalf("final delete of one machine touched another's sessions: %d of 10 left", n)
 	}
-	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes; final delete with a second revoke inside it %v", took, writes.Load(), finalTook)
+	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes", took, writes.Load())
 }

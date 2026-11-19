@@ -251,6 +251,7 @@ type Service struct {
 	runtimeQuota                accountingauthority.QuotaChecker
 	nameRandom                  io.Reader
 	db                          *db.DB
+	afterFinalDeleteBatch       func() // test seam: called between two final-delete batch transactions; nil in production
 	audit                       *audit.Writer
 	policy                      Policy
 	seats                       SeatAuthorizer
