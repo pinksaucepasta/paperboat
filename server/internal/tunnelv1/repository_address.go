@@ -228,6 +228,11 @@ func (r *SQLRepository) SettleAddressMoves(ctx context.Context, input AddressSet
 }
 
 func (r *SQLRepository) settleAddressMove(ctx context.Context, newHost string, input AddressSettleRecord) error {
+	unlock, lockErr := r.lockAddressMachine(ctx, newHost)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		return settleAddressMoveTx(ctx, tx, newHost, input, "")
 	})

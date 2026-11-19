@@ -319,6 +319,11 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 		return MutationRecord{}, err
 	}
 	var result MutationRecord
+	unlock, lockErr := endpoints.LockMachine(ctx, input.HostID)
+	if lockErr != nil {
+		return MutationRecord{}, lockErr
+	}
+	defer unlock()
 	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
@@ -443,6 +448,11 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 		return MutationRecord{}, err
 	}
 	var result MutationRecord
+	unlock, lockErr := r.lockTunnelMachine(ctx, input.TunnelID)
+	if lockErr != nil {
+		return MutationRecord{}, lockErr
+	}
+	defer unlock()
 	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
@@ -572,6 +582,11 @@ func (r *SQLRepository) Transition(ctx context.Context, input StateRecord) (Muta
 		return MutationRecord{}, err
 	}
 	var result MutationRecord
+	unlock, lockErr := r.lockTunnelMachine(ctx, input.TunnelID)
+	if lockErr != nil {
+		return MutationRecord{}, lockErr
+	}
+	defer unlock()
 	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
@@ -1006,4 +1021,33 @@ func snapshotRoute(route dbsqlc.TunnelRoute) connectorprotocol.ConfigRoute {
 		TLSPin: nullStringPointer(route.TlsPin), ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxConcurrentStreams: route.MaxConcurrentStreams,
 		DesiredState: route.DesiredState,
 	}
+}
+
+// lockTunnelMachine takes endpoints.LockMachine for the machine that hosts tunnelID, found by one read before the
+// transaction (a tunnel change rewrites that machine's route assignments, which its runtime attach writes too). An
+// unknown tunnel takes no lock: the transaction reports it.
+func (r *SQLRepository) lockTunnelMachine(ctx context.Context, tunnelID string) (func(), error) {
+	var machine string
+	err := r.db.SQL().QueryRowContext(ctx, `SELECT created_by_host_id FROM paperboat.tunnels WHERE id=$1`, tunnelID).Scan(&machine)
+	if errors.Is(err, sql.ErrNoRows) {
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return endpoints.LockMachine(ctx, machine)
+}
+
+// lockAddressMachine is lockTunnelMachine for the tunnel an incoming address hold of hostname moves.
+func (r *SQLRepository) lockAddressMachine(ctx context.Context, hostname string) (func(), error) {
+	var machine string
+	err := r.db.SQL().QueryRowContext(ctx, `SELECT t.created_by_host_id FROM paperboat.tunnel_address_holds h JOIN paperboat.tunnels t ON t.id=h.tunnel_id
+WHERE h.hostname=$1 AND h.kind='incoming'`, hostname).Scan(&machine)
+	if errors.Is(err, sql.ErrNoRows) {
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return endpoints.LockMachine(ctx, machine)
 }
