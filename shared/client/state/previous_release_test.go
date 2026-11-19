@@ -16,8 +16,15 @@ func TestLoadsSessionWrittenByPreviousRelease(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "sdk-session.json"), raw, 0o600); err != nil {
+	file := filepath.Join(dir, "sdk-session.json")
+	if err := os.WriteFile(file, raw, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	// What the previous release wrote was private to its owner: on Windows that is a protected DACL the loader checks.
+	for path, isDir := range map[string]bool{dir: true, file: false} {
+		if err := securePath(path, isDir); err != nil {
+			t.Fatal(err)
+		}
 	}
 	directory, err := OpenDirectory(dir)
 	if err != nil {
