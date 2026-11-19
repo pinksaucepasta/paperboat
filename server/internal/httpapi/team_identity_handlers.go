@@ -75,8 +75,10 @@ func teamIdentity(s *teamidentity.Service, action string) http.HandlerFunc {
 			writeError(w, r, 403, "forbidden", teamidentity.ErrForbidden.Error())
 		case errors.Is(err, teamidentity.ErrInvalid):
 			writeError(w, r, 400, "invalid_request", "Check the SSO or directory setting: session length within the allowed range, a known role and group.")
-		case errors.Is(err, teamidentity.ErrTooFewSeats):
-			writeError(w, r, 409, "sso_needs_seats", "SSO and directory sync are available to teams with enough seats. Add seats in Billing first.")
+		case errors.Is(err, teamidentity.ErrNeedsSSOAddon):
+			writeError(w, r, 409, "sso_needs_addon", "Single sign-on needs the SSO add-on. Add it in Billing first.")
+		case errors.Is(err, teamidentity.ErrNeedsSCIMAddon):
+			writeError(w, r, 409, "scim_needs_addon", "Directory sync needs the SCIM add-on. Add it in Billing first.")
 		case errors.Is(err, teamidentity.ErrNotReady):
 			writeError(w, r, 409, "sso_not_ready", teamidentity.ErrNotReady.Error())
 		case errors.Is(err, teamidentity.ErrExemptLimit):

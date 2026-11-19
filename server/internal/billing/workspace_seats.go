@@ -27,11 +27,13 @@ type SeatPreview struct {
 
 type SeatChange struct {
 	TeamID, SubscriptionID, CustomerID, ItemID, PriceID string
-	Quantity, PreviousQuantity                          int
-	HadScheduledReduction                               bool
-	PeriodStart, PeriodEnd                              time.Time
-	ProrationAt                                         int64
-	Preview                                             SeatPreview
+	// AddonPriceID is the price of the team's SSO/SCIM add-on item, empty without one.
+	AddonPriceID               string
+	Quantity, PreviousQuantity int
+	HadScheduledReduction      bool
+	PeriodStart, PeriodEnd     time.Time
+	ProrationAt                int64
+	Preview                    SeatPreview
 }
 
 func seatChangeTx(ctx context.Context, tx *db.Tx, account, team string, quantity int) (Workspace, SeatChange, error) {
@@ -49,7 +51,11 @@ func seatChangeTx(ctx context.Context, tx *db.Tx, account, team string, quantity
 	if err = tx.QueryRow(ctx, `SELECT provider_price_id FROM billing_products WHERE code=$1 AND provider='stripe'`, w.ProductCode).Scan(&price); err != nil {
 		return w, SeatChange{}, err
 	}
-	return w, SeatChange{TeamID: w.TeamID, SubscriptionID: w.SubscriptionID, CustomerID: w.CustomerID, ItemID: w.ItemID, PriceID: price, Quantity: quantity, PreviousQuantity: w.Quantity, PeriodStart: *w.PeriodStart, PeriodEnd: *w.PeriodEnd, ProrationAt: time.Now().Unix(), HadScheduledReduction: w.ScheduledQuantity != nil}, nil
+	var addonPrice string
+	if err = tx.QueryRow(ctx, `SELECT CASE WHEN addon_item_id IS NOT NULL THEN coalesce(addon_price_id,'') ELSE '' END FROM billing_workspaces WHERE id=$1`, w.ID).Scan(&addonPrice); err != nil {
+		return w, SeatChange{}, err
+	}
+	return w, SeatChange{AddonPriceID: addonPrice, TeamID: w.TeamID, SubscriptionID: w.SubscriptionID, CustomerID: w.CustomerID, ItemID: w.ItemID, PriceID: price, Quantity: quantity, PreviousQuantity: w.Quantity, PeriodStart: *w.PeriodStart, PeriodEnd: *w.PeriodEnd, ProrationAt: time.Now().Unix(), HadScheduledReduction: w.ScheduledQuantity != nil}, nil
 }
 
 // PreviewSeats runs its provider calls outside any transaction: the transaction would hold teams.Lock (every team write
