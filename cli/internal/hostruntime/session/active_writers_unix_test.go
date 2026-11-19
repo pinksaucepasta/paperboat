@@ -88,3 +88,36 @@ func TestActiveWritersKeepInputActivityAndAuthorityAcrossTakeover(t *testing.T) 
 		t.Fatal("private writer metadata leaked into a terminal snapshot", err)
 	}
 }
+
+// The same client reattaching at the live boundary while its old connection's detach is still pending takes the
+// attachment over, like the replay path; CI failed TestNativeTerminalReattachRestoresCoherentScreenWithoutReplayingInput
+// when the old wire's teardown lost the race to the second attach.
+func TestLiveReattachTakesOverTheSameClientsAttachment(t *testing.T) {
+	manager, root, shell := realManager(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), time.Second)
+		defer stop()
+		manager.Shutdown(cleanup)
+	})
+	created, err := manager.Create(ctx, CreateRequest{Name: "live-takeover", Command: shellCommand(shell, root, "exec cat")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := Participant{AttachmentID: "att_a", AccountID: "account", ClientID: "client_a", SourceMachineID: "machine_a", Role: "owner", ConnectedAt: time.Now()}
+	first, err := manager.AttachLiveParticipantAtGeneration(created.ID, a, created.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.AttachLiveParticipantAtGeneration(created.ID, a, created.Generation)
+	if err != nil {
+		t.Fatal("live reattach of the same client's attachment was refused:", err)
+	}
+	if err := manager.DetachAttachment(created.ID, a.AttachmentID, first.AttachmentLease); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.DetachAttachment(created.ID, a.AttachmentID, second.AttachmentLease); err != nil {
+		t.Fatal(err)
+	}
+}

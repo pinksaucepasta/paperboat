@@ -44,11 +44,7 @@ func (m *Manager) attachParticipantLocked(session *managedSession, participant P
 		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
 	m.pruneParticipantsLocked(session)
-	// A host runtime restart (update activation) drops the connection without detaching it; the same client
-	// reattaching takes its attachment over, like EternalTerminal's recoverClient.
-	if old, ok := session.participants[participant.AttachmentID]; ok && old.AccountID == participant.AccountID && old.ClientID == participant.ClientID && session.fanout.Detach(participant.AttachmentID) == nil {
-		session.removeParticipantLocked(participant.AttachmentID)
-	}
+	takeOverSameClientLocked(session, participant)
 	if fromSequence == 0 {
 		fromSequence, _, _ = session.history.Bounds()
 	}
@@ -65,6 +61,14 @@ func (m *Manager) attachParticipantLocked(session *managedSession, participant P
 		result.Snapshot = session.snapshotLocked()
 	}
 	return result, err
+}
+
+// A host runtime restart (update activation) or a carrier move drops the connection without detaching it yet; the
+// same client reattaching takes its attachment over, like EternalTerminal's recoverClient.
+func takeOverSameClientLocked(session *managedSession, participant Participant) {
+	if old, ok := session.participants[participant.AttachmentID]; ok && old.AccountID == participant.AccountID && old.ClientID == participant.ClientID && session.fanout.Detach(participant.AttachmentID) == nil {
+		session.removeParticipantLocked(participant.AttachmentID)
+	}
 }
 
 func (m *Manager) pruneParticipantsLocked(session *managedSession) {
@@ -113,6 +117,7 @@ func (m *Manager) AttachLiveParticipantAtGeneration(sessionID string, participan
 		return AttachResult{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
 	m.pruneParticipantsLocked(session)
+	takeOverSameClientLocked(session, participant)
 	result, err := m.attachLocked(session, participant.AttachmentID, latest, participant.Browser, controllingOwner(participant))
 	if err == nil {
 		if session.participants == nil {
