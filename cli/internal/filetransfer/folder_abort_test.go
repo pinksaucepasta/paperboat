@@ -77,7 +77,7 @@ func TestFolderAbandonedStreamReleasesWriter(t *testing.T) {
 	// A read blocked on the writer when the abort comes (the transport still reading an abandoned body).
 	blocked := make(chan error, 1)
 	go func() { _, err := io.CopyN(io.Discard, stream, 4<<20); blocked <- err }()
-	time.Sleep(20 * time.Millisecond)
+	waitFor(t, "the reader to be inside the stream", 30*time.Second, func() bool { return stream.position() > 1<<20 })
 	// Simulate abort: nobody will Seek again; Close must stop the writer.
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
