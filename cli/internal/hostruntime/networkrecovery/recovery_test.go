@@ -83,6 +83,13 @@ func (t *fakeTimer) Reset(delay time.Duration) bool {
 	}
 	t.active = true
 	t.deadline = t.clock.now.Add(delay)
+	if delay <= 0 { // like time.Timer: a due Reset fires at once, else a token drained by Stop is lost
+		t.active = false
+		select {
+		case t.ch <- t.clock.now:
+		default:
+		}
+	}
 	return wasActive
 }
 
@@ -134,6 +141,22 @@ func identity() Identity {
 
 func readyResult(i Identity, network, carrier uint64) ReplacementResult {
 	return ReplacementResult{Identity: i, NetworkGeneration: network, CarrierGeneration: carrier, Ready: true}
+}
+
+// The loop re-arms its timers on every pass; one pass can run after Advance fired the timer. The due Reset must fire
+// again or the wakeup is lost (CI windows-latest: TestNetworkRecoveryAutomaticIncidentAndConfirmedRecovery, 10 s).
+func TestResetTimerFiresADueTimerAgainAfterAdvance(t *testing.T) {
+	clock := newFakeClock()
+	controller := newControllerForTest(t, clock, &scriptedReplacer{})
+	timer := clock.NewTimer(time.Hour)
+	controller.resetTimer(timer, 100*time.Millisecond)
+	clock.Advance(100 * time.Millisecond)
+	controller.resetTimer(timer, 0) // the loop's next configureTimers pass: Stop drains the token, Reset(0) must refire
+	select {
+	case <-timer.C():
+	default:
+		t.Fatal("due timer lost its wakeup")
+	}
 }
 
 func newControllerForTest(t *testing.T, clock *fakeClock, replacer CarrierReplacer) *Controller {
