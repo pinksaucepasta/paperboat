@@ -11,7 +11,7 @@ import (
 // messages as coming from a process other than the main one and logs every one.
 func TestExecRunnerChildrenDoNotInheritTheServiceManagerNotificationEnvironment(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "/run/systemd/notify")
-	t.Setenv("WATCHDOG_USEC", "30000000")
+	t.Setenv("WATCHDOG_USEC", "300000000")
 	t.Setenv("WATCHDOG_PID", "1")
 	t.Setenv("PAPERBOAT_TEST_KEEP", "kept")
 	output, err := ExecRunner{}.Output(t.Context(), "env")

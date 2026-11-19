@@ -632,7 +632,10 @@ func renderSystemd(config Config) ([]byte, error) {
 	if notify {
 		options = append(options,
 			unit.NewUnitOption("Service", "NotifyAccess", "main"),
-			unit.NewUnitOption("Service", "WatchdogSec", "30s"),
+			// A frozen host (VM pause, memory thrash) freezes systemd too and resumes it first, so a short
+			// limit kills every healthy unit at once. hostd's own worker liveness (2 min) catches hangs inside.
+			unit.NewUnitOption("Service", "WatchdogSec", "300s"),
+			unit.NewUnitOption("Service", "TimeoutAbortSec", "10s"),
 		)
 	}
 	if systemService {

@@ -34,7 +34,7 @@ func TestCarrierGenerationNativeDefinition(t *testing.T) {
 			if !strings.Contains(string(body), "__runtime-carrier") || !strings.Contains(string(body), "alice") {
 				t.Fatal("carrier command or enrolled identity omitted")
 			}
-			if platform == "linux" && (!strings.Contains(string(body), "RuntimeDirectoryMode=0700") || !strings.Contains(string(body), "RuntimeDirectory=paperboat-carrier-u501 paperboat-hostd-u501") || !strings.Contains(string(body), "RuntimeDirectoryPreserve=yes") || !strings.Contains(string(body), "Type=notify") || !strings.Contains(string(body), "WatchdogSec=30s") || !strings.Contains(string(body), "Restart=on-failure")) {
+			if platform == "linux" && (!strings.Contains(string(body), "RuntimeDirectoryMode=0700") || !strings.Contains(string(body), "RuntimeDirectory=paperboat-carrier-u501 paperboat-hostd-u501") || !strings.Contains(string(body), "RuntimeDirectoryPreserve=yes") || !strings.Contains(string(body), "Type=notify") || !strings.Contains(string(body), "WatchdogSec=300s") || !strings.Contains(string(body), "Restart=on-failure")) {
 				t.Fatal("carrier private endpoint, native readiness or retirement restart policy lost")
 			}
 			if platform == "darwin" && !strings.Contains(string(body), "<key>SuccessfulExit</key>") {
