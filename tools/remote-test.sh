@@ -3,14 +3,17 @@
 #   tools/remote-test.sh <host> <module> [go test args...]
 #   tools/remote-test.sh pbvm2 cli -run TestExec ./cmd/pb
 #   tools/remote-test.sh pbvm3 shared            # go test -p 2 ./...
-# <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit). The VMs have 3-4 GB
+#   tools/remote-test.sh linpool-1 server -run . ./internal/edgeset/   # a GitHub runner, PostgreSQL included
+# <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit, linpool-N). The VMs have 3-4 GB
 # of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`. Where a
 # systemd user manager exists the job runs in a scope capped at 60% of RAM: a -race PostgreSQL suite once froze anvit,
 # which also hosts a prod canary machine, for two minutes (2026-11-19).
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
 # on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
 # The synced tree has no .git, so the full HEAD goes over as GITHUB_SHA (tools/tuf-repository reads it for its release source commit).
-# gcc is installed on all three, so -race works. The cli module needs passwordless sudo on the host (root updater fixture,
+# linpool-N (tools/device-smoke/linpool.sh start N) is a GitHub-hosted Linux runner kept alive for hours with Go, gcc,
+# passwordless sudo and a postgres:17 container behind ~/.pb-test-pg-dsn already set up: start it once, reuse it for every job.
+# gcc is installed on all of them, so -race works. The cli module needs passwordless sudo on the host (root updater fixture,
 # frozen-filesystem bandwidth test): anvit has it, hermes does not.
 set -euo pipefail
 

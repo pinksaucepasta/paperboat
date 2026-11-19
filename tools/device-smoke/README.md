@@ -40,6 +40,25 @@ How it is wired: the runner starts sshd on loopback with the controller's public
 no shell and `/etc/ssh/sshd_config.d/70-winpool.conf` allows it only those fourteen loopback listeners; the key's own `permitlisten=` options in `~winpool/.ssh/authorized_keys` must list the same fourteen ports (a port missing from either place makes `ssh -R` fail forever, 2026-11-10 slots 7-10). The controller
 reaches a machine with `ProxyJump` through its own login on the jump host (`WINPOOL_JUMP`, default `ubuntu@anvit`).
 
+## Linux test hosts that stay up (linpool)
+
+`linpool.sh` keeps up to twelve GitHub-hosted `ubuntu-latest` runners alive for 1-5 hours as SSH test hosts, so a
+heavy suite does not wait for a new runner and set it up on every `tools/ci-test.sh` run. Each host has Go 1.27.4, gcc
+(for `-race`), passwordless sudo and a `postgres:17` container behind `~/.pb-test-pg-dsn`, which is what
+`tools/remote-test.sh` expects.
+
+```sh
+tools/device-smoke/linpool.sh start 3 2     # 3 hosts for 2 hours (1-5); prints linpool-1.. when SSH answers (~2 min)
+tools/remote-test.sh linpool-1 server -run . ./internal/edgeset/   # PostgreSQL suites work; a second job reuses the host at once
+tools/device-smoke/linpool.sh stop          # all of yours (release N keeps one running for the next lane, adopt takes it)
+```
+
+- Same design, controller key, tunnel secrets and claim records as winpool/macpool; host `linpool-N` is user `runner` on
+  the jump host's loopback port `22400+N` (1-12), written to `~/.ssh/linpool.conf`. Start and stop only from the controller.
+- The jump host's `winpool` tunnel account must allow ports 22401-22412 in both `70-winpool.conf` and the key's `permitlisten=`.
+- `remote-test.sh` runs one job per host at a time (host lock); start several hosts to run suites in parallel.
+- A host is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
+
 ## Extra macOS machines (macpool)
 
 `macpool.sh` is `winpool.sh` for macOS: up to eight GitHub-hosted `macos-latest` runners (arm64, macOS 26, 3 cores) as
