@@ -37,3 +37,12 @@ func TestComposeWithoutLogoShowsTheWordmarkAlone(t *testing.T) {
 		t.Fatalf("unexpected HTML: %s", m.HTML)
 	}
 }
+
+// A long unbreakable URL must wrap inside the card instead of widening the mail on a phone, and the dark button keeps
+// white text at 4.5:1.
+func TestComposeWrapsLongWordsAndKeepsTheDarkButtonReadable(t *testing.T) {
+	m := transactionalmail.Compose(mailtest.Policy, "a@example.test", "S", transactionalmail.Content{Paragraphs: []string{"POST /v1/admin/publications/" + strings.Repeat("a", 80) + "/block"}, Button: &transactionalmail.Button{Label: "Open", URL: "https://x.example.test"}})
+	if strings.Count(m.HTML, "overflow-wrap:anywhere") < 2 || !strings.Contains(m.HTML, ".btn{background:#3868f0!important}") {
+		t.Fatalf("missing wrapping or dark button colour: %s", m.HTML)
+	}
+}
