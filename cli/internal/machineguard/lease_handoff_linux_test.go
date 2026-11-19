@@ -4,11 +4,14 @@ package machineguard
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -76,7 +79,61 @@ func TestStoreLeaseSendsTheListeningSocketToSystemd(t *testing.T) {
 
 // A guard replacement: the socket the old guard stored is inherited by the new one, keeps accepting connects while
 // no guard owns it, and is handed to the daemon that re-acquires the same listener; another user is refused it.
+// runInOwnLoopback reruns the calling test in a new user and network namespace with only loopback up, so the
+// host's own machine guard (which rejects 127.100.0.0/16 except its leases) cannot refuse the test's dials. It
+// (as root of that namespace: only it may bring loopback up) reports true when the rerun did the test; false means run it here (inside the namespace, or where the host
+// allows no unprivileged namespace, such as GitHub runners, which have no guard either).
+const noOwnLoopback = 42
+
+func runInOwnLoopback(t *testing.T) bool {
+	t.Helper()
+	if os.Getenv("PAPERBOAT_TEST_OWN_LOOPBACK") == "1" {
+		fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unix.Close(fd)
+		ifr, err := unix.NewIfreq("lo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, ifr); err != nil {
+			t.Fatal(err)
+		}
+		ifr.SetUint16(ifr.Uint16() | unix.IFF_UP)
+		if err := unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr); err != nil {
+			// A confined namespace (GitHub runners' AppArmor) is created but may not raise loopback: tell the parent.
+			os.Exit(noOwnLoopback)
+		}
+		return false
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^"+t.Name()+"$", "-test.v", "-test.timeout=60s")
+	cmd.Env = append(os.Environ(), "PAPERBOAT_TEST_OWN_LOOPBACK=1")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags:  unix.CLONE_NEWUSER | unix.CLONE_NEWNET,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
+	}
+	output, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() == noOwnLoopback) {
+		t.Logf("no usable unprivileged network namespace here (%v): running on the host loopback", err)
+		return false
+	}
+	if err != nil || !strings.Contains(string(output), "--- PASS: "+t.Name()) {
+		t.Fatalf("in its own network namespace: %v\n%s", err, output)
+	}
+	return true
+}
+
 func TestInheritedLeaseKeepsAcceptingAndIsHandedToItsDaemon(t *testing.T) {
+	if runInOwnLoopback(t) {
+		return
+	}
 	state := t.TempDir()
 	recordTestDefaultDomain(t, state)
 	host := "hp." + testBrowserDomain
@@ -180,6 +237,9 @@ func inheritedGatewayFixture(t *testing.T) (*guardServer, int, *os.File) {
 // The browser gateway's shared socket survives a guard replacement: its connects queue while no daemon has
 // registered a route, its nft rule is kept by a placeholder lease, and the first route starts the accepting.
 func TestInheritedGatewayHoldsItsBacklogUntilADaemonRegisters(t *testing.T) {
+	if runInOwnLoopback(t) {
+		return
+	}
 	g, port, _ := inheritedGatewayFixture(t)
 	gateway := g.gateways[port]
 	if gateway == nil || gateway.serving || len(g.leases) != 1 {
