@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 )
 
 type peerNetworkRegisterBody struct {
@@ -104,7 +105,7 @@ func peerNetworkConfig(s peerNetworkService) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, HomeRelay: body.HomeRelay, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
+		value, err := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: p.User.ID, EndpointID: p.Client.SessionID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, HomeRelay: body.HomeRelay, Authority: body.Authority, BaseGeneration: body.BaseGeneration, CapVersion: capver.FromRequest(r)})
 		if err != nil {
 			peerNetworkError(w, r, err)
 			return
@@ -196,7 +197,7 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network configuration request is invalid.")
 			return
 		}
-		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, HomeRelay: body.HomeRelay, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
+		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, HomeRelay: body.HomeRelay, Authority: body.Authority, BaseGeneration: body.BaseGeneration, CapVersion: capver.FromRequest(r)})
 		if e != nil {
 			peerNetworkError(w, r, e)
 			return

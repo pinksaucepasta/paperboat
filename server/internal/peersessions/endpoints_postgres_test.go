@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
@@ -88,7 +89,7 @@ func (f endpointsFixture) topic(t *testing.T) int64 {
 // configure requests machine n's configuration, reporting endpoints (nil: none sent).
 func (f endpointsFixture) configure(t *testing.T, op string, n int, endpoints []string) NetworkConfigResult {
 	t.Helper()
-	result, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: op + "_" + f.suffix, UserID: f.account, EndpointID: fmt.Sprintf("%s_m_%d", f.account, n), Endpoints: endpoints})
+	result, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: op + "_" + f.suffix, UserID: f.account, EndpointID: fmt.Sprintf("%s_m_%d", f.account, n), Endpoints: endpoints, CapVersion: capver.Version})
 	if err != nil {
 		t.Fatalf("%s: %v", op, err)
 	}
@@ -412,6 +413,18 @@ func TestHomeRelayReachesPeersOnPostgres(t *testing.T) {
 	report("back", relays[0])
 	if got := delivered(); got != relays[0] || f.topic(t) != before+4 {
 		t.Fatalf("after the machine was homed again: delivered %q, topic moves %d", got, f.topic(t)-before)
+	}
+	// A client whose capability version predates home_relay gets no home relay in its signed document (peers: 1 with one).
+	if _, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: "old_client_" + f.suffix, UserID: f.account, EndpointID: f.account + "_m_0", CapVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.signed.Peers) == 0 {
+		t.Fatal("the old client's document has no peers")
+	}
+	for _, p := range f.signed.Peers {
+		if p.HomeRelay != "" {
+			t.Fatalf("a capver 1 client's document carries home_relay %q", p.HomeRelay)
+		}
 	}
 	if _, err := f.service.Configuration(f.ctx, NetworkConfigRequest{OperationID: "long_" + f.suffix, UserID: f.account, EndpointID: peer, HomeRelay: strings.Repeat("r", 129)}); err == nil {
 		t.Fatal("an oversized home relay was accepted")

@@ -10,25 +10,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
-// TestEmitCompatNetworkConfiguration writes, to $COMPAT_ARTIFACTS_DIR, the network configuration claims a
-// recipient that never declared endpoints receives (tools/compat decodes it with the oldest official release):
-// a peer with delivered endpoints, built by the production claims function, must not carry them.
+// TestEmitCompatNetworkConfiguration writes, to $COMPAT_ARTIFACTS_DIR, the network configuration claims a client that
+// sent no capability version receives: a peer with a home relay, built by the production claims function, must not
+// carry it (peernetwork minCapVersion).
 func TestEmitCompatNetworkConfiguration(t *testing.T) {
 	dir := os.Getenv("COMPAT_ARTIFACTS_DIR")
 	if dir == "" {
 		t.Skip("set COMPAT_ARTIFACTS_DIR to emit compat artifacts for tools/compat")
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	binding := func(id, address string) networkBinding {
-		return networkBinding{Binding: peernetwork.Binding{AccountID: "usr_compat", EndpointID: id, Role: peernetwork.RoleMachine, MachineID: id, EndpointGeneration: 1, MachineGeneration: 1, KeyGeneration: 1,
-			WireGuardPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", DiscoPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-			QUICCertificateFingerprint: "0000000000000000000000000000000000000000000000000000000000000000", QUICPublicKey: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-			VirtualAddress: address}, Endpoints: []string{"203.0.113.7:41641"}}
-	}
-	self, peer := binding("machine_self", "100.64.0.1"), binding("machine_peer", "100.64.0.2")
+	self, peer := contractBinding("usr_compat", "machine_self", peernetwork.RoleMachine, 1), contractBinding("usr_compat", "machine_peer", peernetwork.RoleMachine, 2)
+	peer.Endpoints, peer.HomeRelay = []string{"203.0.113.7:41641"}, "relay_compat"
 	expiry := now.Add(5 * time.Minute)
 	peers := []networkPeer{{Identity: peer, Scopes: []networkScope{personalNetworkScope(self, peer, expiry.Unix())}}}
-	raw, err := json.MarshalIndent(configurationClaims("https://api.compat.example.test", now, expiry, 1, self, peers), "", "  ")
+	raw, err := json.MarshalIndent(configurationClaims("https://api.compat.example.test", now, expiry, 1, self, peers, 0), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

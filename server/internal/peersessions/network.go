@@ -61,6 +61,9 @@ type NetworkConfigRequest struct {
 	// BaseGeneration is the generation of the configuration the endpoint holds (0: none); when this replica sent it,
 	// the answer is a delta from it.
 	BaseGeneration uint64
+	// CapVersion is the capability version (shared/capver) the requesting client sent; 0 when it sent none. The signed
+	// document omits every field newer than it (peernetwork.Configuration.ForCapVersion).
+	CapVersion int
 }
 
 // AuthorityUntilRevoked is the peer-state contract of PLAN 3b "offline-capable authority". A daemon that asks for it
@@ -722,7 +725,7 @@ WHERE t>$3`, self.AccountID, self.MachineID, now).Scan(&entitlementChange); err 
 // signConfiguration signs one request's answer from a policy document: the configuration under this request's
 // generation, the regional candidates and relay grants from the current relay nodes.
 func (s *NetworkService) signConfiguration(ctx context.Context, in NetworkConfigRequest, doc *policyDoc, generation int64, now time.Time) (NetworkConfigResult, error) {
-	claims := configurationClaims(s.issuer, now, doc.expiry, generation, doc.self, doc.peers)
+	claims := configurationClaims(s.issuer, now, doc.expiry, generation, doc.self, doc.peers, in.CapVersion)
 	token, err := s.signer.SignNetworkConfiguration(claims)
 	if err != nil {
 		return NetworkConfigResult{}, err
