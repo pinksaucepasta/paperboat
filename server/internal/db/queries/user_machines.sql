@@ -1010,6 +1010,8 @@ WITH machine_updated AS (
 SELECT id FROM machine_updated LIMIT 1;
 
 -- name: RevokeUserMachineAccessSessions :many
+-- For a machine that has ended (every caller): its expired signed sessions carry no authority, need no helper call
+-- and are retired by RetireAccessSessionsOfEndedMachines in batches, so this leaves them.
 -- Revokes the active sessions (a signed credential is done at once: it needs no helper call) and returns every
 -- session that still needs its helper told, without rewriting those already revoked.
 WITH revoked AS (
@@ -1017,6 +1019,7 @@ WITH revoked AS (
   SET state = 'revoked', revoked_at = coalesce(active.revoked_at, now()), revocation_reason = sqlc.arg(reason), updated_at = now(),
     helper_revoked_at = CASE WHEN active.credential_kind = 'control_plane_signed' THEN now() END
   WHERE active.user_machine_id = sqlc.arg(user_machine_id) AND active.state = 'active'
+    AND (active.expires_at > now() OR active.credential_kind <> 'control_plane_signed')
   RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
   coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind, helper_revoked_at

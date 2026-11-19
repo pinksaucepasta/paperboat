@@ -18,7 +18,8 @@ import (
 // stay active for the retention period) could not be revoked: the session cascade ran 15 s inside the revoke's first
 // statement while the account's peer writes queued behind it. On a 100-machine account whose revoked machine holds
 // 20,000 active sessions (all but 100 expired), with peer config writes and SSH CA authority locks running on other
-// machines, the revoke commits in under 2 s, revokes every session of that machine and no other, keeps the usage
+// machines, the revoke commits in under 2 s, revokes every unexpired session of that machine and no other (the
+// worker's next tick retires the expired ones), keeps the usage
 // authority of expired sessions as it was, and bumps the client endpoint's peer generation.
 func TestRevokeMachineWithManyAccessSessionsOnPostgres(t *testing.T) {
 	store := testStore(t)
@@ -117,7 +118,8 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	revokeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	err := New(store, audit.NewWriter(store), Policy{}, nil).Disconnect(revokeCtx, user, machine(0))
+	service := New(store, audit.NewWriter(store), Policy{}, nil)
+	err := service.Disconnect(revokeCtx, user, machine(0))
 	took := time.Since(start)
 	before := writes.Load()
 	time.Sleep(200 * time.Millisecond)
@@ -141,8 +143,16 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 		}
 		return n
 	}
+	// At commit every unexpired session is revoked; the expired ones carry no authority once the machine ended and
+	// the worker's next tick retires them, in batches.
+	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1 AND state<>'revoked' AND expires_at>now()`, machine(0)); n != 0 {
+		t.Fatalf("%d unexpired sessions of the revoked machine are not revoked", n)
+	}
+	if err := service.retireExpiredAccessSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1 AND state<>'revoked'`, machine(0)); n != 0 {
-		t.Fatalf("%d sessions of the revoked machine are not revoked", n)
+		t.Fatalf("%d sessions of the revoked machine are not revoked after a worker tick", n)
 	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1 AND state='active' AND revoked_at IS NULL`, machine(1)); n != 10 {
 		t.Fatalf("another machine has %d of 10 sessions active after the revoke", n)

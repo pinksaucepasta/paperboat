@@ -405,11 +405,21 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 // retireExpiredAccessSessions stops expired access sessions from staying active (and from being
 // named as admitted) forever.
 func (s *Service) retireExpiredAccessSessions(ctx context.Context) error {
+	// Bounded batches (each its own short statement), at most retireBatches per tick; the next tick continues.
+	// First the expired sessions a machine revoke left active (they carry no authority once the machine ended).
+	for range retireBatches {
+		n, err := s.db.Queries().RetireAccessSessionsOfEndedMachines(ctx, retireBatchSize)
+		if err != nil {
+			return err
+		}
+		if n < retireBatchSize {
+			break
+		}
+	}
 	if s.policy.ExpiredAccessSessionRetention <= 0 {
 		return nil
 	}
 	before := s.now().UTC().Add(-s.policy.ExpiredAccessSessionRetention)
-	// Bounded batches (each its own short statement), at most retireBatches per tick; the next tick continues.
 	for range retireBatches {
 		n, err := s.db.Queries().RetireExpiredMachineAccessSessions(ctx, dbsqlc.RetireExpiredMachineAccessSessionsParams{ExpiredBefore: before, BatchSize: retireBatchSize})
 		if err != nil || n < retireBatchSize {
