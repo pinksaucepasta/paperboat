@@ -38,11 +38,11 @@ export const legalDraft = Object.values(company).some((value) => value.startsWit
 
 /**
  * Fair use for traffic through servers Paperboat runs (user-approved 2026-11-19, built by the BANDWIDTH lane): a monthly amount at
- * full speed, then a slow rate until the month resets. Edge and relay are counted separately; browser terminals count as edge
- * traffic; on Team the paid amounts are per seat. Self-hosted relays and edges are not limited.
+ * full speed, then a slow rate until the month resets. Edge and relay share one allowance (user correction 2026-11-19); browser
+ * terminals count as edge traffic; on Team the paid allowance is per seat. Self-hosted relays and edges are not limited.
  */
 export const fairUse = {
-  free: { edge: "5 GB", relay: "5 GB", slow: "512 kbit/s" },
-  paid: { edge: "100 GB", relay: "100 GB", slow: "1 Mbit/s" },
+  free: { allowance: "5 GB", slow: "512 kbit/s" },
+  paid: { allowance: "100 GB", slow: "1 Mbit/s" },
   relaySpeed: "10 Mbit/s",
 }
