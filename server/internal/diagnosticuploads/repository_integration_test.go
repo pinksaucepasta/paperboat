@@ -60,7 +60,7 @@ func TestSQLRepositoryDiagnosticUploadLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + fmt.Sprint(time.Now().UnixNano())
 	userA, userB := "diag_user_a_"+suffix, "diag_user_b_"+suffix
 	clientA, clientB := "diag_cli_a_"+suffix, "diag_cli_b_"+suffix
 	for _, userID := range []string{userA, userB} {
