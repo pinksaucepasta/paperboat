@@ -6,14 +6,26 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
+
+// serverClockAhead moves the server's clock (as this process learned it) d ahead until the test ends. Waiting out
+// a short real credential instead races Admit/Accept against the expiry on a slow runner and against Windows'
+// ~15.6 ms wall-clock tick on the way past it.
+func serverClockAhead(t *testing.T, d time.Duration) {
+	t.Helper()
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	serverclock.Observe(time.Now().Add(d).UTC().Format(http.TimeFormat), time.Now(), time.Now())
+}
 
 func TestAdmittedConnectionOutlivesCredentialAndRevocationInterruptsIO(t *testing.T) {
 	revoked := make(chan struct{})
-	expires := time.Now().Add(20 * time.Millisecond)
+	expires := time.Now().Add(time.Minute)
 	lease, err := Admit(t.Context(), expires, revoked)
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +36,7 @@ func TestAdmittedConnectionOutlivesCredentialAndRevocationInterruptsIO(t *testin
 	defer server.Close()
 	stop := lease.Bind(server)
 	defer stop()
-	time.Sleep(time.Until(expires) + 20*time.Millisecond)
+	serverClockAhead(t, 10*time.Minute) // the credential expires with no real wait
 	sent := make(chan error, 1)
 	go func() { _, e := server.Write([]byte{42}); sent <- e }()
 	client.SetReadDeadline(time.Now().Add(time.Second))

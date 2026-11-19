@@ -10,7 +10,7 @@ import (
 func TestStagingHandsOffBeforeCallerAndCredentialExpire(t *testing.T) {
 	caller, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	expires := time.Now().Add(20 * time.Millisecond)
+	expires := time.Now().Add(time.Minute)
 	staged, err := Stage(caller, expires)
 	if err != nil {
 		t.Fatal(err)
@@ -21,7 +21,10 @@ func TestStagingHandsOffBeforeCallerAndCredentialExpire(t *testing.T) {
 	}
 	defer lease.Close()
 	cancel()
-	time.Sleep(time.Until(expires) + 20*time.Millisecond)
+	serverClockAhead(t, 10*time.Minute) // the credential expires with no real wait
+	if _, err := Stage(t.Context(), expires); !errors.Is(err, ErrExpired) {
+		t.Fatal("the credential did not expire on the server clock", err)
+	}
 	if err := lease.Check(); err != nil {
 		t.Fatal("setup lifetime canceled accepted connection", err)
 	}
