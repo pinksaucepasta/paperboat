@@ -44,6 +44,40 @@ class BuildVersionTest(unittest.TestCase):
         self.assertRegex(version, r'^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$')  # server/deploy/Dockerfile's check
 
 
+class MainOnlyTest(unittest.TestCase):
+    """Staging migrates only what main holds."""
+
+    def run_with(self, ancestor_code):
+        calls = []
+        original = staging.subprocess.run
+
+        def fake(command, **kwargs):
+            calls.append(command)
+            return type('Done', (), {'returncode': ancestor_code if 'merge-base' in command else 0, 'stderr': b'', 'stdout': b''})()
+        staging.subprocess.run = fake
+        try:
+            staging.require_main('abcdef0123456789abcdef0123456789abcdef01', 'the commit')
+        finally:
+            staging.subprocess.run = original
+        return calls
+
+    def test_a_commit_on_main_passes_and_one_off_main_is_refused(self):
+        calls = self.run_with(0)
+        self.assertIn(['git', 'merge-base', '--is-ancestor', 'abcdef0123456789abcdef0123456789abcdef01', 'origin/main'], calls)
+        with self.assertRaisesRegex(SystemExit, 'not on origin/main'):
+            self.run_with(1)
+
+    def test_up_refuses_an_image_without_a_main_revision(self):
+        original = staging.ssh, staging.subprocess.run
+        staging.ssh = lambda host, script, **k: ''
+        staging.subprocess.run = lambda command, **k: type('Done', (), {'returncode': 1 if 'merge-base' in command else 0})()
+        try:
+            with self.assertRaisesRegex(SystemExit, 'revision unknown'):
+                staging.up('paperboat-server:stg-x')
+        finally:
+            staging.ssh, staging.subprocess.run = original
+
+
 class SeedAuthorityTest(unittest.TestCase):
     def test_session_is_private_random_persistent_and_only_hashes_reach_database(self):
         original = staging.remote, staging.sql

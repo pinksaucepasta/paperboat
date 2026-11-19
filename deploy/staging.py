@@ -5,7 +5,7 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   build <commit>       build paperboat-server:stg-<short> natively (arm64) on anvit from that commit
   init                 write the stack's files and secrets (kept on rerun); WorkOS ids and the Cloudflare DNS token
                        are read from the production server env over ssh and never printed
-  up <image>           start the stack on that image (migrate first), wait for /readyz
+  up <image>           start the stack on that image (migrate first), wait for /readyz; build and up refuse a commit/image that is not on origin/main
   grant                give usr_staging a paid Pro workspace (test data)
   dns                  ensure regional and public wildcard DNS
   seed                 account, paid entitlement and a console session for the staging test account (idempotent)
@@ -229,10 +229,21 @@ def source_archive(commit):
     return short, full, git("archive", full, "--", ".", ":!console", ":!marketing", ":!tools")
 
 
+def require_main(full, what):
+    """Staging only ever runs migrations that main holds: a branch's migrations may be renumbered before they land, and goose compares only
+    numbers (2026-11-18: staging applied a branch's 421/422, main later reused the numbers, and the real objects were never created)."""
+    git = lambda *args: subprocess.run(["git", *args], capture_output=True, cwd=REPO)
+    if git("fetch", "-q", "origin", "main").returncode or git("merge-base", "--is-ancestor", full, "origin/main").returncode:
+        raise SystemExit(f"staging: {what} ({full[:9]}) is not on origin/main, so its migrations are not final. Land and renumber the change on main, "
+                         "then build from that commit; staging never migrates from a branch.")
+
+
 def build(commit, target="server"):
-    """Build paperboat-server:stg-<short> (target 'server') or paperboat-edge:stg-<short> (target 'edge') on HOST."""
+    """Build paperboat-server:stg-<short> (target 'server') or paperboat-edge:stg-<short> (target 'edge') on HOST (a server build only from a commit on main)."""
     dockerfile = {"server": "server/deploy/Dockerfile", "edge": "edge/deploy/Dockerfile"}[target]
     short, full, tar = source_archive(commit)
+    if target == "server":
+        require_main(full, "the commit")
     src = f"pb-stg-src-{short}"
     done = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, f"rm -rf ~/{src} && mkdir ~/{src} && tar x -C ~/{src}"], input=tar, capture_output=True, timeout=300)
     if done.returncode:
@@ -248,6 +259,8 @@ def build(commit, target="server"):
 
 
 def up(image):
+    revision = ssh(HOST, f"docker image inspect {image} --format '{{{{index .Config.Labels \"org.opencontainers.image.revision\"}}}}'").strip()
+    require_main(revision or "0" * 40, f"the image {image} (revision {revision or 'unknown'})")
     remote(f"sed -i 's|^PAPERBOAT_SERVER_IMAGE=.*|PAPERBOAT_SERVER_IMAGE={image}|' .env && docker compose up -d --remove-orphans")
     wait_ready()
     print(json.dumps(status()))

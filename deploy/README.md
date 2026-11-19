@@ -328,6 +328,12 @@ provider allow) and the plain API on anvit's loopback `18091`. Subcommands: `bui
 anvit), `init`, `up <image>`, `seed` (account `usr_staging`, a paid entitlement of 64 seats, a console session),
 `enroll <name>` (one enrollment token on stdout, `TOKEN_CMD` for `tools/probe/canary-setup.sh`), `reset` (empty database;
 the stored regional certificate is kept so Let's Encrypt duplicate limits are not hit), `status`, `logs`, `down`.
+**Staging only ever runs migrations from main.** A branch's migrations can be renumbered before they land, and goose compares only
+numbers: on 2026-11-18 staging applied a branch's `421`/`422`, main later reused those numbers, and goose skipped the real
+migrations (objects missing). So `staging.py build` refuses a commit that is not an ancestor of `origin/main`, and `staging.py up`
+refuses an image whose revision label is not on `origin/main` (or has none). Test a branch on staging by landing it on main first.
+If staging's migration table ever disagrees with its objects, rebuild it (`staging.py reset`, zero compatibility: never patch the table).
+
 Staging machines: containers `pb-stg-a` and `pb-stg-b` on anvit paired with a `pb` built with that `DefaultServerURL`.
 Staging never reads or writes prod data; it copies only the WorkOS client id/key and the Cloudflare DNS token from the
 prod env, in memory. `staging.py edge <edge image>` runs a staging edge as a plain container `pb-stg-edge` (no `pbh`, no firewall or nft
