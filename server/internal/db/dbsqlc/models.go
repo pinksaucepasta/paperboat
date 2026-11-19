@@ -3080,6 +3080,23 @@ type TerminalGuestSession struct {
 	ExpiresAt         time.Time
 }
 
+type TrafficDaily struct {
+	Day           time.Time
+	Category      string
+	NodeID        string
+	UploadBytes   int64
+	DownloadBytes int64
+}
+
+type TrafficHourly struct {
+	Hour          time.Time
+	Category      string
+	NodeID        string
+	Shard         int16
+	UploadBytes   int64
+	DownloadBytes int64
+}
+
 type TransactionalMailOutbox struct {
 	MailID         string
 	InvitationID   sql.NullString
