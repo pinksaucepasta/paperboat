@@ -142,7 +142,7 @@ UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $
 # $req.addr and, with $req.inbound, from them; the program scope keeps the controller's SSH (sshd, the runner's tunnel
 # ssh.exe) alive, which a machine-wide cut would sever. The firewall drops silently: no reset, no link-down.
 NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue\n"
-           "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe delete $a mask 255.255.255.255 127.0.0.1 *>$null}}};exit 0}\n"
+           "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe delete $a mask 255.255.255.255 0.0.0.0 if 1 *>$null}}};exit 0}\n"
            "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
            "$p=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"
            "if(-not $p.Count){throw 'no pb.exe under Program Files\\Paperboat'}\n"
@@ -155,7 +155,7 @@ NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $re
            # the pb.exe that own such sockets (their services restart them) makes every flow new, so the rule decides it.
            # keep: the cut must not replace any pb.exe, so the flows that already exist are dropped by a route instead: each IPv4 address
            # routes to the loopback interface, which discards what is not its own, silently like the Unix checks' DROP. Needs explicit addresses.
-           "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe add $a mask 255.255.255.255 127.0.0.1 metric 1 *>$null;if($LASTEXITCODE){throw \"route to $a failed\"}}};exit 0}\n"
+           "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe add $a mask 255.255.255.255 0.0.0.0 if 1 metric 1 *>$null;if($LASTEXITCODE){throw \"route to $a failed\"}}};exit 0}\n"
            "$k=@{}\n"
            "if(-not $req.ports -or $req.protos -contains 'UDP'){Get-NetUDPEndpoint|ForEach-Object{$k[[int]$_.OwningProcess]=1}}\n"
            "if(-not $req.ports -or $req.protos -contains 'TCP'){Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue|"
@@ -647,12 +647,16 @@ class WindowsDevice:
         if keep_processes and not addresses:
             raise ValueError('keep_processes needs explicit addresses')
         name = 'PaperboatSmoke-cut-' + uuid.uuid4().hex[:12]
-        self.ps('cut the network', NET_CUT, action='add', name=name, addr=list(addresses or NON_LOOPBACK), inbound=inbound, ports=ports, protos=list(protocols), keep=keep_processes)
+        try:
+            self.ps('cut the network', NET_CUT, action='add', name=name, addr=list(addresses or NON_LOOPBACK), inbound=inbound, ports=ports, protos=list(protocols), keep=keep_processes)
+        except BaseException:  # a route that failed to add (2026-11-19) left the rules behind
+            self.ps('restore the network', NET_CUT, action='remove', name=name, addr=list(addresses or []), keep=keep_processes)
+            raise
         scratch = self.temp_dir('pb-cut')
         try:
             timer = "Start-Sleep %d; Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue" % (seconds, name)
             if keep_processes:
-                timer += ''.join('; & route.exe delete %s mask 255.255.255.255 127.0.0.1' % ps_quote(a) for a in addresses if ':' not in a)
+                timer += ''.join('; & route.exe delete %s mask 255.255.255.255 0.0.0.0 if 1' % ps_quote(a) for a in addresses if ':' not in a)
             self.start(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
                         _b64(timer.encode('utf-16-le'))], scratch.__enter__())
         except BaseException:
