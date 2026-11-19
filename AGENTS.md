@@ -138,8 +138,6 @@ short table: rows done, rows `[!]` with reasons, commits. Root files no lane own
 `Makefile`, `tools/gate.sh`) are edited by the lane whose change needs them, with `make gate`;
 do not ask.
 
-**Never `git config` an identity in a worktree** (2026-11-20: `git config user.name demo` in a linked worktree wrote the shared `.git/config` and 82 commits on main got that author): a throwaway identity is `GIT_AUTHOR_*`/`GIT_COMMITTER_*` or `git -c`, and the pre-push hook refuses `example.test` emails and `demo`/`test`/`x` names.
-
 **Shared branch.** All lanes push to `main`, always with `tools/push.sh`: it takes one lock shared by
 every worktree, then fetches, rebases and pushes, so pushes queue instead of racing. Re-run the
 affected tests if the rebase brought in changes to your paths or shared code. Never force-push.

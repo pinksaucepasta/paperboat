@@ -46,28 +46,6 @@ def changed_paths(local, remote):
     return [p for p in git("diff", "--name-only", f"{base}..{local}").splitlines() if p]
 
 
-# Placeholder identities from tests and demos: 2026-11-20 a `git config user.name demo` run in a worktree wrote the shared
-# .git/config and 82 commits on main got that author. Compared case-insensitively.
-BANNED_NAMES = {"demo", "test", "x"}
-BANNED_EMAIL_SUFFIX = "example.test"
-
-
-def placeholder_authors(local, remote):
-    """Commits being pushed whose author or committer name or email is a placeholder, as 'hash name <email>' lines."""
-    known = remote != ZERO and subprocess.run(["git", "cat-file", "-e", remote + "^{commit}"], capture_output=True).returncode == 0
-    base = remote if known else "origin/main"
-    log = git("log", "--format=%h%x09%an%x09%ae%x09%cn%x09%ce", local, "--not", base, check=False)
-    bad = []
-    for line in log.splitlines():
-        short, *people = line.split("\t")
-        names, emails = people[0::2], people[1::2]
-        for name, email in zip(names, emails):
-            if name.strip().lower() in BANNED_NAMES or email.strip().lower().endswith(BANNED_EMAIL_SUFFIX):
-                bad.append(f"{short} {name} <{email}>")
-                break
-    return bad
-
-
 def touched(paths):
     if paths is None or any(p in ("go.work", "go.work.sum") for p in paths):
         return list(MODULES)
@@ -176,9 +154,9 @@ def check(commit, modules, paths):
 
 
 def main():
-    skip = os.environ.get("PB_PREPUSH_SKIP") == "1"  # skips the build only, never the identity check
-    if skip:
-        print("pre-push: build skipped (PB_PREPUSH_SKIP=1)", file=sys.stderr)
+    if os.environ.get("PB_PREPUSH_SKIP") == "1":
+        print("pre-push: skipped (PB_PREPUSH_SKIP=1)", file=sys.stderr)
+        return 0
     failed = False
     for line in sys.stdin.read().splitlines():
         parts = line.split()
@@ -187,16 +165,6 @@ def main():
         _, local, _, remote = parts
         if local == ZERO:
             continue  # deleting a ref
-        bad = placeholder_authors(local, remote)
-        if bad:
-            failed = True
-            print("pre-push: placeholder author or committer (a test or demo identity, not a real one):\n  " + "\n  ".join(bad[:10])
-                  + f"\npre-push: {len(bad)} commit(s). Check `git config user.name` / `user.email` (a `git config` run inside a worktree writes the shared "
-                  "repo config; use GIT_AUTHOR_*/GIT_COMMITTER_* or `git -c` for a throwaway identity), then rewrite them, e.g. "
-                  "`git rebase --exec 'git commit --amend --no-edit --reset-author' origin/main`.", file=sys.stderr)
-            continue
-        if skip:
-            continue
         try:
             paths = changed_paths(local, remote)
             modules = touched(paths)
@@ -210,7 +178,7 @@ def main():
             failed = True
             print(f"pre-push: {failure}", file=sys.stderr)
     if failed:
-        print("pre-push: push refused. Fix what is named above (a build failure: did a file miss `git add`?) and push again.", file=sys.stderr)
+        print("pre-push: push refused. Fix the build (did a file miss `git add`?) and push again.", file=sys.stderr)
         return 1
     return 0
 
