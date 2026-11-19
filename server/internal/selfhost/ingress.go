@@ -23,7 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
 
-var ErrIngress = errors.New("public ingress verification failed; check the installation hostname A/AAAA records, HTTPS port 443, certificate and running edge, then retry verify-ingress")
+var ErrIngress = errors.New("public ingress verification failed; check that the installation hostname A/AAAA records point at this server, that HTTPS port 443 is open and that the edge is running with the identity it enrolled with, then retry verify-ingress")
 
 type ingressProbeFailure struct{ cause error }
 
@@ -60,17 +60,23 @@ func publicIngressIP(ip netip.Addr) bool {
 }
 
 // VerifyIngress probes only the installation's registered public hostname on
-// HTTPS 443. Resolution is pinned before dialing, redirects/proxies are disabled,
-// and every advertised address must prove possession of this node's credential.
+// HTTPS 443. The server certificate must be the node's enrolled identity
+// (tls_spki_sha256), so no publicly trusted certificate is needed. Resolution is
+// pinned before dialing, redirects/proxies are disabled, and every advertised
+// address must prove possession of this node's credential.
 func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	var node, host, epoch string
-	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch); err != nil {
+	var pin []byte
+	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch,n.tls_spki_sha256 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch, &pin); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrIngress
 		}
 		return err
+	}
+	if len(pin) != sha256.Size {
+		return ErrIngress
 	}
 	credential, err := s.RuntimeCredential(ctx, node)
 	if err != nil {
@@ -79,7 +85,7 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP)
+	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP, func(_ string, ip netip.Addr) *http.Transport { return pinnedIngressTransport(pin, ip) })
 	if err != nil {
 		return err
 	}
@@ -101,12 +107,12 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 // exact node's credential over publicly trusted HTTPS, independently of its
 // pinned carrier identity. The caller must fence its state write.
 func ProbePublicIngress(ctx context.Context, host, node, credential string) (any, any, error) {
-	return probeIngress(ctx, host, node, credential, publicIngressIP)
+	return probeIngress(ctx, host, node, credential, publicIngressIP, publicIngressTransport)
 }
 
 // probeIngress is ProbePublicIngress with the address rule given: managed nodes stay public-only, and a
 // self-hosted node may be private when the service allows it (staging).
-func probeIngress(ctx context.Context, host, node, credential string, allowed func(netip.Addr) bool) (any, any, error) {
+func probeIngress(ctx context.Context, host, node, credential string, allowed func(netip.Addr) bool, transportFor func(host string, ip netip.Addr) *http.Transport) (any, any, error) {
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return nil, nil, ingressProbeError(err)
@@ -140,15 +146,14 @@ func probeIngress(ctx context.Context, host, node, credential string, allowed fu
 	}
 	challenge := base64.RawURLEncoding.EncodeToString(nonce[:])
 	for _, ip := range addresses {
-		if err = verifyIngressAddress(ctx, host, ip, node, challenge, credential); err != nil {
+		if err = verifyIngressAddress(ctx, transportFor(host, ip), host, node, challenge, credential); err != nil {
 			return nil, nil, ingressProbeError(err)
 		}
 	}
 	return v4, v6, nil
 }
 
-func verifyIngressAddress(ctx context.Context, host string, ip netip.Addr, node, challenge, credential string) (returnErr error) {
-	transport := publicIngressTransport(host, ip)
+func verifyIngressAddress(ctx context.Context, transport *http.Transport, host, node, challenge, credential string) (returnErr error) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://"+host+"/.well-known/paperboat-installation?challenge="+challenge, nil)
@@ -313,6 +318,14 @@ func (s *Service) observeIngressIteration(ctx context.Context, err error) {
 		supportreport.CaptureFromContext(faultCtx, component, operation, "worker_recovery", "worker_recovered", nil)
 	}
 }
+// pinnedIngressTransport dials ip:443 and accepts only the node's enrolled certificate (PinnedTransport).
+func pinnedIngressTransport(pin []byte, ip netip.Addr) *http.Transport {
+	transport := PinnedTransport(pin, net.JoinHostPort(ip.String(), "443"))
+	transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout = 4*time.Second, 4*time.Second
+	transport.DisableKeepAlives, transport.MaxResponseHeaderBytes = true, 4096
+	return transport
+}
+
 func publicIngressTransport(host string, ip netip.Addr) *http.Transport {
 	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	return &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {

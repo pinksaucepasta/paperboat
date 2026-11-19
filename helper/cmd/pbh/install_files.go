@@ -25,14 +25,11 @@ import (
 type trustFile struct {
 	kind        string // file name prefix in the state directory
 	label       string // operator-facing name used in errors
-	private     bool   // source must be owner-only (private key)
 	certificate bool   // source must contain a PEM certificate
 }
 
 var (
-	publicCertFile = trustFile{kind: "public-https-cert", label: "browser HTTPS certificate", certificate: true}
-	publicKeyFile  = trustFile{kind: "public-https-key", label: "browser HTTPS private key", private: true}
-	controlCAFile  = trustFile{kind: "control-ca", label: "control-plane CA certificate", certificate: true}
+	controlCAFile = trustFile{kind: "control-ca", label: "control-plane CA certificate", certificate: true}
 )
 
 const maxTrustFileBytes = 1 << 20
@@ -51,9 +48,6 @@ func readTrustFile(file trustFile, src string) ([]byte, error) {
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxTrustFileBytes {
 		return nil, commandError(fmt.Sprintf("%s %q must be a regular file of at most 1 MiB", file.label, src))
-	}
-	if file.private && info.Mode().Perm()&0077 != 0 {
-		return nil, commandError(fmt.Sprintf("%s %q must be owner-only (mode 0600)", file.label, src))
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxTrustFileBytes+1))
 	if err != nil {
@@ -128,16 +122,6 @@ func stageInstallFiles(dir string, fs *flag.FlagSet, c selfhost.Config) (selfhos
 		return c, err
 	}
 	var err error
-	if src := fs.Lookup("https-cert").Value.String(); src != "" {
-		if c.PublicHTTPSCertFile, err = stageTrustFile(dir, publicCertFile, src); err != nil {
-			return c, err
-		}
-	}
-	if src := fs.Lookup("https-key").Value.String(); src != "" {
-		if c.PublicHTTPSKeyFile, err = stageTrustFile(dir, publicKeyFile, src); err != nil {
-			return c, err
-		}
-	}
 	if src := fs.Lookup("control-ca").Value.String(); src != "" {
 		if c.ControlCA, err = stageTrustFile(dir, controlCAFile, src); err != nil {
 			return c, err
@@ -166,7 +150,7 @@ func discardFreshInstall(dir string) error {
 		errs = append(errs, err)
 	}
 	for _, entry := range entries {
-		for _, file := range []trustFile{publicCertFile, publicKeyFile, controlCAFile} {
+		for _, file := range []trustFile{controlCAFile} {
 			if name := entry.Name(); strings.HasPrefix(name, file.kind+"-") && strings.HasSuffix(name, ".pem") {
 				remove(filepath.Join(dir, name))
 			}

@@ -41,7 +41,7 @@ func TestDiscardFreshInstallRemovesOnlyInstallationFiles(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	installation := []string{"selfhost.json", "images.json", "tls.crt", "tls.key", ".selfhost.lock", "public-https-cert-0123456789abcdef.pem", "public-https-key-0123456789abcdef.pem", "control-ca-0123456789abcdef.pem"}
+	installation := []string{"selfhost.json", "images.json", "tls.crt", "tls.key", ".selfhost.lock", "control-ca-0123456789abcdef.pem"}
 	for _, name := range append(installation, "operator-notes.txt") {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0600); err != nil {
 			t.Fatal(err)
@@ -97,7 +97,7 @@ func TestFreshInstallRefusedAfterStagingLeavesNoState(t *testing.T) {
 	claim := listener.Addr().String()
 	listener.Close()
 	dir := filepath.Join(t.TempDir(), "protected")
-	args := []string{"install", "--no-service", "--state-dir", dir, "--endpoint-host", "203.0.113.10", "--claim-listen", claim, "--relay-image", "example.test/relay:next", "--https-cert", cert, "--control-ca", notCertificate}
+	args := []string{"install", "--no-service", "--state-dir", dir, "--endpoint-host", "203.0.113.10", "--claim-listen", claim, "--relay-image", "example.test/relay:next", "--control-ca", notCertificate}
 	if err := run(context.Background(), args, io.Discard); err == nil || !strings.Contains(err.Error(), notCertificate) {
 		t.Fatalf("install accepted an invalid control CA: %v", err)
 	}

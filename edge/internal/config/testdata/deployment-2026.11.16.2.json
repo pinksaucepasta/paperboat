@@ -19,8 +19,6 @@
   "preview_base_domain": "preview.example.test",
   "private_https_listen_address": "127.0.0.1:9443",
   "public_http_listen_address": "0.0.0.0:80",
-  "public_https_cert_file": "",
-  "public_https_key_file": "",
   "public_https_listen_address": "0.0.0.0:443",
   "public_routes": [],
   "revocations_file": "/tmp/TestWriteFixtures1821501590/002/revocations.json",

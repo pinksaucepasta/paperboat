@@ -16,7 +16,6 @@ Commands:
   selfhost code   print a fresh single-use code to claim this node in the dashboard
   status          show the paperboat-selfhost service state
   doctor          check that this host can serve public tunnel ports
-  configure-tls   set or rotate the browser HTTPS certificate
   uninstall       remove the service and containers
   serve           run the node in the foreground (the systemd unit runs this)
   check-host      check that this operating system and architecture are supported
@@ -33,8 +32,7 @@ node with the address and code printed here (pbh selfhost code prints a new one)
 same command upgrades in place and keeps data. Needs root (it re-runs itself with sudo) unless
 --no-service is given.
 Examples:
-  pbh install --enable both --endpoint-host edge.example.com
-  pbh install --enable tunnel --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
+  pbh install --enable both --endpoint-host edge.example.com`,
 	"selfhost code": `Print this installation's claim address and a fresh single-use code (valid for 15 minutes) for
 Dashboard → Network → Add self-hosted node. The code carries no account identity.`,
 	"status": `Show the paperboat-selfhost service state (systemctl status). A running service is not
@@ -43,12 +41,6 @@ readiness; use pbh doctor for the host and Dashboard → Network for registratio
 TCP 443 and the public port range, per-address connection limits, and a reachability test of a
 test port from the control plane. Each failed check names the fix. Installations without a tunnel
 need no host setup and report so. Fails when no installation exists in --state-dir.`,
-	"configure-tls": `Set or rotate the browser-trusted HTTPS certificate for this installation's endpoint hostname.
-The certificate hostname, validity, key pairing and owner-only key permissions are checked before
-anything is saved; the service then restarts, and the previous certificate is restored when it
-cannot. Carrier identity and enrollment do not change. Rerun it after each certificate renewal.
-Example:
-  pbh configure-tls --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
 	"uninstall": `Stop the service and remove its containers and the pbh executables. Protected identity,
 credentials and configuration are kept for a reinstall unless both --remove-data and
 --confirm-remove-data are given, which deletes them permanently. Remove the node from
