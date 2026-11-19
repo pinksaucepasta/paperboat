@@ -1016,14 +1016,18 @@ func snapshotRoute(route dbsqlc.TunnelRoute) connectorprotocol.ConfigRoute {
 	}
 }
 
-// inMachineTx runs fn like db.InTx under machine's write lock (endpoints.MachineWriteLockSeed), taken before the
-// serializable snapshot: a tunnel change rewrites its host machine's route assignments, which the machine's runtime
-// attach writes too, so they queue instead of failing each other's commit with 40001. No machine: a plain InTx.
+// inMachineTx runs fn like db.InTx holding machine's write lock (endpoints.LockMachine), taken before the
+// transaction: a tunnel change rewrites its host machine's route assignments, which the machine's runtime attach writes
+// too, so they queue instead of failing each other's commit with 40001. No machine: a plain InTx.
 func (r *SQLRepository) inMachineTx(ctx context.Context, machine string, fn func(context.Context, *db.Tx) error) error {
-	if machine == "" {
-		return r.db.InTx(ctx, fn)
+	if machine != "" {
+		unlock, err := endpoints.LockMachine(ctx, machine)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
-	return r.db.InTxUnderSessionLock(ctx, machine, endpoints.MachineWriteLockSeed, fn)
+	return r.db.InTx(ctx, fn)
 }
 
 // tunnelMachine is the machine that hosts tunnelID, read before the transaction ("" for an unknown tunnel, which the

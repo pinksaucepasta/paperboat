@@ -1,30 +1,32 @@
-package peersessions
+// Package keyedlock serializes work per key within one process.
+package keyedlock
 
 import (
 	"context"
 	"sync"
 )
 
-// keyedLocks serializes work per key within this process; entries are removed
+// Locks serializes work per key within this process; entries are removed
 // when their last holder leaves, so it never grows beyond the keys in use.
-type keyedLocks struct {
+type Locks struct {
 	mu    sync.Mutex
-	locks map[string]*keyedLock
+	locks map[string]*entry
 }
 
-type keyedLock struct {
+type entry struct {
 	slot chan struct{}
 	refs int
 }
 
-func (k *keyedLocks) lock(ctx context.Context, key string) (func(), error) {
+// Lock waits for key's slot until ctx ends and returns its release.
+func (k *Locks) Lock(ctx context.Context, key string) (func(), error) {
 	k.mu.Lock()
 	if k.locks == nil {
-		k.locks = map[string]*keyedLock{}
+		k.locks = map[string]*entry{}
 	}
 	l := k.locks[key]
 	if l == nil {
-		l = &keyedLock{slot: make(chan struct{}, 1)}
+		l = &entry{slot: make(chan struct{}, 1)}
 		k.locks[key] = l
 	}
 	l.refs++

@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/keyedlock"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -82,7 +83,7 @@ type NetworkConfigResult struct {
 }
 
 type NetworkService struct {
-	endpointBuilds keyedLocks
+	endpointBuilds keyedlock.Locks
 	store          *db.DB
 	signer         interface {
 		SignNetworkConfiguration(peernetwork.Configuration) (string, error)
@@ -255,7 +256,7 @@ func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequ
 	// built concurrently they all bump the same generation row and abort each
 	// other past the retry budget. One build per endpoint at a time instead.
 	started := time.Now()
-	unlock, err := s.endpointBuilds.lock(ctx, in.EndpointID)
+	unlock, err := s.endpointBuilds.Lock(ctx, in.EndpointID)
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}

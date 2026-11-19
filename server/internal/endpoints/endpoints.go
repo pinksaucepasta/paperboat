@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/keyedlock"
 )
 
 var ErrInvalid = errors.New("invalid endpoint")
@@ -80,15 +81,22 @@ func ReconcileEndpointTx(ctx context.Context, tx *db.Tx, machineID, endpointID s
 	return reconcileTx(ctx, tx, machineID, endpointID)
 }
 
-// MachineWriteLockSeed keys the per-machine lock (db.InTxUnderSessionLock(machineID, MachineWriteLockSeed)) that
-// transactions writing a machine's carrier and route rows take before their serializable snapshot, so they queue
-// instead of failing at commit. Prior art: NetBird locks the rows it writes (store.LockingStrengthUpdate,
-// management/server/store/sql_store.go); Headscale funnels node writes through one writer (hscontrol/state/node_store.go).
-const MachineWriteLockSeed = 1120
+// machineWriters serializes, within this server process, the transactions that write one machine's carrier and route
+// rows (runtime attach, preview create, tunnel changes), so they queue instead of failing each other's serializable
+// commit with 40001. Waiting costs no database connection; a writer in another server process (a rolling deploy) is
+// the rare case InTx's retry still covers. Prior art: Headscale funnels node writes through one writer
+// (hscontrol/state/node_store.go NodeStore.writeQueue); NetBird locks the rows it writes (store.LockingStrengthUpdate).
+var machineWriters keyedlock.Locks
+
+// LockMachine waits, until ctx ends, for the right to write machineID's carrier and route rows, and returns its release.
+// Take it before the transaction begins.
+func LockMachine(ctx context.Context, machineID string) (func(), error) {
+	return machineWriters.Lock(ctx, machineID)
+}
 
 func reconcileTx(ctx context.Context, tx *db.Tx, machineID, endpointID string) error {
-	// Callers that write a machine's routes hold its MachineWriteLock (runtime attach, preview create), so its carrier
-	// report and a reconcile queue instead of aborting each other with 40001 (prod 2026-11-20: 18 in 30 min).
+	// Callers that write a machine's routes hold LockMachine (runtime attach, preview create, tunnel changes), so its
+	// carrier report and a reconcile queue instead of aborting each other with 40001 (prod 2026-11-20: 18 in 30 min).
 	_, err := tx.Exec(ctx, `WITH desired AS (
 SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_node_id,a.edge_process_epoch,a.session_id
 FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id

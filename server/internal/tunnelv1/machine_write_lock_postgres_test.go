@@ -19,19 +19,9 @@ func TestTunnelChangeQueuesBehindAnotherWriterOfItsMachineOnPostgres(t *testing.
 	tunnel := "tun_mlock_" + f.suffix
 	created := f.createTunnel(t, account, host, tunnel, "mlock-"+f.suffix)
 
-	// Another writer of the machine: its write lock, held on a connection of its own.
-	conn, err := f.database.SQL().Conn(ctx)
+	unlock, err := endpoints.LockMachine(ctx, host)
 	if err != nil {
 		t.Fatal(err)
-	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtextextended($1,$2))`, host, endpoints.MachineWriteLockSeed); err != nil {
-		t.Fatal(err)
-	}
-	unlock := func() {
-		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtextextended($1,$2))`, host, endpoints.MachineWriteLockSeed); err != nil {
-			t.Error(err)
-		}
 	}
 	done := make(chan error, 1)
 	go func() {

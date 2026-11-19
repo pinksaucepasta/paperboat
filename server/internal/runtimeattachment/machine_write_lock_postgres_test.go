@@ -2,12 +2,17 @@ package runtimeattachment
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
@@ -42,14 +47,15 @@ VALUES($1,$2,$3,$3,$4,'owner_session_mlock','foreground','http','127.0.0.1:3000'
 			}
 
 			// The other writer: the machine's write lock, then an uncommitted change of the contended row.
+			unlock, err := endpoints.LockMachine(ctx, f.machine)
+			if err != nil {
+				t.Fatal(err)
+			}
 			conn, err := f.database.SQL().Conn(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer conn.Close()
-			if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtextextended($1,$2))`, f.machine, endpoints.MachineWriteLockSeed); err != nil {
-				t.Fatal(err)
-			}
 			if _, err := conn.ExecContext(ctx, `BEGIN ISOLATION LEVEL SERIALIZABLE`); err != nil {
 				t.Fatal(err)
 			}
@@ -64,9 +70,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_mlock','foreground','http','127.0.0.1:3000'
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtextextended($1,$2))`, f.machine, endpoints.MachineWriteLockSeed); err != nil {
-				t.Fatal(err)
-			}
+			unlock()
 			if err := <-done; err != nil {
 				t.Fatalf("attach behind another writer of the machine: %v", err)
 			}
@@ -75,4 +79,46 @@ VALUES($1,$2,$3,$3,$4,'owner_session_mlock','foreground','http','127.0.0.1:3000'
 			}
 		})
 	}
+}
+
+// Writers of different machines never wait for each other, and waiting for a machine takes no database connection:
+// 50 machines attach at once through one server, every attach succeeds, and the direct pool (6 connections, used by
+// session locks) is not touched.
+func TestFiftyMachinesAttachAtOnceOnPostgres(t *testing.T) {
+	f := newAgentFixture(t, "fifty")
+	ctx := f.ctx
+	proofs := []previewattachment.MachineProof{f.proof}
+	for i := range 49 {
+		machine, env, route := fmt.Sprintf("%s_m%02d", f.prefix, i), fmt.Sprintf("%s_e%02d", f.prefix, i), fmt.Sprintf("%s_r%02d", f.prefix, i)
+		public, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.exec(t, `INSERT INTO control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$1,$2,'active')`, env, f.account)
+		f.exec(t, `INSERT INTO user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,public_identity_key,installation_generation,worker_generation,configured_capabilities) VALUES ($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',$5,1,1,ARRAY['terminal_host']::text[])`, machine, f.account, env, fmt.Sprintf("fifty-%02d", i), base64.RawURLEncoding.EncodeToString(public))
+		f.exec(t, `INSERT INTO control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',38080)`, route, env, machine+".runtime.example.test")
+		f.exec(t, `INSERT INTO control_connector_generations(environment_id,machine_id,connector_id,generation,edge_pool,state) VALUES($1,$2,'runtime',1,'default','pending')`, env, machine)
+		proofs = append(proofs, previewattachment.MachineProof{UserID: f.account, MachineID: machine, OperationID: fmt.Sprintf("operation_fifty_%02d", i), InstallationGeneration: 1})
+	}
+	t.Cleanup(func() {
+		for _, q := range []string{`DELETE FROM runtime_carrier_attachments WHERE machine_id LIKE $1||'_m%'`, `DELETE FROM user_machines WHERE id LIKE $1||'_m%'`, `DELETE FROM control_environments WHERE id LIKE $1||'_e%'`} {
+			_, _ = f.database.SQL().ExecContext(context.Background(), q, f.prefix)
+		}
+	})
+	direct := f.database.Direct().Stat().AcquireCount()
+	errs := make(chan error, len(proofs))
+	for _, proof := range proofs {
+		request := f.request
+		request.OperationID = proof.OperationID
+		go func() { _, err := f.service.Attach(ctx, proof, request); errs <- err }()
+	}
+	for range proofs {
+		if err := <-errs; err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+	}
+	if used := f.database.Direct().Stat().AcquireCount() - direct; used != 0 {
+		t.Fatalf("50 attaches took %d direct connections, want 0", used)
+	}
+	t.Logf("50 attaches at once: %+v", f.database.TransactionStats().Serializable)
 }
