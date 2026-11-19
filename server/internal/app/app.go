@@ -1034,10 +1034,12 @@ func New(opts Options) (*App, error) {
 		}), progress),
 		// Each server process records its own CPU and memory for the operator capacity page.
 		observedWorker(supportService, "worker_node_capacity", periodicPreviewTunnelWorker(30*time.Second, serverCapacityRecorder(store, opts.Config.Reporting.Instance)), progress))
+	sweeps := 0
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(edgeset.SweepEvery, func(ctx context.Context) error {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
-		_, err := edgeset.ReconcileAll(reconcileContext, store, time.Now().UTC())
+		sweeps++
+		_, err := edgeset.Sweep(reconcileContext, store, time.Now().UTC(), (sweeps-1)%edgeset.FullSweepEvery == 0)
 		workers.IterationFailure(ctx, "edge_set_reconcile", "edge_set_reconcile_failed", err)
 		outcome := "success"
 		if err != nil {
