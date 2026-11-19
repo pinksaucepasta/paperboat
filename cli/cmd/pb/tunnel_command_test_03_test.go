@@ -356,7 +356,13 @@ func TestTunnelCreateDomainWaitSurvivesUnavailableAndTimesOutTyped(t *testing.T)
 			command := tunnelCreateCommand()
 			command.SetContext(context.Background())
 			_ = command.Flags().Set("wait", "true")
-			_ = command.Flags().Set("timeout", "3s")
+			// Ready after 6 refusals must not race the deadline on a slow runner (a macOS run took 15 s); a domain
+			// that never becomes ready ends at the 1 s minimum whatever the load: only "no ready by then" matters.
+			waitFlag := "60s"
+			if neverReady {
+				waitFlag = "1s"
+			}
+			_ = command.Flags().Set("timeout", waitFlag)
 			client, _, err := tunnelClient(command)
 			if err != nil {
 				t.Fatal(err)
