@@ -33,6 +33,10 @@ func (c *fakeClock) NewTimer(delay time.Duration) Timer {
 	c.timers[timer] = struct{}{}
 	timer.active = true
 	timer.deadline = c.now.Add(delay)
+	if delay <= 0 { // like time.NewTimer(0): a due timer fires at once, not on the next Advance
+		timer.active = false
+		timer.ch <- c.now
+	}
 	return timer
 }
 
@@ -156,6 +160,16 @@ func TestResetTimerFiresADueTimerAgainAfterAdvance(t *testing.T) {
 	case <-timer.C():
 	default:
 		t.Fatal("due timer lost its wakeup")
+	}
+}
+
+// time.NewTimer(0) fires immediately; a fake that only waits for the next Advance loses that wakeup.
+func TestNewTimerWithNoDelayFiresAtOnce(t *testing.T) {
+	timer := newFakeClock().NewTimer(0)
+	select {
+	case <-timer.C():
+	default:
+		t.Fatal("NewTimer(0) did not fire")
 	}
 }
 
