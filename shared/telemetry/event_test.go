@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	"github.com/pinksaucepasta/paperboat/shared/telemetry/safe"
 	"strings"
@@ -202,5 +203,26 @@ func TestEventLogCountsEvictionAndKeepsEventsRecordedWhileTheRingIsBusy(t *testi
 	}
 	if got := log.DroppedEvents(); got != 2 {
 		t.Fatalf("total drops = %d, want 2", got)
+	}
+}
+
+// A full log keeps the newest capacity events, oldest first, as it did when each append shifted the buffer.
+func TestEventLogKeepsTheNewestEventsInOrderPastCapacity(t *testing.T) {
+	log, err := NewEventLog(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	for i := 0; i < 23; i++ {
+		log.append(Event{Name: fmt.Sprintf("event_%02d", i)})
+	}
+	got := log.Snapshot()
+	if len(got) != 5 {
+		t.Fatalf("%d events kept, want 5", len(got))
+	}
+	for i, event := range got {
+		if want := fmt.Sprintf("event_%02d", 18+i); event.Name != want {
+			t.Fatalf("event %d is %s, want %s", i, event.Name, want)
+		}
 	}
 }

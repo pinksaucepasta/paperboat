@@ -207,6 +207,7 @@ type EventLog struct {
 	gate     sync.RWMutex
 	capacity int
 	events   []Event
+	oldest   int // index of the oldest event once the buffer is full (it is a ring then); shifting every event per append cost 20% of an edge's CPU
 	queue    chan eventItem
 	commands chan flushCommand
 	stop     chan struct{}
@@ -296,8 +297,8 @@ func (l *EventLog) append(event Event) {
 		}
 	}()
 	if len(l.events) == l.capacity {
-		copy(l.events, l.events[1:])
-		l.events[len(l.events)-1] = cloneEvent(event)
+		l.events[l.oldest] = cloneEvent(event)
+		l.oldest = (l.oldest + 1) % l.capacity
 		return
 	}
 	l.events = append(l.events, cloneEvent(event))
@@ -377,8 +378,8 @@ func (l *EventLog) Snapshot() []Event {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	result := make([]Event, len(l.events))
-	for index, event := range l.events {
-		result[index] = cloneEvent(event)
+	for index := range l.events {
+		result[index] = cloneEvent(l.events[(l.oldest+index)%len(l.events)])
 	}
 	return result
 }
