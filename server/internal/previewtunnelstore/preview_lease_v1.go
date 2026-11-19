@@ -485,7 +485,10 @@ func (s *Store) RenewPreviewLeaseV1(ctx context.Context, input RenewPreviewLease
 	}
 	now := input.Now.UTC()
 	var result RenewPreviewLeaseV1Result
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// The operation key is unique and advancing the generation locks the lease
+	// with an owner/session/generation CAS. Keep the lease, domains and
+	// certificates in that transaction while competing renewals queue on the CAS.
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if ws, selected := workspace.FromContext(ctx); selected {
 			if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 				return err

@@ -109,15 +109,17 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 		t.Fatalf("create operation was not completed: %#v", operation)
 	}
 
-	renewed, err := store.RenewPreviewLeaseV1(ctx, RenewPreviewLeaseV1Input{
+	renewInput := RenewPreviewLeaseV1Input{
 		OperationID: "op_renew_" + suffix, AuditEventID: "aud_renew_" + suffix, AccountID: accountID, ActorID: accountID, ActorType: "user",
 		PreviewID: created.Lease.ID, OwnerMachineID: "machine_" + suffix, OwnerSessionID: "session_" + suffix, ExpectedGeneration: 2, LeaseDeadline: now.Add(3 * time.Minute), RequestHash: sha256Bytes("preview-renew:" + suffix),
 		IdempotencyKey: "preview-renew:" + suffix, CorrelationID: "cor_renew_" + suffix, RequestID: "req_renew_" + suffix,
 		SourceMachineID: "machine_" + suffix, Now: now.Add(2 * time.Second),
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
+	rival := renewInput
+	rival.OperationID, rival.AuditEventID = "op_rival_renew_"+suffix, "aud_rival_renew_"+suffix
+	rival.IdempotencyKey = "preview-rival-renew:" + suffix
+	rival.RequestHash = sha256Bytes(rival.IdempotencyKey)
+	renewed, winningAuditID := racePreviewRenewals(t, ctx, database, store, renewInput, rival)
 	if renewed.Lease.Generation != 3 || !renewed.Lease.LastRenewedAt.After(ready.LastRenewedAt) {
 		t.Fatalf("renewed lease = %#v", renewed.Lease)
 	}
@@ -133,7 +135,7 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_preview_"+suffix, "preview-"+
 	}
 	var personAudits, hostAudits int
 	if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE id=$1),count(*) FILTER (WHERE id=$2) FROM paperboat.audit_events WHERE id IN ($1,$2)`,
-		"aud_renew_"+suffix, "aud_host_renew_"+suffix).Scan(&personAudits, &hostAudits); err != nil || personAudits != 1 || hostAudits != 0 {
+		winningAuditID, "aud_host_renew_"+suffix).Scan(&personAudits, &hostAudits); err != nil || personAudits != 1 || hostAudits != 0 {
 		t.Fatalf("renewal audit events: person %d, host %d, %v; want 1 and 0", personAudits, hostAudits, err)
 	}
 
@@ -387,4 +389,75 @@ INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,su
 		t.Fatal(err)
 	}
 	check(member, "private", false, ErrOwnerNotFound)
+}
+
+func racePreviewRenewals(t *testing.T, ctx context.Context, database *db.DB, store *Store, first, second RenewPreviewLeaseV1Input) (RenewPreviewLeaseV1Result, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	blocker, err := database.Pool().Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(ctx)
+	var pid int32
+	if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid() FROM paperboat.preview_leases
+WHERE id=$1 FOR NO KEY UPDATE`, first.PreviewID).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		result RenewPreviewLeaseV1Result
+		err    error
+		input  RenewPreviewLeaseV1Input
+	}
+	before := database.TransactionStats()
+	outcomes := make(chan outcome, 2)
+	for _, input := range []RenewPreviewLeaseV1Input{first, second} {
+		go func() {
+			result, err := store.RenewPreviewLeaseV1(ctx, input)
+			outcomes <- outcome{result, err, input}
+		}()
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting int
+		if err := database.Pool().QueryRow(ctx, `WITH RECURSIVE blocked(pid) AS (
+ SELECT $1::integer
+ UNION
+ SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid))
+ WHERE a.datname=current_database()
+) SELECT count(*)-1 FROM blocked`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 2 {
+			break
+		}
+		select {
+		case result := <-outcomes:
+			t.Fatalf("renewal finished before the lease lock was released: %v", result.err)
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	winner, loser := <-outcomes, <-outcomes
+	if winner.err != nil {
+		winner, loser = loser, winner
+	}
+	if winner.err != nil || !errors.Is(loser.err, ErrGenerationConflict) {
+		t.Fatalf("expected one renewal and one generation conflict, got %v and %v", winner.err, loser.err)
+	}
+	if retries := database.TransactionStats().Serializable.Retries - before.Serializable.Retries; retries != 0 {
+		t.Fatalf("preview renewals retried %d transaction attempts (40001/40P01)", retries)
+	}
+	var operations int
+	if err := database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.operations WHERE id IN ($1,$2)`,
+		first.OperationID, second.OperationID).Scan(&operations); err != nil || operations != 1 {
+		t.Fatalf("persisted renewal operations = %d, want 1, error = %v", operations, err)
+	}
+	return winner.result, winner.input.AuditEventID
 }
