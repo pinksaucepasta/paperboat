@@ -3,10 +3,8 @@
 package session
 
 import (
-	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"go.uber.org/goleak"
 )
@@ -15,18 +13,16 @@ import (
 // waiter goroutines behind; with -count=20 they pile up until the run times out.
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
-// shutdownAtEnd stops the manager's sessions and writer when the test ends, so no test leaves
-// goroutines for the next repetition.
-var verified sync.Map
+var leakChecked sync.Map // *testing.T already registered
 
-func shutdownAtEnd(t *testing.T, manager *Manager) {
-	t.Helper()
-	if _, seen := verified.LoadOrStore(t.Name(), true); !seen {
-		t.Cleanup(func() { goleak.VerifyNone(t, goleak.IgnoreAnyFunction("database/sql.(*DB).connectionOpener")) })
+// registerLeakCheck fails the test, by name, if goroutines remain once all its other cleanups ran
+// (the first call registers it, so it runs last).
+func registerLeakCheck(t *testing.T) {
+	if _, seen := leakChecked.LoadOrStore(t, true); seen {
+		return
 	}
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = manager.Shutdown(ctx)
+		leakChecked.Delete(t)
+		goleak.VerifyNone(t, goleak.IgnoreAnyFunction("database/sql.(*DB).connectionOpener"))
 	})
 }
