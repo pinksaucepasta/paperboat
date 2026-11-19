@@ -2,13 +2,13 @@
 
 import { LockSimpleIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { unlockVault } from "@/lib/envvault/vault"
 import { Button } from "@/components/ui/button"
 import { EnvRecover } from "@/components/environment/env-recover"
 import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * An inline card at the top of the variables: the password opens the vault inside this browser and
@@ -23,8 +23,8 @@ export function EnvUnlock({
   /** What unlocking is for, on pages other than ENV. */
   title?: string
 }) {
-  const [password, setPassword] = useState("")
-  const [recovering, setRecovering] = useState(false)
+  const [password, setPassword] = useShellState("environment/env-unlock.tsx:password", "")
+  const [recovering, setRecovering] = useShellState("environment/env-unlock.tsx:recovering", false)
   const client = useQueryClient()
   const unlock = useMutation({
     mutationFn: (secret: string) => unlockVault(secret),

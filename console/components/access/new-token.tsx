@@ -3,7 +3,7 @@
 import { CheckCircleIcon, KeyIcon, SlidersHorizontalIcon, WarningIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
-import { useId, useState } from "react"
+import { useId } from "react"
 import { clientConfigQuery, useApiQuery, useMachines, useWorkspace } from "@/lib/api"
 import { actionLabels, createApiToken, machineActions, namePattern, PolicyError, policyQuery } from "@/lib/policy"
 import { queryKeys } from "@/lib/query-keys"
@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Field } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const listPath = "/settings/api-tokens"
 const selectClass =
@@ -42,9 +43,9 @@ type Form = {
 
 /** Create token: choose Full access or Custom, fill the form, check the summary, copy the token once. */
 export function NewToken() {
-  const [mode, setMode] = useState<Mode | null>(null)
-  const [step, setStep] = useState<"form" | "summary">("form")
-  const [form, setForm] = useState<Form>({
+  const [mode, setMode] = useShellState<Mode | null>("access/new-token.tsx:mode", null)
+  const [step, setStep] = useShellState<"form" | "summary">("access/new-token.tsx:step", "form")
+  const [form, setForm] = useShellState<Form>("access/new-token.tsx:form", {
     name: "",
     expiry: "90",
     customDate: "",
@@ -55,12 +56,7 @@ export function NewToken() {
   const workspace = useWorkspace()
   const queryClient = useQueryClient()
   const now = useNow(60_000)
-  const days =
-    form.expiry === "custom"
-      ? form.customDate
-        ? daysUntil(form.customDate, now)
-        : 0
-      : Number(form.expiry)
+  const days = form.expiry === "custom" ? (form.customDate ? daysUntil(form.customDate, now) : 0) : Number(form.expiry)
   const create = useMutation({
     mutationFn: () =>
       createApiToken(workspace?.id ?? "", {
@@ -110,8 +106,18 @@ export function NewToken() {
 
 function Start({ onChoose }: { onChoose: (mode: Mode) => void }) {
   const choices = [
-    { mode: "full" as const, icon: KeyIcon, title: "Full access", detail: "Acts as you: everything you can do in this workspace." },
-    { mode: "custom" as const, icon: SlidersHorizontalIcon, title: "Custom", detail: "Choose the machines and what the token may do on them." },
+    {
+      mode: "full" as const,
+      icon: KeyIcon,
+      title: "Full access",
+      detail: "Acts as you: everything you can do in this workspace.",
+    },
+    {
+      mode: "custom" as const,
+      icon: SlidersHorizontalIcon,
+      title: "Custom",
+      detail: "Choose the machines and what the token may do on them.",
+    },
   ]
   return (
     <div className="flex flex-col gap-3">
@@ -122,7 +128,7 @@ function Start({ onChoose }: { onChoose: (mode: Mode) => void }) {
             key={mode}
             type="button"
             onClick={() => onChoose(mode)}
-            className="surface flex flex-col items-start gap-3 rounded-lg p-5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="flex flex-col items-start gap-3 surface rounded-lg p-5 text-left transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30"
           >
             <Icon className="size-5 text-muted-foreground" />
             <span className="flex flex-col gap-1">
@@ -224,7 +230,9 @@ function TokenForm({
               />
             )}
           </div>
-          <span className="min-h-5 text-xs text-muted-foreground">{expires && `Expires on ${time.date(expires.toISOString(), "date")}`}</span>
+          <span className="min-h-5 text-xs text-muted-foreground">
+            {expires && `Expires on ${time.date(expires.toISOString(), "date")}`}
+          </span>
         </div>
       </Block>
       {mode === "custom" && (
@@ -280,7 +288,13 @@ function MachinesBlock({ form, onChange }: { form: Form; onChange: (next: Partia
       </div>
       {form.machines === "selected" && (
         <div className="max-w-md">
-          <TokenMachines labelledBy={labelId} tags={tags} names={policy.data?.names.machines ?? []} value={form.targets} onChange={(targets) => onChange({ targets })} />
+          <TokenMachines
+            labelledBy={labelId}
+            tags={tags}
+            names={policy.data?.names.machines ?? []}
+            value={form.targets}
+            onChange={(targets) => onChange({ targets })}
+          />
         </div>
       )}
     </Block>
@@ -292,7 +306,10 @@ function PermissionTable({ actions, onChange }: { actions: string[]; onChange: (
   return (
     <ul className="flex flex-col border-t border-divider">
       {machineActions.map((action) => (
-        <li key={action} className="flex min-h-14 items-center justify-between gap-4 border-b border-divider py-2 text-sm">
+        <li
+          key={action}
+          className="flex min-h-14 items-center justify-between gap-4 border-b border-divider py-2 text-sm"
+        >
           <span className="flex min-w-0 flex-col">
             <span className="font-medium">{actionLabels[action]}</span>
             <span className="text-muted-foreground">{permissionDetails[action]}</span>
@@ -332,8 +349,7 @@ function Summary({
   onCreate: () => void
 }) {
   const time = useTimeFormat()
-  const machines =
-    form.machines === "all" ? "All machines" : form.targets.map(targetName).join(", ")
+  const machines = form.machines === "all" ? "All machines" : form.targets.map(targetName).join(", ")
   const rows = [
     ["Name", form.name],
     ["Expires", expires ? time.date(expires.toISOString(), "date") : ""],
@@ -348,9 +364,12 @@ function Summary({
   return (
     <div className="flex flex-col gap-4">
       <SectionHeading title="Summary" />
-      <dl className="surface flex flex-col rounded-lg px-4 py-1 text-sm">
+      <dl className="flex flex-col surface rounded-lg px-4 py-1 text-sm">
         {rows.map(([label, value]) => (
-          <div key={label} className="flex flex-col gap-1 border-b border-divider py-3 last:border-b-0 sm:flex-row sm:gap-6">
+          <div
+            key={label}
+            className="flex flex-col gap-1 border-b border-divider py-3 last:border-b-0 sm:flex-row sm:gap-6"
+          >
             <dt className="w-32 shrink-0 text-muted-foreground">{label}</dt>
             <dd className="min-w-0 break-words">{value}</dd>
           </div>

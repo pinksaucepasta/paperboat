@@ -18,11 +18,7 @@ import {
 } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
 import { useLastCount } from "@/lib/last-count"
-import {
-  SendFilesButton,
-  SendFilesDialog,
-  SendToMachineDialog,
-} from "@/components/files/file-dialogs"
+import { SendFilesButton, SendFilesDialog, SendToMachineDialog } from "@/components/files/file-dialogs"
 import { DropOverlay, usePageFileDrop } from "@/components/file-drop"
 import { ShareDialog, ShareFileButton } from "@/components/files/share-dialog"
 import { Transfers } from "@/components/files/transfers"
@@ -37,6 +33,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const filesOf = (id: string) => `/files?machine=${encodeURIComponent(id)}`
 
@@ -72,12 +69,15 @@ function ChooseMachine() {
     <>
       {drop.over && !drop.files.length && <DropOverlay title="Drop to send" detail="Then choose the machines" />}
       {drop.files.length > 0 && <SendFilesDialog choose files={drop.files} onClose={drop.clear} />}
-      <MachineChooser href={filesOf} action={
+      <MachineChooser
+        href={filesOf}
+        action={
           <>
             <ShareFileButton />
             <SendFilesButton choose />
           </>
-        } />
+        }
+      />
     </>
   )
 }
@@ -90,17 +90,18 @@ function MachineInbox({ machineId }: { machineId: string }) {
     ...inboxQuery(machineId, workspace?.id ?? ""),
     enabled: Boolean(workspace && machine?.online),
   })
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useShellState("files/file-list.tsx:search", "")
   const q = useDeferredValue(search.trim().toLowerCase())
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [deletingSelected, setDeletingSelected] = useState(false)
+  const [selected, setSelected] = useShellState<Set<string>>("files/file-list.tsx:selected", new Set())
+  const [deletingSelected, setDeletingSelected] = useShellState("files/file-list.tsx:deletingSelected", false)
   const drop = usePageFileDrop()
 
-  const offline = (machine && !machine.online) || (inbox.error instanceof ApiError && inbox.error.code === "machine_offline")
+  const offline =
+    (machine && !machine.online) || (inbox.error instanceof ApiError && inbox.error.code === "machine_offline")
   const outdated = inbox.error instanceof ApiError && inbox.error.code === "machine_update_required"
   const loading = !machine || (machine.online && inbox.isPending && !offline)
   const owner = { id: machineId, alias: machine?.alias ?? "" }
-  const lastRows = useLastCount(`files:${machineId}`, inbox.data ? inbox.data.items?.length ?? 0 : undefined)
+  const lastRows = useLastCount(`files:${machineId}`, inbox.data ? (inbox.data.items?.length ?? 0) : undefined)
   const rows: Row[] = (inbox.data?.items ?? [])
     .filter((file) => !q || file.name.toLowerCase().includes(q))
     .map((file) => ({ file, machine: owner }))
@@ -199,25 +200,27 @@ function MachineInbox({ machineId }: { machineId: string }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-divider border-b border-divider">
-              {loading && !rows.length
-                ? <TableRowsSkeleton
-                    rows={lastRows}
-                    columns={[
-                      { bar: "w-4" },
-                      { bar: "w-48" },
-                      { className: "hidden text-right sm:table-cell", bar: "w-12" },
-                      { className: "hidden sm:table-cell", bar: "w-24" },
-                      { empty: true },
-                    ]}
+              {loading && !rows.length ? (
+                <TableRowsSkeleton
+                  rows={lastRows}
+                  columns={[
+                    { bar: "w-4" },
+                    { bar: "w-48" },
+                    { className: "hidden text-right sm:table-cell", bar: "w-12" },
+                    { className: "hidden sm:table-cell", bar: "w-24" },
+                    { empty: true },
+                  ]}
+                />
+              ) : (
+                rows.map((row) => (
+                  <FileRow
+                    key={rowKey(row)}
+                    row={row}
+                    selected={selected.has(rowKey(row))}
+                    onSelect={(on) => toggle(rowKey(row), on)}
                   />
-                : rows.map((row) => (
-                    <FileRow
-                      key={rowKey(row)}
-                      row={row}
-                      selected={selected.has(rowKey(row))}
-                      onSelect={(on) => toggle(rowKey(row), on)}
-                    />
-                  ))}
+                ))
+              )}
             </tbody>
           </table>
           {!loading && rows.length === 0 && q && (
@@ -235,8 +238,12 @@ function MachineInbox({ machineId }: { machineId: string }) {
               </button>
             </p>
           )}
-          {outdated && <p className="text-sm text-muted-foreground">Update Paperboat on {owner.alias} to browse its Inbox here.</p>}
-          {truncated && <p className="text-sm text-muted-foreground">Showing the newest 200 files of {owner.alias}’s Inbox.</p>}
+          {outdated && (
+            <p className="text-sm text-muted-foreground">Update Paperboat on {owner.alias} to browse its Inbox here.</p>
+          )}
+          {truncated && (
+            <p className="text-sm text-muted-foreground">Showing the newest 200 files of {owner.alias}’s Inbox.</p>
+          )}
         </div>
       )}
 
@@ -261,16 +268,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
   )
 }
 
-
-function FileRow({
-  row,
-  selected,
-  onSelect,
-}: {
-  row: Row
-  selected: boolean
-  onSelect: (on: boolean) => void
-}) {
+function FileRow({ row, selected, onSelect }: { row: Row; selected: boolean; onSelect: (on: boolean) => void }) {
   const queryClient = useQueryClient()
   const { file, machine } = row
   const [dialog, setDialog] = useState<"share" | "send" | "delete" | null>(null)
@@ -343,7 +341,9 @@ function FileRow({
       row={rowOf}
       dialogs={
         <>
-          {dialog === "share" && <ShareDialog source={{ kind: "inbox", machine, file }} onClose={() => setDialog(null)} />}
+          {dialog === "share" && (
+            <ShareDialog source={{ kind: "inbox", machine, file }} onClose={() => setDialog(null)} />
+          )}
           {dialog === "send" && <SendToMachineDialog machine={machine} file={file} onClose={() => setDialog(null)} />}
           <ConfirmAction
             open={dialog === "delete"}

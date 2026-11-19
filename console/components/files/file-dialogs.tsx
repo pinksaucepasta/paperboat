@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** A machine can take files while it's online and its Paperboat service receives them. */
 export function canReceive(machine: Machine) {
@@ -27,7 +28,7 @@ type Run = { machine: Pick<Machine, "id" | "alias">; uploads: Upload[] }
 
 /** `choose`: no machine is in context (the Choose machine page), so none is picked until the person picks. */
 export function SendFilesButton({ machine, choose }: { machine?: Machine; choose?: boolean }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("files/file-dialogs.tsx:open", false)
   return (
     <>
       <Button size="lg" onClick={() => setOpen(true)}>
@@ -57,7 +58,10 @@ function UploadRow({ entry }: { entry: Upload }) {
       </div>
       {entry.state === "sending" && (
         <div className="h-1 overflow-hidden rounded-full bg-muted">
-          <div className="h-full bg-primary transition-[width]" style={{ width: `${Math.round(entry.progress * 100)}%` }} />
+          <div
+            className="h-full bg-primary transition-[width]"
+            style={{ width: `${Math.round(entry.progress * 100)}%` }}
+          />
         </div>
       )}
       {entry.error && <p className="text-xs text-destructive">{entry.error}</p>}
@@ -97,7 +101,9 @@ function MachineChips({
           )}
         </Badge>
       ))}
-      {!selected.length && !rest.length && <span className="font-medium text-foreground">{pending ? "…" : "no machine"}</span>}
+      {!selected.length && !rest.length && (
+        <span className="font-medium text-foreground">{pending ? "…" : "no machine"}</span>
+      )}
       {rest.length > 0 && (
         <Choice
           label="Add machine"
@@ -147,7 +153,7 @@ export function SendFilesDialog({
   // The upload rides a terminal connection, so a machine must host terminals as well as receive files.
   const usable = (machines.data ?? []).filter((entry) => canReceive(entry) && canHostTerminal(entry))
   // Until the person changes it, the destination is the page's machine, else the first usable one.
-  const [picked, setPicked] = useState<string[]>()
+  const [picked, setPicked] = useShellState<string[]>("files/file-dialogs.tsx:picked")
   const fallback = choose ? undefined : (usable.find((entry) => entry.id === machine?.id) ?? usable[0])
   const selected = picked ? usable.filter((entry) => picked.includes(entry.id)) : fallback ? [fallback] : []
   const ids = selected.map((entry) => entry.id)
@@ -185,7 +191,11 @@ export function SendFilesDialog({
       // Files of the batches before the failed one arrived; the rest keep the machine's reason.
       const delivered = error instanceof InboxUploadFailed ? error.filesDone : 0
       files.forEach((_, index) =>
-        update(run, index, index < delivered ? { state: "sent", progress: 1 } : { state: "failed", error: (error as Error).message }),
+        update(
+          run,
+          index,
+          index < delivered ? { state: "sent", progress: 1 } : { state: "failed", error: (error as Error).message },
+        ),
       )
     }
   }
@@ -193,7 +203,12 @@ export function SendFilesDialog({
   const start = async (files: File[]) => {
     if (!selected.length || !files.length) return
     const targets = selected
-    setRuns(targets.map((entry) => ({ machine: entry, uploads: files.map((file) => ({ file, progress: 0, state: "waiting" })) })))
+    setRuns(
+      targets.map((entry) => ({
+        machine: entry,
+        uploads: files.map((file) => ({ file, progress: 0, state: "waiting" })),
+      })),
+    )
     // Machines run in parallel; one failing never stops the others (sendTo catches its own errors).
     await Promise.all(targets.map((entry, run) => sendTo(run, entry, files)))
     await queryClient.invalidateQueries({ queryKey: fileKeys.inboxes })
@@ -290,7 +305,11 @@ export function SendFilesDialog({
             >
               <UploadSimpleIcon className="size-5 text-muted-foreground" />
               <span className="font-medium">
-                {waiting ? `${waiting} ${waiting === 1 ? "file" : "files"} waiting` : over ? "Drop to send" : "Drop files here"}
+                {waiting
+                  ? `${waiting} ${waiting === 1 ? "file" : "files"} waiting`
+                  : over
+                    ? "Drop to send"
+                    : "Drop files here"}
               </span>
               <span className="text-xs text-muted-foreground">
                 {waiting ? "They send once you choose a machine" : "or click to choose"}
@@ -336,7 +355,7 @@ export function SendToMachineDialog({
   const queryClient = useQueryClient()
   const machines = useMachines()
   const others = (machines.data ?? []).filter((entry) => entry.id !== machine.id && canReceive(entry))
-  const [chosen, setChosen] = useState<string>()
+  const [chosen, setChosen] = useShellState<string>("files/file-dialogs.tsx:chosen")
   const target = others.find((entry) => entry.id === chosen) ?? others[0]
   const send = useMutation({
     mutationFn: () => sendToMachine(machine.id, file.id, target!.id),

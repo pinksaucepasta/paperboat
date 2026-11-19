@@ -31,13 +31,14 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The Git repositories your machines can sync config with: connect one, disconnect one. */
 export function ConfigRepositories() {
   const queryClient = useQueryClient()
   const pages = usePageParam("config-repositories")
   const query = useApiQuery(configRepositoriesQuery(pages.page))
-  const [connecting, setConnecting] = useState(false)
+  const [connecting, setConnecting] = useShellState("config/repositories.tsx:connecting", false)
   const [removing, setRemoving] = useState<ConfigRepository | null>(null)
   const items = query.data?.items ?? []
   return (
@@ -60,7 +61,10 @@ export function ConfigRepositories() {
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">No repositories connected.</p>
       ) : (
         items.map((repository) => (
-          <div key={repository.id} className="flex min-h-12 items-center justify-between gap-4 border-b border-divider text-sm">
+          <div
+            key={repository.id}
+            className="flex min-h-12 items-center justify-between gap-4 border-b border-divider text-sm"
+          >
             <div className="flex min-w-0 flex-col">
               <span className="truncate font-medium">{repository.display_name || repository.external_ref}</span>
               {repository.provider === "github" ? (
@@ -79,7 +83,12 @@ export function ConfigRepositories() {
         ))
       )}
       {query.data && (
-        <ListPager page={pages.page} size={configRepositoriesPageSize} total={query.data.pagination.total} go={pages.go} />
+        <ListPager
+          page={pages.page}
+          size={configRepositoriesPageSize}
+          total={query.data.pagination.total}
+          go={pages.go}
+        />
       )}
       {connecting && <ConnectDialog onClose={() => setConnecting(false)} />}
       {removing && (
@@ -107,7 +116,7 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
   // GitHub repositories can be picked once your GitHub account is linked; any Git URL always works.
   const linked = useApiQuery(githubStatusQuery).data?.connected === true
-  const [chosen, setSource] = useState<"github" | "git">("github")
+  const [chosen, setSource] = useShellState<"github" | "git">("config/repositories.tsx:chosen", "github")
   const source = linked ? chosen : "git"
   const done = () => {
     void queryClient.invalidateQueries({ queryKey: ["config-sync"] })
@@ -195,9 +204,9 @@ function GitHubPicker({ onDone }: { onDone: () => void }) {
 }
 
 function GitUrlForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const [url, setUrl] = useState("")
-  const [name, setName] = useState("")
-  const [branch, setBranch] = useState("main")
+  const [url, setUrl] = useShellState("config/repositories.tsx:url", "")
+  const [name, setName] = useShellState("config/repositories.tsx:name", "")
+  const [branch, setBranch] = useShellState("config/repositories.tsx:branch", "main")
   const connect = useMutation({
     mutationFn: () =>
       connectRepository({

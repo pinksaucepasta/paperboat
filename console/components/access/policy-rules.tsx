@@ -13,8 +13,16 @@ import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/u
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useShellState } from "@/lib/use-shell-state"
 
-type Rule = { src: string[]; dst: string[]; allow?: string[]; deny?: string[]; ports?: (number | string)[]; note?: string }
+type Rule = {
+  src: string[]
+  dst: string[]
+  allow?: string[]
+  deny?: string[]
+  ports?: (number | string)[]
+  note?: string
+}
 const known = ["src", "dst", "allow", "deny", "ports", "note"]
 const list = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string")
 
@@ -33,9 +41,22 @@ export function readRules(text: string): { rules: Rule[] } | { problem: string }
     const rule = item.kind === "object" ? (valueOf(text, item) as Record<string, unknown>) : undefined
     const extra = rule && Object.keys(rule).find((key) => !known.includes(key))
     const ports = rule?.ports
-    const portsOk = ports === undefined || (Array.isArray(ports) && ports.every((p) => typeof p === "number" || typeof p === "string"))
-    if (!rule || extra || !list(rule.src) || !list(rule.dst) || !portsOk || (rule.allow !== undefined && !list(rule.allow)) || (rule.deny !== undefined && !list(rule.deny)) || (rule.note !== undefined && typeof rule.note !== "string")) {
-      return { problem: `Rule ${index + 1} ${extra ? `has a key, “${extra}”,` : "has a shape"} that the table cannot show.` }
+    const portsOk =
+      ports === undefined ||
+      (Array.isArray(ports) && ports.every((p) => typeof p === "number" || typeof p === "string"))
+    if (
+      !rule ||
+      extra ||
+      !list(rule.src) ||
+      !list(rule.dst) ||
+      !portsOk ||
+      (rule.allow !== undefined && !list(rule.allow)) ||
+      (rule.deny !== undefined && !list(rule.deny)) ||
+      (rule.note !== undefined && typeof rule.note !== "string")
+    ) {
+      return {
+        problem: `Rule ${index + 1} ${extra ? `has a key, “${extra}”,` : "has a shape"} that the table cannot show.`,
+      }
     }
     rules.push(rule as Rule)
   }
@@ -63,13 +84,11 @@ export function PolicyRules({
   openFile: () => void
 }) {
   const read = readRules(text)
-  const [editing, setEditing] = useState<{ index: number; rule?: Rule }>()
+  const [editing, setEditing] = useShellState<{ index: number; rule?: Rule }>("access/policy-rules.tsx:editing")
   if ("problem" in read) {
     return (
       <div className="flex flex-col items-start gap-3 surface rounded-lg p-4 text-sm" data-policy-rules="unsupported">
-        <p>
-          {read.problem} Edit this file as text.
-        </p>
+        <p>{read.problem} Edit this file as text.</p>
         <Button variant="outline" onClick={openFile}>
           Open the file
         </Button>
@@ -122,10 +141,20 @@ export function PolicyRules({
                   </div>
                   {editable && (
                     <div className="flex shrink-0 gap-1">
-                      <Button variant="ghost" size="icon" aria-label={`Edit rule ${index + 1}`} onClick={() => setEditing({ index, rule })}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Edit rule ${index + 1}`}
+                        onClick={() => setEditing({ index, rule })}
+                      >
                         <PencilSimpleIcon />
                       </Button>
-                      <Button variant="ghost" size="icon" aria-label={`Delete rule ${index + 1}`} onClick={() => onChange(setItem(text, "rules", index, undefined))}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Delete rule ${index + 1}`}
+                        onClick={() => onChange(setItem(text, "rules", index, undefined))}
+                      >
                         <TrashIcon />
                       </Button>
                     </div>
@@ -173,12 +202,18 @@ function RuleDialog({
   onClose: () => void
   onSave: (rule: Rule) => void
 }) {
-  const [kind, setKind] = useState<"allow" | "deny">(initial?.deny ? "deny" : "allow")
-  const [who, setWho] = useState(csv(initial?.src))
-  const [where, setWhere] = useState(csv(initial?.dst))
-  const [actions, setActions] = useState<string[]>(initial?.deny ?? initial?.allow ?? ["terminal"])
-  const [ports, setPorts] = useState(csv(initial?.ports))
-  const [note, setNote] = useState(initial?.note ?? "")
+  const [kind, setKind] = useShellState<"allow" | "deny">(
+    "access/policy-rules.tsx:kind",
+    initial?.deny ? "deny" : "allow",
+  )
+  const [who, setWho] = useShellState("access/policy-rules.tsx:who", csv(initial?.src))
+  const [where, setWhere] = useShellState("access/policy-rules.tsx:where", csv(initial?.dst))
+  const [actions, setActions] = useShellState<string[]>(
+    "access/policy-rules.tsx:actions",
+    initial?.deny ?? initial?.allow ?? ["terminal"],
+  )
+  const [ports, setPorts] = useShellState("access/policy-rules.tsx:ports", csv(initial?.ports))
+  const [note, setNote] = useShellState("access/policy-rules.tsx:note", initial?.note ?? "")
   const [error, setError] = useState<string>()
   const groups = Object.keys((parseFile(text).groups as object) ?? {})
   const tags = Object.keys((parseFile(text).tags as object) ?? {})
@@ -213,19 +248,41 @@ function RuleDialog({
         </ToggleGroup>
         <Field className="gap-1.5">
           <FieldLabel htmlFor="rule-who">Who</FieldLabel>
-          <Input id="rule-who" list="rule-who-names" value={who} autoComplete="off" spellCheck={false} placeholder="group:platform, user:ana@example.test" onChange={(e) => setWho(e.target.value)} />
+          <Input
+            id="rule-who"
+            list="rule-who-names"
+            value={who}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="group:platform, user:ana@example.test"
+            onChange={(e) => setWho(e.target.value)}
+          />
           <datalist id="rule-who-names">
-            {[...named("user:", policy.names.users), ...named("group:", groups), "role:admin", "role:member", "*"].map((n) => (
-              <option key={n} value={n} />
-            ))}
+            {[...named("user:", policy.names.users), ...named("group:", groups), "role:admin", "role:member", "*"].map(
+              (n) => (
+                <option key={n} value={n} />
+              ),
+            )}
           </datalist>
           <span className="text-xs text-muted-foreground">Separate with commas.</span>
         </Field>
         <Field className="gap-1.5">
           <FieldLabel htmlFor="rule-where">Machines</FieldLabel>
-          <Input id="rule-where" list="rule-where-names" value={where} autoComplete="off" spellCheck={false} placeholder="tag:ci, machine:db1" onChange={(e) => setWhere(e.target.value)} />
+          <Input
+            id="rule-where"
+            list="rule-where-names"
+            value={where}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="tag:ci, machine:db1"
+            onChange={(e) => setWhere(e.target.value)}
+          />
           <datalist id="rule-where-names">
-            {[...named("tag:", tags.length ? tags : policy.names.tags), ...named("machine:", policy.names.machines), "machine:*"].map((n) => (
+            {[
+              ...named("tag:", tags.length ? tags : policy.names.tags),
+              ...named("machine:", policy.names.machines),
+              "machine:*",
+            ].map((n) => (
               <option key={n} value={n} />
             ))}
           </datalist>
@@ -235,7 +292,10 @@ function RuleDialog({
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             {machineActions.map((action) => (
               <label key={action} className="flex items-center gap-2 text-sm">
-                <Checkbox checked={actions.includes(action)} onCheckedChange={(on) => setActions(on ? [...actions, action] : actions.filter((a) => a !== action))} />
+                <Checkbox
+                  checked={actions.includes(action)}
+                  onCheckedChange={(on) => setActions(on ? [...actions, action] : actions.filter((a) => a !== action))}
+                />
                 {actionLabels[action]}
               </label>
             ))}
@@ -247,7 +307,13 @@ function RuleDialog({
               <FieldLabel htmlFor="rule-ports">Ports</FieldLabel>
               <span className="text-xs text-muted-foreground">Optional</span>
             </div>
-            <Input id="rule-ports" value={ports} spellCheck={false} placeholder="5432, 8000-8100" onChange={(e) => setPorts(e.target.value)} />
+            <Input
+              id="rule-ports"
+              value={ports}
+              spellCheck={false}
+              placeholder="5432, 8000-8100"
+              onChange={(e) => setPorts(e.target.value)}
+            />
           </Field>
         )}
         <Field className="gap-1.5">

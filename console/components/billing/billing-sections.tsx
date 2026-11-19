@@ -28,9 +28,9 @@ import { Input } from "@/components/ui/input"
 import { CheckoutConsent } from "@/components/billing/checkout-consent"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const gigabyte = 1e9
-
 
 /** Refetches the plan after any change so every row shows the server's state. */
 function useRefreshBilling(workspace: Workspace) {
@@ -46,8 +46,7 @@ function PreviewLine({ preview, pending }: { preview?: ChangePreview; pending: b
   return (
     <span className="text-muted-foreground">
       {formatMoney(preview.amount_due_now, preview.currency)} now · then{" "}
-      {formatMoney(preview.next_invoice_amount, preview.currency)} on{" "}
-      {time.date(preview.next_invoice_at, "date")}
+      {formatMoney(preview.next_invoice_amount, preview.currency)} on {time.date(preview.next_invoice_at, "date")}
     </span>
   )
 }
@@ -59,7 +58,7 @@ function PreviewLine({ preview, pending }: { preview?: ChangePreview; pending: b
 export function Seats({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
   const bought = billing.seats_bought
   const used = billing.seats_used ?? billing.members
-  const [quantity, setQuantity] = useState(bought)
+  const [quantity, setQuantity] = useShellState("billing/billing-sections.tsx:quantity", bought)
   const refresh = useRefreshBilling(workspace)
   const changed = quantity !== bought
   const preview = useApiQuery({ ...seatPreviewQuery(workspace, quantity), enabled: billingLive.seats && changed })
@@ -144,7 +143,9 @@ export function PlanActions({ workspace, billing }: { workspace: Workspace; bill
   const current = billing.product
   const other =
     current &&
-    products.data?.find((p) => p.catalog_type === current.catalog_type && p.interval !== current.interval && p.price_verified)
+    products.data?.find(
+      (p) => p.catalog_type === current.catalog_type && p.interval !== current.interval && p.price_verified,
+    )
   if (!current || !billing.can_manage || billing.granted || planEnded(billing, time.now)) return null
   return (
     <>
@@ -180,8 +181,8 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
   const step = product?.unit_bytes ?? topupDefaults.unitBytes
   const max = product?.max_quantity ?? topupDefaults.maxQuantity
   const time = useTimeFormat()
-  const [units, setUnits] = useState(1)
-  const [terms, setTerms] = useState<string | null>(null)
+  const [units, setUnits] = useShellState("billing/billing-sections.tsx:units", 1)
+  const [terms, setTerms] = useShellState<string | null>("billing/billing-sections.tsx:terms", null)
   // Same rule as plan Checkout: an unknown provider outcome keeps the key so a retry can't buy twice.
   const [key, setKey] = useState(idempotencyKey)
   const buy = useMutation({

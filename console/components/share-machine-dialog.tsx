@@ -2,7 +2,6 @@
 
 import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import {
   api,
@@ -22,6 +21,7 @@ import { StatusDot } from "@/components/machine-status"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Share one of your machines with a team: machines join a team by being shared from their owner's
@@ -29,7 +29,7 @@ import { ErrorMessage } from "@/components/error-reference"
  */
 export function ShareMachine({ team, onDone }: { team: Workspace; onDone: () => void }) {
   const queryClient = useQueryClient()
-  const [mode, setMode] = useState<"share" | "move">("share")
+  const [mode, setMode] = useShellState<"share" | "move">("share-machine-dialog.tsx:mode", "share")
   const { primary: primaryDomain } = useMachineDomains()
   const { data: me } = useApiQuery(meQuery)
   const { data: workspaces } = useApiQuery(workspacesQuery)

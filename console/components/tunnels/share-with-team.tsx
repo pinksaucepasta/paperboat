@@ -1,13 +1,13 @@
 "use client"
 
 import { useMutation } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, workspacesQuery } from "@/lib/api"
 import { attachResource } from "@/lib/teams"
 import { Section, SettingRow } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Attach your preview or tunnel to a team you run, or detach it. Attaching alone lets nobody use it;
@@ -18,7 +18,7 @@ export function ShareWithTeam({ kind, id }: { kind: "preview" | "tunnel"; id: st
   const teams = (useApiQuery(workspacesQuery).data ?? []).filter(
     (workspace) => workspace.kind === "team" && (workspace.role === "owner" || workspace.role === "admin"),
   )
-  const [team, setTeam] = useState("")
+  const [team, setTeam] = useShellState("tunnels/share-with-team.tsx:team", "")
   const chosen = team || teams[0]?.id
   const change = useMutation({
     mutationFn: (active: boolean) => attachResource({ team_id: chosen! }, kind, id, active),

@@ -1,7 +1,6 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { actionLabels, PolicyError, type AccessChange, type Policy, type Validation } from "@/lib/policy"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -9,6 +8,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Review, then save or restore. Lists who gains and loses access, then runs the change with the
@@ -34,8 +34,11 @@ export function ChangesDialog({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  const [message, setMessage] = useState("")
-  const [pending, setPending] = useState<{ changes: AccessChange[]; confirm: string } | null>(null)
+  const [message, setMessage] = useShellState("access/changes-dialog.tsx:message", "")
+  const [pending, setPending] = useShellState<{ changes: AccessChange[]; confirm: string } | null>(
+    "access/changes-dialog.tsx:pending",
+    null,
+  )
   const reviewed = useQuery({
     queryKey: ["policy-review", workspace, title],
     queryFn: ({ signal }) => review!(signal),

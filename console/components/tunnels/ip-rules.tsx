@@ -2,7 +2,6 @@
 
 import { XIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery } from "@/lib/api"
 import { ipRulesQuery, saveIpRules, type IPRules as Rules } from "@/lib/tunnels"
@@ -14,6 +13,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** A tunnel's or preview's IP rules: who may reach it by address, checked by the edge before your app. */
 export function IpRules({ kind, id }: { kind: "tunnel" | "preview"; id: string }) {
@@ -43,7 +43,10 @@ export function IpRules({ kind, id }: { kind: "tunnel" | "preview"; id: string }
 
 function RulesForm({ kind, id, saved }: { kind: "tunnel" | "preview"; id: string; saved: Rules }) {
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState<Rules>({ allow: saved.allow ?? [], deny: saved.deny ?? [] })
+  const [draft, setDraft] = useShellState<Rules>("tunnels/ip-rules.tsx:draft", {
+    allow: saved.allow ?? [],
+    deny: saved.deny ?? [],
+  })
   const dirty = JSON.stringify(draft) !== JSON.stringify({ allow: saved.allow ?? [], deny: saved.deny ?? [] })
   const save = useMutation({
     mutationFn: () => saveIpRules(kind, id, draft),
@@ -74,9 +77,11 @@ function RulesForm({ kind, id, saved }: { kind: "tunnel" | "preview"; id: string
           values={draft.deny}
           onChange={(deny) => setDraft({ ...draft, deny })}
         />
-        {save.isError && <FieldError>
+        {save.isError && (
+          <FieldError>
             <ErrorMessage error={save.error} message={save.error.message.replace(/^ip rules invalid: /, "")} />
-          </FieldError>}
+          </FieldError>
+        )}
       </div>
     </Section>
   )
@@ -94,7 +99,7 @@ function ChipField({
   values: string[]
   onChange: (values: string[]) => void
 }) {
-  const [typed, setTyped] = useState("")
+  const [typed, setTyped] = useShellState("tunnels/ip-rules.tsx:typed", "")
   const commit = () => {
     const entries = typed.split(/[\s,]+/).filter(Boolean)
     setTyped("")
@@ -106,7 +111,7 @@ function ChipField({
       <FieldLabel htmlFor={field}>{label}</FieldLabel>
       <div className="flex min-h-8 flex-wrap items-center gap-1.5 rounded-md bg-surface px-2 py-1">
         {values.map((value) => (
-          <Badge key={value} variant="outline" className="gap-1 font-mono font-normal text-code">
+          <Badge key={value} variant="outline" className="gap-1 font-mono text-code font-normal">
             {value}
             <button
               type="button"
@@ -132,7 +137,7 @@ function ChipField({
           onBlur={commit}
           spellCheck={false}
           autoComplete="off"
-          className="h-6 min-w-40 flex-1 border-0 bg-transparent px-1 font-mono shadow-none focus-visible:ring-0 dark:bg-transparent md:text-code"
+          className="h-6 min-w-40 flex-1 border-0 bg-transparent px-1 font-mono shadow-none focus-visible:ring-0 md:text-code dark:bg-transparent"
         />
       </div>
       <p className="text-xs text-muted-foreground">{hint}</p>

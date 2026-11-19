@@ -24,6 +24,7 @@ import { Switch } from "@/components/ui/switch"
 import { ended } from "@/components/tunnels/preview-list"
 import { useNow } from "@/lib/use-now"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 type StatusClass = "all" | "2xx" | "3xx" | "4xx" | "5xx"
 const METHODS = ["All", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
@@ -99,16 +100,19 @@ function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => un
   const [paused, setPaused] = useState(false)
   const feed = useCaptureFeed(channel, preview.id, paused)
   const [selected, setSelected] = useState("")
-  const [method, setMethod] = useState("All")
-  const [status, setStatus] = useState<StatusClass>("all")
-  const [search, setSearch] = useState("")
+  const [method, setMethod] = useShellState("tunnels/inspector-page.tsx:method", "All")
+  const [status, setStatus] = useShellState<StatusClass>("tunnels/inspector-page.tsx:status", "all")
+  const [search, setSearch] = useShellState("tunnels/inspector-page.tsx:search", "")
   const text = useDeferredValue(search.trim().toLowerCase())
-  const [clearing, setClearing] = useState(false)
+  const [clearing, setClearing] = useShellState("tunnels/inspector-page.tsx:clearing", false)
 
   // Final states replace the page; while reconnecting the last list stays visible under a notice.
   if (!routing && channel.phase !== "ready" && feed.records.length === 0)
     return <State title="Waiting for the preview" detail={waiting} />
-  if (channel.phase !== "ready" && (feed.records.length === 0 || ["denied", "update", "gone"].includes(channel.phase))) {
+  if (
+    channel.phase !== "ready" &&
+    (feed.records.length === 0 || ["denied", "update", "gone"].includes(channel.phase))
+  ) {
     const [title, detail] = phases[channel.phase]
     return <State title={title} detail={channel.phase === "denied" && channel.message ? channel.message : detail} />
   }
@@ -157,7 +161,10 @@ function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => un
               <Switch checked={feed.capture === "on"} onCheckedChange={(on) => void policy(on, feed.bodies)} />
               Capture
             </label>
-            <label className="flex items-center gap-2" title="Keep request and response bodies on the machine; needed to replay">
+            <label
+              className="flex items-center gap-2"
+              title="Keep request and response bodies on the machine; needed to replay"
+            >
               <Switch
                 checked={feed.bodies}
                 disabled={feed.capture !== "on"}

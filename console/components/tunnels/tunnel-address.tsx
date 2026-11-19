@@ -4,16 +4,31 @@ import { toast } from "sonner"
 import { CheckIcon, PencilSimpleIcon, WarningIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { addressParts, hostOf, patchTunnel, subdomainAvailabilityQuery, subdomainPattern, type Tunnel } from "@/lib/tunnels"
+import {
+  addressParts,
+  hostOf,
+  patchTunnel,
+  subdomainAvailabilityQuery,
+  subdomainPattern,
+  type Tunnel,
+} from "@/lib/tunnels"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The pencil next to a tunnel's address; opens the dialog that picks a new one. */
 export function ChangeAddress({ tunnel, disabled }: { tunnel: Tunnel; disabled?: boolean }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("tunnels/tunnel-address.tsx:open", false)
   return (
     <>
       <Button
@@ -44,7 +59,7 @@ function useSettled(value: string) {
 function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () => void }) {
   const queryClient = useQueryClient()
   const { label: current, base } = addressParts(tunnel.stable_endpoint)
-  const [typed, setTyped] = useState(current)
+  const [typed, setTyped] = useShellState("tunnels/tunnel-address.tsx:typed", current)
   const label = typed.trim()
   const settled = useSettled(label)
   const unchanged = label === current
@@ -60,7 +75,8 @@ function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () 
       await queryClient.invalidateQueries({ queryKey: ["tunnel", tunnel.id] })
       // A move nothing serves finishes while the request answers; a running one is followed on the tunnel page.
       const moved = (result as { stable_endpoint?: string } | undefined)?.stable_endpoint
-      if (moved && hostOf(moved) === `${label}${base}`) toast.success("Address changed", { description: `The tunnel is now at ${hostOf(moved)}.` })
+      if (moved && hostOf(moved) === `${label}${base}`)
+        toast.success("Address changed", { description: `The tunnel is now at ${hostOf(moved)}.` })
       onClose()
     },
   })
@@ -80,9 +96,9 @@ function ChangeAddressDialog({ tunnel, onClose }: { tunnel: Tunnel; onClose: () 
         <DialogHeader>
           <DialogTitle>Change address</DialogTitle>
           <DialogDescription>
-            Pick the name this tunnel answers on. The new address starts working first; the current one keeps
-            working until the new one is ready everywhere, then stops. Anyone using it, including webhooks and
-            bookmarks, must switch to the new one.
+            Pick the name this tunnel answers on. The new address starts working first; the current one keeps working
+            until the new one is ready everywhere, then stops. Anyone using it, including webhooks and bookmarks, must
+            switch to the new one.
           </DialogDescription>
         </DialogHeader>
         <form

@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 // "-" stands for the default vault: a vault name never starts with it (validName).
 const defaultValue = "-"
@@ -36,7 +37,7 @@ export function EnvVaultSwitcher({
   onSelect: (vault: string | null) => void
 }) {
   const vaults = useNamedVaults(workspace)
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useShellState("environment/env-named-vaults.tsx:creating", false)
   return (
     <div className="flex flex-wrap items-center gap-2 pb-3">
       {vaults.isPending && <Skeleton className="h-9 w-48" />}
@@ -93,7 +94,7 @@ function CreateVaultDialog({
   onCreated: (name: string) => void
 }) {
   const client = useQueryClient()
-  const [name, setName] = useState("")
+  const [name, setName] = useShellState("environment/env-named-vaults.tsx:name", "")
   const create = useMutation({
     mutationFn: (vault: string) =>
       createNamedVault(workspace.id, vault, workspace.kind === "team" ? workspace.id : undefined),

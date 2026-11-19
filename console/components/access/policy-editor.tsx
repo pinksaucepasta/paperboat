@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
 import { cn } from "@/lib/utils"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The policy as a file: a plain editor with line numbers, checked by the server as you type. */
 export function PolicyEditor({
@@ -37,8 +38,8 @@ export function PolicyEditor({
 }) {
   const editable = policy.can_edit === "all"
   const [checked, setChecked] = useState(text)
-  const [reviewing, setReviewing] = useState(false)
-  const [view, setView] = useState<"file" | "rules">("file")
+  const [reviewing, setReviewing] = useShellState("access/policy-editor.tsx:reviewing", false)
+  const [view, setView] = useShellState<"file" | "rules">("access/policy-editor.tsx:view", "file")
   useEffect(() => {
     const timer = setTimeout(() => setChecked(text), 800)
     return () => clearTimeout(timer)
@@ -94,8 +95,8 @@ export function PolicyEditor({
       </div>
       {note && <p className="text-sm text-muted-foreground">{note}</p>}
       <p hidden={view !== "file"} className="text-xs text-muted-foreground">
-        Sections: groups, tags, rules, tests and config_sync (the repository machines sync config with, for all
-        machines or a tag).
+        Sections: groups, tags, rules, tests and config_sync (the repository machines sync config with, for all machines
+        or a tag).
       </p>
       {view === "file" ? (
         <CodeArea value={text} onChange={editable ? onChange : undefined} />
@@ -176,11 +177,24 @@ export function ValidationResult({
 }
 
 /** A monospace textarea with a line-number gutter that scrolls with it. Read-only without `onChange`. */
-export function CodeArea({ value, onChange, compact }: { value: string; onChange?: (value: string) => void; compact?: boolean }) {
+export function CodeArea({
+  value,
+  onChange,
+  compact,
+}: {
+  value: string
+  onChange?: (value: string) => void
+  compact?: boolean
+}) {
   const gutter = useRef<HTMLDivElement>(null)
   const lines = value.split("\n").length
   return (
-    <div className={cn("flex overflow-hidden surface rounded-lg font-mono text-xs leading-5", compact ? "h-64" : "h-[32rem]")}>
+    <div
+      className={cn(
+        "flex overflow-hidden surface rounded-lg font-mono text-xs leading-5",
+        compact ? "h-64" : "h-[32rem]",
+      )}
+    >
       <div
         ref={gutter}
         aria-hidden

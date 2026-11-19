@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 type Grant = Team["grants"][number]
 const pageSize = 20
@@ -24,7 +25,7 @@ const select =
 /** What members may do with the team's ENV, previews and tunnels; owners and admins grant and revoke. */
 export function TeamGrants({ team, emails }: { team: Team; emails: Map<string, string> }) {
   const queryClient = useQueryClient()
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useShellState("team/team-grants.tsx:adding", false)
   const [revoking, setRevoking] = useState<Grant | null>(null)
   const [page, setPage] = useState(1)
   const all = team.grants.filter((grant) => grant.active && kindLabels[grant.resource_kind])
@@ -105,10 +106,10 @@ function AddGrant({
   onClose: () => void
   onDone: () => void
 }) {
-  const [account, setAccount] = useState("")
-  const [kind, setKind] = useState<GrantKind>("env")
-  const [permission, setPermission] = useState("read")
-  const [resource, setResource] = useState("")
+  const [account, setAccount] = useShellState("team/team-grants.tsx:account", "")
+  const [kind, setKind] = useShellState<GrantKind>("team/team-grants.tsx:kind", "env")
+  const [permission, setPermission] = useShellState("team/team-grants.tsx:permission", "read")
+  const [resource, setResource] = useShellState("team/team-grants.tsx:resource", "")
   const people = team.members.filter((member) => member.active)
   const chosen = kind === "env" ? team.team_id : resource
   const save = useMutation({
@@ -131,7 +132,12 @@ function AddGrant({
         >
           <Field className="gap-1.5">
             <FieldLabel htmlFor="grant-member">Member</FieldLabel>
-            <select id="grant-member" className={select} value={account} onChange={(event) => setAccount(event.target.value)}>
+            <select
+              id="grant-member"
+              className={select}
+              value={account}
+              onChange={(event) => setAccount(event.target.value)}
+            >
               <option value="">Choose a member</option>
               {people.map((member) => (
                 <option key={member.account_id} value={member.account_id}>
@@ -207,7 +213,7 @@ function ResourcePicker({
   value: string
   onChange: (id: string) => void
 }) {
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useShellState("team/team-grants.tsx:search", "")
   const q = useDeferredValue(search.trim())
   const [page, setPage] = useState(1)
   const previews = useApiQuery({

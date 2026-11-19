@@ -1,7 +1,6 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import { updateMachine, type Machine } from "@/lib/api"
 import { nameProblem, normalizeName } from "@/lib/enrollment"
@@ -11,11 +10,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** Name editing shared by the in-place title and the Edit dialog. */
 export function useMachineEdit(machine: Machine, onSaved: () => void) {
   const queryClient = useQueryClient()
-  const [name, setNameRaw] = useState(machine.alias)
+  const [name, setNameRaw] = useShellState("machine-edit.tsx:name", machine.alias)
   const finalName = name.replace(/-+$/, "")
   const problem = finalName ? nameProblem(finalName) : "A machine needs a name"
   const changed = finalName !== machine.alias

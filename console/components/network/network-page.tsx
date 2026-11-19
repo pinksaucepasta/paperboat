@@ -1,6 +1,14 @@
 "use client"
 
-import { ArrowClockwiseIcon, CaretUpDownIcon, CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
+import {
+  ArrowClockwiseIcon,
+  CaretUpDownIcon,
+  CheckCircleIcon,
+  CopyIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+  TrashIcon,
+} from "@phosphor-icons/react"
 import { useInfiniteQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -55,6 +63,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { LoadError } from "@/components/load-error"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Your own relays and tunnel servers, and which servers your traffic uses. Machines connect
@@ -87,11 +96,17 @@ function nodeState(node: Node, now: number): { ok: boolean; label: string; detai
   if (node.installations.some((installation) => installation.enrollment_state === "pending"))
     return { ok: false, label: "Finishing pairing" }
   const running = node.installations.find(updating)?.update
-  if (running) return { ok: false, label: `Updating to ${running.target_version}: ${updateSteps[running.state] ?? running.state}` }
+  if (running)
+    return { ok: false, label: `Updating to ${running.target_version}: ${updateSteps[running.state] ?? running.state}` }
   // A failed update stays shown for a day: the reason and its support reference are in the tooltip.
   const failed = node.installations
     .map((installation) => installation.update)
-    .find((update) => update && (update.state === "failed" || update.state === "rolled_back") && now - Date.parse(update.updated_at) < 86_400_000)
+    .find(
+      (update) =>
+        update &&
+        (update.state === "failed" || update.state === "rolled_back") &&
+        now - Date.parse(update.updated_at) < 86_400_000,
+    )
   if (failed)
     return {
       ok: false,
@@ -110,7 +125,7 @@ export function NetworkPage() {
   const workspace = useWorkspace()
   const scope = scopeOf(workspace)
   const team = workspace?.kind === "team"
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useShellState("network/network-page.tsx:search", "")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(q)
   const installations = useApiQuery({
@@ -119,7 +134,7 @@ export function NetworkPage() {
     // Live progress while a node updates.
     refetchInterval: (query) => (query.state.data?.items.some(updating) ? 5000 : 10_000),
   })
-  const [adding, setAdding] = useState<"relay" | "tunnel" | undefined>()
+  const [adding, setAdding] = useShellState<"relay" | "tunnel" | undefined>("network/network-page.tsx:adding")
   const nodes = groupNodes(installations.data?.items ?? [])
   const none = installations.isSuccess && installations.data.total === 0 && !q
 
@@ -278,8 +293,12 @@ function NodeRow({ node }: { node: Node }) {
           <td>
             <span className="flex items-center gap-2 text-muted-foreground">
               <StatusDot online={state.ok} />
-              <span className="truncate" title={state.detail}>{verify.isPending ? "Checking public access…" : state.label}</span>
-              {!state.detail && available && <span className="hidden truncate text-xs xl:inline">Update available: {available}</span>}
+              <span className="truncate" title={state.detail}>
+                {verify.isPending ? "Checking public access…" : state.label}
+              </span>
+              {!state.detail && available && (
+                <span className="hidden truncate text-xs xl:inline">Update available: {available}</span>
+              )}
             </span>
           </td>
           <td className="hidden truncate text-muted-foreground lg:table-cell">
@@ -488,7 +507,7 @@ function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
  */
 function EdgesSection({ workspace, manage }: { workspace: string; manage: boolean }) {
   const pair = useApiQuery({ ...edgePairQuery(workspace), enabled: Boolean(workspace) })
-  const [changing, setChanging] = useState(false)
+  const [changing, setChanging] = useShellState("network/network-page.tsx:changing", false)
   const edges: { role: string; edge: PairEdge }[] = []
   if (pair.data) edges.push({ role: "Primary", edge: pair.data.primary })
   if (pair.data?.fallback) edges.push({ role: "Fallback", edge: pair.data.fallback })
@@ -573,7 +592,7 @@ function EdgeChoice({
   value: string
   onChange: (id: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("network/network-page.tsx:open", false)
   const chosen = options.find((option) => option.id === value)
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -668,8 +687,8 @@ function ChangeEdgesDialog({
       }
     }),
   ]
-  const [primary, setPrimary] = useState(current?.primary.id ?? "")
-  const [fallback, setFallback] = useState(current?.fallback?.id ?? "")
+  const [primary, setPrimary] = useShellState("network/network-page.tsx:primary", current?.primary.id ?? "")
+  const [fallback, setFallback] = useShellState("network/network-page.tsx:fallback", current?.fallback?.id ?? "")
   const kindOf = (id: string) => options.find((option) => option.id === id)?.kind
   const problem =
     !primary || !fallback
@@ -777,10 +796,13 @@ function ChangeEdgesDialog({
 function AddServerDialog({ initial, onClose }: { initial: "relay" | "tunnel"; onClose: () => void }) {
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
-  const [components, setComponents] = useState<"relay" | "tunnel" | "both">(initial)
+  const [components, setComponents] = useShellState<"relay" | "tunnel" | "both">(
+    "network/network-page.tsx:components",
+    initial,
+  )
   const installer = useApiQuery(clientConfigQuery).data?.installer_base_url
-  const [address, setAddress] = useState("")
-  const [code, setCode] = useState("")
+  const [address, setAddress] = useShellState("network/network-page.tsx:address", "")
+  const [code, setCode] = useShellState("network/network-page.tsx:code", "")
   const pair = useMutation({
     mutationFn: () => pairNode({ address: address.trim(), code: code.trim(), scope: scopeOf(workspace) }),
     onSuccess: () => refreshNetwork(queryClient),

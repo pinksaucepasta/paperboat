@@ -3,7 +3,7 @@
 import { CaretDownIcon, CheckCircleIcon, CircleNotchIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { ApiError, machineOverviewQuery, useApiQuery, useWorkspace, workspacesQuery, type Workspace } from "@/lib/api"
 import {
   cancelEnrollment,
@@ -36,13 +36,14 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { roleLabels } from "@/lib/teams"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** Install on a new computer in any workspace; in a team, also share one of your machines. */
 export function AddMachineDialog() {
   const workspace = useWorkspace()
   const { data } = useApiQuery(machineOverviewQuery)
   const installUrl = installUrlFrom(data?.bootstrap_command)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("add-machine-dialog.tsx:open", false)
   const trigger = (
     <>
       <PlusIcon data-icon="inline-start" />
@@ -82,9 +83,9 @@ function AddMachineChoices({
   onDone: () => void
 }) {
   const { data: workspaces } = useApiQuery(workspacesQuery)
-  const [target, setTarget] = useState(workspace.id)
-  const [plain, setPlain] = useState(false)
-  const [sharing, setSharing] = useState(false)
+  const [target, setTarget] = useShellState("add-machine-dialog.tsx:target", workspace.id)
+  const [plain, setPlain] = useShellState("add-machine-dialog.tsx:plain", false)
+  const [sharing, setSharing] = useShellState("add-machine-dialog.tsx:sharing", false)
   const destination =
     workspaces?.find((entry) => entry.id === target) ?? (target === workspace.id ? workspace : undefined)
   if (sharing && workspace.kind === "team") return <ShareMachine team={workspace} onDone={onDone} />
@@ -141,12 +142,10 @@ function WorkspaceSelect({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Workspace"
-        className="flex h-7 w-full items-center gap-2 rounded-md border border-input bg-input/20 px-2 text-left text-xs/relaxed outline-none hover:bg-accent focus-visible:border-ring focus-visible:ring-2 dark:bg-input/30 focus-visible:ring-ring/30"
+        className="flex h-7 w-full items-center gap-2 rounded-md border border-input bg-input/20 px-2 text-left text-xs/relaxed outline-none hover:bg-accent focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/30"
       >
         <span className="min-w-0 flex-1 truncate">{selected?.name}</span>
-        {selected && note(selected) && (
-          <span className="shrink-0 text-xs text-muted-foreground">{note(selected)}</span>
-        )}
+        {selected && note(selected) && <span className="shrink-0 text-xs text-muted-foreground">{note(selected)}</span>}
         <CaretDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-72">
@@ -180,8 +179,8 @@ function AddMachine({
   const track = useTrack()
   const workspaceKind = workspace === "personal" ? "personal" : "team"
   // The token is the same for every computer; the toggle only picks the shell the command is written for.
-  const [shell, setShell] = useState<Shell>("posix")
-  const [name, setName] = useState("")
+  const [shell, setShell] = useShellState<Shell>("add-machine-dialog.tsx:shell", "posix")
+  const [name, setName] = useShellState("add-machine-dialog.tsx:name", "")
 
   // The command is the point of this dialog, so a pairing token is requested as soon as it opens.
   // A token that arrives after the dialog or workspace choice is gone is cancelled on arrival.
@@ -394,7 +393,7 @@ export function CommandBlock({
       <code
         className={cn(
           "no-scrollbar min-w-0 flex-1 py-3 pr-12 pl-3.5 font-mono text-xs leading-relaxed",
-          wrap ? "break-all whitespace-normal" : "overflow-x-auto whitespace-pre"
+          wrap ? "break-all whitespace-normal" : "overflow-x-auto whitespace-pre",
         )}
       >
         {command}

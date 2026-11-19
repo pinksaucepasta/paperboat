@@ -2,7 +2,6 @@
 
 import { BellIcon } from "@phosphor-icons/react"
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import { ListPager } from "@/components/list-pager"
 import { Time } from "@/components/time"
@@ -29,6 +28,7 @@ import { answerInvitation, answerMachine, roleLabels, type TeamInvitation } from
 import { queryKeys } from "@/lib/query-keys"
 import { useTrack } from "@/lib/analytics"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * The header's bell: things waiting for you to accept or decline (files teammates want to send, team
@@ -53,14 +53,26 @@ export function RequestsMenu() {
   return (
     <Popover>
       <PopoverTrigger
-        render={<Button variant="ghost" size="icon" className="relative" aria-label={total ? `Requests, ${total} waiting` : "Requests"} />}
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative"
+            aria-label={total ? `Requests, ${total} waiting` : "Requests"}
+          />
+        }
       >
         <BellIcon />
-        {total > 0 && <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-medium text-primary-foreground tabular-nums">
-          {total > 99 ? "99+" : total}
-        </span>}
+        {total > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-medium text-primary-foreground tabular-nums">
+            {total > 99 ? "99+" : total}
+          </span>
+        )}
       </PopoverTrigger>
-      <PopoverContent align="end" className="max-h-[min(36rem,calc(100dvh-5rem))] w-[min(26rem,calc(100vw-2rem))] gap-2 overflow-y-auto p-3 text-sm">
+      <PopoverContent
+        align="end"
+        className="max-h-[min(36rem,calc(100dvh-5rem))] w-[min(26rem,calc(100vw-2rem))] gap-2 overflow-y-auto p-3 text-sm"
+      >
         <RequestList counts={counts} machines={machines} notices={announcements?.notices ?? []} workspace={workspace} />
       </PopoverContent>
     </Popover>
@@ -79,9 +91,11 @@ function RequestList({
   workspace: string
 }) {
   // Read announcements stay listed: only the unread count is a number to answer.
-  const kinds = requestKinds.filter((kind) => counts[kind.id] > 0 || (kind.id === "announcements" && notices.length > 0))
-  const [chosen, setChosen] = useState<RequestKind>()
-  const [asked, setPage] = useState(1)
+  const kinds = requestKinds.filter(
+    (kind) => counts[kind.id] > 0 || (kind.id === "announcements" && notices.length > 0),
+  )
+  const [chosen, setChosen] = useShellState<RequestKind>("requests-menu.tsx:chosen")
+  const [asked, setPage] = useShellState("requests-menu.tsx:asked", 1)
   const kind = kinds.find((entry) => entry.id === chosen)?.id ?? kinds[0]?.id
   if (!kind) {
     return (
@@ -113,7 +127,7 @@ function RequestList({
             }}
           >
             {entry.label}{" "}
-            {counts[entry.id] > 0 && <span className="tabular-nums text-muted-foreground">{counts[entry.id]}</span>}
+            {counts[entry.id] > 0 && <span className="text-muted-foreground tabular-nums">{counts[entry.id]}</span>}
           </Button>
         ))}
       </div>
@@ -157,11 +171,23 @@ function Answer({
   )
 }
 
-function FileRequests({ workspace, total, page, go }: { workspace: string; total: number; page: number; go: (page: number) => void }) {
+function FileRequests({
+  workspace,
+  total,
+  page,
+  go,
+}: {
+  workspace: string
+  total: number
+  page: number
+  go: (page: number) => void
+}) {
   const requests = useApiQuery({ ...waitingFilesQuery(workspace, page), placeholderData: (previous) => previous })
   return (
     <>
-      {requests.data?.rows.map((request) => <FileRequest key={request.request_id} request={request} workspace={workspace} />)}
+      {requests.data?.rows.map((request) => (
+        <FileRequest key={request.request_id} request={request} workspace={workspace} />
+      ))}
       <ListPager page={page} size={requestsPageSize} total={total} go={go} />
     </>
   )
@@ -199,7 +225,9 @@ function InvitationRequests({ total, page, go }: { total: number; page: number; 
   const invitations = useApiQuery({ ...waitingInvitationsQuery(page), placeholderData: (previous) => previous })
   return (
     <>
-      {invitations.data?.rows.map((invitation) => <InvitationRequest key={invitation.invitation_id} invitation={invitation} />)}
+      {invitations.data?.rows.map((invitation) => (
+        <InvitationRequest key={invitation.invitation_id} invitation={invitation} />
+      ))}
       <ListPager page={page} size={requestsPageSize} total={total} go={go} />
     </>
   )
@@ -301,7 +329,9 @@ function Notices({ notices, unread }: { notices: AnnouncementNotice[]; unread: n
                 <span className="sr-only">Unread</span>
               </span>
             )}
-            <span className={notice.read ? "min-w-0 break-words" : "min-w-0 break-words font-medium"}>{notice.title}</span>
+            <span className={notice.read ? "min-w-0 break-words" : "min-w-0 font-medium break-words"}>
+              {notice.title}
+            </span>
           </div>
           {notice.body && <p className="break-words text-muted-foreground">{notice.body}</p>}
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -312,7 +342,13 @@ function Notices({ notices, unread }: { notices: AnnouncementNotice[]; unread: n
               </span>
             )}
             {!notice.read && (
-              <Button variant="ghost" size="sm" className="ml-auto" disabled={read.isPending} onClick={() => read.mutate([notice.id])}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                disabled={read.isPending}
+                onClick={() => read.mutate([notice.id])}
+              >
                 Mark as read
               </Button>
             )}

@@ -1,7 +1,6 @@
 "use client"
 
 import { useQueries } from "@tanstack/react-query"
-import { useState } from "react"
 import { useApiQuery } from "@/lib/api"
 import { type LiveItem } from "@/lib/network"
 import { domainsQuery, hostOf, tunnelsPageQuery } from "@/lib/tunnels"
@@ -10,6 +9,7 @@ import { domainStates } from "@/components/tunnels/tunnel-hostnames"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Changing between Paperboat's edges and your own servers strands what runs on the old ones, so the
@@ -29,7 +29,9 @@ function LiveList({ items, count }: { items: LiveItem[]; count: number }) {
       {items.map((item) => (
         <li key={`${item.kind}:${item.id}`} className="flex items-baseline gap-2">
           <span className="w-16 shrink-0 text-muted-foreground">{noun[item.kind]}</span>
-          <span className="min-w-0 truncate font-medium">{item.kind === "preview" ? hostOf(item.name) : item.name}</span>
+          <span className="min-w-0 truncate font-medium">
+            {item.kind === "preview" ? hostOf(item.name) : item.name}
+          </span>
           <span className="ml-auto shrink-0 text-muted-foreground">{verb[item.kind]}</span>
         </li>
       ))}
@@ -52,7 +54,7 @@ export function StopAndSwitch({
   pending: boolean
   onConfirm: () => void
 }) {
-  const [typed, setTyped] = useState("")
+  const [typed, setTyped] = useShellState("network/switch-edges.tsx:typed", "")
   const confirmed = typed.trim() === CONFIRM_SWITCH
   return (
     <form

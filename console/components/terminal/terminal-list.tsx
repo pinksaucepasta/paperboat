@@ -6,7 +6,13 @@ import { Fragment, useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, useMachines, type Machine } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
-import { closeTerminal, terminalCountsQuery, terminalKeys, terminalPageSize, terminalsPageQuery } from "@/lib/terminal/queries"
+import {
+  closeTerminal,
+  terminalCountsQuery,
+  terminalKeys,
+  terminalPageSize,
+  terminalsPageQuery,
+} from "@/lib/terminal/queries"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import { terminalCanAttach, type TerminalSession } from "@/lib/terminal/use-terminal-connection"
@@ -26,6 +32,7 @@ import { copyWithToast } from "@/lib/clipboard"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
 import { cn } from "@/lib/utils"
+import { useShellState } from "@/lib/use-shell-state"
 
 const day = 86_400_000
 
@@ -74,8 +81,11 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
   const { now, date } = useTimeFormat(60_000)
   const picked = usePickedView()
-  const [view, setView] = useState<View>(!tabMachine && picked === "recordings" ? "recordings" : "open")
-  const [search, setSearch] = useState("")
+  const [view, setView] = useShellState<View>(
+    "terminal/terminal-list.tsx:view",
+    !tabMachine && picked === "recordings" ? "recordings" : "open",
+  )
+  const [search, setSearch] = useShellState("terminal/terminal-list.tsx:search", "")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(`${view}|${q}|${scope ?? ""}`)
   const counts = useApiQuery(terminalCountsQuery(scope ?? undefined))
@@ -114,7 +124,10 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const reporting = shown.some(
     ({ session }) => session.state !== "unavailable" && Boolean(session.title || session.foreground_process),
   )
-  const lastRunning = useLastCount(`${remembered}:running`, query.data && view === "open" ? Number(reporting) : undefined)
+  const lastRunning = useLastCount(
+    `${remembered}:running`,
+    query.data && view === "open" ? Number(reporting) : undefined,
+  )
   const running = view === "open" && (query.data ? reporting : lastRunning === 1)
 
   // Whether there were no terminals last time: then the page loads as its empty state, not as a table.
@@ -202,7 +215,10 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
                 </tr>
               ) : null}
               <TableRowsSkeleton
-                rows={lastRows ?? Math.min((view === "open" ? counts.data?.open : counts.data?.closed) ?? 12, terminalPageSize)}
+                rows={
+                  lastRows ??
+                  Math.min((view === "open" ? counts.data?.open : counts.data?.closed) ?? 12, terminalPageSize)
+                }
                 columns={[
                   { bar: "w-48" },
                   !scope && { className: "hidden md:table-cell", bar: "w-20" },
@@ -227,7 +243,14 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
                 )}
                 <tbody className="divide-y divide-divider border-b border-divider">
                   {group.rows.map(({ session, time }) => (
-                    <Row key={session.id} session={session} time={time} now={now} showMachine={!scope} showRunning={running} />
+                    <Row
+                      key={session.id}
+                      session={session}
+                      time={time}
+                      now={now}
+                      showMachine={!scope}
+                      showRunning={running}
+                    />
                   ))}
                 </tbody>
               </Fragment>
@@ -238,11 +261,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
         {query.isError && <LoadError what="terminals" error={query.error} retry={() => query.refetch()} />}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {q
-              ? `No terminals match “${q}”`
-              : view === "open"
-                ? "No open terminals"
-                : "No closed terminals"}
+            {q ? `No terminals match “${q}”` : view === "open" ? "No open terminals" : "No closed terminals"}
           </p>
         )}
       </div>

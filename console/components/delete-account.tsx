@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const reauthPath = "/auth/sign-in?reauth=1&return_to=%2Faccount%2Fdelete"
 // Set while a sign-in started here has not come back yet: a sign-in that returns still "too old" must not loop.
@@ -31,7 +32,8 @@ const reauthTried = "pb-delete-reauth-tried"
  */
 export function DeleteAccount() {
   const preview = useApiQuery(deletionPreviewQuery)
-  if (!accountDeletionLive) return <p className="text-sm text-muted-foreground">Deleting an account isn’t available yet.</p>
+  if (!accountDeletionLive)
+    return <p className="text-sm text-muted-foreground">Deleting an account isn’t available yet.</p>
   if (preview.isPending) return <Skeleton className="h-48 w-full" />
   if (preview.isError)
     return (
@@ -86,7 +88,9 @@ function Blocking({ teams }: { teams: DeletionPreview["teams_blocking"] }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border border-destructive/40 p-4 text-sm" data-deletion-blocked>
       <p className="font-medium">First hand over or delete these teams</p>
-      <p className="text-muted-foreground">You own these teams and they have other members. Transfer or delete them first.</p>
+      <p className="text-muted-foreground">
+        You own these teams and they have other members. Transfer or delete them first.
+      </p>
       <ul className="flex flex-col gap-1">
         {teams.map((team) => (
           <li key={team.slug}>
@@ -103,7 +107,7 @@ function Blocking({ teams }: { teams: DeletionPreview["teams_blocking"] }) {
 
 function Confirm({ preview }: { preview: DeletionPreview }) {
   const router = useRouter()
-  const [typed, setTyped] = useState("")
+  const [typed, setTyped] = useShellState("delete-account.tsx:typed", "")
   const remove = useMutation({
     mutationFn: () => deleteAccount(typed.trim()),
     // The server ended the session; the deleted page needs none.
@@ -111,7 +115,8 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
     onError: (error) => {
       // Sign-in is a route handler (a full page load), not a page the router can show.
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      if (error instanceof DeletionError && error.code === "reauthentication_required") window.location.href = reauthPath
+      if (error instanceof DeletionError && error.code === "reauthentication_required")
+        window.location.href = reauthPath
     },
   })
   const reauthenticate = preview.reauthentication_required

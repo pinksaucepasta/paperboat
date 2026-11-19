@@ -1,7 +1,7 @@
 "use client"
 
 import { CaretUpDownIcon, CheckIcon, XIcon } from "@phosphor-icons/react"
-import { useId, useState } from "react"
+import { useId } from "react"
 import { useApiQuery, useMachines, useWorkspace } from "@/lib/api"
 import { memberEmails, teamInvitationsQuery, teamQuery } from "@/lib/teams"
 import { machineOptions, targetName } from "@/lib/token-scope"
@@ -10,6 +10,7 @@ import { StatusDot } from "@/components/machine-status"
 import { Badge } from "@/components/ui/badge"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useShellState } from "@/lib/use-shell-state"
 
 const visibleChips = 3
 
@@ -44,8 +45,8 @@ export function TokenMachines({
     members.data ? memberEmails(members.data, invitations.data) : new Map(),
   )
   const triggerId = useId()
-  const [open, setOpen] = useState(false)
-  const [all, setAll] = useState(false)
+  const [open, setOpen] = useShellState("access/token-machines.tsx:open", false)
+  const [all, setAll] = useShellState("access/token-machines.tsx:all", false)
   const toggle = (target: string) =>
     onChange(value.includes(target) ? value.filter((v) => v !== target) : [...value, target])
   const shown = all ? value : value.slice(0, visibleChips)
@@ -79,7 +80,12 @@ export function TokenMachines({
               {options.length > 0 && (
                 <CommandGroup heading="Machines">
                   {options.map((option) => (
-                    <Option key={option.target} target={option.target} picked={value.includes(option.target)} onToggle={toggle}>
+                    <Option
+                      key={option.target}
+                      target={option.target}
+                      picked={value.includes(option.target)}
+                      onToggle={toggle}
+                    >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="truncate">{option.alias}</span>
                         {option.online !== undefined && <StatusDot online={option.online} />}
@@ -136,11 +142,7 @@ function Option({
   children: React.ReactNode
 }) {
   return (
-    <CommandItem
-      value={target}
-      className="[&_[data-slot=command-check]]:hidden"
-      onSelect={() => onToggle(target)}
-    >
+    <CommandItem value={target} className="[&_[data-slot=command-check]]:hidden" onSelect={() => onToggle(target)}>
       <span className="flex min-w-0 flex-1 items-center">{children}</span>
       <CheckIcon weight="bold" className={cn("size-3.5 text-primary", !picked && "invisible")} />
     </CommandItem>

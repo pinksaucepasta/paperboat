@@ -28,6 +28,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CheckoutConsent } from "@/components/billing/checkout-consent"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const intervals: Record<BillingInterval, string> = { month: "Monthly", year: "Yearly" }
 /** How long the page waits for Stripe's webhook to activate a plan after Checkout returns. */
@@ -146,9 +147,11 @@ function Plan({
           `${planName(billing.product)} · Granted`
         ) : billing.product ? (
           `${planName(billing.product)} · ${formatPrice(billing.product)}/${billing.product.interval}`
+        ) : // A plan granted outside the catalog (test data) has a code but no price or name.
+        billing.product_code ? (
+          codeName(billing.product_code)
         ) : (
-          // A plan granted outside the catalog (test data) has a code but no price or name.
-          (billing.product_code ? codeName(billing.product_code) : "Free")
+          "Free"
         )}
       </Row>
       {failed ? (
@@ -183,9 +186,7 @@ function Plan({
           <Row label="Machines">{formatLimit(billing.limits.machines)}</Row>
           <Row label="Previews & tunnels">{formatLimit(billing.limits.publications)}</Row>
           <Row label="Browser terminals">{formatLimit(billing.limits.browser_terminals)}</Row>
-          <Row label="Public TCP tunnels">
-            {formatLimit(billing.limits.public_tcp)}
-          </Row>
+          <Row label="Public TCP tunnels">{formatLimit(billing.limits.public_tcp)}</Row>
         </>
       )}
       {!ended && <PlanActions workspace={workspace} billing={billing} />}
@@ -202,8 +203,8 @@ function Plan({
 function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingWorkspace }) {
   const subscribe = billing.granted
   const products = useApiQuery(billingProductsQuery(workspace))
-  const [interval, setPeriod] = useState<BillingInterval>("month")
-  const [terms, setTerms] = useState<string | null>(null)
+  const [interval, setPeriod] = useShellState<BillingInterval>("billing/billing-page.tsx:interval", "month")
+  const [terms, setTerms] = useShellState<string | null>("billing/billing-page.tsx:terms", null)
   if (products.isPending) return <Skeleton className="h-24 w-full" />
   if (products.isError)
     return (
@@ -232,7 +233,14 @@ function Plans({ workspace, billing }: { workspace: Workspace; billing: BillingW
       }
     >
       {shown.map((product) => (
-        <PlanOffer key={product.code} workspace={workspace} product={product} canManage={billing.can_manage} terms={terms} verb={subscribe ? "Subscribe" : "Upgrade"} />
+        <PlanOffer
+          key={product.code}
+          workspace={workspace}
+          product={product}
+          canManage={billing.can_manage}
+          terms={terms}
+          verb={subscribe ? "Subscribe" : "Upgrade"}
+        />
       ))}
       <CheckoutConsent terms={terms} onChange={setTerms} />
     </Section>
@@ -281,13 +289,17 @@ function PlanOffer({
         </span>
         <Button
           disabled={!canManage || terms === null || checkout.isPending}
-          title={canManage ? (terms !== null ? undefined : "Tick the box below to continue.") : "Only the workspace owner can change billing."}
+          title={
+            canManage
+              ? terms !== null
+                ? undefined
+                : "Tick the box below to continue."
+              : "Only the workspace owner can change billing."
+          }
           onClick={() => checkout.mutate()}
         >
           {checkout.isPending && <CircleNotchIcon className="animate-spin" />}
-          {checkout.isError && (checkout.error as ApiError).code === "provider_outcome_unknown"
-            ? "Try again"
-            : verb}
+          {checkout.isError && (checkout.error as ApiError).code === "provider_outcome_unknown" ? "Try again" : verb}
         </Button>
       </div>
       {checkout.isError && (
@@ -335,13 +347,19 @@ function BillingSkeleton() {
   return (
     <div className="flex flex-col gap-10">
       <Section title="Plan" action={<Skeleton className="h-8 w-28" />}>
-        {["Plan", "Renews", "Traffic included", "Machines", "Previews & tunnels", "Browser terminals", "Public TCP tunnels"].map(
-          (label) => (
-            <Row key={label} label={label}>
-              {value("w-24")}
-            </Row>
-          ),
-        )}
+        {[
+          "Plan",
+          "Renews",
+          "Traffic included",
+          "Machines",
+          "Previews & tunnels",
+          "Browser terminals",
+          "Public TCP tunnels",
+        ].map((label) => (
+          <Row key={label} label={label}>
+            {value("w-24")}
+          </Row>
+        ))}
         <Row label="Billing period">{button("w-40")}</Row>
         <Row label="Cancel">{button("w-24")}</Row>
       </Section>

@@ -2,7 +2,7 @@
 
 import { PlugsIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue } from "react"
 import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { hostOf, tunnelsPageQuery, type Tunnel } from "@/lib/tunnels"
@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The machine page's Tunnels tab. */
 export function MachineTunnels() {
@@ -35,7 +36,7 @@ export function MachineTunnels() {
 export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope, machine, aliasOf } = useListScope(tabMachine)
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useShellState("tunnels/tunnel-list.tsx:search", "")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(`${q}|${scope ?? ""}`)
   const query = useApiQuery({
@@ -99,27 +100,31 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-divider border-b border-divider">
-            {query.isPending
-              ? <TableRowsSkeleton
-                  rows={lastRows}
-                  columns={[
-                    { bar: "w-36" },
-                    { className: "hidden lg:table-cell", bar: "w-56" },
-                    !scope && { className: "hidden md:table-cell", bar: "w-20" },
-                    { className: "hidden sm:table-cell", bar: "w-16" },
-                    { empty: true },
-                  ]}
+            {query.isPending ? (
+              <TableRowsSkeleton
+                rows={lastRows}
+                columns={[
+                  { bar: "w-36" },
+                  { className: "hidden lg:table-cell", bar: "w-56" },
+                  !scope && { className: "hidden md:table-cell", bar: "w-20" },
+                  { className: "hidden sm:table-cell", bar: "w-16" },
+                  { empty: true },
+                ]}
+              />
+            ) : (
+              shown.map((tunnel) => (
+                <Row
+                  key={tunnel.id}
+                  tunnel={tunnel}
+                  machineName={scope ? undefined : (aliasOf(tunnel.created_by_host_id) ?? "")}
                 />
-              : shown.map((tunnel) => (
-                  <Row
-                    key={tunnel.id}
-                    tunnel={tunnel}
-                    machineName={scope ? undefined : (aliasOf(tunnel.created_by_host_id) ?? "")}
-                  />
-                ))}
+              ))
+            )}
           </tbody>
         </table>
-        {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
+        {query.data && (
+          <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />
+        )}
         {query.isError && <LoadError what="tunnels" error={query.error} retry={() => query.refetch()} />}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">No tunnels match “{search.trim()}”</p>

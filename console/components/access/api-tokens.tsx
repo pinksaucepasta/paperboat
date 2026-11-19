@@ -5,14 +5,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import Link from "next/link"
 import { useState } from "react"
 import { useWorkspace } from "@/lib/api"
-import {
-  actionLabels,
-  apiTokensQuery,
-  notOnServer,
-  PolicyError,
-  revokeApiToken,
-  type APIToken,
-} from "@/lib/policy"
+import { actionLabels, apiTokensQuery, notOnServer, PolicyError, revokeApiToken, type APIToken } from "@/lib/policy"
 import { queryKeys } from "@/lib/query-keys"
 import { sections } from "@/lib/sections"
 import { useNow } from "@/lib/use-now"
@@ -32,11 +25,12 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { ListSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** Settings → API tokens: credentials for scripts and agents that act as you in this workspace. */
 export function ApiTokens() {
   const workspace = useWorkspace()
-  const [showEnded, setShowEnded] = useState(false)
+  const [showEnded, setShowEnded] = useShellState("access/api-tokens.tsx:showEnded", false)
   // Live tokens lead; revoked and expired ones are history, read from the server only once unfolded.
   const tokens = useInfiniteQuery(apiTokensQuery(workspace?.id ?? "", "active"))
   const history = useInfiniteQuery(apiTokensQuery(workspace?.id ?? "", "ended", showEnded))

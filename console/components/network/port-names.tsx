@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const scopeLabels: Record<PortNameScope, string> = {
   machine: "One machine",
@@ -40,7 +41,7 @@ export function PortNames() {
   const ws = workspace?.id ?? ""
   const list = useApiQuery({ ...portNamesQuery(ws), enabled: Boolean(workspace) })
   const domain = useApiQuery(clientConfigQuery).data?.local_access_base_domain ?? ""
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useShellState("network/port-names.tsx:adding", false)
   // Owners and admins (everyone in a personal workspace) set names that cover more than one machine.
   const wide = workspace?.kind === "personal" || workspace?.role === "owner" || workspace?.role === "admin"
 
@@ -148,10 +149,10 @@ function NameRow({ name, domain, wide }: { name: PortName; domain: string; wide:
 function AddNameDialog({ wide, domain, onClose }: { wide: boolean; domain: string; onClose: () => void }) {
   const workspace = useWorkspace()
   const queryClient = useQueryClient()
-  const [scope, setScope] = useState<PortNameScope>("machine")
-  const [draft, setDraft] = useState("")
-  const [portText, setPortText] = useState("")
-  const [machineId, setMachineId] = useState<string | null>(null)
+  const [scope, setScope] = useShellState<PortNameScope>("network/port-names.tsx:scope", "machine")
+  const [draft, setDraft] = useShellState("network/port-names.tsx:draft", "")
+  const [portText, setPortText] = useShellState("network/port-names.tsx:portText", "")
+  const [machineId, setMachineId] = useShellState<string | null>("network/port-names.tsx:machineId", null)
   const name = draft.trim().toLowerCase()
   const port = Number(portText)
   const picked = useMachine(machineId).data

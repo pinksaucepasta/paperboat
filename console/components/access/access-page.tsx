@@ -1,7 +1,6 @@
 "use client"
 
 import { ShieldCheckIcon } from "@phosphor-icons/react"
-import { useState } from "react"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { notOnServer, PolicyError, policyQuery } from "@/lib/policy"
 import { cn } from "@/lib/utils"
@@ -11,6 +10,7 @@ import { PolicyTest } from "@/components/access/policy-test"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const tabs = [
   { id: "file", title: "Policy file" },
@@ -24,9 +24,9 @@ export type AccessTab = (typeof tabs)[number]["id"]
 export function AccessPage() {
   const workspace = useWorkspace()
   const policy = useApiQuery(policyQuery(workspace?.id ?? ""))
-  const [tab, setTab] = useState<AccessTab>("file")
+  const [tab, setTab] = useShellState<AccessTab>("access/access-page.tsx:tab", "file")
   // The unsaved file lives here so Test can try it and switching tabs keeps it.
-  const [draft, setDraft] = useState<{ base: number; text: string } | null>(null)
+  const [draft, setDraft] = useShellState<{ base: number; text: string } | null>("access/access-page.tsx:draft", null)
 
   if (policy.isError) return <PolicyUnavailable error={policy.error} />
   const data = policy.data
@@ -50,9 +50,7 @@ export function AccessPage() {
                 )}
               >
                 {title}
-                {id === "file" && data && text !== data.policy && (
-                  <span className="ml-1 text-muted-foreground">•</span>
-                )}
+                {id === "file" && data && text !== data.policy && <span className="ml-1 text-muted-foreground">•</span>}
               </button>
             ))}
           </nav>

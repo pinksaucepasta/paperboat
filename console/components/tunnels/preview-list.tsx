@@ -6,7 +6,15 @@ import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { cursorPageSize } from "@/lib/cursor-pages"
-import { tunnelKeys, hostOf, originLabel, previewCountsQuery, previewsPageQuery, stopPreview, type Preview } from "@/lib/tunnels"
+import {
+  tunnelKeys,
+  hostOf,
+  originLabel,
+  previewCountsQuery,
+  previewsPageQuery,
+  stopPreview,
+  type Preview,
+} from "@/lib/tunnels"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import { formatRelative } from "@/lib/format"
@@ -24,6 +32,7 @@ import { copyWithToast } from "@/lib/clipboard"
 import { useLastCount } from "@/lib/last-count"
 import { RememberedEmpty } from "@/components/remembered-empty"
 import { useWorkspaceId } from "@/lib/workspace"
+import { useShellState } from "@/lib/use-shell-state"
 
 type View = "live" | "ended"
 
@@ -87,8 +96,8 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope, machine, aliasOf } = useListScope(tabMachine)
   const now = useNow(30_000)
-  const [view, setView] = useState<View>("live")
-  const [search, setSearch] = useState("")
+  const [view, setView] = useShellState<View>("tunnels/preview-list.tsx:view", "live")
+  const [search, setSearch] = useShellState("tunnels/preview-list.tsx:search", "")
   const q = useDeferredValue(search.trim())
   const ws = workspace?.id ?? ""
   const pages = usePageParam(`${view}|${q}|${scope ?? ""}`)
@@ -167,37 +176,39 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-divider border-b border-divider">
-            {query.isPending
-              ? <TableRowsSkeleton
-                  rows={lastRows ?? Math.min((view === "live" ? counts.data?.live : counts.data?.ended) ?? 12, cursorPageSize)}
-                  columns={[
-                    { bar: "w-56" },
-                    !scope && { className: "hidden md:table-cell", bar: "w-20" },
-                    { className: "hidden lg:table-cell", bar: "w-32" },
-                    { className: "hidden sm:table-cell", bar: "w-20" },
-                    view === "live" && { className: "hidden md:table-cell", bar: "w-16" },
-                    { empty: true },
-                  ]}
+            {query.isPending ? (
+              <TableRowsSkeleton
+                rows={
+                  lastRows ?? Math.min((view === "live" ? counts.data?.live : counts.data?.ended) ?? 12, cursorPageSize)
+                }
+                columns={[
+                  { bar: "w-56" },
+                  !scope && { className: "hidden md:table-cell", bar: "w-20" },
+                  { className: "hidden lg:table-cell", bar: "w-32" },
+                  { className: "hidden sm:table-cell", bar: "w-20" },
+                  view === "live" && { className: "hidden md:table-cell", bar: "w-16" },
+                  { empty: true },
+                ]}
+              />
+            ) : (
+              shown.map((preview) => (
+                <Row
+                  key={preview.id}
+                  preview={preview}
+                  now={now}
+                  machineName={scope ? undefined : (aliasOf(preview.owner_machine_id) ?? "")}
                 />
-              : shown.map((preview) => (
-                  <Row
-                    key={preview.id}
-                    preview={preview}
-                    now={now}
-                    machineName={scope ? undefined : (aliasOf(preview.owner_machine_id) ?? "")}
-                  />
-                ))}
+              ))
+            )}
           </tbody>
         </table>
-        {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
+        {query.data && (
+          <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />
+        )}
         {query.isError && <LoadError what="previews" error={query.error} retry={() => query.refetch()} />}
         {(query.isSuccess ? shown.length === 0 : query.isPending && lastRows === 0) && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {q
-              ? `No previews match “${q}”`
-              : view === "live"
-                ? "Nothing is live."
-                : "No ended previews"}
+            {q ? `No previews match “${q}”` : view === "live" ? "Nothing is live." : "No ended previews"}
           </p>
         )}
       </div>

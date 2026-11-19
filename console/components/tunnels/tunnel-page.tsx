@@ -13,7 +13,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { useApiQuery, useMachines } from "@/lib/api"
 import { toast } from "sonner"
 import { addressChangeReason, hostOf, patchTunnel, tunnelHealthQuery, tunnelQuery, type Tunnel } from "@/lib/tunnels"
@@ -49,6 +49,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { DangerZone, SectionHeading } from "@/components/section"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * A tunnel's page, laid out like a machine's Overview: who and where it serves, the hostnames
@@ -250,8 +251,7 @@ function FloodNotice({ tunnel }: { tunnel: Tunnel }) {
       <ShieldWarningIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-col gap-0.5">
         <p className="font-medium">
-          {flood.refused} {flood.refused === 1 ? "request" : "requests"} refused since{" "}
-          <Time iso={flood.since} />
+          {flood.refused} {flood.refused === 1 ? "request" : "requests"} refused since <Time iso={flood.since} />
         </p>
         <p className="text-muted-foreground">{flood.summary}</p>
       </div>
@@ -276,8 +276,8 @@ function AddressValue({ tunnel }: { tunnel: Tunnel }) {
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground" role="status">
           <CircleNotchIcon className="size-3.5 shrink-0 animate-spin" aria-hidden />
           <span className="min-w-0 break-words">
-            Moving to <span className="font-mono text-code">{change.hostname}</span>… The current address keeps
-            working until every edge serves the new one.
+            Moving to <span className="font-mono text-code">{change.hostname}</span>… The current address keeps working
+            until every edge serves the new one.
           </span>
         </p>
       )}
@@ -313,7 +313,7 @@ const audiences = { public: "Anyone with the address", private: "Only you" } as 
 /** Who can open the tunnel, changed from a caret menu like the machine's Keep awake. */
 function AccessValue({ tunnel }: { tunnel: Tunnel }) {
   const queryClient = useQueryClient()
-  const [confirmPublic, setConfirmPublic] = useState(false)
+  const [confirmPublic, setConfirmPublic] = useShellState("tunnels/tunnel-page.tsx:confirmPublic", false)
   const save = useMutation({
     mutationFn: (mode: Tunnel["access_mode"]) => patchTunnel(tunnel, { access_mode: mode }),
     onSuccess: async () => {
@@ -349,8 +349,8 @@ function AccessValue({ tunnel }: { tunnel: Tunnel }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Make {tunnel.name} public?</AlertDialogTitle>
             <AlertDialogDescription>
-              Anyone with {hostOf(tunnel.stable_endpoint)} can reach this service without signing in. Only the app’s
-              own login protects it.
+              Anyone with {hostOf(tunnel.stable_endpoint)} can reach this service without signing in. Only the app’s own
+              login protects it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

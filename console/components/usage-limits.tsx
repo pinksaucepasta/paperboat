@@ -9,7 +9,7 @@ import {
   WindowsLogoIcon,
   type Icon,
 } from "@phosphor-icons/react"
-import { useId, useState } from "react"
+import { useId } from "react"
 import {
   usageSinceQuery,
   trafficBreakdown,
@@ -22,7 +22,14 @@ import {
   type TrafficSource,
   type Usage,
 } from "@/lib/api"
-import { allowanceWindow, billingQuery, fairUse, formatSpeed, usageWindowStart, type BillingWorkspace } from "@/lib/billing"
+import {
+  allowanceWindow,
+  billingQuery,
+  fairUse,
+  formatSpeed,
+  usageWindowStart,
+  type BillingWorkspace,
+} from "@/lib/billing"
 import { formatBytes, formatPlatform } from "@/lib/format"
 import { filterKeys, parseQuery, withFilter, type FilterKey } from "@/lib/machine-filter"
 import { cn } from "@/lib/utils"
@@ -37,6 +44,7 @@ import {
 import { useMachineQuery } from "@/components/machine-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { useShellState } from "@/lib/use-shell-state"
 
 const sources: Record<TrafficSource, string> = {
   all: "Combined",
@@ -48,8 +56,8 @@ export function UsageLimits() {
   const workspace = useWorkspace()
   const summary = useApiQuery({ ...machineSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const billing = useApiQuery(billingQuery(workspace))
-  const [chosen, setPeriod] = useState<UsagePeriod | "billing">()
-  const [source, setSource] = useState<TrafficSource>("all")
+  const [chosen, setPeriod] = useShellState<UsagePeriod | "billing">("usage-limits.tsx:chosen")
+  const [source, setSource] = useShellState<TrafficSource>("usage-limits.tsx:source", "all")
   // The bandwidth card opens on the billing period, the window the allowance card counts, so the
   // two agree; the other periods are one click away.
   // While billing loads the card already says what it will open on (most workspaces have a plan).
@@ -231,7 +239,9 @@ function Allowance({ billing }: { billing: BillingWorkspace }) {
           <Figure>{fair?.ownEdges ? "Unlimited" : formatBytes(billing.usage_bytes)}</Figure>
           <span className="text-sm text-muted-foreground">{fair?.ownEdges ? "your own edges" : "used"}</span>
         </span>
-        <span className="mt-auto text-xs text-muted-foreground">{fair?.ownEdges ? "Never counted or limited by Paperboat" : "No limit"}</span>
+        <span className="mt-auto text-xs text-muted-foreground">
+          {fair?.ownEdges ? "Never counted or limited by Paperboat" : "No limit"}
+        </span>
       </div>
     )
   }
@@ -239,7 +249,9 @@ function Allowance({ billing }: { billing: BillingWorkspace }) {
     <div className="flex flex-1 flex-col gap-3" data-fair-use-card data-throttled={fair.throttled}>
       <span className="flex items-baseline gap-2">
         <Figure>{formatBytes(fair.used)}</Figure>
-        <span className="text-sm text-muted-foreground">{fair.throttled ? `at ${formatSpeed(fair.mbit)}` : "full speed"}</span>
+        <span className="text-sm text-muted-foreground">
+          {fair.throttled ? `at ${formatSpeed(fair.mbit)}` : "full speed"}
+        </span>
       </span>
       <div className="mt-auto flex flex-col gap-2.5">
         <div
@@ -250,9 +262,12 @@ function Allowance({ billing }: { billing: BillingWorkspace }) {
           aria-valuenow={Math.min(fair.used, fair.amount)}
           className="flex h-1.5 overflow-hidden rounded-full bg-muted"
         >
-          <div className={fair.throttled ? "bg-muted-foreground" : "bg-primary"} style={{ width: `${fair.share * 100}%` }} />
+          <div
+            className={fair.throttled ? "bg-muted-foreground" : "bg-primary"}
+            style={{ width: `${fair.share * 100}%` }}
+          />
         </div>
-        <div className="flex items-center justify-between gap-3 whitespace-nowrap text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3 text-xs whitespace-nowrap text-muted-foreground">
           <span className="truncate tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)} included`}</span>
           {fair.ends && (
             <span className="shrink-0">
@@ -569,5 +584,7 @@ function BandwidthSkeleton() {
 }
 
 function Figure({ children }: { children: React.ReactNode }) {
-  return <span className="shrink-0 font-heading text-3xl font-semibold tracking-tight whitespace-nowrap">{children}</span>
+  return (
+    <span className="shrink-0 font-heading text-3xl font-semibold tracking-tight whitespace-nowrap">{children}</span>
+  )
 }

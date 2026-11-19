@@ -2,7 +2,6 @@
 
 import { PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
 import { startShell, terminalKeys } from "@/lib/terminal/queries"
 import { pickerOption } from "@/components/crumb-picker"
@@ -11,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** A machine can host a terminal when it's online, you may open terminals on it, and it runs the terminal host. */
 export function canHostTerminal(machine: Machine): boolean {
@@ -59,7 +59,7 @@ export function NewTerminalButton({ machine }: { machine?: Machine }) {
 }
 
 function MachinePickerButton({ onChoose }: { onChoose: (machine: Machine) => void }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("terminal/new-terminal.tsx:open", false)
   const machines = useMachines()
   const eligible = machines.data?.filter(canHostTerminal) ?? []
   const others = (machines.data?.length ?? 0) - eligible.length

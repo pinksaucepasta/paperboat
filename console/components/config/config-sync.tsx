@@ -35,6 +35,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { EmptySkeleton, TableRowsSkeleton } from "@/components/skeletons"
 import { LoadError } from "@/components/load-error"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The machine page's Config sync tab. */
 export function MachineConfigSync() {
@@ -49,7 +50,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const { scope, machine } = useListScope(tabMachine)
   // Your GitHub account and repositories belong to Personal; a team shows its own default instead.
   const personal = useWorkspace()?.kind !== "team"
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useShellState("config/config-sync.tsx:search", "")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(`${q}|${scope ?? ""}`)
   // All machines: the ones that sync lead; the ones that don't are folded below (server `state` groups).
@@ -147,7 +148,7 @@ function AllMachines(props: {
   idle: { environments: ConfigEnvironment[]; total: number; page: number; go: (page: number) => void }
 }) {
   const { loading, environments, total, page, go, conflicted, search, setSearch, idle } = props
-  const [showIdle, setShowIdle] = useState(false)
+  const [showIdle, setShowIdle] = useShellState("config/config-sync.tsx:showIdle", false)
   return (
     <section className="flex flex-col gap-4">
       {conflicted > 0 && (
@@ -354,12 +355,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
       <SyncActions environment={environment} />
 
       {conflicts.length > 0 && (
-        <PathList
-          title="Conflicts"
-          paths={conflicts}
-          note={conflictNote}
-          command="pb config conflict"
-        />
+        <PathList title="Conflicts" paths={conflicts} note={conflictNote} command="pb config conflict" />
       )}
       {review.length > 0 && (
         <PathList
@@ -391,7 +387,9 @@ function PolicyRule({ machineId, workspace, source }: { machineId: string; works
         <p className="text-sm text-muted-foreground">This machine uses its own choice, which comes before the rule.</p>
       )}
       {source === "recipe" && (
-        <p className="text-sm text-muted-foreground">This machine uses its recipe’s repository, which comes before the rule.</p>
+        <p className="text-sm text-muted-foreground">
+          This machine uses its recipe’s repository, which comes before the rule.
+        </p>
       )}
       {rule.state === "connect_on_apply" && (
         <>

@@ -16,6 +16,7 @@ import { Starting } from "@/components/tunnels/new-preview"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Share a file as a link (like Vercel's drop.new), from the Files page: a new file dropped here, or one
@@ -40,10 +41,19 @@ type Destination = { kind: "machine"; id: string; label: string }
 const destinationValue = (destination: Destination) => `${destination.kind}:${destination.id}`
 // A machine hosts a share when it can serve previews, receive files and carry the terminal connection the upload rides.
 const destinationsOf = (machines: Machine[]): Destination[] =>
-  machines.filter((machine) => canPreview(machine) && canReceive(machine) && canHostTerminal(machine)).map((machine) => ({ kind: "machine", id: machine.id, label: machine.alias }))
+  machines
+    .filter((machine) => canPreview(machine) && canReceive(machine) && canHostTerminal(machine))
+    .map((machine) => ({ kind: "machine", id: machine.id, label: machine.alias }))
 
 type HostInput = { file: File; workspace: string; access: Access; hours: number }
-const host: Record<Destination["kind"], (destination: Destination, input: HostInput, onProgress: (fraction: number) => void) => ReturnType<typeof shareNewFile>> = {
+const host: Record<
+  Destination["kind"],
+  (
+    destination: Destination,
+    input: HostInput,
+    onProgress: (fraction: number) => void,
+  ) => ReturnType<typeof shareNewFile>
+> = {
   machine: (destination, input, onProgress) => shareNewFile({ ...input, machine: destination }, onProgress),
 }
 
@@ -70,7 +80,7 @@ export type ShareSource =
   | { kind: "inbox"; machine: Pick<Machine, "id" | "alias">; file: InboxFile }
 
 export function ShareFileButton({ machine }: { machine?: Machine }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("files/share-dialog.tsx:open", false)
   if (!inboxLive.share) return null
   return (
     <>
@@ -88,9 +98,9 @@ type Shared = { id: string; hostName: string; name: string; opens: boolean }
 /** The one share dialog: the same defaults line and the same going-live step for a new file and an Inbox file. */
 export function ShareDialog({ source, onClose }: { source: ShareSource; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [access, setAccess] = useState<Access>("public")
-  const [hours, setHours] = useState(24)
-  const [shared, setShared] = useState<Shared>()
+  const [access, setAccess] = useShellState<Access>("files/share-dialog.tsx:access", "public")
+  const [hours, setHours] = useShellState("files/share-dialog.tsx:hours", 24)
+  const [shared, setShared] = useShellState<Shared>("files/share-dialog.tsx:shared")
   const cancel = useRef<() => void>(undefined)
   const done = (next: Shared) => {
     setShared(next)
@@ -119,7 +129,12 @@ export function ShareDialog({ source, onClose }: { source: ShareSource; onClose:
             onDone={onClose}
           />
         ) : source.kind === "upload" ? (
-          <UploadBody source={source} settings={settings} onShared={done} registerCancel={(fn) => (cancel.current = fn)} />
+          <UploadBody
+            source={source}
+            settings={settings}
+            onShared={done}
+            registerCancel={(fn) => (cancel.current = fn)}
+          />
         ) : (
           <InboxBody source={source} settings={settings} onShared={done} onCancel={onClose} />
         )}
@@ -186,8 +201,8 @@ function InboxBody({
         <SettingsChoices settings={settings} />
       </div>
       <p className="text-xs text-muted-foreground">
-        {opens ? "It opens in the browser." : "It downloads when opened."} {source.machine.alias} serves it while the link
-        lasts.
+        {opens ? "It opens in the browser." : "It downloads when opened."} {source.machine.alias} serves it while the
+        link lasts.
       </p>
       {share.isError && (
         <p className="text-sm text-destructive">
@@ -220,11 +235,11 @@ function UploadBody({
   const workspace = useWorkspace()
   const machines = useMachines()
   const destinations = destinationsOf(machines.data ?? [])
-  const [chosen, setChosen] = useState<string | null>(() =>
+  const [chosen, setChosen] = useShellState<string | null>("files/share-dialog.tsx:chosen", () =>
     source.machine ? `machine:${source.machine.id}` : rememberedDestination(),
   )
   const destination = pickHost(destinations, (entry) => destinationValue(entry) === chosen, Boolean(source.machine))
-  const [file, setFile] = useState<File>()
+  const [file, setFile] = useShellState<File>("files/share-dialog.tsx:file")
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<Error>()
   const cancel = useRef<() => void>(undefined)

@@ -2,7 +2,6 @@
 
 import { GithubLogoIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { useApiQuery } from "@/lib/api"
 import { disconnectGitHub, githubLive, githubStatusQuery, startConnect } from "@/lib/github"
 import { ConfirmAction } from "@/components/list-toolbar"
@@ -11,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Your GitHub account link, which lets you pick your GitHub repositories under Repositories:
@@ -19,7 +19,7 @@ import { ErrorMessage } from "@/components/error-reference"
 export function GitHubConnection() {
   const queryClient = useQueryClient()
   const status = useApiQuery(githubStatusQuery)
-  const [disconnecting, setDisconnecting] = useState(false)
+  const [disconnecting, setDisconnecting] = useShellState("config/github-connection.tsx:disconnecting", false)
   const connect = useMutation({
     mutationFn: () => startConnect("/config"),
     onSuccess: ({ authorization_url }) => window.location.assign(authorization_url),
@@ -67,7 +67,10 @@ export function GitHubConnection() {
         )
       }
     >
-      <div className="flex min-h-12 items-center gap-3 border-b border-divider py-2 text-sm" data-github={data.connected ? "connected" : "disconnected"}>
+      <div
+        className="flex min-h-12 items-center gap-3 border-b border-divider py-2 text-sm"
+        data-github={data.connected ? "connected" : "disconnected"}
+      >
         {data.connected ? (
           <>
             <Avatar className="size-6">
@@ -79,13 +82,13 @@ export function GitHubConnection() {
             </span>
           </>
         ) : (
-          <span className="text-muted-foreground">
-            Connect GitHub to pick your private repositories.
-          </span>
+          <span className="text-muted-foreground">Connect GitHub to pick your private repositories.</span>
         )}
       </div>
       {data.missing_scopes.length > 0 && (
-        <p className="py-2 text-sm text-destructive">GitHub is missing access Paperboat needs; connect again to grant it.</p>
+        <p className="py-2 text-sm text-destructive">
+          GitHub is missing access Paperboat needs; connect again to grant it.
+        </p>
       )}
       {connect.isError && (
         <p className="py-2 text-sm text-destructive">

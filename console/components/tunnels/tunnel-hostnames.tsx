@@ -45,6 +45,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { RouteRulesDialog } from "@/components/tunnels/tunnel-route-rules"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Cloudflare Tunnel's model: a tunnel has public hostnames, each sending one hostname (and
@@ -66,7 +67,12 @@ function routeHost(route: TunnelRoute) {
 function ruleCount(route: TunnelRoute) {
   const rules = route.rewrite_rules
   if (!rules) return 0
-  return (rules.request_headers?.length ?? 0) + (rules.response_headers?.length ?? 0) + (rules.path_rewrite ? 1 : 0) + (rules.redirects?.length ?? 0)
+  return (
+    (rules.request_headers?.length ?? 0) +
+    (rules.response_headers?.length ?? 0) +
+    (rules.path_rewrite ? 1 : 0) +
+    (rules.redirects?.length ?? 0)
+  )
 }
 
 /** A hostname's state: its workspace domain is verified already, so a certificate copy, then ready. */
@@ -86,7 +92,7 @@ export const domainStates: Record<TunnelDomain["state"], { label: string; tone: 
 export function TunnelHostnames({ tunnel }: { tunnel: Tunnel }) {
   const routes = useApiQuery(routesQuery(tunnel.id))
   const domains = useApiQuery(domainsQuery(tunnel.id))
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useShellState("tunnels/tunnel-hostnames.tsx:adding", false)
   const bindingFor = (route: TunnelRoute) =>
     domains.data?.find((domain) => domain.route_id === route.id && domain.hostname === route.host_match.hostname)
 
@@ -161,7 +167,9 @@ function HostnameRow({
       : ([
           { kind: "item", label: "Edit…", icon: PencilSimpleIcon, onSelect: () => setEditing(true) },
           ...(route.protocol === "http"
-            ? ([{ kind: "item", label: "Edit rules…", icon: SlidersHorizontalIcon, onSelect: () => setRuling(true) }] satisfies Entry[])
+            ? ([
+                { kind: "item", label: "Edit rules…", icon: SlidersHorizontalIcon, onSelect: () => setRuling(true) },
+              ] satisfies Entry[])
             : []),
           { kind: "item", label: off ? "Turn on" : "Turn off", icon: PowerIcon, onSelect: () => toggle.mutate() },
           { kind: "separator" },
@@ -288,10 +296,16 @@ function HostnameDialog({
   const queryClient = useQueryClient()
   const managed = hostOf(tunnel.stable_endpoint)
   const startOwn = route ? route.host_match.type !== "managed_exact" : false
-  const [own, setOwn] = useState(startOwn)
-  const [hostname, setHostname] = useState(startOwn && route ? routeHost(route) : "")
-  const [path, setPath] = useState(route?.path_prefix ?? "")
-  const [service, setService] = useState(route ? serviceText(route.origin) : "")
+  const [own, setOwn] = useShellState("tunnels/tunnel-hostnames.tsx:own", startOwn)
+  const [hostname, setHostname] = useShellState(
+    "tunnels/tunnel-hostnames.tsx:hostname",
+    startOwn && route ? routeHost(route) : "",
+  )
+  const [path, setPath] = useShellState("tunnels/tunnel-hostnames.tsx:path", route?.path_prefix ?? "")
+  const [service, setService] = useShellState(
+    "tunnels/tunnel-hostnames.tsx:service",
+    route ? serviceText(route.origin) : "",
+  )
 
   const origin = parseService(service)
   const domain = hostname.trim().toLowerCase().replace(/\.$/, "")

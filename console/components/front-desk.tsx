@@ -1,7 +1,6 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { toast } from "sonner"
 import { useApiQuery, type Machine } from "@/lib/api"
 import { frontDeskQuery, saveFrontDesk, validPort, type FrontDesk as Desk } from "@/lib/port-names"
@@ -12,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const schemes = [
   { value: "http", label: "http" },
@@ -45,8 +45,8 @@ export function FrontDesk() {
 
 function Editor({ machine, current }: { machine: Machine; current: Desk }) {
   const queryClient = useQueryClient()
-  const [portText, setPortText] = useState(String(current.port))
-  const [scheme, setScheme] = useState(current.scheme)
+  const [portText, setPortText] = useShellState("front-desk.tsx:portText", String(current.port))
+  const [scheme, setScheme] = useShellState("front-desk.tsx:scheme", current.scheme)
   const port = Number(portText)
   const dirty = port !== current.port || scheme !== current.scheme
   const save = useMutation({

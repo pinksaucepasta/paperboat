@@ -20,6 +20,7 @@ import { FairUse } from "@/components/usage/fair-use"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
 import { useWorkspaceId } from "@/lib/workspace"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * How much traffic Paperboat carried and which way it went: directly between machines, through a
@@ -82,7 +83,7 @@ function split(usage: Usage): Split {
 export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
   const workspace = useWorkspace()
   const { scope } = useListScope(tabMachine)
-  const [period, setPeriod] = useState<UsagePeriod>("7d")
+  const [period, setPeriod] = useShellState<UsagePeriod>("usage/usage-page.tsx:period", "7d")
   const usage = useApiQuery({ ...usageForQuery(workspace?.id ?? "", period, scope), enabled: Boolean(workspace) })
   const data = usage.data
   // The cookie's workspace: known in the browser before the session is (the prerendered shell).
@@ -131,7 +132,7 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
     .map((resource) => ({ resource, total: resource.upload_bytes + resource.download_bytes }))
     .sort((a, b) => b.total - a.total)
   // The biggest few answer "what used my bandwidth"; the long tail opens on request.
-  const [all, setAll] = useState(false)
+  const [all, setAll] = useShellState("usage/usage-page.tsx:all", false)
   const shown = all ? resources : resources.slice(0, topResources)
 
   return (
@@ -185,9 +186,7 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
               <td>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate font-medium">{resource.resource_name || resource.resource_id}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {kindLabels[resource.resource_kind] ?? "Other"}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{kindLabels[resource.resource_kind] ?? "Other"}</span>
                 </span>
               </td>
               {showMachine && (
@@ -311,7 +310,15 @@ function UsageSkeleton({ showMachine, rows, chart }: { showMachine: boolean; row
             <span className="font-medium">Traffic</span>
           </div>
           <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-48 w-full">
-            <line x1="0" y1="39" x2="100" y2="39" className="stroke-foreground/10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+            <line
+              x1="0"
+              y1="39"
+              x2="100"
+              y2="39"
+              className="stroke-foreground/10"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
           </svg>
           <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
             <span>&nbsp;</span>

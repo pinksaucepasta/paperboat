@@ -1,7 +1,6 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { useApiQuery, type Workspace } from "@/lib/api"
 import {
   addonNames,
@@ -18,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const kinds: Addon[] = ["sso", "scim", "sso_scim"]
 
@@ -28,7 +28,8 @@ const consentText =
 /** Why the add-on cannot be changed right now, when it cannot. */
 function blocked(billing: BillingWorkspace, date: (iso: string) => string): string | undefined {
   if (!billing.can_manage) return "Only the owner and billing admins can change the add-on."
-  if (billing.state !== "active" && billing.state !== "trialing") return "The add-on can be changed while the plan is active."
+  if (billing.state !== "active" && billing.state !== "trialing")
+    return "The add-on can be changed while the plan is active."
   if (billing.cancel_at_period_end) return "The plan ends at the end of this period, so the add-on can't be changed."
   if (billing.scheduled_seats != null && billing.scheduled_seats_at)
     return `A seat reduction takes effect on ${date(billing.scheduled_seats_at)}. Change the add-on after that.`
@@ -45,8 +46,8 @@ export function Addons({ workspace, billing }: { workspace: Workspace; billing: 
   const date = (iso: string) => time.date(iso, "date")
   const interval = billing.product?.interval ?? "month"
   const running: Addon = billing.addon && !billing.addon_until ? (billing.addon as Addon) : ""
-  const [chosen, setChosen] = useState<Addon | undefined>()
-  const [agreed, setAgreed] = useState(false)
+  const [chosen, setChosen] = useShellState<Addon | undefined>("billing/billing-addon.tsx:chosen")
+  const [agreed, setAgreed] = useShellState("billing/billing-addon.tsx:agreed", false)
   const selected = chosen ?? running
   const save = useMutation({
     mutationFn: () => setAddon(workspace, selected),

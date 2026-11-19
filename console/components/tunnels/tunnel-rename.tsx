@@ -2,13 +2,13 @@
 
 import { CheckIcon, CircleNotchIcon, PencilSimpleIcon, XIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { patchTunnel, type Tunnel } from "@/lib/tunnels"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The server's rule (tunnelv1 validateTunnelName): 1–63 of letters, digits, ".", "_", "-", not starting with punctuation. */
 const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
@@ -22,7 +22,7 @@ function nameProblem(name: string) {
 /** One save and validation for renaming a tunnel, from its page or from the list. The address stays. */
 function useRename(tunnel: Tunnel, onDone: () => void) {
   const queryClient = useQueryClient()
-  const [name, setName] = useState(tunnel.name)
+  const [name, setName] = useShellState("tunnels/tunnel-rename.tsx:name", tunnel.name)
   const final = name.trim()
   const problem = final === tunnel.name ? undefined : nameProblem(final)
   const save = useMutation({
@@ -51,7 +51,7 @@ const inPlace =
 
 /** The tunnel's name on its page, edited in place (DESIGN.md: hovering shows a pencil). */
 export function TunnelTitle({ tunnel }: { tunnel: Tunnel }) {
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useShellState("tunnels/tunnel-rename.tsx:editing", false)
   if (editing) return <TitleEditor tunnel={tunnel} onDone={() => setEditing(false)} />
   return (
     <div className="group/title flex min-w-0 items-center gap-1">

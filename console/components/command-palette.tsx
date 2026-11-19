@@ -2,7 +2,7 @@
 
 import { MagnifyingGlassIcon, UserCircleIcon } from "@phosphor-icons/react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useDebounced } from "@/hooks/use-debounced"
 import { machineListQuery } from "@/lib/machine-list"
 import { machineSearchQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
@@ -18,13 +18,14 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Kbd } from "@/components/ui/kbd"
+import { useShellState } from "@/lib/use-shell-state"
 
 const pages = navigationGroups.flatMap((group) => group.items)
 
 /** ⌘K / Ctrl+K: jump to any page or machine. Machine search runs on the server, so size does not matter. */
 export function CommandPalette() {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
+  const [open, setOpen] = useShellState("command-palette.tsx:open", false)
+  const [search, setSearch] = useShellState("command-palette.tsx:search", "")
   const query = useDebounced(search.trim(), 200)
   const router = useRouter()
   const workspace = useWorkspace()
@@ -45,7 +46,7 @@ export function CommandPalette() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  }, [setOpen])
 
   const go = (href: string) => {
     setOpen(false)

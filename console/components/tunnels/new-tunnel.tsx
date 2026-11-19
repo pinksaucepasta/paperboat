@@ -1,7 +1,6 @@
 "use client"
 
 import { PlusIcon } from "@phosphor-icons/react"
-import { useState } from "react"
 import { useWorkspace, type Machine } from "@/lib/api"
 import { usePort } from "@/components/tunnels/machine-choice"
 import { CommandBlock } from "@/components/add-machine-dialog"
@@ -10,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** A tunnel name is kept to lowercase letters, digits and dashes, so it reads well in its address. */
 const slug = (value: string) =>
@@ -20,7 +20,7 @@ const slug = (value: string) =>
     .slice(0, 63)
 
 export function NewTunnelButton({ machine }: { machine?: Machine }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("tunnels/new-tunnel.tsx:open", false)
   return (
     <>
       <Button size="lg" onClick={() => setOpen(true)}>
@@ -40,9 +40,9 @@ export function NewTunnelButton({ machine }: { machine?: Machine }) {
  */
 function NewTunnelDialog({ machine, onClose }: { machine?: Machine; onClose: () => void }) {
   const workspace = useWorkspace()
-  const [name, setName] = useState("")
+  const [name, setName] = useShellState("tunnels/new-tunnel.tsx:name", "")
   const port = usePort()
-  const [access, setAccess] = useState<"public" | "private">("public")
+  const [access, setAccess] = useShellState<"public" | "private">("tunnels/new-tunnel.tsx:access", "public")
   const nameValue = name.replace(/-+$/, "") || "my-app"
   const command = [
     `pb tunnel create ${nameValue} --port ${port.value || "3000"}`,

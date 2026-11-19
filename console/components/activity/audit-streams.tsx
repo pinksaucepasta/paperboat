@@ -17,11 +17,19 @@ import { CopyRow } from "@/components/copy-button"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Row, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Activity → Streaming: the team's audit log sent to a SIEM as it happens, at most one HTTPS and
@@ -32,7 +40,8 @@ import { ErrorMessage } from "@/components/error-reference"
 const kinds: Record<StreamKind, { title: string; about: string }> = {
   https: {
     title: "HTTPS",
-    about: "Batches of events as NDJSON, POSTed to your SIEM (Splunk HEC, Datadog, Axiom, Elastic…), signed with a secret.",
+    about:
+      "Batches of events as NDJSON, POSTed to your SIEM (Splunk HEC, Datadog, Axiom, Elastic…), signed with a secret.",
   },
   s3: {
     title: "S3-compatible storage",
@@ -80,7 +89,7 @@ function Destination({
 }) {
   const time = useTimeFormat()
   const queryClient = useQueryClient()
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useShellState("activity/audit-streams.tsx:editing", false)
   const [removing, setRemoving] = useState(false)
   const test = useMutation({
     mutationFn: () => testAuditStream(team, kind),
@@ -110,7 +119,9 @@ function Destination({
       ) : (
         <>
           <Row label={kind === "s3" ? "Bucket" : "Endpoint"}>
-            <span className="font-mono text-code">{kind === "s3" ? `${stream.bucket}/${stream.prefix ?? ""}` : stream.url}</span>
+            <span className="font-mono text-code">
+              {kind === "s3" ? `${stream.bucket}/${stream.prefix ?? ""}` : stream.url}
+            </span>
           </Row>
           <Row label="Status">
             {stream.failing_since ? (
@@ -181,7 +192,7 @@ function StreamDialog({
     access_key_id: stream?.access_key_id ?? "",
     secret_access_key: "",
   }
-  const [draft, setDraft] = useState(blank)
+  const [draft, setDraft] = useShellState("activity/audit-streams.tsx:draft", blank)
   const [secret, setSecret] = useState<string>()
   const keepsHeader = Boolean(stream?.header_name) && draft.header_name.trim() === stream?.header_name
   const save = useMutation({
@@ -237,7 +248,9 @@ function StreamDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="gap-4 sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{secret ? "Signing secret" : `${stream ? "Edit" : "Set up"} ${kinds[kind].title} streaming`}</DialogTitle>
+          <DialogTitle>
+            {secret ? "Signing secret" : `${stream ? "Edit" : "Set up"} ${kinds[kind].title} streaming`}
+          </DialogTitle>
           <DialogDescription>
             {secret
               ? "Every request carries Pb-Signature: t=<time>,v1=<HMAC-SHA256 of “t.body” with this secret>. Copy it now; it is not shown again."
@@ -265,29 +278,47 @@ function StreamDialog({
           >
             {kind === "https" ? (
               <>
-                {field("url", "Endpoint", { type: "url", required: true, placeholder: "https://siem.example.com/ingest" })}
+                {field("url", "Endpoint", {
+                  type: "url",
+                  required: true,
+                  placeholder: "https://siem.example.com/ingest",
+                })}
                 {field("header_name", "Header name (optional)", { placeholder: "Authorization" })}
                 {draft.header_name.trim() &&
                   // A header that is already stored keeps its value unless a new one is entered.
-                  field("header_value", keepsHeader ? "Header value (leave empty to keep the current one)" : "Header value", {
-                    type: "password",
-                    required: !keepsHeader,
-                  })}
+                  field(
+                    "header_value",
+                    keepsHeader ? "Header value (leave empty to keep the current one)" : "Header value",
+                    {
+                      type: "password",
+                      required: !keepsHeader,
+                    },
+                  )}
               </>
             ) : (
               <>
-                {field("url", "Endpoint", { type: "url", required: true, placeholder: "https://s3.eu-central-1.amazonaws.com" })}
+                {field("url", "Endpoint", {
+                  type: "url",
+                  required: true,
+                  placeholder: "https://s3.eu-central-1.amazonaws.com",
+                })}
                 <div className="grid grid-cols-2 gap-3">
                   {field("region", "Region", { required: true })}
                   {field("bucket", "Bucket", { required: true })}
                 </div>
                 {field("prefix", "Prefix (optional)")}
                 {field("access_key_id", "Access key ID", { required: true })}
-                {field("secret_access_key", stream ? "Secret access key (leave empty to keep the current one)" : "Secret access key", {
-                  type: "password",
-                  required: !stream,
-                })}
-                <p className="text-xs text-muted-foreground">The key only needs permission to put objects under the prefix.</p>
+                {field(
+                  "secret_access_key",
+                  stream ? "Secret access key (leave empty to keep the current one)" : "Secret access key",
+                  {
+                    type: "password",
+                    required: !stream,
+                  },
+                )}
+                <p className="text-xs text-muted-foreground">
+                  The key only needs permission to put objects under the prefix.
+                </p>
               </>
             )}
             {save.isError && (

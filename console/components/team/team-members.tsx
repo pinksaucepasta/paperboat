@@ -54,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Who can do what, from the server's rules (teams/service.go Mutate, teams-business.md). A member
@@ -87,9 +88,9 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const invitations = useApiQuery(teamInvitationsQuery(workspace.id))
   const billing = useApiQuery(billingQuery(workspace))
   const me = useApiQuery(meQuery)
-  const [view, setView] = useState<"members" | "invitations">("members")
-  const [search, setSearch] = useState("")
-  const [inviting, setInviting] = useState(false)
+  const [view, setView] = useShellState<"members" | "invitations">("team/team-members.tsx:view", "members")
+  const [search, setSearch] = useShellState("team/team-members.tsx:search", "")
+  const [inviting, setInviting] = useShellState("team/team-members.tsx:inviting", false)
   const tabParam = useSearchParams().get("tab")
   const tab = tabParam === "security" || tabParam === "recordings" || tabParam === "storage" ? tabParam : "members"
 
@@ -131,7 +132,8 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   // The team's bucket: owners and admins connect and change it.
   const storageTab = admin
   const tabs = (["members", "security", "recordings", "storage"] as const).filter(
-    (value) => value === "members" || (value === "security" ? securityTab : value === "recordings" ? recordingsTab : storageTab),
+    (value) =>
+      value === "members" || (value === "security" ? securityTab : value === "recordings" ? recordingsTab : storageTab),
   )
   const tabTitles = { members: "Members", security: "Security", recordings: "Recordings", storage: "Storage" }
 
@@ -195,41 +197,41 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
         <TeamStorage team={team.data.team_id} admin={admin} />
       ) : (
         <>
-        <MachineRequests team={team.data} admin={admin} me={me.data} />
-        <MachineAccess team={team.data} admin={admin} accountId={me.data.id} emails={emails} />
+          <MachineRequests team={team.data} admin={admin} me={me.data} />
+          <MachineAccess team={team.data} admin={admin} accountId={me.data.id} emails={emails} />
 
-        <section className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <ViewToggle
-              value={view}
-              onChange={setView}
-              views={[
-                { value: "members", label: "Members", count: members.length },
-                ...(admin ? [{ value: "invitations" as const, label: "Invitations", count: pending.length }] : []),
-              ]}
-            />
-            <div className="ml-auto w-full max-w-sm">
-              <SearchField value={search} onChange={setSearch} placeholder="Search by name or email" />
+          <section className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <ViewToggle
+                value={view}
+                onChange={setView}
+                views={[
+                  { value: "members", label: "Members", count: members.length },
+                  ...(admin ? [{ value: "invitations" as const, label: "Invitations", count: pending.length }] : []),
+                ]}
+              />
+              <div className="ml-auto w-full max-w-sm">
+                <SearchField value={search} onChange={setSearch} placeholder="Search by name or email" />
+              </div>
             </div>
-          </div>
-          {view === "members" ? (
-            <MembersTable team={team.data} members={shownMembers} emails={emails} me={me.data} actor={actor} />
-          ) : invitations.isError ? (
-            <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-              Couldn’t load invitations.
-              <Button variant="outline" size="sm" onClick={() => invitations.refetch()}>
-                Retry
-              </Button>
-            </div>
-          ) : (
-            <InvitationsTable team={team.data} invitations={shownInvites} emails={emails} me={me.data} />
-          )}
-        </section>
+            {view === "members" ? (
+              <MembersTable team={team.data} members={shownMembers} emails={emails} me={me.data} actor={actor} />
+            ) : invitations.isError ? (
+              <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
+                Couldn’t load invitations.
+                <Button variant="outline" size="sm" onClick={() => invitations.refetch()}>
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <InvitationsTable team={team.data} invitations={shownInvites} emails={emails} me={me.data} />
+            )}
+          </section>
 
-        {admin && <TeamSettings team={team.data} owner={actor === "owner"} />}
-        {admin && <TeamGrants team={team.data} emails={emails} />}
-        {admin && <TeamConfigDefault team={team.data.team_id} />}
-        <DangerZone team={team.data} owner={actor === "owner"} />
+          {admin && <TeamSettings team={team.data} owner={actor === "owner"} />}
+          {admin && <TeamGrants team={team.data} emails={emails} />}
+          {admin && <TeamConfigDefault team={team.data.team_id} />}
+          <DangerZone team={team.data} owner={actor === "owner"} />
         </>
       )}
       <InviteDialog
@@ -700,7 +702,7 @@ function MachineRequests({ team, admin, me }: { team: Team; admin: boolean; me: 
 function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
   const refresh = useRefreshTeam(team.team_id)
   const queryClient = useQueryClient()
-  const [name, setName] = useState(team.display_name || team.team_id)
+  const [name, setName] = useShellState("team/team-members.tsx:name", team.display_name || team.team_id)
   const rename = useMutation({
     mutationFn: () => teamAction(team, "rename", { name: name.trim() }),
     onSuccess: async () => {

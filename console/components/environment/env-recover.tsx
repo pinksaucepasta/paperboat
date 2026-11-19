@@ -1,13 +1,13 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { lockVault } from "@/lib/envvault/crypto"
 import { newRecoveryCode, recoverVault } from "@/lib/envvault/protection"
 import { unlockVault } from "@/lib/envvault/vault"
 import { PasswordForm, RecoveryCodeStep } from "@/components/environment/env-recovery-code"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Forgot the vault password: the recovery code opens the vault in this browser, a new password and a
@@ -16,8 +16,8 @@ import { Input } from "@/components/ui/input"
  */
 export function EnvRecover({ onCancel }: { onCancel: () => void }) {
   const client = useQueryClient()
-  const [code, setCode] = useState("")
-  const [next, setNext] = useState<{ password: string; code: string }>()
+  const [code, setCode] = useShellState("environment/env-recover.tsx:code", "")
+  const [next, setNext] = useShellState<{ password: string; code: string }>("environment/env-recover.tsx:next")
   const cancel = () => {
     lockVault() // drops the keys the recovery code opened
     onCancel()

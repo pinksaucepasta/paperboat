@@ -2,15 +2,15 @@
 
 import { KeyIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { newRecoveryCode, setUpVault } from "@/lib/envvault/protection"
 import { PasswordForm, RecoveryCodeStep } from "@/components/environment/env-recovery-code"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** No vault yet: a password and a recovery code create one in this browser, the same vault `pb env init` makes. */
 export function EnvVaultSetup() {
   const client = useQueryClient()
-  const [made, setMade] = useState<{ password: string; code: string }>()
+  const [made, setMade] = useShellState<{ password: string; code: string }>("environment/env-vault-setup.tsx:made")
   const prepare = useMutation({
     mutationFn: async (password: string) => ({ password, code: await newRecoveryCode() }),
     onSuccess: setMade,

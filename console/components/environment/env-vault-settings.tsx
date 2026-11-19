@@ -27,6 +27,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 type Change = "password" | "create" | "replace" | "off" | "key" | "reset"
 
@@ -37,7 +38,7 @@ type Change = "password" | "create" | "replace" | "off" | "key" | "reset"
 export function EnvVaultSettings() {
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   const client = useQueryClient()
-  const [change, setChange] = useState<Change>()
+  const [change, setChange] = useShellState<Change>("environment/env-vault-settings.tsx:change")
   const close = () => setChange(undefined)
   const done = () => {
     close()
@@ -56,7 +57,10 @@ export function EnvVaultSettings() {
           action="Replace key"
           pending="Replacing…"
           confirmName="ROTATE ENV"
-          mutation={{ mutationFn: rotatePersonalKey, onSuccess: () => client.invalidateQueries({ queryKey: ["env-names"] }) }}
+          mutation={{
+            mutationFn: rotatePersonalKey,
+            onSuccess: () => client.invalidateQueries({ queryKey: ["env-names"] }),
+          }}
         />
       )}
       {change === "reset" && <ResetDialog onClose={close} />}
@@ -71,8 +75,8 @@ export function EnvVaultSettings() {
 
 function ClosedVault() {
   const vault = useApiQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
-  const [recovering, setRecovering] = useState(false)
-  const [resetting, setResetting] = useState(false)
+  const [recovering, setRecovering] = useShellState("environment/env-vault-settings.tsx:recovering", false)
+  const [resetting, setResetting] = useShellState("environment/env-vault-settings.tsx:resetting", false)
   const notSetUp = vault.isSuccess && !vault.data
   return (
     <Section title="Vault">
@@ -150,7 +154,10 @@ function OpenVault({ onChange }: { onChange: (change: Change) => void }) {
           Replace…
         </Button>
       </SettingRow>
-      <SettingRow label="Reset vault" description="Deletes your variables and team keys, then starts over with a new password.">
+      <SettingRow
+        label="Reset vault"
+        description="Deletes your variables and team keys, then starts over with a new password."
+      >
         <Button variant="outline" onClick={() => onChange("reset")}>
           Reset…
         </Button>
@@ -260,7 +267,7 @@ function TurnOff({ open, onClose, onDone }: { open: boolean; onClose: () => void
 /** A new password for a vault whose old one is lost: every personal variable and team key goes. */
 function ResetDialog({ onClose }: { onClose: () => void }) {
   const client = useQueryClient()
-  const [typed, setTyped] = useState("")
+  const [typed, setTyped] = useShellState("environment/env-vault-settings.tsx:typed", "")
   const reset = useMutation({
     mutationFn: resetVault,
     onSuccess: async () => {
@@ -274,9 +281,7 @@ function ResetDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(open) => !open && !reset.isPending && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">
         <DialogTitle>Reset your vault</DialogTitle>
-        <p className="text-sm text-muted-foreground">
-          Your variables and team keys are deleted. This can’t be undone.
-        </p>
+        <p className="text-sm text-muted-foreground">Your variables and team keys are deleted. This can’t be undone.</p>
         <PasswordForm
           submitLabel="Reset vault"
           pending={reset.isPending}
@@ -289,7 +294,12 @@ function ResetDialog({ onClose }: { onClose: () => void }) {
             <FieldLabel htmlFor="reset-confirm" className="font-normal text-muted-foreground">
               Type <span className="font-mono font-medium text-foreground">RESET ENV</span> to confirm
             </FieldLabel>
-            <Input id="reset-confirm" value={typed} autoComplete="off" onChange={(event) => setTyped(event.target.value)} />
+            <Input
+              id="reset-confirm"
+              value={typed}
+              autoComplete="off"
+              onChange={(event) => setTyped(event.target.value)}
+            />
           </Field>
         </PasswordForm>
       </DialogContent>

@@ -1,7 +1,6 @@
 "use client"
 
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query"
-import { useState } from "react"
 import { meQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import {
   actionLabels,
@@ -20,6 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const selectClass =
   "h-9 rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
@@ -40,13 +40,13 @@ export function PolicyTest({ workspace, policy, draft }: { workspace: string; po
     ...policy.names.tunnels.map((name) => `tunnel:${name}`),
     ...(team ? ["env:team"] : []),
   ]
-  const [src, setSrc] = useState("")
-  const [dst, setDst] = useState("")
-  const [action, setAction] = useState("terminal")
-  const [port, setPort] = useState("")
-  const [token, setToken] = useState("")
-  const [recipe, setRecipe] = useState("")
-  const [useDraft, setUseDraft] = useState(Boolean(draft))
+  const [src, setSrc] = useShellState("access/policy-test.tsx:src", "")
+  const [dst, setDst] = useShellState("access/policy-test.tsx:dst", "")
+  const [action, setAction] = useShellState("access/policy-test.tsx:action", "terminal")
+  const [port, setPort] = useShellState("access/policy-test.tsx:port", "")
+  const [token, setToken] = useShellState("access/policy-test.tsx:token", "")
+  const [recipe, setRecipe] = useShellState("access/policy-test.tsx:recipe", "")
+  const [useDraft, setUseDraft] = useShellState("access/policy-test.tsx:useDraft", Boolean(draft))
   const who = src || users[0] || ""
   const where = dst || targets[0] || ""
   const actions =

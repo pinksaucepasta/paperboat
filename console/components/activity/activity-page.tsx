@@ -3,7 +3,7 @@
 import { ClockCounterClockwiseIcon, DownloadSimpleIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import Link from "next/link"
-import { Fragment, useDeferredValue, useMemo, useState } from "react"
+import { Fragment, useDeferredValue, useMemo } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { teamQuery } from "@/lib/teams"
 import {
@@ -33,6 +33,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadError } from "@/components/load-error"
 import { useTimeFormat } from "@/lib/use-time-format"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The machine page's Activity tab. */
 export function MachineActivity() {
@@ -84,11 +85,18 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   // Streaming: owners and admins configure it, auditors see it (teams-business.md).
   const role = workspace?.kind === "team" ? (workspace.role ?? "") : ""
   const streaming = activityLive.streaming && !tabMachine && ["owner", "admin", "auditor"].includes(role)
-  const [view, setView] = useState<"events" | "streaming">("events")
+  const [view, setView] = useShellState<"events" | "streaming">("activity/activity-page.tsx:view", "events")
   if (streaming && view === "streaming")
     return (
       <section className="flex flex-col gap-6">
-        <ViewToggle value={view} onChange={setView} views={[{ value: "events", label: "Events" }, { value: "streaming", label: "Streaming" }]} />
+        <ViewToggle
+          value={view}
+          onChange={setView}
+          views={[
+            { value: "events", label: "Events" },
+            { value: "streaming", label: "Streaming" },
+          ]}
+        />
         <AuditStreams team={workspace!.id} canConfigure={role !== "auditor"} />
       </section>
     )
@@ -106,7 +114,14 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {streaming && (
-          <ViewToggle value={view} onChange={setView} views={[{ value: "events", label: "Events" }, { value: "streaming", label: "Streaming" }]} />
+          <ViewToggle
+            value={view}
+            onChange={setView}
+            views={[
+              { value: "events", label: "Events" },
+              { value: "streaming", label: "Streaming" },
+            ]}
+          />
         )}
         <SearchField value={search} onChange={setSearch} placeholder="Search activity" />
         <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -144,8 +159,12 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
               Export
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem render={<a href={activityExportHref(filter, "csv")} download />}>CSV (spreadsheets)</DropdownMenuItem>
-              <DropdownMenuItem render={<a href={activityExportHref(filter, "json")} download />}>JSON</DropdownMenuItem>
+              <DropdownMenuItem render={<a href={activityExportHref(filter, "csv")} download />}>
+                CSV (spreadsheets)
+              </DropdownMenuItem>
+              <DropdownMenuItem render={<a href={activityExportHref(filter, "json")} download />}>
+                JSON
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}

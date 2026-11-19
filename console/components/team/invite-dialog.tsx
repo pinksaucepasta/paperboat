@@ -6,13 +6,22 @@ import Link from "next/link"
 import { useState } from "react"
 import { api, ApiError } from "@/lib/api"
 import { billingKey, notLiveTitle } from "@/lib/billing"
-import { inviteMember, teamInvitationsQuery, teamLive, teamQuery, type Team, type TeamRole, type TeamSummary } from "@/lib/teams"
+import {
+  inviteMember,
+  teamInvitationsQuery,
+  teamLive,
+  teamQuery,
+  type Team,
+  type TeamRole,
+  type TeamSummary,
+} from "@/lib/teams"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const maxInvites = 20
@@ -73,8 +82,8 @@ function InviteForm({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  const [text, setText] = useState("")
-  const [role, setRole] = useState<TeamRole>("member")
+  const [text, setText] = useShellState("team/invite-dialog.tsx:text", "")
+  const [role, setRole] = useShellState<TeamRole>("team/invite-dialog.tsx:role", "member")
   const [outcomes, setOutcomes] = useState<Outcome[]>([])
   const emails = parseEmails(text)
   const invalid = emails.filter((email) => !emailPattern.test(email))

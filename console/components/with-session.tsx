@@ -4,6 +4,7 @@ import { Suspense } from "react"
 import { safeReturnPath } from "@/lib/server/control-plane"
 import { prefetchSession, type PageRead } from "@/lib/server/prefetch"
 import { ServerData } from "@/components/server-data"
+import { ShellScope } from "@/lib/use-shell-state"
 
 /**
  * Renders `children` with the visitor's session (user, workspaces, billing) and the page's own first
@@ -21,7 +22,13 @@ export function WithSession({
   return (
     // The shell waits a moment before showing (globals.css .shell-delay); a fast server render
     // replaces it unseen. The wrapper keeps the frame's flex column.
-    <Suspense fallback={<div className="shell-delay flex min-h-0 flex-1 flex-col">{children}</div>}>
+    <Suspense
+      fallback={
+        <div className="shell-delay flex min-h-0 flex-1 flex-col">
+          <ShellScope>{children}</ShellScope>
+        </div>
+      }
+    >
       <Session reads={reads}>{children}</Session>
     </Suspense>
   )

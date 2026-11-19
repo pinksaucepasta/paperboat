@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage, errorToast } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Domains you add to the workspace once (ngrok reserved domains, Vercel team domains): verified by
@@ -105,8 +106,8 @@ export function DomainList() {
   const ws = workspace?.id ?? ""
   const list = useApiQuery({ ...workspaceDomainsQuery(ws), enabled: Boolean(workspace) })
   const config = useApiQuery(clientConfigQuery).data
-  const [adding, setAdding] = useState(false)
-  const [open, setOpen] = useState<string>()
+  const [adding, setAdding] = useShellState("domains/domain-list.tsx:adding", false)
+  const [open, setOpen] = useShellState<string>("domains/domain-list.tsx:open")
   const selected = list.data?.find((domain) => domain.id === open)
   const edgeDomains = [
     config && { domain: config.preview_base_domain, use: "Preview addresses" },
@@ -139,7 +140,8 @@ export function DomainList() {
                   <Access kind="Private" />
                 </td>
                 <td className="hidden truncate text-muted-foreground md:table-cell">
-                  Machine addresses, like <span className="font-mono text-code">homelab.{config.local_access_base_domain}</span>
+                  Machine addresses, like{" "}
+                  <span className="font-mono text-code">homelab.{config.local_access_base_domain}</span>
                 </td>
                 <td>
                   <State tone="ok" label="Ready" />
@@ -449,7 +451,7 @@ function Record({ record }: { record: WorkspaceDomain["records"][number] }) {
 function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
   const workspace = useWorkspace()
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState("")
+  const [draft, setDraft] = useShellState("domains/domain-list.tsx:draft", "")
   const name = cleanDomain(draft)
   const problem = name && !domainPattern.test(name) ? "Enter a domain like example.com or dev.example.com" : undefined
   const add = useMutation({
@@ -485,7 +487,9 @@ function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
               spellCheck={false}
               className="font-mono"
             />
-            {(problem || add.isError) && <FieldError>{problem ?? (add.error ? <ErrorMessage error={add.error} /> : undefined)}</FieldError>}
+            {(problem || add.isError) && (
+              <FieldError>{problem ?? (add.error ? <ErrorMessage error={add.error} /> : undefined)}</FieldError>
+            )}
           </Field>
           <DialogFooter>
             <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={add.isPending}>

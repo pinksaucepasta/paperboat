@@ -2,6 +2,7 @@
 
 import { UploadSimpleIcon } from "@phosphor-icons/react"
 import { useEffect, useRef, useState } from "react"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Files dropped anywhere on the page (Previews shares one, Files sends them to an Inbox). Returns
@@ -9,7 +10,7 @@ import { useEffect, useRef, useState } from "react"
  * A dialog's own drop zone (`data-file-drop`) keeps its drops to itself.
  */
 export function usePageFileDrop() {
-  const [files, setFiles] = useState<File[]>([])
+  const [files, setFiles] = useShellState<File[]>("file-drop.tsx:files", [])
   const [over, setOver] = useState(false)
   const depth = useRef(0)
   useEffect(() => {
@@ -48,7 +49,7 @@ export function usePageFileDrop() {
       window.removeEventListener("dragover", overPage)
       window.removeEventListener("drop", drop)
     }
-  }, [])
+  }, [setFiles])
   return { files, over, clear: () => setFiles([]) }
 }
 

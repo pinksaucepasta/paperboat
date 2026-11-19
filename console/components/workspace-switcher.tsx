@@ -1,7 +1,6 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState } from "react"
 import { needsSso, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
 import { setWorkspace } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
@@ -10,6 +9,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { roleLabels } from "@/lib/teams"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * First breadcrumb on every page: which workspace everything to its right belongs to. Built
@@ -19,8 +19,8 @@ export function WorkspaceSwitcher() {
   const { data: workspaces } = useApiQuery(workspacesQuery)
   const current = useWorkspace()
   const router = useRouter()
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
+  const [open, setOpen] = useShellState("workspace-switcher.tsx:open", false)
+  const [search, setSearch] = useShellState("workspace-switcher.tsx:search", "")
 
   if (!current) return <Skeleton className="my-1.5 h-4 w-24" />
 
@@ -77,7 +77,6 @@ export function WorkspaceSwitcher() {
     </Popover>
   )
 }
-
 
 function WorkspaceAvatar({ name }: { name: string }) {
   return (

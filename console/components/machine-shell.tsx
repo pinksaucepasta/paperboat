@@ -21,6 +21,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useShellState } from "@/lib/use-shell-state"
 
 const MachineContext = createContext<Machine | null>(null)
 // True under MachineSkeleton: the machine is a stand-in, so views draw their loading state.
@@ -57,7 +58,7 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   const session = useTerminalSession(machine, terminal !== "closed")
   const dock = useTerminalDock()
   // In Personal, sharing your machine with people is a Teams feature: the button explains it.
-  const [sharing, setSharing] = useState(false)
+  const [sharing, setSharing] = useShellState("machine-shell.tsx:sharing", false)
   const me = useApiQuery(meQuery).data
   const personalOwner = useWorkspaceId() === "personal" && Boolean(me) && machine?.owner_account === me?.id
   const isMobile = useIsMobile()

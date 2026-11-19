@@ -1,7 +1,7 @@
 "use client"
 
 import { LockSimpleIcon, PlusIcon } from "@phosphor-icons/react"
-import { useState, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { lockVault, subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
 import { readVault, type EnvScope } from "@/lib/envvault/vault"
@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Section } from "@/components/section"
 import { EnvNamesSwitch } from "@/components/environment/env-names-switch"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** The machine page's Environment tab: that machine's own variables. */
 export function MachineEnvironment() {
@@ -29,9 +30,9 @@ export function MachineEnvironment() {
  * Section header once open), the workspace's settings and how machines use the values.
  */
 export function EnvironmentPage() {
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useShellState("environment/env-list.tsx:adding", false)
   // The named vault shown instead of the default variables.
-  const [vault, setVault] = useState<string | null>(null)
+  const [vault, setVault] = useShellState<string | null>("environment/env-list.tsx:vault", null)
   return (
     <div className="flex flex-col gap-10">
       <EnvironmentList adding={adding} onAddingChange={setAdding} vault={vault} onVaultChange={setVault} />

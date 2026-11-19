@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const maxBytes = 64 << 10
 const listPath = sections.recipes.href
@@ -54,10 +55,10 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
   const upload = useRef<HTMLInputElement>(null)
   // The token is made on the first try and kept, so a corrected file is sent with the same one.
   const token = useRef<NewToken>(undefined)
-  const [name, setName] = useState(recipe?.name ?? start?.name ?? "")
-  const [source, setSource] = useState(recipe?.source ?? start?.source ?? "")
+  const [name, setName] = useShellState("recipes/recipe-editor.tsx:name", recipe?.name ?? start?.name ?? "")
+  const [source, setSource] = useShellState("recipes/recipe-editor.tsx:source", recipe?.source ?? start?.source ?? "")
   const [problem, setProblem] = useState<string>()
-  const [view, setView] = useState<"file" | "form">("file")
+  const [view, setView] = useShellState<"file" | "form">("recipes/recipe-editor.tsx:view", "file")
   const [created, setCreated] = useState<string>()
   const save = useMutation({
     mutationFn: async () => {
@@ -185,39 +186,39 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
           </>
         )}
         {view === "file" && (
-        <Field className="gap-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <FieldLabel htmlFor="recipe-file">File</FieldLabel>
-            <Button type="button" variant="outline" onClick={() => upload.current?.click()}>
-              <UploadSimpleIcon data-icon="inline-start" />
-              Upload
-            </Button>
-            <input
-              ref={upload}
-              type="file"
-              accept=".jsonc,.json,text/plain,application/json"
-              className="hidden"
-              aria-label="Upload a recipe file"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                event.target.value = ""
-                if (file) read(file)
-              }}
+          <Field className="gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <FieldLabel htmlFor="recipe-file">File</FieldLabel>
+              <Button type="button" variant="outline" onClick={() => upload.current?.click()}>
+                <UploadSimpleIcon data-icon="inline-start" />
+                Upload
+              </Button>
+              <input
+                ref={upload}
+                type="file"
+                accept=".jsonc,.json,text/plain,application/json"
+                className="hidden"
+                aria-label="Upload a recipe file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ""
+                  if (file) read(file)
+                }}
+              />
+            </div>
+            <Textarea
+              id="recipe-file"
+              ref={area}
+              value={source}
+              rows={18}
+              spellCheck={false}
+              autoCapitalize="off"
+              placeholder={'{\n  "tags": ["ci"],\n  "max_machines": 20\n}\n'}
+              aria-invalid={found.length > 0}
+              className="min-h-72 font-mono text-xs leading-relaxed whitespace-pre"
+              onChange={(event) => setSource(event.target.value)}
             />
-          </div>
-          <Textarea
-            id="recipe-file"
-            ref={area}
-            value={source}
-            rows={18}
-            spellCheck={false}
-            autoCapitalize="off"
-            placeholder={'{\n  "tags": ["ci"],\n  "max_machines": 20\n}\n'}
-            aria-invalid={found.length > 0}
-            className="min-h-72 font-mono text-xs leading-relaxed whitespace-pre"
-            onChange={(event) => setSource(event.target.value)}
-          />
-        </Field>
+          </Field>
         )}
         {found.length > 0 && (
           <ul className="flex flex-col gap-1 text-sm text-destructive" data-recipe-errors>

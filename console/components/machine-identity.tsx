@@ -2,7 +2,6 @@
 
 import { CheckIcon, CircleNotchIcon, PencilSimpleIcon, XIcon } from "@phosphor-icons/react"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
 import type { Machine } from "@/lib/api"
 import { useMachineHostnames } from "@/lib/machine-domains"
 import { Button } from "@/components/ui/button"
@@ -12,13 +11,14 @@ import { TagChips } from "@/components/machine-tags"
 import { RemoveMachineDialog } from "@/components/machine-remove"
 import { DangerZone as DangerZonePanel } from "@/components/section"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * The machine's name and tags. Hovering shows a pencil; editing happens in the title
  * itself (same type, a faint underline), with Enter to save and Escape to cancel.
  */
 export function MachineTitle({ machine }: { machine: Machine }) {
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useShellState("machine-identity.tsx:editing", false)
   if (editing) return <TitleEditor machine={machine} onDone={() => setEditing(false)} />
   return (
     <div className="group/title flex min-w-0 flex-col gap-1">
@@ -44,13 +44,7 @@ export function MachineTitle({ machine }: { machine: Machine }) {
 const inPlace =
   "h-auto rounded-none border-0 border-b border-dashed border-border bg-transparent px-0 shadow-none focus-visible:border-ring focus-visible:ring-0 dark:bg-transparent"
 
-function TitleEditor({
-  machine,
-  onDone,
-}: {
-  machine: Machine
-  onDone: () => void
-}) {
+function TitleEditor({ machine, onDone }: { machine: Machine; onDone: () => void }) {
   const edit = useMachineEdit(machine, onDone)
   const [hostname] = useMachineHostnames(edit.finalName)
   const nameChanged = edit.finalName !== machine.alias
@@ -97,14 +91,16 @@ function TitleEditor({
       </div>
       {(edit.problem || edit.save.isError || nameChanged) && (
         <p className={edit.problem || edit.save.isError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
-          {edit.save.isError
-            ? <ErrorMessage error={edit.save.error} />
-            : (edit.problem ??
-              (hostname && (
-                <>
-                  Reachable as <span className="font-mono">{hostname}</span>
-                </>
-              )))}
+          {edit.save.isError ? (
+            <ErrorMessage error={edit.save.error} />
+          ) : (
+            (edit.problem ??
+            (hostname && (
+              <>
+                Reachable as <span className="font-mono">{hostname}</span>
+              </>
+            )))
+          )}
         </p>
       )}
     </form>
@@ -114,7 +110,7 @@ function TitleEditor({
 /** The end of the Overview, set apart like GitHub's and Vercel's danger zones. */
 export function DangerZone({ machine }: { machine: Machine }) {
   const router = useRouter()
-  const [confirming, setConfirming] = useState(false)
+  const [confirming, setConfirming] = useShellState("machine-identity.tsx:confirming", false)
   if (!machine.can_manage) return null
 
   return (

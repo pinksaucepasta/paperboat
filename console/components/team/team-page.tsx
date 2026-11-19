@@ -28,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { SectionHeading } from "@/components/section"
 import { ErrorMessage } from "@/components/error-reference"
-
+import { useShellState } from "@/lib/use-shell-state"
 
 export function TeamPage() {
   const workspace = useWorkspace()
@@ -86,8 +86,8 @@ function Teams() {
   // `?create=1` (from the Teams prompt elsewhere) opens Create team once.
   const router = useRouter()
   const createRequested = useSearchParams().get("create") === "1"
-  const [creating, setCreating] = useState(false)
-  const [adding, setAdding] = useState(false)
+  const [creating, setCreating] = useShellState("team/team-page.tsx:creating", false)
+  const [adding, setAdding] = useShellState("team/team-page.tsx:adding", false)
   // Handled once per arrival: closing the dialog must not reopen it before the URL is cleaned.
   const [handledCreate, setHandledCreate] = useState(false)
   if (createRequested && !handledCreate) {
@@ -246,10 +246,10 @@ function CreateTeamDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
 /** Creating a team is paying first (NOTES.md "Teams"); until that endpoint is live it is free. */
 function CreateTeamForm() {
   const queryClient = useQueryClient()
-  const [id, setId] = useState("")
-  const [seats, setSeats] = useState(1)
-  const [period, setPeriod] = useState<"month" | "year">("month")
-  const [terms, setTerms] = useState<string | null>(null)
+  const [id, setId] = useShellState("team/team-page.tsx:id", "")
+  const [seats, setSeats] = useShellState("team/team-page.tsx:seats", 1)
+  const [period, setPeriod] = useShellState<"month" | "year">("team/team-page.tsx:period", "month")
+  const [terms, setTerms] = useShellState<string | null>("team/team-page.tsx:terms", null)
   const paid = billingLive.paidTeamCreate
   // One operation per distinct order: changing the team, seats or interval is a new order.
   const key = useMemo(() => idempotencyKey(), [id, seats, period, terms]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -336,11 +336,7 @@ function CreateTeamForm() {
       )}
       <DialogFooter>
         <Button type="submit" size="lg" disabled={!valid || (paid && terms === null) || create.isPending}>
-          {create.isPending
-            ? "Creating…"
-            : paid
-              ? "Continue to payment"
-              : "Create team"}
+          {create.isPending ? "Creating…" : paid ? "Continue to payment" : "Create team"}
         </Button>
       </DialogFooter>
     </form>

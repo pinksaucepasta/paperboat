@@ -23,6 +23,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 const lifetimes = [
   { hours: 1, label: "1 hour" },
@@ -31,7 +32,7 @@ const lifetimes = [
 ]
 
 export function NewPreviewButton({ machine }: { machine?: Machine }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useShellState("tunnels/new-preview.tsx:open", false)
   return (
     <>
       <Button size="lg" onClick={() => setOpen(true)}>
@@ -52,14 +53,14 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   const machines = useMachines()
-  const [chosen, setChosen] = useState<Machine | undefined>(machine)
+  const [chosen, setChosen] = useShellState<Machine | undefined>("tunnels/new-preview.tsx:chosen", machine)
   const target = chosen ?? machines.data?.find(canPreview)
   const port = usePort()
-  const [access, setAccess] = useState<Preview["access_mode"]>("public")
-  const [hours, setHours] = useState(1)
+  const [access, setAccess] = useShellState<Preview["access_mode"]>("tunnels/new-preview.tsx:access", "public")
+  const [hours, setHours] = useShellState("tunnels/new-preview.tsx:hours", 1)
   // "Generated" (a random address) or a name on one of your domains.
-  const [ownAddress, setOwnAddress] = useState(false)
-  const [hostname, setHostname] = useState("")
+  const [ownAddress, setOwnAddress] = useShellState("tunnels/new-preview.tsx:ownAddress", false)
+  const [hostname, setHostname] = useShellState("tunnels/new-preview.tsx:hostname", "")
   const hostnameProblem =
     ownAddress && hostname && !/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(hostname)
       ? "Enter an address like demo.acme.dev."
@@ -264,9 +265,11 @@ export function Starting({
         <WarningCircleIcon weight="fill" className="size-10 text-destructive" />
         <p className="font-medium">The preview didn’t start</p>
         <p className="text-sm text-muted-foreground">
-          {preview.isError
-            ? <ErrorMessage error={preview.error} />
-            : `Couldn’t start the preview on ${machineName}. Check that ${machineName} is online and try again.`}
+          {preview.isError ? (
+            <ErrorMessage error={preview.error} />
+          ) : (
+            `Couldn’t start the preview on ${machineName}. Check that ${machineName} is online and try again.`
+          )}
         </p>
         <Button variant="secondary" size="lg" className="mt-1" onClick={onDone}>
           Close

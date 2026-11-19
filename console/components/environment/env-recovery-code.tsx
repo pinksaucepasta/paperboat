@@ -1,13 +1,13 @@
 "use client"
 
 import { DownloadSimpleIcon } from "@phosphor-icons/react"
-import { useState } from "react"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** A recovery code is shown once: copy or download it, confirm it is saved, then the change is published. */
 export function RecoveryCodeStep({
@@ -28,7 +28,7 @@ export function RecoveryCodeStep({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useShellState("environment/env-recovery-code.tsx:saved", false)
   const download = () => {
     const url = URL.createObjectURL(new Blob([`${code}\n`], { type: "text/plain" }))
     const link = Object.assign(document.createElement("a"), { href: url, download: "paperboat-recovery-code.txt" })
@@ -83,8 +83,8 @@ export function PasswordForm({
   onSubmit: (password: string) => void
   onCancel?: () => void
 }) {
-  const [password, setPassword] = useState("")
-  const [confirm, setConfirm] = useState("")
+  const [password, setPassword] = useShellState("environment/env-recovery-code.tsx:password", "")
+  const [confirm, setConfirm] = useShellState("environment/env-recovery-code.tsx:confirm", "")
   const mismatch = confirm !== "" && confirm !== password
   return (
     <form

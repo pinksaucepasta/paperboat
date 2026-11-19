@@ -1,7 +1,7 @@
 "use client"
 
 import { CheckIcon, StackIcon } from "@phosphor-icons/react"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useDebounced } from "@/hooks/use-debounced"
 import { machineListQuery } from "@/lib/machine-list"
 import { machineSearchQuery, useApiQuery, useMachine, useWorkspace, type Machine } from "@/lib/api"
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useShellState } from "@/lib/use-shell-state"
 
 type Props = {
   value: string | null
@@ -32,8 +33,8 @@ type Props = {
 const suggestionLimit = 6
 
 export function MachinePicker({ value, onChange, allowAll = false }: Props) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
+  const [open, setOpen] = useShellState("machine-picker.tsx:open", false)
+  const [search, setSearch] = useShellState("machine-picker.tsx:search", "")
   const query = useDebounced(search.trim(), 200)
   const workspace = useWorkspace()
   // Without a search: the first page in name order (revoked left out by the server), not every machine.
@@ -46,14 +47,7 @@ export function MachinePicker({ value, onChange, allowAll = false }: Props) {
   })
 
   const suggestions = useMemo(
-    () =>
-      page.data
-        ? suggest(
-            page.data.items,
-            value,
-            workspace ? recentMachines(workspace.id) : [],
-          )
-        : [],
+    () => (page.data ? suggest(page.data.items, value, workspace ? recentMachines(workspace.id) : []) : []),
     // Recents are read when the list opens; they only change by choosing here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [page.data, value, workspace, open],

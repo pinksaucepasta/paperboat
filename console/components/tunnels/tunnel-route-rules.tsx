@@ -2,7 +2,6 @@
 
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import {
   patchRoute,
   tunnelKeys,
@@ -18,6 +17,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /*
  * Header and URL rules of one route, shown from the route's "Edit rules…" menu entry. The limits and the
@@ -28,11 +28,36 @@ import { ErrorMessage } from "@/components/error-reference"
 const MAX_HEADERS = 8
 const MAX_REDIRECTS = 4
 const BLOCKED_NAMES = new Set([
-  "forwarded", "x-real-ip", "x-request-id", "host", "connection", "proxy-connection", "proxy-authenticate",
-  "proxy-authorization", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade", "content-length", "cookie",
-  "set-cookie", "authorization", "paperboat-visitor-assertion", "alt-svc", "strict-transport-security",
-  "content-security-policy", "x-content-type-options", "x-frame-options", "referrer-policy", "x-robots-tag", "location",
-  "x-forwarded", "x-paperboat", "paperboat", "sec-websocket",
+  "forwarded",
+  "x-real-ip",
+  "x-request-id",
+  "host",
+  "connection",
+  "proxy-connection",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "keep-alive",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "content-length",
+  "cookie",
+  "set-cookie",
+  "authorization",
+  "paperboat-visitor-assertion",
+  "alt-svc",
+  "strict-transport-security",
+  "content-security-policy",
+  "x-content-type-options",
+  "x-frame-options",
+  "referrer-policy",
+  "x-robots-tag",
+  "location",
+  "x-forwarded",
+  "x-paperboat",
+  "paperboat",
+  "sec-websocket",
 ])
 const BLOCKED_PREFIXES = ["x-forwarded-", "x-paperboat-", "paperboat-", "sec-websocket-"]
 
@@ -44,7 +69,8 @@ function headerProblem(rule: RouteHeaderRule) {
   if (BLOCKED_NAMES.has(lower) || BLOCKED_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
     return `${name} belongs to Paperboat or the browser and can’t be changed.`
   }
-  if (rule.op !== "remove" && /[\u0000-\u0008\u000a-\u001f\u007f]/.test(rule.value ?? "")) return "A value can’t contain line breaks or control characters."
+  if (rule.op !== "remove" && /[\u0000-\u0008\u000a-\u001f\u007f]/.test(rule.value ?? ""))
+    return "A value can’t contain line breaks or control characters."
   return undefined
 }
 
@@ -57,7 +83,8 @@ function redirectProblem(rule: RouteRedirect) {
   const fromProblem = pathProblem(rule.from)
   if (fromProblem) return fromProblem
   const to = rule.to
-  if (!/^\/(?!\/)[^\s\\]*$/.test(to) && !/^https:\/\/[^\s/@\\]+[^\s\\]*$/.test(to)) return "Send to a path like /new or an https:// address."
+  if (!/^\/(?!\/)[^\s\\]*$/.test(to) && !/^https:\/\/[^\s/@\\]+[^\s\\]*$/.test(to))
+    return "Send to a path like /new or an https:// address."
   const target = to.split(/[?#]/)[0]
   const prefix = rule.from.replace(/\/+$/, "")
   if (to.startsWith("/") && (prefix === "" || target === prefix || target.startsWith(`${prefix}/`))) {
@@ -150,14 +177,31 @@ function HeaderRows({
   )
 }
 
-export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; route: TunnelRoute; onClose: () => void }) {
+export function RouteRulesDialog({
+  tunnel,
+  route,
+  onClose,
+}: {
+  tunnel: Tunnel
+  route: TunnelRoute
+  onClose: () => void
+}) {
   const queryClient = useQueryClient()
   const current = route.rewrite_rules
-  const [requestHeaders, setRequestHeaders] = useState<RouteHeaderRule[]>(current?.request_headers ?? [])
-  const [responseHeaders, setResponseHeaders] = useState<RouteHeaderRule[]>(current?.response_headers ?? [])
-  const [from, setFrom] = useState(current?.path_rewrite?.from ?? "")
-  const [to, setTo] = useState(current?.path_rewrite?.to ?? "")
-  const [redirects, setRedirects] = useState<RouteRedirect[]>(current?.redirects ?? [])
+  const [requestHeaders, setRequestHeaders] = useShellState<RouteHeaderRule[]>(
+    "tunnels/tunnel-route-rules.tsx:requestHeaders",
+    current?.request_headers ?? [],
+  )
+  const [responseHeaders, setResponseHeaders] = useShellState<RouteHeaderRule[]>(
+    "tunnels/tunnel-route-rules.tsx:responseHeaders",
+    current?.response_headers ?? [],
+  )
+  const [from, setFrom] = useShellState("tunnels/tunnel-route-rules.tsx:from", current?.path_rewrite?.from ?? "")
+  const [to, setTo] = useShellState("tunnels/tunnel-route-rules.tsx:to", current?.path_rewrite?.to ?? "")
+  const [redirects, setRedirects] = useShellState<RouteRedirect[]>(
+    "tunnels/tunnel-route-rules.tsx:redirects",
+    current?.redirects ?? [],
+  )
 
   const rewriteProblem =
     from || to ? (pathProblem(from) ?? (to.trim() ? pathProblem(to) : "Enter where the path goes.")) : undefined
@@ -169,13 +213,16 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
     mutationFn: () => {
       const clean = (list: RouteHeaderRule[]) =>
         list.map((rule) =>
-          rule.op === "remove" ? { op: rule.op, name: rule.name.trim() } : { op: rule.op, name: rule.name.trim(), value: rule.value ?? "" },
+          rule.op === "remove"
+            ? { op: rule.op, name: rule.name.trim() }
+            : { op: rule.op, name: rule.name.trim(), value: rule.value ?? "" },
         )
       const rules: RouteRules = {}
       if (requestHeaders.length) rules.request_headers = clean(requestHeaders)
       if (responseHeaders.length) rules.response_headers = clean(responseHeaders)
       if (from.trim()) rules.path_rewrite = { from: from.trim(), to: to.trim() }
-      if (redirects.length) rules.redirects = redirects.map((r) => ({ from: r.from.trim(), code: r.code, to: r.to.trim() }))
+      if (redirects.length)
+        rules.redirects = redirects.map((r) => ({ from: r.from.trim(), code: r.code, to: r.to.trim() }))
       return patchRoute(route, { rewrite_rules: rules })
     },
     onSuccess: async () => {

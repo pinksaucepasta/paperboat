@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
 import { useWorkspace } from "@/lib/api"
 import { failedSections, recipeQuery, type RecipeMachine } from "@/lib/recipes"
 import { sections } from "@/lib/sections"
@@ -14,6 +13,7 @@ import { DangerZone, Row, Section, SectionHeading } from "@/components/section"
 import { ListSkeleton, SectionSkeleton } from "@/components/skeletons"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
+import { useShellState } from "@/lib/use-shell-state"
 
 const base = sections.recipes.href
 
@@ -21,7 +21,7 @@ const base = sections.recipes.href
 export function RecipePage({ name }: { name: string }) {
   const workspace = useWorkspace()
   const router = useRouter()
-  const [dialog, setDialog] = useState<"rotate" | "revoke">()
+  const [dialog, setDialog] = useShellState<"rotate" | "revoke">("recipes/recipe-page.tsx:dialog")
   const query = useQuery(recipeQuery(workspace?.id ?? "", name))
   if (query.isError) return <LoadError what={name} error={query.error} retry={() => query.refetch()} />
   if (!query.data || !workspace) {
@@ -63,7 +63,7 @@ export function RecipePage({ name }: { name: string }) {
       </Section>
       <section className="flex flex-col gap-3">
         <SectionHeading title="File" />
-        <pre data-recipe-file className="surface overflow-x-auto rounded-lg p-4 font-mono text-xs leading-relaxed">
+        <pre data-recipe-file className="overflow-x-auto surface rounded-lg p-4 font-mono text-xs leading-relaxed">
           {recipe.source}
         </pre>
       </section>
@@ -85,7 +85,9 @@ export function RecipePage({ name }: { name: string }) {
         action="Revoke"
         onAction={() => setDialog("revoke")}
       />
-      {dialog === "rotate" && <RotateRecipe workspace={workspace.id} recipe={recipe} onClose={() => setDialog(undefined)} />}
+      {dialog === "rotate" && (
+        <RotateRecipe workspace={workspace.id} recipe={recipe} onClose={() => setDialog(undefined)} />
+      )}
       {dialog === "revoke" && (
         <RevokeRecipe
           workspace={workspace.id}
@@ -101,7 +103,10 @@ export function RecipePage({ name }: { name: string }) {
 function MachineLine({ machine, revision }: { machine: RecipeMachine; revision: number }) {
   const failed = failedSections(machine)
   return (
-    <li className="flex min-h-14 flex-wrap items-center gap-3 border-b border-divider py-2 text-sm" data-machine={machine.name}>
+    <li
+      className="flex min-h-14 flex-wrap items-center gap-3 border-b border-divider py-2 text-sm"
+      data-machine={machine.name}
+    >
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <Link href={`/machines/${machine.id}`} className="font-medium hover:underline">

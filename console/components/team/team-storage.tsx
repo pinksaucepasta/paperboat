@@ -4,13 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useState } from "react"
 import { ApiError, useApiQuery } from "@/lib/api"
-import {
-  bucketMessage,
-  removeTeamBucket,
-  saveTeamBucket,
-  teamBucketQuery,
-  type TeamBucket,
-} from "@/lib/team-bucket"
+import { bucketMessage, removeTeamBucket, saveTeamBucket, teamBucketQuery, type TeamBucket } from "@/lib/team-bucket"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { Row, Section, SettingRow } from "@/components/section"
@@ -21,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { ErrorMessage } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /**
  * Team → Storage: the team's own S3-compatible bucket, where machines archive their terminal recordings. Owners and admins
@@ -28,7 +23,7 @@ import { ErrorMessage } from "@/components/error-reference"
  */
 export function TeamStorage({ team, admin }: { team: string; admin: boolean }) {
   const bucket = useApiQuery(teamBucketQuery(team))
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useShellState("team/team-storage.tsx:editing", false)
   const [removing, setRemoving] = useState(false)
   const queryClient = useQueryClient()
   if (bucket.error instanceof ApiError && bucket.error.code === "team_plan_required")
@@ -40,7 +35,12 @@ export function TeamStorage({ team, admin }: { team: string; admin: boolean }) {
         </Link>
       </p>
     )
-  if (bucket.isError) return <p className="text-sm text-muted-foreground">{<ErrorMessage error={bucket.error} message={bucketMessage(bucket.error)} />}</p>
+  if (bucket.isError)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {<ErrorMessage error={bucket.error} message={bucketMessage(bucket.error)} />}
+      </p>
+    )
   return (
     <div className="flex flex-col gap-10" data-team-storage>
       <Section
@@ -110,7 +110,7 @@ function BucketRows({ bucket }: { bucket: TeamBucket }) {
 
 function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBucket; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useShellState("team/team-storage.tsx:draft", {
     endpoint: bucket?.endpoint ?? "",
     region: bucket?.region ?? "",
     bucket: bucket?.bucket ?? "",
@@ -118,7 +118,7 @@ function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBu
     access_key_id: bucket?.access_key_id ?? "",
     secret_access_key: "",
   })
-  const [pathStyle, setPathStyle] = useState(bucket?.path_style ?? false)
+  const [pathStyle, setPathStyle] = useShellState("team/team-storage.tsx:pathStyle", bucket?.path_style ?? false)
   const save = useMutation({
     mutationFn: () =>
       saveTeamBucket(team, {
@@ -161,23 +161,37 @@ function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBu
             save.mutate()
           }}
         >
-          {field("endpoint", "Endpoint", { type: "url", required: true, placeholder: "https://s3.eu-central-1.amazonaws.com" })}
+          {field("endpoint", "Endpoint", {
+            type: "url",
+            required: true,
+            placeholder: "https://s3.eu-central-1.amazonaws.com",
+          })}
           <div className="grid grid-cols-2 gap-3">
             {field("region", "Region", { required: true })}
             {field("bucket", "Bucket", { required: true })}
           </div>
           {field("prefix", "Folder (optional)")}
           {field("access_key_id", "Access key ID", { required: true })}
-          {field("secret_access_key", bucket ? "Secret access key (leave empty to keep the current one)" : "Secret access key", {
-            type: "password",
-            required: !bucket,
-          })}
+          {field(
+            "secret_access_key",
+            bucket ? "Secret access key (leave empty to keep the current one)" : "Secret access key",
+            {
+              type: "password",
+              required: !bucket,
+            },
+          )}
           <SettingRow label="Address the bucket in the URL path" htmlFor="bucket-path-style">
             <Switch id="bucket-path-style" checked={pathStyle} onCheckedChange={setPathStyle} />
           </SettingRow>
           <p className="text-xs text-muted-foreground">The key needs permission to put, get and delete objects.</p>
-          <p className="text-xs text-muted-foreground">Browser replay needs the bucket’s CORS to allow GET from {window.location.origin}.</p>
-          {save.isError && <p className="text-sm text-destructive">{<ErrorMessage error={save.error} message={bucketMessage(save.error)} />}</p>}
+          <p className="text-xs text-muted-foreground">
+            Browser replay needs the bucket’s CORS to allow GET from {window.location.origin}.
+          </p>
+          {save.isError && (
+            <p className="text-sm text-destructive">
+              {<ErrorMessage error={save.error} message={bucketMessage(save.error)} />}
+            </p>
+          )}
           <DialogFooter>
             <Button type="submit" size="lg" disabled={save.isPending}>
               {save.isPending ? "Checking…" : bucket ? "Save" : "Connect"}

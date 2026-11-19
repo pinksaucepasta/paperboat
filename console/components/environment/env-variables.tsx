@@ -14,6 +14,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorMessage, errorToastOf } from "@/components/error-reference"
+import { useShellState } from "@/lib/use-shell-state"
 
 /** Where the variables live: the account's or a team's own records, or one named vault. */
 export type VariableStore = {
@@ -53,7 +54,7 @@ export function EnvVariables({
   const client = useQueryClient()
   const key = store.key
   const names = useQuery({ queryKey: key, queryFn: ({ signal }) => store.list(signal), staleTime: 0 })
-  const [ownEditing, setOwnEditing] = useState<string | null>(null)
+  const [ownEditing, setOwnEditing] = useShellState<string | null>("environment/env-variables.tsx:ownEditing", null)
   // A header's Add variable opens the same form with an empty name.
   const editing = adding ? "" : ownEditing
   const setEditing = (name: string | null) => {
@@ -157,8 +158,8 @@ function SetDialog({
   onSaved: () => void
   onError: (error: Error) => void
 }) {
-  const [name, setName] = useState(initial)
-  const [value, setValue_] = useState("")
+  const [name, setName] = useShellState("environment/env-variables.tsx:name", initial)
+  const [value, setValue_] = useShellState("environment/env-variables.tsx:value", "")
   const save = useMutation({
     mutationFn: (input: { name: string; value: string }) => store.set(input.name, input.value),
     onSuccess: onSaved,
