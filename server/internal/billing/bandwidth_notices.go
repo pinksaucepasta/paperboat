@@ -21,7 +21,7 @@ import (
 )
 
 // BandwidthThrottledEvent is the Activity action shown to the workspace's owner and admins when its fair-use
-// bandwidth is used up and its edge traffic slows down.
+// bandwidth is used up and its edge and relay traffic slows down.
 const BandwidthThrottledEvent = "billing.bandwidth_throttled"
 
 // ConfigureNotificationMail supplies the deployment's mail policy. Without it (no mail
@@ -75,7 +75,7 @@ func (s *WorkspaceService) noticeBandwidthWarningTx(ctx context.Context, tx *db.
 	}
 	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-80:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
 		"80% of included traffic used",
-		fmt.Sprintf("After %s a month, public traffic through Paperboat's edges is reduced to %s. Add bandwidth to keep full speed.", gigabytes(allowance), speed(mbit)),
+		fmt.Sprintf("After %s a month through Paperboat's edges and relays, traffic is reduced to %s. Add bandwidth to keep full speed.", gigabytes(allowance), speed(mbit)),
 		"/billing", &window.end)
 }
 
@@ -98,10 +98,10 @@ WHERE workspace_id=$1 AND coalesce(budget_start,period_start)<$2`, workspaceID, 
 	}
 	ends := time.Now().AddDate(0, 0, 14)
 	return announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-reset:"+workspaceID+":"+window.budget.UTC().Format(time.RFC3339),
-		"Full speed is back", "A new billing period started. Public traffic through Paperboat's edges runs at full speed again.", "/billing", &ends)
+		"Full speed is back", "A new billing period started. Traffic through Paperboat's edges and relays runs at full speed again.", "/billing", &ends)
 }
 
-// noticeBandwidthThrottledTx tells a workspace's owner (personal) or owner and admins (team) that edge traffic is slowed,
+// noticeBandwidthThrottledTx tells a workspace's owner (personal) or owner and admins (team) that edge and relay traffic is slowed,
 // once per allowance period: the bell notice, the audit event and each recipient's mail are idempotent on the period, so
 // every later debit or retry is a no-op. It runs in the debit's transaction, so a notice exists if and only if the debit
 // committed.
@@ -115,8 +115,8 @@ func (s *WorkspaceService) noticeBandwidthThrottledTx(ctx context.Context, tx *d
 	period := window.budget.UTC().Format(time.RFC3339)
 	audience, _, _ := workspaceAudience(workspaceID)
 	if err := announcements.SystemNoticeTx(ctx, tx, audience, id, "bandwidth-throttled:"+workspaceID+":"+period,
-		fmt.Sprintf("Public traffic reduced to %s", speed(mbit)),
-		fmt.Sprintf("This workspace used its %s of included traffic. Full speed returns on %s, or sooner if you add bandwidth. Nothing is cut off.", gigabytes(allowance), window.end.UTC().Format("2 Jan")),
+		fmt.Sprintf("Traffic reduced to %s", speed(mbit)),
+		fmt.Sprintf("This workspace used its %s of included traffic (edges and relays together). Full speed returns on %s, or sooner if you add bandwidth. Nothing is cut off.", gigabytes(allowance), window.end.UTC().Format("2 Jan")),
 		"/billing", &window.end); err != nil {
 		return err
 	}
@@ -161,8 +161,8 @@ AND u.status='active' AND u.email_verified AND u.primary_email<>'' ORDER BY u.id
 	billing := strings.TrimRight(s.mail.ConsoleOrigin, "/") + "/billing"
 	for _, r := range recipients {
 		message := transactionalmail.Message{
-			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: public traffic reduced",
-			HTML: fmt.Sprintf("<p>Public traffic through Paperboat's edges for %s is reduced to %s because its included traffic is used up. It is never cut off and never billed extra. Direct machine-to-machine traffic, relays, and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
+			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: traffic reduced",
+			HTML: fmt.Sprintf("<p>Traffic through Paperboat's edges and relays for %s is reduced to %s because its included traffic is used up. It is never cut off and never billed extra. Direct machine-to-machine traffic and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
 				html.EscapeString(r.name), speed(mbit), window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
 		}
 		if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "bandwidth-throttled:"+workspaceID+":"+period+":"+r.account, message); err != nil {

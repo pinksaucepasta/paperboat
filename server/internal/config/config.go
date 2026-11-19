@@ -260,31 +260,26 @@ type Billing struct {
 	FairUse FairUse `json:"fair_use"`
 }
 
-// FairUse holds the slowdown speeds and relay tiers (user decisions 2026-11-19: edge Free 5 GB then 512 kbit/s, Pro and Team 100 GB
-// then 1 Mbit/s; relay Free 5 GB then 512 kbit/s, paid 100 GB then 1 Mbit/s, 10 Mbit/s before; relay and edge are counted separately). The edge
-// included amounts are the plans' allowances (PersonalAllowanceBytes, the products' allowance_bytes).
+// FairUse holds the allowance pool's speeds (user decision 2026-11-19): ONE combined pool per workspace counts the traffic through
+// Paperboat's edges and relays together (Free 5 GB; Pro 100 GB; Team 100 GB per seat, pooled; self-hosted traffic never counts). Until
+// the pool is used, relays run at RelayMbit per account and edges at full speed; once it is, both are slowed to the plan's slow speed
+// (Free 512 kbit/s, Pro and Team 1 Mbit/s) until the workspace's next billing date. Never cut off, never billed extra. The pool is the
+// plans' allowance (PersonalAllowanceBytes for Free, the products' allowance_bytes for Pro, TeamPerSeatBytes times seats for a team).
 type FairUse struct {
-	// EdgeFreeBytesPerSecond and EdgeBytesPerSecond are the speed of a Free, and of a Pro or Team, workspace's public traffic
-	// across all its Paperboat edges together once its included amount is used up, until its next billing date. The edges
-	// each get a share (controlplane: rate divided by the edges carrying the workspace).
+	// EdgeFreeBytesPerSecond and EdgeBytesPerSecond are the slow speed of a Free, and of a Pro or Team, workspace across all its
+	// Paperboat edges together and, as the account's speed, across the relays it uses. The edges each get a share (controlplane: rate
+	// divided by the edges carrying the workspace); so do the relays.
 	EdgeFreeBytesPerSecond int64 `json:"edge_free_bytes_per_second"`
 	EdgeBytesPerSecond     int64 `json:"edge_bytes_per_second"`
-	// TeamPerSeatBytes is a paid team's included public traffic through the edges per seat and month, and its relayed bytes per
-	// seat (RelayIncludedBytes is the per-seat relay amount): the team's allowance is this times its seats, pooled in the one team
-	// workspace (user decision 2026-11-19: Team 100 GB a seat).
+	// TeamPerSeatBytes is a paid team's pool per seat and month: the pool is this times its seats, shared by the team.
 	TeamPerSeatBytes int64 `json:"team_per_seat_bytes"`
-	// Relays (never cut off, never counted against the edge allowance): one account's speed on one Paperboat relay is RelayMbit
-	// while it has carried less than the plan's included relayed bytes this calendar month (RelayFreeIncludedBytes for an
-	// account without a paid plan, RelayIncludedBytes for a paid one; a team's pool is RelayIncludedBytes times its seats), then the plan's slow speed until the month ends.
-	RelayMbit              float64 `json:"relay_mbit"`
-	RelayFreeIncludedBytes int64   `json:"relay_free_included_bytes"`
-	RelayIncludedBytes     int64   `json:"relay_included_bytes"`
-	RelayFreeSlowMbit      float64 `json:"relay_free_slow_mbit"`
-	RelaySlowMbit          float64 `json:"relay_slow_mbit"`
+	// RelayMbit is one account's speed through Paperboat's relays while its workspace pool is not used up (shared across the relays it
+	// is on).
+	RelayMbit float64 `json:"relay_mbit"`
 }
 
 func (f FairUse) valid() bool {
-	return f.EdgeFreeBytesPerSecond >= 1024 && f.EdgeBytesPerSecond >= f.EdgeFreeBytesPerSecond && f.RelayFreeSlowMbit > 0 && f.RelaySlowMbit >= f.RelayFreeSlowMbit && f.RelayMbit >= f.RelaySlowMbit && f.RelayFreeIncludedBytes > 0 && f.RelayIncludedBytes >= f.RelayFreeIncludedBytes && f.TeamPerSeatBytes > 0
+	return f.EdgeFreeBytesPerSecond >= 1024 && f.EdgeBytesPerSecond >= f.EdgeFreeBytesPerSecond && f.TeamPerSeatBytes > 0 && f.RelayMbit*125_000 >= float64(f.EdgeBytesPerSecond)
 }
 
 // PlanLimit is one count limit per plan. Free and Pro apply to a personal workspace. Teams are
@@ -657,7 +652,7 @@ func Default() Config {
 		},
 		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, TunnelAddressPerMinute: 6, TunnelAddressBurst: 10, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, TeamPerSeatBytes: 100_000_000_000, RelayMbit: 10, RelayFreeIncludedBytes: 5_000_000_000, RelayIncludedBytes: 100_000_000_000, RelayFreeSlowMbit: 0.512, RelaySlowMbit: 1}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, TeamPerSeatBytes: 100_000_000_000, RelayMbit: 10}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
