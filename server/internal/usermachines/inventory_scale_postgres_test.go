@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -17,8 +18,8 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	owner := "inv_scale_owner_" + suffix
 	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.user_machines WHERE user_id=$1`, owner)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE user_id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
 	})
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, owner, owner+"@example.test"); err != nil {
 		t.Fatal(err)
@@ -65,7 +66,7 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 	team := "inv-scale-team-" + suffix
 	t.Cleanup(func() {
 		for _, q := range []string{`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, `DELETE FROM paperboat.team_members WHERE team_id=$1`, `DELETE FROM paperboat.teams WHERE team_id=$1`} {
-			_, _ = store.SQL().ExecContext(t.Context(), q, team)
+			_, _ = store.SQL().ExecContext(context.Background(), q, team)
 		}
 	})
 	for _, step := range []struct {
@@ -99,9 +100,9 @@ func TestMachineInventoryIgnoresOtherAccountsMachinesOnPostgres(t *testing.T) {
 	owner, crowd := "inv_fence_owner_"+suffix, "inv_fence_crowd_"+suffix
 	t.Cleanup(func() {
 		for _, account := range []string{owner, crowd} {
-			_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.user_machines WHERE user_id=$1`, account)
-			_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.control_environments WHERE owner_user_id=$1`, account)
-			_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id=$1`, account)
+			_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE user_id=$1`, account)
+			_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_environments WHERE owner_user_id=$1`, account)
+			_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, account)
 		}
 	})
 	for account, n := range map[string]int{owner: 10, crowd: 2000} {

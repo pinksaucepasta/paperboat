@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -23,9 +24,9 @@ func TestRevokingAMachineEndsItsPairTimeCLICredentialAtOnceOnPostgres(t *testing
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.cli_client_sessions WHERE id IN ($1,$2)`, session, other)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.cli_client_sessions WHERE id IN ($1,$2)`, session, other)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, owner, owner+"@example.test")
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, owner)

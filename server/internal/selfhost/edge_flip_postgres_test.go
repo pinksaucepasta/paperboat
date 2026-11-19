@@ -1,6 +1,7 @@
 package selfhost
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -58,7 +59,7 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 		for _, q := range []string{
 			`DELETE FROM paperboat.selfhost_placements WHERE installation_id=$1`,
 		} {
-			store.SQL().ExecContext(t.Context(), q, installation.InstallationID)
+			store.SQL().ExecContext(context.Background(), q, installation.InstallationID)
 		}
 		for _, q := range []string{
 			`DELETE FROM paperboat.native_usage_authorities WHERE workspace_id='personal:'||$1`,
@@ -72,9 +73,9 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 			`DELETE FROM paperboat.user_machines WHERE user_id=$1`,
 			`DELETE FROM paperboat.users WHERE id=$1`,
 		} {
-			store.SQL().ExecContext(t.Context(), q, owner)
+			store.SQL().ExecContext(context.Background(), q, owner)
 		}
-		store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id IN ($1,$2)`, m1, m2)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id IN ($1,$2)`, m1, m2)
 	})
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,'api tunnel','active',$3,$4,$5,'actor')`, tunnel, owner, tunnelEndpoint, "https://"+managedTunnelTarget, machine)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, tunnel)

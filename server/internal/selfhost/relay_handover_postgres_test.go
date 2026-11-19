@@ -1,6 +1,7 @@
 package selfhost
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -46,9 +47,9 @@ func TestRelayPoolSwitchListsHandoversOnPostgres(t *testing.T) {
 	managed := "relay_managed_" + stamp
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1','epoch','relay.example.test',443,444,'ready',true,now(),1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,0,now(),now()+interval '1 hour')`, managed)
 	t.Cleanup(func() {
-		store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, managed)
-		store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id IN ($1,$2)`, owner, other)
-		store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, owner, other)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, managed)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id IN ($1,$2)`, owner, other)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, owner, other)
 	})
 	service := New(store, "relay-handover-test-key")
 	handovers := func(account string) map[string]time.Time {

@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,9 +16,9 @@ func TestMachineItemsCarryTheirPolicyTagsOnPostgres(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	owner := "inv_tag_owner_" + suffix
 	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.workspace_policies WHERE owner_account=$1`, owner)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.user_machines WHERE user_id=$1`, owner)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.workspace_policies WHERE owner_account=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE user_id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
 	})
 	exec := func(query string, args ...any) {
 		t.Helper()

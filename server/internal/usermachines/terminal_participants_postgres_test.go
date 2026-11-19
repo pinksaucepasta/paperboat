@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -27,9 +28,9 @@ func TestTerminalParticipantsAreNamedOnlyForTheOwnerAndThemselvesOnPostgres(t *t
 			{`DELETE FROM paperboat.team_members WHERE team_id=$1`, team},
 			{`DELETE FROM paperboat.teams WHERE team_id=$1`, team},
 		} {
-			_, _ = store.SQL().ExecContext(t.Context(), command.query, command.arg)
+			_, _ = store.SQL().ExecContext(context.Background(), command.query, command.arg)
 		}
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id IN ($1,$2,$3)`, owner, mate, outsider)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2,$3)`, owner, mate, outsider)
 	})
 	for id, name := range map[string]string{owner: "Ada Owner", mate: "Bo Mate", outsider: "Cy Outsider"} {
 		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,display_name,status) VALUES($1,$1,$2,true,$3,'active')`, id, id+"@example.test", name)
@@ -112,9 +113,9 @@ func TestOwnerRemovesAGuestWhoJoinedWithTheCodeOnPostgres(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, session)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
-		_, _ = store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, owner, other)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, session)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, owner, other)
 	})
 	for _, id := range []string{owner, other} {
 		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,$2,true,'active')`, id, id+"@example.test")
