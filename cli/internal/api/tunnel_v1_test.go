@@ -552,6 +552,24 @@ func TestTunnelV1StateMutationReadsCanonicalResourceAfterOperation(t *testing.T)
 	}
 }
 
+// pb tunnel delete --wait printed "could not finish the command" after a successful delete: the 202 answered with the
+// operation alone, the client read the tunnel back, and a deleted tunnel is 404 for the deleter.
+func TestTunnelV1DeleteOperationDoesNotReadTheDeletedTunnelBack(t *testing.T) {
+	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":"tunnel_not_found","message":"Tunnel not found"}}`)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		writeTunnelTestData(t, w, validTunnelOperationTestValue("tunnel", "tun_1"))
+	})
+	out, err := client.ChangeTunnelStateV1(context.Background(), "tun_1", "delete", `"tunnel:tun_1:3"`, "idem_1")
+	if err != nil || out.Tunnel.ID != "tun_1" || out.Operation.Schema == "" {
+		t.Fatalf("mutation = %#v, error %v", out, err)
+	}
+}
+
 func TestTunnelEndpointIdentityIsIndependentOfHostname(t *testing.T) {
 	value := validTunnelTestValue()
 	value.StableEndpoint = "https://brave-blue-beacon-0421.tunnels.example.test"
