@@ -21,7 +21,6 @@ import (
 func TestStartupNeverQueriesTheTerminal(t *testing.T) {
 	if os.Getenv("PB_STARTUP_QUERY_CHILD") == "1" {
 		// init has run; leave the typed bytes in the terminal and report what is still readable.
-		time.Sleep(300 * time.Millisecond)
 		buf := make([]byte, 64)
 		n, _ := os.Stdin.Read(buf)
 		_, _ = os.Stderr.WriteString("STDIN:" + string(buf[:n]) + "\n")
