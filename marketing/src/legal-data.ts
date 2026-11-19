@@ -43,4 +43,10 @@ export const fairUse = {
   free: { allowance: plans[0].bandwidth, slow: speeds.after[0] },
   paid: { allowance: plans[1].bandwidth, slow: speeds.after[1] },
   relaySpeed: speeds.relay,
+  /** Browser terminals do not count toward the allowance; each workspace's are capped at this speed (user decision 2026-11-19). */
+  terminalSpeed: "10 Mbit/s",
 }
+
+const inBytes: Record<string, string> = { "512 kbit/s": "about 64 KB/s", "1 Mbit/s": "about 125 KB/s", "10 Mbit/s": "about 1.25 MB/s" }
+/** "512 kbit/s (about 64 KB/s)": a speed with its bytes figure, for readers who think in file sizes. */
+export const withBytes = (speed: string) => (inBytes[speed] ? `${speed} (${inBytes[speed]})` : speed)
