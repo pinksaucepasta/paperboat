@@ -232,9 +232,15 @@ func newCarrierComponentWithTelemetry(
 				defer ticker.Stop()
 				for {
 					// A runtime admission naming this carrier makes it an engine replica at once, not at the next tick.
+					// Taken before the sync, so a Replace between the handler's first sync and this goroutine's
+					// first wait (or during any sync) is not missed.
 					var runtimeChanged <-chan struct{}
 					if runtimeWorker != nil && !engine {
 						runtimeChanged = runtimeWorker.Expected.Changed()
+					}
+					if err := syncDurable(time.Now().UTC()); err != nil {
+						results <- err
+						return
 					}
 					select {
 					case <-handlerCtx.Done():
@@ -242,10 +248,6 @@ func newCarrierComponentWithTelemetry(
 						return
 					case <-ticker.C:
 					case <-runtimeChanged:
-					}
-					if err := syncDurable(time.Now().UTC()); err != nil {
-						results <- err
-						return
 					}
 				}
 			}()
