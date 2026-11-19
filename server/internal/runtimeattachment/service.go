@@ -118,6 +118,8 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 		previewSessions := map[string]string{}
 		var generation uint64
 		var activeNode, activeEpoch string
+		// Locks this route's own carrier row: two attaches of the same machine can race, and the loser's 40001 is retried
+		// by InTx, the right outcome for a per-machine race (prod 2026-11-20: 10 retries in 30 min, no failure).
 		previousRows, err := tx.Query(ctx, `SELECT edge_node_id,admission,process_id,generation,active,preview_session_id,agent_capabilities FROM runtime_carrier_attachments WHERE route_id=$1 FOR UPDATE`, route)
 		if err != nil {
 			return err
@@ -184,18 +186,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.I
 		}
 		// pick reads up to limit live edges, the machine's preferred first, that satisfy eligible.
 		pick := func(eligible string, limit int, terminal bool) ([]edgeRow, error) {
-			rows, err := tx.Query(ctx, `SELECT n.id,n.process_epoch,coalesce(n.failure_domain,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
-FROM control_tunnel_nodes n LEFT JOIN machine_edge_placements p ON p.machine_id=$3 AND p.account_id=$1
-AND p.installation_generation=$4 AND p.worker_generation=$5 AND p.observed_at>now()-interval '2 minutes'
-WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
-AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
-AND n.capacity_observed_at>now()-interval '30 seconds' AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
-AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND `+eligible+`
-AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
-AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
-ORDER BY CASE WHEN n.id=p.primary_node_id AND n.process_epoch=p.primary_process_epoch THEN 0
-WHEN n.id=p.secondary_node_id AND n.process_epoch=p.secondary_process_epoch THEN 1
-WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32 FOR SHARE OF n`, proof.UserID, activeNode, proof.MachineID, request.InstallationGeneration, request.WorkerGeneration, teamID)
+			rows, err := tx.Query(ctx, edgeSelectQuery(eligible), proof.UserID, activeNode, proof.MachineID, request.InstallationGeneration, request.WorkerGeneration, teamID)
 			if err != nil {
 				return nil, err
 			}
@@ -822,4 +813,26 @@ ORDER BY g.tunnel_id LIMIT $3`, proof.MachineID, proof.UserID, runtimewire.Maxim
 		out = append(out, tunnel)
 	}
 	return out, rows.Err()
+}
+
+// edgeSelectQuery reads up to 32 live edges for a machine, its preferred ones first. It locks no node row: every edge
+// heartbeats its row every few seconds, and a serializable transaction that locks (FOR SHARE) a row changed after its
+// snapshot fails with 40001, so attaches lost to heartbeats (13 of the 70 serialization failures in 30 min on prod,
+// 2026-11-20). A node that drains or goes offline right after it is chosen is the case of an edge failing after an
+// attach: the drain grace and the machine's carrier failover re-attach it. Prior art: Teleport agents pick proxies
+// from heartbeat records without locking them (lib/reversetunnel/agentpool.go); Headscale clients choose a DERP region
+// from the map it serves (hscontrol/derp/derp.go).
+func edgeSelectQuery(eligible string) string {
+	return `SELECT n.id,n.process_epoch,coalesce(n.failure_domain,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
+FROM control_tunnel_nodes n LEFT JOIN machine_edge_placements p ON p.machine_id=$3 AND p.account_id=$1
+AND p.installation_generation=$4 AND p.worker_generation=$5 AND p.observed_at>now()-interval '2 minutes'
+WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
+AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
+AND n.capacity_observed_at>now()-interval '30 seconds' AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
+AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND ` + eligible + `
+AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
+AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
+ORDER BY CASE WHEN n.id=p.primary_node_id AND n.process_epoch=p.primary_process_epoch THEN 0
+WHEN n.id=p.secondary_node_id AND n.process_epoch=p.secondary_process_epoch THEN 1
+WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32`
 }

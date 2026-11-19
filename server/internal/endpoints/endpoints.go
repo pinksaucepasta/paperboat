@@ -81,6 +81,8 @@ func ReconcileEndpointTx(ctx context.Context, tx *db.Tx, machineID, endpointID s
 }
 
 func reconcileTx(ctx context.Context, tx *db.Tx, machineID, endpointID string) error {
+	// Two writers of one machine's route rows (its carrier report and a reconcile) can race here; the loser's 40001 is
+	// retried by InTx, which is the right outcome for a per-machine race (prod 2026-11-20: 18 retries in 30 min, no failure).
 	_, err := tx.Exec(ctx, `WITH desired AS (
 SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_node_id,a.edge_process_epoch,a.session_id
 FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
