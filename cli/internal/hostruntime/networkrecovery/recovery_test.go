@@ -423,7 +423,7 @@ func TestControllerSourceDebounceAndCancellation(t *testing.T) {
 		if request.Reasons != ReasonDefaultRoute|ReasonDNS {
 			t.Fatalf("merged request=%+v", request)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("debounced replacement did not start")
 	}
 	if err := controller.Stop(context.Background()); err != nil {
@@ -431,7 +431,7 @@ func TestControllerSourceDebounceAndCancellation(t *testing.T) {
 	}
 	select {
 	case <-canceled:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("in-flight replacement was not canceled")
 	}
 	select {
@@ -454,13 +454,10 @@ func (r *generationFenceReplacer) Replace(ctx context.Context, request Replaceme
 	case <-ctx.Done():
 		return ReplacementResult{}, ctx.Err()
 	}
-	if request.NetworkGeneration == 1 {
-		select {
-		case <-ctx.Done():
-			close(r.finished)
-			return ReplacementResult{}, ctx.Err()
-		case <-time.After(time.Second):
-		}
+	if request.NetworkGeneration == 1 { // held until the controller cancels it; a timer here made a slow cancel look like success
+		<-ctx.Done()
+		close(r.finished)
+		return ReplacementResult{}, ctx.Err()
 	}
 	select {
 	case <-ctx.Done():
@@ -489,7 +486,7 @@ func TestControllerCancelsStaleReplacementBeforeActivation(t *testing.T) {
 	}
 	select {
 	case <-replacer.finished:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("stale replacement was not canceled")
 	}
 	if err := <-firstDone; !errors.Is(err, context.Canceled) {

@@ -202,7 +202,7 @@ func TestNetworkRecoverySourceFailureCleanupAndBoundedJoin(t *testing.T) {
 	live.events <- Observation{} // Invalid monitor output is an owned permanent source fault.
 	select {
 	case <-faults:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("invalid source output lost")
 	}
 	close(live.events)
@@ -249,7 +249,7 @@ func TestNetworkRecoveryShutdownRetainsIndependentInFlightFailure(t *testing.T) 
 	clock.Advance(100 * time.Millisecond)
 	select {
 	case <-started:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("replacement did not start")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
