@@ -78,6 +78,15 @@ func terminalOrphanFixture(t *testing.T, store *db.DB) (*Service, *hostWithSessi
 	insert(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active')`, owner)
 	insert(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,worker_generation,configured_capabilities,observed_capabilities) VALUES($1,$2,$3,'orphan-host','linux','amd64','/launch','online','occupied',true,$4,1,ARRAY['terminal_host'],ARRAY['terminal_host'])`, machine, owner, environment, identity)
 	insert(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$2,$3,'active')`, environment, machine, owner)
+	// The sweep asks the 32 oldest live sessions of every online machine: rows a fixture leaves behind push later
+	// tests' sessions out of the batch (the orphan test failed from the 12th iteration of -count on).
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id=$1`, machine)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.users WHERE id=$1`, owner)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, edge)
+	})
 	insert(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,transports,registry_expires_at,region,failure_domain,capacity_limit,capacity_observed_at) VALUES($1,'development','1.0',$2,'ready',true,now(),ARRAY['edge'],ARRAY['http2','http3'],now()+interval '1 hour','test-region','test-domain',100,now())`, edge, epoch)
 	insert(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now(),endpoint_host='edge.example.test' WHERE id=$1`, edge)
 	insert(`INSERT INTO paperboat.control_connector_generations(environment_id,machine_id,generation,edge_pool,edge_node_id,state) VALUES($1,$2,1,'development',$3,'admitted')`, environment, machine, edge)
@@ -88,6 +97,10 @@ func terminalOrphanFixture(t *testing.T, store *db.DB) (*Service, *hostWithSessi
 	if err := store.SQL().QueryRowContext(ctx, `SELECT paperboat.runtime_carrier_current($1,true)`, route).Scan(&carrierReady); err != nil || !carrierReady {
 		t.Fatalf("fixture carrier readiness=%t error=%v", carrierReady, err)
 	}
+	// The sweep asks the 32 oldest unconfirmed live sessions of every online machine in the database. Sessions other
+	// tests of the package left on machines that stayed online (older than the 2-minute bound after a long run) fill
+	// that batch and keep this fixture's sessions out of it, so only this machine's sessions may be left.
+	insert(`DELETE FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id<>$1`, machine)
 	signer, err := mint.NewEphemeral(5 * time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -312,5 +325,40 @@ func TestPostgresSilentHostDoesNotStarveTheTerminalSweep(t *testing.T) {
 	}
 	if asked > terminalReconcileConcurrency {
 		t.Fatalf("a silent machine was asked %d times in one sweep, want at most one per worker (%d)", asked, terminalReconcileConcurrency)
+	}
+}
+
+// A fixture removes its machine and sessions when its test ends, so later sweeps are not crowded by them.
+func TestOrphanFixtureLeavesNoSessionsBehind(t *testing.T) {
+	store := testStore(t)
+	var machine string
+	t.Run("fixture", func(t *testing.T) {
+		_, _, owner, id := terminalOrphanFixture(t, store)
+		machine = id
+		insertOrphanSession(t, store, "terminal_"+uuid.NewString(), owner, machine, "left-"+machine, 24*time.Hour)
+	})
+	var left int
+	if err := store.SQL().QueryRowContext(context.Background(), `SELECT count(*) FROM paperboat.user_machine_terminal_sessions WHERE user_machine_id=$1`, machine).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d sessions of the fixture's machine remain after its test (%v)", left, err)
+	}
+}
+
+// Stale sessions of other machines must not crowd a fixture's sessions out of the sweep's batch.
+func TestOrphanSweepIsNotCrowdedOutByOtherMachinesSessions(t *testing.T) {
+	store := testStore(t)
+	_, _, noiseOwner, noiseMachine := terminalOrphanFixture(t, store)
+	for i := 0; i < terminalOrphanBatch+8; i++ {
+		insertOrphanSession(t, store, "terminal_"+uuid.NewString(), noiseOwner, noiseMachine, fmt.Sprintf("noise-%d", i), 48*time.Hour)
+	}
+	service, host, owner, machine := terminalOrphanFixture(t, store)
+	unknown := "terminal_" + uuid.NewString()
+	insertOrphanSession(t, store, unknown, owner, machine, "orphan", 24*time.Hour)
+	host.has = map[string]bool{}
+	if err := service.reconcileTerminalSessions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var runtimeState string
+	if err := store.SQL().QueryRowContext(context.Background(), `SELECT runtime_state FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, unknown).Scan(&runtimeState); err != nil || runtimeState != "closed" {
+		t.Fatalf("orphan = %q (%v), want closed after one sweep", runtimeState, err)
 	}
 }
