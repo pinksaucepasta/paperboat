@@ -21,7 +21,7 @@ type UpdateRequest struct {
 	State         string `json:"state"`
 }
 
-// ErrUpdateRequired: this pbh is below its update floor; the error text says why and how to update.
+// ErrUpdateRequired means this pbh is below its update floor; the error text says why and how to update.
 var ErrUpdateRequired = errors.New("this pbh release is below the minimum supported version")
 
 // UpdateNode is how pbh talks to the server about its own update, with its node's runtime credential.

@@ -281,8 +281,11 @@ func TestRestartedClientsPathIsForgottenOnItsPing(t *testing.T) {
 		t.Fatal("fixture: peer not admitted")
 	}
 	first, second := [meowNonceLen]byte{1}, [meowNonceLen]byte{2}
-	if s.recordPeerStart(peer, first) || s.recordPeerStart(peer, first) {
-		t.Fatal("the first and a repeated start id reported a restart")
+	if s.recordPeerStart(peer, first) {
+		t.Fatal("the first start id reported a restart")
+	}
+	if s.recordPeerStart(peer, first) {
+		t.Fatal("a repeated start id reported a restart")
 	}
 	if !s.recordPeerStart(peer, second) {
 		t.Fatal("a changed start id did not report a restart")

@@ -37,7 +37,7 @@ func windowsRelease(t *testing.T) *fakeRelease {
 
 // runWindowsInstaller runs install.ps1 in real PowerShell with GitHub replaced by the fake release. It returns the calls
 // the fake pb and the fake downloads saw, one per line, and the installer's own error.
-func runWindowsInstaller(t *testing.T, r *fakeRelease, noSshKeygen bool, env ...string) (calls []string, output string, runErr error) {
+func runWindowsInstaller(t *testing.T, r *fakeRelease, noSSHKeygen bool, env ...string) (calls []string, output string, runErr error) {
 	t.Helper()
 	shell := findPwsh(t)
 	if runtime.GOOS == "windows" {
@@ -60,7 +60,7 @@ func runWindowsInstaller(t *testing.T, r *fakeRelease, noSshKeygen bool, env ...
 		"  Copy-Item -LiteralPath $source -Destination $OutFile; if ($OutFile -like '*pb-windows-*') { & chmod 0755 $OutFile } }\n" +
 		"function Unblock-File { param($LiteralPath) }\n" +
 		"$ErrorActionPreference = 'Stop'\n"
-	if noSshKeygen {
+	if noSSHKeygen {
 		script += "$env:PATH = '" + filepath.Join(r.root, "empty") + "'\n"
 	}
 	// pwsh on Linux is not Windows: the installer's OS guard (checked by its own test) is cut out so its download logic runs here.

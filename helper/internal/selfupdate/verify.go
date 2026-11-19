@@ -23,7 +23,7 @@ import (
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 )
 
-// ErrSignature: the bundle is not the one the signed release metadata names (or the metadata does not verify).
+// ErrSignature means the bundle is not the one the signed release metadata names (or the metadata does not verify).
 var ErrSignature = errors.New("the self-host release does not match its signed release metadata")
 
 // TargetName is the TUF target of the self-host bundle for one version and Linux architecture.
