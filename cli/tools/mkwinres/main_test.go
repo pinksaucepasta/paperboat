@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"unicode/utf16"
 
 	"github.com/tc-hib/winres"
+	"github.com/tc-hib/winres/version"
 )
 
 func utf16le(s string) []byte {
@@ -57,5 +59,47 @@ func TestCommittedObjectsNamePaperboat(t *testing.T) {
 			t.Fatal(err)
 		}
 		requireBranded(t, name, object)
+	}
+}
+
+// A plain `go build` of pb for Windows must link the Paperboat version resource (what dialogs read).
+func TestBuiltWindowsExecutableNamesPaperboat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds cmd/pb for two Windows architectures")
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		exe := filepath.Join(t.TempDir(), "pb.exe")
+		build := exec.Command("go", "build", "-o", exe, "./cmd/pb")
+		build.Dir = filepath.Join("..", "..")
+		build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=windows", "GOARCH="+arch)
+		if out, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("%s: build: %v\n%s", arch, err, out)
+		}
+		f, err := os.Open(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rs, err := winres.LoadFromEXE(f)
+		f.Close()
+		if err != nil {
+			t.Fatalf("%s: read resources: %v", arch, err)
+		}
+		raw := rs.Get(winres.RT_VERSION, winres.ID(1), winres.LCIDDefault)
+		if raw == nil {
+			t.Fatalf("%s: pb.exe has no version resource", arch)
+		}
+		vi, err := version.FromBytes(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		table := vi.Table()[version.LangDefault]
+		for key, want := range map[string]string{version.FileDescription: "Paperboat", version.ProductName: "Paperboat", version.CompanyName: "Paperboat", version.OriginalFilename: "pb.exe"} {
+			if got := (*table)[key]; got != want {
+				t.Errorf("%s: %s=%q want %q", arch, key, got, want)
+			}
+		}
+		if rs.Get(winres.RT_MANIFEST, winres.ID(1), winres.LCIDDefault) == nil {
+			t.Errorf("%s: pb.exe lost its manifest", arch)
+		}
 	}
 }
