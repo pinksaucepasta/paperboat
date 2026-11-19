@@ -155,7 +155,7 @@ class Rollout:
         self.save(self.state_path, old)
         self.journal.unlink()
 
-    def deploy(self, image, rollback=False):
+    def deploy(self, image, rollback=False, commit=''):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}", image):
             raise RolloutError("Use one valid Docker image reference.")
         self.recover()
@@ -166,6 +166,13 @@ class Rollout:
             raise RolloutError('Two previous servers still hold live connections. '
                                'Run --reap after those sessions finish; none were stopped.')
         info = json.loads(self.run(['docker', 'image', 'inspect', image]))[0]
+        # A tag can name an older build than the one just built (2026-11-19: .9 was rehearsed from the commit before
+        # it). A forward deploy ships only the image built from the commit it was told to ship; a rollback restores a
+        # noted image whose commit is not known here.
+        revision = ((info.get('Config') or {}).get('Labels') or {}).get('org.opencontainers.image.revision', '')
+        if not rollback and revision != commit:
+            raise RolloutError(f'Image {image} was built from {revision or "an unknown commit"}, not {commit or "the commit "
+                               'to deploy (--commit)'}. Build it again under a new tag; nothing was changed.')
         active = json.loads(self.run(['docker', 'inspect', before['active']]))[0]
         if active['Image'] == info['Id']:
             return 'Current server already runs this image.'
@@ -236,11 +243,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', default='/opt/paperboat')
     parser.add_argument('--image')
+    parser.add_argument('--commit', default='', help='the commit the image must have been built from (its revision label)')
     parser.add_argument('--reap', action='store_true')
     parser.add_argument('--rollback', action='store_true', help='with --image: deploy even while two servers drain')
     args = parser.parse_args()
     if bool(args.image) == args.reap:
         parser.error('choose --image or --reap')
+    if args.image and not args.rollback and not args.commit:
+        parser.error('--image needs --commit <sha> (the image must carry that revision), or --rollback')
     os.umask(0o077)
     root = Path(args.directory)
     with (root / 'server-rollout.lock').open('a') as lock:
@@ -251,7 +261,7 @@ def main():
                 rollout.recover()
                 print('Draining servers retained:', rollout.reap(rollout.current()))
             else:
-                print(rollout.deploy(args.image, args.rollback))
+                print(rollout.deploy(args.image, args.rollback, args.commit))
         finally:
             rollout.log.close()
 

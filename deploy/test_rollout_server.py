@@ -62,6 +62,8 @@ class ServerRolloutTest(unittest.TestCase):
         self.rollout = module.Rollout(self.root)
         self.addCleanup(self.rollout.log.close)
         self.image = 'sha256:' + 'a' * 64
+        self.commit = 'c' * 40
+        self.revision = self.commit
         self.candidate = 'paperboat-server-' + 'a' * 16
         self.operations = []
         self.live = False
@@ -74,7 +76,7 @@ class ServerRolloutTest(unittest.TestCase):
         if args[:4] == ['docker', 'compose', 'ps', '-q']:
             return b'old-id'
         if args[:3] == ['docker', 'image', 'inspect']:
-            return json.dumps([{'Id': self.image}]).encode()
+            return json.dumps([{'Id': self.image, 'Config': {'Labels': {'org.opencontainers.image.revision': self.revision}}}]).encode()
         if args[:2] == ['docker', 'inspect']:
             return json.dumps([{'Name': '/paperboat-server-1', 'Image': 'old-image', 'State': {'Running': True}}]).encode()
         if args[:2] == ['docker', 'exec'] and args[3] == 'cat':
@@ -92,10 +94,19 @@ class ServerRolloutTest(unittest.TestCase):
                 raise module.RolloutError('reload failed')
         return b''
 
+    def test_stale_tag_is_refused_before_anything_changes(self):
+        self.revision = 'd' * 40
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            with self.assertRaisesRegex(module.RolloutError, 'was built from d+, not c+'):
+                self.rollout.deploy('new-image', commit=self.commit)
+            with self.assertRaises(module.RolloutError):
+                self.rollout.deploy('new-image')
+        self.assertFalse([a for a in self.operations if 'migrate' in a or 'server' in a and 'run' in a])
+
     def test_ready_replacement_precedes_switch_and_old_live_server_is_retained(self):
         self.live = True
         with patch.object(self.rollout, 'run', side_effect=self.docker):
-            self.rollout.deploy('new-image')
+            self.rollout.deploy('new-image', commit=self.commit)
         ready = next(i for i, a in enumerate(self.operations) if a[:3] == ['docker', 'exec', self.candidate] and 'curl' in a)
         reload = next(i for i, a in enumerate(self.operations) if 'reload' in a)
         self.assertLess(ready, reload)
@@ -116,7 +127,7 @@ class ServerRolloutTest(unittest.TestCase):
         self.live = True
         self.taken = {self.candidate}
         with patch.object(self.rollout, 'run', side_effect=self.docker):
-            self.rollout.deploy('new-image')
+            self.rollout.deploy('new-image', commit=self.commit)
         state = json.loads(self.rollout.state_path.read_text())
         self.assertEqual(state['active'], self.candidate + '-r2')
         self.assertEqual(state['retired'], ['paperboat-server-1'])
@@ -129,7 +140,7 @@ class ServerRolloutTest(unittest.TestCase):
         self.rollout.save(self.rollout.state_path, {'active': 'paperboat-server-1', 'retired': ['old-a', 'old-b']})
         with patch.object(self.rollout, 'run', side_effect=self.docker):
             with self.assertRaisesRegex(module.RolloutError, 'Two previous servers'):
-                self.rollout.deploy('new-image')
+                self.rollout.deploy('new-image', commit=self.commit)
             self.assertFalse(any('reload' in a for a in self.operations))
             self.rollout.deploy('new-image', rollback=True)
         state = json.loads(self.rollout.state_path.read_text())
@@ -141,7 +152,7 @@ class ServerRolloutTest(unittest.TestCase):
         self.taken = {self.candidate} | {f'{self.candidate}-r{n}' for n in range(2, 12)}
         with patch.object(self.rollout, 'run', side_effect=self.docker):
             with self.assertRaisesRegex(module.RolloutError, 'names are all taken'):
-                self.rollout.deploy('new-image')
+                self.rollout.deploy('new-image', commit=self.commit)
         self.assertFalse(any(a[:2] in (['docker', 'stop'], ['docker', 'rm']) or 'reload' in a for a in self.operations))
 
     def test_switch_keeps_the_stream_close_delay_block(self):
@@ -150,14 +161,14 @@ class ServerRolloutTest(unittest.TestCase):
         (self.root / 'Caddyfile').write_text(block + block.replace('api.', 'get.'))
         self.live = True
         with patch.object(self.rollout, 'run', side_effect=self.docker):
-            self.rollout.deploy('new-image')
+            self.rollout.deploy('new-image', commit=self.commit)
         caddy = (self.root / 'Caddyfile').read_text()
         self.assertEqual(caddy.count('reverse_proxy ' + self.candidate + ':8080 {'), 2)
         self.assertEqual(caddy.count('stream_close_delay 10m'), 2)
 
     def test_retired_server_drains_workers_after_the_switch(self):
         with patch.object(self.rollout, 'run', side_effect=self.docker):
-            self.rollout.deploy('new-image')
+            self.rollout.deploy('new-image', commit=self.commit)
         reload = next(i for i, a in enumerate(self.operations) if 'reload' in a)
         drain = self.operations.index(['docker', 'kill', '--signal=SIGUSR1', 'paperboat-server-1'])
         self.assertLess(reload, drain)
@@ -169,14 +180,14 @@ class ServerRolloutTest(unittest.TestCase):
                 raise module.RolloutError('no such container')
             return self.docker(args, image, timeout)
         with patch.object(self.rollout, 'run', side_effect=docker):
-            self.rollout.deploy('new-image')
+            self.rollout.deploy('new-image', commit=self.commit)
         self.assertFalse(any(a[:3] == ['docker', 'rm', '-f'] for a in self.operations))
         self.assertEqual(json.loads(self.rollout.state_path.read_text())['active'], self.candidate)
 
     def test_failed_readiness_does_not_switch_or_stop_previous_server(self):
         with patch.object(self.rollout, 'run', side_effect=self.docker), patch.object(self.rollout, 'ready', return_value=False), patch.object(module.time, 'sleep'):
             with self.assertRaisesRegex(module.RolloutError, 'did not become ready'):
-                self.rollout.deploy('new-image')
+                self.rollout.deploy('new-image', commit=self.commit)
         self.assertEqual((self.root / 'Caddyfile').read_text(), self.original)
         self.assertFalse(any('reload' in a or a[:2] == ['docker', 'stop'] for a in self.operations))
         self.assertIn(['docker', 'rm', '-f', self.candidate], self.operations)
@@ -196,7 +207,7 @@ class ServerRolloutTest(unittest.TestCase):
         self.fail_reload = True
         with patch.object(self.rollout, 'run', side_effect=self.docker):
             with self.assertRaisesRegex(module.RolloutError, 'reload failed'):
-                self.rollout.deploy('new-image')
+                self.rollout.deploy('new-image', commit=self.commit)
         self.assertIn(self.candidate, self.routes[0])
         self.assertEqual(self.routes[1], self.original)
         self.assertEqual((self.root / 'Caddyfile').read_text(), self.original)

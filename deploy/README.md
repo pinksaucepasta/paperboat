@@ -99,7 +99,7 @@ or renewing a certificate.
 
 ## Managed server upgrades
 
-Use `python3 rollout-server.py --directory /opt/paperboat --image <qualified-image>`
+Use `python3 rollout-server.py --directory /opt/paperboat --image <qualified-image> --commit <sha>` (the image must carry that revision label; `--rollback` is exempt)
 for upgrades. Do not replace the serving server with `compose up` or restart the
 proxy. The controller runs additive migrations and starts a separate candidate,
 checks `/readyz`, then reloads only Caddy's API/download upstreams. Database,
@@ -194,7 +194,8 @@ docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C \
 cd /opt/paperboat && ./backup-database.sh                          # always, before the migration runs
 # new migration? rehearse it first in the isolated test PostgreSQL (goose up on oracle's lane-b-test-pg)
 docker inspect --format '{{.Config.Image}}' $(python3 -c "import json;print(json.load(open('server-rollout.json'))['active'])")   # PREVIOUS image: note it
-python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:$V
+python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:$V --commit <the commit it was built from>
+# rehearse first: deploy/rehearse-migrations.sh $V <commit> (refuses a stale tag)
 python3 rollout-server.py --directory /opt/paperboat --reap        # before the next deploy
 ```
 
