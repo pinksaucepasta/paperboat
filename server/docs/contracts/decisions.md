@@ -152,7 +152,7 @@ Status: approved model; commercial values unset.
 
 Free and Pro have identical personal features and differ only in the count limits in
 `billing.limits` (machines, concurrently active previews and tunnels, console browser
-terminals; defaults 100/100/10 on Free and 1000/1000/100 on Pro). Team workspaces are
+terminals; defaults 100/10/10 on Free and 1000/100/100 on Pro). Team workspaces are
 advertised as unlimited and meet only a hidden per-team ceiling. Optional byte allowances
 (`personal_allowance_bytes`, initially 5 GB; `team_allowance_bytes`, initially unset) seed
 the operator policy once; an unset allowance imposes no limit. Team
