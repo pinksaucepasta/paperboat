@@ -43,7 +43,7 @@ func TestCarrierConnectAdmissionHonorsWaitingContextAndClose(t *testing.T) {
 			go func() { first <- carrier.Connect(context.Background()) }()
 			select {
 			case <-started:
-			case <-time.After(time.Second):
+			case <-time.After(waitBound):
 				t.Fatal("first connect did not enter credential lookup")
 			}
 			begin := time.Now()
@@ -73,12 +73,12 @@ func TestCarrierConnectAdmissionHonorsWaitingContextAndClose(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-			case <-time.After(time.Second):
+			case <-time.After(waitBound):
 				t.Fatal("Close did not cancel admitted connect")
 			}
 			select {
 			case <-first:
-			case <-time.After(time.Second):
+			case <-time.After(waitBound):
 				t.Fatal("admitted connect remained blocked after Close")
 			}
 		})

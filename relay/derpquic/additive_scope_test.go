@@ -49,7 +49,7 @@ func TestAdditiveResourceRequiresFreshReciprocalGrant(t *testing.T) {
 	}
 	select {
 	case <-cc.receive:
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("fresh reciprocal grant did not permit control delivery")
 	}
 	if err := s.Revoke("account", "b", gb.Generation+1); err != nil {

@@ -116,7 +116,7 @@ func (f *fixture) start(address string) (*Server, string, func()) {
 			server.Close()
 			select {
 			case <-done:
-			case <-time.After(3 * time.Second):
+			case <-time.After(waitBound):
 				f.t.Error("Serve did not stop")
 			}
 			server.Wait()
@@ -132,9 +132,28 @@ func (f *fixture) client(address string, cert tls.Certificate, g Grant) *Client 
 	f.t.Cleanup(func() { c.Close() })
 	return c
 }
+
+// waitBound bounds every wait for something that must happen: a wait returns the moment its condition holds, so a
+// generous bound costs nothing when the machine is healthy and keeps a loaded CI runner from failing a correct run.
+const waitBound = 30 * time.Second
+
+// expiryHeadroom is how far ahead a test grant that must expire mid-test is set. Grants carry Unix seconds, so the
+// time left to connect before expiry is between headroom-1 s and headroom: it must outlast a connect on a loaded runner.
+const expiryHeadroom = 4 * time.Second
+
+// expiresSoon is the expiry of a grant that expires during the test.
+func expiresSoon() int64 { return time.Now().Add(expiryHeadroom).Unix() }
+
+// waitPastExpiry returns once the whole second after expires has begun: the relay judges a grant expired from that
+// second on, and a full second later its lease timer has fired, so the carrier staying up is the relay's choice.
+func waitPastExpiry(t testing.TB, expires int64) {
+	t.Helper()
+	eventually(t, func() bool { return time.Now().Unix() > expires })
+}
+
 func eventually(t testing.TB, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(waitBound)
 	for !condition() {
 		if time.Now().After(deadline) {
 			t.Fatal("condition did not become true")
@@ -144,7 +163,7 @@ func eventually(t testing.TB, condition func() bool) {
 }
 func connect(t testing.TB, c *Client) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
 	defer cancel()
 	if err := c.Connect(ctx); err != nil {
 		t.Fatal(err)
@@ -169,7 +188,7 @@ func receive(t *testing.T, c *Client, want key.NodePublic, payload []byte) int {
 			t.Fatal("forwarded source or bytes differ")
 		}
 		return r.gen
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitBound):
 		c.Close()
 		t.Fatal("receive timed out")
 		return 0
@@ -369,7 +388,7 @@ func TestCancellationAndPacketBounds(t *testing.T) {
 		if !errors.Is(e, ErrClosed) {
 			t.Fatalf("receive close: %v", e)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("Close did not cancel receive")
 	}
 	blocked := NewClient(ClientConfig{Address: address, TLS: &tls.Config{Certificates: []tls.Certificate{cert}}, Credential: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() }})
@@ -390,7 +409,7 @@ func TestAdmittedLifetimeRevocationAndDrain(t *testing.T) {
 			g := f.grant(key.NewNode().Public(), cert, "a")
 			if mode == "expiry" {
 				// Unix-second grants need admission headroom even near a second boundary.
-				g.ExpiresAt = time.Now().Add(2 * time.Second).Unix()
+				g.ExpiresAt = expiresSoon()
 			}
 			c := f.client(address, cert, g)
 			connect(t, c)
@@ -409,7 +428,7 @@ func TestAdmittedLifetimeRevocationAndDrain(t *testing.T) {
 			cc := c.current
 			c.mu.Unlock()
 			if mode == "expiry" {
-				time.Sleep(time.Until(time.Unix(g.ExpiresAt, 0)) + 350*time.Millisecond)
+				waitPastExpiry(t, g.ExpiresAt)
 				if err := c.Ping(t.Context()); err != nil {
 					t.Fatal("expiry closed admitted carrier", err)
 				}
@@ -423,7 +442,7 @@ func TestAdmittedLifetimeRevocationAndDrain(t *testing.T) {
 			}
 			select {
 			case <-cc.conn.Context().Done():
-			case <-time.After(3 * time.Second):
+			case <-time.After(waitBound):
 				t.Fatal("expired or drained connection remains live")
 			}
 			want := ErrAdmission
@@ -501,7 +520,7 @@ func TestReconnectSupersedesLiveConnection(t *testing.T) {
 	connect(t, replacement)
 	select {
 	case <-previous.conn.Context().Done():
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("old connection was not superseded")
 	}
 	s.mu.Lock()
@@ -537,7 +556,7 @@ func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
 	ca, cb := certificate(t), certificate(t)
 	ga, gb := f.grant(ka, ca, "a"), f.grant(kb, cb, "b")
 	pairScopes(&ga, &gb)
-	ga.ExpiresAt = time.Now().Add(2 * time.Second).Unix()
+	ga.ExpiresAt = expiresSoon()
 	var mu sync.Mutex
 	token := f.token(ga)
 	a := NewClient(ClientConfig{Address: address, TLS: &tls.Config{RootCAs: f.roots, ServerName: "localhost", Certificates: []tls.Certificate{ca}}, Credential: func(context.Context) (string, error) { mu.Lock(); defer mu.Unlock(); return token, nil }})
@@ -558,7 +577,7 @@ func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
 	a.mu.Lock()
 	old := a.current
 	a.mu.Unlock()
-	time.Sleep(time.Until(time.Unix(ga.ExpiresAt, 0)) + 350*time.Millisecond)
+	waitPastExpiry(t, ga.ExpiresAt)
 	select {
 	case <-old.conn.Context().Done():
 		t.Fatal("expiry closed admitted carrier")

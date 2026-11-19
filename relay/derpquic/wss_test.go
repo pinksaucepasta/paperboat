@@ -33,7 +33,7 @@ func (f *fixture) wss(server *Server, cert tls.Certificate, g Grant, proxy func(
 
 func connectWSS(t *testing.T, c *WSSClient) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
 	defer cancel()
 	if err := c.Connect(ctx); err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func receiveWSS(t *testing.T, c *WSSClient, want key.NodePublic, payload []byte)
 		if !ok || p.Source != want || !bytes.Equal(p.Data, payload) {
 			t.Fatal("forwarded source or bytes differ")
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("receive timed out")
 	}
 }
@@ -204,7 +204,7 @@ func TestRealWSSFallsBackThenRecoversToQUIC(t *testing.T) {
 	_ = s.Close()
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("QUIC recovery server did not stop")
 	}
 	s.Wait()
@@ -220,16 +220,18 @@ func testWSSExpiredLease(t *testing.T, callback bool) {
 	ga, gb := f.grant(ka, ca, "a"), f.grant(kb, cb, "b")
 	pairScopes(&ga, &gb)
 	if !callback {
-		ga.ExpiresAt = time.Now().Add(2 * time.Second).Unix()
+		ga.ExpiresAt = expiresSoon()
 	}
 	a, _ := f.wss(server, ca, ga, nil)
 	var mu sync.Mutex
 	token := f.token(ga)
 	callbackExpired := false
+	var expiredLookups int
 	a.config.Credential = func(context.Context) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if callbackExpired {
+			expiredLookups++
 			return "", ErrExpired
 		}
 		return token, nil
@@ -246,9 +248,10 @@ func testWSSExpiredLease(t *testing.T, callback bool) {
 	old := a.current
 	a.mu.Unlock()
 	if callback {
-		time.Sleep(16 * time.Second)
+		// The authority watch looks the credential up once a second: three refused lookups are three chances to close it.
+		eventually(t, func() bool { mu.Lock(); defer mu.Unlock(); return expiredLookups >= 3 })
 	} else {
-		time.Sleep(time.Until(time.Unix(ga.ExpiresAt, 0)) + 350*time.Millisecond)
+		waitPastExpiry(t, ga.ExpiresAt)
 	}
 	select {
 	case <-old.ctx.Done():
@@ -312,7 +315,7 @@ func TestWSSControlServiceUsesOwnedConnectionContext(t *testing.T) {
 	}
 	select {
 	case <-called:
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("WSS control did not reach its authorized handler")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

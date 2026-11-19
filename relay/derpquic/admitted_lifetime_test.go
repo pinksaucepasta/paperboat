@@ -15,7 +15,7 @@ func TestAdmittedRelayCarriersOutliveGrantAndRevoke(t *testing.T) {
 			ka, kb := key.NewNode().Public(), key.NewNode().Public()
 			ca, cb := certificate(t), certificate(t)
 			ga, gb := f.grant(ka, ca, "a"), f.grant(kb, cb, "b")
-			expires := time.Now().Add(2 * time.Second).Unix()
+			expires := expiresSoon()
 			ga.ExpiresAt = expires
 			gb.ExpiresAt = expires
 			pairScopes(&ga, &gb)
@@ -34,7 +34,7 @@ func TestAdmittedRelayCarriersOutliveGrantAndRevoke(t *testing.T) {
 				t.Fatal(err)
 			}
 			receive(t, b, ka, []byte("before"))
-			time.Sleep(time.Until(time.Unix(expires, 0)) + 350*time.Millisecond)
+			waitPastExpiry(t, expires)
 			if err := a.Send(kb, []byte("after")); err != nil {
 				t.Fatal("expiry ended admitted relay", err)
 			}
@@ -54,7 +54,7 @@ func TestAdmittedRelayCarriersOutliveGrantAndRevoke(t *testing.T) {
 				if err == nil {
 					t.Fatal("revocation left carrier readable")
 				}
-			case <-time.After(time.Second):
+			case <-time.After(waitBound):
 				t.Fatal("revocation did not close carrier")
 			}
 			before := s.Snapshot().Forwarded

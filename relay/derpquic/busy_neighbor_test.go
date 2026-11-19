@@ -1,11 +1,13 @@
 package derpquic
 
 import (
+	"bytes"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"tailscale.com/derp"
 	"tailscale.com/types/key"
 )
 
@@ -30,13 +32,20 @@ func TestBusyAccountDoesNotSlowANeighbor(t *testing.T) {
 	data := make([]byte, 1312)
 	data[0] = 4
 
-	var delivered atomic.Int64
+	// Flood packets and the packets sent after the budget ran out differ in one byte, so a leaked one is told apart
+	// from a flood packet still in flight when the budget ran out.
+	over := append([]byte(nil), data...)
+	over[1] = 1
+	var leaked atomic.Int64
 	go func() {
 		for {
-			if _, _, err := busyB.RecvDetail(); err != nil {
+			m, _, err := busyB.RecvDetail()
+			if err != nil {
 				return
 			}
-			delivered.Add(1)
+			if p, ok := m.(derp.ReceivedPacket); ok && bytes.Equal(p.Data, over) {
+				leaked.Add(1)
+			}
 		}
 	}()
 	// Neighbor round trips while the busy account floods its carrier at full speed.
@@ -82,16 +91,17 @@ func TestBusyAccountDoesNotSlowANeighbor(t *testing.T) {
 	budget.tokens, budget.at = 0, time.Now().Add(time.Minute) // no refill: the account is out of bytes
 	budget.mu.Unlock()
 	// Data over the exhausted budget is dropped and counted, not forwarded; the carrier itself stays up.
-	time.Sleep(300 * time.Millisecond) // let the flood's last packets arrive
-	dropped, before := s.dropped.Load(), delivered.Load()
+	dropped := s.dropped.Load()
 	for range 20 {
-		if err := busyA.Send(busyKeyB, data); err != nil {
+		if err := busyA.Send(busyKeyB, over); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// The relay reads a carrier's datagrams in order and drops each over-budget one at once, so its drop count has
+	// stopped moving only after it has decided all 20 (and the flood's last packets before them).
 	eventually(t, func() bool { return s.dropped.Load() >= dropped+20 })
-	time.Sleep(300 * time.Millisecond)
-	if delivered.Load() != before {
+	stableFor(t, time.Second, func() uint64 { return s.dropped.Load() })
+	if leaked.Load() != 0 {
 		t.Fatal("a packet over the account budget was forwarded")
 	}
 	if err := quietA.Send(quietKeyB, data); err != nil {
@@ -102,4 +112,16 @@ func TestBusyAccountDoesNotSlowANeighbor(t *testing.T) {
 		t.Fatal(err)
 	}
 	receive(t, quietA, quietKeyB, data)
+}
+
+// stableFor returns once value has not changed for the whole of window; a value still moving keeps it waiting.
+func stableFor(t testing.TB, window time.Duration, value func() uint64) {
+	t.Helper()
+	last, since := value(), time.Now()
+	eventually(t, func() bool {
+		if v := value(); v != last {
+			last, since = v, time.Now()
+		}
+		return time.Since(since) >= window
+	})
 }

@@ -46,7 +46,7 @@ func TestLongGrantAdmittedAndRevokedByFence(t *testing.T) {
 		if err == nil {
 			t.Fatal("revocation left the carrier readable")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("revocation did not close the carrier")
 	}
 	if err := f.client(address, ca, ga).Connect(t.Context()); !errors.Is(err, ErrAdmission) {

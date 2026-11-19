@@ -16,22 +16,21 @@ func TestCarrierSendsOnlyChangedGrants(t *testing.T) {
 	defer cancel()
 	var token atomic.Value
 	token.Store("grant-1")
-	var sends atomic.Int32
+	var sends, polls atomic.Int32
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		watchCarrierAuthority(ctx, func(context.Context) (string, error) { return token.Load().(string), nil },
+		watchCarrierAuthority(ctx, func(context.Context) (string, error) { polls.Add(1); return token.Load().(string), nil },
 			func(string) error { sends.Add(1); return nil }, func() {})
 	}()
-	time.Sleep(3500 * time.Millisecond)
+	// Count polls, not seconds: a stalled scheduler delays the polls, it cannot make the window vacuous.
+	const unchangedPolls = 4
+	eventually(t, func() bool { return polls.Load() >= unchangedPolls })
 	if got := sends.Load(); got != 1 {
-		t.Fatalf("%d sends of an unchanged grant in 3.5 s, want 1", got)
+		t.Fatalf("%d sends of an unchanged grant in %d polls, want 1", got, polls.Load())
 	}
 	token.Store("grant-2")
-	deadline := time.Now().Add(3 * time.Second)
-	for sends.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	eventually(t, func() bool { return sends.Load() >= 2 })
 	if got := sends.Load(); got != 2 {
 		t.Fatalf("a changed grant was not sent: %d sends", got)
 	}
@@ -57,10 +56,7 @@ func TestFailedReauthenticationInTheNetworkIsRetriedNotRevoked(t *testing.T) {
 				return nil
 			}, func() { revokes.Add(1) })
 	}()
-	deadline := time.Now().Add(6 * time.Second)
-	for sends.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	eventually(t, func() bool { return sends.Load() >= 2 })
 	if sends.Load() < 2 || revokes.Load() != 0 {
 		t.Fatalf("%d sends, %d revocations: the undelivered grant must be sent again without revoking", sends.Load(), revokes.Load())
 	}
@@ -72,7 +68,7 @@ func TestFailedReauthenticationInTheNetworkIsRetriedNotRevoked(t *testing.T) {
 		func(string) error { return errors.New("grant cannot be encoded") }, func() { close(revoked) })
 	select {
 	case <-revoked:
-	case <-time.After(5 * time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("a grant the client cannot encode was not revoked")
 	}
 }

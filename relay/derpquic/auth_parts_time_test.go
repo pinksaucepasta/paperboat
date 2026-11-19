@@ -1,6 +1,7 @@
 package derpquic
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
@@ -45,7 +46,13 @@ func TestGrantPartExpiredBeforeAdmissionIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	// The relay reads a carrier's frames in order, so the pong to a ping sent after the auth parts means it has
+	// decided them: no sleep to hope that it has.
+	ctx, cancel := context.WithTimeout(context.Background(), waitBound)
+	defer cancel()
+	if err := b.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Refused as expired, the connection keeps its admitted grant; admitted, the newer generation
