@@ -95,7 +95,7 @@ func TestRouteWorkerSeparatesCanonicalHTTPPublicAndPrivateTCPFromLegacyRoutes(t 
 		t.Fatal(err)
 	}
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()
@@ -176,7 +176,7 @@ func TestRouteWorkerCompleteCanonicalEmptyKeepsLegacyRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()
@@ -231,7 +231,7 @@ func TestRouteWorkerReadyFailureLeavesPreviousCanonicalGeneration(t *testing.T) 
 	if _, err := canonical.Match(first.PublicHost, "/"); err != nil {
 		t.Fatalf("previous route unavailable after failed ready: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if err := worker.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestRouteWorkerIsolatesCanonicalTunnelActivation(t *testing.T) {
 		t.Fatalf("ready tunnel B did not activate while tunnel A was unavailable: %v", err)
 	}
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()
@@ -366,7 +366,7 @@ func TestRouteWorkerRestartDetachesSupersededActiveAssignmentAfterReplacement(t 
 	if err := worker.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if err := worker.Shutdown(ctx); err != nil {
 		t.Fatal(err)

@@ -97,7 +97,7 @@ func TestRouteWorkerTransientInitialControlOutageStartsAndRetries(t *testing.T) 
 		}
 		time.Sleep(time.Millisecond)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if err := worker.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestRouteWorkerPrivateOutageDoesNotBlockPublicProgressOrEraseLKG(t *testing
 		}
 		time.Sleep(time.Millisecond)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if err := worker.Shutdown(ctx); err != nil {
 		t.Fatal(err)

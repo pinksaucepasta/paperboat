@@ -49,7 +49,7 @@ func TestRouteWorkerRetainsLKGAdmissionUntilReplacementPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()

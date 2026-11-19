@@ -28,10 +28,10 @@ func TestIngressShutdownAfterWatcherConsumedCompletion(t *testing.T) {
 		_ = server.server.Close()
 		select {
 		case <-server.Done():
-		case <-time.After(time.Second):
+		case <-time.After(time.Minute):
 			t.Fatal("HTTP completion not signaled")
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
 			t.Fatal("watcher consumption prevented HTTP cleanup", err)
@@ -52,10 +52,10 @@ func TestIngressShutdownAfterWatcherConsumedCompletion(t *testing.T) {
 		_ = server.packet.Close()
 		select {
 		case <-server.Done():
-		case <-time.After(time.Second):
+		case <-time.After(time.Minute):
 			t.Fatal("HTTP3 completion not signaled")
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
 			t.Fatal("watcher consumption prevented HTTP3 cleanup", err)

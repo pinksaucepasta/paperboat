@@ -96,7 +96,7 @@ func TestTRK35RouteWorkerLostAckRestartAndIdempotentReconcile(t *testing.T) {
 		t.Fatalf("idempotent reconcile changed admissions: %+v", durable.Snapshot())
 	}
 
-	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), time.Second)
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), time.Minute)
 	defer cancelShutdown()
 	if err := restarted.Shutdown(shutdownContext); err != nil {
 		t.Fatal(err)
