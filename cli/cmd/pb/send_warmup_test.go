@@ -12,35 +12,44 @@ import (
 // generation there is nothing safe to pre-dial, so it returns synchronously
 // and the send proceeds exactly as without it.
 func TestPeerWarmupSkipsWithoutPeerOrIdentity(t *testing.T) {
-	called := make(chan struct{}, 1)
-	peer := daemonProbeFunc(func(context.Context, localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
-		called <- struct{}{}
-		return localapi.PeerProbeResult{}, nil
-	})
-	warmPeerSessionBeforeDescriptor(context.Background(), nil, "machine_dst", "environment_dst", 7)
-	warmPeerSessionBeforeDescriptor(context.Background(), peer, "", "environment_dst", 7)
-	warmPeerSessionBeforeDescriptor(context.Background(), peer, "machine_dst", "", 7)
-	warmPeerSessionBeforeDescriptor(context.Background(), peer, "machine_dst", "environment_dst", 0)
-	select {
-	case <-called:
-		t.Fatal("warmup probed without a peer or an identity")
-	case <-time.After(100 * time.Millisecond):
+	for name, skipped := range map[string]func() bool{
+		"no machine":     func() bool { _, ok := peerWarmupTarget("", "environment_dst", 7); return !ok },
+		"blank machine":  func() bool { _, ok := peerWarmupTarget("  ", "environment_dst", 7); return !ok },
+		"no environment": func() bool { _, ok := peerWarmupTarget("machine_dst", "", 7); return !ok },
+		"no generation":  func() bool { _, ok := peerWarmupTarget("machine_dst", "environment_dst", 0); return !ok },
+	} {
+		if !skipped() {
+			t.Fatalf("%s: warmup would probe without a complete identity", name)
+		}
 	}
+	if _, ok := peerWarmupTarget("machine_dst", "environment_dst", 7); !ok {
+		t.Fatal("a complete identity must warm")
+	}
+	// Without a peer nothing is dialed and nothing is started: the call returns with no goroutine to wait for.
+	warmPeerSessionBeforeDescriptor(context.Background(), nil, "machine_dst", "environment_dst", 7)
 }
 
 // With an identity the warmup probes the peer on a health_probe stream in the
 // background, with the short timeout: the caller never waits for it.
 func TestPeerWarmupProbesTheDestinationPeer(t *testing.T) {
 	probed := make(chan localapi.PeerStreamRequest, 1)
+	release := make(chan struct{})
+	defer close(release)
 	peer := daemonProbeFunc(func(_ context.Context, request localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
 		probed <- request
+		<-release // a probe that never finishes must not hold the caller
 		return localapi.PeerProbeResult{Path: "direct"}, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	started := time.Now()
-	warmPeerSessionBeforeDescriptor(ctx, peer, "machine_dst", "environment_dst", 7)
-	if time.Since(started) > 2*time.Second {
+	returned := make(chan struct{})
+	go func() {
+		warmPeerSessionBeforeDescriptor(ctx, peer, "machine_dst", "environment_dst", 7)
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-ctx.Done():
 		t.Fatal("warmup blocked the caller")
 	}
 	select {
