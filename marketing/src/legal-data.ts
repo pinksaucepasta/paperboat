@@ -43,7 +43,7 @@ export const fairUse = {
   free: { allowance: plans[0].bandwidth, slow: speeds.after[0] },
   paid: { allowance: plans[1].bandwidth, slow: speeds.after[1] },
   relaySpeed: speeds.relay,
-  /** Browser terminals do not count toward the allowance; each workspace's are capped at this speed (user decision 2026-11-19). */
+  /** Typing and output in browser terminals do not count toward the allowance and are capped at this speed per workspace; console uploads count (user decision 2026-11-19). */
   terminalSpeed: "10 Mbit/s",
 }
 
