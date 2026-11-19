@@ -127,6 +127,11 @@ func TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres(t *testing.T) {
 		{"machine service toggle", `WITH m AS (UPDATE paperboat.user_machines SET personal_auto_enabled=false,machine_service_policy_generation=machine_service_policy_generation+1 WHERE id=$1 RETURNING id),
  r AS (UPDATE paperboat.user_machine_access_sessions SET state='revoked',revoked_at=now(),revocation_reason='machine_service_policy_changed' WHERE user_machine_id=$1 AND state='active' AND machine_service_source_kind='automatic' RETURNING id)
  SELECT paperboat.publish_machine_topic(ARRAY[$1::text],'machine_services') FROM m`, []any{host}, []string{host}, false},
+		// A busy account's route, preview and service topics wake daemons but name nothing a document reads (migration 453).
+		{"private routes topic", `SELECT paperboat.publish_account_topic(ARRAY[$1::text],'private_routes')`, []any{owner}, []string{"account:" + owner}, true},
+		{"previews topic", `SELECT paperboat.publish_account_topic(ARRAY[$1::text],'previews')`, []any{owner}, []string{"account:" + owner}, true},
+		{"peer network topic", `SELECT paperboat.publish_account_topic(ARRAY[$1::text],'peer_network')`, []any{owner}, []string{"account:" + owner}, false},
+		{"machine peer network topic", `SELECT paperboat.publish_machine_topic(ARRAY[$1::text],'peer_network')`, []any{host}, []string{host}, false},
 		{"member role", `UPDATE paperboat.team_members SET role='auditor' WHERE team_id=$1 AND account_id=$2`, []any{team, member}, teamKeys, false},
 		{"member sign-in only", `UPDATE paperboat.team_members SET sso_verified_at=now() WHERE team_id=$1 AND account_id=$2`, []any{team, member}, []string{"account:" + member}, true},
 		{"member joins", `INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, []any{team, other}, append([]string{"account:" + other}, teamKeys...), false},

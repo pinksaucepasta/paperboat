@@ -57,7 +57,7 @@ func usePolicyCache(t *testing.T, s *NetworkService, store *db.DB) {
 		mu.Lock()
 		waiting[marker] = ch
 		mu.Unlock()
-		if _, err := store.SQL().ExecContext(ctx, `SELECT pg_notify('machine_events',$1)`, marker); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `SELECT pg_notify('machine_events','policy:'||$1)`, marker); err != nil {
 			return err
 		}
 		select {

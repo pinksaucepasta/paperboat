@@ -15,9 +15,11 @@ import (
 // part of its configuration (its own binding, every peer with its scopes, the refresh hint and the peers' owning
 // teams) is built once from PostgreSQL and then served from memory until something it depends on changes.
 //
-// One invalidation owner: the machine_events notifications. The topic triggers (paperboat.publish_machine_topic /
-// publish_account_topic, migrations 110, 150 and later) NOTIFY machine_events with a machine id or "account:<id>";
-// migration 334 adds paperboat.publish_peer_policy, which sends "policy:<key>" from a trigger on every table the
+// One invalidation owner: the machine_events notifications named "policy:<key>". The topic publishers
+// (paperboat.publish_machine_topic / publish_account_topic, migrations 110, 150 and later) send one with the machine
+// id or "account:<id>" for every topic but private_routes, previews and machine_services (migration 453: a busy
+// account's route and preview churn dropped all of its documents about once a second); migration 334 adds
+// paperboat.publish_peer_policy, which sends "policy:<key>" from a trigger on every table the
 // document reads (TestPeerPolicyInvalidationCoversEveryMutationPathOnPostgres checks each write). A cached document
 // depends on its own endpoint and account and on every peer's endpoint, machine and account; a notification naming
 // any of them drops it. Every server replica runs its own LISTEN session, so replicas stay in sync without talking
@@ -231,8 +233,12 @@ func (s *NetworkService) ListenPolicy(ctx context.Context, direct policyListenPo
 	for {
 		n, err := s.policyConn.WaitForNotification(session)
 		if err == nil {
-			// "policy:<key>" comes from the peer policy triggers (migration 334), a bare key from the topic triggers.
-			s.cache.notify(strings.TrimPrefix(n.Payload, "policy:"))
+			// Only "policy:<key>" drops documents: the peer policy triggers (migration 334) and the topic publishers send
+			// it (migration 453, except for the private_routes, previews and machine_services topics, which name nothing
+			// a document reads). A bare key is the daemons' wake-up.
+			if key, ok := strings.CutPrefix(n.Payload, "policy:"); ok {
+				s.cache.notify(key)
+			}
 			continue
 		}
 		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && !s.policyConn.IsClosed() {
