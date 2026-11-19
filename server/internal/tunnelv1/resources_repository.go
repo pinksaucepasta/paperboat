@@ -54,7 +54,11 @@ func (r *SQLRepository) CreateResourceRoute(ctx context.Context, input RouteReco
 		return ResourceMutationRecord{}, err
 	}
 	var result ResourceMutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	machine, err := r.tunnelMachine(ctx, input.TunnelID)
+	if err != nil {
+		return ResourceMutationRecord{}, err
+	}
+	err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
 		}
@@ -165,7 +169,11 @@ func (r *SQLRepository) PatchResourceRoute(ctx context.Context, input RouteRecor
 		return ResourceMutationRecord{}, err
 	}
 	var result ResourceMutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	machine, err := r.tunnelMachine(ctx, input.TunnelID)
+	if err != nil {
+		return ResourceMutationRecord{}, err
+	}
+	err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
 		}
@@ -284,7 +292,11 @@ func (r *SQLRepository) DeleteResourceRoute(ctx context.Context, input RouteReco
 		return ResourceMutationRecord{}, err
 	}
 	var result ResourceMutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	machine, err := r.tunnelMachine(ctx, input.TunnelID)
+	if err != nil {
+		return ResourceMutationRecord{}, err
+	}
+	err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
 		}

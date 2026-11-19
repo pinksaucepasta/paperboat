@@ -319,7 +319,7 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 		return MutationRecord{}, err
 	}
 	var result MutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := r.inMachineTx(ctx, input.HostID, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
 		}
@@ -443,7 +443,11 @@ func (r *SQLRepository) Patch(ctx context.Context, input PatchRecord) (MutationR
 		return MutationRecord{}, err
 	}
 	var result MutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	machine, err := r.tunnelMachine(ctx, input.TunnelID)
+	if err != nil {
+		return MutationRecord{}, err
+	}
+	err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
 		}
@@ -572,7 +576,11 @@ func (r *SQLRepository) Transition(ctx context.Context, input StateRecord) (Muta
 		return MutationRecord{}, err
 	}
 	var result MutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	machine, err := r.tunnelMachine(ctx, input.TunnelID)
+	if err != nil {
+		return MutationRecord{}, err
+	}
+	err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
 			return err
 		}
@@ -1006,4 +1014,36 @@ func snapshotRoute(route dbsqlc.TunnelRoute) connectorprotocol.ConfigRoute {
 		TLSPin: nullStringPointer(route.TlsPin), ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxConcurrentStreams: route.MaxConcurrentStreams,
 		DesiredState: route.DesiredState,
 	}
+}
+
+// inMachineTx runs fn like db.InTx under machine's write lock (endpoints.MachineWriteLockSeed), taken before the
+// serializable snapshot: a tunnel change rewrites its host machine's route assignments, which the machine's runtime
+// attach writes too, so they queue instead of failing each other's commit with 40001. No machine: a plain InTx.
+func (r *SQLRepository) inMachineTx(ctx context.Context, machine string, fn func(context.Context, *db.Tx) error) error {
+	if machine == "" {
+		return r.db.InTx(ctx, fn)
+	}
+	return r.db.InTxUnderSessionLock(ctx, machine, endpoints.MachineWriteLockSeed, fn)
+}
+
+// tunnelMachine is the machine that hosts tunnelID, read before the transaction ("" for an unknown tunnel, which the
+// transaction then reports).
+func (r *SQLRepository) tunnelMachine(ctx context.Context, tunnelID string) (string, error) {
+	var machine string
+	err := r.db.SQL().QueryRowContext(ctx, `SELECT created_by_host_id FROM paperboat.tunnels WHERE id=$1`, tunnelID).Scan(&machine)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return machine, err
+}
+
+// addressMachine is tunnelMachine for the tunnel an incoming address hold of hostname moves.
+func (r *SQLRepository) addressMachine(ctx context.Context, hostname string) (string, error) {
+	var machine string
+	err := r.db.SQL().QueryRowContext(ctx, `SELECT t.created_by_host_id FROM paperboat.tunnel_address_holds h JOIN paperboat.tunnels t ON t.id=h.tunnel_id
+WHERE h.hostname=$1 AND h.kind='incoming'`, hostname).Scan(&machine)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return machine, err
 }

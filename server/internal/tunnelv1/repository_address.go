@@ -228,12 +228,16 @@ func (r *SQLRepository) SettleAddressMoves(ctx context.Context, input AddressSet
 }
 
 func (r *SQLRepository) settleAddressMove(ctx context.Context, newHost string, input AddressSettleRecord) error {
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	machine, err := r.addressMachine(ctx, newHost)
+	if err != nil {
+		return err
+	}
+	err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 		return settleAddressMoveTx(ctx, tx, newHost, input, "")
 	})
 	if reason := undoReason(err); reason != "" {
 		// The new name cannot be taken any more (blocked, or claimed by another resource meanwhile): undo the move.
-		err = r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		err = r.inMachineTx(ctx, machine, func(ctx context.Context, tx *db.Tx) error {
 			return settleAddressMoveTx(ctx, tx, newHost, input, reason)
 		})
 	}
