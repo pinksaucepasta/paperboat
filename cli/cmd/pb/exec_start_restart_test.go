@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -81,9 +82,12 @@ func TestUncertainExecStartEndsAtTheWindowStillUncertain(t *testing.T) {
 }
 
 // W1: `pb exec --timeout 2s` against a machine in the middle of an update waited 10 s, because the uncertain-start
-// recovery (up to 90 s) ignored the user's timeout. The timeout bounds the start too: the exec returns at about 2 s,
-// still reporting that the start is uncertain, whether the opens keep failing or the first one never answers.
+// recovery (up to 90 s) ignored the user's timeout. The timeout bounds the start too: the exec returns at the
+// timeout, still reporting that the start is uncertain, whether the opens keep failing or the first one never answers.
+// Checked on the deadline every open is handed, not on how long the run took: a loaded runner makes wall time
+// meaningless, while a recovery that outlives the timeout shows as an open with a later (or no) deadline.
 func TestUncertainStartEndsAtTheUserTimeout(t *testing.T) {
+	const timeout = 2 * time.Second
 	for name, open := range map[string]func(context.Context) (tunnel.ExecConn, error){
 		"opens keep failing": func(ctx context.Context) (tunnel.ExecConn, error) {
 			select {
@@ -99,14 +103,36 @@ func TestUncertainStartEndsAtTheUserTimeout(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var first time.Time
+			var opens int
+			var outlived string
 			begin := time.Now()
-			conn, uncertain, err := startExec(context.Background(), 2*time.Second, open)
-			took := time.Since(begin)
+			conn, uncertain, err := startExec(context.Background(), timeout, func(ctx context.Context) (tunnel.ExecConn, error) {
+				deadline, bounded := ctx.Deadline()
+				mu.Lock()
+				defer mu.Unlock()
+				if opens++; opens == 1 {
+					first = deadline
+				}
+				if !bounded || deadline.After(first) {
+					outlived = fmt.Sprintf("open %d got deadline %v (bounded=%v), after the timeout's %v", opens, deadline, bounded, first)
+				}
+				return open(ctx)
+			})
+			mu.Lock()
+			defer mu.Unlock()
 			if conn != nil || !uncertain || !execStartUncertain(err) {
 				t.Fatalf("conn %v uncertain %v err %v", conn, uncertain, err)
 			}
-			if took < 1900*time.Millisecond || took > 2600*time.Millisecond {
-				t.Fatalf("returned after %v, want about the 2 s --timeout", took)
+			if outlived != "" {
+				t.Fatal(outlived)
+			}
+			if first.Before(begin.Add(timeout)) {
+				t.Fatalf("the start's deadline %v is shorter than --timeout %v from %v", first, timeout, begin)
+			}
+			if time.Now().Before(first) {
+				t.Fatalf("returned before the --timeout deadline %v", first)
 			}
 		})
 	}
