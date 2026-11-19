@@ -33,7 +33,7 @@ func TestComposeBrandsEveryPartAndEscapesContent(t *testing.T) {
 
 func TestComposeWithoutLogoShowsTheWordmarkAlone(t *testing.T) {
 	m := transactionalmail.Compose(config.TransactionalMail{From: "n@example.test", ConsoleOrigin: "https://console.example.test/"}, "a@example.test", "S", transactionalmail.Content{Paragraphs: []string{"Hi"}})
-	if strings.Contains(m.HTML, "<img") || !strings.Contains(m.HTML, ">paperboat</a>") || strings.Contains(m.HTML, `class="btn"`) {
+	if strings.Contains(m.HTML, "<img") || !strings.Contains(m.HTML, ">paperboat</a>") || strings.Contains(m.HTML, `class="btn"`) || !strings.Contains(m.Text, "Paperboat · console.example.test") {
 		t.Fatalf("unexpected HTML: %s", m.HTML)
 	}
 }

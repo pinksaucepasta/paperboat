@@ -32,13 +32,17 @@ const (
 // Compose renders c with the shared layout and returns the message with its HTML and plain-text bodies. The wordmark,
 // logo and footer come from the deployment's mail configuration.
 func Compose(policy config.TransactionalMail, to, subject string, c Content) Message {
-	site := strings.TrimRight(policy.ConsoleOrigin, "/")
+	site, logo := strings.TrimRight(policy.ConsoleOrigin, "/"), ""
+	if policy.SiteURL != "" {
+		site = strings.TrimRight(policy.SiteURL, "/")
+		logo = site + "/apple-touch-icon.png"
+	}
 	host := site
 	if u, err := url.Parse(site); err == nil && u.Host != "" {
 		host = u.Host
 	}
 	footer := "Paperboat · " + host
-	return Message{From: policy.From, To: []string{to}, Subject: subject, HTML: renderHTML(policy.LogoURL, site, footer, subject, c), Text: renderText(footer, c)}
+	return Message{From: policy.From, To: []string{to}, Subject: subject, HTML: renderHTML(logo, site, footer, subject, c), Text: renderText(footer, c)}
 }
 
 func renderHTML(logo, site, footer, title string, c Content) string {
@@ -50,7 +54,7 @@ func renderHTML(logo, site, footer, title string, c Content) string {
 		`<tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">` +
 		`<tr><td style="padding:0 0 20px;font-family:` + fontStack + `;font-size:20px;font-weight:600;letter-spacing:-0.025em">`)
 	if logo != "" {
-		b.WriteString(`<img src="` + e(logo) + `" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px;margin-right:8px">`)
+		b.WriteString(`<img src="` + e(logo) + `" width="28" height="28" alt="Paperboat" style="vertical-align:middle;border:0;border-radius:6px;margin-right:8px">`)
 	}
 	b.WriteString(`<a href="` + e(site) + `" class="ink" style="vertical-align:middle;color:#141414;text-decoration:none">paperboat</a></td></tr>` +
 		`<tr><td class="card" style="background:#ffffff;border:1px solid #e8e8e6;border-radius:12px;padding:32px;font-family:` + fontStack + `">`)

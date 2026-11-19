@@ -11,8 +11,9 @@ type TransactionalMail struct {
 	Endpoint      string `json:"endpoint"`
 	From          string `json:"from"`
 	ConsoleOrigin string `json:"console_origin"`
-	// LogoURL is the hosted PNG shown beside the wordmark in every mail; empty shows the wordmark alone.
-	LogoURL                   string `json:"logo_url"`
+	// SiteURL is the marketing site origin: mail shows its /apple-touch-icon.png beside the wordmark and names its
+	// host in the footer. Empty shows the text wordmark alone and names the console host.
+	SiteURL                   string `json:"site_url"`
 	InvitationLifetimeSeconds int64  `json:"invitation_lifetime_seconds"`
 	// InvitationMailDedupSeconds: a new invitation to an address that already got one for the same
 	// team within this window sends no mail (pending or cancelled and re-created). Resend always mails.
@@ -46,9 +47,9 @@ func (m TransactionalMail) Validate(key string) error {
 			return errors.New("mail endpoint and console_origin must be HTTPS URLs without credentials, queries or fragments")
 		}
 	}
-	if m.LogoURL != "" {
-		if u, err := url.Parse(m.LogoURL); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
-			return errors.New("mail.logo_url must be an HTTPS URL without credentials")
+	if m.SiteURL != "" {
+		if u, err := url.Parse(m.SiteURL); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			return errors.New("mail.site_url must be an HTTPS origin without credentials, path, query or fragment")
 		}
 	}
 	u, _ := url.Parse(m.ConsoleOrigin)
