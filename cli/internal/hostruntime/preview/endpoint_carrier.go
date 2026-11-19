@@ -19,7 +19,8 @@ type AgentCarriers interface {
 }
 
 // endpointReadyTimeout bounds how long a preview waits for the first edge to serve its route.
-const endpointReadyTimeout = 90 * time.Second
+// A variable only so a test can shorten it.
+var endpointReadyTimeout = 90 * time.Second
 
 // EndpointCarrier serves a preview as an endpoint route on the agent's runtime carriers: the
 // preview never dials a carrier of its own. The route id is the preview id. Every hub runs one
@@ -127,7 +128,9 @@ func (c *EndpointCarrier) RunWithLease(ctx context.Context, currentLease func() 
 	return c.Run(ctx, currentLease(), ready)
 }
 
-// readyWhenServed reports readiness, retrying while no edge serves the route yet.
+// readyWhenServed reports readiness, retrying while no edge serves the route yet. When none does within
+// endpointReadyTimeout the failure is retryable: the session reconnects and waits again, because ending it would
+// orphan the lease for good while the edge is only slow to learn the route (a fresh pair's first preview).
 func readyWhenServed(ctx context.Context, observed Lease, ready func(Lease) error) error {
 	deadline := time.Now().Add(endpointReadyTimeout)
 	wait := 250 * time.Millisecond
@@ -135,8 +138,11 @@ func readyWhenServed(ctx context.Context, observed Lease, ready func(Lease) erro
 		err := ready(observed)
 		// Not served yet, or the server briefly unavailable: retry until the deadline.
 		transient := errors.Is(err, ErrDispatchNotServed) || errors.Is(err, ErrDispatchUnavailable)
-		if err == nil || !transient || time.Now().Add(wait).After(deadline) {
+		if err == nil || !transient {
 			return err
+		}
+		if time.Now().Add(wait).After(deadline) {
+			return &RetryableCarrierError{Err: err}
 		}
 		select {
 		case <-ctx.Done():
