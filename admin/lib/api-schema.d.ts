@@ -10189,8 +10189,6 @@ export interface components {
             tunnel_base_domain: string;
             /** Format: hostname */
             runtime_base_domain: string;
-            /** @description Control-plane regions clients rank by measured latency; empty when the server has no regional nodes. */
-            control_regions: components["schemas"]["ControlRegion"][];
         };
         ErrorResponse: {
             error: components["schemas"]["APIError"];
@@ -13983,13 +13981,6 @@ export interface components {
             next_cursor?: string;
             /** @description Every machine shared into the team. */
             total: number;
-        };
-        ControlRegion: {
-            id: string;
-            /** Format: uri */
-            api_origin: string;
-            /** @enum {unknown} */
-            state: "healthy" | "draining";
         };
         ServerNode: {
             id: string;

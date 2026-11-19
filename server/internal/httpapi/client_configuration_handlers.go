@@ -5,7 +5,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/legalconsent"
-	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 )
 
 type clientConfigurationResponse struct {
@@ -23,8 +22,6 @@ type clientConfigurationResponse struct {
 	AbuseMailbox string `json:"abuse_mailbox,omitempty"`
 	// PurchaseConsent is the wording and version a buyer accepts before any purchase (console and CLI show it).
 	PurchaseConsent purchaseConsent `json:"purchase_consent"`
-	// ControlRegions is the region map clients rank by measured latency (PLAN 3b).
-	ControlRegions []servernodes.Region `json:"control_regions"`
 }
 
 type purchaseConsent struct {
@@ -32,7 +29,7 @@ type purchaseConsent struct {
 	Text    string `json:"text"`
 }
 
-func clientConfiguration(cfg config.Config, regions *servernodes.RegionCache) http.HandlerFunc {
+func clientConfiguration(cfg config.Config) http.HandlerFunc {
 	response := clientConfigurationResponse{
 		Version:               "1",
 		Issuer:                config.NormalizeIssuer(cfg.HTTP.PublicBaseURL),
@@ -53,8 +50,6 @@ func clientConfiguration(cfg config.Config, regions *servernodes.RegionCache) ht
 			writeError(w, r, http.StatusServiceUnavailable, "client_configuration_unavailable", "Server discovery is not configured; contact the server operator.")
 			return
 		}
-		out := response
-		out.ControlRegions = regions.Get(r.Context())
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: response})
 	}
 }

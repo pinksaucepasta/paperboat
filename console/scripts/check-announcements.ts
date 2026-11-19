@@ -42,7 +42,7 @@ const answers: Record<string, () => unknown> = {
   "/v1/client-configuration": () => ({
     version: "1", cli_verification_url: "https://example.test/cli", machines_url: "https://example.test/machines", abuse_mailbox: "abuse@example.test", issuer: "https://example.test",
     installer_base_url: "https://example.test", console_url: ORIGIN, local_access_base_domain: "local.example.test", preview_base_domain: "preview.example.test",
-    tunnel_base_domain: "tunnel.example.test", runtime_base_domain: "runtime.example.test", control_regions: [],
+    tunnel_base_domain: "tunnel.example.test", runtime_base_domain: "runtime.example.test",
   }),
   "/v1/auth/csrf": () => ({ csrf_token: "csrf-check" }),
   "/v1/announcements": view,
