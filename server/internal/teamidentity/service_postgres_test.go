@@ -18,13 +18,14 @@ type fakeWorkOS struct {
 	mu    sync.Mutex
 	state OrganizationState
 	orgs  int
+	org   string // teams.workos_organization_id is unique across the database: one per test run
 }
 
 func (f *fakeWorkOS) CreateOrganization(context.Context, string, string, string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.orgs++
-	return "org_test", nil
+	return f.org, nil
 }
 func (f *fakeWorkOS) DeleteOrganization(context.Context, string) error { return nil }
 func (f *fakeWorkOS) PortalLink(_ context.Context, org, intent, _ string) (string, error) {
@@ -87,7 +88,8 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,addon,period_start,period_end) VALUES('team:'||$1,$1,'active',2,'sso_scim',now()-interval '1 day',now()+interval '30 days')`, team)
 	exec(`DELETE FROM paperboat.users WHERE id=$1`, bob) // bob has no account yet
-	fake := &fakeWorkOS{}
+	org := "org_" + x
+	fake := &fakeWorkOS{org: org}
 	seats := &fakeSeats{}
 	s := New(store, fake, config.Default().Business, config.Default().Mail.InvitationLifetimeSeconds, "https://console.example.test/team", seats)
 	tx := func(fn func(context.Context, *db.Tx) error) error { return store.InTx(ctx, fn) }
@@ -96,7 +98,7 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		t.Fatalf("non-member portal: %v", err)
 	}
 	link, err := s.PortalLink(ctx, owner, team, "sso")
-	if err != nil || link != "https://setup.example.test/org_test/sso" {
+	if err != nil || link != "https://setup.example.test/"+org+"/sso" {
 		t.Fatalf("portal link=%q err=%v", link, err)
 	}
 	fake.state = OrganizationState{
@@ -179,7 +181,7 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		t.Fatalf("owner break-glass: %v", err)
 	}
 	if err = tx(func(ctx context.Context, tx *db.Tx) error {
-		return teams.RecordSSOSignInTx(ctx, tx, "org_test", alice, "alice@"+domain)
+		return teams.RecordSSOSignInTx(ctx, tx, org, alice, "alice@"+domain)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +206,7 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	}
 
 	if err = tx(func(ctx context.Context, tx *db.Tx) error {
-		return teams.RecordSSOSignInTx(ctx, tx, "org_test", bob, "bob@"+domain)
+		return teams.RecordSSOSignInTx(ctx, tx, org, bob, "bob@"+domain)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +287,7 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = tx(func(ctx context.Context, tx *db.Tx) error {
-		return teams.RecordSSOSignInTx(ctx, tx, "org_test", dave, "dave@"+domain)
+		return teams.RecordSSOSignInTx(ctx, tx, org, dave, "dave@"+domain)
 	}); err != nil {
 		t.Fatal(err)
 	}
