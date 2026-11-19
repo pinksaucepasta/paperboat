@@ -385,6 +385,7 @@ func (s *Service) Worker(interval time.Duration) func(context.Context) error {
 				_, progressErr := s.db.Queries().MarkStaleUserMachinesOffline(ctx, sql.NullTime{Time: s.now().UTC().Add(-s.policy.OfflineAfter), Valid: true})
 				workers.IterationFailure(ctx, "stale_machine_offline", "machine_offline_reconcile_failed", progressErr)
 				workers.IterationFailure(ctx, "access_session_retention", "access_session_retention_failed", s.retireExpiredAccessSessions(ctx))
+				workers.IterationFailure(ctx, "account_topic_fold", "account_topic_fold_failed", s.foldAccountTopicBumps(ctx))
 
 				return nil
 			}()
@@ -436,6 +437,20 @@ func (s *Service) retireExpiredAccessSessions(ctx context.Context) error {
 }
 
 const retireBatchSize, retireBatches = 1000, 20
+
+// foldAccountTopicBumps moves account topic bumps into their base rows (migration 450), bounded batches per tick: a
+// publish appends a bump instead of updating the one hot row every event of the account used to fight over.
+func (s *Service) foldAccountTopicBumps(ctx context.Context) error {
+	for range retireBatches {
+		var folded int64
+		if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			return tx.QueryRow(ctx, `SELECT paperboat.fold_account_topic_bumps($1)`, retireBatchSize).Scan(&folded)
+		}); err != nil || folded < retireBatchSize {
+			return err
+		}
+	}
+	return nil
+}
 
 func (s *Service) ConfigureInstallationEncryption(encryptionKey string) {
 	s.encryptionKey = encryptionKey

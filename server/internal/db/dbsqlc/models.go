@@ -74,11 +74,23 @@ type AccountE2eeRoot struct {
 	RevokedAt   sql.NullTime
 }
 
-type AccountTopicGeneration struct {
+type AccountTopicBase struct {
 	AccountID  string
 	Topic      string
 	Generation int64
 	UpdatedAt  time.Time
+}
+
+type AccountTopicBump struct {
+	ID        int64
+	AccountID string
+	Topic     string
+}
+
+type AccountTopicGeneration struct {
+	AccountID  string
+	Topic      string
+	Generation int64
 }
 
 type Announcement struct {

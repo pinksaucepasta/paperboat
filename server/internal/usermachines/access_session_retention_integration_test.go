@@ -74,3 +74,42 @@ SELECT 'control_plane_signed','retire_bulk_'||$1||'_'||g,$2,$3,$4,$5,'',$6,'acti
 		t.Fatalf("%d of 2500 old sessions still active after one tick (%v)", left, err)
 	}
 }
+
+// Account topic bumps (migration 450) are bounded: one worker tick folds them into their base rows, more than one
+// batch at a time, and the topic generation every reader sees (the account_topic_generations view) does not change.
+func TestAccountTopicBumpsAreFoldedByTheWorkerOnPostgres(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	account := "fold_user_" + fmt.Sprint(time.Now().UnixNano())
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, account)
+	})
+	if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.publish_account_topic(ARRAY[$1::text], 'inventory') FROM generate_series(1,2500)`, account); err != nil {
+		t.Fatal(err)
+	}
+	read := func(query string) int64 {
+		t.Helper()
+		var n int64
+		if err := store.SQL().QueryRowContext(ctx, query, account).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	generation := `SELECT coalesce((SELECT generation FROM paperboat.account_topic_generations WHERE account_id=$1 AND topic='inventory'),0)`
+	bumps := `SELECT count(*) FROM paperboat.account_topic_bumps WHERE account_id=$1`
+	if g := read(generation); g != 2500 {
+		t.Fatalf("generation %d after 2500 publishes", g)
+	}
+	if err := New(store, nil, Policy{}, nil).foldAccountTopicBumps(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := read(bumps); n != 0 {
+		t.Fatalf("%d bumps left after one worker tick", n)
+	}
+	if g := read(generation); g != 2500 {
+		t.Fatalf("generation %d after folding, want 2500", g)
+	}
+}
