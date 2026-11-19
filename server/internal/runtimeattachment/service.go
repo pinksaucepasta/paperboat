@@ -82,6 +82,27 @@ func (s *Service) Attach(ctx context.Context, proof previewattachment.MachinePro
 		return runtimewire.HostAdmission{}, lockErr
 	}
 	defer unlock()
+	// The workspace's edge set exists before the attach transaction. Building it reads the latency samples of every
+	// machine of the workspace, which each attach writes for its own machine: inside the attach, a burst of first
+	// attaches (a new fleet, 50 machines at once) aborted each other until one ran out of retries. Here the builders
+	// race in one short transaction, and the attach only reads the set.
+	if err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var team sql.NullString
+		err := tx.QueryRow(ctx, `SELECT owner_team_id FROM user_machines WHERE id=$1 AND user_id=$2`, proof.MachineID, proof.UserID).Scan(&team)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // the attach transaction reports the machine
+		}
+		if err != nil {
+			return err
+		}
+		scope := edgeset.Scope{Kind: "account", ID: proof.UserID, Account: proof.UserID}
+		if team.Valid {
+			scope.Kind, scope.ID = "team", team.String
+		}
+		return edgeset.EnsureTx(ctx, tx, scope, time.Now().UTC())
+	}); err != nil {
+		return out, err
+	}
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var route, environment, host, managedHost, publicKey, mode string
 		var revision int64
