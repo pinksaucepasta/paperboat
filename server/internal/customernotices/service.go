@@ -35,7 +35,7 @@ const (
 
 	audienceAll  = "all"
 	audiencePaid = "paid"
-	paidStates   = `b.state IN ('active','trialing','past_due')`
+	paidStates   = `b.state IN ('active','past_due')`
 	eligible     = `u.status='active' AND u.email_verified AND u.primary_email<>'' AND u.role<>'system_worker'`
 	// recipients: the account holders to write to. $1 is the keyset cursor, $2 the audience value. A paid workspace's
 	// contact is its personal owner or its team owner and admins; a team audience is the team's owner and admins.

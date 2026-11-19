@@ -138,7 +138,6 @@ type wireSub struct {
 	Currency          string          `json:"currency"`
 	StartDate         int64           `json:"start_date"`
 	EndedAt           int64           `json:"ended_at"`
-	TrialEnd          int64           `json:"trial_end"`
 	CancelAtPeriodEnd bool            `json:"cancel_at_period_end"`
 	Items             struct {
 		Data []wireItem `json:"data"`
@@ -174,7 +173,7 @@ func (w wireItem) item() (Item, bool) {
 }
 
 func (w wireSub) sub() Sub {
-	s := Sub{ID: w.ID, Customer: customerID(w.Customer), Status: w.Status, Currency: strings.ToLower(w.Currency), Start: w.StartDate, Ended: w.EndedAt, TrialEnd: w.TrialEnd, CancelAtPeriodEnd: w.CancelAtPeriodEnd}
+	s := Sub{ID: w.ID, Customer: customerID(w.Customer), Status: w.Status, Currency: strings.ToLower(w.Currency), Start: w.StartDate, Ended: w.EndedAt, CancelAtPeriodEnd: w.CancelAtPeriodEnd}
 	for _, it := range w.Items.Data {
 		if item, ok := it.item(); ok {
 			s.Items = append(s.Items, item)

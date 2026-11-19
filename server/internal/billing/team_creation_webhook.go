@@ -94,13 +94,7 @@ func (s *WorkspaceService) handleTeamCreationWebhook(ctx context.Context, event 
 		err = s.expireTeamOrder(ctx, key)
 		return true, err == nil, err
 	}
-	// A trial Checkout that collected a card reports "paid" (Stripe sandbox, 2026-10-23);
-	// one without a first charge may report "no_payment_required". Both start a trial.
-	paymentOK, wantStatus := paid == "paid", "active"
-	if req.TrialDays > 0 {
-		paymentOK, wantStatus = paid == "paid" || paid == "no_payment_required", "trialing"
-	}
-	if checkout.Status != "complete" || !paymentOK || checkout.SubscriptionID == "" {
+	if checkout.Status != "complete" || paid != "paid" || checkout.SubscriptionID == "" {
 		return true, false, ErrCheckoutPending
 	}
 	if event.Data.Object.Object != "checkout.session" && event.SubscriptionID() != checkout.SubscriptionID {
@@ -110,7 +104,7 @@ func (s *WorkspaceService) handleTeamCreationWebhook(ctx context.Context, event 
 	if err != nil {
 		return true, false, err
 	}
-	if sub.ID != checkout.SubscriptionID || sub.CustomerID != req.CustomerID || sub.PriceID != req.PriceID || sub.Quantity != req.Input.Seats || sub.CheckoutOperation != "team-create:"+key || sub.Status != wantStatus || sub.ItemID == "" || !sub.PeriodEnd.After(sub.PeriodStart) {
+	if sub.ID != checkout.SubscriptionID || sub.CustomerID != req.CustomerID || sub.PriceID != req.PriceID || sub.Quantity != req.Input.Seats || sub.CheckoutOperation != "team-create:"+key || sub.Status != "active" || sub.ItemID == "" || !sub.PeriodEnd.After(sub.PeriodStart) {
 		return true, false, ErrProviderOutcomeUnknown
 	}
 	processed, err := s.materializePaidTeam(ctx, event, key, id, req, sub)
@@ -154,11 +148,6 @@ func (s *WorkspaceService) materializePaidTeam(ctx context.Context, event Stripe
 		}
 		if err := teams.AuditTx(ctx, tx, actor, req.Input.TeamID, "create", key, nil); err != nil {
 			return err
-		}
-		if req.TrialDays > 0 {
-			if err := s.noticeTeamTrialStartedTx(ctx, tx, actor, key, req, sub); err != nil {
-				return err
-			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE billing_team_orders SET state='paid',provider_session_id=$2,updated_at=now() WHERE operation_id=$1`, key, id); err != nil {
 			return err

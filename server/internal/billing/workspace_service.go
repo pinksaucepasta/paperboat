@@ -29,7 +29,6 @@ type WorkspaceService struct {
 	mail             config.TransactionalMail
 	mailEnabled      bool
 	throttle         config.FairUse // the speeds notices and the overview promise a throttled workspace (SetThrottleRates)
-	teamTrialDays    int
 }
 
 var ErrProductChanged = errors.New("billing product price changed")
@@ -91,13 +90,6 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 		}
 		if out.Limits, err = planlimits.UsageTx(ctx, tx, planlimits.Scope{Account: account, Team: team}); err != nil {
 			return err
-		}
-		if team == "" {
-			days, err := s.teamTrialDaysTx(ctx, tx, account)
-			if err != nil {
-				return err
-			}
-			out.TeamTrialDays = &days
 		}
 		if team != "" {
 			if seats, overridden, err := planlimits.SeatsOverrideTx(ctx, tx, team); err != nil {
@@ -572,7 +564,7 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		// A support grant owns the plan while it runs. The snapshot is read live (never the event payload), so a replayed
 		// or late event for an old subscription carries that subscription's current state, cancelled, and must not
 		// replace the grant; only a subscription that is really paid for does (and then ends the grant).
-		if grantRunning && current.Status != "active" && current.Status != "trialing" {
+		if grantRunning && current.Status != "active" {
 			if event != nil {
 				if _, err = tx.Exec(ctx, `INSERT INTO stripe_events(id,event_type,subscription_id) VALUES($1,$2,$3)`, event.ID, event.Type, current.ID); err != nil {
 					return err
@@ -643,7 +635,7 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		if err = tx.QueryRow(ctx, `SELECT coalesce(product_code,''),state FROM billing_workspaces WHERE id=$1`, workspaceID).Scan(&previousProduct, &previousState); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5 IN ('active','trialing') THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,grant_until=NULL,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE billing_workspaces SET provider_subscription_id=$2,provider_item_id=$3,product_code=$4,state=$5,quantity=$6,period_start=$7,period_end=$8,cancel_at_period_end=$9,bandwidth_anchor=CASE WHEN $5='active' THEN coalesce(bandwidth_anchor,$7) ELSE bandwidth_anchor END,grant_until=NULL,updated_at=now(),revision=revision+1 WHERE id=$1 AND provider_customer_id=$10`, workspaceID, current.ID, current.ItemID, productCode, current.Status, current.Quantity, current.PeriodStart, current.PeriodEnd, current.CancelAtPeriodEnd, current.CustomerID); err != nil {
 			return err
 		}
 		// A plan or state change is a product event (retention, revenue): record it so analytics and support can see it.
