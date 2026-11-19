@@ -1,6 +1,6 @@
 "use client"
 
-import { DotsThreeVerticalIcon, MonitorIcon, MoonIcon, SignOutIcon, SunIcon, UserIcon } from "@phosphor-icons/react"
+import { ArrowSquareOutIcon, DotsThreeVerticalIcon, MonitorIcon, MoonIcon, SignOutIcon, SunIcon, UserIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useTheme } from "next-themes"
 import { useEffect, useRef, useState } from "react"
@@ -29,7 +29,7 @@ const themes = [
   { value: "dark", label: "Dark", icon: MoonIcon },
 ] as const
 
-export function UserMenu() {
+export function UserMenu({ statusUrl }: { statusUrl?: string }) {
   const { data: me } = useApiQuery(meQuery)
   const { theme, setTheme } = useTheme()
   const ThemeIcon = themes.find((item) => item.value === theme)?.icon ?? MonitorIcon
@@ -76,6 +76,11 @@ export function UserMenu() {
             <DropdownMenuItem render={<Link href="/account" />}>
               <UserIcon /> Account
             </DropdownMenuItem>
+            {statusUrl && (
+              <DropdownMenuItem render={<a href={statusUrl} target="_blank" rel="noopener noreferrer" />}>
+                <ArrowSquareOutIcon /> Status
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             {/* shadcn's pattern for themes: radio items (here in a submenu), not a toggle group. */}
             <DropdownMenuSub>
