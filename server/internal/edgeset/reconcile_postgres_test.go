@@ -152,55 +152,92 @@ func TestWorkspaceEdgeSetOnPostgres(t *testing.T) {
 	}
 }
 
-func TestWorkspaceEdgeSetPrefersNearestOnPostgres(t *testing.T) {
-	database := openIsolated(t)
-	ctx := context.Background()
-	stamp := fmt.Sprint(time.Now().UnixNano())
-	account, environment, machine := "edgenear_account_"+stamp, "edgenear_env_"+stamp, "edgenear_machine_"+stamp
-	exec := func(query string, args ...any) {
-		t.Helper()
-		if _, err := database.SQL().ExecContext(ctx, query, args...); err != nil {
-			t.Fatalf("%v: %s", err, query)
-		}
-	}
-	node := func(name string) string {
-		id := "edgenear_" + name + "_" + stamp
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
-		t.Cleanup(func() {
-			_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
-		})
-		return id
-	}
-	exec(`UPDATE paperboat.control_tunnel_nodes SET ready=false WHERE id NOT LIKE $1 AND roles @> ARRAY['edge']`, "edgenear_%"+stamp)
-	slow, mid, near, stale := node("slow"), node("mid"), node("near"), node("stale")
-	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
-	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account)
-	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'office','linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment)
+// nearestFixture is a workspace with one environment, a set of edges in distinct failure domains (all
+// other edges made unready) and a way to add machines with an RTT sample per edge.
+type nearestFixture struct {
+	t       *testing.T
+	ctx     context.Context
+	db      *db.DB
+	stamp   string
+	account string
+	env     string
+}
+
+func newNearestFixture(t *testing.T) *nearestFixture {
+	f := &nearestFixture{t: t, ctx: context.Background(), db: openIsolated(t), stamp: fmt.Sprint(time.Now().UnixNano())}
+	f.account, f.env = "edgenear_account_"+f.stamp, "edgenear_env_"+f.stamp
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET ready=false WHERE id NOT LIKE $1 AND roles @> ARRAY['edge']`, "edgenear_%"+f.stamp)
+	f.exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, f.account)
+	f.exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, f.env, f.account)
 	t.Cleanup(func() {
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, account)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_environments WHERE id=$1`, environment)
-		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, account)
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, f.account)
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.user_machines WHERE environment_id=$1`, f.env)
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.control_environments WHERE id=$1`, f.env)
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.users WHERE id=$1`, f.account)
 	})
-	for id, sample := range map[string]struct {
-		rtt int
-		age string
-	}{slow: {300, "1 hour"}, mid: {40, "1 hour"}, near: {5, "1 hour"}, stale: {1, "48 hours"}} {
-		exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'edge',$3,now()-$4::interval)`, machine, id, sample.rtt, sample.age)
+	return f
+}
+
+func (f *nearestFixture) exec(query string, args ...any) {
+	f.t.Helper()
+	if _, err := f.db.SQL().ExecContext(f.ctx, query, args...); err != nil {
+		f.t.Fatalf("%v: %s", err, query)
 	}
-	scope := Scope{Kind: "account", ID: account, Account: account}
-	err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		_, err := ReconcileScope(ctx, tx, scope, time.Now())
+}
+
+func (f *nearestFixture) node(name string) string {
+	id := "edgenear_" + name + "_" + f.stamp
+	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
+	f.t.Cleanup(func() {
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
+	})
+	return id
+}
+
+// machine adds a live machine with one edge sample (rtt in ms, age as an interval) per node.
+func (f *nearestFixture) machine(name string, rtt map[string]int, age string) {
+	id := "edgenear_machine_" + name + "_" + f.stamp
+	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,1)`, id, f.account, f.env)
+	for node, ms := range rtt {
+		f.exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'edge',$3,now()-$4::interval)`, id, node, ms, age)
+	}
+}
+
+func (f *nearestFixture) pair() []string {
+	f.t.Helper()
+	err := f.db.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		_, err := ReconcileScope(ctx, tx, Scope{Kind: "account", ID: f.account, Account: f.account}, time.Now())
 		return err
 	})
 	if err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
 	var ids []string
-	if err = database.Pool().QueryRow(ctx, `SELECT node_ids FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, account).Scan(&ids); err != nil {
-		t.Fatal(err)
+	if err = f.db.Pool().QueryRow(f.ctx, `SELECT node_ids FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, f.account).Scan(&ids); err != nil {
+		f.t.Fatal(err)
 	}
-	if len(ids) != 2 || ids[0] != near || ids[1] != mid {
+	return ids
+}
+
+func TestWorkspaceEdgeSetPrefersNearestOnPostgres(t *testing.T) {
+	f := newNearestFixture(t)
+	slow, mid, near, stale := f.node("slow"), f.node("mid"), f.node("near"), f.node("stale")
+	f.machine("one", map[string]int{slow: 300, mid: 40, near: 5}, "1 hour")
+	f.machine("old", map[string]int{stale: 1}, "48 hours")
+	if ids := f.pair(); len(ids) != 2 || ids[0] != near || ids[1] != mid {
 		t.Fatalf("pair = %v, want [%s %s] (the stale 1 ms sample of %s must be ignored)", ids, near, mid, stale)
+	}
+}
+
+// One machine near edge A and three near edge B: the median, not the single best machine, places the workspace.
+func TestWorkspaceEdgeSetRanksByMedianMachineOnPostgres(t *testing.T) {
+	f := newNearestFixture(t)
+	a, b, c := f.node("a"), f.node("b"), f.node("c")
+	f.machine("m1", map[string]int{a: 5, b: 100, c: 200}, "1 hour")
+	for _, name := range []string{"m2", "m3", "m4"} {
+		f.machine(name, map[string]int{a: 100, b: 10, c: 200}, "1 hour")
+	}
+	if ids := f.pair(); len(ids) != 2 || ids[0] != b || ids[1] != a {
+		t.Fatalf("pair = %v, want [%s %s]: three machines near B outvote the one near A", ids, b, a)
 	}
 }

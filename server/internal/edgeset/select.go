@@ -29,7 +29,7 @@ type Candidate struct {
 
 // choose keeps the members of current that are still retained, then fills the remaining places
 // from usable candidates: edges in failure domains the set does not use yet first. Inside that,
-// edges the workspace's machines measured come first, lowest best RTT first (rtt: node id to
+// edges the workspace's machines measured come first, lowest median RTT first (rtt: node id to
 // milliseconds, empty when there is no fresh sample); the rest, and ties, go by highest rendezvous
 // score, so a workspace without samples lands on a stable, evenly spread pair.
 func choose(scope string, current []string, retained map[string]bool, rtt map[string]int, usable []Candidate, size int) []string {
