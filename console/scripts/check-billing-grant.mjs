@@ -34,14 +34,14 @@ const product = (code, type, interval, amount) => ({ code, name: code.includes("
 const personalProducts = [product("pro-month", "personal_subscription", "month", 900), product("pro-year", "personal_subscription", "year", 9000), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
 const teamProducts = [product("team-month", "team_subscription", "month", 1500), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
 const limits = { machines: { used: 2, limit: 100 }, publications: { used: 1, limit: 10 }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: 10 } }
-const base = { usage_bytes: 5e9, allowance_bytes: 1e12, allowance_period_start: iso(-5 * day), allowance_period_end: iso(25 * day), topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], limits, can_manage: true, cancel_at_period_end: false, granted: false }
+const base = { usage_bytes: 5e9, allowance_bytes: 1e12, allowance_period_start: iso(-5 * day), allowance_period_end: iso(25 * day), topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], limits, can_manage: true, cancel_at_period_end: false, granted: false, throttled: false, throttle_lifted: false, throttle_mbit: 10, relay_mbit: 10, sso_addon: false, scim_addon: false }
 const states = {
   granted: (kind) => ({ ...base, id: kind === "team" ? "team:tg" : "personal:u", state: "active", product_code: kind === "team" ? "team-month" : "pro-month", product: (kind === "team" ? teamProducts : personalProducts)[0], seats_bought: kind === "team" ? 10 : 0, seats_used: kind === "team" ? 12 : 0, members: kind === "team" ? 12 : 1, period_start: iso(-day), period_end: iso(9 * day), cancel_at_period_end: true, granted: true, granted_until: iso(9 * day) }),
   ended: (kind) => ({ ...states.granted(kind), period_start: iso(-11 * day), period_end: iso(-day), granted: false, granted_until: undefined }),
-  exhausted: (kind) => ({ ...states.granted(kind), usage_bytes: 1e12 }),
+  exhausted: (kind) => ({ ...states.granted(kind), usage_bytes: 1e12, throttled: true }),
   failed: (kind) => ({ ...states.paid(kind), state: "past_due", period_start: iso(-31 * day), period_end: iso(-day), paid_benefits_until: iso(5 * day) }),
   member: (kind) => ({ ...states.granted(kind), can_manage: false }),
-  exhaustedPaid: (kind) => ({ ...states.paid(kind), usage_bytes: 1e12 }),
+  exhaustedPaid: (kind) => ({ ...states.paid(kind), usage_bytes: 1e12, throttled: true }),
   extras: (kind) => ({ ...states.paid(kind), allowance_granted_bytes: 2.5e11, allowance_bytes: 1.25e12, limits: { ...limits, machines: { used: 2, limit: 500, granted: true } }, ...(kind === "team" ? { seats_granted: 20 } : {}) }),
   paid: (kind) => ({ ...states.granted(kind), cancel_at_period_end: false, granted: false, granted_until: undefined, period_end: iso(20 * day), paid_benefits_until: iso(20 * day) }),
 }
@@ -123,7 +123,7 @@ try {
     await context.addCookies([{ name: "pb-workspace", value: workspace, url: ORIGIN }])
     await page.goto(`${ORIGIN}/billing`)
     // The skeleton has the same headings; the loaded page has the plan row filled in.
-    await page.getByText("Hosted allowance").first().waitFor({ timeout: 30000 })
+    await page.getByText("Traffic included").first().waitFor({ timeout: 30000 })
     await page.waitForFunction(() => !document.querySelector('[data-slot="skeleton"], .animate-pulse'), null, { timeout: 30000 })
     // Times (and so "ended") are only known once the page has hydrated; wait for the text that depends on them.
     await page.waitForFunction((pattern) => new RegExp(pattern).test(document.querySelector("main")?.innerText ?? ""), ready.source, { timeout: 30000 })
@@ -185,12 +185,12 @@ try {
   await step("an exhausted grant: the quota banner offers Subscribe, not Add bandwidth or Change plan", async () => {
     await open("personal", "exhausted", /Granted until/)
     const banner = (await page.locator("[data-quota-banner]").first().innerText({ timeout: 15000 })).replace(/\s+/g, " ")
-    expect(/used its bandwidth|used its bandwidth for this period/.test(banner), `banner: ${banner.slice(0, 160)}`)
+    expect(/used its included traffic/.test(banner), `banner: ${banner.slice(0, 160)}`)
     expect(/Subscribe/.test(banner) && !/Add bandwidth/.test(banner) && !/Change plan/.test(banner), `banner links on a grant: ${banner}`)
     await shot("exhausted-granted")
   })
   await step("operator grants on a paid plan: extra bandwidth and an overridden limit read as granted, in the numbers", async () => {
-    const text = await open("personal", "extras", /Hosted allowance/)
+    const text = await open("personal", "extras", /Traffic included/)
     expect(/5\.0 GB of 1\.3 TB used · 250 GB granted/.test(text) || /of 1\.25 TB used · 250 GB granted/.test(text), `allowance row: ${text.slice(0, 400)}`)
     expect(/Machines 2 of 500 · Granted/.test(text), `machines row: ${text.slice(0, 400)}`)
     expect((text.match(/ · Granted/g) ?? []).length === 1, "an unchanged limit reads as granted")

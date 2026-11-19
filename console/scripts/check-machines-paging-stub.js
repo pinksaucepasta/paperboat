@@ -1,7 +1,8 @@
 // Browser check for the Machines table's pages, without a large real account. Run in a signed-in
 // tab on / (Personal), e.g. a headless Chromium. It stubs this tab's fetch of GET /api/v1/machines
 // (130 machines in use by default, 12 more with ?state=revoked, cloned from one real record,
-// honouring limit, cursor, state and q) and GET /api/v1/machines/summary, waits
+// honouring limit, cursor, state and q) and GET /api/v1/machines/summary, both in the documented
+// OpenAPI shapes (the console rejects any other answer), waits
 // for the table's next refresh, and checks: the card's online/offline; pages of 50 with the range
 // "1–50 of 130", Next to page 3 ("101–130 of 130"), Previous; the page in the URL and a ?page=3 deep
 // link; a new search starts at page 1; Status → Revoked lists the 12 revoked. Changes nothing on
@@ -23,7 +24,9 @@
 
   const realFetch = window.__realFetch ?? window.fetch
   window.__realFetch = realFetch
-  const sample = (await (await realFetch("/api/v1/machines?limit=1&workspace=personal")).json()).data.items[0]
+  // Cloned from one real machine; an account without any (a fresh one) gets the smallest answer the OpenAPI document accepts.
+  const empty = { ownership: "own", id: "", environment_id: "", alias: "", platform: "linux", architecture: "amd64", workspace_root: "", state: "online", seat_state: "active", public_identity_key: "", can_manage: true, shared: false, online: true, network_approved: true, permissions: [], installation_generation: 0, runtime_versions: {}, capabilities: { file_receive: { configured: false, observed: false }, preview_launch: { configured: false, observed: false }, terminal_host: { configured: false, observed: false }, session_host: { configured: false, observed: false }, keep_awake: { configured: false, observed: false }, environment_injection: { configured: false, observed: false } }, availability: { schema: null, desired_mode: "", desired_version: 0, observed_version: 0, status: "", update_rollbacks: 0, update_health: "" }, runtime_diagnostics: { worker_generation: 0, worker_service_scope: "", connector_state: "", connector_generation: 0 }, machine_capabilities: { schema: null, desired: { terminal: false, managed_ssh: false, file_receive: false, preview_tunnel: false }, desired_version: 0, applied: { terminal: false, managed_ssh: false, file_receive: false, preview_tunnel: false }, applied_version: 0, status: "" } }
+  const sample = (await (await realFetch("/api/v1/machines?limit=1&workspace=personal")).json()).data.items[0] ?? empty
   const machines = Array.from({ length: 142 }, (_, i) => ({
     ...sample,
     id: `machine_stub_${i}`,
@@ -37,7 +40,7 @@
     if (url.pathname === "/api/v1/machines/summary") {
       const online = live.filter((m) => m.online).length
       const by_state = { online, offline: live.length - online, pending: 0, revoked: machines.length - live.length }
-      return Response.json({ data: { total: live.length, by_state, by_platform: { linux: live.length } } })
+      return Response.json({ data: { total: live.length, by_state, by_platform: { linux: live.length, macos: 0, windows: 0 } } })
     }
     if (url.pathname !== "/api/v1/machines") return realFetch(input, init)
     // The cursor contract (Lane Q, PQ-04 C1): state and q filter on the server, total counts them.
@@ -48,7 +51,8 @@
     const chosen = (state ? machines.filter((m) => m.state === state) : live).filter((m) => !q || m.alias.includes(q))
     const items = chosen.slice(offset, offset + limit)
     const next = offset + limit < chosen.length ? String(offset + limit) : undefined
-    return Response.json({ data: { items, total: chosen.length, ...(next && { next_cursor: next }) } })
+    const pagination = { limit, offset, total: chosen.length, next_offset: next ? Number(next) : null }
+    return Response.json({ data: { items, pagination, total: chosen.length, ...(next && { next_cursor: next }) } })
   }
 
   const rows = () => document.querySelectorAll("#machines-table tbody tr").length
