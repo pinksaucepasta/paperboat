@@ -63,19 +63,36 @@ func TestFirstExecAfterPeerRestartRunsOnceWithTheSameOperation(t *testing.T) {
 
 // A machine that does not come back within the window still reports start-uncertain (the host may have the command),
 // not a generic "Paperboat is unreachable", and the wait ends at the window.
+// Checked on the deadline the opens are handed, not on how long the run took (a loaded runner makes wall time
+// meaningless): the window is the bound only if every open gets one deadline, no earlier than the window from the
+// call and no later than the window from the moment the first open ran.
 func TestUncertainExecStartEndsAtTheWindowStillUncertain(t *testing.T) {
-	ctx := withExecReattach(context.Background(), 0, 300*time.Millisecond)
-	start := time.Now()
-	opens := 0
+	const window = 300 * time.Millisecond
+	ctx := withExecReattach(context.Background(), 0, window)
+	begin := time.Now()
+	var deadlines []time.Time
+	var firstRan time.Time
 	_, err := retryUncertainExecStart(ctx, func(ctx context.Context) (tunnel.ExecConn, error) {
-		if opens++; opens == 1 {
+		deadline, bounded := ctx.Deadline()
+		if !bounded {
+			t.Error("an open without a deadline: the window does not bound it")
+		}
+		if deadlines = append(deadlines, deadline); len(deadlines) == 1 {
+			firstRan = time.Now()
 			return nil, localapi.ErrExecStartUncertain
 		}
 		<-ctx.Done() // a silent machine: the window cancels this open before the daemon's own timeout
 		return nil, ctx.Err()
 	})
-	if !execStartUncertain(err) || time.Since(start) > 2*time.Second {
-		t.Fatalf("err=%v after %v", err, time.Since(start))
+	end := time.Now()
+	if !execStartUncertain(err) || len(deadlines) != 2 {
+		t.Fatalf("err=%v after %d opens", err, len(deadlines))
+	}
+	if deadlines[0] != deadlines[1] || deadlines[0].Before(begin.Add(window)) || deadlines[0].After(firstRan.Add(window)) {
+		t.Fatalf("open deadlines %v, want one deadline in [%v, %v]", deadlines, begin.Add(window), firstRan.Add(window))
+	}
+	if end.Before(deadlines[0]) {
+		t.Fatalf("returned at %v, before the window's deadline %v", end, deadlines[0])
 	}
 }
 
