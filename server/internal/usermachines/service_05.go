@@ -892,6 +892,9 @@ func (s *Service) DeleteMachineTx(ctx context.Context, tx *db.Tx, userID string,
 const machineRemovalLockSeed = 448
 
 func (s *Service) revokeUserMachineControl(ctx context.Context, userID, userMachineID string, deleted bool) error {
+	if err := s.revokeMachineCLISessions(ctx, userID, userMachineID); err != nil {
+		return err
+	}
 	// The lock is taken before the transaction, so the revoke waits for a final-delete batch to commit and then
 	// takes its snapshot, instead of racing it (db.InTxUnderSessionLock).
 	return s.db.InTxUnderSessionLock(ctx, userID, machineRemovalLockSeed, func(ctx context.Context, tx *db.Tx) error {
@@ -976,4 +979,35 @@ func (s *Service) RevokeUserSessions(ctx context.Context, userID, reason string)
 		sessions[i] = dbsqlc.RevokeUserMachineAccessSessionsRow(row)
 	}
 	return s.revokeSessionCredentials(ctx, sessions)
+}
+
+// revokeMachineCLISessions revokes the machine's CLI sessions (its enrollment's) before the serializable revoke, in a
+// short READ COMMITTED transaction under the same account removal lock. Revoking a CLI session bumps the peer identities
+// of every machine it ever reached (advance_peer_network_for_cli_session), rows those machines' configuration requests
+// update all the time: in the serializable revoke the bump lost every retry to them (40001, a restored prod dump,
+// 2026-11-20); at READ COMMITTED it waits for their row locks and applies. The serializable revoke then finds no active
+// CLI session left and writes none of those rows. Invariants:
+//   - the actor may manage the machine and it is not deleted: GetUserMachineForUpdate locks the machine row and checks
+//     both on its committed state (no machine: nothing here, the serializable revoke reports it);
+//   - every active CLI session of the machine ends: the UPDATE re-checks each locked row; one created after this step
+//     is revoked by the serializable revoke's cleanup (the same query);
+//   - ordering with final deletes and other removals of the account: the account removal lock;
+//   - the identity bumps are increments on locked rows, with no read-then-write.
+//
+// If the serializable revoke then fails, the credentials stay revoked: the safe side, and the user's retry completes it.
+func (s *Service) revokeMachineCLISessions(ctx context.Context, userID, userMachineID string) error {
+	return s.db.InReadCommittedTxUnderSessionLock(ctx, userID, machineRemovalLockSeed, func(ctx context.Context, tx *db.Tx) error {
+		machine, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: userMachineID, UserID: userID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.Queries().RevokeCLIClientSessionsForUserMachine(ctx, dbsqlc.RevokeCLIClientSessionsForUserMachineParams{
+			RevocationTime: sql.NullTime{Time: s.now().UTC(), Valid: true}, RevocationCause: sql.NullString{String: "machine_removed", Valid: true},
+			TargetMachineID: sql.NullString{String: machine.ID, Valid: true}, TargetUserID: machine.UserID,
+		})
+		return err
+	})
 }
