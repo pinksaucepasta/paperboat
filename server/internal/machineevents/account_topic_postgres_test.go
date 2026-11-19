@@ -65,7 +65,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 			_ = hub.ListenFor(ctx, 10*time.Second)
 		}
 	}()
-	time.Sleep(300 * time.Millisecond) // let the listener attach
+	waitListening(t, ctx, database)
 	waiter := account + "_m2000"
 	known, err := hub.Wait(ctx, waiter, map[string]int64{TopicInventory: 0}, time.Second)
 	if err != nil {
@@ -80,7 +80,7 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 		}
 		woke <- changed
 	}()
-	time.Sleep(200 * time.Millisecond)
+	waitSubscribed(t, hub, waiter, accountKey(account))
 	renamed := time.Now()
 	exec(`UPDATE paperboat.user_machines SET alias='renamed' WHERE id=$1`, account+"_m1")
 	select {

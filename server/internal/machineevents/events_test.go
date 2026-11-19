@@ -27,7 +27,7 @@ func TestWatchWaitWakesByKeyTimesOutAndDrains(t *testing.T) {
 	if woken, err := w.Wait(ctx, time.Second); !woken || err != nil {
 		t.Fatalf("wait after its key = %v, %v", woken, err)
 	}
-	go func() { time.Sleep(20 * time.Millisecond); h.wake("edge:a") }()
+	go h.wake("edge:a") // the wake is kept whether it lands before or while Wait holds
 	started := time.Now()
 	if woken, err := w.Wait(ctx, 5*time.Second); !woken || err != nil || time.Since(started) > time.Second {
 		t.Fatalf("held wait = %v, %v after %v", woken, err, time.Since(started))

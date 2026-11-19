@@ -279,6 +279,14 @@ func (h *Hub) Watch(key string) *Watch {
 // Close ends the subscription.
 func (w *Watch) Close() { w.stop() }
 
+// Watching reports whether a wait or Watch is registered on key: a caller that must act only once a waiter is
+// really held (a test publishing after its waiters subscribed) polls it instead of sleeping.
+func (h *Hub) Watching(key string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subs[key]) > 0
+}
+
 // Wait holds until the key was notified since Watch (or the last Wait): true. It returns false when maxWait
 // passes or the server drains, and ctx's error if the request is abandoned.
 func (w *Watch) Wait(ctx context.Context, maxWait time.Duration) (bool, error) {

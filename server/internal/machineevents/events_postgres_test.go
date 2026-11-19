@@ -53,7 +53,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 			_ = hub.ListenFor(ctx, 10*time.Second)
 		}
 	}()
-	time.Sleep(300 * time.Millisecond) // let the listener attach
+	waitListening(t, ctx, database)
 
 	publish := func(ids []string, topic string) {
 		t.Helper()
@@ -109,7 +109,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	// A publish wakes a waiting host in well under a second, and only for that machine and topic set.
 	waiting := wait(machine, map[string]int64{}, 20*time.Second)
 	bystander := wait(other, map[string]int64{}, 1500*time.Millisecond)
-	time.Sleep(200 * time.Millisecond)
+	waitSubscribed(t, hub, machine, other, accountKey(account))
 	publish([]string{machine}, TopicPreviews)
 	r := <-waiting
 	if r.err != nil || r.changed[TopicPreviews] != 1 || len(r.changed) != 1 || r.after > 2*time.Second {
@@ -128,7 +128,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 		changed, err := hub.Wait(ctx, other, map[string]int64{TopicInventory: inventoryNow}, 800*time.Millisecond)
 		only <- result{changed: changed, err: err}
 	}()
-	time.Sleep(100 * time.Millisecond)
+	waitSubscribed(t, hub, other, accountKey(account))
 	publish([]string{other}, TopicMachineServices)
 	if r := <-only; r.err != nil || len(r.changed) != 0 {
 		t.Fatalf("a topic the host does not wait on woke it: %+v", r)
@@ -159,7 +159,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	// Writes that already exist in the product publish on their own (triggers): a preview for the
 	// machine and an access session for it.
 	waiting = wait(machine, map[string]int64{TopicPreviews: 2, TopicMachineAccess: 1}, 20*time.Second)
-	time.Sleep(200 * time.Millisecond)
+	waitSubscribed(t, hub, machine, accountKey(account))
 	exec(`INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,lease_deadline) VALUES($1,$2,$3,$3,$4,'session','foreground','http','127.0.0.1:3000',now()+interval '1 hour')`, "preview_"+stamp, "https://p-"+stamp+".preview.example.test", account, machine)
 	if r := <-waiting; r.err != nil || r.changed[TopicPreviews] != 3 {
 		t.Fatalf("a new preview did not wake its machine: %+v", r)
@@ -179,7 +179,7 @@ func TestHostIsToldAboutAChangeWithoutPollingOnPostgres(t *testing.T) {
 	}
 	// F21-09: on shutdown a held wait answers "no change" at once, and so does every later wait.
 	held := wait(machine, map[string]int64{TopicPreviews: 4, TopicMachineAccess: 1}, 20*time.Second)
-	time.Sleep(200 * time.Millisecond)
+	waitSubscribed(t, hub, machine, accountKey(account))
 	hub.Drain()
 	if r := <-held; r.err != nil || len(r.changed) != 0 || r.after > 2*time.Second {
 		t.Fatalf("held wait on drain = %+v", r)
