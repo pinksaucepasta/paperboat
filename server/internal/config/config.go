@@ -274,7 +274,8 @@ type FairUse struct {
 	// is on).
 	RelayMbit float64 `json:"relay_mbit"`
 	// TerminalMbit is the anti-abuse cap on all browser-terminal traffic of one workspace together (one shared bucket, however many
-	// sessions are open). Browser terminals never count toward the pool and are never slowed by it; the edges each get a share.
+	// sessions are open); the edges each get a share. Typing and terminal output never count toward the pool and are never slowed by it;
+	// the file uploads the browser marks do (they meet the pool's bucket like any edge traffic).
 	TerminalMbit float64 `json:"terminal_mbit"`
 }
 

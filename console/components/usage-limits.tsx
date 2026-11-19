@@ -218,7 +218,7 @@ function Stat({
 }
 
 /**
- * Traffic through Paperboat's edges and relays (previews, tunnels, relayed connections; browser terminals are not counted): ONE included amount and what is
+ * Traffic through Paperboat's edges and relays (previews, tunnels, relayed connections; files uploaded through a browser terminal; its typing and output are not counted): ONE included amount and what is
  * used of it, and past it the reduced speed with the date full speed returns. Direct and self-hosted traffic are not counted here.
  */
 function Allowance({ billing }: { billing: BillingWorkspace }) {

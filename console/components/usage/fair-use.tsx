@@ -66,7 +66,7 @@ export function FairUse() {
             {formatBytes(fair.amount)} a month of traffic included
             {fair.seats ? ` (${formatBytes(fair.seats.perSeat)} × ${fair.seats.count} seat${fair.seats.count === 1 ? "" : "s"}, shared by the team)` : ""}
             {until && !fair.throttled ? `, resets ${until}` : ""}. Edges and relays share it: previews, tunnels and relayed connections count.
-            Console terminals are not counted and are never slowed by it. After that, speed is
+            Files you upload through a console terminal count too; typing and terminal output do not, and are never slowed by it. After that, speed is
             reduced to {formatSpeed(fair.mbit)} until your next billing date. Never cut off, never billed extra.
           </p>
           <p className="text-xs text-muted-foreground">

@@ -28,7 +28,7 @@ export const formatAllowance = (billing: BillingWorkspace) =>
 export const formatSpeed = (mbit: number) => (mbit < 1 ? `${Math.round(mbit * 1000)} kbit/s` : `${mbit} Mbit/s`)
 
 /**
- * Traffic through Paperboat's edges and relays (previews, tunnels, relayed connections; browser terminals are not counted) is ONE pool, included up
+ * Traffic through Paperboat's edges and relays (previews, tunnels, relayed connections; files uploaded through a browser terminal; its typing and output are not counted) is ONE pool, included up
  * to an amount a month; past it speed (edges and relays alike) is reduced to `mbit` Mbit/s until the period ends, never cut off or billed extra. The amount is the plan's plus
  * what support granted and what was topped up. `ownEdges`: the workspace runs its own edges, so nothing is counted or limited.
  * Undefined when the workspace has no included amount.
