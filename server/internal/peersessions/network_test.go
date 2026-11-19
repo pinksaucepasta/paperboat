@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,40 +37,10 @@ func TestPersonalNetworkScopeHasReciprocalPairAndNoApplicationCapability(t *test
 	}
 }
 
-func TestKeyedLocksSerializeOneKeyAndForgetIt(t *testing.T) {
-	var locks keyedLocks
-	var inside, maximum int32
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			unlock, err := locks.lock(t.Context(), "endpoint")
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			if n := atomic.AddInt32(&inside, 1); n > atomic.LoadInt32(&maximum) {
-				atomic.StoreInt32(&maximum, n)
-			}
-			time.Sleep(2 * time.Millisecond)
-			atomic.AddInt32(&inside, -1)
-			unlock()
-		}()
-	}
-	wg.Wait()
-	if maximum != 1 {
-		t.Fatalf("%d builds of one endpoint ran at once", maximum)
-	}
-	if len(locks.locks) != 0 {
-		t.Fatal("lock entries outlived their holders")
-	}
-}
-
 // A stalled build must not hold canceled refresh requests in its wait queue.
 func TestConfigurationBuildLockHonorsCancellation(t *testing.T) {
 	s := &NetworkService{}
-	unlock, err := s.endpointBuilds.lock(t.Context(), "endpoint")
+	unlock, err := s.endpointBuilds.Lock(t.Context(), "endpoint")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +56,6 @@ func TestConfigurationBuildLockHonorsCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("canceled request still waits for the active build")
-	}
-	s.endpointBuilds.mu.Lock()
-	defer s.endpointBuilds.mu.Unlock()
-	if s.endpointBuilds.locks["endpoint"].refs != 1 {
-		t.Fatal("canceled waiter retained a lock reference")
 	}
 }
 
