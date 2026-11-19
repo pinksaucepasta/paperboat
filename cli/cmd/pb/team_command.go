@@ -16,7 +16,6 @@ import (
 	"unicode"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
-	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -108,8 +107,6 @@ func teamReadCommand(action string) *cobra.Command {
 	c.Flags().Bool("json", false, "print canonical JSON")
 	return c
 }
-
-var teamCreatePollInterval = time.Duration(config.DefaultPollIntervalSeconds) * time.Second
 
 // startPaidTeamCreate reserves the Team and returns the Checkout that pays for
 // its seats. The operation ID is derived from the request, so repeating the same
@@ -214,7 +211,7 @@ func teamCreateFailure(err error) error {
 func waitForPaidTeam(c *cobra.Command, client *api.Client, team string, timeout time.Duration, jsonOutput bool) error {
 	ctx, cancel := context.WithTimeout(c.Context(), timeout)
 	defer cancel()
-	ticker := time.NewTicker(teamCreatePollInterval)
+	ticker := time.NewTicker(timingsOf(ctx).teamCreatePoll)
 	defer ticker.Stop()
 	if !jsonOutput {
 		fmt.Fprintln(c.ErrOrStderr(), "Waiting for payment... (Ctrl+C stops waiting; the team is still created once you pay)")

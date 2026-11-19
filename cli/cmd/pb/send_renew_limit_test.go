@@ -13,11 +13,9 @@ import (
 // A renewal refused for the account's operation cap waits and asks again instead of ending the send (X-37: a 4.7 GB
 // send ended with sdk_limit_reached after 20 minutes).
 func TestRenewalWaitsOutTheOperationsCap(t *testing.T) {
-	restore := renewLimitFloor
-	renewLimitFloor = time.Millisecond
-	t.Cleanup(func() { renewLimitFloor = restore })
+	ctx := withTimings(t.Context(), func(timings *commandTimings) { timings.renewLimitFloor = time.Millisecond })
 	calls := 0
-	got, err := retryRenewalOnLimit(t.Context(), func() (string, error) {
+	got, err := retryRenewalOnLimit(ctx, func() (string, error) {
 		calls++
 		if calls < 4 {
 			return "", &api.APIError{Status: http.StatusTooManyRequests, Code: "sdk_limit_reached"}

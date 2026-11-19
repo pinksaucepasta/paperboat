@@ -46,13 +46,13 @@ func TestARemovedDestinationStopsTheSendAndSaysSo(t *testing.T) {
 // F21-166: a destination at its 2-transfer limit makes a send wait its turn (and say so), not fail; a destination that stays busy
 // past the wait still ends in the busy refusal, a cancelled send stops, and any other error is returned at once.
 func TestASendQueuesWhileTheDestinationIsAtItsTransferLimit(t *testing.T) {
-	was, poll := sendQueueWait, sendQueuePoll
-	t.Cleanup(func() { sendQueueWait, sendQueuePoll = was, poll })
-	sendQueuePoll, sendQueueWait = time.Millisecond, time.Minute
+	ctx := withTimings(context.Background(), func(timings *commandTimings) {
+		timings.sendQueuePoll, timings.sendQueueWait = time.Millisecond, time.Minute
+	})
 	busy := &filetransfer.Error{Code: "resource_limit", StatusCode: 429}
 	var said []string
 	attempts := 0
-	err := queueWhileBusy(context.Background(), "m", func(s string) { said = append(said, s) }, func() error {
+	err := queueWhileBusy(ctx, "m", func(s string) { said = append(said, s) }, func() error {
 		if attempts++; attempts < 4 {
 			return fmt.Errorf("send batch: %w", busy)
 		}
@@ -62,15 +62,14 @@ func TestASendQueuesWhileTheDestinationIsAtItsTransferLimit(t *testing.T) {
 		t.Fatalf("err=%v attempts=%d said=%q", err, attempts, said)
 	}
 	other := errors.New("other")
-	if calls := 0; queueWhileBusy(context.Background(), "m", func(string) {}, func() error { calls++; return other }) != other || calls != 1 {
+	if calls := 0; queueWhileBusy(ctx, "m", func(string) {}, func() error { calls++; return other }) != other || calls != 1 {
 		t.Fatal("an unrelated error was retried or changed")
 	}
-	sendQueueWait = 20 * time.Millisecond
-	if err := queueWhileBusy(context.Background(), "m", func(string) {}, func() error { return busy }); !isDestinationBusy(err) {
+	brief := withTimings(ctx, func(timings *commandTimings) { timings.sendQueueWait = 20 * time.Millisecond })
+	if err := queueWhileBusy(brief, "m", func(string) {}, func() error { return busy }); !isDestinationBusy(err) {
 		t.Fatalf("a destination busy past the wait: %v", err)
 	}
-	sendQueueWait = time.Minute
-	cancelled, cancel := context.WithCancel(context.Background())
+	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	if err := queueWhileBusy(cancelled, "m", func(string) {}, func() error { return busy }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a cancelled send: %v", err)

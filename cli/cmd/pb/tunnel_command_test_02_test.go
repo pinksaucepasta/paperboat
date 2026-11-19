@@ -526,9 +526,6 @@ func TestTunnelCreateInterruptedRetryWithDifferentInputFailsBeforeNetwork(t *tes
 }
 
 func TestTunnelMutationWaitUsesBoundedOperationReadsAndSameMutationKey(t *testing.T) {
-	oldInterval := tunnelOperationPollInterval
-	tunnelOperationPollInterval = time.Millisecond
-	t.Cleanup(func() { tunnelOperationPollInterval = oldInterval })
 	operationReads := 0
 	mutationCalls := 0
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -555,6 +552,7 @@ func TestTunnelMutationWaitUsesBoundedOperationReadsAndSameMutationKey(t *testin
 		}
 	})
 	command := tunnelCobraCommandV1()
+	command.SetContext(withTimings(t.Context(), func(timings *commandTimings) { timings.tunnelOperationPoll = time.Millisecond }))
 	command.SetArgs([]string{"pause", "tun_1", "--wait", "--timeout", "1s"})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)

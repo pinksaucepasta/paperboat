@@ -152,14 +152,11 @@ func TestUpdateCommandContract(t *testing.T) {
 }
 
 func TestUpdateWithProgressReportsHumanProgressOnStderr(t *testing.T) {
-	oldInterval := updateProgressInterval
-	updateProgressInterval = time.Millisecond
-	defer func() { updateProgressInterval = oldInterval }()
 	command, _, err := newRootCommand().Find([]string{"update"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	command.SetContext(context.Background())
+	command.SetContext(withTimings(context.Background(), func(timings *commandTimings) { timings.updateProgress = time.Millisecond }))
 	stderr := &progressBuffer{}
 	command.SetErr(stderr)
 	started := make(chan struct{})
@@ -207,9 +204,6 @@ func (b *progressBuffer) String() string {
 }
 
 func TestUpdateWithProgressDoesNotWriteJSONStdout(t *testing.T) {
-	oldInterval := updateProgressInterval
-	updateProgressInterval = time.Millisecond
-	defer func() { updateProgressInterval = oldInterval }()
 	command, _, err := newRootCommand().Find([]string{"update"})
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +211,7 @@ func TestUpdateWithProgressDoesNotWriteJSONStdout(t *testing.T) {
 	if err := command.Flags().Set("json", "true"); err != nil {
 		t.Fatal(err)
 	}
-	command.SetContext(context.Background())
+	command.SetContext(withTimings(context.Background(), func(timings *commandTimings) { timings.updateProgress = time.Millisecond }))
 	var stdout, stderr bytes.Buffer
 	command.SetOut(&stdout)
 	command.SetErr(&stderr)
@@ -256,10 +250,8 @@ func TestUpdateWithProgressReturnsAtTheDeadlineWhenTheCallIgnoresIt(t *testing.T
 		t.Fatal(err)
 	}
 	command.SetErr(io.Discard)
-	original := updateCancelGrace
-	updateCancelGrace = 50 * time.Millisecond
-	t.Cleanup(func() { updateCancelGrace = original })
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	graceCtx := withTimings(context.Background(), func(timings *commandTimings) { timings.updateCancelGrace = 50 * time.Millisecond })
+	ctx, cancel := context.WithTimeout(graceCtx, 50*time.Millisecond)
 	defer cancel()
 	release := make(chan struct{})
 	defer close(release)

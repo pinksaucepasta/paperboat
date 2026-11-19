@@ -434,11 +434,11 @@ func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) 
 // Checkout URL; the team exists only after payment.
 func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 	supportedTeamFixtureVersion(t)
-	previousInterval, previousOpen := teamCreatePollInterval, openBrowser
-	teamCreatePollInterval = time.Millisecond
+	previousOpen := openBrowser
+	ctx := withTimings(t.Context(), func(timings *commandTimings) { timings.teamCreatePoll = time.Millisecond })
 	var opened string
 	openBrowser = func(target string) error { opened = target; return nil }
-	t.Cleanup(func() { teamCreatePollInterval, openBrowser = previousInterval, previousOpen })
+	t.Cleanup(func() { openBrowser = previousOpen })
 	var operations []string
 	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -483,7 +483,7 @@ func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 	writeTestProfile(t, dir, configPath, server.URL)
 	args := []string{"team", "create", "acme", "--seats", "3", "--interval", "year", "--accept-terms", "--server", server.URL, "--config", configPath}
 	var output bytes.Buffer
-	if code := run(t.Context(), args, &output, &output); code != 0 {
+	if code := run(ctx, args, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%s", code, output.String())
 	}
 	if opened != "https://checkout.example.test/c/pay_1" || !strings.Contains(output.String(), "https://checkout.example.test/c/pay_1") || !strings.Contains(output.String(), "TEAM\tacme") || polls != 3 {
@@ -492,7 +492,7 @@ func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 	// The same command again reuses the same order.
 	output.Reset()
 	polls = 2
-	if code := run(t.Context(), args, &output, &output); code != 0 || len(operations) != 2 || operations[0] != operations[1] {
+	if code := run(ctx, args, &output, &output); code != 0 || len(operations) != 2 || operations[0] != operations[1] {
 		t.Fatalf("repeat exit=%d operations=%v", code, operations)
 	}
 }

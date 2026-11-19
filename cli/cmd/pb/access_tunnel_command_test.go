@@ -303,18 +303,14 @@ func TestAccessTunnelHumanOutputIsCanonicalSafeEndpoint(t *testing.T) {
 	}
 }
 
-func shortAccessTunnelHeartbeat(t *testing.T) {
-	t.Helper()
-	old := accessTunnelHeartbeatInterval
-	accessTunnelHeartbeatInterval = 5 * time.Millisecond
-	t.Cleanup(func() { accessTunnelHeartbeatInterval = old })
+func shortAccessTunnelHeartbeat(parent context.Context) context.Context {
+	return withTimings(parent, func(timings *commandTimings) { timings.accessTunnelHeartbeat = 5 * time.Millisecond })
 }
 
 func TestAccessTunnelCommandBeatsWhileAliveThenReleases(t *testing.T) {
-	shortAccessTunnelHeartbeat(t)
 	runtime := &fakeAccessTunnelRuntime{}
 	withAccessTunnelRuntime(t, runtime)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(shortAccessTunnelHeartbeat(context.Background()), 200*time.Millisecond)
 	defer cancel()
 	command := accessTunnelCobraCommandV1()
 	command.SetContext(ctx)
@@ -331,10 +327,9 @@ func TestAccessTunnelCommandBeatsWhileAliveThenReleases(t *testing.T) {
 }
 
 func TestAccessTunnelCommandEndsWhenHostdForgotTheSession(t *testing.T) {
-	shortAccessTunnelHeartbeat(t)
 	runtime := &fakeAccessTunnelRuntime{heartbeatErr: ErrAccessTunnelGone}
 	withAccessTunnelRuntime(t, runtime)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(shortAccessTunnelHeartbeat(context.Background()), 5*time.Second)
 	defer cancel()
 	command := accessTunnelCobraCommandV1()
 	command.SetContext(ctx)

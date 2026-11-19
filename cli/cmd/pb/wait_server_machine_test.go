@@ -32,10 +32,11 @@ func TestWaitResolvesATeamMachineOnTheServerAndUnknownNamesStayNotFound(t *testi
 	}
 }
 
+func fastServerPoll() context.Context {
+	return withTimings(context.Background(), func(timings *commandTimings) { timings.waitServerPoll = time.Millisecond })
+}
+
 func TestWaitOnATeamMachineReturnsWhenTheServerSeesItReady(t *testing.T) {
-	previous := waitServerPollEvery
-	waitServerPollEvery = time.Millisecond
-	t.Cleanup(func() { waitServerPollEvery = previous })
 	offline := api.UserMachine{ID: "machine_pb", Alias: "laneo-pb", Ownership: "team"}
 	polls := 0
 	refresh := func() (api.UserMachine, error) {
@@ -47,7 +48,7 @@ func TestWaitOnATeamMachineReturnsWhenTheServerSeesItReady(t *testing.T) {
 		ready.Online, ready.InstallationGeneration = true, 4
 		return ready, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(fastServerPoll(), 5*time.Second)
 	defer cancel()
 	result, err := waitForServerMachineWith(ctx, "laneo-f13-team", waitTestSnapshot(), offline, "runtime", nil, refresh)
 	if err != nil || result.Outcome != "ready" || result.Machine.Generation != 4 || result.Validate() != nil || polls != 3 {
@@ -71,17 +72,14 @@ func TestWaitOnATeamMachineTransportUsesThePeerProbeInItsWorkspace(t *testing.T)
 }
 
 func TestWaitOnATeamMachineEndsOnRemovalAndOnTheDeadline(t *testing.T) {
-	previous := waitServerPollEvery
-	waitServerPollEvery = time.Millisecond
-	t.Cleanup(func() { waitServerPollEvery = previous })
 	offline := api.UserMachine{ID: "machine_pb", Alias: "laneo-pb"}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(fastServerPoll(), 5*time.Second)
 	defer cancel()
 	removed, err := waitForServerMachineWith(ctx, "", waitTestSnapshot(), offline, "runtime", nil, func() (api.UserMachine, error) { return api.UserMachine{}, resolver.ErrMachineNotFound })
 	if err != nil || removed.Outcome != "failed" || removed.Code != "machine_removed" || removed.Validate() != nil {
 		t.Fatalf("removed: %+v err=%v", removed, err)
 	}
-	short, cancelShort := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	short, cancelShort := context.WithTimeout(fastServerPoll(), 20*time.Millisecond)
 	defer cancelShort()
 	timedOut, err := waitForServerMachineWith(short, "", waitTestSnapshot(), offline, "runtime", nil, func() (api.UserMachine, error) { return offline, nil })
 	if err != nil || timedOut.Outcome != "timeout" || timedOut.Validate() != nil || waitExitCode(timedOut) != 203 {

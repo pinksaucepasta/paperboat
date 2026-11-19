@@ -94,7 +94,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	}
 	if !machine.Online {
 		// A host that just restarted its runtime (pb update) is reported offline for a moment: wait like send and ssh
-		// do, bounded by machineBlipGrace, before saying so.
+		// do, bounded by the machine-blip grace, before saying so.
 		machine, err = waitForMachineOnline(c.Context, func() (api.UserMachine, error) { return resolveUserMachine(c.Context, client, requested) })
 		if err != nil {
 			if machineOfflineError(err) {
@@ -257,7 +257,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	lastEventSequence := uint64(0)
 	// The command keeps running in its session owner through pb update; the
 	// stream may be gone while the runtime restarts, so reattach for up to
-	// execReattachWindow instead of 300 ms (a test VM feat runs: update restarts take seconds).
+	// the reattach window instead of 300 ms (a test VM feat runs: update restarts take seconds).
 	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Backoff: execRecoveryBackoff, Retryable: retryableExecReattachment})
 	var code int
 	var inputCloseFailure error
@@ -389,19 +389,11 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 
 const execReattachAttempts = 40
 
-// execReattachAttemptTimeout bounds one reattach attempt; the daemon's own peer open takes up to 10 s.
-var execReattachAttemptTimeout = 15 * time.Second
-
-// execReattachWindow bounds one recovery: it outlasts a machine restarting for an update (a Windows worker was
-// unavailable 41 and 48 s through pb install on a Windows test VM; 40 s dropped the exec 2 s before it was back). Attempts alone
-// do not bound time: 40 attempts that each hang to 15 s take 10 min.
-var execReattachWindow = 90 * time.Second
-
-// recoverExecConnection runs one recovery under execReattachWindow; the attempt budget stays recovery's own.
+// recoverExecConnection runs one recovery under the context's exec reattach window (commandTimings); the attempt budget stays recovery's own.
 func recoverExecConnection(
 	ctx context.Context, recovery *reattach.Recovery, attempt func(context.Context) (tunnel.ExecConn, error),
 ) (tunnel.ExecConn, error) {
-	bounded, cancel := context.WithTimeout(ctx, execReattachWindow)
+	bounded, cancel := context.WithTimeout(ctx, timingsOf(ctx).execReattachWindow)
 	defer cancel()
 	var replacement tunnel.ExecConn
 	err := recovery.Run(bounded, func(ctx context.Context) error {
@@ -410,7 +402,7 @@ func recoverExecConnection(
 		return attemptErr
 	})
 	if err != nil && ctx.Err() == nil && bounded.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
-		err = fmt.Errorf("the machine did not answer within %v: %w", execReattachWindow, reattach.ErrExhausted)
+		err = fmt.Errorf("the machine did not answer within %v: %w", timingsOf(ctx).execReattachWindow, reattach.ErrExhausted)
 	}
 	return replacement, err
 }
@@ -439,13 +431,13 @@ func reattachExecConnection(
 ) (tunnel.ExecConn, error) {
 	request.InputOffset = ref.BeginReattach()
 	// A daemon that accepts the socket and never answers must not hang one attempt until Ctrl-C.
-	attempt, cancel := context.WithTimeout(ctx, execReattachAttemptTimeout)
+	attempt, cancel := context.WithTimeout(ctx, timingsOf(ctx).execReattachAttempt)
 	defer cancel()
 	replacement, err := reattachExecDial(attempt, descriptor, dial)
 	if err != nil {
 		// Only the attempt's own expiry becomes retryable: a permanent answer racing the timer stays permanent.
 		if ctx.Err() == nil && attempt.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
-			err = fmt.Errorf("the reattach attempt got no answer in %v: %w", execReattachAttemptTimeout, tunnel.ErrPeerStreamOpen)
+			err = fmt.Errorf("the reattach attempt got no answer in %v: %w", timingsOf(ctx).execReattachAttempt, tunnel.ErrPeerStreamOpen)
 		}
 		return nil, err
 	}
@@ -466,7 +458,7 @@ func reattachExecConnection(
 
 // execRecoveryBackoff tries at once, then polls every 150 ms for the first 20 attempts, the length of a network handover
 // (the pause of a call that reattaches is the sleep after the machine is back, so it stays short), then backs off by
-// 100 ms per attempt up to 2 s; 40 attempts sleep about 24 s in all (execReattachWindow bounds the whole recovery). A successor that is already up costs no sleep, like
+// 100 ms per attempt up to 2 s; 40 attempts sleep about 24 s in all (the reattach window bounds the whole recovery). A successor that is already up costs no sleep, like
 // EternalTerminal, which dials on loss and sleeps only after a failed attempt (ClientConnection.cpp:210).
 func execRecoveryBackoff(attempt int) time.Duration {
 	if attempt == 1 {

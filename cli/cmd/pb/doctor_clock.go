@@ -16,10 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// doctorClockTimeout bounds each of the (at most two) unauthenticated server requests that read the
-// server's clock; both and the pause between them stay inside the probe's 10 s deadline.
-var doctorClockTimeout = 4 * time.Second
-
 const doctorClockRetryPause = 250 * time.Millisecond
 
 // probeDoctorClock compares this machine's clock with the Paperboat server's. Paperboat corrects for
@@ -89,13 +85,13 @@ func measureServerClock(ctx context.Context, serverURL string) (time.Duration, e
 }
 
 func requestServerClock(ctx context.Context, normalized string) (time.Duration, error) {
-	ctx, cancel := context.WithTimeout(ctx, doctorClockTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timingsOf(ctx).doctorClock)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, normalized+"/v1/server-version", nil)
 	if err != nil {
 		return 0, err
 	}
-	client := &http.Client{Transport: errorreport.Transport(nil, normalized), Timeout: doctorClockTimeout}
+	client := &http.Client{Transport: errorreport.Transport(nil, normalized), Timeout: timingsOf(ctx).doctorClock}
 	sent := time.Now()
 	response, err := client.Do(request)
 	if err != nil {

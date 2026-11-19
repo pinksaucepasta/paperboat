@@ -43,12 +43,8 @@ const (
 	tunnelRequestRetryMaximumDelay = 2 * time.Second
 )
 
-var tunnelOperationPollInterval = 500 * time.Millisecond
-
-// tunnelRequestRetryDelay is a seam for deterministic command tests. Retries
-// are deliberately short and bounded because commands must remain responsive
-// while still recovering ordinary transient control-plane failures.
-var tunnelRequestRetryDelay = func(attempt int) time.Duration {
+// tunnelRequestJitteredDelay is the production pause before a control-plane request retry (commandTimings).
+func tunnelRequestJitteredDelay(attempt int) time.Duration {
 	delay := tunnelRequestRetryBaseDelay
 	for i := 0; i < attempt; i++ {
 		if delay >= tunnelRequestRetryMaximumDelay/2 {
@@ -97,7 +93,7 @@ func retryTunnelRequest(ctx context.Context, request func() error) error {
 		if err == nil || !tunnelRequestRetryable(err) || attempt == tunnelRequestRetryAttempts-1 {
 			return err
 		}
-		timer := time.NewTimer(tunnelRequestRetryDelay(attempt))
+		timer := time.NewTimer(timingsOf(ctx).tunnelRequestRetryDelay(attempt))
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -405,7 +401,7 @@ func waitForTunnelOperation(command *cobra.Command, client *api.Client, initial 
 }
 
 // pollTunnelUntil is the one --wait loop for tunnel operations and domains: it reads every
-// tunnelOperationPollInterval until done reports true, keeps polling through retryable reads (408/429/5xx, network
+// the operation poll interval until done reports true, keeps polling through retryable reads (408/429/5xx, network
 // timeouts), and reports --timeout as TunnelOperationWaitTimeoutError, since the server-side change stays active.
 func pollTunnelUntil[T any](command *cobra.Command, id string, current T, done func(T) (bool, error), read func(context.Context) (T, error)) (T, error) {
 	var zero T
@@ -423,7 +419,7 @@ func pollTunnelUntil[T any](command *cobra.Command, id string, current T, done f
 		if finished {
 			return current, nil
 		}
-		timer := time.NewTimer(tunnelOperationPollInterval)
+		timer := time.NewTimer(timingsOf(command.Context()).tunnelOperationPoll)
 		select {
 		case <-command.Context().Done():
 			timer.Stop()

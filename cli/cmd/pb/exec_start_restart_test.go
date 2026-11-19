@@ -64,12 +64,10 @@ func TestFirstExecAfterPeerRestartRunsOnceWithTheSameOperation(t *testing.T) {
 // A machine that does not come back within the window still reports start-uncertain (the host may have the command),
 // not a generic "Paperboat is unreachable", and the wait ends at the window.
 func TestUncertainExecStartEndsAtTheWindowStillUncertain(t *testing.T) {
-	old := execReattachWindow
-	execReattachWindow = 300 * time.Millisecond
-	defer func() { execReattachWindow = old }()
+	ctx := withExecReattach(context.Background(), 0, 300*time.Millisecond)
 	start := time.Now()
 	opens := 0
-	_, err := retryUncertainExecStart(context.Background(), func(ctx context.Context) (tunnel.ExecConn, error) {
+	_, err := retryUncertainExecStart(ctx, func(ctx context.Context) (tunnel.ExecConn, error) {
 		if opens++; opens == 1 {
 			return nil, localapi.ErrExecStartUncertain
 		}

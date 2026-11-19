@@ -131,9 +131,7 @@ func TestLogoutDeadlineReturnsAfterRequestStopsAndDoesNotClaimReceipt(t *testing
 	action := command.NewContext(set, strings.NewReader(""))
 	// Exercise the revocation deadline, which starts after local credential
 	// removal, rather than expiring before a request can start.
-	defer func(previous time.Duration) { logoutRevocationDeadline = previous }(logoutRevocationDeadline)
-	logoutRevocationDeadline = time.Second
-	action.Context = t.Context()
+	action.Context = withTimings(t.Context(), func(timings *commandTimings) { timings.logoutRevocation = time.Second })
 	var out bytes.Buffer
 	action.Writer = &out
 	action.ErrWriter = io.Discard

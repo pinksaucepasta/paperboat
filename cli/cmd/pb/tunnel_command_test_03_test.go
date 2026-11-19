@@ -125,10 +125,12 @@ func TestTunnelRouteSelectorsResolveNamesToCanonicalIDs(t *testing.T) {
 	})
 }
 
+// withoutTunnelRetryDelay makes control-plane request retries immediate in this command's context only.
+func withoutTunnelRetryDelay(ctx context.Context) context.Context {
+	return withTimings(ctx, func(timings *commandTimings) { timings.tunnelRequestRetryDelay = func(int) time.Duration { return 0 } })
+}
+
 func TestTunnelRouteMutationRetriesTransientFailureWithSameIdempotencyKey(t *testing.T) {
-	oldDelay := tunnelRequestRetryDelay
-	tunnelRequestRetryDelay = func(int) time.Duration { return 0 }
-	t.Cleanup(func() { tunnelRequestRetryDelay = oldDelay })
 	var calls int
 	var keys []string
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +152,7 @@ func TestTunnelRouteMutationRetriesTransientFailureWithSameIdempotencyKey(t *tes
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: route, Operation: validCommandOperation("route", route.ID), Changed: true}})
 	})
 	command := tunnelCobraCommandV1()
+	command.SetContext(withoutTunnelRetryDelay(t.Context()))
 	command.SetArgs([]string{"route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080"})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
@@ -329,9 +332,6 @@ func TestTunnelRouteAddPublicHTTPWithoutManagedHostnameExplainsTheDomainStep(t *
 // The domain wait once had its own loop: a 503 burst longer than one read's retries aborted `pb tunnel create
 // --domain --wait`, and --timeout surfaced as a bare context deadline. It now shares the operation wait loop.
 func TestTunnelCreateDomainWaitSurvivesUnavailableAndTimesOutTyped(t *testing.T) {
-	oldDelay := tunnelRequestRetryDelay
-	tunnelRequestRetryDelay = func(int) time.Duration { return 0 }
-	t.Cleanup(func() { tunnelRequestRetryDelay = oldDelay })
 	for _, neverReady := range []bool{false, true} {
 		t.Run(fmt.Sprintf("never_ready=%v", neverReady), func(t *testing.T) {
 			initial := validCommandDomain("domain_wait", "app.example.test")
@@ -354,7 +354,7 @@ func TestTunnelCreateDomainWaitSurvivesUnavailableAndTimesOutTyped(t *testing.T)
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": next})
 			})
 			command := tunnelCreateCommand()
-			command.SetContext(context.Background())
+			command.SetContext(withoutTunnelRetryDelay(context.Background()))
 			_ = command.Flags().Set("wait", "true")
 			// Ready after 6 refusals must not race the deadline on a slow runner (a macOS run took 15 s); a domain
 			// that never becomes ready ends at the 1 s minimum whatever the load: only "no ready by then" matters.

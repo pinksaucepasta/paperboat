@@ -142,9 +142,9 @@ func TestAHelperRunningDespiteALaunchErrorIsAPendingUninstallNotAFailure(t *test
 }
 
 func TestHandoffWaitReadsThroughATransientStatusReadError(t *testing.T) {
-	originalRead, originalTimeout := readUninstallStatus, windowsHandoffTimeout
-	t.Cleanup(func() { readUninstallStatus, windowsHandoffTimeout = originalRead, originalTimeout })
-	windowsHandoffTimeout = 5 * time.Second
+	originalRead := readUninstallStatus
+	t.Cleanup(func() { readUninstallStatus = originalRead })
+	ctx := withTimings(context.Background(), func(timings *commandTimings) { timings.windowsHandoff = 5 * time.Second })
 	statusPath := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\status.json`
 	reads := 0
 	readUninstallStatus = func(string) (windowsUninstallStatus, error) {
@@ -154,19 +154,19 @@ func TestHandoffWaitReadsThroughATransientStatusReadError(t *testing.T) {
 		}
 		return windowsUninstallStatus{State: "completed"}, nil
 	}
-	if err := waitForWindowsUninstallHandoff(context.Background(), statusPath); err != nil || reads != 3 {
+	if err := waitForWindowsUninstallHandoff(ctx, statusPath); err != nil || reads != 3 {
 		t.Fatalf("a transient sharing violation failed the handoff: err=%v reads=%d", err, reads)
 	}
 }
 
 func TestHandoffWaitFailsWithTheReadErrorWhenTheStatusStaysUnreadable(t *testing.T) {
-	originalRead, originalTimeout := readUninstallStatus, windowsHandoffTimeout
-	t.Cleanup(func() { readUninstallStatus, windowsHandoffTimeout = originalRead, originalTimeout })
-	windowsHandoffTimeout = 300 * time.Millisecond
+	originalRead := readUninstallStatus
+	t.Cleanup(func() { readUninstallStatus = originalRead })
+	ctx := withTimings(context.Background(), func(timings *commandTimings) { timings.windowsHandoff = 300 * time.Millisecond })
 	statusPath := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\status.json`
 	broken := errors.New("invalid protected Windows uninstall status")
 	readUninstallStatus = func(string) (windowsUninstallStatus, error) { return windowsUninstallStatus{}, broken }
-	err := waitForWindowsUninstallHandoff(context.Background(), statusPath)
+	err := waitForWindowsUninstallHandoff(ctx, statusPath)
 	if err == nil || !errors.Is(err, broken) {
 		t.Fatalf("a status that never validates must fail with its own error, got %v", err)
 	}

@@ -44,7 +44,6 @@ var (
 	windowsProcessIsRunning    = isWindowsProcessRunning
 	windowsHelperIsRunning     = windowsExecutableIsRunning
 	readUninstallStatus        = readWindowsUninstallStatus
-	windowsHandoffTimeout      = 30 * time.Second
 	windowsUninstallRoot       = func() string { return filepath.Join(os.TempDir(), "Paperboat Uninstall") }
 	recoverWindowsUninstall    = recoverExpiredWindowsUninstallHelpers
 )
@@ -727,7 +726,7 @@ func readWindowsUninstallPlan(planPath string) (windowsUninstallPlan, error) {
 func waitForWindowsUninstallHandoff(ctx context.Context, statusPath string) error {
 	// This is a startup acknowledgement, not the five-minute teardown itself.
 	// A caller without a deadline must still regain control if startup stalls.
-	ctx, cancel := context.WithTimeout(ctx, windowsHandoffTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timingsOf(ctx).windowsHandoff)
 	defer cancel()
 	var readErr error
 	for {

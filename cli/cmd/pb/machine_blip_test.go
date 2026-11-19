@@ -14,13 +14,11 @@ import (
 )
 
 func TestRetryWhileMachineOfflineWaitsOutABlipAndNothingElse(t *testing.T) {
-	grace, interval := machineBlipGrace, machineBlipInterval
-	machineBlipGrace, machineBlipInterval = 2*time.Second, 5*time.Millisecond
-	t.Cleanup(func() { machineBlipGrace, machineBlipInterval = grace, interval })
+	ctx := withMachineBlip(context.Background(), 2*time.Second, 5*time.Millisecond)
 	offline := &api.APIError{Code: "machine_offline"}
 
 	calls := 0
-	value, err := retryWhileMachineOffline(context.Background(), func() (int, error) {
+	value, err := retryWhileMachineOffline(ctx, func() (int, error) {
 		calls++
 		if calls < 4 {
 			return 0, offline
@@ -33,18 +31,17 @@ func TestRetryWhileMachineOfflineWaitsOutABlipAndNothingElse(t *testing.T) {
 
 	other := errors.New("destination machine is revoked")
 	calls = 0
-	if _, err := retryWhileMachineOffline(context.Background(), func() (int, error) { calls++; return 0, other }); !errors.Is(err, other) || calls != 1 {
+	if _, err := retryWhileMachineOffline(ctx, func() (int, error) { calls++; return 0, other }); !errors.Is(err, other) || calls != 1 {
 		t.Fatalf("another error was retried: err=%v calls=%d", err, calls)
 	}
 
-	machineBlipGrace = 60 * time.Millisecond
 	calls = 0
-	if _, err := retryWhileMachineOffline(context.Background(), func() (int, error) { calls++; return 0, offline }); !machineOfflineError(err) || calls < 2 || calls > 20 {
+	short := withMachineBlip(context.Background(), 60*time.Millisecond, 5*time.Millisecond)
+	if _, err := retryWhileMachineOffline(short, func() (int, error) { calls++; return 0, offline }); !machineOfflineError(err) || calls < 2 || calls > 20 {
 		t.Fatalf("a machine that stays offline did not report it when the grace ended: err=%v calls=%d", err, calls)
 	}
 
-	machineBlipGrace = 5 * time.Second
-	cancelled, cancel := context.WithCancel(context.Background())
+	cancelled, cancel := context.WithCancel(withMachineBlip(context.Background(), 5*time.Second, 5*time.Millisecond))
 	cancel()
 	started := time.Now()
 	if _, err := retryWhileMachineOffline(cancelled, func() (int, error) { return 0, offline }); !machineOfflineError(err) || time.Since(started) > time.Second {
@@ -67,11 +64,9 @@ func TestSSHHandoverBlipIsATransportLossNotARefusalOrATimeout(t *testing.T) {
 			t.Errorf("%s: blip=%v want %v", name, got, want.blip)
 		}
 	}
-	interval := machineBlipInterval
-	machineBlipInterval = 5 * time.Millisecond
-	t.Cleanup(func() { machineBlipInterval = interval })
 	calls := 0
-	_, err := retryWhile(context.Background(), time.Second, sshHandoverBlip, func() (int, error) {
+	fast := withMachineBlip(context.Background(), 0, 5*time.Millisecond)
+	_, err := retryWhile(fast, time.Second, sshHandoverBlip, func() (int, error) {
 		calls++
 		if calls < 3 {
 			return 0, tunnel.ErrTransportLost
@@ -107,8 +102,8 @@ func TestExecRecoveryBackoffPollsQuicklyThenBacksOff(t *testing.T) {
 	if execRecoveryBackoff(21) != 100*time.Millisecond || execRecoveryBackoff(40) != 2*time.Second {
 		t.Fatalf("backoff after the handover window: %v %v", execRecoveryBackoff(21), execRecoveryBackoff(40))
 	}
-	if machineBlipInterval > 150*time.Millisecond {
-		t.Fatalf("handover polling interval %v", machineBlipInterval)
+	if interval := timingsOf(context.Background()).machineBlipInterval; interval > 150*time.Millisecond {
+		t.Fatalf("handover polling interval %v", interval)
 	}
 }
 
@@ -116,9 +111,7 @@ func TestExecRecoveryBackoffPollsQuicklyThenBacksOff(t *testing.T) {
 // the new peer seconds later) or a dropped local setup connection; it is repeated within the dial bound. A refusal or a
 // stopped local service ends it at once.
 func TestSSHDialRetriesTheFirstDialAfterAccessAppears(t *testing.T) {
-	interval := machineBlipInterval
-	machineBlipInterval = 5 * time.Millisecond
-	t.Cleanup(func() { machineBlipInterval = interval })
+	ctx := withMachineBlip(t.Context(), 0, 5*time.Millisecond)
 	notYet := &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "peer_stream_unavailable"}
 	for name, want := range map[string]struct {
 		err   error
@@ -131,7 +124,7 @@ func TestSSHDialRetriesTheFirstDialAfterAccessAppears(t *testing.T) {
 		"other remote":             {&localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "environment_unavailable"}, 1},
 	} {
 		calls := 0
-		_, err := retrySSHDial(t.Context(), func() (tunnel.Conn, error) {
+		_, err := retrySSHDial(ctx, func() (tunnel.Conn, error) {
 			calls++
 			if calls < 3 {
 				return nil, want.err
@@ -166,24 +159,22 @@ func TestSSHDialWaitsPastTheFirstStreamOpenTimeoutForANewPeer(t *testing.T) {
 // pb exec waits a short bounded time for a machine the server calls offline (a host that just updated), and says
 // machine_offline when it stays offline; any other failure returns at once.
 func TestWaitForMachineOnline(t *testing.T) {
-	grace, interval := machineBlipGrace, machineBlipInterval
-	machineBlipGrace, machineBlipInterval = 2*time.Second, 5*time.Millisecond
-	t.Cleanup(func() { machineBlipGrace, machineBlipInterval = grace, interval })
+	ctx := withMachineBlip(t.Context(), 2*time.Second, 5*time.Millisecond)
 	calls := 0
-	machine, err := waitForMachineOnline(t.Context(), func() (api.UserMachine, error) {
+	machine, err := waitForMachineOnline(ctx, func() (api.UserMachine, error) {
 		calls++
 		return api.UserMachine{ID: "machine_a", Online: calls >= 3}, nil
 	})
 	if err != nil || !machine.Online || calls != 3 {
 		t.Fatalf("machine=%+v err=%v calls=%d, want online on the third read", machine, err, calls)
 	}
-	machineBlipGrace = 60 * time.Millisecond
-	if _, err := waitForMachineOnline(t.Context(), func() (api.UserMachine, error) { return api.UserMachine{ID: "machine_a"}, nil }); !machineOfflineError(err) {
+	short := withMachineBlip(t.Context(), 60*time.Millisecond, 5*time.Millisecond)
+	if _, err := waitForMachineOnline(short, func() (api.UserMachine, error) { return api.UserMachine{ID: "machine_a"}, nil }); !machineOfflineError(err) {
 		t.Fatalf("a machine that stays offline: %v", err)
 	}
 	boom := errors.New("lookup failed")
 	calls = 0
-	if _, err := waitForMachineOnline(t.Context(), func() (api.UserMachine, error) { calls++; return api.UserMachine{}, boom }); !errors.Is(err, boom) || calls != 1 {
+	if _, err := waitForMachineOnline(ctx, func() (api.UserMachine, error) { calls++; return api.UserMachine{}, boom }); !errors.Is(err, boom) || calls != 1 {
 		t.Fatalf("another failure was retried: err=%v calls=%d", err, calls)
 	}
 }

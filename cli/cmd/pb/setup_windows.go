@@ -8,15 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
-
-// setupOpenSSHBudget bounds the OpenSSH step like an install or pair does: the package may only be reachable through
-// slow fallbacks, and setup must still finish without managed SSH.
-var setupOpenSSHBudget = 75 * time.Second
 
 // setupNoticeWriter receives the notice that setup went on without managed SSH.
 var setupNoticeWriter io.Writer = os.Stderr
@@ -38,7 +33,7 @@ func setupPlatformHostPrerequisites(ctx context.Context) (uint16, error) {
 // runSetupOpenSSH skips what only means "this machine cannot supply OpenSSH in time" (the managed SSH target stays not
 // ready; `pb doctor --repair` prepares it later, as after an install). A refusal or the caller's own expiry still fails.
 func runSetupOpenSSH(ctx context.Context, step func(context.Context) error) error {
-	bounded, cancel := context.WithTimeout(ctx, setupOpenSSHBudget)
+	bounded, cancel := context.WithTimeout(ctx, timingsOf(ctx).setupOpenSSH)
 	defer cancel()
 	err := step(bounded)
 	if err == nil || ctx.Err() != nil {

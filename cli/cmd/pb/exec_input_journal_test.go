@@ -168,9 +168,7 @@ func TestExecStdinJournalNeverTrimsBytesNoConnectionAccepted(t *testing.T) {
 // A daemon that accepts the socket and never answers cannot hang a reattach attempt: it times out as a retryable
 // peer-stream failure and the bounded recovery tries again.
 func TestExecReattachAttemptTimesOutAndIsRetried(t *testing.T) {
-	old := execReattachAttemptTimeout
-	execReattachAttemptTimeout = 50 * time.Millisecond
-	defer func() { execReattachAttemptTimeout = old }()
+	ctx := withExecReattach(context.Background(), 50*time.Millisecond, 0)
 	ref := newExecConnectionRef(&cutConn{host: &hostStdin{}})
 	var request tunnel.ExecRequest
 	descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
@@ -179,11 +177,11 @@ func TestExecReattachAttemptTimesOutAndIsRetried(t *testing.T) {
 		return nil, ctx.Err()
 	}
 	start := time.Now()
-	_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, silent)
+	_, err := reattachExecConnection(ctx, ref, &request, descriptor, silent)
 	if err == nil || !retryableExecReattachment(err) || time.Since(start) > 2*time.Second {
 		t.Fatalf("a silent daemon: err=%v after %v", err, time.Since(start))
 	}
-	canceled, cancel := context.WithCancel(context.Background())
+	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	if _, err = reattachExecConnection(canceled, ref, &request, descriptor, silent); retryableExecReattachment(err) {
 		t.Fatalf("a canceled command was retried: %v", err)
@@ -192,9 +190,7 @@ func TestExecReattachAttemptTimesOutAndIsRetried(t *testing.T) {
 
 // A permanent answer that arrives as the attempt timer fires is the answer: it is not turned into a retryable timeout.
 func TestExecReattachKeepsAPermanentErrorThatRacesTheAttemptTimer(t *testing.T) {
-	old := execReattachAttemptTimeout
-	execReattachAttemptTimeout = 20 * time.Millisecond
-	defer func() { execReattachAttemptTimeout = old }()
+	ctx := withExecReattach(context.Background(), 20*time.Millisecond, 0)
 	ref := newExecConnectionRef(&cutConn{host: &hostStdin{}})
 	var request tunnel.ExecRequest
 	missing := &api.APIError{Code: "user_machine_not_found"}
@@ -205,7 +201,7 @@ func TestExecReattachKeepsAPermanentErrorThatRacesTheAttemptTimer(t *testing.T) 
 	dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) {
 		return nil, errors.New("not dialed")
 	}
-	_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, dial)
+	_, err := reattachExecConnection(ctx, ref, &request, descriptor, dial)
 	if !errors.Is(err, missing) || retryableExecReattachment(err) {
 		t.Fatalf("the permanent error became %v (retryable %v)", err, retryableExecReattachment(err))
 	}
@@ -232,9 +228,7 @@ func (c *stallConn) Detach() error { c.once.Do(func() { close(c.aborted) }); ret
 // A replacement that connects and then stalls while the stdin journal is resent is cut at the attempt deadline and
 // retried, instead of hanging the reattach until Ctrl-C.
 func TestExecReattachBoundsTheStdinResend(t *testing.T) {
-	old := execReattachAttemptTimeout
-	execReattachAttemptTimeout = 50 * time.Millisecond
-	defer func() { execReattachAttemptTimeout = old }()
+	ctx := withExecReattach(context.Background(), 50*time.Millisecond, 0)
 	host := &hostStdin{}
 	ref := newExecConnectionRef(&cutConn{host: host, failAt: 1})
 	if connection, err := ref.SendInput(context.Background(), []byte("stdin")); err != nil {
@@ -247,7 +241,7 @@ func TestExecReattachBoundsTheStdinResend(t *testing.T) {
 	}
 	result := make(chan error, 1)
 	go func() {
-		_, err := reattachExecConnection(context.Background(), ref, &request, descriptor, dial)
+		_, err := reattachExecConnection(ctx, ref, &request, descriptor, dial)
 		result <- err
 	}()
 	select {
@@ -287,11 +281,9 @@ func TestExecReattachIsNotHeldByAStdinWriteOnAFullWindow(t *testing.T) {
 }
 
 // Attempts alone did not bound a recovery: 40 attempts each hanging to their own timeout took 10 minutes, while the
-// backoff comment promised about half a minute. One recovery now ends at execReattachWindow, as a spent budget.
+// backoff comment promised about half a minute. One recovery now ends at the reattach window, as a spent budget.
 func TestExecRecoveryEndsAtTheReattachWindow(t *testing.T) {
-	oldAttempt, oldWindow := execReattachAttemptTimeout, execReattachWindow
-	execReattachAttemptTimeout, execReattachWindow = 100*time.Millisecond, 300*time.Millisecond
-	defer func() { execReattachAttemptTimeout, execReattachWindow = oldAttempt, oldWindow }()
+	ctx := withExecReattach(context.Background(), 100*time.Millisecond, 300*time.Millisecond)
 	ref := newExecConnectionRef(&cutConn{host: &hostStdin{}})
 	var request tunnel.ExecRequest
 	descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
@@ -301,7 +293,7 @@ func TestExecRecoveryEndsAtTheReattachWindow(t *testing.T) {
 	}
 	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Retryable: retryableExecReattachment})
 	start := time.Now()
-	_, err := recoverExecConnection(context.Background(), recovery, func(ctx context.Context) (tunnel.ExecConn, error) {
+	_, err := recoverExecConnection(ctx, recovery, func(ctx context.Context) (tunnel.ExecConn, error) {
 		return reattachExecConnection(ctx, ref, &request, descriptor, silent)
 	})
 	// Unbounded, 40 attempts of 100 ms take 4 s.

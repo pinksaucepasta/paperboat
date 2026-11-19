@@ -12,9 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// waitServerPollEvery is how often a machine the daemon does not track is looked up on the server again.
-var waitServerPollEvery = 3 * time.Second
-
 // resolveWaitMachine names a machine the daemon's snapshot does not list the way exec does (resolveUserMachine:
 // --workspace honoured, team machines included). An unreachable server returns a nil client: the caller keeps
 // waiting on the daemon, which may still learn the name (F21-01). An unknown name is an error at once.
@@ -76,7 +73,7 @@ func waitForServerMachineWith(ctx context.Context, workspace string, snapshot lo
 				outcome, code = "timeout", "wait_timeout"
 			}
 			return serverMachineResult(snapshot, machine, condition, outcome, code, "offline", "none"), nil
-		case <-time.After(waitServerPollEvery):
+		case <-time.After(timingsOf(ctx).waitServerPoll):
 		}
 		next, err := refresh()
 		if errors.Is(err, resolver.ErrMachineNotFound) {

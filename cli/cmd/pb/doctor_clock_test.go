@@ -14,11 +14,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
-func shortClockTimeouts(t *testing.T) {
+func shortClockTimeouts(t *testing.T) context.Context {
 	t.Helper()
-	old := doctorClockTimeout
-	doctorClockTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { doctorClockTimeout = old })
+	return withTimings(t.Context(), func(timings *commandTimings) { timings.doctorClock = 200 * time.Millisecond })
 }
 
 func TestMeasureServerClockUsesThisResponsesDate(t *testing.T) {
@@ -33,7 +31,7 @@ func TestMeasureServerClockUsesThisResponsesDate(t *testing.T) {
 }
 
 func TestMeasureServerClockSaysWhyItFailed(t *testing.T) {
-	shortClockTimeouts(t)
+	ctx := shortClockTimeouts(t)
 	for name, tc := range map[string]struct {
 		date    []string // nil: the server sends its own Date
 		missing bool
@@ -50,7 +48,7 @@ func TestMeasureServerClockSaysWhyItFailed(t *testing.T) {
 				w.Header()["Date"] = tc.date // nil suppresses the automatic Date
 			}))
 			defer server.Close()
-			_, err := measureServerClock(context.Background(), server.URL)
+			_, err := measureServerClock(ctx, server.URL)
 			if !errors.Is(err, tc.want) || calls.Load() != 1 {
 				t.Fatalf("err %v after %d calls, want %v after 1", err, calls.Load(), tc.want)
 			}
@@ -62,7 +60,7 @@ func TestMeasureServerClockSaysWhyItFailed(t *testing.T) {
 }
 
 func TestMeasureServerClockRetriesATimeoutOnce(t *testing.T) {
-	shortClockTimeouts(t)
+	ctx := shortClockTimeouts(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
@@ -71,20 +69,20 @@ func TestMeasureServerClockRetriesATimeoutOnce(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	if _, err := measureServerClock(context.Background(), server.URL); err != nil || calls.Load() != 2 {
+	if _, err := measureServerClock(ctx, server.URL); err != nil || calls.Load() != 2 {
 		t.Fatalf("err %v after %d calls, want success on the second", err, calls.Load())
 	}
 }
 
 func TestMeasureServerClockTimesOutTwiceWithItsOwnWording(t *testing.T) {
-	shortClockTimeouts(t)
+	ctx := shortClockTimeouts(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		<-r.Context().Done()
 	}))
 	defer server.Close()
-	_, err := measureServerClock(context.Background(), server.URL)
+	_, err := measureServerClock(ctx, server.URL)
 	if err == nil || calls.Load() != 2 || !isTimeout(err) {
 		t.Fatalf("err %v after %d calls, want a timeout after exactly 2", err, calls.Load())
 	}

@@ -103,28 +103,21 @@ func isDestinationBusy(err error) bool {
 	return err != nil && errors.As(err, &remote) && remote.Code == "resource_limit"
 }
 
-// A destination takes 2 transfers at once and refuses a third at once; a send queues behind them instead (F21-166: 6
-// parallel sends to one machine all finish): it asks again every few seconds, says so once, and gives up with the
-// busy refusal after sendQueueWait. Nothing is delivered by a refused attempt, so asking again is safe.
-var (
-	sendQueueWait = 15 * time.Minute
-	sendQueuePoll = 3 * time.Second
-)
-
-// queueWhileBusy runs attempt until the destination has a free slot. Any other result, and the last busy refusal after
-// the wait, is returned as it came.
+// queueWhileBusy runs attempt until the destination has a free slot, asking again every sendQueuePoll (commandTimings).
+// Any other result, and the last busy refusal after sendQueueWait, is returned as it came.
 func queueWhileBusy(ctx context.Context, machine string, waiting func(string), attempt func() error) error {
-	deadline := time.Now().Add(sendQueueWait)
+	timings := timingsOf(ctx)
+	deadline := time.Now().Add(timings.sendQueueWait)
 	for {
 		err := attempt()
 		if !isDestinationBusy(err) || !time.Now().Before(deadline) {
 			return err
 		}
-		waiting(fmt.Sprintf("%s is already receiving as many transfers as it accepts at once: waiting for one to finish (up to %s)", machine, sendQueueWait.Round(time.Minute)))
+		waiting(fmt.Sprintf("%s is already receiving as many transfers as it accepts at once: waiting for one to finish (up to %s)", machine, timings.sendQueueWait.Round(time.Minute)))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(backoff.Jitter(sendQueuePoll)):
+		case <-time.After(backoff.Jitter(timings.sendQueuePoll)):
 		}
 	}
 }

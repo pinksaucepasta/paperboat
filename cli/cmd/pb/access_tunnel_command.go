@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/spf13/cobra"
 )
 
@@ -22,10 +21,6 @@ const (
 	accessTunnelSchema        = "paperboat.private-tcp-access/v1"
 	accessTunnelResponseLimit = 16 << 10
 )
-
-// hostd closes the listener of a session that has not beaten within its TTL (a CLI killed without Release); both
-// numbers live in preview. A var so tests can shrink it.
-var accessTunnelHeartbeatInterval = preview.PrivateTCPAccessHeartbeatInterval
 
 var (
 	ErrAccessTunnelInvalid               = errors.New("invalid private tunnel access request")
@@ -117,7 +112,7 @@ func runAccessTunnel(command *cobra.Command, args []string) error {
 	// Keep the listener alive only while this process is: hostd owns it and reaps it once the beats stop.
 	gone, beating := make(chan struct{}), make(chan struct{})
 	beatCtx, stopBeats := context.WithCancel(command.Context())
-	interval := accessTunnelHeartbeatInterval // read once, here: tests change the variable between commands
+	interval := timingsOf(command.Context()).accessTunnelHeartbeat
 	defer func() { stopBeats(); <-beating }() // no heartbeat goroutine outlives the command
 	go func() {
 		defer close(beating)

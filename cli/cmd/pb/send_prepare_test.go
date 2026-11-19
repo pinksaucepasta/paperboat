@@ -39,9 +39,6 @@ func prepareTestRegistration(t *testing.T, backendURL string) {
 // the send waits out the handover grace and refuses, without a machine list,
 // a preference read or a descriptor fetch.
 func TestSendPrepareOfflineWaitsOutTheGraceAndRefuses(t *testing.T) {
-	restoreGrace, restoreInterval := machineBlipGrace, machineBlipInterval
-	machineBlipGrace, machineBlipInterval = 400*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { machineBlipGrace, machineBlipInterval = restoreGrace, restoreInterval })
 	var prepares atomic.Int32
 	var reached []string
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -84,7 +81,7 @@ func TestSendPrepareOfflineWaitsOutTheGraceAndRefuses(t *testing.T) {
 	command.SetOut(&out)
 	command.SetErr(&stderr)
 	command.SetArgs([]string{"--config", configPath, "--no-customization", "send", file, "--to", "offline-host"})
-	commandCtx, finish := context.WithTimeout(context.Background(), 10*time.Second)
+	commandCtx, finish := context.WithTimeout(withMachineBlip(context.Background(), 400*time.Millisecond, 50*time.Millisecond), 10*time.Second)
 	defer finish()
 	err = command.ExecuteContext(commandCtx)
 	if !machineOfflineError(err) {
