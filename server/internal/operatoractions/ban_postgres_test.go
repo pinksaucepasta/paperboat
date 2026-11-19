@@ -294,10 +294,28 @@ func TestBanWaitsForASignInInFlight(t *testing.T) {
 		_, err := s.Execute(ctx, admin, "race-"+x, "account_ban", user, "ban:"+x, Input{Revision: 1})
 		done <- err
 	}()
+	// The ban is provably queued behind the sign-in's lock once PostgreSQL lists it as a waiter on that key.
+	var key int64
+	if err = store.SQL().QueryRowContext(ctx, `SELECT hashtextextended(paperboat.canonical_email_address($1||'@test.invalid'),174)`, user).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+		var waiting int
+		if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted
+ AND ((classid::bigint<<32)|objid::bigint)=$1`, key).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the ban never queued behind the sign-in's identity lock")
+		}
+	}
 	select {
 	case err := <-done:
 		t.Fatalf("the ban finished while a sign-in held the identity lock: %v", err)
-	case <-time.After(700 * time.Millisecond):
+	default:
 	}
 	if err = signIn.Commit(); err != nil {
 		t.Fatal(err)
