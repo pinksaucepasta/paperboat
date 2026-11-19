@@ -249,3 +249,52 @@ func TestBrowserTerminalFileMarkerIsRecognised(t *testing.T) {
 		t.Fatal("a shared-output marker was accepted from the browser")
 	}
 }
+
+// A modified browser that sends bulk in small frames, or file bytes it did not mark, is still held to the workspace's 10 Mbit/s bucket
+// (the cap): small frames are interactive only while the bucket is not deep in debt.
+func TestUnmarkedSmallFramesAtWireSpeedStayUnderTheWorkspaceCap(t *testing.T) {
+	throttles := newThrottles()
+	const host = "machine.runtime.example.test"
+	throttles.Set([]connectorprotocol.IngressThrottle{{Hostname: host, Workspace: "personal:one", BytesPerSecond: 256 << 10, Terminal: true}})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var workers sync.WaitGroup
+	in, done := terminalPacing{throttles: throttles, host: host}.start(ctx, &workers, func(err error) { t.Errorf("pacing failed: %v", err) }, func([]byte) error { return nil })
+	started := time.Now()
+	for range 1024 { // 1 MiB in 1 KiB frames, none marked
+		in <- terminalFrame{payload: make([]byte, terminalInteractiveBytes)}
+	}
+	close(in)
+	<-done
+	workers.Wait()
+	// 1 MiB at 256 KiB/s less the 32 KiB burst and one second of grace is 2.7 s; unpaced it would take microseconds.
+	if elapsed := time.Since(started); elapsed < 2*time.Second {
+		t.Fatalf("1 MiB of small unmarked frames passed in %v, faster than the workspace cap allows", elapsed)
+	}
+}
+
+// Small file records are counted and slowed past the allowance like bulk: a stream of tiny files must not count without slowing.
+func TestSmallFileRecordsAreSlowedPastTheAllowance(t *testing.T) {
+	throttles := newThrottles()
+	const host = "machine.runtime.example.test"
+	throttles.Set([]connectorprotocol.IngressThrottle{
+		{Hostname: host, Workspace: "personal:one", BytesPerSecond: 10 << 20, Terminal: true},
+		{Hostname: "files:" + host, Workspace: "personal:one", BytesPerSecond: 32 << 10},
+	})
+	var counted int
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var workers sync.WaitGroup
+	pacing := terminalPacing{throttles: throttles, host: host, fileHost: "files:" + host, fileBytes: func(n int) { counted += n }}
+	in, done := pacing.start(ctx, &workers, func(err error) { t.Errorf("pacing failed: %v", err) }, func([]byte) error { return nil })
+	started := time.Now()
+	for range 160 { // 160 KiB in 1 KiB file records
+		in <- terminalFrame{payload: make([]byte, terminalInteractiveBytes), file: true}
+	}
+	close(in)
+	<-done
+	workers.Wait()
+	if elapsed := time.Since(started); counted != 160<<10 || elapsed < 3*time.Second {
+		t.Fatalf("%d bytes of small file records counted in %v, want all counted and slowed to 32 KiB/s (about 4 s)", counted, elapsed)
+	}
+}
