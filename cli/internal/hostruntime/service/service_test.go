@@ -48,7 +48,7 @@ func TestSystemdDefinitionSignalsWorkerBeforeForceCleaningCgroup(t *testing.T) {
 	}
 	definition := string(body)
 	if !strings.Contains(definition, "TimeoutStopSec=60s\nKillMode=mixed\n") ||
-		!strings.Contains(definition, "Type=notify\n") || !strings.Contains(definition, "WatchdogSec=30s\n") ||
+		!strings.Contains(definition, "Type=notify\n") || !strings.Contains(definition, "WatchdogSec=300s\nTimeoutAbortSec=10s\n") ||
 		!strings.Contains(definition, "RuntimeDirectory=paperboat\n") || !strings.Contains(definition, "StateDirectoryMode=0700\n") ||
 		!strings.Contains(definition, "CacheDirectoryMode=0750\n") {
 		t.Fatalf("systemd shutdown policy missing:\n%s", definition)
