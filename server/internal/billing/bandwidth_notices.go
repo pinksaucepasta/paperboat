@@ -172,7 +172,7 @@ func throttledMessage(policy config.TransactionalMail, address, name, reduced st
 		Heading: "Traffic is reduced",
 		Paragraphs: []string{
 			fmt.Sprintf("Traffic through Paperboat's edges and relays for %s is reduced to %s because its included traffic is used up. It is never cut off and never billed extra. Direct machine-to-machine traffic and your own edges and relays are not slowed.", name, reduced),
-			fmt.Sprintf("Full speed returns on %s (UTC), or as soon as you add bandwidth.", fullSpeed.UTC().Format("2 Jan 2006")),
+			fmt.Sprintf("Full speed returns on %s, or as soon as you add bandwidth.", transactionalmail.Day(fullSpeed.UTC())),
 		},
 		Button: &transactionalmail.Button{Label: "Add bandwidth or upgrade", URL: billingURL},
 		Why:    "You got this because you manage billing for this workspace.",

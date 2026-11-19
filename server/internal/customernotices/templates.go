@@ -93,10 +93,10 @@ func render(in Input, now time.Time) (subject string, c transactionalmail.Conten
 		if err != nil {
 			return
 		}
-		subject = "Paperboat: prices change on " + day.Format("2 Jan 2006")
-		c.Heading = "Prices change on " + day.Format("2 Jan 2006")
+		subject = "Paperboat: prices change on " + transactionalmail.Day(day)
+		c.Heading = "Prices change on " + transactionalmail.Day(day)
 		c.Paragraphs = []string{
-			fmt.Sprintf("Paperboat's prices change from your next renewal on or after %s.", day.Format("2 Jan 2006")),
+			fmt.Sprintf("Paperboat's prices change from your next renewal on or after %s.", transactionalmail.Day(day)),
 			p[0],
 			fmt.Sprintf("This email is our notice, given at least %d days ahead. If you do not agree, cancel in the console under Billing before your renewal; cancelling stops the next renewal.", NoticeDays),
 		}
@@ -111,8 +111,8 @@ func render(in Input, now time.Time) (subject string, c transactionalmail.Conten
 		if err != nil {
 			return
 		}
-		subject = "Paperboat: our terms change on " + day.Format("2 Jan 2006")
-		c.Heading = "Our terms change on " + day.Format("2 Jan 2006")
+		subject = "Paperboat: our terms change on " + transactionalmail.Day(day)
+		c.Heading = "Our terms change on " + transactionalmail.Day(day)
 		c.Paragraphs = []string{p[0]}
 		if p[1] != "" {
 			c.Paragraphs = append(c.Paragraphs, fmt.Sprintf("We are changing them sooner than %d days because %s.", NoticeDays, p[1]))
@@ -138,7 +138,7 @@ func render(in Input, now time.Time) (subject string, c transactionalmail.Conten
 		subject = "Paperboat: new subprocessor " + p[0]
 		c.Heading = "New subprocessor: " + p[0]
 		c.Paragraphs = []string{
-			fmt.Sprintf("From %s we will use %s to %s, in %s, to process personal data.", day.Format("2 Jan 2006"), p[0], p[1], p[2]),
+			fmt.Sprintf("From %s we will use %s to %s, in %s, to process personal data.", transactionalmail.Day(day), p[0], p[1], p[2]),
 			fmt.Sprintf("You may object within %d days, on reasonable data protection grounds, by writing to %s. If we cannot resolve the objection you may end the affected service and we refund the unused part of any period you paid in advance.", NoticeDays, p[3]),
 		}
 	case "breach":
@@ -163,7 +163,7 @@ func render(in Input, now time.Time) (subject string, c transactionalmail.Conten
 		late = now.After(deadline)
 		subject = "Paperboat: notice of a personal data breach"
 		c.Heading = "Notice of a personal data breach"
-		c.Paragraphs = []string{fmt.Sprintf("We became aware on %s (UTC) of a personal data breach that affects your data. We are telling you so you can meet your own duty to notify within 72 hours.", aware.UTC().Format("2 Jan 2006 15:04"))}
+		c.Paragraphs = []string{fmt.Sprintf("We became aware on %s of a personal data breach that affects your data. We are telling you so you can meet your own duty to notify within 72 hours.", transactionalmail.Time(aware))}
 		c.Details = []transactionalmail.Detail{{Label: "What happened", Value: p[0]}, {Label: "Data involved", Value: p[1]}, {Label: "What we are doing", Value: p[2]}, {Label: "Who to contact", Value: p[3]}}
 	default:
 		return "", c, false, time.Time{}, bad("kind is price_increase, terms_change, subprocessor or breach")
