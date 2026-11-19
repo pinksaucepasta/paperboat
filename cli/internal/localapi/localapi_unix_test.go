@@ -475,7 +475,9 @@ func TestLocalAPIPeerStreamPreservesBinaryBytesAndHalfClose(t *testing.T) {
 			return
 		}
 		defer connection.Close()
-		_ = connection.SetReadBuffer(1024)
+		// A small receive window makes the 1 MiB write wait for this reader. 1 KiB left TCP a 2 KiB window, one
+		// delayed-ACK round (~40 ms) per window: 15 s a run. 64 KiB keeps the wait and takes milliseconds.
+		_ = connection.SetReadBuffer(64 << 10)
 		time.Sleep(50 * time.Millisecond)
 		got, readErr := io.ReadAll(connection)
 		if readErr == nil && !bytes.Equal(got, want) {
