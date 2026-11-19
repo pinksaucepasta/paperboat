@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -19,7 +20,20 @@ import (
 )
 
 const windowsAcceptanceIP = "127.100.254.231"
-const windowsAcceptancePort = 46392
+
+// The acceptance runs in several processes of one task (installed guard, LocalSystem probes); the task owner gives
+// them one port pair through the environment, so a run avoids whatever else listens on this host. 46392 and 46393
+// are used when it is unset. The guard service, its pipe, the address and the C:\Users\Public files are host-wide,
+// so two acceptance runs on one host still exclude each other.
+const windowsAcceptancePortEnv = "PAPERBOAT_WINDOWS_GUARD_PORT"
+
+func windowsAcceptancePort() int {
+	if port, err := strconv.Atoi(os.Getenv(windowsAcceptancePortEnv)); err == nil && port > 0 && port < 65535 {
+		return port
+	}
+	return 46392
+}
+
 const windowsProbeRequest = `C:\Users\Public\paperboat-machineguard-probe.request`
 const windowsProbeResult = `C:\Users\Public\paperboat-machineguard-probe.result`
 const windowsGuardStop = `C:\Users\Public\paperboat-machineguard-stop`
@@ -46,7 +60,7 @@ func TestWindowsMalformedPrefacesDoNotStopGuard(t *testing.T) {
 	}
 	defer client.Close()
 	ip := netip.MustParseAddr("127.123.254.233")
-	listener, err := client.Acquire(ctx, "prefaceguard.local.example.test", ip, 46393)
+	listener, err := client.Acquire(ctx, "prefaceguard.local.example.test", ip, windowsAcceptancePort()+1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +87,7 @@ func TestWindowsMalformedPrefacesDoNotStopGuard(t *testing.T) {
 		}
 		accepted <- acceptErr
 	}()
-	probe, err := net.DialTimeout("tcp4", "127.123.254.233:46393", time.Second)
+	probe, err := net.DialTimeout("tcp4", net.JoinHostPort("127.123.254.233", strconv.Itoa(windowsAcceptancePort()+1)), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +110,7 @@ func TestWindowsProtectedGuardAcceptance(t *testing.T) {
 	defer client.Close()
 	defer os.WriteFile(windowsGuardStop, []byte("stop"), 0600)
 	ip := netip.MustParseAddr(windowsAcceptanceIP)
-	listener, err := client.Acquire(ctx, "taskguard.local.example.test", ip, windowsAcceptancePort)
+	listener, err := client.Acquire(ctx, "taskguard.local.example.test", ip, windowsAcceptancePort())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +161,7 @@ func TestWindowsProtectedGuardAcceptance(t *testing.T) {
 		}
 		accepted <- e
 	}()
-	conn, err := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, "46392"), time.Second)
+	conn, err := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, strconv.Itoa(windowsAcceptancePort())), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +196,7 @@ func TestWindowsProtectedGuardSystemDenied(t *testing.T) {
 	if err != nil || user == nil || !user.User.Sid.Equals(system) {
 		t.Fatal("probe is not LocalSystem")
 	}
-	conn, err := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, "46392"), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, strconv.Itoa(windowsAcceptancePort())), 500*time.Millisecond)
 	if err == nil {
 		conn.Close()
 		t.Fatal("LocalSystem reached another SID's protected listener")
@@ -192,12 +206,12 @@ func TestWindowsProtectedGuardPersistentDeny(t *testing.T) {
 	if os.Getenv("PAPERBOAT_WINDOWS_GUARD_DENY") != "1" {
 		t.Skip("requires installed Windows guard policy")
 	}
-	listener, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", "46392"))
+	listener, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(windowsAcceptancePort())))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	conn, err := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, "46392"), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, strconv.Itoa(windowsAcceptancePort())), 500*time.Millisecond)
 	if err == nil {
 		conn.Close()
 		t.Fatal("withdrawn protected address reached wildcard listener")
@@ -227,7 +241,7 @@ func TestWindowsGuardServerProcess(t *testing.T) {
 				return
 			}
 			if _, err := os.Stat(windowsProbeRequest); err == nil {
-				conn, dialErr := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, "46392"), 500*time.Millisecond)
+				conn, dialErr := net.DialTimeout("tcp4", net.JoinHostPort(windowsAcceptanceIP, strconv.Itoa(windowsAcceptancePort())), 500*time.Millisecond)
 				if dialErr == nil {
 					conn.Close()
 					_ = os.WriteFile(windowsProbeResult, []byte("allowed"), 0600)
