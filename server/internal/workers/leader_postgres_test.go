@@ -36,6 +36,7 @@ func TestWorkersRunInOneInstanceAndFailOverOnPostgres(t *testing.T) {
 	}
 	var active, overlap atomic.Int32
 	runs := map[string]*atomic.Int32{"a": {}, "b": {}}
+	pools := map[string]*db.DB{}
 	instance := func(name string) (*workers.Supervisor, context.CancelFunc, chan error) {
 		// Each instance has its own pool, as separate server processes do: a shared pool could hand the
 		// standby the leader's own session, where the advisory lock is reentrant and a lock left behind
@@ -45,6 +46,7 @@ func TestWorkersRunInOneInstanceAndFailOverOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { pool.Close() })
+		pools[name] = pool
 		leader := &workers.PostgresLeader{DB: pool.Direct(), Instance: "test-" + name, Version: "test",
 			Retry: 100 * time.Millisecond, Check: 100 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 		s := workers.NewLeaderSupervisor(leader, func(ctx context.Context) error {
@@ -80,7 +82,8 @@ func TestWorkersRunInOneInstanceAndFailOverOnPostgres(t *testing.T) {
 	_, stopA, doneA := instance("a")
 	waitFor("a to lead", func() bool { return runs["a"].Load() == 1 && leaderRow() == "test-a" })
 	_, stopB, doneB := instance("b")
-	time.Sleep(500 * time.Millisecond)
+	// The standby has tried the lock and been refused more than once (every try acquires a connection).
+	waitFor("the standby to try the lock", func() bool { return pools["b"].Direct().Stat().AcquireCount() >= 3 })
 	if runs["b"].Load() != 0 {
 		t.Fatal("standby ran workers while the leader held the lock")
 	}
