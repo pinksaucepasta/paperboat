@@ -130,9 +130,7 @@ func TestConfigurationRefreshFetchesKeysOnlyForAnUnknownKey(t *testing.T) {
 // now back off to about five minutes and return to the observation schedule once a relay is usable.
 func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
-	c.IssuedAt = time.Now().Unix()
-	c.ExpiresAt = c.IssuedAt + 300
-	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
+	c = untilReplaced(c) // a configuration renews with half its life left, which would end the five-minute backoff early
 	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
 		t.Fatal(err)
 	}
