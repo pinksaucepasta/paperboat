@@ -582,7 +582,7 @@ func New(opts Options) (*App, error) {
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
 		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
 		edgeControlService.SetFairUse(opts.Config.Billing.FairUse)
-		edgeControlService.SetRelayVolumeGate(bandwidthgate.NewRelayVolume(store, opts.Config.Billing.FairUse.RelayFreeIncludedBytes, opts.Config.Billing.FairUse.RelayIncludedBytes))
+		edgeControlService.SetRelayPoolGate(bandwidthgate.NewRelayPool(store))
 	}
 	telemetryHealth, telemetryErr := telemetry.NewHealthTracker(time.Now)
 	if telemetryErr != nil {
@@ -703,6 +703,7 @@ func New(opts Options) (*App, error) {
 	operatorService.SetNodeCapacity(opts.Config.NodeCapacity)
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Analytics = analyticsCapture
+	resourceUsageService.Debiter = workspaceBilling
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
 	teamBuckets := teambucket.New(store, opts.Config.Secrets.EncryptionKey)
 	recordingService.SetBuckets(teamBuckets)

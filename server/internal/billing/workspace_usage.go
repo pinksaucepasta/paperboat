@@ -27,14 +27,10 @@ func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Wo
 	}
 	w.AllowancePeriodStart = window.budget
 	w.AllowancePeriodEnd = policy.end
-	w.RelayMbit, w.RelayIncludedBytes, w.RelaySlowMbit = s.throttle.RelayMbit, s.throttle.RelayFreeIncludedBytes, s.throttle.RelayFreeSlowMbit
-	if window.paid {
-		w.RelayIncludedBytes, w.RelaySlowMbit = s.throttle.RelayIncludedBytes, s.throttle.RelaySlowMbit
-	}
+	w.RelayMbit = s.throttle.RelayMbit
 	if policy.seats > 0 {
-		// A paid team pools per seat: the allowances of both edges and relays are the per-seat amounts times its seats.
+		// A paid team's pool is the per-seat amount times its seats, shared by the team.
 		w.AllowanceSeats, w.AllowancePerSeatBytes = int(policy.seats), s.throttle.TeamPerSeatBytes
-		w.RelayIncludedBytes *= policy.seats
 	}
 	w.AllowanceBytes = nil
 	var allowance sql.NullInt64

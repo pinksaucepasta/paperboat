@@ -64,8 +64,8 @@ func TestTeamAllowanceIsPerSeatPooledPostgres(t *testing.T) {
 	}
 	const perSeat = 100_000_000_000
 	w := overview()
-	if w.AllowanceBytes == nil || *w.AllowanceBytes != 4*perSeat || w.AllowanceSeats != 4 || w.AllowancePerSeatBytes != perSeat || w.RelayIncludedBytes != 4*fair.RelayIncludedBytes {
-		t.Fatalf("four seats: allowance %v, seats %d, per seat %d, relay %d; want %d, 4, %d, %d", w.AllowanceBytes, w.AllowanceSeats, w.AllowancePerSeatBytes, w.RelayIncludedBytes, 4*perSeat, perSeat, 4*fair.RelayIncludedBytes)
+	if w.AllowanceBytes == nil || *w.AllowanceBytes != 4*perSeat || w.AllowanceSeats != 4 || w.AllowancePerSeatBytes != perSeat {
+		t.Fatalf("four seats: allowance %v, seats %d, per seat %d; want %d, 4, %d", w.AllowanceBytes, w.AllowanceSeats, w.AllowancePerSeatBytes, 4*perSeat, perSeat)
 	}
 	// A seat change mid-period applies at once, to the overview and to the period row every other reader uses.
 	exec(`UPDATE paperboat.billing_workspaces SET quantity=6 WHERE id=$1`, workspace)

@@ -11,9 +11,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
-// A Paperboat-operated relay's lease carries the account speed and names the connected accounts that carried their plan's included
-// relay bytes this month, each with its plan's slower speed (Free 5 GB then 512 kbit/s, paid 100 GB then 1 Mbit/s); a customer-owned
-// relay gets neither, and nothing is listed without the gate.
+// A Paperboat-operated relay's lease carries the account speed and names the connected accounts whose workspace pool (edge and relay
+// traffic together) is used up this month, each with its plan's slower speed (Free 512 kbit/s, paid 1 Mbit/s); a customer-owned relay
+// gets neither, and nothing is listed without the gate.
 func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := t.Context()
@@ -31,7 +31,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, u := range users {
-			_, _ = store.SQL().ExecContext(bg, `DELETE FROM resource_bandwidth_events WHERE actor_account_id=$1`, u)
+			_, _ = store.SQL().ExecContext(bg, `DELETE FROM billing_workspace_usage_periods WHERE workspace_id='personal:'||$1`, u)
 			_, _ = store.SQL().ExecContext(bg, `DELETE FROM billing_workspaces WHERE id='personal:'||$1`, u)
 			_, _ = store.SQL().ExecContext(bg, `DELETE FROM users WHERE id=$1`, u)
 		}
@@ -51,15 +51,13 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	}
 	runtimeHash := sha256.Sum256([]byte(x))
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,$2,$3,'ciphertext','own relay','relay','account',$4,$1,true)`, own, make([]byte, 32), runtimeHash[:], free12)
-	event := func(user, key string, bytes int64, end time.Time) {
-		exec(`INSERT INTO resource_bandwidth_events(operation_id,workspace_id,resource_kind,resource_id,resource_name,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,actor_account_id)
- VALUES($1,'personal:'||$2,'machine','m','m','m','m','relay','managed',$3,'n',$4,0,$5,$5,$2)`, key+x, user, node, bytes, end)
+	period := func(user string, included, consumed int64, paid bool) {
+		exec(`INSERT INTO billing_workspace_usage_periods(workspace_id,period_start,period_end,included_bytes,consumed_bytes,paid,budget_start) VALUES('personal:'||$1,$2,$3,$4,$5,$6,$2)`, user, now.Add(-time.Hour), now.AddDate(0, 1, 0), included, consumed, paid)
 	}
-	event(free12, "f12", 7_000_000_000, now.Add(-time.Minute))
-	event(paid60, "p60", 60_000_000_000, now.Add(-time.Minute))
-	event(paid120, "p120", 120_000_000_000, now.Add(-time.Minute))
-	event(light, "l1", 1_000_000_000, now.Add(-time.Minute))
-	event(light, "l0", 90_000_000_000, now.AddDate(0, -1, -1)) // last month's bytes do not count
+	period(free12, 5_000_000_000, 7_000_000_000, false)     // out of its 5 GB pool
+	period(paid60, 100_000_000_000, 60_000_000_000, true)   // under its pool
+	period(paid120, 100_000_000_000, 120_000_000_000, true) // out of its 100 GB pool
+	period(light, 5_000_000_000, 1_000_000_000, false)
 
 	observe := func(service *EdgeService, id string, accounts ...string) relayNodeLeaseDocument {
 		t.Helper()
@@ -81,15 +79,15 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	}
 	gated := NewEdgeService(store, "relay-observe-test-credential-0123456789")
 	gated.SetFairUse(fair)
-	gate := bandwidthgate.NewRelayVolume(store, fair.RelayFreeIncludedBytes, fair.RelayIncludedBytes)
+	gate := bandwidthgate.NewRelayPool(store)
 	gate.SetLookupTimeout(5 * time.Second) // this test database is slower than production
-	gated.SetRelayVolumeGate(gate)
+	gated.SetRelayPoolGate(gate)
 	got := map[string]float64{}
 	for _, a := range observe(gated, node, users[:4]...).AccountSpeeds {
 		got[a.Account] = a.Mbit
 	}
 	if len(got) != 2 || got[free12] != 0.512 || got[paid120] != 1 {
-		t.Fatalf("slow accounts = %v, want %s at 0.512 (7 of 5 GB, Free) and %s at 1 (120 of 100 GB, paid); %s is under its plan's amount", got, free12, paid120, paid60)
+		t.Fatalf("slow accounts = %v, want %s at 0.512 (7 of 5 GB, Free pool) and %s at 1 (120 of 100 GB, paid pool); %s is under its plan's amount", got, free12, paid120, paid60)
 	}
 	if out := observe(gated, own, users[:4]...); out.AccountMbit != 0 || len(out.AccountSpeeds) != 0 {
 		t.Fatalf("a customer-owned relay was given limits: %+v", out)
@@ -99,7 +97,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	// slower one), so the shares add up to it; the customer-owned relay does not count as one of them.
 	shared := NewEdgeService(store, "relay-observe-test-credential-0123456789")
 	shared.SetFairUse(fair)
-	shared.SetRelayVolumeGate(gate)
+	shared.SetRelayPoolGate(gate)
 	observe(shared, node2, both, paid120)
 	observe(shared, own, both)
 	shared.relayCountsAt = time.Time{} // the relay counts are cached for a few seconds; read them again
