@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from unittest import mock
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('pr_checks', Path(__file__).with_name('pr-checks.py'))
@@ -32,13 +33,16 @@ class AffectedTests(unittest.TestCase):
 
 
 class DatabaseTests(unittest.TestCase):
-    def test_database_dsn_keeps_the_server_and_changes_the_name(self):
-        self.assertEqual(checks.database_dsn('postgres://u:p@localhost:5432/paperboat_test?sslmode=disable', 'paperboat_pr_3'),
-                         'postgres://u:p@localhost:5432/paperboat_pr_3?sslmode=disable')
-
-    def test_database_names_satisfy_the_servers_isolation_guard(self):
-        for index in (0, 7, 31):
-            self.assertTrue(checks.database_name(index).endswith('_test'))
+    def test_database_modules_run_their_tests_through_the_pg_test_exec_wrapper(self):
+        for module, dsn, wrapped in (('server', 'postgres://x/lane_test', True), ('cli', 'postgres://x/lane_test', False),
+                                     ('server', None, False)):
+            with self.subTest(module=module, dsn=dsn), mock.patch.object(checks.subprocess, 'run') as run, \
+                    mock.patch.dict(checks.os.environ, {'PAPERBOAT_TEST_DATABASE_DSN': dsn} if dsn else {}, clear=not dsn):
+                checks.test_packages(module, ['p/a'])
+                command = run.call_args.args[0]
+                self.assertEqual(['-exec', str(checks.ROOT / 'tools/pg-test-exec.sh')] if wrapped else [],
+                                 command[command.index('-count=1') + 1:-1])
+                self.assertEqual(command[-1], 'p/a')
 
     def test_fast_mode_selects_only_the_changed_packages(self):
         packages = {

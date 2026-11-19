@@ -44,12 +44,12 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: paperboat_test
+          POSTGRES_DB: lane_test
         ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/paperboat_test?sslmode=disable
+      PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

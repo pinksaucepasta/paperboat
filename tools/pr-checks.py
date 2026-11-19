@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 MODULES = ('shared', 'server', 'cli', 'relay', 'edge', 'helper')
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,31 +43,13 @@ def affected(packages, paths, transitive=True):
     return sorted(selected.intersection(packages))
 
 
-def database_dsn(dsn, name):
-    """The same server with another database name."""
-    parts = urlsplit(dsn)
-    return urlunsplit(parts._replace(path='/' + name))
-
-
-def database_name(index):
-    """The server's test guards refuse any database whose name does not end in _test (auth_integration_test.go, abusereports)."""
-    return f'paperboat_pr_{index}_test'
-
-
 def test_packages(module, names):
-    """-race tests. Every package of a database module gets its own fresh database, as the lane-test workflow and
-    tools/remote-test.sh do: packages sharing one database truncate each other's rows (deadlocks, foreign key errors)."""
+    """-race tests. A database module's packages each get a fresh database from tools/pg-test-exec.sh (shared with
+    server-ci.yml, lane-test.yml and tools/remote-test.sh): packages sharing one database truncate each other's rows."""
     command = ['go', 'test', '-race', '-count=1']
-    dsn = os.environ.get('PAPERBOAT_TEST_DATABASE_DSN')
-    if not dsn or module not in DATABASE_MODULES:
-        subprocess.run(command + names, cwd=ROOT / module, check=True, timeout=1200)
-        return
-    for index, name in enumerate(names):
-        database = database_name(index)
-        subprocess.run(['psql', database_dsn(dsn, 'postgres').split('?')[0], '-qv', 'ON_ERROR_STOP=1',
-                        '-c', f'drop database if exists "{database}" with (force)', '-c', f'create database "{database}"'], check=True, timeout=120)
-        subprocess.run(command + [name], cwd=ROOT / module, check=True, timeout=1200,
-                       env=dict(os.environ, PAPERBOAT_TEST_DATABASE_DSN=database_dsn(dsn, database)))
+    if os.environ.get('PAPERBOAT_TEST_DATABASE_DSN') and module in DATABASE_MODULES:
+        command += ['-exec', str(ROOT / 'tools/pg-test-exec.sh')]
+    subprocess.run(command + names, cwd=ROOT / module, check=True, timeout=1200)
 
 
 def output(*argv, cwd=ROOT):

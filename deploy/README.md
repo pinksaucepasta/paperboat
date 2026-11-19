@@ -441,7 +441,7 @@ Required checks are `Go format and vet`, `Repository policy checks`, `Console li
 integration build, including preceding queue entries; merge limits do not combine those builds
 or provide bors-style batching. The heavy checks run only on the queue's `merge_group` event:
 `Targeted Go checks` (vet and -race tests of the changed packages and their importers, every package on its own fresh
-`paperboat_pr_<n>_test` PostgreSQL database; the group's diff selects the packages) and `End-to-end core` (the real
+PostgreSQL database via `tools/pg-test-exec.sh`; the group's diff selects the packages) and `End-to-end core` (the real
 server, edge, relay and two daemons: exec, ssh, send, preview, tunnel, restarts; green three times in a row before it was
 required). On a pull request those two jobs are skipped, which GitHub reports as passed, so a PR can enter the queue;
 pull requests run only the fast `Go format and vet` (gofmt of the changed files, go vet of the changed
