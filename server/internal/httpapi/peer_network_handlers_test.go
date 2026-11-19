@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 )
 
 type peerNetworkStub struct {
@@ -80,6 +82,27 @@ func TestPeerNetworkConfigDerivesIdentityAndBindsLiveScopes(t *testing.T) {
 	peerNetworkConfig(stub).ServeHTTP(w, home)
 	if w.Code != http.StatusOK || stub.config.HomeRelay != "relay_1" {
 		t.Fatalf("the CLI route dropped home_relay: status=%d config=%+v", w.Code, stub.config)
+	}
+	// The capability version the client sent reaches the build of the signed document, on both routes (the document
+	// omits fields the client's version predates), and a client that sent none is 0.
+	for _, want := range []int{0, 1, capver.Version} {
+		cli := httptest.NewRequest(http.MethodPost, "/v1/peer-network/config", bytes.NewReader(body))
+		if want != 0 {
+			cli.Header.Set(capver.Header, strconv.Itoa(want))
+		}
+		cli = cli.WithContext(context.WithValue(cli.Context(), authContextKey{}, principal{User: auth.User{ID: "account_2"}, Client: &auth.ClientPrincipal{SessionID: "cli_2"}}))
+		peerNetworkConfig(stub).ServeHTTP(httptest.NewRecorder(), cli)
+		got := stub.config.CapVersion
+		machine := httptest.NewRequest(http.MethodPost, "/v1/machine-peer-network/config", bytes.NewReader(body))
+		machine.Header.Set("Authorization", "Bearer machine-token")
+		machine.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
+		if want != 0 {
+			machine.Header.Set(capver.Header, strconv.Itoa(want))
+		}
+		machinePeerNetworkConfig(stub, verifier, nil).ServeHTTP(httptest.NewRecorder(), machine)
+		if got != want || stub.config.CapVersion != want {
+			t.Fatalf("capability version %d reached the service as cli=%d machine=%d", want, got, stub.config.CapVersion)
+		}
 	}
 	// Admitted certificates are gone (no client sent them, and the claim they produced was refused by clients and
 	// relays); a request naming them is invalid like any unknown field.

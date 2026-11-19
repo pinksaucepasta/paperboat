@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
@@ -226,7 +227,7 @@ func TestEveryConfigurationTheServerBuildsIsAcceptedByClients(t *testing.T) {
 			peer.Endpoints = []string{"203.0.113.7:41641"}
 			peers = append(peers, networkPeer{Identity: peer, Scopes: emittedConfigurationScopes(self, peer, now.Add(time.Minute).Unix())})
 		}
-		token, err := signer.SignNetworkConfiguration(configurationClaims("https://api.example.test", now, now.Add(time.Minute), 3, self, peers))
+		token, err := signer.SignNetworkConfiguration(configurationClaims("https://api.example.test", now, now.Add(time.Minute), 3, self, peers, capver.Version))
 		if err != nil {
 			t.Fatalf("%s: mint refused a configuration the server built: %v", role, err)
 		}

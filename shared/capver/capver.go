@@ -12,7 +12,8 @@ import (
 // starts to send something new. It is never lowered or reused. Log each bump here:
 //
 //	1: 2026-11-18, the launch release.
-const Version = 1
+//	2: 2026-11-19, signed peer documents carry home_relay (peernetwork minCapVersion); a build that sends 1 does not decode it.
+const Version = 2
 
 // Header carries Version. A request without it comes from a build older than this package.
 const Header = "X-Paperboat-Capability-Version"

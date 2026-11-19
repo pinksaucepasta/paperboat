@@ -121,7 +121,7 @@ func publishedEndpoints(raw []byte) ([]string, error) {
 // first configuration: a dial right after an engine starts goes direct when no relay is usable yet (F20-02/04). A peer
 // whose identity receivers would refuse (peernetwork.Binding.Valid, e.g. no disco key yet) is left out, so one such
 // peer never fails the whole configuration.
-func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer) peernetwork.Configuration {
+func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer, capVersion int) peernetwork.Configuration {
 	out := peernetwork.Configuration{Version: 1, Issuer: issuer, Audience: peernetwork.ConfigurationAudience, IssuedAt: now.Unix(), ExpiresAt: expiry.Unix(), Generation: uint64(generation), Self: self.Binding, Peers: make([]peernetwork.Peer, 0, len(peers))}
 	for _, p := range peers {
 		if !p.Identity.Valid() {
@@ -132,5 +132,6 @@ func configurationClaims(issuer string, now, expiry time.Time, generation int64,
 	}
 	// Ordered by endpoint id, as a delta's receiver rebuilds it (peernetwork.ConfigurationDelta.Rebuild).
 	slices.SortFunc(out.Peers, func(a, b peernetwork.Peer) int { return strings.Compare(a.Identity.EndpointID, b.Identity.EndpointID) })
-	return out
+	// Before signing: a client strictly decodes, so it must not receive a field newer than its capability version.
+	return out.ForCapVersion(capVersion)
 }
