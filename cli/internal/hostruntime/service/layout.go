@@ -220,3 +220,19 @@ func withinForPlatform(platform, root, value string) bool {
 func pathpkgIsCleanAbsolute(value string) bool {
 	return path.IsAbs(value) && path.Clean(value) == value
 }
+
+// windowsServiceLabels are what the Services app and system dialogs show for a service. The service
+// name (the SCM key) stays PaperboatXxx; people see "Paperboat (<role>)".
+func windowsServiceLabels(kind string) (displayName, description string) {
+	switch kind {
+	case HostdKind:
+		return "Paperboat (supervisor)", "Paperboat stable host supervisor"
+	case CarrierKind:
+		return "Paperboat (carrier)", "Paperboat independent native carrier"
+	case UpdaterKind:
+		return "Paperboat (updater)", "Paperboat signed update service"
+	case DaemonKind:
+		return "Paperboat (daemon)", "Paperboat local daemon"
+	}
+	return "Paperboat (runtime)", "Paperboat host runtime"
+}

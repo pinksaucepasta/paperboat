@@ -72,6 +72,10 @@ if [ -e "$output" ] || [ -L "$output" ]; then
 fi
 
 ldflags="-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryDSN=$SENTRY_DSN -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryRelease=paperboat:$version -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$version -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=${GITHUB_SHA:-unknown} -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$server_url -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$release_url"
+# Windows dialogs read the program name from the version resource: write it with this release's version.
+if [ "$platform" = windows ]; then
+  go run ./tools/mkwinres -arch "$architecture" -out "cmd/pb/windows_manifest_windows_${architecture}.syso" -version "$version"
+fi
 CGO_ENABLED=0 GOOS="$platform" GOARCH="$architecture" go build \
   -buildvcs=false \
   -trimpath \

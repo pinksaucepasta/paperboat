@@ -273,3 +273,12 @@ func TestComponentControllerUsesStableRoleServiceNames(t *testing.T) {
 		t.Fatalf("windows controller=%T", controller)
 	}
 }
+
+func TestWindowsServiceLabelsNamePaperboat(t *testing.T) {
+	for _, kind := range []string{WorkerKind, HostKind, HostdKind, UpdaterKind, ConfigKind, DaemonKind, CarrierKind, SessionOwnerKind} {
+		display, description := windowsServiceLabels(kind)
+		if !strings.HasPrefix(display, "Paperboat (") || !strings.HasSuffix(display, ")") || !strings.HasPrefix(description, "Paperboat ") || strings.Contains(display, "pb") {
+			t.Errorf("kind %q: display=%q description=%q", kind, display, description)
+		}
+	}
+}

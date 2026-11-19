@@ -338,8 +338,12 @@ jobs:
           $env:GOARCH = 'amd64'
           if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
           $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
+          & go run ./tools/mkwinres -arch amd64 -out cmd/pb/windows_manifest_windows_amd64.syso -version $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Windows resource generation failed.' }
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
+          $info = (Get-Item $output).VersionInfo
+          if ($info.FileDescription -ne 'Paperboat' -or $info.ProductName -ne 'Paperboat' -or $info.OriginalFilename -ne 'pb.exe') { throw "pb.exe version info is not Paperboat: $($info.FileDescription) / $($info.ProductName) / $($info.OriginalFilename)" }
       # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
       - name: Installer and pb agree on this machine's host name
         shell: powershell
@@ -433,8 +437,12 @@ jobs:
           $env:GOARCH = 'arm64'
           if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
           $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/cli/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
+          & go run ./tools/mkwinres -arch arm64 -out cmd/pb/windows_manifest_windows_arm64.syso -version $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Windows resource generation failed.' }
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
+          $info = (Get-Item $output).VersionInfo
+          if ($info.FileDescription -ne 'Paperboat' -or $info.ProductName -ne 'Paperboat' -or $info.OriginalFilename -ne 'pb.exe') { throw "pb.exe version info is not Paperboat: $($info.FileDescription) / $($info.ProductName) / $($info.OriginalFilename)" }
       # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
       - name: Installer and pb agree on this machine's host name
         shell: powershell
