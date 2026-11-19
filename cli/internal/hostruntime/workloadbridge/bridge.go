@@ -22,6 +22,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/freeze"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
@@ -226,7 +227,7 @@ func (s *Server) handler() http.Handler {
 		if len(parts) == 2 && parts[0] == "exec" && parts[1] == "begin_update" {
 			requestTimeout = hostdproto.MaximumUpdateGateDuration
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		ctx, cancel := freeze.WithTimeout(r.Context(), requestTimeout)
 		defer cancel()
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 		body, err := io.ReadAll(r.Body)
@@ -481,7 +482,7 @@ func (c *Client) callOnce(ctx context.Context, kind, op string, body json.RawMes
 	if kind == "exec" && op == "begin_update" {
 		requestTimeout = hostdproto.MaximumUpdateGateDuration
 	}
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	ctx, cancel := freeze.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://terminal-owner/"+kind+"/"+op, bytes.NewReader(body))
 	if err != nil {
