@@ -2362,9 +2362,29 @@ const getControlUsageReceipt = `-- name: GetControlUsageReceipt :one
 SELECT operation_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, observed_bytes, delta_bytes, interval_start, interval_end, acknowledged_at, created_at, authority_id, workspace_id, disposition, actor_account_id FROM control_usage_receipts WHERE operation_id = $1
 `
 
-func (q *Queries) GetControlUsageReceipt(ctx context.Context, operationID string) (ControlUsageReceipt, error) {
+type GetControlUsageReceiptRow struct {
+	OperationID    string
+	EdgeNodeID     string
+	CounterEpoch   string
+	EnvironmentID  string
+	RouteID        string
+	RouteRevision  int64
+	Direction      string
+	ObservedBytes  int64
+	DeltaBytes     int64
+	IntervalStart  time.Time
+	IntervalEnd    time.Time
+	AcknowledgedAt sql.NullTime
+	CreatedAt      time.Time
+	AuthorityID    string
+	WorkspaceID    sql.NullString
+	Disposition    string
+	ActorAccountID sql.NullString
+}
+
+func (q *Queries) GetControlUsageReceipt(ctx context.Context, operationID string) (GetControlUsageReceiptRow, error) {
 	row := q.db.QueryRow(ctx, getControlUsageReceipt, operationID)
-	var i ControlUsageReceipt
+	var i GetControlUsageReceiptRow
 	err := row.Scan(
 		&i.OperationID,
 		&i.EdgeNodeID,
@@ -3001,7 +3021,27 @@ type InsertControlUsageReceiptParams struct {
 	IntervalEnd   time.Time
 }
 
-func (q *Queries) InsertControlUsageReceipt(ctx context.Context, arg InsertControlUsageReceiptParams) (ControlUsageReceipt, error) {
+type InsertControlUsageReceiptRow struct {
+	OperationID    string
+	EdgeNodeID     string
+	CounterEpoch   string
+	EnvironmentID  string
+	RouteID        string
+	RouteRevision  int64
+	Direction      string
+	ObservedBytes  int64
+	DeltaBytes     int64
+	IntervalStart  time.Time
+	IntervalEnd    time.Time
+	AcknowledgedAt sql.NullTime
+	CreatedAt      time.Time
+	AuthorityID    string
+	WorkspaceID    sql.NullString
+	Disposition    string
+	ActorAccountID sql.NullString
+}
+
+func (q *Queries) InsertControlUsageReceipt(ctx context.Context, arg InsertControlUsageReceiptParams) (InsertControlUsageReceiptRow, error) {
 	row := q.db.QueryRow(ctx, insertControlUsageReceipt,
 		arg.AuthorityID,
 		arg.OperationID,
@@ -3016,7 +3056,7 @@ func (q *Queries) InsertControlUsageReceipt(ctx context.Context, arg InsertContr
 		arg.IntervalStart,
 		arg.IntervalEnd,
 	)
-	var i ControlUsageReceipt
+	var i InsertControlUsageReceiptRow
 	err := row.Scan(
 		&i.OperationID,
 		&i.EdgeNodeID,

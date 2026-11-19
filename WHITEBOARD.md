@@ -359,3 +359,8 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 - The form needs a phone number: use a forwarding number (e.g. Google Voice), never a personal mobile. The site shows none.
 - Stripe requires a public support phone (shown on receipts) and will not remove it: swap it for the same forwarding number.
 - Amend the designation when the company is incorporated.
+
+## Next server deploy after 2026-11-19: drop control_usage_receipts.quota_exhausted
+The throttle work stopped reading and writing the column (receipt queries name their columns without it) but the migration that drops it
+must ship one deploy later, because the servers of the first deploy still write it (AGENTS.md: a column the previous server reads or writes is
+dropped one deploy after). Migration to add then: `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.control_usage_receipts DROP COLUMN quota_exhausted;` (forward-only Down).
