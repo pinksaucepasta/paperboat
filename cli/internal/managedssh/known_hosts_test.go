@@ -42,3 +42,23 @@ func TestFormatKnownHostsRejectsUnsafeHostAndDuplicateKeys(t *testing.T) {
 		t.Fatal("duplicate host key was accepted")
 	}
 }
+
+// ssh looks a HostKeyAlias up as the alias alone: a [host]:port line never matches it, so the Windows loopback
+// connection to a machine whose sshd is not on port 22 (its own managed port, any Windows machine) failed host
+// key verification (victus, 2026-11-19).
+func TestFormatKnownHostsForAliasIgnoresThePort(t *testing.T) {
+	line := authorizedPublicLine(t)
+	public, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := HostPublicKey{Fingerprint: sha256.Sum256(public.Marshal()), Algorithm: public.Type(), PublicKey: line}
+	got, err := FormatKnownHostsForAlias("Machine.MACHINES.EXAMPLE.TEST", 38222, []HostPublicKey{key})
+	if err != nil || !strings.HasPrefix(string(got), "machine.machines.example.test ssh-ed25519 ") {
+		t.Fatalf("alias known hosts=%q error=%v", got, err)
+	}
+	key.Fingerprint[0] ^= 0xff
+	if _, err := FormatKnownHostsForAlias("machine.machines.example.test", 38222, []HostPublicKey{key}); err == nil {
+		t.Fatal("mismatched host fingerprint was accepted")
+	}
+}

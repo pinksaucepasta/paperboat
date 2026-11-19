@@ -86,8 +86,9 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 	action := elevation.ActionInstall
 	if existing, loadErr := hostinstall.LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
 		if !existing.EnrollmentPending {
-			request.Artifact = existing.Artifact
-			request.Artifact.Version = source.Version
+			// The update target describes the supplied build, not the installed one: a dev (Custom) install stored none, and
+			// an Official build installed over it failed "artifact descriptor: pb TUF target descriptor is invalid".
+			request.Artifact = hostinstall.InstallationTarget(source)
 			request.Home = home
 			request.Path = os.Getenv("PATH")
 			request.StateRoot = existing.StateRoot

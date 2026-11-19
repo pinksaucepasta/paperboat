@@ -27,7 +27,7 @@ func TestWindowsLoopbackOpenSSHArgumentsOfferTheManagedIdentity(t *testing.T) {
 		"-o", "ProxyCommand=none",
 		"-o", "Hostname=127.0.0.1",
 		"-o", "HostKeyAlias=hn.local.example.test",
-		"-o", `KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.local.example.test --port 2222`,
+		"-o", `KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.local.example.test --port 2222 --alias-lines`,
 		"-p", "49152",
 		"root@hn.local.example.test",
 		"/usr/bin/printf", "VICTUS_PB_SSH_OK",
@@ -47,7 +47,7 @@ func TestWindowsLoopbackOpenSSHArgumentsKeepDefaultRegisteredPortSeparateFromLoo
 	got := windowsLoopbackOpenSSHArguments(destination, 50443, `C:\Program Files\Paperboat\pb.exe`, nil, []string{"must-not-appear"}, false)
 	joined := strings.Join(got, "\n")
 	for _, required := range []string{
-		`KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.local.example.test --port 22`,
+		`KnownHostsCommand="C:\Program Files\Paperboat\pb.exe" __ssh-known-hosts --host hn.local.example.test --port 22 --alias-lines`,
 		"HostKeyAlias=hn.local.example.test",
 		"ProxyCommand=none",
 		"Hostname=127.0.0.1",
