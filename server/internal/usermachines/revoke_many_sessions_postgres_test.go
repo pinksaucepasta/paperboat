@@ -57,8 +57,8 @@ SELECT 'many_m_'||g||'_'||$2,$1,'many_env_'||g||'_'||$2,'m'||g,'linux','amd64','
 SELECT sha256(convert_to('q'||e.id,'UTF8')),$1,e.id,e.role,1,1,decode(repeat('00',200),'hex'),sha256(convert_to('k'||e.id,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',sha256(convert_to('k'||e.id,'UTF8'))
 FROM (SELECT 'many_m_'||g||'_'||$2 AS id,'machine' AS role FROM generate_series(0,87) g UNION ALL SELECT $3,'cli') e`, user, x, cli)
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-SELECT $1,'many_m_'||g||'_'||$2,'machine','many_m_'||g||'_'||$2,1,1,1,sha256(convert_to('wg'||g||$2,'UTF8')),sha256(convert_to('q'||'many_m_'||g||'_'||$2,'UTF8')),('100.71.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series(0,87) g
-UNION ALL SELECT $1,$3,'cli',NULL,1,0,1,sha256(convert_to('wgcli'||$2,'UTF8')),sha256(convert_to('q'||$3,'UTF8')),'100.71.9.1'::inet,now(),now()`, user, x, cli)
+SELECT $1,'many_m_'||g||'_'||$2,'machine','many_m_'||g||'_'||$2,1,1,1,sha256(convert_to('wg'||g||$2,'UTF8')),sha256(convert_to('q'||'many_m_'||g||'_'||$2,'UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now() FROM generate_series(0,87) g
+UNION ALL SELECT $1,$3,'cli',NULL,1,0,1,sha256(convert_to('wgcli'||$2,'UTF8')),sha256(convert_to('q'||$3,'UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now()`, user, x, cli)
 	// Inserted through the normal triggers (each gets its usage authority). Machine 0: 19,900 expired + 100 live.
 	sessions := func(m string, from, to int, expires string) {
 		exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,state,helper_terminal_session_id,capabilities,operation_id)

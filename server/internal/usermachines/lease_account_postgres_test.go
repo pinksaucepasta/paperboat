@@ -27,7 +27,7 @@ VALUES($1,$2,$1,'shared-host','linux','amd64','/w','online','occupied',true,$3)`
 VALUES(sha256(convert_to($1,'UTF8')),$2,$1,'machine',1,1,decode(repeat('00',200),'hex'),sha256(convert_to('q'||$1,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',sha256(convert_to('s'||$1,'UTF8')))`, machine, owner)
 	f.exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
 wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to('w'||$2,'UTF8')),sha256(convert_to($2,'UTF8')),'100.126.255.253',now(),now())`, owner, machine)
+VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to('w'||$2,'UTF8')),sha256(convert_to($2,'UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, owner, machine)
 	// Another machine of the admin's own takes the admin's slot 2, so the viewer's lease is a different number
 	// than the owner's.
 	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)

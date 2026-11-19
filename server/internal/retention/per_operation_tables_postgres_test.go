@@ -72,7 +72,7 @@ FROM (VALUES('_old',now()-interval '31 days'),('_named',now()-interval '31 days'
 VALUES($1||'_revocation_old',$1,sha256(convert_to($1||'_old','UTF8')),1,'endpoint_removed',now()-interval '31 days')`, user)
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
 wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-VALUES($1,$1||'_named','cli',NULL,1,0,1,sha256(convert_to('w'||$1,'UTF8')),sha256(convert_to($1||'_named','UTF8')),'100.127.255.254',now(),now())`, user)
+VALUES($1,$1||'_named','cli',NULL,1,0,1,sha256(convert_to('w'||$1,'UTF8')),sha256(convert_to($1||'_named','UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, user)
 	exec(`INSERT INTO paperboat.peer_mesh_accounts(account_id) VALUES($1)`, user)
 	exec(`INSERT INTO paperboat.peer_mesh_log(account_id,mesh_seq,endpoint_id,op,entry,recorded_at) VALUES
  ($1,1,'a','add','{}',now()-interval '3 hours'),($1,2,'a','update','{}',now()-interval '2 hours'),

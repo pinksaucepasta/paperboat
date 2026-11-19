@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"testing"
@@ -67,12 +66,11 @@ VALUES($1,$2,'pb','laptop','cli','linux',ARRAY['machines:connect'],'active',now(
 	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
 SELECT sha256(convert_to('q'||e,'UTF8')),$1,e,r,1,1,decode(repeat('00',200),'hex'),sha256(convert_to('k'||e,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',
  sha256(convert_to('s'||e,'UTF8')) FROM (VALUES($2,'machine'),($3,'cli')) v(e,r)`, user, machine, cli)
-	net := sha256.Sum256([]byte(s))
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
 wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to($2,'UTF8')),sha256(convert_to('q'||$2,'UTF8')),('100.'||(64+$4::int)||'.'||$5::int||'.1')::inet,now(),now()),
- ($1,$3,'cli',NULL,1,0,1,sha256(convert_to($3,'UTF8')),sha256(convert_to('q'||$3,'UTF8')),('100.'||(64+$4::int)||'.'||$5::int||'.2')::inet,now(),now())`,
-		user, machine, cli, int(net[0])%64, int(net[1]))
+VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to($2,'UTF8')),sha256(convert_to('q'||$2,'UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now()),
+ ($1,$3,'cli',NULL,1,0,1,sha256(convert_to($3,'UTF8')),sha256(convert_to('q'||$3,'UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`,
+		user, machine, cli)
 	generations := func() (int64, int64) {
 		return value(`SELECT config_generation FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, user, machine),
 			value(`SELECT config_generation FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, user, cli)

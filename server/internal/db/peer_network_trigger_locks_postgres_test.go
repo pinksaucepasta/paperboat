@@ -55,7 +55,7 @@ SELECT $1||'_access_'||g,CASE WHEN g%40=0 THEN $1 ELSE $1||'_'||(g%40) END,$2,CA
  CASE WHEN g%10=0 THEN 'active' ELSE 'revoked' END,CASE WHEN g%10=0 THEN NULL ELSE now() END,CASE WHEN g%10=0 THEN NULL ELSE 'expired' END,
  now()+interval '1 hour',ARRAY['terminal'],'control_plane_signed' FROM generate_series(1,600) g`, machine, user, env, cli)
 	exec(`ANALYZE paperboat.user_machine_access_sessions`)
-	for i, endpoint := range []struct{ id, role string }{{machine, "machine"}, {cli + "_0", "cli"}} {
+	for _, endpoint := range []struct{ id, role string }{{machine, "machine"}, {cli + "_0", "cli"}} {
 		fingerprint := sha256.Sum256([]byte(endpoint.id))
 		key := sha256.Sum256([]byte("key" + endpoint.id))
 		exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
@@ -65,8 +65,8 @@ VALUES($1,$2,$3,$4,1,1,$5,$6,now()-interval '1 minute',now()+interval '1 day','k
 			machineID, machineGeneration = endpoint.id, 1
 		}
 		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
-wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,$3,$4,1,$5,1,$6,$7,$8::inet,now(),now())`,
-			user, endpoint.id, endpoint.role, machineID, machineGeneration, key[:], fingerprint[:], fmt.Sprintf("100.127.%d.%d", time.Now().UnixNano()%250, i+1))
+wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,$3,$4,1,$5,1,$6,$7,('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`,
+			user, endpoint.id, endpoint.role, machineID, machineGeneration, key[:], fingerprint[:])
 	}
 
 	statements := []struct {

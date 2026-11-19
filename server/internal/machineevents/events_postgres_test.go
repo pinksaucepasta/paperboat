@@ -296,7 +296,7 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
  VALUES(decode(repeat('02',32),'hex'),$1,$2,'machine',1,1,decode(repeat('aa',200),'hex'),decode(repeat('bb',32),'hex'),now(),now()+interval '1 day','key_01',decode(repeat('cc',32),'hex'))`, account, server)
 	expect("peer identity", moved(TopicPeerNetwork, all, func() {
-		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,'machine',$2,1,1,1,decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'100.64.0.9',now(),now())`, account, server)
+		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,'machine',$2,1,1,1,decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, account, server)
 	}), map[string]bool{laptop: true, server: true, outsider: false})
 	expect("peer key rotation", moved(TopicPeerNetwork, all, func() {
 		exec(`UPDATE paperboat.peer_network_identities SET wireguard_public_key=decode(repeat('03',32),'hex'),key_generation=2 WHERE endpoint_id=$1`, server)
