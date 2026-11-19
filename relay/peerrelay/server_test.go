@@ -77,9 +77,18 @@ func signGrant(t *testing.T, priv ed25519.PrivateKey, g derpquic.Grant) string {
 	body := h + "." + base64.RawURLEncoding.EncodeToString(b)
 	return body + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(body)))
 }
+
+// waitBound bounds every wait for something that must happen: a wait returns the moment its condition holds, so a
+// generous bound costs nothing when the machine is healthy and keeps a loaded CI runner from failing a correct run.
+const waitBound = 30 * time.Second
+
+// expiryHeadroom is how far ahead a test grant that must expire mid-test is set. Grants carry Unix seconds, so the
+// time left to set up before expiry is between headroom-1 s and headroom: it must outlast a setup on a loaded runner.
+const expiryHeadroom = 6 * time.Second
+
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
-	until := time.Now().Add(3 * time.Second)
+	until := time.Now().Add(waitBound)
 	for !condition() {
 		if time.Now().After(until) {
 			t.Fatal("condition did not become true")
@@ -137,7 +146,7 @@ func newFixture(t *testing.T, mutate func(*derpquic.Grant, *derpquic.Grant)) *te
 		f.server.Close()
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(waitBound):
 			t.Error("DERP server did not stop")
 		}
 		f.server.Wait()
@@ -162,7 +171,7 @@ func newFixture(t *testing.T, mutate func(*derpquic.Grant, *derpquic.Grant)) *te
 		token := signGrant(t, priv, g)
 		c := derpquic.NewClient(derpquic.ClientConfig{Address: socket.LocalAddr().String(), Namespace: namespace, GenerationDisco: disco, TLS: &tls.Config{RootCAs: roots, ServerName: "localhost", Certificates: []tls.Certificate{cert}}, Credential: func(context.Context) (string, error) { return token, nil }})
 		t.Cleanup(func() { c.Close() })
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), waitBound)
 		defer cancel()
 		if e := c.Connect(ctx); e != nil {
 			t.Fatal(e)
@@ -220,7 +229,7 @@ func (f *testFixture) allocate(generation uint32) *disco.AllocateUDPRelayEndpoin
 			f.t.Fatal(r.err)
 		}
 		received = r.packet
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitBound):
 		f.a.Close()
 		f.t.Fatal("allocation response timed out")
 	}
@@ -279,7 +288,7 @@ func (c *udpClient) send(t *testing.T, control bool, b []byte) {
 }
 func (c *udpClient) read(t *testing.T) []byte {
 	t.Helper()
-	c.conn.SetReadDeadline(time.Now().Add(time.Second))
+	c.conn.SetReadDeadline(time.Now().Add(waitBound))
 	b := make([]byte, 4096)
 	n, e := c.conn.Read(b)
 	if e != nil {
@@ -433,7 +442,7 @@ func TestAllocationDeniedSignedBindings(t *testing.T) {
 	}
 }
 func TestAllocationExpiryLifetimeAndRateBound(t *testing.T) {
-	f := newFixture(t, func(a, b *derpquic.Grant) { b.ExpiresAt = time.Now().Add(2 * time.Second).Unix() })
+	f := newFixture(t, func(a, b *derpquic.Grant) { b.ExpiresAt = time.Now().Add(expiryHeadroom).Unix() })
 	// The bound is the grant's remaining time when the request was made; measuring it after the
 	// answer made the check depend on the round trip (flaky on a loaded host, with or without load).
 	remaining := time.Until(time.Unix(f.gb.ExpiresAt, 0))
@@ -525,7 +534,7 @@ func TestAllocationReplyFencedWhenOtherPeerRevoked(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("handler did not produce allocation")
 	}
 	if !f.relay.authorizePacket(f.da.Public(), f.db.Public()) {
@@ -549,7 +558,7 @@ func TestAllocationReplyFencedWhenOtherPeerRevoked(t *testing.T) {
 	f.a.Close()
 	select {
 	case <-received:
-	case <-time.After(time.Second):
+	case <-time.After(waitBound):
 		t.Fatal("pending receive did not close")
 	}
 }
@@ -558,7 +567,7 @@ func TestDrainRejectsAllocationWhileExistingUDPContinues(t *testing.T) {
 	f := newFixture(t, nil)
 	response := f.allocate(1)
 	a, b := f.bound(response)
-	f.server.Drain(time.Now().Add(2 * time.Second))
+	f.server.Drain(time.Now().Add(time.Minute)) // never reached: the test asserts what holds until the deadline
 	before := f.server.Snapshot().Dropped
 	payload := allocationMessage(f.da, f.config.DiscoPrivate.Public(), f.da.Public(), f.db.Public(), 2)
 	if err := f.a.SendControl(f.service, payload); err != nil {
@@ -581,8 +590,8 @@ func TestUDPAllocationSurvivesDERPReconnect(t *testing.T) {
 	a, b := f.bound(first)
 	payload := bytes.Repeat([]byte{4}, 1312)
 	f.a.Close()
+	// The relay forgets the closed carrier before it counts one connection fewer; nothing else happens on disconnect.
 	waitFor(t, func() bool { return f.server.Snapshot().Connections == 1 })
-	time.Sleep(350 * time.Millisecond)
 	a.send(t, false, payload)
 	if got := b.read(t); !bytes.Equal(got, payload) {
 		t.Fatal("data changed during DERP disconnect")
@@ -653,7 +662,7 @@ func TestUDPAllocationFencedByChangedAuthority(t *testing.T) {
 func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 	for _, retained := range []bool{false, true} {
 		t.Run(fmt.Sprintf("other_live_scope_%t", retained), func(t *testing.T) {
-			short := time.Now().Unix() + 3
+			short := time.Now().Add(expiryHeadroom).Unix()
 			f := newFixture(t, func(a, b *derpquic.Grant) {
 				a.Memberships[0].ExpiresAt = short
 				b.Memberships[0].ExpiresAt = short + 1
@@ -688,7 +697,7 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 			if !bytes.Equal(b.read(t), payload) {
 				t.Fatal("authorized payload changed")
 			}
-			time.Sleep(time.Until(time.Unix(short, 0)) + 20*time.Millisecond)
+			waitFor(t, func() bool { return time.Now().Unix() >= short })
 			if !retained {
 				if _, ok := lease.Valid(); ok {
 					t.Fatal("expired-only pair retained authority")
