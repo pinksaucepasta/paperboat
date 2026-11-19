@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
+	"github.com/pinksaucepasta/paperboat/server/internal/keyedlock"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
@@ -82,25 +83,7 @@ func (s *Service) Attach(ctx context.Context, proof previewattachment.MachinePro
 		return runtimewire.HostAdmission{}, lockErr
 	}
 	defer unlock()
-	// The workspace's edge set exists before the attach transaction. Building it reads the latency samples of every
-	// machine of the workspace, which each attach writes for its own machine: inside the attach, a burst of first
-	// attaches (a new fleet, 50 machines at once) aborted each other until one ran out of retries. Here the builders
-	// race in one short transaction, and the attach only reads the set.
-	if err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var team sql.NullString
-		err := tx.QueryRow(ctx, `SELECT owner_team_id FROM user_machines WHERE id=$1 AND user_id=$2`, proof.MachineID, proof.UserID).Scan(&team)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // the attach transaction reports the machine
-		}
-		if err != nil {
-			return err
-		}
-		scope := edgeset.Scope{Kind: "account", ID: proof.UserID, Account: proof.UserID}
-		if team.Valid {
-			scope.Kind, scope.ID = "team", team.String
-		}
-		return edgeset.EnsureTx(ctx, tx, scope, time.Now().UTC())
-	}); err != nil {
+	if err := s.ensureEdgeSet(ctx, proof); err != nil {
 		return out, err
 	}
 	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -863,4 +846,35 @@ AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_ch
 ORDER BY CASE WHEN n.id=p.primary_node_id AND n.process_epoch=p.primary_process_epoch THEN 0
 WHEN n.id=p.secondary_node_id AND n.process_epoch=p.secondary_process_epoch THEN 1
 WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32`
+}
+
+// edgeSetBuilders lets one attach per workspace build the workspace's edge set; the rest wait in memory.
+var edgeSetBuilders keyedlock.Locks
+
+// ensureEdgeSet makes the workspace's edge set exist before the attach transaction, one builder at a time. Building it
+// reads every usable edge's eligibility, which the other machines' attaches write: inside the attach, and when every
+// attach of a new fleet built it at once, builders and attaches aborted each other (50 machines at once: 328
+// serialization failures, 214 of them on usableEdgesSQL, and one attach out of retries). The waiters then find the
+// set with one read.
+func (s *Service) ensureEdgeSet(ctx context.Context, proof previewattachment.MachineProof) error {
+	var team sql.NullString
+	err := s.DB.SQL().QueryRowContext(ctx, `SELECT owner_team_id FROM user_machines WHERE id=$1 AND user_id=$2`, proof.MachineID, proof.UserID).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // the attach transaction reports the machine
+	}
+	if err != nil {
+		return err
+	}
+	scope := edgeset.Scope{Kind: "account", ID: proof.UserID, Account: proof.UserID}
+	if team.Valid {
+		scope.Kind, scope.ID = "team", team.String
+	}
+	unlock, err := edgeSetBuilders.Lock(ctx, scope.Kind+":"+scope.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return edgeset.EnsureTx(ctx, tx, scope, time.Now().UTC())
+	})
 }
