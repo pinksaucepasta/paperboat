@@ -16,6 +16,7 @@ import {
   DatabaseIcon,
   EnvelopeSimpleIcon,
   HeartbeatIcon,
+  TreeStructureIcon,
   WarningIcon,
   UserIcon,
   UserGearIcon,
@@ -45,6 +46,7 @@ export const sections: Section[] = [
   { href: "/status", title: "Status page", icon: HeartbeatIcon, roles: ["admin", "operations"] },
   { href: "/infrastructure", title: "Servers", icon: HardDrivesIcon, roles: ["admin", "operations"] },
   { href: "/billing", title: "Billing", icon: CreditCardIcon, roles: ["admin", "support", "billing"] },
+  { href: "/fleet", title: "Fleet", icon: TreeStructureIcon, roles: ["admin", "operations"] },
   { href: "/releases", title: "Releases", icon: RocketLaunchIcon, roles: ["admin"] },
   { href: "/announcements", title: "Announcements", icon: MegaphoneIcon, roles: ["admin"] },
   { href: "/notices", title: "Customer notices", icon: EnvelopeSimpleIcon, roles: ["admin"] },
@@ -59,7 +61,7 @@ const groups: { label?: string; hrefs: Section["href"][] }[] = [
   { hrefs: ["/overview", "/analytics", "/money"] },
   { label: "Customers", hrefs: ["/users", "/teams", "/machines", "/billing"] },
   { label: "Support", hrefs: ["/support", "/sentry", "/abuse"] },
-  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/traffic", "/backups", "/status", "/releases"] },
+  { label: "Infrastructure", hrefs: ["/infrastructure", "/capacity", "/traffic", "/backups", "/status", "/fleet", "/releases"] },
   { label: "Admin", hrefs: ["/announcements", "/notices", "/ip-blocks", "/operators", "/audit"] },
 ]
 

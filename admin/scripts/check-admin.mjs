@@ -97,6 +97,12 @@ const world = {
   requests: [],
 }
 const ref = "support_11111111-2222-4333-8444-555555555555"
+// 120 offline machines, 24 in each "unseen for" bucket (the last bucket never reported), at the fixture's now of 2026-11-18T09:00Z.
+const fleetSeen = { under_1_day: "2026-11-18T06:00:00Z", "1_to_7_days": "2026-11-14T06:00:00Z", "7_to_30_days": "2026-11-01T06:00:00Z", over_30_days: "2026-09-20T06:00:00Z" }
+const fleetOffline = Array.from({ length: 120 }, (_, i) => {
+  const bucket = ["under_1_day", "1_to_7_days", "7_to_30_days", "over_30_days", "never_seen"][Math.floor(i / 24)]
+  return { id: `host-off-${String(i).padStart(3, "0")}`, alias: `box-${i}`, platform: ["linux", "darwin", "windows"][i % 3], architecture: i % 3 === 1 ? "arm64" : "amd64", version: i % 5 === 0 ? "dev-abc1234" : i % 2 ? "2026.11.5.1" : "2026.10.28.2", state: "offline", account_id: `usr_${String(i % 40).padStart(3, "0")}`, bucket, ...(fleetSeen[bucket] ? { last_seen_at: fleetSeen[bucket] } : {}) }
+})
 const page = (items, key, total, url) => {
   const after = url.searchParams.get("after") ?? ""
   const limit = Number(url.searchParams.get("limit") ?? 50)
@@ -382,6 +388,32 @@ function route(req, url) {
     const start = all.findIndex((id) => id > (url.searchParams.get("after") ?? "")) , limit = Number(url.searchParams.get("limit") ?? 50)
     const items = (start < 0 ? [] : all.slice(start, start + limit)).map((node_id) => ({ node_id, region: "hel", state: "ready", reporting: node_id !== `${kind}-03`, upload_bytes: node_id === `${kind}-03` ? 0 : 1e9, download_bytes: node_id === `${kind}-03` ? 0 : 2e9 }))
     return { period: url.searchParams.get("period"), kind, items, ...(start >= 0 && start + limit < all.length ? { next_after: items.at(-1).node_id } : {}) }
+  }
+  if (p === "/v1/admin/fleet/versions")
+    return {
+      observed_at: "2026-11-18T09:00:00Z", machines: 340, online: 301, users: 120, teams: 9, oldest_online_version: "2026.10.28.2",
+      platforms: [{ platform: "linux", machines: 200, online: 180, users: 90, teams: 6, oldest_online_version: "2026.10.28.2" }, { platform: "darwin", machines: 100, online: 90, users: 70, teams: 3, oldest_online_version: "2026.11.5.1" }, { platform: "windows", machines: 40, online: 31, users: 20, teams: 2, oldest_online_version: "2026.11.12.1" }],
+      versions: [{ platform: "darwin", version: "2026.11.12.1", machines: 70, online: 66, users: 55, teams: 3 }, { platform: "darwin", version: "2026.11.5.1", machines: 30, online: 24, users: 25, teams: 1 }, { platform: "linux", version: "2026.11.12.1", machines: 150, online: 140, users: 80, teams: 5 }, { platform: "linux", version: "2026.10.28.2", machines: 45, online: 40, users: 30, teams: 2 }, { platform: "linux", version: "dev-abc1234", machines: 5, online: 0, users: 2, teams: 0 }, { platform: "windows", version: "2026.11.12.1", machines: 40, online: 31, users: 20, teams: 2 }],
+      failures: [{ target_version: "2026.11.12.1", state: "failed", error_code: "signature_invalid", machines: 3 }, { target_version: "2026.11.12.1", state: "rolled_back", error_code: "health_check_failed", machines: 2 }],
+    }
+  if (p === "/v1/admin/fleet/rollouts")
+    return {
+      observed_at: "2026-11-18T09:00:00Z",
+      rollouts: [{
+        version: "2026.11.12.1", platforms: ["darwin", "linux", "windows"], started_at: "2026-11-12T04:30:00Z", action: "promote", rollout_percentage: 100, updated: 260, older: 75, other: 5, failed: 3, rolled_back: 2, offline_since_start: 29, offline_now: 6,
+        failures: [{ target_version: "2026.11.12.1", state: "failed", error_code: "signature_invalid", machines: 3 }, { target_version: "2026.11.12.1", state: "rolled_back", error_code: "health_check_failed", machines: 2 }],
+        series: [["2026-11-12", 4], ["2026-11-13", 31], ["2026-11-14", 52], ["2026-11-15", 61], ["2026-11-16", 70], ["2026-11-17", 76], ["2026-11-18", 78]].map(([day, share]) => ({ day, total: 335, updated: Math.round((335 * share) / 100), failed: 5 })),
+      }, { version: "2026.10.28.2", platforms: ["linux"], started_at: "2026-10-28T04:30:00Z", action: "pause", rollout_percentage: 25, updated: 45, older: 5, other: 0, failed: 0, rolled_back: 0, offline_since_start: 5, offline_now: 0, failures: [], series: [] }],
+    }
+  if (p === "/v1/admin/fleet/offline") {
+    const q = (url.searchParams.get("q") ?? "").toLowerCase(), bucket = url.searchParams.get("bucket"), platform = url.searchParams.get("platform")
+    const rows = fleetOffline.filter((m) => (!q || m.id.includes(q) || m.alias.includes(q)) && (!bucket || m.bucket === bucket) && (!platform || m.platform === platform))
+    const start = Number(url.searchParams.get("after") ?? 0), limit = Number(url.searchParams.get("limit") ?? 50)
+    const count = (b) => fleetOffline.filter((m) => m.bucket === b).length
+    return {
+      total: rows.length, fleet_machines: 340, offline: fleetOffline.length, items: rows.slice(start, start + limit), ...(start + limit < rows.length ? { next_after: String(start + limit) } : {}),
+      buckets: ["under_1_day", "1_to_7_days", "7_to_30_days", "over_30_days", "never_seen"].map((b) => ({ bucket: b, machines: count(b) })),
+    }
   }
   const entitlementRead = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/entitlements$/.exec(p)
   if (entitlementRead) {
@@ -996,6 +1028,35 @@ try {
     await p.locator("[data-table=traffic-relay]").locator("xpath=ancestor::section").getByRole("button", { name: "Next" }).click()
     await p.waitForFunction(() => document.querySelectorAll("[data-table=traffic-relay] tbody tr").length === 10)
     await p.screenshot({ path: `${shots}/traffic-light.png`, fullPage: true })
+  })
+  await step("fleet: versions per OS, rollout progress with its chart, and the offline list with real totals in IST", async () => {
+    await p.goto(`${ORIGIN}/fleet`)
+    await p.waitForSelector("[data-fleet-versions-ready]")
+    expect((await text('[data-stat="Machines"]')).includes("340"), "machines")
+    expect((await text('[data-stat="Oldest version online"]')).includes("2026.10.28.2"), "oldest online version")
+    expect((await p.locator("[data-table=fleet-versions] tbody tr").count()) === 6, "six version rows")
+    expect((await text("[data-table=fleet-failures]")).includes("signature invalid"), "failure reason")
+    await p.screenshot({ path: `${shots}/fleet-versions-light.png`, fullPage: true })
+    await p.getByRole("tab", { name: "Rollouts" }).click()
+    await p.waitForSelector("[data-fleet-rollouts-ready]")
+    expect((await text('[data-rollout="2026.11.12.1"] [data-stat="Updated"]')).includes("77.6%"), "updated share is 260 of 335")
+    expect((await text('[data-rollout="2026.11.12.1"] [data-stat="Offline the whole time"]')).includes("29"), "offline for the whole window")
+    expect((await p.locator('[data-rollout-chart="2026.11.12.1"]').count()) === 1, "rollout chart")
+    expect((await p.getByText("Paused", { exact: true }).count()) === 1, "a paused rollout is labelled paused")
+    expect(await p.getByText("IST").first().isVisible(), "rollout start in IST")
+    await p.screenshot({ path: `${shots}/fleet-rollouts-light.png`, fullPage: true })
+    await p.getByRole("tab", { name: "Offline" }).click()
+    await p.waitForSelector("[data-fleet-offline-ready]")
+    await waitReady("fleet-offline")
+    expect((await text("[data-list-range]")) === "1–50 of 120", "first page of 120")
+    expect((await text('[data-bucket="over_30_days"]')).includes("24"), "bucket count")
+    expect((await text("[data-table=fleet-offline] tbody tr")).includes("IST"), "last seen in IST")
+    await p.getByRole("button", { name: "Next" }).click()
+    await p.waitForFunction(() => document.querySelector("[data-list-range]")?.textContent?.startsWith("51"))
+    await p.screenshot({ path: `${shots}/fleet-offline-light.png`, fullPage: true })
+    await p.locator('[data-bucket="never_seen"]').click()
+    await p.waitForFunction(() => document.querySelector("[data-list-range]")?.textContent === "1–24 of 24" || document.querySelector("[data-list-range]")?.textContent === "24 total")
+    expect((await text("[data-table=fleet-offline] tbody tr")).includes("Never"), "never-seen machines say so")
   })
   await step("billing: workspaces, operations and plans", async () => {
     await p.goto(`${ORIGIN}/billing`)
