@@ -20,7 +20,7 @@ func updateRenewalGraceTx(ctx context.Context, tx *db.Tx, id string, current Str
 		failed.Time = time.Unix(event.Created, 0).UTC()
 	}
 	_, err := tx.Exec(ctx, `UPDATE billing_workspaces w SET
- renewal_grace_until=CASE WHEN $2 IN ('active','trialing') THEN NULL
+ renewal_grace_until=CASE WHEN $2='active' THEN NULL
  WHEN $2 IN ('past_due','unpaid') THEN CASE
  WHEN $3::timestamptz IS NULL THEN renewal_grace_until
  WHEN renewal_grace_until IS NULL OR ($5 AND renewal_grace_invoice_id=$4)
@@ -28,7 +28,7 @@ func updateRenewalGraceTx(ctx context.Context, tx *db.Tx, id string, current Str
  WHEN renewal_grace_invoice_id=$4 THEN renewal_grace_until
  ELSE least(renewal_grace_until,$3::timestamptz + make_interval(secs=>p.renewal_grace_seconds)) END
  ELSE NULL END,
- renewal_grace_invoice_id=CASE WHEN $2 IN ('active','trialing') THEN NULL
+ renewal_grace_invoice_id=CASE WHEN $2='active' THEN NULL
  WHEN $2 IN ('past_due','unpaid') THEN coalesce(renewal_grace_invoice_id,NULLIF($4,'')) ELSE NULL END
 FROM billing_operator_policy p WHERE w.id=$1 AND p.singleton`, id, current.Status, failed, current.RenewalInvoiceID, firstFailure)
 	return err

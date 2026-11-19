@@ -167,16 +167,6 @@ func TestPlanGrantIsNotOverwrittenByAnOldSubscriptionsEvent(t *testing.T) {
 		t.Fatalf("a paid subscription must replace the grant: sub=%q state=%q grant running=%t", sub, state, running)
 	}
 
-	// A trial the customer starts ends a grant the same way.
-	f.grant(10)
-	f.checkoutOp("checkout-trial-"+f.x, "")
-	trial := f.fresh
-	trial.ID, trial.ItemID, trial.Status, trial.CheckoutOperation = "sub_trial_"+f.x, "si_trial_"+f.x, "trialing", "checkout-trial-"+f.x
-	f.replay(trial)
-	if sub, _, state, running := f.row(); sub != "sub_trial_"+f.x || state != "trialing" || running {
-		t.Fatalf("a trial must replace the grant: sub=%q state=%q running=%t", sub, state, running)
-	}
-
 	// A checkout started before the grant (it names the lapsed subscription as predecessor, an id the grant cleared) still
 	// applies when its subscription turns active: the customer paid, and a grant must not swallow that.
 	f.exec(`UPDATE paperboat.billing_workspaces SET provider_subscription_id='sub_lapsed_'||$2,state='canceled' WHERE id=$1`, f.workspace, f.x)

@@ -84,7 +84,6 @@ func baseFixture() fixture {
 			sub("sub_b", "cus_b", "active", testNow-40*d, "price_team", 120000, 2, "year", obj("discounts", []any{obj("end", 0, "coupon", obj("percent_off", 25, "duration", "forever"))})),
 			sub("sub_c", "cus_c", "past_due", testNow-60*d, "price_pro", 2000, 1, "month",
 				obj("latest_invoice", obj("id", "in_1", "status", "open", "amount_remaining", 2000, "attempt_count", 2, "next_payment_attempt", testNow+86400, "created", testNow-3*d))),
-			sub("sub_d", "cus_d", "trialing", testNow-2*d, "price_pro", 2000, 1, "month", obj("trial_end", testNow+5*d)),
 			sub("sub_e", "cus_e", "canceled", testNow-80*d, "price_pro", 2000, 1, "month", obj("ended_at", testNow-3*d)),
 			sub("sub_f", "cus_f", "active", testNow-3*d, "price_pro", 2000, 1, "month", obj("cancel_at_period_end", true)),
 		),
@@ -103,7 +102,7 @@ func baseFixture() fixture {
 				"data", obj("object", sub("sub_b", "cus_b", "active", testNow-40*d, "price_team", 120000, 1, "year", obj("discounts", []any{obj("end", 0, "coupon", obj("percent_off", 25, "duration", "forever"))})),
 					"previous_attributes", obj("items", obj("data", []any{obj("id", "si_sub_b", "quantity", 2)})))),
 			obj("id", "evt_other", "type", "customer.subscription.updated", "created", testNow-3*d,
-				"data", obj("object", sub("sub_a", "cus_a", "active", testNow-90*d, "price_pro", 2000, 3, "month", nil), "previous_attributes", obj("status", "trialing"))),
+				"data", obj("object", sub("sub_a", "cus_a", "active", testNow-90*d, "price_pro", 2000, 3, "month", nil), "previous_attributes", obj("status", "past_due"))),
 		),
 		"/v1/balance": obj("available", []any{obj("amount", 12345, "currency", "usd")}, "pending", []any{obj("amount", 600, "currency", "usd")}),
 		"/v1/payouts": lst(
@@ -118,11 +117,11 @@ func TestReportMath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// MRR: a 2000 + b (2 seats x 120000/12 = 20000, 25% off = 15000) + c past_due 2000 + f 2000 = 21000; the trial and the canceled one are out.
+	// MRR: a 2000 + b (2 seats x 120000/12 = 20000, 25% off = 15000) + c past_due 2000 + f 2000 = 21000; the canceled one is out.
 	if r.MRR.Value != 21000 || r.ARR.Value != 252000 || r.Subscribers.Value != 4 {
 		t.Errorf("MRR %d ARR %d subscribers %d", r.MRR.Value, r.ARR.Value, r.Subscribers.Value)
 	}
-	// A week ago: a, b, c and e paid (e ended 3 days ago); f started 3 days ago; d is a trial that began 2 days ago.
+	// A week ago: a, b, c and e paid (e ended 3 days ago); f started 3 days ago.
 	if r.MRR.Previous != 2000+15000+2000+2000 || r.Subscribers.Previous != 4 {
 		t.Errorf("previous MRR %d subscribers %d", r.MRR.Previous, r.Subscribers.Previous)
 	}
@@ -142,8 +141,8 @@ func TestReportMath(t *testing.T) {
 	if d := r.Movement.Downgraded; d.Count != 1 || d.MRR != 7500 {
 		t.Errorf("downgraded %+v", d)
 	}
-	if r.Trials.Active != 1 || r.Trials.EndingSoon != 1 || r.Ending != 1 {
-		t.Errorf("trials %+v ending %d", r.Trials, r.Ending)
+	if r.Ending != 1 {
+		t.Errorf("ending %d", r.Ending)
 	}
 	if c := r.Cash; c == nil || c.Collected.Value != 2000 || c.Collected.Previous != 4500 || c.Refunds.Value != 500 || c.Net.Value != 1500 || c.FailedPayments.Value != 1 {
 		t.Errorf("cash %+v", r.Cash)
@@ -241,10 +240,6 @@ func TestListsPage(t *testing.T) {
 		if _, err := s.List(context.Background(), bad[0], bad[1], 5); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%v: %v", bad, err)
 		}
-	}
-	trials, _ := s.List(context.Background(), "trials", "", 5)
-	if trials.Total != 1 || trials.Rows[0].At != testNow+5*86400 {
-		t.Fatalf("trials %+v", trials)
 	}
 }
 

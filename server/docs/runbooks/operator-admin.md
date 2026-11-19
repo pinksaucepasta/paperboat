@@ -176,7 +176,7 @@ subscription row, so the plan limits, team entitlement and bandwidth allowance f
 by itself at `expires_at`, and the Stripe webhook never touches it (it matches workspaces by their Stripe ids). A grant
 is refused (409) while the workspace has a live Stripe subscription or a checkout in flight; a later paid checkout replaces it.
 While a grant runs (`grant_until`), a Stripe event for the workspace is applied only if its subscription is live and paid
-(active or trialing, read from Stripe at the time, not from the event), so a retried or replayed event of any age for an old
+(active, read from Stripe at the time, not from the event), so a retried or replayed event of any age for an old
 subscription cannot overwrite the grant.
 Revoke only ends a grant; a paid plan is cancelled in Stripe. The audit event records product, days and seats.
 

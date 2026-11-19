@@ -221,7 +221,7 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 		}
 	}
 	teamstest.SetMachineAccess(t, store, secondTeam, machine, member, "terminal")
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'trialing','team-pro',2,$3,$4)`, "bw_"+secondTeam, secondTeam, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,$3,$4)`, "bw_"+secondTeam, secondTeam, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err = persist(member, "ambiguous_"+suffix, "terminal"); !errors.Is(err, ErrAmbiguousTeamAccess) {

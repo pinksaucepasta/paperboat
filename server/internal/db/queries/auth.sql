@@ -40,4 +40,4 @@ SELECT EXISTS (SELECT 1 FROM sessions WHERE session_hash = $1 AND csrf_hash = $2
 
 
 -- name: UserHasActiveSubscription :one
-SELECT EXISTS (SELECT 1 FROM user_machine_entitlements WHERE user_id=$1 AND state IN ('active','trialing') AND current_period_end>now());
+SELECT EXISTS (SELECT 1 FROM user_machine_entitlements WHERE user_id=$1 AND state='active' AND current_period_end>now());
