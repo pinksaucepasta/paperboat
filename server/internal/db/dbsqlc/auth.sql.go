@@ -228,7 +228,7 @@ func (q *Queries) UpsertWorkOSUser(ctx context.Context, arg UpsertWorkOSUserPara
 }
 
 const userHasActiveSubscription = `-- name: UserHasActiveSubscription :one
-SELECT EXISTS (SELECT 1 FROM user_machine_entitlements WHERE user_id=$1 AND state IN ('active','trialing') AND current_period_end>now())
+SELECT EXISTS (SELECT 1 FROM user_machine_entitlements WHERE user_id=$1 AND state='active' AND current_period_end>now())
 `
 
 func (q *Queries) UserHasActiveSubscription(ctx context.Context, userID string) (bool, error) {

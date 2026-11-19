@@ -29,8 +29,6 @@ type TeamCreationInput struct {
 type teamCreationRequest struct {
 	Input                                   TeamCreationInput
 	Email, PriceID, ProductCode, CustomerID string
-	// TrialDays is decided once when the order is reserved, so retries replay it.
-	TrialDays int
 }
 
 func activeTeamCreator(ctx context.Context, tx *db.Tx, actor string) error {
@@ -119,9 +117,6 @@ func (s *WorkspaceService) CreatePaidTeam(ctx context.Context, actor, email stri
 			}
 			return err
 		}
-		if req.TrialDays, err = s.teamTrialDaysTx(ctx, tx, actor); err != nil {
-			return err
-		}
 		cipher, err := s.encryptResult(req)
 		if err != nil {
 			return err
@@ -166,7 +161,7 @@ func (s *WorkspaceService) startTeamCheckout(ctx context.Context, actor string, 
 			return fail(err)
 		}
 	}
-	session, err := s.stripe.CreateSubscriptionCheckout(ctx, StripeCheckoutInput{CustomerID: req.CustomerID, PriceID: req.PriceID, Quantity: req.Input.Seats, SuccessURL: req.Input.SuccessURL, CancelURL: req.Input.CancelURL, IdempotencyKey: "team-create:" + key, TrialDays: req.TrialDays})
+	session, err := s.stripe.CreateSubscriptionCheckout(ctx, StripeCheckoutInput{CustomerID: req.CustomerID, PriceID: req.PriceID, Quantity: req.Input.Seats, SuccessURL: req.Input.SuccessURL, CancelURL: req.Input.CancelURL, IdempotencyKey: "team-create:" + key})
 	if err != nil {
 		return fail(err)
 	}

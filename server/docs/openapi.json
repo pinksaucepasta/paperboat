@@ -10039,10 +10039,6 @@
               }
             }
           },
-          "team_trial_days": {
-            "type": "integer",
-            "description": "Personal overview only: the Team trial a new team would get (0 once used)."
-          },
           "id": {
             "type": "string"
           },
@@ -20494,28 +20490,6 @@
               "changes_unavailable"
             ]
           },
-          "trials": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "active": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "ending_soon": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "started": {
-                "$ref": "#/components/schemas/OperatorMoneyPair"
-              }
-            },
-            "required": [
-              "active",
-              "ending_soon",
-              "started"
-            ]
-          },
           "cash": {
             "type": "object",
             "additionalProperties": false,
@@ -20634,7 +20608,6 @@
           "trend",
           "plans",
           "movement",
-          "trials",
           "dunning",
           "customers",
           "renewals",
@@ -63386,8 +63359,7 @@
               "enum": [
                 "customers",
                 "past_due",
-                "renewals",
-                "trials"
+                "renewals"
               ]
             }
           },
@@ -63418,7 +63390,7 @@
           }
         ],
         "x-operator-capability": "billing",
-        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time. trials: `at` is the trial end, `mrr` what it becomes."
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time."
       }
     },
     "/v1/admin/money/events": {

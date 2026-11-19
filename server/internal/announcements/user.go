@@ -44,7 +44,7 @@ type View struct {
 // Audience matches announcement a to user $1: everyone, the user, a member of the team, or someone on the plan
 // (their own paid plan or one of their teams'; free is the audience without a paid personal plan).
 const (
-	paidStates = `b.state IN ('active','trialing','past_due')`
+	paidStates = `b.state IN ('active','past_due')`
 	audience   = `(a.audience_kind='all'
  OR (a.audience_kind='user' AND a.audience_value=$1)
  OR (a.audience_kind='team' AND EXISTS(SELECT 1 FROM paperboat.team_members m WHERE m.team_id=a.audience_value AND m.account_id=$1 AND m.active))

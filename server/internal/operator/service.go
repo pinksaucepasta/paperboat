@@ -616,7 +616,7 @@ func readTeams(ctx context.Context, tx *db.Tx, target, after string, limit int) 
 	return p, rows.Err()
 }
 
-var billingStates = map[string]bool{"free": true, "incomplete": true, "incomplete_expired": true, "trialing": true, "active": true, "past_due": true, "canceled": true, "unpaid": true, "paused": true}
+var billingStates = map[string]bool{"free": true, "incomplete": true, "incomplete_expired": true, "active": true, "past_due": true, "canceled": true, "unpaid": true, "paused": true}
 var operationStates = map[string]bool{"pending": true, "running": true, "succeeded": true, "failed": true, "uncertain": true, "dead_letter": true}
 
 func readWorkspaces(ctx context.Context, tx *db.Tx, state, after string, limit int) (_ BillingPage, resultErr error) {

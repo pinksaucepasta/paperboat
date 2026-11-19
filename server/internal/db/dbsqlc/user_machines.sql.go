@@ -1761,7 +1761,7 @@ func (q *Queries) GetActiveUserMachineForControl(ctx context.Context, id string)
 const getActiveUserMachineSeatQuantity = `-- name: GetActiveUserMachineSeatQuantity :one
 SELECT seat_quantity FROM user_machine_entitlements
 WHERE user_id = $1
-  AND state IN ('active', 'trialing')
+  AND state = 'active'
   AND current_period_start <= now()
   AND current_period_end > now()
 `
@@ -6366,7 +6366,7 @@ const userMachineEntitlementIsActive = `-- name: UserMachineEntitlementIsActive 
 SELECT EXISTS (
   SELECT 1 FROM user_machine_entitlements
   WHERE user_id = $1
-    AND state IN ('active', 'trialing')
+    AND state = 'active'
     AND current_period_start <= now()
     AND current_period_end > now()
 )

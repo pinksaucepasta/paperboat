@@ -146,7 +146,7 @@ func (s *Service) ensureCurrentBandwidthPeriodAt(ctx context.Context, tx *db.Tx,
 	if err != nil {
 		return dbsqlc.UserMachineBandwidthPeriod{}, err
 	}
-	if (entitlement.State != "active" && entitlement.State != "trialing") || !now.Before(entitlement.CurrentPeriodEnd) || now.Before(entitlement.CurrentPeriodStart) {
+	if entitlement.State != "active" || !now.Before(entitlement.CurrentPeriodEnd) || now.Before(entitlement.CurrentPeriodStart) {
 		return dbsqlc.UserMachineBandwidthPeriod{}, ErrBandwidthDenied
 	}
 	return tx.Queries().UpsertUserMachineBandwidthPeriod(ctx, dbsqlc.UpsertUserMachineBandwidthPeriodParams{UserMachineID: machine.ID, PeriodStart: entitlement.CurrentPeriodStart, PeriodEnd: entitlement.CurrentPeriodEnd, IncludedBytes: entitlement.AllowanceBytes})

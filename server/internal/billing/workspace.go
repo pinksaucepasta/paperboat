@@ -69,13 +69,11 @@ type Workspace struct {
 	GrantedUntil *time.Time `json:"granted_until,omitempty"`
 	// Limits are the plan's count limits with current use (machines, publications = previews and
 	// tunnels, browser_terminals); a Teams limit is null (advertised unlimited).
-	Limits map[planlimits.Kind]planlimits.Usage `json:"limits"`
-	// TeamTrialDays, on the personal overview only, is the trial a new team would get.
-	TeamTrialDays  *int   `json:"team_trial_days,omitempty"`
-	CustomerID     string `json:"-"`
-	SubscriptionID string `json:"-"`
-	ItemID         string `json:"-"`
-	Revision       int64  `json:"-"`
+	Limits         map[planlimits.Kind]planlimits.Usage `json:"limits"`
+	CustomerID     string                               `json:"-"`
+	SubscriptionID string                               `json:"-"`
+	ItemID         string                               `json:"-"`
+	Revision       int64                                `json:"-"`
 }
 
 // WorkspaceTx revalidates current role authority even when replaying a provider

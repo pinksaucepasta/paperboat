@@ -168,8 +168,8 @@ func TestEntitlementActiveRejectsExpiredPeriod(t *testing.T) {
 	if entitlementActive("active", now, now) {
 		t.Fatal("expired active entitlement was accepted")
 	}
-	if !entitlementActive("trialing", now.Add(time.Second), now) {
-		t.Fatal("current trialing entitlement was rejected")
+	if !entitlementActive("active", now.Add(time.Second), now) {
+		t.Fatal("current active entitlement was rejected")
 	}
 }
 

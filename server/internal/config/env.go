@@ -198,13 +198,6 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		}
 		c.Billing.TopupMaxQuantity = n
 	}
-	if value, ok := lookup("PAPERBOAT_BILLING_TEAM_TRIAL_DAYS"); ok {
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return errors.New("PAPERBOAT_BILLING_TEAM_TRIAL_DAYS must be an integer")
-		}
-		c.Billing.TeamTrialDays = n
-	}
 	if value, ok := lookup("PAPERBOAT_BILLING_STRIPE_TAX"); ok {
 		on, err := strconv.ParseBool(value)
 		if err != nil {
