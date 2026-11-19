@@ -29,8 +29,12 @@
     // Arriving from another workspace, ?team= switches to the team.
     document.cookie = "pb-workspace=personal; Path=/"
     window.next.router.push(`/team?team=${teamId}&tab=security`)
+    // The tab shows skeletons (with the section titles) until the identity has loaded: read it once they are gone.
     const tab = await until(
-      () => /Security/.test(text()) && (/Single sign-on|add-on/.test(text()) ? text() : null),
+      () =>
+        /Security/.test(text()) &&
+        !main().querySelector('[data-slot="skeleton"]') &&
+        (/Single sign-on|add-on/.test(text()) ? text() : null),
     )
     pass("?team=…&tab=security opens the team's Security tab", Boolean(tab))
     pass("the workspace switched to the team", document.cookie.includes(`pb-workspace=${teamId}`))
