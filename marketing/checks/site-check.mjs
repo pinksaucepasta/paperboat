@@ -139,7 +139,7 @@ if (serverConfig) {
     expect("/pricing/", `${row} ${shown(free)} ${shown(pro)} Unlimited`, `${name} limits`)
   }
   const [tcpFree, tcpPro] = limit("PublicTCP")
-  expect("/pricing/", `Public raw-TCP tunnel addresses ${tcpFree} ${tcpPro} ${number(serverConfig, /TeamPerSeat: (\d+)/)} per seat`, "public TCP limits")
+  expect("/pricing/", `Public raw-TCP tunnel addresses ${tcpFree} ${tcpPro} ${number(serverConfig, /TeamPerSeat: (\d+)/)}/seat`, "public TCP limits")
   expect("/pricing/", `${number(serverConfig, /TeamTrialDays: (\d+)/)}-day`, "Team trial length")
   expect("/pricing/", `${number(serverConfig, /PersonalAllowanceBytes: new\(int64\(([\d_]+)/) / 1e9} GB`, "free bandwidth")
   expect("/pricing/", `${number(serverConfig, /ViewersPerSharedTerminal: (\d+)/)} possible viewers`, "shared terminal viewers")
