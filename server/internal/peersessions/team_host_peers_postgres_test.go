@@ -68,6 +68,13 @@ func TestTeamHostPeersChecksEachHostBindingOnceOnPostgres(t *testing.T) {
 	if err = tx.QueryRowContext(ctx, `SELECT coalesce(sum(calls),0) FROM pg_stat_xact_user_functions WHERE schemaname='paperboat' AND funcname='team_machine_bound_for'`).Scan(&bound); err != nil {
 		t.Fatal(err)
 	}
+	var wrapper int64
+	if err = tx.QueryRowContext(ctx, `SELECT coalesce(sum(calls),0) FROM pg_stat_xact_user_functions WHERE schemaname='paperboat' AND funcname='workspace_policy_ports'`).Scan(&wrapper); err != nil {
+		t.Fatal(err)
+	}
+	if wrapper != 0 {
+		t.Fatalf("%d calls of workspace_policy_ports: it costs 1.5 ms a call on prod; the offline capabilities need only workspace_policy_rule_ports", wrapper)
+	}
 	t.Logf("RESULT teamHostPeers on a %d-host team: %v, %d binding checks, %d peers", hosts, elapsed, bound, len(peers))
 	if len(peers) != hosts {
 		t.Fatalf("%d peers, want every host of the team (%d)", len(peers), hosts)
@@ -79,5 +86,14 @@ func TestTeamHostPeersChecksEachHostBindingOnceOnPostgres(t *testing.T) {
 	}
 	if bound > hosts {
 		t.Fatalf("%d binding checks for %d hosts, want one per host", bound, hosts)
+	}
+}
+
+// The rule-ports shortcut of the two offline queries is right only while no offline capability is private_access.
+func TestOfflineCapabilitiesNeverIncludePrivateAccess(t *testing.T) {
+	for _, c := range offlineCapabilities {
+		if c[0] == "private_access" || c[1] == "private_access" {
+			t.Fatal("offline queries call workspace_policy_rule_ports, which skips the private_access team switch")
+		}
 	}
 }

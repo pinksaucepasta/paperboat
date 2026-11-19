@@ -18,6 +18,8 @@ var maximumOfflinePeers = 400
 
 // offlineCapabilities maps the policy capability that decides a session (machine_capability_allowed, the same
 // function online descriptors use) to the network scope capability the daemon checks.
+// None is private_access: the two queries below call workspace_policy_rule_ports directly, because its wrapper
+// workspace_policy_ports (which only adds the private_access switch) cost 1.5 ms a call against 0.09 ms on prod.
 var offlineCapabilities = [][2]string{{"terminal", "terminal"}, {"exec", "exec"}, {"managed_ssh", "managed_ssh"}, {"files", "file_transfer"}, {"preview_manage", "inspector"}}
 
 // offlineOwnerOnly lists the network capabilities a team grant never confers offline. Inspecting is decided per preview
@@ -82,7 +84,7 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
  SELECT u.user_id,cap.network FROM (SELECT DISTINCT user_id FROM endpoints) u CROSS JOIN host h
  CROSS JOIN unnest($4::text[],$5::text[]) AS cap(policy,network)
  WHERE (u.user_id=h.user_id AND paperboat.machine_capability_allowed(u.user_id,h.id,cap.policy))
-  OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM bound b WHERE b.user_id=u.user_id AND NOT isempty(paperboat.workspace_policy_ports(u.user_id,b.team_id,h.id,cap.policy))))
+  OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM bound b WHERE b.user_id=u.user_id AND NOT isempty(paperboat.workspace_policy_rule_ports(u.user_id,b.team_id,h.id,cap.policy))))
 )
 SELECT e.id,e.user_id,array_to_json(array_agg(a.network ORDER BY a.network)),e.generation
 FROM endpoints e JOIN allowed a ON a.user_id=e.user_id
@@ -133,7 +135,7 @@ LEFT JOIN paperboat.workspace_policies policy ON policy.team_id=member.team_id
 -- keeps the planner from flattening it into the capability rows).
 CROSS JOIN LATERAL (SELECT paperboat.team_machine_bound_for(member.account_id,member.team_id,m.id) AS bound OFFSET 0) gate
 CROSS JOIN unnest($2::text[],$3::text[]) AS cap(policy,network)
-CROSS JOIN LATERAL (SELECT gate.bound AND NOT isempty(paperboat.workspace_policy_ports(member.account_id,member.team_id,m.id,cap.policy)) AS allowed) decision
+CROSS JOIN LATERAL (SELECT gate.bound AND NOT isempty(paperboat.workspace_policy_rule_ports(member.account_id,member.team_id,m.id,cap.policy)) AS allowed) decision
 WHERE member.account_id=$1 AND member.active AND NOT cap.network=ANY($4::text[])
 GROUP BY n.endpoint_id,m.user_id HAVING bool_or(allowed) ORDER BY n.endpoint_id LIMIT $5`, self.AccountID, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
 	if err != nil {
