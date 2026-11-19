@@ -347,4 +347,5 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 
 - Register the agent at dmca.copyright.gov ($6, 3 years), using the address already on the legal pages and abuse@mail.paperboat.cloud.
 - The form needs a phone number: use a forwarding number (e.g. Google Voice), never a personal mobile. The site shows none.
+- Stripe requires a public support phone (shown on receipts) and will not remove it: swap it for the same forwarding number.
 - Amend the designation when the company is incorporated.
