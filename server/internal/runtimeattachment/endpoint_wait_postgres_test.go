@@ -35,7 +35,30 @@ func TestEndpointPullHeldUntilAnAssignmentIsWrittenOnPostgres(t *testing.T) {
 			_ = hub.ListenFor(listening, time.Minute)
 		}
 	}()
-	time.Sleep(500 * time.Millisecond) // LISTEN is attached; its start wakes every waiter once
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) { // LISTEN is attached; its start wakes every waiter once
+		var listeners int
+		if err := f.database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND query='LISTEN machine_events'`).Scan(&listeners); err == nil && listeners > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the LISTEN session never attached")
+		}
+	}
+	watching := func(nodes ...string) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
+			held := true
+			for _, node := range nodes {
+				held = held && hub.Watching(EdgeEventKey(node))
+			}
+			if held {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the held pulls of %v never subscribed", nodes)
+			}
+		}
+	}
 	register := func(lease string) {
 		t.Helper()
 		host := strings.ReplaceAll(lease, "_", "-") + ".preview.example.test"
@@ -90,7 +113,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_wait','foreground','http','127.0.0.1:3000',
 	// A write for the other edge does not wake a held pull.
 	held := pull(f.backupEdge, backupFull.Cursor, 800*time.Millisecond)
 	other := pull(f.edge, full.Cursor, 800*time.Millisecond)
-	time.Sleep(200 * time.Millisecond)
+	watching(f.edge.NodeID, f.backupEdge.NodeID)
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=clock_timestamp() WHERE edge_node_id=$1`, f.node)
 	if r := <-held; r.err != nil || r.elapsed < 700*time.Millisecond || len(flatten(r.answer)) != 0 {
 		t.Fatalf("backup pull = %d routes after %v, %v; want it held for its whole wait", len(flatten(r.answer)), r.elapsed, r.err)
@@ -98,17 +121,18 @@ VALUES($1,$2,$3,$3,$4,'owner_session_wait','foreground','http','127.0.0.1:3000',
 	<-other
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=now()-interval '1 minute'`)
 
-	// A new preview answers the held pull of each edge within 300 ms, with the route.
+	// A new preview answers the held pull of each edge with the route, by notification: a pull that ran out its
+	// 5 s hold would answer with nothing.
 	heldFirst := pull(f.edge, full.Cursor, 5*time.Second)
 	heldBackup := pull(f.backupEdge, backupFull.Cursor, 5*time.Second)
-	time.Sleep(300 * time.Millisecond)
+	watching(f.edge.NodeID, f.backupEdge.NodeID)
 	second := f.prefix + "_second"
 	written := time.Now()
 	register(second)
 	for name, ch := range map[string]<-chan endpointPullResult{"first edge": heldFirst, "second edge": heldBackup} {
 		r := <-ch
 		got := flatten(r.answer)
-		if r.err != nil || len(got) != 1 || got[0].EndpointID != second || time.Since(written) > 300*time.Millisecond {
+		if r.err != nil || len(got) != 1 || got[0].EndpointID != second || time.Since(written) >= 5*time.Second {
 			t.Fatalf("%s: held pull = %d routes, %v, answered %v after the write", name, len(got), r.err, time.Since(written))
 		}
 	}

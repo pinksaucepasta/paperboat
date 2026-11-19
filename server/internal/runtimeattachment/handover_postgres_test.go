@@ -119,7 +119,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_handover','foreground','http','127.0.0.1:30
 		t.Fatalf("before the handover the old carrier is not authorized: %v, %v", got, err)
 	}
 
-	var phase atomic.Int32
+	var phase, samples atomic.Int32
 	var next atomic.Value
 	next.Store("")
 	var mu sync.Mutex
@@ -149,9 +149,19 @@ VALUES($1,$2,$3,$3,$4,'owner_session_handover','foreground','http','127.0.0.1:30
 				}
 			}
 			mu.Unlock()
+			samples.Add(1)
 		}
 	}()
-	step := func() { time.Sleep(300 * time.Millisecond) }
+	// A step lasts until the sampler has made three more decisions, so every phase is checked while it holds.
+	step := func() {
+		target := samples.Load() + 3
+		for deadline := time.Now().Add(30 * time.Second); samples.Load() < target && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		if samples.Load() < target {
+			t.Fatal("the sampler made no decisions")
+		}
+	}
 	step()
 	// The next worker generation registers, then attaches while the old one still serves.
 	f.exec(t, `UPDATE user_machines SET worker_generation=2 WHERE id=$1`, f.machine)

@@ -100,7 +100,9 @@ func TestTunnelPauseCompletesOnlyAfterEveryLiveEdgeFetchedTheSnapshotOnPostgres(
 		}
 	}
 	state("running") // no edge has fetched a snapshot since the pause
-	time.Sleep(1100 * time.Millisecond)
+	// A snapshot counts once it began a second after the pause's operation was written (the commit's own skew):
+	// the fetches read a clock two seconds ahead instead of the test waiting a real second.
+	control.SetClock(func() time.Time { return time.Now().Add(2 * time.Second) })
 	fetch(f.node, f.edge)
 	state("running") // the other edge still serves the route
 	fetch(f.backupNode, f.backupEdge)
