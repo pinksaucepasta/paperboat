@@ -412,6 +412,21 @@ type BillingWorkspaceUsagePeriod struct {
 	BudgetStart   sql.NullTime
 }
 
+type BreakglassRun struct {
+	ID              string
+	State           string
+	OperatorID      string
+	Reason          string
+	KeepSessionHash []byte
+	FloorVersion    string
+	Preview         []byte
+	Stages          []byte
+	LastError       string
+	StartedAt       time.Time
+	UpdatedAt       time.Time
+	FinishedAt      sql.NullTime
+}
+
 type BrowserAccessSession struct {
 	GrantID                          string
 	TokenHash                        []byte
@@ -1905,6 +1920,11 @@ type ManagedNodeAuthority struct {
 	UpdatedAt         time.Time
 }
 
+type ManagedSshCaFetch struct {
+	MachineID string
+	FetchedAt time.Time
+}
+
 type ManagedSshCertificateHolder struct {
 	MachineID          string
 	CLIClientSessionID string
@@ -2441,6 +2461,8 @@ type RecordingKey struct {
 	SealedPrevious    []byte
 	CreatedBy         string
 	CreatedAt         time.Time
+	ResetPublicKey    []byte
+	ResetSignature    []byte
 }
 
 type RecordingKeyGrant struct {
