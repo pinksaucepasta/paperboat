@@ -14,11 +14,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/bandwidth"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"tailscale.com/tstest/integration"
 )
 
@@ -52,8 +52,7 @@ func (c closeSignalConn) Close() error {
 // Its usage must still name the peer the native session proved, or the server cannot attribute it and every SSH
 // byte goes unrecorded. 1 MiB each way over a host-rules SSH stream is reported under ssh, for the peer, exactly.
 func TestHostRulesSSHStreamUsageNamesItsPeer(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)

@@ -31,13 +31,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/protocol"
 	hostserver "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
-	"go.uber.org/goleak"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"
 )
@@ -45,16 +45,7 @@ import (
 // This fixture owns only endpoint storage. The relay receives encrypted packets;
 // both directions use the production HTTP application handler above native QUIC.
 func TestNativeTransferDurableBidirectionalResume(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	// The stdlib DNS singleflight worker detaches its query onto a
-	// never-expiring context (withUnexpiredValuesPreserved, src/net/lookup.go),
-	// so under host load a slow stub-resolver answer can still be in flight
-	// when this parent-only check runs: the full cli -race suite at 72790f9c
-	// failed here with two such workers and passing subtests
-	// (/tmp/rel2-cli-pbvm2.log:27868). Narrowly ignore exactly that top frame;
-	// product goroutines stay fully guarded.
-	stdlibDNS := goleak.IgnoreTopFunction("net.(*Resolver).lookupIPAddr.func2")
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks, stdlibDNS) })
+	testleak.Check(t)
 	for _, relayed := range []bool{false, true} {
 		name := "direct"
 		if relayed {

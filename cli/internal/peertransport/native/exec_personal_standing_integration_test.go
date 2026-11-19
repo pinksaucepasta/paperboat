@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"tailscale.com/tstest/integration"
 )
 
@@ -22,8 +22,7 @@ import (
 // it by its standing rule for its own account. The client dials on the personal mesh pair that stands for that rule;
 // once the pair is withdrawn the stream is refused again.
 func TestNewExecToOwnMachineDialsOnThePersonalPair(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)

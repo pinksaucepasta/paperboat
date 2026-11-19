@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"tailscale.com/tstest/integration"
 )
 
@@ -23,8 +23,7 @@ import (
 // the host itself), so a new operation costs the host no config refresh and no server request; a capability without
 // a standing rule still refreshes once, and withdrawing the rule closes a running stream.
 func TestStandingRuleAdmitsExecWithoutHostRefresh(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)

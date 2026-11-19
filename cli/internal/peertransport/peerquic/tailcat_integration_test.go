@@ -16,6 +16,7 @@ import (
 
 	"go.uber.org/goleak"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"tailscale.com/tstest/integration"
@@ -30,10 +31,9 @@ var tailcatBlocks = flag.Int("tailcat-blocks", 8, "32 KiB blocks each Tailcat st
 // Tests use real WireGuard/netstack UDP and Paperboat's actual QUIC entrypoints.
 // The in-process upstream DERP/STUN fixture binds only remote-host loopback.
 func TestTailcatQUIC(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
 	// The diagnostic log's worker lives for the process and starts at the first log line; run alone, that is inside this test.
 	logWorker := goleak.IgnoreTopFunction("github.com/pinksaucepasta/paperboat/shared/diagnosticlog.ensureWorker.func1.1")
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks, logWorker) })
+	testleak.Check(t, logWorker)
 	var maximum atomic.Uint32
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")

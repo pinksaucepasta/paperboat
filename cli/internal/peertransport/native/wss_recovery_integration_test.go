@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
-	"go.uber.org/goleak"
 )
 
 type droppingPacketConn struct {
@@ -76,8 +76,7 @@ func TestNativeSessionRecoversQUICToWSSAndBack(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real DERP QUIC/WSS transition integration")
 	}
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()

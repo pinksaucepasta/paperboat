@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"tailscale.com/tstest/integration"
 )
 
@@ -22,8 +22,7 @@ import (
 // control-plane request, so the host refreshes its own state once before refusing (the first `pb ssh` of a new session
 // failed until an exec had refreshed the host). A capability the refreshed document still lacks stays refused.
 func TestOfflineStreamRefreshesTheHostsSignedStateBeforeRefusing(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)

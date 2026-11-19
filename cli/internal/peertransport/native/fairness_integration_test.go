@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"tailscale.com/tstest/integration"
 )
 
@@ -40,8 +40,7 @@ const (
 // 20 workload on one QUIC connection. It deliberately uses ordinary bounded
 // writes: scheduling belongs here only if this gate demonstrates a failure.
 func TestNativeBulkDoesNotStarveInteractiveAndControl(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	ctx, cancel := context.WithTimeout(t.Context(), fairnessWorkloadBound)
 	defer cancel()

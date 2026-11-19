@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"io"
 	"math/big"
@@ -43,7 +44,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
-	"go.uber.org/goleak"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"
 	"tailscale.com/types/nettype"
@@ -73,8 +73,7 @@ func (s testSecrets) Set(key, value string) error { s[key] = value; return nil }
 func (s testSecrets) Delete(key string) error     { delete(s, key); return nil }
 
 func TestAuthorizedTerminalAndLiveTransferRevocationReconnect(t *testing.T) {
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
 	signerPublic, signerPrivate, _ := ed25519.GenerateKey(rand.Reader)

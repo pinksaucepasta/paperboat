@@ -5,18 +5,18 @@ package localdaemon
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/cli/internal/api"
-	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"go.uber.org/goleak"
+	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func TestFailedStartupReleasesWorkersAndProcessLock(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	testleak.Check(t)
 	paths := daemonTestPaths(t)
 	// Fail after transport ownership starts, before inventory or IPC startup.
 	if err := os.WriteFile(filepath.Join(paths.StateRoot, "diagnostics"), nil, 0600); err != nil {

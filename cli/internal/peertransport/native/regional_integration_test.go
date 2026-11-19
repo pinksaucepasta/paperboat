@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
-	"go.uber.org/goleak"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
@@ -55,8 +55,7 @@ func testNativeRegionalFailover(t *testing.T, expiry bool) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
-	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	testleak.Check(t)
 	t.Setenv("IN_TS_TEST", "true")
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Second)
 	defer cancel()
