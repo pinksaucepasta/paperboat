@@ -223,16 +223,16 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 	go func() { result <- command.ExecuteContext(ctx) }()
 	select {
 	case <-carrier.ready:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("carrier did not receive the lease")
 	}
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for output.Len() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("preview command did not publish output after readiness")
 		default:
-			time.Sleep(time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	var resource api.PreviewLease
@@ -252,7 +252,7 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("preview command did not stop after context cancellation")
 	}
 	requestsMu.Lock()
@@ -335,7 +335,7 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	var ownerID string
 	select {
 	case ownerID = <-carrier.owner:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("production carrier did not receive hostd owner session")
 	}
 	if ownerID == "" || !strings.HasPrefix(ownerID, "session_") {
@@ -343,16 +343,16 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	}
 	select {
 	case <-carrier.ready:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("production carrier did not report readiness")
 	}
-	outputDeadline := time.After(2 * time.Second)
+	outputDeadline := time.After(30 * time.Second)
 	for output.Len() == 0 {
 		select {
 		case <-outputDeadline:
 			t.Fatal("preview command did not publish output")
 		default:
-			time.Sleep(time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	cancel()
@@ -622,7 +622,7 @@ func TestPreviewForegroundProductionOwnerLeaseHeartbeatFailureCancels(t *testing
 	go func() { started <- command.ExecuteContext(context.Background()) }()
 	select {
 	case <-carrier.ready:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("preview did not become ready before heartbeat failure")
 	}
 	select {

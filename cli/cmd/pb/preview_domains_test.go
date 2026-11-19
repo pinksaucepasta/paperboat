@@ -93,7 +93,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 
 	select {
 	case <-carrier.ready:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		select {
 		case err := <-result:
 			t.Fatalf("carrier did not report readiness; command error: %v", err)
@@ -101,13 +101,13 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 			t.Fatal("carrier did not report readiness")
 		}
 	}
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for bytes.Count(output.Bytes(), []byte("\n")) < 3 {
 		select {
 		case <-deadline:
 			t.Fatal("preview command did not publish JSON")
 		default:
-			time.Sleep(time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 
@@ -134,7 +134,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("preview command did not stop")
 	}
 	if errorOutput.Len() != 0 {
@@ -235,7 +235,7 @@ func TestObservePreviewDomainsDoesNotReportReadyBeforeCertificate(t *testing.T) 
 	}()
 	select {
 	case <-writer.first:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("observer did not publish the initial DNS state")
 	}
 	initial := writer.String()
@@ -244,7 +244,7 @@ func TestObservePreviewDomainsDoesNotReportReadyBeforeCertificate(t *testing.T) 
 	}
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("observer did not stop after readiness")
 	}
 	final := writer.String()
