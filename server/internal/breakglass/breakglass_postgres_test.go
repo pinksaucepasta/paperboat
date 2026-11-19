@@ -362,7 +362,8 @@ func TestRevokeStageRefusesEverySessionAndTokenExceptTheActingOperators(t *testi
 	w.exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES ($1,$2,'cli','t','cli','linux','{}','active',$3,$3)`, "bg_c_"+w.sfx, user, past)
 	w.exec(`INSERT INTO paperboat.cli_access_tokens(token_hash,cli_client_session_id,expires_at,created_at) VALUES ($1,$2,$3,$4)`, "bg_at_"+w.sfx, "bg_c_"+w.sfx, future, past)
 	w.exec(`INSERT INTO paperboat.cli_refresh_tokens(token_hash,cli_client_session_id,state,expires_at,created_at) VALUES ($1,$2,'active',$3,$4)`, "bg_rt_"+w.sfx, "bg_c_"+w.sfx, future, past)
-	secret := apitokens.SecretPrefix + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	random := sha256.Sum256([]byte(w.sfx)) // secret_hash is unique across the database
+	secret := apitokens.SecretPrefix + base64.RawURLEncoding.EncodeToString(random[:])
 	hashed := sha256.Sum256([]byte(secret))
 	w.exec(`INSERT INTO paperboat.api_tokens(id,account_id,name,secret_hash,created_at,expires_at) VALUES ($1,$2,'ci',$3,$4,$5)`, "bg_tok_"+w.sfx, user, hashed[:], past, future)
 	w.exec(`INSERT INTO paperboat.recipes(id,token_id,account_id,name,source,source_format,canonical,auth_hash,created_at,expires_at) VALUES ($1,$1,$2,'r','x','toml','{}'::jsonb,sha256(convert_to($3,'UTF8')),$4,$5)`, "bg_rcp_"+w.sfx, user, "recipe"+w.sfx, past, future)
