@@ -289,3 +289,25 @@ func TestSnapshotFrameIsValidatedOnce(t *testing.T) {
 		t.Fatalf("snapshot validated %d times on read+decode, want 1", n)
 	}
 }
+
+// validIdentifierText must stay the same grammar as identifierPattern.
+func TestValidIdentifierTextMatchesTheRegexp(t *testing.T) {
+	alphabet := "aZ09._:-@ /\x00é"
+	seed := uint64(7)
+	check := func(v string) {
+		if got, want := validIdentifierText(v), identifierPattern.MatchString(v); got != want {
+			t.Fatalf("validIdentifierText(%q) = %v, regexp says %v", v, got, want)
+		}
+	}
+	for _, v := range []string{"", "a", "-a", ".a", "a.", "a:b", strings.Repeat("a", 128), strings.Repeat("a", 129), "é", "a b"} {
+		check(v)
+	}
+	for i := 0; i < 20000; i++ {
+		var b strings.Builder
+		for n := int(seed % 12); n > 0; n-- {
+			seed = seed*6364136223846793005 + 1442695040888963407
+			b.WriteByte(alphabet[(seed>>33)%uint64(len(alphabet))])
+		}
+		check(b.String())
+	}
+}

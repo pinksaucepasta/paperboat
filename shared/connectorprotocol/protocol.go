@@ -233,8 +233,23 @@ func ReasonOf(err error) DisconnectReason {
 	return ""
 }
 
+// validIdentifierText is identifierPattern without the regexp: the edge validates several identifiers per request.
+func validIdentifierText(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || c != '.' && c != '_' && c != ':' && c != '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func ValidateIdentifier(value string) error {
-	if !identifierPattern.MatchString(value) || len(value) > MaxIdentifierBytes {
+	if !validIdentifierText(value) || len(value) > MaxIdentifierBytes {
 		return ErrInvalidInput
 	}
 	return nil
@@ -829,7 +844,7 @@ func writeAll(writer io.Writer, data []byte) error {
 }
 
 func validRequestID(value string) bool {
-	return len(value) >= 1 && len(value) <= MaxIdentifierBytes && identifierPattern.MatchString(value)
+	return len(value) >= 1 && len(value) <= MaxIdentifierBytes && validIdentifierText(value)
 }
 
 // decodeTolerant decodes a wire message that carries no authorization decision: edge and host
