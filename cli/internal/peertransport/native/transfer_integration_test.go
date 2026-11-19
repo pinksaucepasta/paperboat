@@ -46,7 +46,15 @@ import (
 // both directions use the production HTTP application handler above native QUIC.
 func TestNativeTransferDurableBidirectionalResume(t *testing.T) {
 	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	// The stdlib DNS singleflight worker detaches its query onto a
+	// never-expiring context (withUnexpiredValuesPreserved, src/net/lookup.go),
+	// so under host load a slow stub-resolver answer can still be in flight
+	// when this parent-only check runs: the full cli -race suite at 72790f9c
+	// failed here with two such workers and passing subtests
+	// (/tmp/rel2-cli-pbvm2.log:27868). Narrowly ignore exactly that top frame;
+	// product goroutines stay fully guarded.
+	stdlibDNS := goleak.IgnoreTopFunction("net.(*Resolver).lookupIPAddr.func2")
+	t.Cleanup(func() { goleak.VerifyNone(t, leaks, stdlibDNS) })
 	for _, relayed := range []bool{false, true} {
 		name := "direct"
 		if relayed {
