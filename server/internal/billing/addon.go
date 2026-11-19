@@ -60,7 +60,7 @@ type AddonChange struct {
 }
 
 func (c HTTPStripeClient) ChangeAddon(ctx context.Context, in AddonChange, key string) (StripeSubscription, error) {
-	v := url.Values{}
+	v := url.Values{"expand[]": {"latest_invoice"}} // the response parser reads the invoice as an object
 	if in.PriceID == "" {
 		// Removal gives no credit (refund policy): the add-on keeps working to the end of the paid period (addon_until).
 		v.Set("items[0][id]", in.AddonItemID)
