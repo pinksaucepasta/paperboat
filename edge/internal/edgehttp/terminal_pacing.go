@@ -11,8 +11,13 @@ import (
 const terminalReadAheadBytes = 256 << 10
 
 // terminalInteractiveBytes is the size up to which a terminal frame is interactive (a keystroke, its echo, a resize, a prompt): it is
-// never delayed by the workspace's terminal cap. Bulk output and uploads are larger.
+// not delayed by the workspace's terminal cap (within terminalInteractiveGrace). Bulk output and uploads are larger.
 const terminalInteractiveBytes = 1024
+
+// terminalInteractiveGrace is how much debt (in time at the bucket's rate) an interactive frame passes through at once: what the bulk
+// released ahead of an echo left behind. Past it the frame waits like bulk, so a client that sends bulk (or file bytes it did not mark)
+// in small frames stays held to the workspace's bucket; typing never meets it.
+const terminalInteractiveGrace = time.Second
 
 // terminalPacing paces the frames of one browser terminal with its workspace's terminal cap (Throttles, the Terminal entries; the
 // terminal's runtime host names the workspace): all the workspace's terminals share ONE bucket, so more tabs do not multiply the cap.
@@ -36,6 +41,12 @@ type terminalPacing struct {
 type terminalFrame struct {
 	payload []byte
 	file    bool
+}
+
+// interactive reports a frame that is never delayed by a bucket's rate: small, and not a file record (small file records are counted
+// and slowed like bulk, or a stream of tiny files would count without ever being slowed).
+func (f terminalFrame) interactive() bool {
+	return len(f.payload) <= terminalInteractiveBytes && !f.file
 }
 
 // charge takes the frame's bytes without waiting: from the terminal cap, and for a file frame also from the allowance bucket (counted).
@@ -100,9 +111,18 @@ func (p terminalPacing) run(ctx context.Context, in <-chan terminalFrame, forwar
 				return ctx.Err()
 			}
 		}
-		if len(frame.payload) <= terminalInteractiveBytes || release > 0 {
+		if release > 0 {
 			p.charge(frame)
-			release = max(release-1, 0)
+			release--
+		} else if frame.interactive() {
+			// Passes at once unless the bucket is deep in debt (a client sending small frames at wire speed).
+			if delay := p.reserve(frame) - terminalInteractiveGrace; delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
 		} else if delay := p.reserve(frame); delay > 0 {
 			// Wait for the tokens, but not in front of an interactive frame: read ahead, and stop waiting when one arrives.
 			timer := time.NewTimer(delay)
@@ -119,7 +139,7 @@ func (p terminalPacing) run(ctx context.Context, in <-chan terminalFrame, forwar
 					}
 					pending = append(pending, next)
 					ahead += len(next.payload)
-					if len(next.payload) <= terminalInteractiveBytes {
+					if next.interactive() {
 						release, waiting = len(pending), false // the bulk waiting now goes below; with the frames up to the interactive one
 					} else if ahead >= terminalReadAheadBytes {
 						source = nil
