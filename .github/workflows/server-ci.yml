@@ -25,6 +25,15 @@ jobs:
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lane_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     defaults:
       run:
         working-directory: server
@@ -44,7 +53,61 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
       - run: sudo apt-get install -y --no-install-recommends ripgrep
       - run: python3 -m unittest discover -s ../.github/tests -p 'test_*.py'
-      - run: make check race reproducible-builds binary-size-check static-analysis vulnerability-check license-check
+      - run: make check reproducible-builds binary-size-check static-analysis vulnerability-check license-check
+      # The PostgreSQL suites (revoke, final delete, retention, reconcile ...) run here, each package on its own fresh
+      # database (tools/pg-test-exec.sh). `make check` above runs without a DSN, so they skip there and run once, with -race.
+      - name: go test -race (PostgreSQL suites included)
+        env:
+          PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable&statement_timeout=600000
+          GOTEST_EVENTS: ${{ github.workspace }}/gotest-events
+        run: |
+          set -o pipefail
+          mkdir -p "$GOTEST_EVENTS"
+          make race TESTFLAGS="-json -timeout 30m -exec ${{ github.workspace }}/tools/pg-test-exec.sh" |
+            python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/server.jsonl"
+      # A skipped PostgreSQL suite must not look green: these two named in the PR that added the service container.
+      - name: PostgreSQL suites really ran
+        run: |
+          for t in TestRevokeMachineWithManyAccessSessionsOnPostgres TestWorkspaceEdgeSetPrefersNearestOnPostgres; do
+            grep -q "\"Action\":\"pass\".*\"Test\":\"$t\"" ../gotest-events/server.jsonl || { echo "$t did not pass (skipped or missing)" >&2; exit 1; }
+            echo "--- PASS: $t"
+          done
+
+  # max_pred_locks_per_transaction is restart-only and a service container cannot take server arguments, so this job
+  # starts its own PostgreSQL with a tiny predicate-lock pool (prod's filled in bursts and a revoke ran out, 2026-11-19).
+  server-tiny-pool:
+    name: Server tiny predicate-lock pool
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: server/go.mod
+          cache: true
+          cache-dependency-path: |
+            server/go.sum
+            cli/go.sum
+            relay/go.sum
+            edge/go.sum
+            helper/go.sum
+            go.work.sum
+      - run: |
+          docker run -d --name pg-tiny -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=lane_test postgres:17 \
+            -c max_pred_locks_per_transaction=10 -c max_connections=10
+          for i in $(seq 40); do docker exec pg-tiny pg_isready -U postgres -d lane_test && exit 0; sleep 2; done
+          docker logs pg-tiny; exit 1
+      - name: tiny predicate-lock pool test
+        env:
+          PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/lane_test?sslmode=disable&statement_timeout=600000
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v -timeout 10m -run '^TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres$' ./internal/usermachines | tee tiny.log
+          grep -q -- '--- PASS: TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres' tiny.log || { echo "the tiny-pool test skipped or did not run" >&2; exit 1; }
 
   modules:
     name: Vet and test ${{ matrix.module }}

@@ -136,23 +136,8 @@ jobs:
           mkdir -p "$GOTEST_EVENTS"
           run=(); v=(); [ -z "$RUN" ] || { run=(-run "$RUN"); v=(--verbose); }
           report() { python3 "$GITHUB_WORKSPACE/tools/gotest-json.py" --save "$GOTEST_EVENTS/$1.jsonl" "${v[@]}"; }
-          # Without a PostgreSQL DSN no package needs a database: one run covers them all.
-          if [ -z "$PAPERBOAT_TEST_DATABASE_DSN" ]; then
-            go test -json -race -count="$COUNT" -timeout 30m "${run[@]}" ./... | report main
-            exit
-          fi
-          # Every package gets its own empty database, created here, so no package sees rows another
-          # package left behind. Packages run one after another; every failing package is reported.
-          mod=$(go list -f '{{.Module.Path}}' ./... | head -n1)
-          export PGPASSWORD=postgres
-          failed=0
-          for pkg in $(go list ./...); do
-            db="lane_$(sed -e "s|^$mod/||" -e 's|[^A-Za-z0-9]|_|g' <<<"$pkg")_test"
-            psql -h localhost -U postgres -qc "create database \"$db\"" || { failed=1; continue; }
-            PAPERBOAT_TEST_DATABASE_DSN="${PAPERBOAT_TEST_DATABASE_DSN/lane_test\?/$db?}" \
-              go test -json -race -count="$COUNT" -timeout 30m "${run[@]}" "$pkg" | report main || failed=1
-          done
-          exit $failed
+          # Every package gets its own empty database (tools/pg-test-exec.sh); every failing package is reported.
+          go test -json -race -count="$COUNT" -timeout 30m -exec "$GITHUB_WORKSPACE/tools/pg-test-exec.sh" "${run[@]}" ./... | report main
       # F21-15: the server behind a real PgBouncer in transaction mode (PlanetScale's pooler), with its own role,
       # because the test stores role defaults (ALTER ROLE ... SET) that must not reach the other packages' role.
       - name: server behind PgBouncer (transaction pooling)

@@ -75,8 +75,9 @@ scenario-matrix-check:
 test:
 	$(GO) test ./...
 
+# TESTFLAGS: CI passes -json and -exec tools/pg-test-exec.sh (a fresh PostgreSQL database per package).
 race:
-	$(GO) test -race ./...
+	$(GO) test -race $(TESTFLAGS) ./...
 
 reproducible-builds: verify-toolchain
 	@../tools/verify-reproducible-builds.sh server

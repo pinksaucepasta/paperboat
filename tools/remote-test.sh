@@ -67,19 +67,6 @@ go version
 # A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.
 case $module in server | edge | helper) ;; *) exec nice go test -p 2 "$@" ;; esac # no database suites elsewhere
 [ -f "$HOME/.pb-test-pg-dsn" ] || exec nice go test -p 2 "$@"
-base=$(cat "$HOME/.pb-test-pg-dsn") pkgs=() args=() failed=0
-# -tags goes to go list too: a package whose files all carry a build tag (internal/testtopology) matches nothing otherwise.
-tags=() prev=
-for a in "$@"; do
-  case $a in ./* | ...) pkgs+=("$a") ;; *) args+=("$a") ;; esac
-  case $a in -tags=*) tags=("$a") ;; *) [ "$prev" = -tags ] && tags=(-tags "$a") ;; esac
-  prev=$a
-done
-mod=$(go list "${tags[@]}" -f "{{.Module.Path}}" "${pkgs[@]}" | sed -n 1p)
-for pkg in $(go list "${tags[@]}" "${pkgs[@]}"); do
-  db="lane_$(sed -e "s|^$mod/||" -e 's|[^A-Za-z0-9]|_|g' <<<"$pkg")_test"
-  psql "${base%%lane_test*}postgres?sslmode=disable" -qc "drop database if exists \"$db\" with (force)" -c "create database \"$db\"" || { failed=1; continue; }
-  PAPERBOAT_TEST_DATABASE_DSN="${base/lane_test\?/$db?}" nice go test "${args[@]}" "$pkg" || failed=1
-done
-exit $failed
+# One go test run: tools/pg-test-exec.sh (git archive ships tools/) gives each package a fresh database, packages in parallel.
+PAPERBOAT_TEST_DATABASE_DSN=$(cat "$HOME/.pb-test-pg-dsn") exec nice go test -p 2 -exec "$HOME/pb-remote-test/$lane/tools/pg-test-exec.sh" "$@"
 REMOTE
