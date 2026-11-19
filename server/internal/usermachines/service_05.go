@@ -886,8 +886,15 @@ func (s *Service) DeleteMachineTx(ctx context.Context, tx *db.Tx, userID string,
 	return s.revokeUserMachineControlTx(ctx, tx, userID, machine, true)
 }
 
+// machineRemovalLockSeed keys the account lock a user's revoke or delete and each final-delete batch take
+// (hashtextextended(account, seed)): background final deletes of the account's other machines ran back to back,
+// and a revoke that overlapped them lost every serializable retry (40001, read/write dependencies).
+const machineRemovalLockSeed = 448
+
 func (s *Service) revokeUserMachineControl(ctx context.Context, userID, userMachineID string, deleted bool) error {
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// The lock is taken before the transaction, so the revoke waits for a final-delete batch to commit and then
+	// takes its snapshot, instead of racing it (db.InTxUnderSessionLock).
+	return s.db.InTxUnderSessionLock(ctx, userID, machineRemovalLockSeed, func(ctx context.Context, tx *db.Tx) error {
 		machine, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: userMachineID, UserID: userID})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound

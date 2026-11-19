@@ -171,6 +171,11 @@ const finalDeleteChildBatch = 1000
 
 // finalDeleteMachine reports more when it removed a full batch of child rows and left the machine row for later.
 func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, machine dbsqlc.LockUserMachinesForFinalDeletionRow) (more bool, err error) {
+	// A user's revoke or delete of another machine of the account goes first (revokeUserMachineControl holds this
+	// lock across its transaction); this background batch waits, and retries if its snapshot is now stale.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,$2))`, machine.UserID, machineRemovalLockSeed); err != nil {
+		return false, err
+	}
 	for _, child := range finalDeleteChildren {
 		tag, err := tx.Exec(ctx, `DELETE FROM `+child.table+` WHERE ctid IN (SELECT ctid FROM `+child.table+` WHERE `+child.column+`=$1 LIMIT `+strconv.Itoa(finalDeleteChildBatch)+`)`, machine.ID)
 		if err != nil {
