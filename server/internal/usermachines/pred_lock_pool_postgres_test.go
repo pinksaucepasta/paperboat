@@ -15,19 +15,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 )
 
-// requireSmallPredicateLockPool skips unless PostgreSQL runs with a tiny predicate-lock pool; it returns the setting.
-func requireSmallPredicateLockPool(t *testing.T, store *db.DB) int {
-	t.Helper()
-	var perTx int
-	if err := store.SQL().QueryRowContext(t.Context(), `SELECT current_setting('max_pred_locks_per_transaction')::int`).Scan(&perTx); err != nil {
-		t.Fatal(err)
-	}
-	if perTx > 10 {
-		t.Skipf("max_pred_locks_per_transaction is %d: start PostgreSQL with -c max_pred_locks_per_transaction=10 -c max_connections=10 (a restart-only setting) to run this test", perTx)
-	}
-	return perTx
-}
-
 // seedPredPoolAccount seeds one account with 300 machines and two edge latency samples each.
 func seedPredPoolAccount(t *testing.T, store *db.DB) (owner, stamp string) {
 	t.Helper()
@@ -103,9 +90,11 @@ func TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres(t *testing.T) 
 	go func() {
 		released <- holdPredicateLockPoolFull(ctx, store.SQL(), full, 400*time.Millisecond)
 	}()
+	// full carries nil only once the holder itself got 53200: a pass always means the pool really filled.
 	if err := <-full; err != nil {
-		t.Fatalf("fill the predicate-lock pool: %v", err)
+		t.Fatalf("the predicate-lock pool was not filled: %v", err)
 	}
+	t.Log("pool filled: the holder hit SQLSTATE 53200 (out of shared memory, max_pred_locks_per_transaction)")
 	var peak int
 	count := func() int {
 		var n int
@@ -145,7 +134,8 @@ func TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres(t *testing.T) 
 
 // holdPredicateLockPoolFull opens a serializable transaction and reads each table of the schema (a sequential scan
 // takes a relation-level SIREAD lock) until PostgreSQL answers 53200, which the savepoint absorbs (the locks it took
-// stay). It then reports on full and commits after hold.
+// stay). It then reports nil on full (and only then: a nil is proof of 53200, an error covers every other end) and
+// commits after hold.
 func holdPredicateLockPoolFull(ctx context.Context, database *sql.DB, full chan<- error, hold time.Duration) (err error) {
 	reported := false
 	report := func(e error) {
@@ -202,7 +192,7 @@ func holdPredicateLockPoolFull(ctx context.Context, database *sql.DB, full chan<
 		time.Sleep(hold)
 		return tx.Commit()
 	}
-	return fmt.Errorf("read all %d tables and the predicate-lock pool never filled", len(tables))
+	return fmt.Errorf("read all %d tables and the predicate-lock pool never filled (run PostgreSQL with `docker run ... postgres:17 %s`)", len(tables), tinyPoolFlags)
 }
 
 func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }

@@ -111,6 +111,9 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,'fixture-clien
 	if e, _ := holderErr.Load().(error); e != nil {
 		t.Fatalf("holder: %v", e)
 	}
+	if held.Load() == 0 { // each count is one holder that hit 53200 before the delete started
+		t.Fatal("the predicate-lock pool was never filled while the final delete ran")
+	}
 	if err != nil {
 		t.Fatalf("final delete failed after %v: %v", took, err)
 	}
