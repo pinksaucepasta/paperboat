@@ -11986,11 +11986,11 @@ export interface components {
              * @description The part of allowance_bytes an operator granted.
              */
             allowance_granted_bytes?: number;
-            /** @description The fair-use amount is used up: edge traffic runs at the throttled rate until allowance_period_end. Nothing is stopped. */
+            /** @description The fair-use amount (edge and relay traffic together) is used up: edge and relay traffic run at the throttled rate until allowance_period_end. Nothing is stopped. */
             throttled: boolean;
             /** @description An operator lifted the throttle; the workspace runs at full speed meanwhile. */
             throttle_lifted: boolean;
-            /** @description The speed in Mbit/s a throttled workspace's edge traffic runs at. */
+            /** @description The speed in Mbit/s a throttled workspace's edge and relay traffic runs at. */
             throttle_mbit: number;
             /** @description A paid team's seats that its included public traffic is for (allowance_bytes is allowance_per_seat_bytes times this, pooled in the team workspace). */
             allowance_seats?: number;
@@ -11999,15 +11999,8 @@ export interface components {
              * @description A paid team's included public traffic per seat and month.
              */
             allowance_per_seat_bytes?: number;
-            /** @description The speed in Mbit/s of one account on a Paperboat relay. Relays are never cut off and do not count against the edge allowance. */
+            /** @description The speed in Mbit/s of one account on a Paperboat relay until the workspace pool (edge and relay traffic together) is used up; after that relays run at throttle_mbit like edges. Relays are never cut off. */
             relay_mbit: number;
-            /**
-             * Format: int64
-             * @description Relayed bytes an account carries a month at relay_mbit before relay_slow_mbit applies (the plan's tier).
-             */
-            relay_included_bytes: number;
-            /** @description The speed in Mbit/s of an account on a Paperboat relay after relay_included_bytes in the month. */
-            relay_slow_mbit: number;
             /** @description An operator's override of the team's seats. */
             seats_granted?: number;
         };
