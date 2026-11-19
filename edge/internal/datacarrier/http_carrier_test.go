@@ -304,15 +304,12 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.
 // an edge handover cuts it and its redial is refused there (gated edge deploy 2026-11-12 22:06Z). A miss that still
 // knows the key (here: no live admission, as during a control outage) keeps it.
 func TestHTTPServiceClosesACarrierWhoseMachineKeyIsNoLongerAdmitted(t *testing.T) {
-	saved := carrierRebindInterval
-	carrierRebindInterval = 20 * time.Millisecond
-	defer func() { carrierRebindInterval = saved }()
 	clientTLS, serverTLS, _ := testEndpointCertificates(t)
 	identity := testCarrierIdentity()
 	var refusal atomic.Int32 // 0: admitted
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	service, err := NewHTTPService(ctx, ServiceConfig{Carrier: testCarrierConfig(1), TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) {
+	service, err := NewHTTPService(ctx, ServiceConfig{RebindInterval: 20 * time.Millisecond, Carrier: testCarrierConfig(1), TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) {
 		if r := refusal.Load(); r != 0 {
 			return Identity{}, carrierFailure{sentinel: ErrDurableAdmissionMissing, cause: CarrierRefusal(r)}
 		}

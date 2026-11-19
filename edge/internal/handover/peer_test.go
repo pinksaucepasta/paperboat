@@ -40,13 +40,10 @@ func TestPeerOfAnotherUserIsRefused(t *testing.T) {
 		t.Fatal("a peer of another user was accepted")
 	}
 	// The serving side refuses the exchange and sends nothing: the peer reads EOF, not sockets.
-	old := peerUID
-	peerUID = func() int { return os.Geteuid() + 1 }
-	t.Cleanup(func() { peerUID = old })
 	go func() { _, _ = client.Write([]byte(`{"op":"hello"}`)) }()
 	done := make(chan bool, 1)
 	go func() {
-		done <- offer(server, "epoch_0001", func() ([][]byte, error) { return [][]byte{[]byte("key")}, nil })
+		done <- offer(server, os.Geteuid()+1, "epoch_0001", func() ([][]byte, error) { return [][]byte{[]byte("key")}, nil })
 	}()
 	select {
 	case released := <-done:

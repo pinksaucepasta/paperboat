@@ -49,6 +49,9 @@ type CarrierAssemblyConfig struct {
 	// Goaway, when set, tells one carrier's host that this edge is going away until deadline
 	// (Drain sends it to every carrier).
 	Goaway func(ctx context.Context, server *datacarrier.Server, deadline time.Time) error
+	// DrainMinimum keeps an idle draining carrier open long enough for its host's replacement carrier to land
+	// first. Zero means DefaultDrainMinimum.
+	DrainMinimum time.Duration
 }
 
 // CarrierAssembly owns the accepted datacarrier.Service peers and provides a
@@ -63,6 +66,7 @@ type CarrierAssembly struct {
 	observeError    func(error)
 	telemetry       *datacarrier.CarrierTelemetry
 	goaway          func(context.Context, *datacarrier.Server, time.Time) error
+	drainMinimum    time.Duration
 	maximumHandlers int
 	// live is every carrier a handler currently serves.
 	live map[*datacarrier.Server]struct{}
@@ -87,8 +91,12 @@ func NewCarrierAssembly(config CarrierAssemblyConfig) (*CarrierAssembly, error) 
 	if config.MaximumHandlers < 1 || config.MaximumHandlers > maxCarrierHandlers {
 		return nil, ErrCarrierAssemblyInvalid
 	}
+	if config.DrainMinimum == 0 {
+		config.DrainMinimum = DefaultDrainMinimum
+	}
 	return &CarrierAssembly{
-		reporter: config.Reporter, service: config.Service, handle: config.Handle, observeError: config.ObserveError,
+		drainMinimum: config.DrainMinimum,
+		reporter:     config.Reporter, service: config.Service, handle: config.Handle, observeError: config.ObserveError,
 		telemetry: config.Telemetry, goaway: config.Goaway, maximumHandlers: config.MaximumHandlers, done: make(chan error, 1),
 		live: map[*datacarrier.Server]struct{}{},
 	}, nil
@@ -246,13 +254,13 @@ func (a *CarrierAssembly) Done() <-chan error {
 	return a.done
 }
 
-// drainMinimum keeps an idle draining carrier open long enough for its host's replacement
+// DefaultDrainMinimum keeps an idle draining carrier open long enough for its host's replacement
 // carrier to land first.
-var drainMinimum = 5 * time.Second
+const DefaultDrainMinimum = 5 * time.Second
 
 // Drain is the first step of stopping: every carrier's host is told the edge is going away until
 // deadline (edge_draining), the carriers keep serving, and Drain returns once each has no open
-// stream and drainMinimum has passed, or at deadline. Hosts dial their replacement at once.
+// stream and the drain minimum has passed, or at deadline. Hosts dial their replacement at once.
 func (a *CarrierAssembly) Drain(ctx context.Context, deadline time.Time) {
 	if a == nil {
 		return
@@ -281,7 +289,7 @@ func (a *CarrierAssembly) Drain(ctx context.Context, deadline time.Time) {
 		}
 		sent.Wait()
 	}
-	earliest := time.Now().Add(drainMinimum)
+	earliest := time.Now().Add(a.drainMinimum)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {

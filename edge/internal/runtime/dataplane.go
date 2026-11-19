@@ -8,9 +8,12 @@ import (
 )
 
 type DataPlaneSpec struct {
-	Persistence Component
-	Control     Component
-	Carrier     Component
+	// StartupRollbackTimeout bounds stopping the already started components after a failed start. Zero means
+	// DefaultStartupRollbackTimeout.
+	StartupRollbackTimeout time.Duration
+	Persistence            Component
+	Control                Component
+	Carrier                Component
 	// Certificates owns the authenticated server-to-edge TLS certificate
 	// distribution loop. It is optional for a legacy/static deployment, but
 	// when supplied it must be stopped before carrier listeners are closed.
@@ -75,7 +78,11 @@ func (d *DataPlane) Start(ctx context.Context) error {
 		if err := component.Start(ctx); err != nil {
 			// One bounded budget for the whole rollback: a child that ignores SIGTERM is killed
 			// when it runs out instead of hanging the failed start.
-			rollback, cancel := context.WithTimeout(context.Background(), startupRollbackTimeout)
+			rollbackTimeout := d.spec.StartupRollbackTimeout
+			if rollbackTimeout == 0 {
+				rollbackTimeout = DefaultStartupRollbackTimeout
+			}
+			rollback, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
 			var cleanup []error
 			for i := len(d.started) - 1; i >= 0; i-- {
 				if stopErr := d.started[i].Shutdown(rollback); stopErr != nil {
@@ -92,8 +99,8 @@ func (d *DataPlane) Start(ctx context.Context) error {
 	return nil
 }
 
-// startupRollbackTimeout bounds stopping the already started components after a failed start.
-var startupRollbackTimeout = 10 * time.Second
+// DefaultStartupRollbackTimeout bounds stopping the already started components after a failed start.
+const DefaultStartupRollbackTimeout = 10 * time.Second
 
 func (d *DataPlane) Shutdown(ctx context.Context) error {
 	d.mu.Lock()

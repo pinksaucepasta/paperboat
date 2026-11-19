@@ -246,7 +246,7 @@ func Offer(stateDir, epoch string, certificates func() ([][]byte, error), onRele
 			if err != nil {
 				return
 			}
-			if offer(conn, epoch, certificates) {
+			if offer(conn, os.Geteuid(), epoch, certificates) {
 				_ = l.Close()
 				onRelease()
 				// Held open until this process exits: its closing tells the replacement to read UDP.
@@ -258,9 +258,10 @@ func Offer(stateDir, epoch string, certificates func() ([][]byte, error), onRele
 	return func() { _ = l.Close() }, nil
 }
 
-// offer runs one exchange; true once this process released its sockets to a ready replacement.
-func offer(conn *net.UnixConn, epoch string, certificates func() ([][]byte, error)) bool {
-	if requirePeerUID(conn, peerUID()) != nil {
+// offer runs one exchange with a peer that must be user peerUID; true once this process released its sockets to a
+// ready replacement.
+func offer(conn *net.UnixConn, peerUID int, epoch string, certificates func() ([][]byte, error)) bool {
+	if requirePeerUID(conn, peerUID) != nil {
 		return false
 	}
 	_ = conn.SetDeadline(time.Now().Add(helloTimeout))
@@ -296,9 +297,6 @@ func offer(conn *net.UnixConn, epoch string, certificates func() ([][]byte, erro
 //
 //lint:ignore U1000 only the assignment matters: the package variable keeps the connection reachable
 var held *net.UnixConn
-
-// peerUID is the user a handover peer must be; a variable so a test can name another one.
-var peerUID = os.Geteuid
 
 // sendCertificates sends the serving process's certificate records in batches, always ending with a
 // message that has no More, and wipes them. A record too large for one message is skipped: the

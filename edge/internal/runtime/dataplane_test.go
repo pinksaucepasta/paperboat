@@ -126,14 +126,12 @@ func (stuckComponent) Shutdown(ctx context.Context) error {
 // Code review (dataplane.go:77): a failed start's rollback is bounded, and the start error stays
 // the primary error.
 func TestDataPlaneRollbackIsBoundedAndKeepsTheStartError(t *testing.T) {
-	defer func(previous time.Duration) { startupRollbackTimeout = previous }(startupRollbackTimeout)
-	startupRollbackTimeout = 200 * time.Millisecond
 	var mu sync.Mutex
 	var events []string
 	component := func(name string, fail bool) Component {
 		return orderedComponent{name: name, events: &events, mu: &mu, fail: fail}
 	}
-	dataPlane, _ := NewDataPlane(DataPlaneSpec{Persistence: component("store", false), Control: component("control", false), Node: component("node", false), Routes: component("routes", false), Gateway: stuckComponent{}, HTTP3Ingress: component("http3", true), PrivateIngress: component("private", false), RedirectIngress: component("redirect", false), Usage: component("usage", false)})
+	dataPlane, _ := NewDataPlane(DataPlaneSpec{StartupRollbackTimeout: 200 * time.Millisecond, Persistence: component("store", false), Control: component("control", false), Node: component("node", false), Routes: component("routes", false), Gateway: stuckComponent{}, HTTP3Ingress: component("http3", true), PrivateIngress: component("private", false), RedirectIngress: component("redirect", false), Usage: component("usage", false)})
 	done := make(chan error, 1)
 	go func() { done <- dataPlane.Start(context.Background()) }()
 	select {

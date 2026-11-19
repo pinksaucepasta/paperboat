@@ -39,6 +39,7 @@ type HTTPService struct {
 	accepted       chan *Server
 	admissions     chan struct{}
 	done           chan struct{}
+	rebindInterval time.Duration
 	once           sync.Once
 	failure        error
 	onFailure      func(context.Context, error)
@@ -62,11 +63,18 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 	if maximum < 0 || maximum > 1<<16 {
 		return nil, ErrInvalidEndpoint
 	}
+	rebind := config.RebindInterval
+	if rebind == 0 {
+		rebind = DefaultRebindInterval
+	}
+	if rebind < 0 {
+		return nil, ErrInvalidEndpoint
+	}
 	serviceCtx, cancel := context.WithCancel(ctx)
 	// admissions is held for each carrier's whole life: it bounds concurrent carriers, so it is
 	// sized by MaximumCarriers. (It was the accept queue depth, 16, so an edge refused every
 	// carrier past the 16th with 503 "carrier capacity reached".)
-	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, maximum), done: make(chan struct{}), servers: make(map[*Server]struct{})}
+	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, rebindInterval: rebind, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, maximum), done: make(chan struct{}), servers: make(map[*Server]struct{})}
 	if config.TCP != nil {
 		if err := config.TCP.validateServer(); err != nil {
 			cancel()
@@ -206,7 +214,7 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 		// now. Left open it sat idle until the next edge handover cut it, and its redial was refused there
 		// (gated edge deploy 2026-11-12 22:06Z: 34 unknown_machine refusals). A miss that leaves the key known
 		// (a newer session, an expired admission during a control outage) keeps the carrier.
-		recheck := time.NewTicker(carrierRebindInterval)
+		recheck := time.NewTicker(s.rebindInterval)
 		defer recheck.Stop()
 	serving:
 		for {
@@ -235,9 +243,6 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 }
 
 type httpTLSConnectionKey struct{}
-
-// carrierRebindInterval is how often a live carrier's machine key is checked against the current admissions.
-var carrierRebindInterval = 30 * time.Second
 
 func (s *HTTPService) Accept(ctx context.Context) (*Server, error) {
 	if s == nil || ctx == nil {

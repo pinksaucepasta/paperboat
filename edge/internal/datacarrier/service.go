@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"time"
 )
 
 // ServiceConfig describes the edge listener set for connector-v1 carriers.
@@ -22,10 +23,16 @@ type ServiceConfig struct {
 	// preview and tunnel carriers); a carrier past it is refused with 503. Zero means
 	// DefaultMaximumCarriers. It is not the accept queue depth.
 	MaximumCarriers int
+	// RebindInterval is how often a live carrier's machine key is checked against the current admissions. Zero
+	// means DefaultRebindInterval.
+	RebindInterval time.Duration
 }
 
 // DefaultMaximumCarriers is the carrier bound of a service that does not name one.
 const DefaultMaximumCarriers = 1024
+
+// DefaultRebindInterval is how often a live carrier's machine key is checked against the current admissions.
+const DefaultRebindInterval = 30 * time.Second
 
 // Service owns the real edge carrier listeners. It only publishes a Server
 // after the listener has completed mutual TLS/QUIC authentication, canonical

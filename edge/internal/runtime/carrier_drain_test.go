@@ -15,9 +15,6 @@ import (
 // going away, then keeps serving: a held stream finishes before the drain ends, and the drain
 // still ends at its deadline when a stream never does.
 func TestCarrierAssemblyDrainSendsGoawayAndWaitsForOpenStreams(t *testing.T) {
-	previous := drainMinimum
-	drainMinimum = 200 * time.Millisecond
-	t.Cleanup(func() { drainMinimum = previous })
 	for _, mode := range []string{"stream finishes", "deadline"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -39,7 +36,8 @@ func TestCarrierAssemblyDrainSendsGoawayAndWaitsForOpenStreams(t *testing.T) {
 			handled := make(chan struct{})
 			var goaways atomic.Int32
 			assembly, err := NewCarrierAssembly(CarrierAssemblyConfig{
-				Service: newTelemetryCarrierService(server),
+				DrainMinimum: 200 * time.Millisecond,
+				Service:      newTelemetryCarrierService(server),
 				Handle: func(ctx context.Context, _ *datacarrier.Server) error {
 					close(handled)
 					<-ctx.Done()
