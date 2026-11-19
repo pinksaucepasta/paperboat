@@ -5,8 +5,10 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -14,13 +16,28 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
-const nativeBootstrapHealthURL = "http://127.0.0.1:18084/healthz"
+// The child listens on a port this run picked (passed in its environment), never a fixed one.
+const nativeBootstrapHealthPortEnv = "PAPERBOAT_NATIVE_BOOTSTRAP_HEALTH_PORT"
+
+func nativeBootstrapHealthURL(port string) string {
+	return "http://" + net.JoinHostPort("127.0.0.1", port) + "/healthz"
+}
+
+func nativeBootstrapHealthPort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+}
 
 func TestNativeBootstrapSystemdServiceProcess(t *testing.T) {
 	if os.Getenv("PAPERBOAT_NATIVE_BOOTSTRAP_CHILD") != "1" {
 		t.Skip("native bootstrap child only")
 	}
-	server := &http.Server{Addr: "127.0.0.1:18084", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
+	server := &http.Server{Addr: net.JoinHostPort("127.0.0.1", os.Getenv(nativeBootstrapHealthPortEnv)), Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.Fatal(err)
 	}
@@ -43,11 +60,12 @@ func TestNativeBootstrapSystemdFailureRetryAndCleanup(t *testing.T) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
+	healthPort := nativeBootstrapHealthPort(t)
 	runner := &failFirstRunner{next: service.ExecRunner{}}
 	installer, err := service.New(service.Config{
 		Platform: "linux", ConfigRoot: "/", Executable: executable, User: "nobody", Group: "nogroup",
 		Arguments:   []string{"-test.run=^TestNativeBootstrapSystemdServiceProcess$", "-test.v"},
-		Environment: map[string]string{"PAPERBOAT_NATIVE_BOOTSTRAP_CHILD": "1"},
+		Environment: map[string]string{"PAPERBOAT_NATIVE_BOOTSTRAP_CHILD": "1", nativeBootstrapHealthPortEnv: healthPort},
 		Controller:  service.SystemdController{Runner: runner},
 	})
 	if err != nil {
@@ -72,12 +90,12 @@ func TestNativeBootstrapSystemdFailureRetryAndCleanup(t *testing.T) {
 	if runner.calls < 2 {
 		t.Fatalf("system manager calls=%d", runner.calls)
 	}
-	waitForBootstrapHealth(t, true)
+	waitForBootstrapHealth(t, healthPort, true)
 	if err := installer.Uninstall(ctx); err != nil {
 		t.Fatal(err)
 	}
 	cleanupNeeded = false
-	waitForBootstrapHealth(t, false)
+	waitForBootstrapHealth(t, healthPort, false)
 }
 
 type failFirstRunner struct {
@@ -97,12 +115,12 @@ func (r *failFirstRunner) Run(ctx context.Context, name string, args ...string) 
 	return r.next.Run(ctx, name, args...)
 }
 
-func waitForBootstrapHealth(t *testing.T, wantReady bool) {
+func waitForBootstrapHealth(t *testing.T, port string, wantReady bool) {
 	t.Helper()
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		response, err := client.Get(nativeBootstrapHealthURL)
+		response, err := client.Get(nativeBootstrapHealthURL(port))
 		ready := err == nil && response.StatusCode == http.StatusOK
 		if response != nil {
 			response.Body.Close()

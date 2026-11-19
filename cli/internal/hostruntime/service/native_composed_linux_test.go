@@ -27,6 +27,7 @@ func TestNativeSystemdComposedLifecycle(t *testing.T) {
 	if user == "" {
 		user = "root"
 	}
+	healthPort := nativeLinuxHealthPort(t)
 	definitions := []string{"/etc/systemd/system/paperboat-hostd.service", "/etc/systemd/system/paperboat-updated.service"}
 	for _, path := range definitions {
 		if _, err := os.Lstat(path); err == nil {
@@ -38,7 +39,7 @@ func TestNativeSystemdComposedLifecycle(t *testing.T) {
 	hostd, err := New(Config{
 		Platform: "linux", Kind: HostdKind, ConfigRoot: "/", Executable: executable, User: user, Group: user,
 		Arguments:   []string{"-test.run=^TestNativeSystemdServiceProcess$", "-test.v"},
-		Environment: map[string]string{"PAPERBOAT_NATIVE_SERVICE_CHILD": "1", "PAPERBOAT_NATIVE_SERVICE_ROLE": "hostd"},
+		Environment: map[string]string{"PAPERBOAT_NATIVE_SERVICE_CHILD": "1", "PAPERBOAT_NATIVE_SERVICE_ROLE": "hostd", nativeLinuxHealthPortEnv: healthPort},
 		Controller:  SystemdController{Runner: ExecRunner{}, Unit: "paperboat-hostd.service"},
 	})
 	if err != nil {
@@ -53,7 +54,7 @@ func TestNativeSystemdComposedLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe, err := NewHTTPReadinessProbe(nativeLinuxHealthURL)
+	probe, err := NewHTTPReadinessProbe(nativeLinuxHealthURL(healthPort))
 	if err != nil {
 		t.Fatal(err)
 	}

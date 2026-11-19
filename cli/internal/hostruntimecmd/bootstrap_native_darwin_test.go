@@ -5,9 +5,11 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -15,13 +17,28 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
-const nativeBootstrapDarwinHealthURL = "http://127.0.0.1:18085/healthz"
+// The child listens on a port this run picked (passed in its environment), never a fixed one.
+const nativeBootstrapDarwinHealthPortEnv = "PAPERBOAT_NATIVE_BOOTSTRAP_DARWIN_HEALTH_PORT"
+
+func nativeBootstrapDarwinHealthURL(port string) string {
+	return "http://" + net.JoinHostPort("127.0.0.1", port) + "/healthz"
+}
+
+func nativeBootstrapDarwinHealthPort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+}
 
 func TestNativeBootstrapLaunchdServiceProcess(t *testing.T) {
 	if os.Getenv("PAPERBOAT_NATIVE_BOOTSTRAP_DARWIN_CHILD") != "1" {
 		t.Skip("native bootstrap child only")
 	}
-	server := &http.Server{Addr: "127.0.0.1:18085", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
+	server := &http.Server{Addr: net.JoinHostPort("127.0.0.1", os.Getenv(nativeBootstrapDarwinHealthPortEnv)), Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.Fatal(err)
 	}
@@ -44,11 +61,12 @@ func TestNativeBootstrapLaunchdFailureRetryAndCleanup(t *testing.T) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
+	healthPort := nativeBootstrapDarwinHealthPort(t)
 	runner := &darwinFailFirstRunner{next: service.ExecRunner{}}
 	installer, err := service.New(service.Config{
 		Platform: "darwin", ConfigRoot: "/", Executable: executable, User: "nobody", Group: "nobody",
 		Arguments:   []string{"-test.run=^TestNativeBootstrapLaunchdServiceProcess$", "-test.v"},
-		Environment: map[string]string{"PAPERBOAT_NATIVE_BOOTSTRAP_DARWIN_CHILD": "1"},
+		Environment: map[string]string{"PAPERBOAT_NATIVE_BOOTSTRAP_DARWIN_CHILD": "1", nativeBootstrapDarwinHealthPortEnv: healthPort},
 		Controller:  service.LaunchdController{Runner: runner, UID: os.Getuid()},
 	})
 	if err != nil {
@@ -73,12 +91,12 @@ func TestNativeBootstrapLaunchdFailureRetryAndCleanup(t *testing.T) {
 	if runner.calls < 2 {
 		t.Fatalf("launchd manager calls=%d", runner.calls)
 	}
-	waitForBootstrapDarwinHealth(t, true)
+	waitForBootstrapDarwinHealth(t, healthPort, true)
 	if err := installer.Uninstall(ctx); err != nil {
 		t.Fatal(err)
 	}
 	cleanupNeeded = false
-	waitForBootstrapDarwinHealth(t, false)
+	waitForBootstrapDarwinHealth(t, healthPort, false)
 }
 
 type darwinFailFirstRunner struct {
@@ -98,12 +116,12 @@ func (r *darwinFailFirstRunner) Run(ctx context.Context, name string, args ...st
 	return r.next.Run(ctx, name, args...)
 }
 
-func waitForBootstrapDarwinHealth(t *testing.T, wantReady bool) {
+func waitForBootstrapDarwinHealth(t *testing.T, port string, wantReady bool) {
 	t.Helper()
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		response, err := client.Get(nativeBootstrapDarwinHealthURL)
+		response, err := client.Get(nativeBootstrapDarwinHealthURL(port))
 		ready := err == nil && response.StatusCode == http.StatusOK
 		if response != nil {
 			response.Body.Close()

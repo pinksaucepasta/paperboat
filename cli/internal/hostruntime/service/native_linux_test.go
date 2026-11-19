@@ -10,13 +10,30 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
 
-const nativeLinuxHealthURL = "http://127.0.0.1:18083/healthz"
+// The child of the test service listens on a port the test picked for this run (passed in its environment), so a
+// run never collides with another process on a fixed one.
+const nativeLinuxHealthPortEnv = "PAPERBOAT_NATIVE_SERVICE_HEALTH_PORT"
+
+func nativeLinuxHealthPort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+}
+
+func nativeLinuxHealthURL(port string) string {
+	return "http://" + net.JoinHostPort("127.0.0.1", port) + "/healthz"
+}
 
 func TestNativeSystemdServiceProcess(t *testing.T) {
 	if os.Getenv("PAPERBOAT_NATIVE_SERVICE_CHILD") != "1" {
@@ -27,7 +44,7 @@ func TestNativeSystemdServiceProcess(t *testing.T) {
 		awaitNativeServiceTermination()
 		return
 	}
-	server := &http.Server{Addr: "127.0.0.1:18083", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := &http.Server{Addr: net.JoinHostPort("127.0.0.1", os.Getenv(nativeLinuxHealthPortEnv)), Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"live":true}`))
@@ -97,6 +114,7 @@ func TestNativeSystemdInstallUpgradeAndUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	executable = installNativeServiceTestExecutable(t, executable)
+	healthPort := nativeLinuxHealthPort(t)
 	definitionPath := "/etc/systemd/system/paperboat-runtime-host.service"
 	if _, err := os.Lstat(definitionPath); err == nil {
 		t.Fatalf("refusing to replace existing service definition %s", definitionPath)
@@ -106,7 +124,7 @@ func TestNativeSystemdInstallUpgradeAndUninstall(t *testing.T) {
 	installer, err := New(Config{
 		Platform: "linux", ConfigRoot: "/", Executable: executable, User: os.Getenv("USER"), Group: os.Getenv("USER"),
 		Arguments:   []string{"-test.run=^TestNativeSystemdServiceProcess$", "-test.v"},
-		Environment: map[string]string{"PAPERBOAT_NATIVE_SERVICE_CHILD": "1"},
+		Environment: map[string]string{"PAPERBOAT_NATIVE_SERVICE_CHILD": "1", nativeLinuxHealthPortEnv: healthPort},
 		Controller:  SystemdController{Runner: ExecRunner{}},
 	})
 	if err != nil {
@@ -124,16 +142,16 @@ func TestNativeSystemdInstallUpgradeAndUninstall(t *testing.T) {
 		definition, _ := os.ReadFile(installer.DefinitionPath())
 		t.Fatalf("install: %v\ndefinition:\n%s", err, definition)
 	}
-	waitForNativeSystemdHealth(t, true)
+	waitForNativeSystemdHealth(t, healthPort, true)
 	if err := nativeSystemdOperation(installer.Install); err != nil {
 		t.Fatal(err)
 	}
-	waitForNativeSystemdHealth(t, true)
+	waitForNativeSystemdHealth(t, healthPort, true)
 	if err := nativeSystemdOperation(installer.Uninstall); err != nil {
 		t.Fatal(err)
 	}
 	cleanupNeeded = false
-	waitForNativeSystemdHealth(t, false)
+	waitForNativeSystemdHealth(t, healthPort, false)
 }
 
 func nativeSystemdOperation(operation func(context.Context) error) error {
@@ -142,12 +160,12 @@ func nativeSystemdOperation(operation func(context.Context) error) error {
 	return operation(ctx)
 }
 
-func waitForNativeSystemdHealth(t *testing.T, wantReady bool) {
+func waitForNativeSystemdHealth(t *testing.T, port string, wantReady bool) {
 	t.Helper()
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		response, err := client.Get(nativeLinuxHealthURL)
+		response, err := client.Get(nativeLinuxHealthURL(port))
 		ready := err == nil && response.StatusCode == http.StatusOK
 		if response != nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
