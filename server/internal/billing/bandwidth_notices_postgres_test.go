@@ -148,7 +148,7 @@ func TestBandwidthThrottleNoticeGoesOnceToOwnerAndAdminsPostgres(t *testing.T) {
 		t.Fatalf("team mails owner=%d admin=%d member=%d, want 1/1/0", mails(teamWorkspace, owner), mails(teamWorkspace, admin), mails(teamWorkspace, member))
 	}
 	var body string
-	if err := store.SQL().QueryRowContext(ctx, `SELECT payload->>'html' FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "bandwidth-throttled:"+teamWorkspace+":%:"+admin).Scan(&body); err != nil || !strings.Contains(body, "https://console.example.test/billing") || !strings.Contains(body, "Direct machine-to-machine traffic, relays") {
+	if err := store.SQL().QueryRowContext(ctx, `SELECT payload->>'html' FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "bandwidth-throttled:"+teamWorkspace+":%:"+admin).Scan(&body); err != nil || !strings.Contains(body, "https://console.example.test/billing") || !strings.Contains(body, "Direct machine-to-machine traffic and your own edges and relays") {
 		t.Fatalf("mail lacks the billing link or the direct-traffic note: %q %v", body, err)
 	}
 }
