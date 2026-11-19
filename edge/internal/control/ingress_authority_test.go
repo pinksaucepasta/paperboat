@@ -137,6 +137,11 @@ func TestIngressAuthorityRefreshesColdPreviewWithoutRequestReplay(t *testing.T) 
 	}
 }
 
+const (
+	ingressReplyLatency  = 150 * time.Millisecond // a slow handshake/reply: the old 75 ms validity was gone before it arrived
+	ingressFirstValidity = time.Second
+)
+
 func TestIngressAuthorityRefreshesDecisionBeforeCacheInterval(t *testing.T) {
 	for _, outcome := range []string{"renewed", "withdrawn", "unavailable"} {
 		t.Run(outcome, func(t *testing.T) {
@@ -146,8 +151,11 @@ func TestIngressAuthorityRefreshesDecisionBeforeCacheInterval(t *testing.T) {
 				d := ingressAuthorityTestDecision(time.Now().UTC())
 				decisions := []connectorprotocol.IngressDecision{d}
 				if n == 1 {
-					d.ExpiresAt = time.Now().Add(75 * time.Millisecond)
+					// Valid for far longer than the slowest reply a loaded runner can deliver (a 75 ms expiry
+					// could pass before the first Snapshot returned); the test waits for it to pass below.
+					d.ExpiresAt = time.Now().Add(ingressFirstValidity)
 					decisions[0] = d
+					time.Sleep(ingressReplyLatency)
 				} else {
 					switch outcome {
 					case "withdrawn":
@@ -169,7 +177,11 @@ func TestIngressAuthorityRefreshesDecisionBeforeCacheInterval(t *testing.T) {
 			if err != nil || len(before) != 1 {
 				t.Fatalf("initial authority: %v", err)
 			}
-			<-time.After(time.Until(before[0].ExpiresAt) + time.Millisecond)
+			// Poll the clock the authority reads: a fixed sleep past the expiry can wake a tick early on
+			// Windows' ~15.6 ms wall clock, leaving "now" equal to the expiry, which is not yet expired.
+			for !time.Now().After(before[0].ExpiresAt) {
+				time.Sleep(time.Millisecond)
+			}
 			after, err := authority.Snapshot(t.Context())
 			if calls.Load() != 2 {
 				t.Fatal("expired authority reused inside the refresh interval")
