@@ -208,6 +208,37 @@ func accountBurst(bytesPerSecond float64) float64 {
 	return min(float64(budgetBurstBytes), max(bytesPerSecond/4, 2*budgetMinimumCost))
 }
 
+// shapingMaxDelay bounds how long an account's over-cap traffic may wait in the relay: past it a datagram is dropped (a full buffer),
+// so latency stays bounded while the account's own transport converges on its speed instead of collapsing under drops.
+const shapingMaxDelay = 500 * time.Millisecond
+
+// reserve takes size bytes from the budget the way a shaper does: it returns how long the caller must wait before forwarding them (zero
+// within the burst), or !ok when that wait would exceed maxDelay (the buffer is full). Tokens go negative while packets wait.
+// Prior art: Tailscale's DERP delays a client's sends past its limit rather than dropping them (derp/derpserver/derpserver.go
+// rateLimitWait: x/time/rate ReserveN and a sleep), so the sender's TCP slows to the limit; here the relay carries datagrams, so the
+// delay is a bounded queue (readDatagrams) or a sleep before the next frame is read (the stream loop, TCP back-pressure).
+func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.Duration, bool) {
+	cost := float64(max(size, budgetMinimumCost))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.at.IsZero() {
+		b.tokens = b.burst
+	} else {
+		b.tokens = min(b.burst, b.tokens+now.Sub(b.at).Seconds()*b.rate)
+	}
+	b.at = now
+	if b.tokens >= cost {
+		b.tokens -= cost
+		return 0, true
+	}
+	delay := time.Duration((cost - b.tokens) / b.rate * float64(time.Second))
+	if delay > maxDelay {
+		return 0, false
+	}
+	b.tokens -= cost
+	return delay, true
+}
+
 // setRate changes the refill rate and the burst; tokens already held are cut to the new burst.
 func (b *budget) setRate(bytesPerSecond, burst float64) {
 	b.mu.Lock()
