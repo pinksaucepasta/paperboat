@@ -1010,30 +1010,53 @@ WITH machine_updated AS (
 SELECT id FROM machine_updated LIMIT 1;
 
 -- name: RevokeUserMachineAccessSessions :many
-UPDATE user_machine_access_sessions
-SET state = 'revoked', revoked_at = coalesce(revoked_at, now()), revocation_reason = sqlc.arg(reason), updated_at = now()
-WHERE user_machine_id = sqlc.arg(user_machine_id)
-  AND (state = 'active' OR (state = 'revoked' AND helper_revoked_at IS NULL))
-RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
+-- Revokes the active sessions (a signed credential is done at once: it needs no helper call) and returns every
+-- session that still needs its helper told, without rewriting those already revoked.
+WITH revoked AS (
+  UPDATE user_machine_access_sessions AS active
+  SET state = 'revoked', revoked_at = coalesce(active.revoked_at, now()), revocation_reason = sqlc.arg(reason), updated_at = now(),
+    helper_revoked_at = CASE WHEN active.credential_kind = 'control_plane_signed' THEN now() END
+  WHERE active.user_machine_id = sqlc.arg(user_machine_id) AND active.state = 'active'
+  RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
-  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason;
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind, helper_revoked_at
+)
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, helper_terminal_session_id, helper_file_session_id, revocation_reason, credential_kind FROM revoked WHERE helper_revoked_at IS NULL
+UNION ALL
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind FROM user_machine_access_sessions AS pending
+WHERE pending.user_machine_id = sqlc.arg(user_machine_id) AND pending.state = 'revoked' AND helper_revoked_at IS NULL;
 
 -- name: RevokeUserMachineAccessSessionsForUser :many
-UPDATE user_machine_access_sessions
-SET state = 'revoked', revoked_at = coalesce(revoked_at, now()), revocation_reason = sqlc.arg(reason), updated_at = now()
-WHERE user_id = sqlc.arg(user_id)
-  AND (state = 'active' OR (state = 'revoked' AND helper_revoked_at IS NULL))
-RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
+-- Revokes the active sessions (a signed credential is done at once: it needs no helper call) and returns every
+-- session that still needs its helper told, without rewriting those already revoked.
+WITH revoked AS (
+  UPDATE user_machine_access_sessions AS active
+  SET state = 'revoked', revoked_at = coalesce(active.revoked_at, now()), revocation_reason = sqlc.arg(reason), updated_at = now(),
+    helper_revoked_at = CASE WHEN active.credential_kind = 'control_plane_signed' THEN now() END
+  WHERE active.user_id = sqlc.arg(user_id) AND active.state = 'active'
+  RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
-  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason;
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind, helper_revoked_at
+)
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, helper_terminal_session_id, helper_file_session_id, revocation_reason, credential_kind FROM revoked WHERE helper_revoked_at IS NULL
+UNION ALL
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind FROM user_machine_access_sessions AS pending
+WHERE pending.user_id = sqlc.arg(user_id) AND pending.state = 'revoked' AND helper_revoked_at IS NULL;
 
 -- name: ListPendingUserMachineAccessSessionRevocations :many
 SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
-  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind
 FROM user_machine_access_sessions
 WHERE state = 'revoked' AND helper_revoked_at IS NULL
-ORDER BY created_at, id;
+ORDER BY created_at, id
+LIMIT 5000;
 
 -- name: LockUserMachinesForFinalDeletion :many
 SELECT candidate.id,candidate.user_id,candidate.alias FROM user_machines candidate
@@ -1044,10 +1067,10 @@ AND NOT (candidate.id = ANY(sqlc.arg(skip_ids)::text[])) AND NOT EXISTS (
 )
 ORDER BY coalesce(candidate.deleted_at,candidate.revoked_at,candidate.created_at),candidate.id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
--- name: MarkUserMachineAccessSessionRevoked :execrows
+-- name: MarkUserMachineAccessSessionsRevoked :execrows
 UPDATE user_machine_access_sessions
 SET helper_revoked_at = now(), updated_at = now()
-WHERE id = sqlc.arg(id) AND state = 'revoked' AND helper_revoked_at IS NULL;
+WHERE id = ANY(sqlc.arg(ids)::text[]) AND state = 'revoked' AND helper_revoked_at IS NULL;
 
 -- name: GetUserMachineTerminalSession :one
 SELECT s.* FROM user_machine_terminal_sessions s

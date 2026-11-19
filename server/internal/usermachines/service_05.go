@@ -951,17 +951,7 @@ func (s *Service) RevokeUserMachineSessions(ctx context.Context, userMachineID, 
 	if err != nil {
 		return err
 	}
-	var errs []error
-	for _, row := range rows {
-		if err := s.revokeCredentialSessions(ctx, machineAccessSession{ID: row.ID, UserID: row.UserID, UserMachineID: row.UserMachineID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: row.CLIClientSessionID, HTTPBaseURL: row.HttpBaseUrl, TerminalSessionID: row.HelperTerminalSessionID, FileSessionID: row.HelperFileSessionID}, reason); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if _, err := s.db.Queries().MarkUserMachineAccessSessionRevoked(ctx, row.ID); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return s.revokeSessionCredentials(ctx, rows, reason)
 }
 
 // RevokeUserSessions is called after an entitlement revocation. It has the
@@ -974,15 +964,9 @@ func (s *Service) RevokeUserSessions(ctx context.Context, userID, reason string)
 	if err != nil {
 		return err
 	}
-	var errs []error
-	for _, row := range rows {
-		if err := s.revokeCredentialSessions(ctx, machineAccessSession{ID: row.ID, UserID: row.UserID, UserMachineID: row.UserMachineID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: row.CLIClientSessionID, HTTPBaseURL: row.HttpBaseUrl, TerminalSessionID: row.HelperTerminalSessionID, FileSessionID: row.HelperFileSessionID}, reason); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if _, err := s.db.Queries().MarkUserMachineAccessSessionRevoked(ctx, row.ID); err != nil {
-			errs = append(errs, err)
-		}
+	sessions := make([]dbsqlc.RevokeUserMachineAccessSessionsRow, len(rows))
+	for i, row := range rows {
+		sessions[i] = dbsqlc.RevokeUserMachineAccessSessionsRow(row)
 	}
-	return errors.Join(errs...)
+	return s.revokeSessionCredentials(ctx, sessions, reason)
 }

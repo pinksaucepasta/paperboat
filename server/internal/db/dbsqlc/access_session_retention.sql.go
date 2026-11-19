@@ -14,13 +14,22 @@ const retireExpiredMachineAccessSessions = `-- name: RetireExpiredMachineAccessS
 UPDATE user_machine_access_sessions
 SET state = 'revoked', revoked_at = now(), revocation_reason = 'expired',
     helper_revoked_at = coalesce(helper_revoked_at, now()), updated_at = now()
-WHERE state = 'active' AND expires_at < $1
+WHERE id IN (
+  SELECT due.id FROM user_machine_access_sessions AS due
+  WHERE due.state = 'active' AND due.expires_at < $1
+  ORDER BY due.expires_at LIMIT $2::int FOR UPDATE SKIP LOCKED)
 `
+
+type RetireExpiredMachineAccessSessionsParams struct {
+	ExpiredBefore time.Time
+	BatchSize     int32
+}
 
 // Admitted streams keep their authority beyond the credential TTL until explicit revocation, so an
 // expired session is only retired after a retention period; the helper side expired it long before.
-func (q *Queries) RetireExpiredMachineAccessSessions(ctx context.Context, expiredBefore time.Time) (int64, error) {
-	result, err := q.db.Exec(ctx, retireExpiredMachineAccessSessions, expiredBefore)
+// One bounded batch per statement: one statement over every expired row of a busy machine held its locks for seconds.
+func (q *Queries) RetireExpiredMachineAccessSessions(ctx context.Context, arg RetireExpiredMachineAccessSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireExpiredMachineAccessSessions, arg.ExpiredBefore, arg.BatchSize)
 	if err != nil {
 		return 0, err
 	}
