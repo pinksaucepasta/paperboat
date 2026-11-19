@@ -76,6 +76,10 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 			}
 			for _, statement := range []string{
 				`DELETE FROM paperboat.control_sync_leases WHERE account_id=$1 OR machine_id LIKE $1||'\_m%'`,
+				// Foreign keys are off too: the leases' topic bumps would stay behind without their user, and the
+				// worker's fold of them into account_topic_base then fails with 23503.
+				`DELETE FROM paperboat.account_topic_bumps WHERE account_id=$1`,
+				`DELETE FROM paperboat.account_topic_base WHERE account_id=$1`,
 				`DELETE FROM paperboat.user_machines WHERE user_id=$1`,
 				`DELETE FROM paperboat.users WHERE id=$1`,
 			} {
@@ -89,6 +93,29 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 			f.t.Errorf("lease fixture cleanup of %s: %v", user, err)
 		}
 	})
+}
+
+// The fixture deletes its account with foreign keys off, so its cleanup must remove every row that refers to the
+// account: an orphan topic bump made the worker's fold (and so a test that runs after this one) fail with 23503.
+func TestLeaseFixtureCleanupLeavesNoOrphanTopicBumpsOnPostgres(t *testing.T) {
+	f := newLeaseFixture(t)
+	user := "lease_orphan_" + fmt.Sprint(time.Now().UnixNano())
+	t.Run("fixture", func(t *testing.T) {
+		g := newLeaseFixture(t)
+		g.account(user, 2)
+		g.slots(t, user, user+"_m1")
+		var bumps int
+		if err := g.store.SQL().QueryRowContext(g.ctx, `SELECT count(*) FROM paperboat.account_topic_bumps WHERE account_id=$1`, user).Scan(&bumps); err != nil || bumps == 0 {
+			t.Fatalf("a lease published %d topic bumps (%v); the test needs some", bumps, err)
+		}
+	})
+	var orphans int
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.account_topic_bumps b WHERE NOT EXISTS (SELECT 1 FROM paperboat.users u WHERE u.id=b.account_id)`).Scan(&orphans); err != nil || orphans != 0 {
+		t.Fatalf("%d topic bumps of deleted accounts left behind (%v)", orphans, err)
+	}
+	if err := New(f.store, nil, Policy{}, nil).foldAccountTopicBumps(f.ctx); err != nil {
+		t.Fatalf("fold after the fixture's cleanup: %v", err)
+	}
 }
 
 // slots allocates (or reads) the account's leases for machines and returns machine -> slot.
