@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestNetworkCertificateRebindKeepsWireGuardKeyPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Add(2 * time.Second).Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userID, cliID := "rebind_user_"+suffix, "rebind_cli_"+suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func TestTransportKeysCountOnlySessionsThatCanStillRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(t.Name()) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(t.Name()) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userID, removedMachineID := "peer_trust_user_"+suffix, "peer_trust_removed_"+suffix
 	exec := func(query string, args ...any) {
 		t.Helper()

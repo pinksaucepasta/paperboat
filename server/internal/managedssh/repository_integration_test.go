@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userA, userB := "ssh_user_a_"+suffix, "ssh_user_b_"+suffix
 	clientA, clientB := "ssh_cli_a_"+suffix, "ssh_cli_b_"+suffix
 	machineA, machineB := "ssh_machine_a_"+suffix, "ssh_machine_b_"+suffix

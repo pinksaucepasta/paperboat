@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string, moves bool)
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	user, other := "reenroll_user_"+suffix, "reenroll_other_"+suffix
 	oldID, newID, otherID, liveID := "reenroll_old_"+suffix, "reenroll_new_"+suffix, "reenroll_foreign_"+suffix, "reenroll_live_"+suffix
 	for _, userID := range []string{user, other} {
@@ -149,7 +150,7 @@ func TestSQLRepositoryHostKeysSharedByTwoOSUsersOfOneComputer(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	user := "cohost_user_" + suffix
 	firstID, secondID, cloneID := "cohost_u1_"+suffix, "cohost_u2_"+suffix, "cohost_clone_"+suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, user, "workos_"+user, user+"@example.test"); err != nil {

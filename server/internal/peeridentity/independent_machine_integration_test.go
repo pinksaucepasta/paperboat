@@ -7,6 +7,7 @@ import (
 	"errors"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestIndependentMachineEnrollmentWithoutAccountRootPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	accountID, machineID, environmentID := "peer_independent_user_"+suffix, "peer_independent_machine_"+suffix, "peer_independent_env_"+suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, accountID, "workos_"+accountID, accountID+"@example.test"); err != nil {
 		t.Fatal(err)

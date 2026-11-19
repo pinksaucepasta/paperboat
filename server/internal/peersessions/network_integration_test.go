@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userID, cliID, machineID, envID := "network_user_"+suffix, "network_cli_"+suffix, "network_machine_"+suffix, "network_env_"+suffix
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
 		t.Fatal(err)

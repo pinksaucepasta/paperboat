@@ -8,6 +8,7 @@ import (
 	"errors"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestSQLRepositoryBootstrapsRootAndCertificateAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userID, clientID := "peer_root_user_"+suffix, "peer_root_cli_"+suffix
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
 		t.Fatal(err)
@@ -103,7 +104,7 @@ func TestSQLRepositoryAuthenticatedMachineEnrollmentBindsSignerWithoutChangingAc
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userID := "peer_fresh_user_" + suffix
 	firstClientID, freshClientID := "peer_first_cli_"+suffix, "peer_fresh_cli_"+suffix
 	machineID := "peer_fresh_machine_" + suffix
@@ -197,7 +198,7 @@ func TestSQLRepositoryCLIEndpointEnrollmentReplaysOnlyBoundActiveRequests(t *tes
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strings.ReplaceAll(now.Format("150405.000000000"), ".", "")
+	suffix := strings.ToLower(strings.ReplaceAll(t.Name(), "/", "_")) + strconv.FormatInt(time.Now().UnixNano(), 10)
 	userID, otherUserID, orphanUserID, revokedUserID := "peer_cli_user_"+suffix, "peer_cli_other_"+suffix, "peer_cli_orphan_"+suffix, "peer_cli_revoked_"+suffix
 	for _, userID := range []string{userID, otherUserID, orphanUserID, revokedUserID} {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+userID, userID+"@example.test"); err != nil {
