@@ -13,7 +13,7 @@ import (
 func registerOperatorAnnouncements(mux *http.ServeMux, opts Options) {
 	s := opts.Announcements
 	mux.Handle("GET /v1/admin/announcements", operatorRoute(opts, operatorAnnouncementList(s)))
-	mux.Handle("GET /v1/admin/notices", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /v1/admin/node-notices", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		notices, err := s.ForOperators(r.Context())
 		if err != nil {
 			writeError(w, r, 503, "announcements_unavailable", "Notices could not be read. Retry.", err)
