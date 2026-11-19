@@ -216,7 +216,7 @@ export const paperboat = {
     setup_one_line: ["Yes, recipes: access, secrets, config, previews"],
     encryption_native: ["End to end; direct when possible"],
     encryption_public: ["TLS ends at Paperboat's edge"],
-    teams: ["Yes, five roles; SSO and SCIM from 10 seats"],
+    teams: ["Yes, five roles; SSO and SCIM as add-ons"],
     access_rules: ["Yes, a policy file with groups, tags and deny rules"],
     api_tokens: ["Yes, scoped API tokens that expire"],
     selfhost: ["Relays and tunnel servers"],
@@ -227,7 +227,7 @@ export const paperboat = {
   pricing: [
     "Free: $0, every feature for personal use, 5 GB/mo, then 512 kbit/s",
     "Pro: $8 a month or $80 a year, 100 GB/mo, then 1 Mbit/s",
-    "Team: $15 per seat a month or $150 a year, 100 GB/mo per seat; 14-day trial",
+    "Team: $15 per seat a month or $150 a year, 100 GB/mo per seat",
     "Direct traffic between your machines is never counted",
   ],
 }

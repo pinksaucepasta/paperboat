@@ -3,6 +3,7 @@
  * (`GET /v1/client-configuration`), read when the site builds or the dev server starts; the only
  * setting is the API address, `PAPERBOAT_API_URL` (see .env.example). No domain is written in code.
  */
+import { statusUrl as resolveStatusUrl } from "./status-url.mjs"
 const apiUrl = import.meta.env.PAPERBOAT_API_URL
 if (!apiUrl) throw new Error("PAPERBOAT_API_URL is required (see marketing/.env.example)")
 
@@ -21,6 +22,8 @@ export const apiBaseUrl = apiUrl
 /** Where abuse is reported by email; undefined when the server publishes none. */
 export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
+/** The status page's address (PAPERBOAT_STATUS_URL, else status.<site domain> for an https site), when this deployment has one. */
+export const statusUrl: string | undefined = resolveStatusUrl(import.meta.env.PAPERBOAT_SITE_URL, import.meta.env.PAPERBOAT_STATUS_URL)
 /** Where the installers are served, e.g. https://get.example.test. */
 export const installerBase = config.installer_base_url
 export const selfhostInstallUrl = `${config.installer_base_url}/selfhost`
@@ -44,7 +47,7 @@ export const plans = [
     unit: "",
     bandwidth: "5 GB",
     machines: "100",
-    publications: "100",
+    publications: "10",
     browserTerminals: "10",
     detail: "Every feature for personal use, on your own machines.",
   },
@@ -55,7 +58,7 @@ export const plans = [
     unit: "",
     bandwidth: "100 GB",
     machines: "1,000",
-    publications: "1,000",
+    publications: "100",
     browserTerminals: "100",
     detail: "Everything in Free, with more bandwidth. Add 100 GB any time.",
   },
@@ -93,15 +96,14 @@ export const topUp = { size: "100 GB", price: "$5" }
 /** Audit log retention per plan (server config business.audit_retention_*; server/docs/teams-business.md). */
 export const auditRetention = ["30 days", "90 days", "365 days"] as const
 
-/** Single sign-on and directory sync need a team of at least this many seats (server config business.sso_min_seats). */
-export const ssoMinSeats = 10
+/** SSO and SCIM are paid add-ons on a Team at any size, dollars a month (server config business.sso_addon_cents,
+ * scim_addon_cents, sso_scim_addon_cents); a year costs addon_yearly_months months. */
+export const addons = { sso: 100, scim: 100, both: 150, yearlyMonths: 10 }
+export const addonPrices = `SSO $${addons.sso}/mo, SCIM $${addons.scim}/mo, both $${addons.both}/mo`
 
 /** Public raw-TCP tunnel addresses per plan (server config billing.limits.public_tcp). */
 export const publicTcp = ["1", "10", "10 per seat"] as const
 
-/** The Team plan's trial, said once wherever it is mentioned. */
-export const teamTrial =
-  "Team starts with a 14-day trial. Your card is taken at the start and billing begins on day 15. We remind you 3 days before, and cancelling during the trial costs nothing."
 
 /** The mark: a paper boat on a 10 × 6 cell grid, 60 units per cell (brand guidelines 02). */
 export const boatPath =
