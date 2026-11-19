@@ -144,6 +144,8 @@ UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $
 NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue\n"
            "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe delete $a mask 255.255.255.255 0.0.0.0 if 1 *>$null}}};exit 0}\n"
            "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
+           # Rules a killed or failed earlier cut left behind (6 on 2026-11-19) go first: a cut is made by one session at a time.
+           "Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*' -ErrorAction SilentlyContinue|Remove-NetFirewallRule\n"
            "$p=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"
            "if(-not $p.Count){throw 'no pb.exe under Program Files\\Paperboat'}\n"
            "foreach($d in @('Outbound')+$(if($req.inbound){@('Inbound')}else{@()})){foreach($x in $p){foreach($pr in $(if($req.ports){@($req.protos)}else{@('')})){\n"

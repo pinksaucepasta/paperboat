@@ -346,6 +346,7 @@ class WindowsChecksRunner(unittest.TestCase):
         cut.release(), cut.release()
         self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])
         self.assertIn("RemotePort=@($req.ports)", winhost.NET_CUT)  # ports= narrows the cut to those TCP ports
+        self.assertLess(winhost.NET_CUT.index("Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*'"), winhost.NET_CUT.index('New-NetFirewallRule'))  # stale rules of a killed cut go first
         self.assertIn('Stop-Process -Force', winhost.NET_CUT)  # sockets open before the rule keep passing until their pb.exe is replaced
         calls.clear()
         device.start = lambda argv, directory: (_ for _ in ()).throw(winhost.DeviceError('no timer'))
