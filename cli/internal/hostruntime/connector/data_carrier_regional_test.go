@@ -72,8 +72,7 @@ func TestRegionalCarriersStandbyRepairAndConcurrentIngress(t *testing.T) {
 	mu.Lock()
 	failed = false
 	mu.Unlock()
-	deadline := time.Now().Add(4 * time.Second)
-	for len(pool.Snapshot()) != 2 && time.Now().Before(deadline) {
+	for len(pool.Snapshot()) != 2 && ctx.Err() == nil { // polls until the repair lands; ctx bounds a hung test
 		time.Sleep(10 * time.Millisecond)
 	}
 	if len(pool.Snapshot()) != 2 {

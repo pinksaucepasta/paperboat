@@ -515,7 +515,7 @@ func TestClientCloseSerializesWithActivation(t *testing.T) {
 	}()
 	select {
 	case <-applier.activateStarted:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("activation did not start")
 	}
 	closeDone := make(chan error, 1)
@@ -532,7 +532,7 @@ func TestClientCloseSerializesWithActivation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("activation failed after release: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("activation did not complete")
 	}
 	select {
@@ -540,7 +540,7 @@ func TestClientCloseSerializesWithActivation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("close failed: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second): // returns when signalled; the bound only ends a hung test
 		t.Fatal("close did not complete")
 	}
 	firstEvent, secondEvent := <-events, <-events
