@@ -12,7 +12,7 @@ import { useOperator, type Data } from "@/lib/api"
 import { useCursorList } from "@/lib/paging"
 
 type View = "workspaces" | "operations" | "products"
-const billingStates: [string, string][] = ["free", "trialing", "active", "past_due", "unpaid", "canceled", "paused", "incomplete"].map((s) => [s, s[0].toUpperCase() + s.slice(1).replace("_", " ")])
+const billingStates: [string, string][] = ["free", "active", "past_due", "unpaid", "canceled", "paused", "incomplete"].map((s) => [s, s[0].toUpperCase() + s.slice(1).replace("_", " ")])
 
 export default function BillingPage() {
   const [view, setView] = useState<View>("workspaces")

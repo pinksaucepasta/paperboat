@@ -81,9 +81,6 @@ function Report({ days }: { days: Days }) {
           <MoneyStat label="Churned" value={String(m.churned.count)} previous={flow(m.churned)} worseUp note={m.churned.mrr > 0 ? `−${money(m.churned.mrr)} MRR` : undefined} />
           <MoneyStat label="Churn rate" value={percent(m.logo_churn_percent)} previous={{ now: m.logo_churn_percent, before: m.previous_logo_churn_percent }} worseUp points note={`${percent(m.revenue_churn_percent)} of MRR`} />
         </div>
-        {r.trials.active > 0 || r.trials.started.value > 0 ? (
-          <p className="text-sm text-muted-foreground">{r.trials.active} on trial{r.trials.ending_soon > 0 ? `, ${r.trials.ending_soon} ending within a week` : ""} · {r.trials.started.value} started this {label}</p>
-        ) : null}
       </Panel>
 
       {r.cash && (
@@ -109,7 +106,6 @@ function Report({ days }: { days: Days }) {
         />
         <ListCard title="Top customers" kind="customers" total={r.customers.total} rows={r.customers.rows} money={money} empty="No paying customers yet." />
         <ListCard title="Renewing in the next 30 days" kind="renewals" total={r.renewals.total} rows={r.renewals.rows} money={money} empty="No renewals due." />
-        {r.trials.active > 0 && <TrialsCard money={money} total={r.trials.active} />}
         <Panel title="Plans">
           <ul className="text-sm" data-money-plans>
             {r.plans.slice(0, 5).map((p) => (
@@ -138,17 +134,10 @@ function Report({ days }: { days: Days }) {
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        MRR is Stripe’s definition: active and past-due subscriptions normalised to a month, after running discounts; trials, one-time charges and tax are not in it. Updated <Time iso={r.observed_at} relative />.
+        MRR is Stripe’s definition: active and past-due subscriptions normalised to a month, after running discounts; one-time charges and tax are not in it. Updated <Time iso={r.observed_at} relative />.
       </p>
     </div>
   )
-}
-
-/** Trials are listed from the full list (the report carries the count only). */
-function TrialsCard({ money, total }: { money: (n: number) => string; total: number }) {
-  const q = useApiQuery<Data<"/v1/admin/money/lists/{list}">>(["money", "trials"], "/v1/admin/money/lists/trials?limit=5", 120_000)
-  if (q.isError) return <ErrorBlock what="trials" error={q.error} retry={() => q.refetch()} />
-  return <ListCard title="Trials" kind="trials" total={total} rows={q.data?.rows ?? []} money={money} empty="No one is on a trial." />
 }
 
 function Events() {
