@@ -14,7 +14,7 @@ const retireAccessSessionsOfEndedMachines = `-- name: RetireAccessSessionsOfEnde
 UPDATE user_machine_access_sessions
 SET state = 'revoked', revoked_at = now(), revocation_reason = 'machine_ended',
     helper_revoked_at = coalesce(helper_revoked_at, now()), updated_at = now()
-WHERE id IN (
+WHERE id = ANY(ARRAY(
   -- Driven by the ended machines (few), then one range scan of user_machine_access_sessions_machine_active_expiry per
   -- machine: a plan that cannot depend on how many sessions the statistics believe there are.
   SELECT due.id FROM user_machines AS machine
@@ -28,10 +28,12 @@ WHERE id IN (
     LIMIT $1::int
     FOR UPDATE OF session SKIP LOCKED) AS due
   WHERE machine.revoked_at IS NOT NULL OR machine.deleted_at IS NOT NULL OR machine.state IN ('revoked', 'disconnected', 'deleted')
-  LIMIT $1::int)
+  LIMIT $1::int))
 `
 
 // The expired signed sessions a machine revoke leaves active (migration 443; they need no helper call), one bounded batch per statement.
+// One array of ids, matched by primary key (or one hashed scan): an id IN (subquery) join let stale statistics
+// pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linpool 2026-11-19).
 func (q *Queries) RetireAccessSessionsOfEndedMachines(ctx context.Context, batchSize int32) (int64, error) {
 	result, err := q.db.Exec(ctx, retireAccessSessionsOfEndedMachines, batchSize)
 	if err != nil {
@@ -44,12 +46,12 @@ const retireExpiredMachineAccessSessions = `-- name: RetireExpiredMachineAccessS
 UPDATE user_machine_access_sessions
 SET state = 'revoked', revoked_at = now(), revocation_reason = 'expired',
     helper_revoked_at = coalesce(helper_revoked_at, now()), updated_at = now()
-WHERE id IN (
+WHERE id = ANY(ARRAY(
   SELECT due.id FROM user_machine_access_sessions AS due
   WHERE due.state = 'active' AND due.expires_at < $1
     AND (due.expires_at < $2 OR (due.credential_kind = 'control_plane_signed'
       AND (due.admitted_seen_at IS NULL OR due.admitted_seen_at < $1)))
-  ORDER BY due.expires_at LIMIT $3::int FOR UPDATE SKIP LOCKED)
+  ORDER BY due.expires_at LIMIT $3::int FOR UPDATE SKIP LOCKED))
 `
 
 type RetireExpiredMachineAccessSessionsParams struct {
@@ -63,6 +65,8 @@ type RetireExpiredMachineAccessSessionsParams struct {
 // named since idle_before (a whole peer document lifetime) has no open stream left and is retired; any session is
 // retired after the retention period (expired_before); the helper side expired it long before.
 // One bounded batch per statement: one statement over every expired row of a busy machine held its locks for seconds.
+// One array of ids, matched by primary key (or one hashed scan): an id IN (subquery) join let stale statistics
+// pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linpool 2026-11-19).
 func (q *Queries) RetireExpiredMachineAccessSessions(ctx context.Context, arg RetireExpiredMachineAccessSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, retireExpiredMachineAccessSessions, arg.IdleBefore, arg.ExpiredBefore, arg.BatchSize)
 	if err != nil {
