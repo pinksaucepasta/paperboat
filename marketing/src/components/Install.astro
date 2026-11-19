@@ -91,14 +91,9 @@ const commands = [
     scrollbar-width: none;
   }
 
-  /* A phone wraps the command instead of hiding its end under the copy button. */
-  @media (max-width: 479px) {
-    .command {
-      align-items: baseline;
-      padding-block: var(--s3);
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
+  /* The command scrolls inside its box; the fade says there is more before the copy button. */
+  .command {
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
   }
 
   .prompt {

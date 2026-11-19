@@ -13,8 +13,8 @@ const members = ["A", "M", "J"]
 <div class="uses">
   <a class="use" href="/use-cases/ai-agents/">
     <span class="head"><Icon name="robot" size={18} class="icon" /><span class="name">AI agents</span><Icon name="arrow-right" size={16} class="arrow" /></span>
-    <span class="band band-term">
-      <span class="line"><span class="prompt">$</span> curl -fsSL {installHost} | PB_RECIPE=… sh</span>
+    <span class="band">
+      <span class="line"><span class="prompt">$</span><span class="mono">curl {installHost} | PB_RECIPE=… sh</span></span>
       <span class="line ok"><span>✓ Paired</span><span>✓ Secrets</span><span>✓ Preview</span></span>
     </span>
   </a>
@@ -25,8 +25,8 @@ const members = ["A", "M", "J"]
       <span class="line">
         <span class="avatars">{members.map((m) => <span class="avatar">{m}</span>)}</span>
         <span class="mono">oncall → tag:prod</span>
-        <span class="actions-list"><span>terminal</span><span>exec</span></span>
       </span>
+      <span class="line actions-list"><span>terminal</span><span>exec</span></span>
     </span>
   </a>
 
@@ -110,32 +110,26 @@ const members = ["A", "M", "J"]
     min-width: 0;
   }
 
-  .band-term {
-    background: #16171a;
-    color: #e8e8e6;
-  }
 
   .line {
     display: flex;
     align-items: center;
     gap: var(--s2);
+    min-height: 20px;
     min-width: 0;
     white-space: nowrap;
   }
 
-  .band-term .line {
-    display: block;
-    font-family: var(--font-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
 
   .prompt {
-    color: var(--sky);
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    color: var(--cobalt);
   }
 
   .ok {
-    color: #5fd3a5;
+    font-family: var(--font-mono);
+    color: var(--good);
   }
 
   .ok span + span {
@@ -157,8 +151,8 @@ const members = ["A", "M", "J"]
   .avatar {
     display: grid;
     place-items: center;
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     margin-left: -4px;
     border-radius: 50%;
     background: var(--hull);
@@ -173,12 +167,8 @@ const members = ["A", "M", "J"]
   }
 
   .actions-list {
-    display: flex;
-    gap: 1ch;
-    margin-left: auto;
-    flex-shrink: 0;
+    gap: 1.5ch;
     font-family: var(--font-mono);
-    font-size: var(--text-tiny);
     color: var(--cobalt);
   }
 

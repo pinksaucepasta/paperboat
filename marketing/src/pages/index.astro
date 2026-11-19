@@ -266,6 +266,11 @@ const versus = compares.filter((item) => ["tailscale", "ngrok", "cloudflare-tunn
       grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
       column-gap: var(--s7);
     }
+
+    /* The cards start level with the headline's capitals, not its line box (Figtree: 0.173em). */
+    .hero-grid :global(.uses) {
+      margin-top: calc(var(--text-h1) * 0.173);
+    }
   }
 
   /*
