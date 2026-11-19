@@ -36,14 +36,19 @@ func (t *Throttles) Set(entries []connectorprotocol.IngressThrottle) {
 	next := make(map[string]*rate.Limiter, len(entries))
 	byHost := make(map[string]throttledRoute, len(entries))
 	for _, e := range entries {
-		limiter := next[e.Workspace]
+		// A workspace's browser terminals share one bucket of their own, apart from its allowance's.
+		key := e.Workspace
+		if e.Terminal {
+			key = "terminal:" + key
+		}
+		limiter := next[key]
 		if limiter == nil {
-			if limiter = t.workspaces[e.Workspace]; limiter == nil {
+			if limiter = t.workspaces[key]; limiter == nil {
 				limiter = rate.NewLimiter(rate.Limit(e.BytesPerSecond), ingressPacingChunk)
 			} else if limiter.Limit() != rate.Limit(e.BytesPerSecond) {
 				limiter.SetLimit(rate.Limit(e.BytesPerSecond))
 			}
-			next[e.Workspace] = limiter
+			next[key] = limiter
 		}
 		byHost[e.Hostname] = throttledRoute{bytes: limiter, resetsAt: e.ResetsAt}
 	}
