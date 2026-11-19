@@ -323,9 +323,11 @@ func (w *PlatformCertificateWorker) Reconcile(ctx context.Context, limit int) (i
 			w.emitTelemetry(ctx, target.ID, "", platformCertificateOperation(hadCurrent), "failed", now.Add(time.Minute))
 			return changed, tunnelcert.ErrGenerationConflict
 		}
-		if err := w.store.MarkPlatformCertificateReady(ctx, target.ID, certificate.CertificateReference, certificate.ExpiresAt, now); err != nil {
-			w.emitTelemetry(ctx, target.ID, certificate.ID, platformCertificateOperation(hadCurrent), "failed", now.Add(time.Minute))
-			return changed, err
+		if !platformTargetAlreadyReady(target, certificate) {
+			if err := w.store.MarkPlatformCertificateReady(ctx, target.ID, certificate.CertificateReference, certificate.ExpiresAt, now); err != nil {
+				w.emitTelemetry(ctx, target.ID, certificate.ID, platformCertificateOperation(hadCurrent), "failed", now.Add(time.Minute))
+				return changed, err
+			}
 		}
 		w.emitTelemetry(ctx, target.ID, certificate.ID, platformCertificateOperation(hadCurrent), "success", time.Time{})
 		if result.Issued {
@@ -432,6 +434,14 @@ func platformRetryDelay(attempt int) time.Duration {
 // Revoke performs durable local/edge/authority revocation through the same
 // coordinator path as user certificates, then terminally disables the target
 // so a background renewal cannot resurrect it.
+// platformTargetAlreadyReady is true when the target row already records this certificate as ready: the worker
+// reconciles every tick, and rewriting an unchanged row was most of the table's writes.
+func platformTargetAlreadyReady(target tunnelcert.PlatformCertificateTarget, certificate tunnelcert.StoredCertificate) bool {
+	return target.CertificateState == "ready" && target.CertificateReference == certificate.CertificateReference &&
+		target.CertificateExpiresAt.Equal(certificate.ExpiresAt) && target.CertificateFailureCode == "" &&
+		target.RetryCount == 0 && target.NextRetryAt.IsZero()
+}
+
 func (w *PlatformCertificateWorker) Revoke(ctx context.Context, targetID, reason string) error {
 	if w == nil || w.store == nil || w.coordinator == nil || !validPlatformTargetID(targetID) {
 		return ErrInvalidInput

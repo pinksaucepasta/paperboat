@@ -133,3 +133,40 @@ func TestPlatformRetryDelayIsBoundedAndExponential(t *testing.T) {
 		t.Fatalf("bounded retry delay = %s", got)
 	}
 }
+
+// The worker reconciles every tick; a target that already records the current certificate as ready must not be
+// rewritten (it was 4 writes a second on two rows in production).
+func TestPlatformTargetAlreadyReadyOnlyWhenNothingWouldChange(t *testing.T) {
+	expires := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	target := tunnelcert.PlatformCertificateTarget{CertificateState: "ready", CertificateReference: "cert-1", CertificateExpiresAt: expires}
+	certificate := tunnelcert.StoredCertificate{CertificateReference: "cert-1", ExpiresAt: expires}
+	if !platformTargetAlreadyReady(target, certificate) {
+		t.Fatal("an unchanged ready target must not be rewritten")
+	}
+	for name, mutate := range map[string]func(*tunnelcert.PlatformCertificateTarget, *tunnelcert.StoredCertificate){
+		"not ready": func(target *tunnelcert.PlatformCertificateTarget, _ *tunnelcert.StoredCertificate) {
+			target.CertificateState = "failed"
+		},
+		"new reference": func(_ *tunnelcert.PlatformCertificateTarget, certificate *tunnelcert.StoredCertificate) {
+			certificate.CertificateReference = "cert-2"
+		},
+		"renewed expiry": func(_ *tunnelcert.PlatformCertificateTarget, certificate *tunnelcert.StoredCertificate) {
+			certificate.ExpiresAt = expires.Add(time.Hour)
+		},
+		"failure recorded": func(target *tunnelcert.PlatformCertificateTarget, _ *tunnelcert.StoredCertificate) {
+			target.CertificateFailureCode = "dns"
+		},
+		"retry counted": func(target *tunnelcert.PlatformCertificateTarget, _ *tunnelcert.StoredCertificate) {
+			target.RetryCount = 1
+		},
+		"retry scheduled": func(target *tunnelcert.PlatformCertificateTarget, _ *tunnelcert.StoredCertificate) {
+			target.NextRetryAt = expires
+		},
+	} {
+		changedTarget, changedCertificate := target, certificate
+		mutate(&changedTarget, &changedCertificate)
+		if platformTargetAlreadyReady(changedTarget, changedCertificate) {
+			t.Fatalf("%s: the row must be written", name)
+		}
+	}
+}

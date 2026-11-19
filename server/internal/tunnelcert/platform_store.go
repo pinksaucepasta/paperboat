@@ -199,6 +199,10 @@ func (s *PlatformCertificateStore) EnsurePlatformTargets(ctx context.Context, de
 		seen[definition.ID] = struct{}{}
 		seenHosts[definition.Hostname] = struct{}{}
 	}
+	// The worker calls this every tick: rows that already carry these identities are read, never rewritten.
+	if existing, err := s.ListPlatformTargets(ctx, 500); err == nil && platformTargetsPresent(existing, definitions) {
+		return nil
+	}
 	return s.db.InTx(ctx, func(txCtx context.Context, tx *db.Tx) error {
 		for _, definition := range definitions {
 			_, err := tx.Queries().UpsertTunnelPlatformCertificateTargetV1(txCtx, dbsqlc.UpsertTunnelPlatformCertificateTargetV1Params{
@@ -215,6 +219,23 @@ func (s *PlatformCertificateStore) EnsurePlatformTargets(ctx context.Context, de
 		}
 		return nil
 	})
+}
+
+// platformTargetsPresent reports whether every definition has a stored target with the same identity.
+func platformTargetsPresent(stored []PlatformCertificateTarget, definitions []PlatformCertificateTargetDefinition) bool {
+	for _, definition := range definitions {
+		found := false
+		for _, target := range stored {
+			if target.PlatformCertificateTargetDefinition == definition {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *PlatformCertificateStore) ListPlatformTargets(ctx context.Context, limit int) ([]PlatformCertificateTarget, error) {

@@ -199,3 +199,20 @@ func TestSharedPublicBaseHasOneCertificateOwner(t *testing.T) {
 		t.Fatalf("shared public certificate owners = %+v", definitions)
 	}
 }
+
+func TestPlatformTargetsPresentNeedsEveryDefinitionWithTheSameIdentity(t *testing.T) {
+	a := PlatformCertificateTargetDefinition{ID: "a", Kind: PlatformPublicWildcardTarget, Hostname: "*.a.example.test", AccountID: "acct", ChallengeReference: "ref-a", Generation: 1}
+	b := PlatformCertificateTargetDefinition{ID: "b", Kind: PlatformRuntimeWildcardTarget, Hostname: "*.b.example.test", AccountID: "acct", ChallengeReference: "ref-b", Generation: 1}
+	stored := []PlatformCertificateTarget{{PlatformCertificateTargetDefinition: a}, {PlatformCertificateTargetDefinition: b}}
+	if !platformTargetsPresent(stored, []PlatformCertificateTargetDefinition{a, b}) {
+		t.Fatal("stored targets with the same identities need no write")
+	}
+	if platformTargetsPresent(stored[:1], []PlatformCertificateTargetDefinition{a, b}) {
+		t.Fatal("a missing target must be inserted")
+	}
+	moved := b
+	moved.Generation = 2
+	if platformTargetsPresent(stored, []PlatformCertificateTargetDefinition{a, moved}) {
+		t.Fatal("a changed identity must reach the upsert, which reports the conflict")
+	}
+}
