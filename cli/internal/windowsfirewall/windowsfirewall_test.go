@@ -43,7 +43,7 @@ func TestRemoveDropsTheWholeGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := r.commands[0][len(r.commands[0])-1]
-	if !strings.Contains(script, "Get-NetFirewallRule -Group 'Paperboat u1'") || !strings.HasSuffix(script, "Remove-NetFirewallRule") {
+	if !strings.Contains(script, "Get-NetFirewallRule -Group 'Paperboat u1'") || !strings.Contains(script, "|Remove-NetFirewallRule") {
 		t.Fatalf("script = %s", script)
 	}
 }
@@ -70,5 +70,14 @@ func TestScriptsDoNothingWithoutTheFirewallService(t *testing.T) {
 		if skip < 0 || skip > strings.Index(script, "NetFirewallRule") {
 			t.Fatalf("script must skip before any firewall cmdlet when mpssvc is not running:\n%s", script)
 		}
+	}
+}
+
+// powershell -Command exits 1, with no output, when the last statement left $? false; the silenced lookup of a
+// group with no rules does, so the script must end in an explicit exit 0 (real failures throw before it).
+func TestRemoveScriptExitsZeroAfterAnEmptyGroupLookup(t *testing.T) {
+	script := RemoveScript("g")
+	if !strings.HasSuffix(script, "|Remove-NetFirewallRule;exit 0") || !strings.HasPrefix(script, "$ErrorActionPreference='Stop';") {
+		t.Fatalf("script:\n%s", script)
 	}
 }
