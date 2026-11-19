@@ -94,6 +94,10 @@ type IngressThrottle struct {
 	BytesPerSecond int64 `json:"bytes_per_second"`
 	// ResetsAt is when the workspace's allowance period ends and full speed resumes; zero when unknown.
 	ResetsAt time.Time `json:"resets_at,omitzero"`
+	// Terminal marks the runtime hostname of a machine with a browser terminal attached on this edge: its BytesPerSecond is the
+	// anti-abuse cap on all the workspace's browser-terminal traffic together, a bucket of its own that the fair-use allowance
+	// never touches (terminals are neither counted nor slowed by it).
+	Terminal bool `json:"terminal,omitempty"`
 }
 
 // IngressBlock names a hostname an operator took down for violating the acceptable use policy. The
