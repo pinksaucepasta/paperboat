@@ -9409,6 +9409,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator traffic totals
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Bytes by path (direct, our relays, self-hosted relays, our edges, self-hosted edges) over today, 7 days, 30 days or this UTC month, with a time series and per-category coverage.
+         */
+        get: operations["get_v1_admin_traffic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/traffic/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator traffic per node
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Our own relays or edges, paged by node id, with the bytes each carried; a registered node that reported nothing is listed with reporting=false.
+         */
+        get: operations["get_v1_admin_traffic_nodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -15179,6 +15219,55 @@ export interface components {
             support_reference?: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        OperatorTrafficTotal: {
+            /** @enum {string} */
+            category: "direct" | "relay_managed" | "relay_self_hosted" | "edge_managed" | "edge_self_hosted";
+            /** Format: int64 */
+            upload_bytes: number;
+            /** Format: int64 */
+            download_bytes: number;
+            /** Format: int64 */
+            reporting: number;
+            /** Format: int64 */
+            expected: number;
+            coverage_percent: number | null;
+        };
+        OperatorTrafficPoint: {
+            /** Format: date-time */
+            at: string;
+            category: string;
+            /** Format: int64 */
+            upload_bytes: number;
+            /** Format: int64 */
+            download_bytes: number;
+        };
+        OperatorTrafficPage: {
+            period: string;
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+            /** @enum {string} */
+            grain: "hour" | "day";
+            totals: components["schemas"]["OperatorTrafficTotal"][];
+            series: components["schemas"]["OperatorTrafficPoint"][];
+        };
+        OperatorTrafficNode: {
+            node_id: string;
+            region: string;
+            state: string;
+            reporting: boolean;
+            /** Format: int64 */
+            upload_bytes: number;
+            /** Format: int64 */
+            download_bytes: number;
+        };
+        OperatorTrafficNodePage: {
+            period: string;
+            kind: string;
+            items: components["schemas"]["OperatorTrafficNode"][];
+            next_after?: string;
         };
     };
     responses: {
@@ -38029,6 +38118,129 @@ export interface operations {
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    get_v1_admin_traffic: {
+        parameters: {
+            query: {
+                period: "today" | "7d" | "30d" | "month";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorTrafficPage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_traffic_nodes: {
+        parameters: {
+            query: {
+                period: "today" | "7d" | "30d" | "month";
+                kind: "relay" | "edge";
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorTrafficNodePage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
 }

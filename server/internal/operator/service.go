@@ -292,18 +292,18 @@ func allowed(role auth.Role, kind string) bool {
 	case "billing":
 		return kind == "account" || kind == "team" || kind == "billing" || kind == "billing_operation" || kind == "workspaces" || kind == "billing_operations" || kind == "machines" || kind == "machine"
 	case "operations":
-		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity"
+		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes"
 	default:
 		return false
 	}
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "operators" || kind == "ip_blocks"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "traffic_nodes" || kind == "operators" || kind == "ip_blocks"
 }
 
 func safeID(v string) bool {
@@ -370,6 +370,11 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return s.readOverview(ctx, tx, target)
 	case "capacity":
 		return s.readCapacity(ctx, tx, after, limit)
+	case "traffic":
+		return s.readTraffic(ctx, tx, target)
+	case "traffic_nodes":
+		period, nodeKind, _ := strings.Cut(target, ":")
+		return s.readTrafficNodes(ctx, tx, period, nodeKind, after, limit)
 	case "entitlements":
 		return readEntitlements(ctx, tx, target)
 	case "account_ips":

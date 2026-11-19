@@ -139,6 +139,8 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/billing/workspaces/{workspace_id}":                               {"support", "workspace_id", ""},
 	"GET /v1/admin/infrastructure":                                                  {"operations", "", "infrastructure"},
 	"GET /v1/admin/infrastructure/capacity":                                         {"operations", "", "node-capacity"},
+	"GET /v1/admin/traffic":                                                         {"operations", "", "traffic"},
+	"GET /v1/admin/traffic/nodes":                                                   {"operations", "", "traffic-nodes"},
 	"GET /v1/admin/reporting":                                                       {"operations", "", "reporting"},
 	"GET /v1/admin/audit/{resource_id}":                                             {"admin", "resource_id", ""},
 	"GET /v1/admin/control-operations/{operation_id}":                               {"operations", "operation_id", ""},
@@ -361,6 +363,8 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/accounts/{account_id}/ips", "account_ips", "account_id"},
 		{"GET /v1/admin/infrastructure", "infrastructure", ""},
 		{"GET /v1/admin/infrastructure/capacity", "capacity", ""},
+		{"GET /v1/admin/traffic", "traffic", ""},
+		{"GET /v1/admin/traffic/nodes", "traffic_nodes", ""},
 		{"GET /v1/admin/control-operations/{operation_id}", "control_operation", "operation_id"},
 		{"GET /v1/admin/billing/workspace-operations/{operation_id}", "billing_operation", "operation_id"},
 		{"GET /v1/admin/audit/{resource_id}", "audit", "resource_id"},
@@ -393,6 +397,12 @@ func operatorRead(service *operator.Service, kind, param string) http.Handler {
 			target = r.URL.Query().Get("kind")
 			if target == "" {
 				target = "host"
+			}
+		}
+		if kind == "traffic" || kind == "traffic_nodes" {
+			target = r.URL.Query().Get("period")
+			if kind == "traffic_nodes" {
+				target += ":" + r.URL.Query().Get("kind")
 			}
 		}
 		if kind == "audit" {
