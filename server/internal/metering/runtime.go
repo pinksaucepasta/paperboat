@@ -49,6 +49,7 @@ type RuntimeObservation struct {
 	MachineID             string
 	ObservedAt            time.Time
 	ReporterVersion       string
+	ReporterSHA256        string
 	WorkerGeneration      uint64
 	OSBootID              string
 	WorkerServiceScope    string
@@ -77,7 +78,7 @@ func (r *RuntimeRepository) RecordRuntimeObservation(ctx context.Context, observ
 			}
 		}
 		refresh := r.presenceRefresh.Seconds()
-		eligible, err := tx.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, ObservedCapabilities: observation.Capabilities, ReporterVersion: observation.ReporterVersion, PresenceRefreshSeconds: refresh})
+		eligible, err := tx.Queries().MarkUserMachineOnlineFromHelper(ctx, dbsqlc.MarkUserMachineOnlineFromHelperParams{ID: observation.MachineID, EnvironmentID: observation.EnvironmentID, ObservedCapabilities: observation.Capabilities, ReporterVersion: observation.ReporterVersion, ReporterSha256: observation.ReporterSHA256, PresenceRefreshSeconds: refresh})
 		if err != nil || !eligible {
 			return err
 		}

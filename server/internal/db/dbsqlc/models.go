@@ -2569,6 +2569,14 @@ type ReleaseAuthorityRequest struct {
 	FulfilledAt       sql.NullTime
 }
 
+type ReleaseTargetHash struct {
+	Version      string
+	Platform     string
+	Architecture string
+	Sha256       string
+	FirstSeenAt  time.Time
+}
+
 type ResourceBandwidthEvent struct {
 	OperationID     string
 	WorkspaceID     string
@@ -3472,6 +3480,7 @@ type UserMachine struct {
 	MachineServicePolicyGeneration int64
 	CapabilitiesApplied            []string
 	ReporterVersion                sql.NullString
+	ReporterSha256                 sql.NullString
 }
 
 type UserMachineAccessSession struct {

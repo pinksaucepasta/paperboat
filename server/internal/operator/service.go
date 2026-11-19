@@ -35,6 +35,7 @@ type Service struct {
 	audit          *audit.Writer
 	hostStaleAfter time.Duration
 	nodeStaleAfter time.Duration
+	releaseDir     string // the release origin's directory (signed TUF metadata); empty records no target hashes
 	capacity       config.NodeCapacity
 }
 
@@ -85,6 +86,9 @@ func (s *Service) SetHostStaleAfter(value time.Duration) error {
 	s.hostStaleAfter = value
 	return nil
 }
+
+// SetReleaseDirectory names the release origin whose signed targets the Fleet page verifies machines' builds against.
+func (s *Service) SetReleaseDirectory(directory string) { s.releaseDir = directory }
 
 type Billing struct {
 	ID                string     `json:"id"`

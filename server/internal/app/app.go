@@ -711,6 +711,7 @@ func New(opts Options) (*App, error) {
 		return nil, err
 	}
 	operatorService.SetNodeCapacity(opts.Config.NodeCapacity)
+	operatorService.SetReleaseDirectory(opts.Config.ReleaseDirectory)
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Analytics = analyticsCapture
 	resourceUsageService.Debiter = workspaceBilling

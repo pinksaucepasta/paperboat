@@ -6439,6 +6439,9 @@
           "reporter_version": {
             "type": "string"
           },
+          "reporter_sha256": {
+            "type": "string"
+          },
           "sampled_at": {
             "type": "string",
             "format": "date-time"
@@ -20071,6 +20074,9 @@
           "version": {
             "type": "string"
           },
+          "official": {
+            "type": "boolean"
+          },
           "machines": {
             "type": "integer"
           },
@@ -20087,6 +20093,7 @@
         "required": [
           "platform",
           "version",
+          "official",
           "machines",
           "online",
           "users",

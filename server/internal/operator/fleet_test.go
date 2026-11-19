@@ -2,6 +2,8 @@ package operator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -12,7 +14,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 )
+
+// fleetHash is the executable hash a machine running the official build of version reports in these tests.
+func fleetHash(version string) string {
+	sum := sha256.Sum256([]byte("official build " + version))
+	return hex.EncodeToString(sum[:])
+}
 
 func TestFleetVersionOrderAndOldestOnline(t *testing.T) {
 	a, _ := versionKey("2026.10.9.3")
@@ -26,13 +35,14 @@ func TestFleetVersionOrderAndOldestOnline(t *testing.T) {
 		}
 	}
 	rows := []FleetVersionRow{
-		{Platform: "linux", Version: "2026.10.9.3", Online: 0},
-		{Platform: "linux", Version: "2026.10.12.1", Online: 2},
-		{Platform: "darwin", Version: "2026.10.10.1", Online: 1},
+		{Platform: "linux", Version: "2026.10.9.3", Official: true, Online: 0},
+		{Platform: "linux", Version: "2026.10.12.1", Official: true, Online: 2},
+		{Platform: "darwin", Version: "2026.10.10.1", Official: true, Online: 1},
+		{Platform: "linux", Version: "2026.1.1.1", Official: false, Online: 3}, // a custom build claiming an old release
 		{Platform: "linux", Version: "dev-abc", Online: 5},
 	}
 	if got := oldestOnline(rows, ""); got != "2026.10.10.1" {
-		t.Errorf("oldest online = %q (offline-only and dev versions are skipped)", got)
+		t.Errorf("oldest online = %q (offline-only, dev and unverified versions are skipped)", got)
 	}
 	if got := oldestOnline(rows, "linux"); got != "2026.10.12.1" {
 		t.Errorf("oldest online linux = %q", got)
@@ -88,6 +98,7 @@ func fleetSeed(t *testing.T) (*Service, *db.DB, string) {
 		store.Pool().Exec(bg, `DELETE FROM release_authority_bundles WHERE release_id=$1`, "rel_fleet_"+suffix)
 		store.Pool().Exec(bg, `DELETE FROM release_authority_requests WHERE release_id=$1`, "rel_fleet_"+suffix)
 		store.Pool().Exec(bg, `DELETE FROM fleet_version_daily WHERE version LIKE '2098.%' OR version LIKE '2099.%'`)
+		store.Pool().Exec(bg, `DELETE FROM release_target_hashes WHERE version LIKE '2098.%' OR version LIKE '2099.%'`)
 	})
 	// alias, platform, reporter version, last seen (an interval; "" never), online
 	for i, m := range [][5]string{
@@ -107,8 +118,13 @@ func fleetSeed(t *testing.T) (*Service, *db.DB, string) {
 		if m[3] != "" {
 			seen = "now()-interval '" + m[3] + "'"
 		}
-		exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,alias,reporter_version,online,last_seen_at)
- VALUES($1,$2,$1,$3,'amd64','/workspace',$4,'occupied',$5,NULLIF($6,''),$7::boolean,`+seen+`)`, id, user, m[1], state, m[0]+"-"+suffix, m[2], m[4])
+		hash := ""
+		if strings.HasPrefix(m[2], "20") { // a release version: the machine runs its signed target
+			hash = fleetHash(m[2])
+			exec(`INSERT INTO release_target_hashes(version,platform,architecture,sha256) VALUES($1,$2,'amd64',$3) ON CONFLICT DO NOTHING`, m[2], m[1], hash)
+		}
+		exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,alias,reporter_version,reporter_sha256,online,last_seen_at)
+ VALUES($1,$2,$1,$3,'amd64','/workspace',$4,'occupied',$5,NULLIF($6,''),NULLIF($8,''),$7::boolean,`+seen+`)`, id, user, m[1], state, m[0]+"-"+suffix, m[2], m[4], hash)
 	}
 	obs := func(alias, current, target, state, code string) {
 		exec(`INSERT INTO user_machine_update_observations(user_machine_id,environment_id,schema,current_version,target_version,channel,state,error_code,operation_id,installation_generation,worker_generation,os_boot_id,rollback_count,observed_at,payload_hash)
@@ -311,5 +327,70 @@ func TestFleetVersionsRolloutsAndOfflineOnPostgres(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A build is official only when its executable hash is that of a signed target of the same version, platform and
+// architecture: the same version string with another hash is a custom build.
+func TestFleetOfficialBuildNeedsTheSignedTargetHashOnPostgres(t *testing.T) {
+	s, store, suffix := fleetSeed(t)
+	ctx := context.Background()
+	read := func() FleetVersions {
+		var v FleetVersions
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) { v, err = s.readFleetVersions(ctx, tx); return }); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	count := func(v FleetVersions, platform, version string, official bool) int64 {
+		for _, r := range v.Versions {
+			if r.Platform == platform && r.Version == version && r.Official == official {
+				return r.Machines
+			}
+		}
+		return 0
+	}
+	before := read()
+	if count(before, "linux", "2099.2.1.1", true) != 1 || count(before, "linux", "2099.2.1.1", false) != 0 {
+		t.Fatalf("seed: the machine on the signed 2099.2.1.1 target must be official: %+v", before.Versions)
+	}
+	add := func(name, platform, arch, hash string) {
+		t.Helper()
+		id := "host-fleet-" + name + "-" + suffix
+		if _, err := store.Pool().Exec(ctx, `INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,alias,reporter_version,reporter_sha256,online,last_seen_at)
+ VALUES($1,$2,$1,$3,$4,'/workspace','online','occupied',$5,'2099.2.1.1',NULLIF($6,''),true,now())`, id, "usr_fleet_"+suffix, platform, arch, name+"-"+suffix, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("forged", "linux", "amd64", fleetHash("2099.2.1.0"))    // the right version string, another build
+	add("unhashed", "linux", "amd64", "")                       // reports no hash
+	add("otherarch", "linux", "arm64", fleetHash("2099.2.1.1")) // the amd64 target's hash on an arm64 machine
+	after := read()
+	if got := count(after, "linux", "2099.2.1.1", true); got != 1 {
+		t.Errorf("official 2099.2.1.1 machines = %d, want the one on the signed target", got)
+	}
+	if got := count(after, "linux", "2099.2.1.1", false); got != 3 {
+		t.Errorf("non-official 2099.2.1.1 machines = %d, want 3 (wrong hash, no hash, wrong architecture)", got)
+	}
+	if d := after.NonOfficial.Machines - before.NonOfficial.Machines; d != 3 {
+		t.Errorf("non-official builds +%d, want +3", d)
+	}
+	if d := after.NonOfficial.Versions - before.NonOfficial.Versions; d != 1 {
+		t.Errorf("non-official versions +%d, want +1 (2099.2.1.1 now has custom builds)", d)
+	}
+}
+
+func TestFleetRecordsTheHashOfEverySignedTargetOnPostgres(t *testing.T) {
+	s, store, _ := fleetSeed(t)
+	ctx := context.Background()
+	asset := releases.Asset{Version: "2099.9.9.1", Platform: "linux", Architecture: "arm64", SHA256: fleetHash("2099.9.9.1")}
+	for i := 0; i < 2; i++ { // the worker records the same target every run
+		if err := s.recordTargets(ctx, map[string]releases.Asset{"linux-arm64": asset}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err := store.Pool().QueryRow(ctx, `SELECT count(*) FROM release_target_hashes WHERE version='2099.9.9.1' AND platform='linux' AND architecture='arm64' AND sha256=$1`, asset.SHA256).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("recorded rows = %d, %v", n, err)
 	}
 }

@@ -534,3 +534,28 @@ func TestRuntimeObservationIgnoresRemovedProjectionFieldWithoutLeakingValues(t *
 		t.Fatalf("obsolete private projection field stored or leaked: status=%d", response.Code)
 	}
 }
+
+// The executable hash is stored as sent when it is 64 lowercase hex characters; anything else is a bad request.
+func TestRuntimeObservationReporterHash(t *testing.T) {
+	hash := strings.Repeat("0a", 32)
+	for name, test := range map[string]struct {
+		hash string
+		code int
+	}{"valid": {hash, http.StatusAccepted}, "absent": {"", http.StatusAccepted}, "short": {"abcd", http.StatusBadRequest}, "uppercase": {strings.ToUpper(hash), http.StatusBadRequest}} {
+		t.Run(name, func(t *testing.T) {
+			repository := &fakeRuntimeObservationRepository{}
+			body := `{"environment_id":"prj_test","resource_id":"machine_test","sampled_at":"2026-08-29T12:00:01Z","reporter_version":"2026.8.29.1","reporter_sha256":"` + test.hash + `"}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/runtime-observations", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer machine-token")
+			addRuntimeProof(request)
+			recorder := httptest.NewRecorder()
+			runtimeObservation(repository, &fakeRuntimeIdentity{}, 10).ServeHTTP(recorder, request)
+			if recorder.Code != test.code {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if test.code == http.StatusAccepted && (repository.recorded == nil || repository.recorded.ReporterSHA256 != test.hash) {
+				t.Fatalf("recorded %#v", repository.recorded)
+			}
+		})
+	}
+}

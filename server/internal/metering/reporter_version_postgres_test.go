@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,16 +50,35 @@ func TestRuntimeObservationRecordsTheReporterVersionOnPostgres(t *testing.T) {
 		}
 		return v.String
 	}
-	if err := repo.RecordRuntimeObservation(ctx, RuntimeObservation{EnvironmentID: machine, MachineID: machine, ReporterVersion: "2026.10.25.1"}); err != nil {
+	hash := func() string {
+		t.Helper()
+		var v sql.NullString
+		if err := store.SQL().QueryRowContext(ctx, `SELECT reporter_sha256 FROM paperboat.user_machines WHERE id=$1`, machine).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v.String
+	}
+	sum := strings.Repeat("ab", 32)
+	if err := repo.RecordRuntimeObservation(ctx, RuntimeObservation{EnvironmentID: machine, MachineID: machine, ReporterVersion: "2026.10.25.1", ReporterSHA256: sum}); err != nil {
 		t.Fatal(err)
 	}
 	if got := version(); got != "2026.10.25.1" {
 		t.Fatalf("reporter version = %q, want 2026.10.25.1", got)
 	}
+	if got := hash(); got != sum {
+		t.Fatalf("reporter hash = %q, want %q", got, sum)
+	}
 	if err := repo.RecordRuntimeObservation(ctx, RuntimeObservation{EnvironmentID: machine, MachineID: machine}); err != nil {
 		t.Fatal(err)
 	}
-	if got := version(); got != "2026.10.25.1" {
-		t.Fatalf("an observation without a version cleared it: %q", got)
+	if got := version(); got != "2026.10.25.1" || hash() != sum {
+		t.Fatalf("an observation without a version or hash cleared it: %q %q", got, hash())
+	}
+	other := strings.Repeat("cd", 32) // a changed hash alone is written, though nothing else changed
+	if err := repo.RecordRuntimeObservation(ctx, RuntimeObservation{EnvironmentID: machine, MachineID: machine, ReporterVersion: "2026.10.25.1", ReporterSHA256: other}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hash(); got != other {
+		t.Fatalf("a changed hash was not written: %q", got)
 	}
 }

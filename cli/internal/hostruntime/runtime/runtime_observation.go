@@ -252,6 +252,7 @@ type runtimeObservationSender struct {
 	machineServicesPorts                                []clientapi.MachineServicePort
 	machineServicesGeneration                           uint64
 	endpoint, environmentID, machineID, reporterVersion string
+	reporterSHA256                                      string // of the running executable, computed once at daemon start
 	tokens                                              interface {
 		Token(context.Context) (string, error)
 	}
@@ -327,6 +328,7 @@ func (s *runtimeObservationSender) snapshot(ctx context.Context, within time.Dur
 		EnvironmentID       string                             `json:"environment_id"`
 		ResourceID          string                             `json:"resource_id"`
 		ReporterVersion     string                             `json:"reporter_version"`
+		ReporterSHA256      string                             `json:"reporter_sha256,omitempty"`
 		SampledAt           time.Time                          `json:"sampled_at"`
 		Availability        *availability.Observation          `json:"availability,omitempty"`
 		RuntimeDiagnostics  *runtimeDiagnosticsObservation     `json:"runtime_diagnostics,omitempty"`
@@ -338,6 +340,7 @@ func (s *runtimeObservationSender) snapshot(ctx context.Context, within time.Dur
 		EnvironmentID:       s.environmentID,
 		ResourceID:          s.machineID,
 		ReporterVersion:     s.reporterVersion,
+		ReporterSHA256:      s.reporterSHA256,
 		SampledAt:           now,
 		Availability:        availabilityState,
 		RuntimeDiagnostics:  s.runtimeDiagnostics(now, s.layers != nil),

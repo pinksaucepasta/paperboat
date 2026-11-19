@@ -11158,6 +11158,7 @@ export interface components {
         RuntimeObservation: {
             terminal_join?: components["schemas"]["TerminalJoinObservation"];
             reporter_version?: string;
+            reporter_sha256?: string;
             /** Format: date-time */
             sampled_at: string;
             availability?: components["schemas"]["AvailabilityObservation"];
@@ -14774,6 +14775,7 @@ export interface components {
         OperatorFleetVersionRow: {
             platform: string;
             version: string;
+            official: boolean;
             machines: number;
             online: number;
             users: number;

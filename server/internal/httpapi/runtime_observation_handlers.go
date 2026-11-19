@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
+	"github.com/pinksaucepasta/paperboat/shared/releasepolicy"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
@@ -122,6 +123,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 			EnvironmentID       string                                       `json:"environment_id"`
 			ResourceID          string                                       `json:"resource_id"`
 			ReporterVersion     string                                       `json:"reporter_version"`
+			ReporterSHA256      string                                       `json:"reporter_sha256"`
 			SampledAt           time.Time                                    `json:"sampled_at"`
 			Availability        *usermachines.AvailabilityObservation        `json:"availability"`
 			MachineCapabilities *usermachines.MachineCapabilitiesObservation `json:"machine_capabilities"`
@@ -144,6 +146,10 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 		}
 		if req.EnvironmentID == "" || req.ResourceID == "" || req.SampledAt.IsZero() {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Runtime observation is missing required fields.")
+			return
+		}
+		if req.ReporterSHA256 != "" && !releasepolicy.IsDigest(req.ReporterSHA256) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "Reporter executable hash must be 64 lowercase hex characters.")
 			return
 		}
 		if req.RuntimeDiagnostics != nil && (req.RuntimeDiagnostics.WorkerGeneration < 1 || req.RuntimeDiagnostics.OSBootID == "" || len(req.RuntimeDiagnostics.OSBootID) > 256 || strings.ContainsAny(req.RuntimeDiagnostics.OSBootID, "\x00\r\n") || !validObservedCapabilities(req.RuntimeDiagnostics.Capabilities) || !slices.Contains([]string{"unknown", "user", "system"}, req.RuntimeDiagnostics.WorkerServiceScope) || !slices.Contains([]string{"ready", "degraded", "unavailable"}, req.RuntimeDiagnostics.ConnectorState) || req.RuntimeDiagnostics.ObservedAt.IsZero()) {
@@ -229,6 +235,7 @@ func runtimeObservation(repo runtimeObservationRepository, identities runtimeIde
 			MachineID:       req.ResourceID,
 			ObservedAt:      req.SampledAt.UTC(),
 			ReporterVersion: req.ReporterVersion,
+			ReporterSHA256:  req.ReporterSHA256,
 		}
 		if req.RuntimeDiagnostics != nil {
 			observation.WorkerGeneration = req.RuntimeDiagnostics.WorkerGeneration

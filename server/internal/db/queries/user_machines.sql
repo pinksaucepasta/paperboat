@@ -614,25 +614,26 @@ WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND deleted_at IS NULL
 -- name: MarkUserMachineOnlineFromHelper :one
 -- A heartbeat writes the row only when presence or capabilities change, or to refresh last_seen_at once it is
 -- older than presence_refresh_seconds (half the offline cutoff); an unchanged heartbeat writes nothing. A new
--- reporter_version is written too (an observation without one keeps the last value). A
+-- reporter_version or reporter_sha256 is written too (an observation without one keeps the last value). A
 -- last_seen_at-only refresh keeps version and updated_at: nothing a client reads changed.
 WITH present AS (
   SELECT um.id AS machine_id, um.state AS prior_state, um.online AS prior_online,
     um.observed_capabilities AS prior_capabilities, um.last_seen_at AS prior_seen_at,
     paperboat.machine_observed_capabilities(COALESCE(sqlc.narg(observed_capabilities), '{}'::text[]), um.capabilities_applied) AS next_capabilities,
-    um.reporter_version AS prior_reporter, COALESCE(NULLIF(sqlc.arg(reporter_version)::text, ''), um.reporter_version) AS next_reporter
+    um.reporter_version AS prior_reporter, COALESCE(NULLIF(sqlc.arg(reporter_version)::text, ''), um.reporter_version) AS next_reporter,
+    um.reporter_sha256 AS prior_sha256, COALESCE(NULLIF(sqlc.arg(reporter_sha256)::text, ''), um.reporter_sha256) AS next_sha256
   FROM user_machines um
   WHERE um.id = sqlc.arg(id) AND um.environment_id = sqlc.arg(environment_id)
     AND um.seat_state = 'occupied' AND um.deleted_at IS NULL AND um.state IN ('pending','offline','online')
 ), due AS (
-  SELECT p.machine_id, p.next_capabilities, p.next_reporter,
+  SELECT p.machine_id, p.next_capabilities, p.next_reporter, p.next_sha256,
     (p.prior_state <> 'online' OR NOT p.prior_online OR p.prior_capabilities IS DISTINCT FROM p.next_capabilities) AS material
   FROM present p
   WHERE p.prior_state <> 'online' OR NOT p.prior_online OR p.prior_capabilities IS DISTINCT FROM p.next_capabilities
-    OR p.prior_reporter IS DISTINCT FROM p.next_reporter OR p.prior_seen_at IS NULL OR p.prior_seen_at < now() - make_interval(secs => sqlc.arg(presence_refresh_seconds)::float8)
+    OR p.prior_reporter IS DISTINCT FROM p.next_reporter OR p.prior_sha256 IS DISTINCT FROM p.next_sha256 OR p.prior_seen_at IS NULL OR p.prior_seen_at < now() - make_interval(secs => sqlc.arg(presence_refresh_seconds)::float8)
 ), written AS (
   UPDATE user_machines m
-  SET state = 'online', online = true, observed_capabilities = d.next_capabilities, reporter_version = d.next_reporter, last_seen_at = now(),
+  SET state = 'online', online = true, observed_capabilities = d.next_capabilities, reporter_version = d.next_reporter, reporter_sha256 = d.next_sha256, last_seen_at = now(),
       updated_at = CASE WHEN d.material THEN now() ELSE m.updated_at END,
       version = m.version + CASE WHEN d.material THEN 1 ELSE 0 END
   FROM due d WHERE m.id = d.machine_id

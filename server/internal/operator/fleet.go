@@ -3,6 +3,8 @@ package operator
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
@@ -26,7 +29,10 @@ const (
 	fleetMachines = ` FROM user_machines m LEFT JOIN user_machine_update_observations o ON o.user_machine_id=m.id
  WHERE m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state IN ('online','offline','disconnected')`
 	fleetVersion = `left(coalesce(nullif(m.reporter_version,''),o.current_version,'unknown'),64)`
-	fleetOnline  = `(m.online AND m.state='online' AND m.last_seen_at>now()-($1*interval '1 microsecond'))`
+	// fleetOfficial: the machine's executable is a published, signed release target of its version, platform and arch.
+	fleetOfficial = `EXISTS(SELECT 1 FROM release_target_hashes t WHERE t.platform=m.platform AND t.architecture=m.architecture
+ AND t.version=` + fleetVersion + ` AND t.sha256=m.reporter_sha256)`
+	fleetOnline = `(m.online AND m.state='online' AND m.last_seen_at>now()-($1*interval '1 microsecond'))`
 )
 
 // Offline buckets by how long ago the machine was last seen.
@@ -68,6 +74,7 @@ func versionLess(a, b [4]int) bool {
 type FleetVersionRow struct {
 	Platform string `json:"platform"`
 	Version  string `json:"version"`
+	Official bool   `json:"official"` // the machines' executable matches a signed release target of this version
 	Machines int64  `json:"machines"`
 	Online   int64  `json:"online"`
 	Users    int64  `json:"users"`
@@ -91,9 +98,9 @@ type FleetFailure struct {
 	Machines      int64  `json:"machines"`
 }
 
-// FleetBuilds counts the machines running a build that is not an official release version (a dev or custom build, as
-// the By-version table shows them). shortcut: official means the YYYY.M.D.build form, not "present in a signed
-// release bundle", so a custom build named like a release counts as official; upgrade when builds are signed per machine.
+// FleetBuilds counts the machines running a build that is not official: its executable hash is not that of a signed
+// release target (a dev or custom build, whatever version string it reports). Machines that reported no version at
+// all ("unknown") are not counted.
 type FleetBuilds struct {
 	Machines int64 `json:"machines"`
 	Online   int64 `json:"online"`
@@ -138,13 +145,13 @@ func (s *Service) readFleetVersions(ctx context.Context, tx *db.Tx) (FleetVersio
 		Scan(&out.Machines, &out.Online, &out.Users, &out.Teams); err != nil {
 		return out, err
 	}
-	rows, err := tx.Query(ctx, `SELECT m.platform,`+fleetVersion+`,count(*),count(*) FILTER(WHERE `+fleetOnline+`),count(DISTINCT m.user_id),count(DISTINCT m.owner_team_id)`+fleetMachines+` GROUP BY 1,2`, stale)
+	rows, err := tx.Query(ctx, `SELECT m.platform,`+fleetVersion+`,`+fleetOfficial+`,count(*),count(*) FILTER(WHERE `+fleetOnline+`),count(DISTINCT m.user_id),count(DISTINCT m.owner_team_id)`+fleetMachines+` GROUP BY 1,2,3`, stale)
 	if err != nil {
 		return out, err
 	}
 	for rows.Next() {
 		var v FleetVersionRow
-		if err := rows.Scan(&v.Platform, &v.Version, &v.Machines, &v.Online, &v.Users, &v.Teams); err != nil {
+		if err := rows.Scan(&v.Platform, &v.Version, &v.Official, &v.Machines, &v.Online, &v.Users, &v.Teams); err != nil {
 			return out, closeRowsError(rows, err)
 		}
 		out.Versions = append(out.Versions, v)
@@ -163,8 +170,10 @@ func (s *Service) readFleetVersions(ctx context.Context, tx *db.Tx) (FleetVersio
 			return versionLess(kb, ka) // newest first
 		case oka != okb:
 			return oka
+		case a.Version != b.Version:
+			return a.Version > b.Version
 		}
-		return a.Version > b.Version
+		return a.Official && !b.Official
 	})
 	// Per-platform totals need distinct users, which cannot be summed from version rows.
 	prows, err := tx.Query(ctx, `SELECT m.platform,count(*),count(*) FILTER(WHERE `+fleetOnline+`),count(DISTINCT m.user_id),count(DISTINCT m.owner_team_id)`+fleetMachines+` GROUP BY 1 ORDER BY 1`, stale)
@@ -187,7 +196,7 @@ func (s *Service) readFleetVersions(ctx context.Context, tx *db.Tx) (FleetVersio
 	}
 	versions := map[string]bool{}
 	for _, r := range out.Versions {
-		if _, official := versionKey(r.Version); !official && r.Version != "unknown" {
+		if !r.Official && r.Version != "unknown" {
 			out.NonOfficial.Machines += r.Machines
 			out.NonOfficial.Online += r.Online
 			versions[r.Version] = true
@@ -232,12 +241,12 @@ func (s *Service) fleetSelfHosted(ctx context.Context, tx *db.Tx) (FleetSelfHost
 	return out, err
 }
 
-// oldestOnline is the oldest ordered version some machine of the platform (all, when empty) runs while online.
+// oldestOnline is the oldest official, ordered version some machine of the platform (all, when empty) runs while online.
 func oldestOnline(rows []FleetVersionRow, platform string) string {
 	oldest, best := "", [4]int{}
 	for _, r := range rows {
 		key, ok := versionKey(r.Version)
-		if r.Online == 0 || !ok || (platform != "" && r.Platform != platform) {
+		if r.Online == 0 || !ok || !r.Official || (platform != "" && r.Platform != platform) {
 			continue
 		}
 		if oldest == "" || versionLess(key, best) {
@@ -567,6 +576,39 @@ func (s *Service) readFleetOffline(ctx context.Context, tx *db.Tx, target, after
 // SnapshotFleet rewrites today's rows of fleet_version_daily from the live fleet (the last write of a day stays), and
 // deletes the days past the retention window.
 func (s *Service) SnapshotFleet(ctx context.Context) error {
+	err := s.snapshotFleetVersions(ctx)
+	if recordErr := s.recordReleaseTargets(ctx); recordErr != nil {
+		err = errors.Join(err, recordErr)
+	}
+	return err
+}
+
+// recordReleaseTargets remembers the hash of every signed pb target the origin lists now: targets.json holds only the
+// newest target of each platform, and machines keep running older ones.
+func (s *Service) recordReleaseTargets(ctx context.Context) error {
+	if s.releaseDir == "" {
+		return nil
+	}
+	current, err := releases.ReadCurrent(s.releaseDir)
+	if err != nil {
+		return fmt.Errorf("record release target hashes: %w", err)
+	}
+	return s.recordTargets(ctx, current.Assets)
+}
+
+func (s *Service) recordTargets(ctx context.Context, assets map[string]releases.Asset) error {
+	return s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		for _, a := range assets {
+			if _, err := tx.Exec(ctx, `INSERT INTO release_target_hashes(version,platform,architecture,sha256) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+				a.Version, a.Platform, a.Architecture, a.SHA256); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Service) snapshotFleetVersions(ctx context.Context) error {
 	return s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM fleet_version_daily WHERE day>=(now() AT TIME ZONE 'UTC')::date`); err != nil {
 			return err

@@ -183,7 +183,7 @@ SET public_identity_key = $1,
     enrolled_at = coalesce(enrolled_at, $2), updated_at = $2,
     version = version + CASE WHEN public_identity_key IS DISTINCT FROM $1 THEN 1 ELSE 0 END
 WHERE environment_id = $3 AND deleted_at IS NULL
-RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version
+RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256
 `
 
 type BindCanonicalMachineIdentityParams struct {
@@ -249,6 +249,7 @@ func (q *Queries) BindCanonicalMachineIdentity(ctx context.Context, arg BindCano
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -841,7 +842,7 @@ INSERT INTO user_machines (
   $1, $2, $3, $4,
   $5, $6, $7,
   'offline', 'released', $8, $9, $10, now()
-) RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version
+) RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256
 `
 
 type CreateEnrolledMachineParams struct {
@@ -925,6 +926,7 @@ func (q *Queries) CreateEnrolledMachine(ctx context.Context, arg CreateEnrolledM
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -1692,7 +1694,7 @@ func (q *Queries) FailUserMachineTerminalSessionOperation(ctx context.Context, a
 }
 
 const getActiveUserMachineForControl = `-- name: GetActiveUserMachineForControl :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL
   AND public_identity_key IS NOT NULL AND seat_state = 'occupied'
 `
@@ -1754,6 +1756,7 @@ func (q *Queries) GetActiveUserMachineForControl(ctx context.Context, id string)
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -1884,7 +1887,7 @@ func (q *Queries) GetBootstrapPairingForUser(ctx context.Context, arg GetBootstr
 }
 
 const getCanonicalMachineForEnvironment = `-- name: GetCanonicalMachineForEnvironment :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE environment_id = $1 AND deleted_at IS NULL
 `
 
@@ -1945,6 +1948,7 @@ func (q *Queries) GetCanonicalMachineForEnvironment(ctx context.Context, environ
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -2031,7 +2035,7 @@ func (q *Queries) GetMachineControlSessionForUpdate(ctx context.Context, machine
 }
 
 const getOwnedActiveUserMachineForControl = `-- name: GetOwnedActiveUserMachineForControl :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE id = $1 AND user_id = $2
   AND deleted_at IS NULL AND revoked_at IS NULL AND public_identity_key IS NOT NULL AND seat_state = 'occupied'
 `
@@ -2098,6 +2102,7 @@ func (q *Queries) GetOwnedActiveUserMachineForControl(ctx context.Context, arg G
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -2189,7 +2194,7 @@ func (q *Queries) GetSharedUserMachineTerminalSession(ctx context.Context, arg G
 }
 
 const getTerminalSessionTransferDestination = `-- name: GetTerminalSessionTransferDestination :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machine_terminal_sessions s
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machine_terminal_sessions s
 JOIN user_machines owner ON owner.id = s.user_machine_id
 JOIN user_machines m ON m.id = s.transfer_destination_machine_id
 WHERE s.id = $1 AND s.owner_account = $2 AND s.deleted_at IS NULL
@@ -2258,12 +2263,13 @@ func (q *Queries) GetTerminalSessionTransferDestination(ctx context.Context, arg
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getUserMachineAvailabilityForHelper = `-- name: GetUserMachineAvailabilityForHelper :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m
 JOIN control_helpers h ON h.environment_id=m.environment_id
 WHERE h.id=$1 AND h.environment_id=$2
   AND h.state='active' AND h.revoked_at IS NULL
@@ -2332,6 +2338,7 @@ func (q *Queries) GetUserMachineAvailabilityForHelper(ctx context.Context, arg G
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -2429,7 +2436,7 @@ func (q *Queries) GetUserMachineBandwidthUsage(ctx context.Context, userID strin
 }
 
 const getUserMachineByPublicIdentityForUpdate = `-- name: GetUserMachineByPublicIdentityForUpdate :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE public_identity_key = $1 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -2491,6 +2498,7 @@ func (q *Queries) GetUserMachineByPublicIdentityForUpdate(ctx context.Context, p
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -2573,7 +2581,7 @@ func (q *Queries) GetUserMachineEntitlementForUpdate(ctx context.Context, userID
 }
 
 const getUserMachineForBandwidthUpdate = `-- name: GetUserMachineForBandwidthUpdate :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE id = $1 AND deleted_at IS NULL FOR UPDATE
 `
 
@@ -2634,12 +2642,13 @@ func (q *Queries) GetUserMachineForBandwidthUpdate(ctx context.Context, id strin
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getUserMachineForCapability = `-- name: GetUserMachineForCapability :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m
 WHERE m.id=$1 AND m.deleted_at IS NULL
 AND machine_capability_allowed($2,m.id,$3)
 `
@@ -2707,12 +2716,13 @@ func (q *Queries) GetUserMachineForCapability(ctx context.Context, arg GetUserMa
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getUserMachineForCapabilityInWorkspace = `-- name: GetUserMachineForCapabilityInWorkspace :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m
 WHERE m.id=$1 AND m.deleted_at IS NULL AND (
   (NOT $2::boolean AND machine_capability_allowed($3,m.id,$4))
   OR ($2::boolean AND $5::text IS NULL
@@ -2793,12 +2803,13 @@ func (q *Queries) GetUserMachineForCapabilityInWorkspace(ctx context.Context, ar
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getUserMachineForEnvironmentBandwidthUpdate = `-- name: GetUserMachineForEnvironmentBandwidthUpdate :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE environment_id = $1 AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -2860,6 +2871,7 @@ func (q *Queries) GetUserMachineForEnvironmentBandwidthUpdate(ctx context.Contex
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -2868,7 +2880,7 @@ const getUserMachineForSharedTerminalSession = `-- name: GetUserMachineForShared
 WITH target AS (
  SELECT s.user_machine_id machine_id FROM user_machine_terminal_sessions s WHERE s.id=$2 AND s.deleted_at IS NULL
 )
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM target JOIN user_machines m ON m.id=target.machine_id
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM target JOIN user_machines m ON m.id=target.machine_id
 WHERE terminal_session_role($1,$2) IN ('viewer','interactive') AND m.deleted_at IS NULL
 `
 
@@ -2934,12 +2946,13 @@ func (q *Queries) GetUserMachineForSharedTerminalSession(ctx context.Context, ar
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getUserMachineForUpdate = `-- name: GetUserMachineForUpdate :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE id = $1 AND machine_management_allowed($2,id) AND deleted_at IS NULL FOR UPDATE
 `
 
@@ -3005,12 +3018,13 @@ func (q *Queries) GetUserMachineForUpdate(ctx context.Context, arg GetUserMachin
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getUserMachineForUser = `-- name: GetUserMachineForUser :one
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE id = $1 AND user_id = $2 AND owner_team_id IS NULL AND deleted_at IS NULL
 `
 
@@ -3076,6 +3090,7 @@ func (q *Queries) GetUserMachineForUser(ctx context.Context, arg GetUserMachineF
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -3484,7 +3499,7 @@ func (q *Queries) GetUserMachineTerminalSessionByIdempotencyKeyInWorkspace(ctx c
 }
 
 const getUserMachineTerminalSessionHostForUser = `-- name: GetUserMachineTerminalSessionHostForUser :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machine_terminal_sessions s
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machine_terminal_sessions s
 JOIN user_machines m ON m.id = s.user_machine_id
 WHERE s.id = $1 AND s.owner_account = $2
   AND s.deleted_at IS NULL AND m.deleted_at IS NULL
@@ -3552,6 +3567,7 @@ func (q *Queries) GetUserMachineTerminalSessionHostForUser(ctx context.Context, 
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -3610,7 +3626,7 @@ func (q *Queries) GetUserMachineTerminalSessionInWorkspace(ctx context.Context, 
 }
 
 const getUserTransferDestinationDefault = `-- name: GetUserTransferDestinationDefault :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_transfer_destination_defaults d
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_transfer_destination_defaults d
 JOIN user_machines m ON m.id = d.machine_id
 WHERE d.user_id = $1
   AND m.user_id = d.user_id
@@ -3674,12 +3690,13 @@ func (q *Queries) GetUserTransferDestinationDefault(ctx context.Context, userID 
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getVisibleUserMachine = `-- name: GetVisibleUserMachine :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m WHERE m.id=$1 AND m.deleted_at IS NULL
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m WHERE m.id=$1 AND m.deleted_at IS NULL
 AND (machine_management_allowed($2,m.id) OR EXISTS(
  SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) capability
  WHERE machine_capability_allowed($2,m.id,capability)))
@@ -3747,12 +3764,13 @@ func (q *Queries) GetVisibleUserMachine(ctx context.Context, arg GetVisibleUserM
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
 
 const getVisibleUserMachineInWorkspace = `-- name: GetVisibleUserMachineInWorkspace :one
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m WHERE m.id=$1 AND m.deleted_at IS NULL AND (
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m WHERE m.id=$1 AND m.deleted_at IS NULL AND (
   (NOT $2::boolean AND (machine_management_allowed($3,m.id) OR EXISTS(
     SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) capability
     WHERE machine_capability_allowed($3,m.id,capability))))
@@ -3836,6 +3854,7 @@ func (q *Queries) GetVisibleUserMachineInWorkspace(ctx context.Context, arg GetV
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -4356,7 +4375,7 @@ func (q *Queries) ListUserMachineTerminalSessionsInWorkspace(ctx context.Context
 }
 
 const listUserMachinesByIDs = `-- name: ListUserMachinesByIDs :many
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m WHERE m.id=ANY($1::text[]) AND m.deleted_at IS NULL
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m WHERE m.id=ANY($1::text[]) AND m.deleted_at IS NULL
 `
 
 // The inventory has already decided which machines the caller may see; this loads exactly those rows in one query.
@@ -4423,6 +4442,7 @@ func (q *Queries) ListUserMachinesByIDs(ctx context.Context, ids []string) ([]Us
 			&i.MachineServicePolicyGeneration,
 			&i.CapabilitiesApplied,
 			&i.ReporterVersion,
+			&i.ReporterSha256,
 		); err != nil {
 			return nil, err
 		}
@@ -4435,7 +4455,7 @@ func (q *Queries) ListUserMachinesByIDs(ctx context.Context, ids []string) ([]Us
 }
 
 const listUserMachinesForUser = `-- name: ListUserMachinesForUser :many
-SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version FROM user_machines
+SELECT id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256 FROM user_machines
 WHERE id IN (SELECT id FROM live_user_machines) AND (machine_management_allowed($1,id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,id,cap)))
 ORDER BY lower(alias), id
 LIMIT $3 OFFSET $2
@@ -4510,6 +4530,7 @@ func (q *Queries) ListUserMachinesForUser(ctx context.Context, arg ListUserMachi
 			&i.MachineServicePolicyGeneration,
 			&i.CapabilitiesApplied,
 			&i.ReporterVersion,
+			&i.ReporterSha256,
 		); err != nil {
 			return nil, err
 		}
@@ -4522,7 +4543,7 @@ func (q *Queries) ListUserMachinesForUser(ctx context.Context, arg ListUserMachi
 }
 
 const listUserMachinesInWorkspaceForUser = `-- name: ListUserMachinesInWorkspaceForUser :many
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m
 WHERE m.id IN (SELECT id FROM live_user_machines) AND (
   (NOT $1::boolean AND (machine_management_allowed($2,m.id) OR EXISTS(
     SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap
@@ -4617,6 +4638,7 @@ func (q *Queries) ListUserMachinesInWorkspaceForUser(ctx context.Context, arg Li
 			&i.MachineServicePolicyGeneration,
 			&i.CapabilitiesApplied,
 			&i.ReporterVersion,
+			&i.ReporterSha256,
 		); err != nil {
 			return nil, err
 		}
@@ -4824,19 +4846,20 @@ WITH present AS (
   SELECT um.id AS machine_id, um.state AS prior_state, um.online AS prior_online,
     um.observed_capabilities AS prior_capabilities, um.last_seen_at AS prior_seen_at,
     paperboat.machine_observed_capabilities(COALESCE($1, '{}'::text[]), um.capabilities_applied) AS next_capabilities,
-    um.reporter_version AS prior_reporter, COALESCE(NULLIF($2::text, ''), um.reporter_version) AS next_reporter
+    um.reporter_version AS prior_reporter, COALESCE(NULLIF($2::text, ''), um.reporter_version) AS next_reporter,
+    um.reporter_sha256 AS prior_sha256, COALESCE(NULLIF($3::text, ''), um.reporter_sha256) AS next_sha256
   FROM user_machines um
-  WHERE um.id = $3 AND um.environment_id = $4
+  WHERE um.id = $4 AND um.environment_id = $5
     AND um.seat_state = 'occupied' AND um.deleted_at IS NULL AND um.state IN ('pending','offline','online')
 ), due AS (
-  SELECT p.machine_id, p.next_capabilities, p.next_reporter,
+  SELECT p.machine_id, p.next_capabilities, p.next_reporter, p.next_sha256,
     (p.prior_state <> 'online' OR NOT p.prior_online OR p.prior_capabilities IS DISTINCT FROM p.next_capabilities) AS material
   FROM present p
   WHERE p.prior_state <> 'online' OR NOT p.prior_online OR p.prior_capabilities IS DISTINCT FROM p.next_capabilities
-    OR p.prior_reporter IS DISTINCT FROM p.next_reporter OR p.prior_seen_at IS NULL OR p.prior_seen_at < now() - make_interval(secs => $5::float8)
+    OR p.prior_reporter IS DISTINCT FROM p.next_reporter OR p.prior_sha256 IS DISTINCT FROM p.next_sha256 OR p.prior_seen_at IS NULL OR p.prior_seen_at < now() - make_interval(secs => $6::float8)
 ), written AS (
   UPDATE user_machines m
-  SET state = 'online', online = true, observed_capabilities = d.next_capabilities, reporter_version = d.next_reporter, last_seen_at = now(),
+  SET state = 'online', online = true, observed_capabilities = d.next_capabilities, reporter_version = d.next_reporter, reporter_sha256 = d.next_sha256, last_seen_at = now(),
       updated_at = CASE WHEN d.material THEN now() ELSE m.updated_at END,
       version = m.version + CASE WHEN d.material THEN 1 ELSE 0 END
   FROM due d WHERE m.id = d.machine_id
@@ -4848,6 +4871,7 @@ SELECT EXISTS(SELECT 1 FROM present)::boolean AS eligible
 type MarkUserMachineOnlineFromHelperParams struct {
 	ObservedCapabilities   interface{}
 	ReporterVersion        string
+	ReporterSha256         string
 	ID                     string
 	EnvironmentID          string
 	PresenceRefreshSeconds float64
@@ -4855,12 +4879,13 @@ type MarkUserMachineOnlineFromHelperParams struct {
 
 // A heartbeat writes the row only when presence or capabilities change, or to refresh last_seen_at once it is
 // older than presence_refresh_seconds (half the offline cutoff); an unchanged heartbeat writes nothing. A new
-// reporter_version is written too (an observation without one keeps the last value). A
+// reporter_version or reporter_sha256 is written too (an observation without one keeps the last value). A
 // last_seen_at-only refresh keeps version and updated_at: nothing a client reads changed.
 func (q *Queries) MarkUserMachineOnlineFromHelper(ctx context.Context, arg MarkUserMachineOnlineFromHelperParams) (bool, error) {
 	row := q.db.QueryRow(ctx, markUserMachineOnlineFromHelper,
 		arg.ObservedCapabilities,
 		arg.ReporterVersion,
+		arg.ReporterSha256,
 		arg.ID,
 		arg.EnvironmentID,
 		arg.PresenceRefreshSeconds,
@@ -4932,7 +4957,7 @@ SET availability_mode = 'keep_awake',
     updated_at = now(), version = version + 1
 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
   AND availability_mode <> 'keep_awake'
-RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version
+RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256
 `
 
 type OptInUserMachineKeepAwakeParams struct {
@@ -4997,6 +5022,7 @@ func (q *Queries) OptInUserMachineKeepAwake(ctx context.Context, arg OptInUserMa
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -5191,7 +5217,7 @@ const renameUserMachine = `-- name: RenameUserMachine :one
 UPDATE user_machines
 SET alias = $1, updated_at = now(), version = version + 1
 WHERE id = $2 AND machine_management_allowed($3,id) AND deleted_at IS NULL
-RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version
+RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256
 `
 
 type RenameUserMachineParams struct {
@@ -5257,6 +5283,7 @@ func (q *Queries) RenameUserMachine(ctx context.Context, arg RenameUserMachinePa
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -5808,7 +5835,7 @@ WITH destination AS (
   WHERE s.id = $3 AND s.user_machine_id = owner.id AND s.owner_account = $2 AND s.deleted_at IS NULL
   RETURNING destination.id
 )
-SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version FROM user_machines m
+SELECT m.id, m.user_id, m.environment_id, m.platform, m.architecture, m.workspace_root, m.state, m.seat_state, m.online, m.provider_route_route_id, m.provider_route_client_id, m.provider_route_http_base_url, m.provider_route_websocket_base_url, m.runtime_versions, m.enrolled_at, m.last_seen_at, m.revoked_at, m.disconnected_at, m.deleted_at, m.version, m.created_at, m.updated_at, m.availability_mode, m.availability_desired_version, m.availability_observed_mode, m.availability_observed_version, m.availability_observed_at, m.availability_status, m.availability_error_code, m.host_service_version, m.host_service_scope, m.worker_generation, m.os_boot_id, m.worker_service_scope, m.connector_state, m.connector_generation, m.host_update_rollbacks, m.runtime_diagnostics_observed_at, m.public_identity_key, m.installation_generation, m.configured_capabilities, m.observed_capabilities, m.alias, m.update_health, m.capabilities_desired_version, m.capabilities_observed_version, m.capabilities_status, m.capabilities_error_code, m.owner_team_id, m.personal_auto_enabled, m.machine_service_policy_generation, m.capabilities_applied, m.reporter_version, m.reporter_sha256 FROM user_machines m
 WHERE m.id = (SELECT id FROM machine_updated LIMIT 1)
 `
 
@@ -5875,6 +5902,7 @@ func (q *Queries) SetTerminalSessionTransferDestination(ctx context.Context, arg
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -6076,7 +6104,7 @@ SET alias = $1, workspace_root = $2,
  updated_at = CASE WHEN alias IS DISTINCT FROM $1 OR workspace_root IS DISTINCT FROM $2 OR runtime_versions IS DISTINCT FROM $3 THEN now() ELSE updated_at END,
  version = version + CASE WHEN alias IS DISTINCT FROM $1 OR workspace_root IS DISTINCT FROM $2 OR runtime_versions IS DISTINCT FROM $3 THEN 1 ELSE 0 END
 WHERE id = $4 AND user_id = $5 AND machine_management_allowed($5,id) AND deleted_at IS NULL
-RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version
+RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256
 `
 
 type UpdateUserMachineInstallationParams struct {
@@ -6150,6 +6178,7 @@ func (q *Queries) UpdateUserMachineInstallation(ctx context.Context, arg UpdateU
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
@@ -6160,7 +6189,7 @@ SET alias = $1, runtime_versions = $2,
  updated_at = CASE WHEN alias IS DISTINCT FROM $1 OR runtime_versions IS DISTINCT FROM $2 THEN now() ELSE updated_at END,
  version = version + CASE WHEN alias IS DISTINCT FROM $1 OR runtime_versions IS DISTINCT FROM $2 THEN 1 ELSE 0 END
 WHERE id = $3 AND user_id = $4 AND machine_management_allowed($4,id) AND deleted_at IS NULL
-RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version
+RETURNING id, user_id, environment_id, platform, architecture, workspace_root, state, seat_state, online, provider_route_route_id, provider_route_client_id, provider_route_http_base_url, provider_route_websocket_base_url, runtime_versions, enrolled_at, last_seen_at, revoked_at, disconnected_at, deleted_at, version, created_at, updated_at, availability_mode, availability_desired_version, availability_observed_mode, availability_observed_version, availability_observed_at, availability_status, availability_error_code, host_service_version, host_service_scope, worker_generation, os_boot_id, worker_service_scope, connector_state, connector_generation, host_update_rollbacks, runtime_diagnostics_observed_at, public_identity_key, installation_generation, configured_capabilities, observed_capabilities, alias, update_health, capabilities_desired_version, capabilities_observed_version, capabilities_status, capabilities_error_code, owner_team_id, personal_auto_enabled, machine_service_policy_generation, capabilities_applied, reporter_version, reporter_sha256
 `
 
 type UpdateUserMachineMetadataParams struct {
@@ -6232,6 +6261,7 @@ func (q *Queries) UpdateUserMachineMetadata(ctx context.Context, arg UpdateUserM
 		&i.MachineServicePolicyGeneration,
 		&i.CapabilitiesApplied,
 		&i.ReporterVersion,
+		&i.ReporterSha256,
 	)
 	return i, err
 }
