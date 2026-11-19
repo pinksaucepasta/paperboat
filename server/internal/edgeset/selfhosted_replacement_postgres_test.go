@@ -55,7 +55,7 @@ func TestSelfHostedEdgeSetReplacesOnlyWithSelectedServersOnPostgres(t *testing.T
 		var changed bool
 		err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			var inner error
-			changed, inner = ReconcileScope(ctx, tx, scope, time.Now())
+			changed, inner = ReconcileScope(ctx, tx, scope, nil, time.Now())
 			return inner
 		})
 		if err != nil {
