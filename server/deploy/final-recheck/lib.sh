@@ -19,7 +19,7 @@ KEY_TABLES="users teams billing_workspaces $CONFIG_TABLES"
 
 scratch_start() { # prints the container name
   name=pb-scratch-$$
-  docker run -d --name "$name" -e POSTGRES_PASSWORD=scratch -e POSTGRES_DB=paperboat --tmpfs /var/lib/postgresql/data \
+  docker run -d --name "$name" -e POSTGRES_PASSWORD=scratch -e POSTGRES_DB=paperboat --memory 1536m --memory-swap 1536m \
     "$PAPERBOAT_POSTGRES_IMAGE" >/dev/null
   for i in $(seq 1 60); do docker exec "$name" pg_isready -U postgres -d paperboat >/dev/null 2>&1 && break; sleep 1; done
   sleep 2
