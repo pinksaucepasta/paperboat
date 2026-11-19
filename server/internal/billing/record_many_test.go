@@ -2,9 +2,9 @@ package billing_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -159,8 +159,9 @@ func TestRecordManySlowsHostedNodesAndNeverCustomerOwnedOnes(t *testing.T) {
 		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$1)`, node)
 	}
 	for _, i := range []struct{ node, scope, scopeID string }{{global, "global", "operator"}, {own, "account", user}} {
+		key := sha256.Sum256([]byte(i.node)) // runtime_hash is unique per installation
 		exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete)
- VALUES($1,$1,$2,$2,'fixture','slowdown fixture','tunnel',$3,$4,$1,true)`, i.node, []byte(strings.Repeat("k", 32)), i.scope, i.scopeID)
+ VALUES($1,$1,$2,$2,'fixture','slowdown fixture','tunnel',$3,$4,$1,true)`, i.node, key[:], i.scope, i.scopeID)
 	}
 	now := time.Now().UTC()
 	for node, wantThrottled := range map[string]bool{hosted: true, global: true, own: false} {

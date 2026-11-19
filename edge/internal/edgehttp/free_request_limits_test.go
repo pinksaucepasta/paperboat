@@ -94,7 +94,8 @@ func TestFreeRequestLimitsKeepMemoryBounded(t *testing.T) {
 	tables := l.tables.Load()
 	tables.perAddress.shardKeys = 8
 	for i := 0; i < 100_000; i++ {
-		if l.over("app.preview.example.test", fmt.Sprintf("10.%d.%d.%d", i>>16, (i>>8)&255, i&255)) != nil {
+		// many publications, so the 3,000-request cap of one never refuses: this tests the address table's bound
+		if l.over(fmt.Sprintf("app%d.preview.example.test", i%100), fmt.Sprintf("10.%d.%d.%d", i>>16, (i>>8)&255, i&255)) != nil {
 			t.Fatalf("visitor %d refused", i)
 		}
 	}

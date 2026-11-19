@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"testing"
@@ -293,8 +294,9 @@ func TestHostedLimitsReachPaperboatEdgesAndNeverCustomerOwnedOnesPostgres(t *tes
 	for kind, node := range nodes {
 		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$1)`, node)
 		if scope, ok := scopes[kind]; ok {
+			key := sha256.Sum256([]byte(node)) // runtime_hash is unique per installation
 			exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete)
- VALUES($1,$1,$2,$2,'fixture','hosted limits fixture','tunnel',$3,$4,$1,true)`, node, []byte(strings.Repeat("k", 32)), scope[0], scope[1])
+ VALUES($1,$1,$2,$2,'fixture','hosted limits fixture','tunnel',$3,$4,$1,true)`, node, key[:], scope[0], scope[1])
 		}
 		machine, env := "hl_m_"+kind+x, "hl_env_"+kind+x
 		exec(`INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$3,'hl'||$4,'linux','amd64','/w','online','occupied',true)`, machine, user, env, kind)
