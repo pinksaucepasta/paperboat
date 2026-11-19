@@ -377,8 +377,11 @@ func TestTailcatPacketContract(t *testing.T) {
 // not admitted the new flow yet, and the retry that follows succeeds in milliseconds (SessionConfig.HandshakeTimeout;
 // the native owner redials the same way). A hosted Windows runner lost that first flight now and then (2026-11-17).
 func dialTailcatPeer(ctx context.Context, client *tailnet.UDPClient, maximum *atomic.Uint32, clientTLS *tls.Config, config peerquic.SessionConfig) (*peerquic.Session, error) {
+	// A dial gives up on a silent handshake after 1 s by design and the native owner redials; a flow's first WireGuard
+	// handshake can take longer than a few of those on a loaded runner, so retry on a fresh flow until ctx ends (the
+	// workload deadline). Only a timeout is retried: a refused identity or a closed socket ends the dial.
 	var last error
-	for attempt := 0; attempt < 3 && ctx.Err() == nil; attempt++ {
+	for ctx.Err() == nil {
 		socket, err := client.Dial(ctx)
 		if err != nil {
 			return nil, err
@@ -386,6 +389,10 @@ func dialTailcatPeer(ctx context.Context, client *tailnet.UDPClient, maximum *at
 		session, err := peerquic.DialPacket(ctx, &measuredTailcatPacket{Packet: socket, maximum: maximum}, clientTLS, config)
 		if err == nil {
 			return session, nil
+		}
+		var timeout net.Error
+		if !errors.As(err, &timeout) || !timeout.Timeout() {
+			return nil, err
 		}
 		last = err
 	}
