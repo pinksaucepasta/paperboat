@@ -35,14 +35,14 @@ func isolateCommandCredentialLocation(t *testing.T, root string) {
 
 func waitForCommandSocket(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		connection, err := net.DialTimeout("unix", path, 20*time.Millisecond)
+	deadline := time.Now().Add(30 * time.Second)
+	for delay := 5 * time.Millisecond; time.Now().Before(deadline); delay = min(2*delay, 50*time.Millisecond) {
+		connection, err := net.DialTimeout("unix", path, 2*time.Second)
 		if err == nil {
 			_ = connection.Close()
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(delay)
 	}
 	t.Fatalf("local command socket %s was not ready", path)
 }

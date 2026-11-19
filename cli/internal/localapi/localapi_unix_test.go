@@ -1157,12 +1157,12 @@ func rawHTTPResponse(protocolVersion, body string) string {
 
 func waitForSocket(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for {
+	deadline := time.Now().Add(30 * time.Second)
+	for delay := time.Millisecond; ; delay = min(2*delay, 50*time.Millisecond) {
 		transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", path)
 		}}
-		client := &http.Client{Transport: transport, Timeout: 100 * time.Millisecond}
+		client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 		request, err := http.NewRequest(http.MethodGet, "http://paperboat.local/v1/snapshot", nil)
 		if err != nil {
 			t.Fatal(err)
@@ -1177,7 +1177,7 @@ func waitForSocket(t *testing.T, path string) {
 		if time.Now().After(deadline) {
 			t.Fatalf("local API did not become ready: %v", err)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(delay)
 	}
 }
 

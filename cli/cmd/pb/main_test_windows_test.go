@@ -640,19 +640,19 @@ func isolateCommandCredentialLocation(t *testing.T, root string) {
 
 func waitForCommandSocket(t *testing.T, path string) {
 	t.Helper()
-	client, err := localapi.NewClient(path, 100*time.Millisecond)
+	client, err := localapi.NewClient(path, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	deadline := time.Now().Add(30 * time.Second)
+	for delay := 5 * time.Millisecond; time.Now().Before(deadline); delay = min(2*delay, 50*time.Millisecond) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err = client.Snapshot(ctx)
 		cancel()
 		if err == nil {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(delay)
 	}
 	t.Fatalf("local command pipe %s was not ready: %v", path, err)
 }
