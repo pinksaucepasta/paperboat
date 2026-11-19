@@ -132,7 +132,10 @@ func TestTerminalDescriptorCostPostgres(t *testing.T) {
 		d, err := f.service.ConnectTerminalSession(ctx, f.account, source, f.machine, "cli_"+f.suffix, session.ID)
 		elapsed := time.Since(start)
 		t.Logf("descriptor %d: %v", i, elapsed)
-		if err != nil || !d.Connectable || elapsed > 250*time.Millisecond {
+		// Waiting for the host's shell start would take runtime.delay (2 s); the database work around it is ~25 ms
+		// and grows with the noise rows earlier iterations leave behind (435 ms under -race on 2 cores), so the bound is
+		// half the host's delay: the property is "does not wait for the host", not a latency budget.
+		if err != nil || !d.Connectable || elapsed > runtime.delay/2 {
 			t.Fatalf("descriptor %d: connectable=%t in %v err=%v", i, d.Connectable, elapsed, err)
 		}
 	}
