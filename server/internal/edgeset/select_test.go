@@ -23,7 +23,7 @@ func retainedOf(ids ...string) map[string]bool {
 
 func TestChooseSpreadsAcrossFailureDomains(t *testing.T) {
 	usable := candidateList("a1", "dom-a", "a2", "dom-a", "b1", "dom-b")
-	got := choose("scope", nil, nil, usable, Size)
+	got := choose("scope", nil, nil, nil, usable, Size)
 	if len(got) != 2 {
 		t.Fatalf("set = %v", got)
 	}
@@ -35,11 +35,11 @@ func TestChooseSpreadsAcrossFailureDomains(t *testing.T) {
 
 func TestChooseIsStableAndKeepsRetainedMembers(t *testing.T) {
 	usable := candidateList("a", "dom-a", "b", "dom-b", "c", "dom-c")
-	first := choose("scope", nil, nil, usable, Size)
-	if again := choose("scope", nil, nil, usable, Size); !reflect.DeepEqual(first, again) {
+	first := choose("scope", nil, nil, nil, usable, Size)
+	if again := choose("scope", nil, nil, nil, usable, Size); !reflect.DeepEqual(first, again) {
 		t.Fatalf("same inputs gave %v then %v", first, again)
 	}
-	if kept := choose("scope", first, retainedOf(first...), usable, Size); !reflect.DeepEqual(kept, first) {
+	if kept := choose("scope", first, retainedOf(first...), nil, usable, Size); !reflect.DeepEqual(kept, first) {
 		t.Fatalf("a healthy set changed: %v -> %v", first, kept)
 	}
 	// One member is gone: the other keeps its place, one replacement joins from another domain.
@@ -50,20 +50,20 @@ func TestChooseIsStableAndKeepsRetainedMembers(t *testing.T) {
 			remaining = append(remaining, candidate)
 		}
 	}
-	replaced := choose("scope", first, retainedOf(survivor), remaining, Size)
+	replaced := choose("scope", first, retainedOf(survivor), nil, remaining, Size)
 	if len(replaced) != 2 || replaced[0] != survivor || replaced[1] == first[0] {
 		t.Fatalf("replacement %v after losing %s from %v", replaced, first[0], first)
 	}
 }
 
 func TestChooseFallsBackToOneOrSameDomain(t *testing.T) {
-	if got := choose("scope", nil, nil, candidateList("only", "dom"), Size); !reflect.DeepEqual(got, []string{"only"}) {
+	if got := choose("scope", nil, nil, nil, candidateList("only", "dom"), Size); !reflect.DeepEqual(got, []string{"only"}) {
 		t.Fatalf("single edge set = %v", got)
 	}
-	if got := choose("scope", nil, nil, candidateList("x", "dom", "y", "dom"), Size); len(got) != 2 {
+	if got := choose("scope", nil, nil, nil, candidateList("x", "dom", "y", "dom"), Size); len(got) != 2 {
 		t.Fatalf("two edges in one domain should still form a set, got %v", got)
 	}
-	if got := choose("scope", nil, nil, nil, Size); len(got) != 0 {
+	if got := choose("scope", nil, nil, nil, nil, Size); len(got) != 0 {
 		t.Fatalf("no edges gave %v", got)
 	}
 }
@@ -72,12 +72,36 @@ func TestChooseSpreadsWorkspacesAcrossEdges(t *testing.T) {
 	usable := candidateList("a", "dom-a", "b", "dom-b", "c", "dom-c", "d", "dom-d")
 	first := map[string]int{}
 	for i := 0; i < 200; i++ {
-		got := choose("workspace-"+string(rune('A'+i%26))+string(rune('a'+i/26)), nil, nil, usable, 1)
+		got := choose("workspace-"+string(rune('A'+i%26))+string(rune('a'+i/26)), nil, nil, nil, usable, 1)
 		first[got[0]]++
 	}
 	for _, id := range []string{"a", "b", "c", "d"} {
 		if first[id] < 20 {
 			t.Fatalf("edge %s received only %d of 200 workspaces: %v", id, first[id], first)
 		}
+	}
+}
+
+func TestChoosePicksNearestPairInDistinctDomains(t *testing.T) {
+	usable := candidateList("near-a", "dom-a", "near-a2", "dom-a", "mid-b", "dom-b", "far-c", "dom-c", "unmeasured", "dom-d")
+	rtt := map[string]int{"near-a": 10, "near-a2": 12, "mid-b": 40, "far-c": 200}
+	if got := choose("scope", nil, nil, rtt, usable, Size); !reflect.DeepEqual(got, []string{"near-a", "mid-b"}) {
+		t.Fatalf("nearest pair = %v, want the two fastest in distinct domains", got)
+	}
+}
+
+func TestChooseWithoutSamplesKeepsHashOrder(t *testing.T) {
+	usable := candidateList("a", "dom-a", "b", "dom-b", "c", "dom-c")
+	if got, want := choose("scope", nil, nil, map[string]int{}, usable, Size), choose("scope", nil, nil, nil, usable, Size); !reflect.DeepEqual(got, want) {
+		t.Fatalf("empty samples gave %v, hash gave %v", got, want)
+	}
+}
+
+func TestChooseKeepsRetainedPairOverNearer(t *testing.T) {
+	usable := candidateList("slow1", "dom-a", "slow2", "dom-b", "fast", "dom-c")
+	rtt := map[string]int{"slow1": 300, "slow2": 400, "fast": 1}
+	manual := []string{"slow1", "slow2"}
+	if got := choose("scope", manual, retainedOf(manual...), rtt, usable, Size); !reflect.DeepEqual(got, manual) {
+		t.Fatalf("a retained pair changed to %v", got)
 	}
 }

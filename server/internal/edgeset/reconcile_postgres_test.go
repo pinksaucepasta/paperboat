@@ -151,3 +151,56 @@ func TestWorkspaceEdgeSetOnPostgres(t *testing.T) {
 		t.Fatalf("managed set after switching back = %s %v", mode, ids)
 	}
 }
+
+func TestWorkspaceEdgeSetPrefersNearestOnPostgres(t *testing.T) {
+	database := openIsolated(t)
+	ctx := context.Background()
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	account, environment, machine := "edgenear_account_"+stamp, "edgenear_env_"+stamp, "edgenear_machine_"+stamp
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := database.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v: %s", err, query)
+		}
+	}
+	node := func(name string) string {
+		id := "edgenear_" + name + "_" + stamp
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
+		t.Cleanup(func() {
+			_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
+		})
+		return id
+	}
+	exec(`UPDATE paperboat.control_tunnel_nodes SET ready=false WHERE id NOT LIKE $1 AND roles @> ARRAY['edge']`, "edgenear_%"+stamp)
+	slow, mid, near, stale := node("slow"), node("mid"), node("near"), node("stale")
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'office','linux','amd64','/workspace','online','occupied',true,1)`, machine, account, environment)
+	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, account)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_environments WHERE id=$1`, environment)
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, account)
+	})
+	for id, sample := range map[string]struct {
+		rtt int
+		age string
+	}{slow: {300, "1 hour"}, mid: {40, "1 hour"}, near: {5, "1 hour"}, stale: {1, "48 hours"}} {
+		exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'edge',$3,now()-$4::interval)`, machine, id, sample.rtt, sample.age)
+	}
+	scope := Scope{Kind: "account", ID: account, Account: account}
+	err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		_, err := ReconcileScope(ctx, tx, scope, time.Now())
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err = database.Pool().QueryRow(ctx, `SELECT node_ids FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, account).Scan(&ids); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != near || ids[1] != mid {
+		t.Fatalf("pair = %v, want [%s %s] (the stale 1 ms sample of %s must be ignored)", ids, near, mid, stale)
+	}
+}
