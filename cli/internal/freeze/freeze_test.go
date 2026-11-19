@@ -81,3 +81,15 @@ func TestRetryRetriesOnlyAfterAFreeze(t *testing.T) {
 		t.Fatalf("freeze: calls=%d err=%v", calls, err)
 	}
 }
+
+// Windows' clock advances in ~15 ms steps, so a stall that just ended can carry the same reading as the
+// window's start (CI: Retry called once, health worker ended); that is still a stall inside the window.
+func TestStalledCountsAStallEndingAtTheWindowStart(t *testing.T) {
+	SimulateStall(30 * time.Second)
+	mu.Lock()
+	since := stallEnd
+	mu.Unlock()
+	if !Stalled(since, time.Second) {
+		t.Fatal("a stall ending at the window's first clock reading was not counted")
+	}
+}

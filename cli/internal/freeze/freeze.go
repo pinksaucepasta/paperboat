@@ -61,7 +61,8 @@ func Stalled(since time.Time, limit time.Duration) bool {
 	observe()
 	mu.Lock()
 	defer mu.Unlock()
-	return stallEnd.After(since) && stallLen > limit
+	// Not After: a coarse clock (Windows ~15 ms) gives a stall that just ended the same reading as `since`.
+	return !stallEnd.Before(since) && stallLen > limit
 }
 
 // Gap is the checker's own view of the same rule for a loop that polls: Stalled(now, limit) is true when the

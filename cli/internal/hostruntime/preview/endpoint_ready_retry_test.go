@@ -12,10 +12,7 @@ import (
 // returned a plain error, the session ended and the lease stayed orphaned. The wait now ends as a retryable carrier
 // error (the session reconnects and waits again), still reporting why.
 func TestReadyWhenServedGivesUpAsRetryable(t *testing.T) {
-	previous := endpointReadyTimeout
-	endpointReadyTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { endpointReadyTimeout = previous })
-	err := readyWhenServed(context.Background(), Lease{}, func(Lease) error {
+	err := readyWhenServed(context.Background(), 50*time.Millisecond, Lease{}, func(Lease) error {
 		return readinessFailed("POST", "http_status", http.StatusConflict, ErrDispatchNotServed, nil)
 	})
 	if !retryableCarrier(err) || !errors.Is(err, ErrDispatchNotServed) {

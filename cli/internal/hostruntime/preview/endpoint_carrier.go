@@ -19,8 +19,7 @@ type AgentCarriers interface {
 }
 
 // endpointReadyTimeout bounds how long a preview waits for the first edge to serve its route.
-// A variable only so a test can shorten it.
-var endpointReadyTimeout = 90 * time.Second
+const endpointReadyTimeout = 90 * time.Second
 
 // EndpointCarrier serves a preview as an endpoint route on the agent's runtime carriers: the
 // preview never dials a carrier of its own. The route id is the preview id. Every hub runs one
@@ -61,7 +60,7 @@ func (c *EndpointCarrier) Run(ctx context.Context, lease Lease, ready func(Lease
 		if reported {
 			return nil
 		}
-		err := readyWhenServed(runCtx, observed, ready)
+		err := readyWhenServed(runCtx, endpointReadyTimeout, observed, ready)
 		reported = err == nil
 		return err
 	}
@@ -129,10 +128,10 @@ func (c *EndpointCarrier) RunWithLease(ctx context.Context, currentLease func() 
 }
 
 // readyWhenServed reports readiness, retrying while no edge serves the route yet. When none does within
-// endpointReadyTimeout the failure is retryable: the session reconnects and waits again, because ending it would
+// timeout the failure is retryable: the session reconnects and waits again, because ending it would
 // orphan the lease for good while the edge is only slow to learn the route (a fresh pair's first preview).
-func readyWhenServed(ctx context.Context, observed Lease, ready func(Lease) error) error {
-	deadline := time.Now().Add(endpointReadyTimeout)
+func readyWhenServed(ctx context.Context, timeout time.Duration, observed Lease, ready func(Lease) error) error {
+	deadline := time.Now().Add(timeout)
 	wait := 250 * time.Millisecond
 	for {
 		err := ready(observed)
