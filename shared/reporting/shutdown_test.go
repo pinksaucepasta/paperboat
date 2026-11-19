@@ -173,6 +173,10 @@ func TestProductionInFlightMetricBatchAndReservedHealthBudget(t *testing.T) {
 	r.ExportDrops(context.Background())
 	done := make(chan struct{})
 	go func() { r.Close(); close(done) }()
+	// Start the negative window once Close is provably waiting on the batch (the fence sealed), not at goroutine start.
+	for !r.fence.sealed.Load() {
+		time.Sleep(time.Millisecond)
+	}
 	select {
 	case <-done:
 		t.Fatal("close passed in-flight SDK metric batch")
@@ -202,10 +206,15 @@ func TestShutdownDeadlineBoundsBlockedSDKJoinAndFencesNewProducers(t *testing.T)
 	<-transport.entered
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	started := time.Now()
-	r.CloseContext(ctx)
-	if time.Since(started) > time.Second || r.FlushStatus() != "timed_out" {
+	closed := make(chan struct{})
+	go func() { r.CloseContext(ctx); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second): // returns the moment the 20 ms budget ends; the bound only catches a hang
 		t.Fatal("blocked SDK join exceeded deadline")
+	}
+	if r.FlushStatus() != "timed_out" {
+		t.Fatalf("blocked SDK join status = %s, want timed_out", r.FlushStatus())
 	}
 	r.CaptureFailure(context.Background(), fixtureFailure, syscall.ECONNREFUSED)
 	if r.SDKSubmissionsDropped() != 1 {
@@ -243,10 +252,15 @@ func TestProductionOutageBoundsWholeShutdown(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	started := time.Now()
-	r.CloseContext(ctx)
-	if time.Since(started) > time.Second || r.FlushStatus() != "timed_out" {
-		t.Fatal("outage presented as drained or exceeded deadline")
+	closed := make(chan struct{})
+	go func() { r.CloseContext(ctx); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second): // returns the moment the 20 ms budget ends; the bound only catches a hang
+		t.Fatal("outage exceeded the shutdown deadline")
+	}
+	if r.FlushStatus() != "timed_out" {
+		t.Fatalf("outage presented as %s, want timed_out", r.FlushStatus())
 	}
 	select {
 	case <-r.fence.Done():

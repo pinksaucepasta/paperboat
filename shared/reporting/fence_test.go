@@ -70,6 +70,10 @@ func TestFenceCloseWaitsForAdmittedSubmissions(t *testing.T) {
 	}
 	drained := make(chan struct{})
 	go f.Close(context.Background(), time.Second, nil, func(context.Context) bool { close(drained); return true })
+	// Start the negative window once Close is provably waiting for the admitted submission (the fence sealed).
+	for !f.sealed.Load() {
+		time.Sleep(time.Millisecond)
+	}
 	select {
 	case <-drained:
 		t.Fatal("drain ran while a submission was admitted")
