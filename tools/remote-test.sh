@@ -4,7 +4,9 @@
 #   tools/remote-test.sh pbvm2 cli -run TestExec ./cmd/pb
 #   tools/remote-test.sh pbvm3 shared            # go test -p 2 ./...
 # <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit). The VMs have 3-4 GB
-# of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`.
+# of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`. Where a
+# systemd user manager exists the job runs in a scope capped at 60% of RAM: a -race PostgreSQL suite once froze anvit,
+# which also hosts a prod canary machine, for two minutes (2026-11-19).
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
 # on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
 # The synced tree has no .git, so the full HEAD goes over as GITHUB_SHA (tools/tuf-repository reads it for its release source commit).
@@ -48,7 +50,7 @@ rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remote-test/$la
 echo "remote-test: $host: go test -p 2 $* ($module)" >&2
 printf -v quoted ' %q' "$@"
 exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
-  "GITHUB_SHA=$(git rev-parse HEAD) flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $lane$quoted" <<'REMOTE'
+  "cap=; systemctl --user show-environment >/dev/null 2>&1 && cap='systemd-run --user --scope -q -p MemoryMax=60%'; GITHUB_SHA=$(git rev-parse HEAD) \$cap flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $lane$quoted" <<'REMOTE'
 set -euo pipefail
 umask 022 # a host default of 002 makes every t.TempDir group-writable, which the daemon socket check refuses
 module=$1 lane=$2
