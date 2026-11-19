@@ -440,8 +440,7 @@ def await_windows_uninstall(receipt, seconds=360):
 def uninstall(binary, identifier, check, inbox, script, password):
     # This is disposal of this check's exact enrolled resource, not a claim that
     # reset works. Mint restoration authority before deletion revokes its CLI.
-    request = json.dumps({'action': 'machine.remove', 'payload': {'machine_id': identifier}})
-    invoke(binary, '--workspace', 'personal', '__desktop', 'request', input=request)
+    confirmed_command(binary, '--workspace', 'personal', 'machine', 'revoke', identifier)
     if check == 'broken':
         invoke(binary, 'service', 'uninstall', '--json')
     if check == 'prompts':
