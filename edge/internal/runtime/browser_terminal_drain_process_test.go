@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -134,7 +135,17 @@ func (s drainSource) RuntimeCarrierAdmissions(context.Context, string, string) (
 		return nil, err
 	}
 	var admissions []runtimewire.Admission
-	return admissions, json.Unmarshal(raw, &admissions)
+	if err := json.Unmarshal(raw, &admissions); err != nil {
+		return nil, err
+	}
+	// The machine waits for this file instead of sleeping for the pull interval: it names the generation read last.
+	if len(admissions) != 0 {
+		ack := strconv.FormatUint(admissions[0].AttachmentGeneration, 10)
+		if err := os.WriteFile(s.path+".pulled.tmp", []byte(ack), 0o600); err == nil {
+			_ = os.Rename(s.path+".pulled.tmp", s.path+".pulled")
+		}
+	}
+	return admissions, nil
 }
 func (drainSource) EndpointAdmissions(context.Context, string, string, string, time.Duration) (control.EndpointUpdate, error) {
 	return control.EndpointUpdate{Complete: true}, nil

@@ -115,13 +115,21 @@ func TestBrowserTerminalDrainMachine(t *testing.T) {
 	capCtx, capReached := context.WithCancel(ctx)
 	drained := make(chan error, 1)
 	go func() { drained <- m.gens[1].attachment.DrainBrowserTerminals(capCtx) }()
-	time.Sleep(4 * time.Second) // the handover (goaway, 2 s quiet) and a drain with the browser held
+	// The handover (goaway, then the edge's streams going quiet) is over once generation 1 ends its terminals; it keeps
+	// the browser for the drain (nothing ends it here), so generation 3 starts on a settled route.
+	select {
+	case <-m.gens[1].handedOver:
+	case <-ctx.Done():
+		t.Fatal("generation 1 never finished its handover")
+	}
 
 	m.start(t, ctx, 3)
 	if err := m.gens[2].attachment.DrainBrowserTerminals(ctx); err != nil {
 		t.Fatalf("generation 2 (holding no terminal) did not finish its drain: %v", err)
 	}
 	m.stop(t, 2)
+	// A negative check cannot wait on an event: generation 1 must still hold the browser a while after the others
+	// settled. The window only delays a premature end, so a slow runner cannot fail it.
 	time.Sleep(3 * time.Second)
 	select {
 	case err := <-drained:
@@ -177,6 +185,7 @@ type drainMachine struct {
 }
 
 type drainGeneration struct {
+	handedOver chan struct{} // receives once the generation has handed its carriers over (OnTerminalHandover)
 	attachment *runtimeattachment.Service
 	runtime    *server.Server
 	http       *http.Server
@@ -294,7 +303,10 @@ func (m *drainMachine) start(t *testing.T, ctx context.Context, n uint64) {
 	t.Helper()
 	admission := m.admission(n)
 	writeJSONFile(t, filepath.Join(m.dir, "admissions.json"), []runtimewire.Admission{admission})
-	time.Sleep(300 * time.Millisecond) // the edge pulls every 50 ms
+	waitFor(t, ctx, "the edge to pull generation "+strconv.FormatUint(n, 10), func() bool {
+		raw, err := os.ReadFile(filepath.Join(m.dir, "admissions.json.pulled"))
+		return err == nil && string(raw) == strconv.FormatUint(n, 10)
+	})
 
 	broadcast, err := browserbroadcastserver.NewRegistry(m.sessions, func(context.Context) (ed25519.PrivateKey, error) { return m.machineKey, nil })
 	if err != nil {
@@ -346,10 +358,17 @@ func (m *drainMachine) start(t *testing.T, ctx context.Context, n uint64) {
 	if err := attachment.BindBroadcaster(broadcast); err != nil {
 		t.Fatal(err)
 	}
+	handedOver := make(chan struct{}, 1)
+	attachment.OnTerminalHandover(func() {
+		select {
+		case handedOver <- struct{}{}:
+		default:
+		}
+	})
 	if err := attachment.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	m.gens[n] = &drainGeneration{attachment: attachment, runtime: runtimeServer, http: httpServer}
+	m.gens[n] = &drainGeneration{handedOver: handedOver, attachment: attachment, runtime: runtimeServer, http: httpServer}
 	t.Cleanup(func() { m.stop(t, n) })
 }
 
@@ -739,6 +758,18 @@ func mustKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 		t.Fatal(err)
 	}
 	return public, private
+}
+
+// waitFor returns the moment condition holds; ctx bounds a condition that never does.
+func waitFor(t *testing.T, ctx context.Context, what string, condition func() bool) {
+	t.Helper()
+	for !condition() {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s", what)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
 
 func readJSONFile(t *testing.T, ctx context.Context, path string, value any) {
