@@ -301,7 +301,6 @@ func New(opts Options) (*App, error) {
 	if len(opts.Config.Secrets.SessionKeys) > 0 {
 		userMachineService.ConfigureCLIAuth(opts.Config.CLIAuth.ClientID, opts.Config.CLIAuth.AllowedScopes, opts.Config.CLIAuth.AccessTokenLifetime, opts.Config.CLIAuth.RefreshTokenLifetime, opts.Config.Secrets.SessionKeys[0])
 	}
-	userMachineService.ConfigureAccess(nil, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))
 	userMachineService.ConfigureFileTransfer(opts.Config.Access.FileTransfer.Published())
 	userMachineService.ConfigureTerminalSessions(mintKeys, helperHTTPClient(store, opts.Config.TerminalSessions.OperationTimeout))
 	userMachineService.ConfigureMachineControl(mintKeys, normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL))

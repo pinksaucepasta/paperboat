@@ -852,7 +852,7 @@ func (s *Service) operationDescriptor(ctx context.Context, kind operationKind, u
 		ID: accessSessionID, UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID,
 		CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpIngressURL,
 		HelperTerminalSessionID: operationJTI, HelperFileSessionID: "", ExpiresAt: expiresAt, Capabilities: []string{kind.capability}, OperationID: operationID,
-	}, machineCredentialSigned); err != nil {
+	}); err != nil {
 		return ExecDescriptor{}, err
 	}
 	return ExecDescriptor{

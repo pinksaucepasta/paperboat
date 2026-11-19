@@ -83,7 +83,7 @@ VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to($2,'UTF8')),sha256(convert_to(
 	machineConfig, cliConfig := generations()
 	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,
 helper_terminal_session_id,expires_at,capabilities,operation_id)
-SELECT 'external_issuer',$1||'_access_'||g,$2,$1,$1||'_env_0',$3,'https://invalid.test','jti_'||$1||'_'||g,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1||'_'||g
+SELECT 'control_plane_signed',$1||'_access_'||g,$2,$1,$1||'_env_0',$3,'https://invalid.test','jti_'||$1||'_'||g,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1||'_'||g
 FROM generate_series(1,1000) g`, user, machine, cli)
 	m, c := generations()
 	// An insert does not publish machine_access from a trigger: the code paths that create a session publish it

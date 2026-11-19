@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
-	"github.com/pinksaucepasta/paperboat/server/internal/access"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -257,7 +256,6 @@ type Service struct {
 	seats                       SeatAuthorizer
 	now                         func() time.Time
 	encryptionKey               string
-	credentials                 access.CredentialIssuer
 	issuer                      string
 	fileTransferPolicy          terminalprotocol.FileTransferPolicy
 	teamInbox                   *teaminbox.Service
@@ -441,10 +439,6 @@ const retireBatchSize, retireBatches = 1000, 20
 
 func (s *Service) ConfigureInstallationEncryption(encryptionKey string) {
 	s.encryptionKey = encryptionKey
-}
-
-func (s *Service) ConfigureAccess(credentials access.CredentialIssuer, issuer string) {
-	s.credentials, s.issuer = credentials, strings.TrimRight(issuer, "/")
 }
 
 // ConfigureCLIAuth supplies the same CLI credential policy used by browser login.

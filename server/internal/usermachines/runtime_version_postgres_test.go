@@ -25,7 +25,7 @@ func TestMachineReportsTheVersionItsRuntimeLastObserved(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("runtime-version-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_runtime_version_" + suffix, HelperID: "helper_runtime_version_" + suffix, Credential: "runtime-version-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})

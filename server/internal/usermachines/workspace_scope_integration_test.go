@@ -113,7 +113,7 @@ func newWorkspaceDescriptorFixture(t *testing.T) (workspaceMachineFixture, strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
+	configureSigned(t, f.service, "https://api.paperboat.test")
 	f.service.ConfigureTerminalSessions(signer, nil)
 	f.service.ConfigureFileTransfer(terminalprotocol.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 2_000_000_000})
 	return f, source, signer
@@ -223,7 +223,7 @@ func TestWorkspaceScopedMachineListGetAndAccess(t *testing.T) {
 			ID: id, UserMachineID: f.machine, UserID: f.account, EnvironmentID: "env_" + f.suffix,
 			CLIClientSessionID: "cli_" + id, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "terminal_" + id,
 			ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{"terminal"}, OperationID: "operation_" + id,
-		}, machineCredentialExternal)
+		})
 	}
 	if err := access(teamOne, "ws_access_team_one_"+f.suffix); err != nil {
 		t.Fatalf("team one access denied: %v", err)

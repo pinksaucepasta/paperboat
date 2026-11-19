@@ -59,7 +59,7 @@ SELECT u||'_m_'||g,u,u||'_env_'||g,'m-'||g,'linux','amd64','/w','online','occupi
 SELECT x,$1,'pb','laptop','cli','linux',ARRAY['machines:connect'],'active',now(),now() FROM unnest(ARRAY[$2,$3]) x`, owner, cli, cli2)
 	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,
 helper_terminal_session_id,expires_at,capabilities,operation_id)
-VALUES('external_issuer',$1||'_access',$2,$3,$4,$5,'https://invalid.test','jti_'||$1,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1)`, s, teamHost, owner, other+"_env_0", cli)
+VALUES('control_plane_signed',$1||'_access',$2,$3,$4,$5,'https://invalid.test','jti_'||$1,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1)`, s, teamHost, owner, other+"_env_0", cli)
 
 	own1, own2, host1, un1 := owner+"_m_1", revoked, teamHost, unrelated
 	machines := []string{own, own1, own2, host1, un1}

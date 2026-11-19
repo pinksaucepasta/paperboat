@@ -2,7 +2,6 @@
 package access
 
 import (
-	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"time"
@@ -25,25 +24,9 @@ type CredentialInput struct {
 	AccessSessionID    string
 }
 
-type CredentialRevocationInput struct {
-	UserID             string
-	MachineID          string
-	EnvironmentID      string
-	CLIClientSessionID string
-	HTTPBaseURL        string
-	SessionIDs         []string
-	Reason             string
-}
-
 type CLICredentials struct {
 	TerminalAuth      *terminalprotocol.Auth
 	FileTransferAuth  *terminalprotocol.Auth
 	TerminalSessionID string
 	FileSessionID     string
-}
-
-type CredentialIssuer interface {
-	CheckCLI(context.Context, CredentialInput) error
-	IssueCLI(context.Context, CredentialInput) (CLICredentials, error)
-	RevokeCLI(context.Context, CredentialRevocationInput) error
 }

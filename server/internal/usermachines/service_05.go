@@ -951,7 +951,7 @@ func (s *Service) RevokeUserMachineSessions(ctx context.Context, userMachineID, 
 	if err != nil {
 		return err
 	}
-	return s.revokeSessionCredentials(ctx, rows, reason)
+	return s.revokeSessionCredentials(ctx, rows)
 }
 
 // RevokeUserSessions is called after an entitlement revocation. It has the
@@ -968,5 +968,5 @@ func (s *Service) RevokeUserSessions(ctx context.Context, userID, reason string)
 	for i, row := range rows {
 		sessions[i] = dbsqlc.RevokeUserMachineAccessSessionsRow(row)
 	}
-	return s.revokeSessionCredentials(ctx, sessions, reason)
+	return s.revokeSessionCredentials(ctx, sessions)
 }

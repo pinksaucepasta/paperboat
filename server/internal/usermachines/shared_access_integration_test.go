@@ -142,7 +142,7 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 		t.Fatalf("session visibility: count=%d err=%v", len(sessions), err)
 	}
 	persist := func(actor, id, capability string) error {
-		return service.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: actor, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + actor, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{capability}, OperationID: second.ID}, machineCredentialExternal)
+		return service.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: actor, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + actor, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{capability}, OperationID: second.ID})
 	}
 	if err = persist(member, "denied_"+suffix, "exec"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ungranted exec issuance: %v", err)

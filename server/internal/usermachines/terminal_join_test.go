@@ -109,7 +109,7 @@ func TestPostgresTerminalJoinExactAuthorityAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,capabilities,operation_id,expires_at,team_id,terminal_session_id,terminal_role,terminal_grant_generation,terminal_binding_generation,terminal_membership_generation,terminal_team_generation) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.invalid',$6,ARRAY[]::text[],$7,now()+interval '5 minutes',$8,$7,'viewer',$9,$10,$11,$12)`, access, machine, member, project, "cli_"+suffix, "jti_"+suffix, session, team, decision.GrantGeneration, decision.BindingGeneration, decision.MembershipGeneration, decision.TeamGeneration); err != nil {
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,capabilities,operation_id,expires_at,team_id,terminal_session_id,terminal_role,terminal_grant_generation,terminal_binding_generation,terminal_membership_generation,terminal_team_generation) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'https://machine.invalid',$6,ARRAY[]::text[],$7,now()+interval '5 minutes',$8,$7,'viewer',$9,$10,$11,$12)`, access, machine, member, project, "cli_"+suffix, "jti_"+suffix, session, team, decision.GrantGeneration, decision.BindingGeneration, decision.MembershipGeneration, decision.TeamGeneration); err != nil {
 		t.Fatal(err)
 	}
 	s := &Service{db: database}

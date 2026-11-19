@@ -166,7 +166,7 @@ func testSDKRequestRates(t *testing.T, f workspaceMachineFixture) {
 	}
 	limited(start(token), "sessions")
 	independent := newWorkspaceMachineFixture(t)
-	independent.service.ConfigureAccess(fakeCredentialIssuer{}, f.service.issuer)
+	configureSigned(t, independent.service, f.service.issuer)
 	independent.service.ConfigureTerminalSessions(f.service.controlSigner, nil)
 	independentCtx, independentToken, independentSession := sdkSession(t, independent, "exec")
 	if _, err := independent.service.ExecDescriptor(independentCtx, independent.account, "", independent.machine, independentSession, "operation_sdk_rate_independent", true); err != nil {

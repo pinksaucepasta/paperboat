@@ -87,12 +87,12 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		}
 	}
 	access := "expiry_access_" + suffix
-	execute(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, access, machine, account, environment, cli, "terminal_"+suffix, "files_"+suffix, "operation_access_"+suffix, now.Add(5*time.Second))
+	execute(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, access, machine, account, environment, cli, "terminal_"+suffix, "files_"+suffix, "operation_access_"+suffix, now.Add(5*time.Second))
 	execute(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,allowed_account_ids) VALUES($1,'task23','v1',$2,'relay.example.test',443,444,'ready',true,$3,1,'hel','hel-a',ARRAY['relay'],ARRAY['derp_quic'],100,20,$3,$4,ARRAY[$5])`, "expiry_relay_"+suffix, "epoch_"+suffix, now, now.Add(time.Minute), account)
 	inspector, assignment := addExpiryResourceAdmissions(t, execute, account, cli, machine, environment, suffix, now)
 	live := []AdmittedScope{{ResourceKind: "machine_access", ResourceID: access}, {ResourceKind: "inspector", ResourceID: inspector}, {ResourceKind: "config_compare", ResourceID: assignment}}
 	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
- SELECT 'external_issuer',$1||'-historical-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['terminal','files','private_access'],$8||i,$9 FROM generate_series(1,200) i`, access, machine, account, environment, cli, "terminal_history_"+suffix, "files_history_"+suffix, "operation_history_"+suffix, now.Add(-time.Second))
+ SELECT 'control_plane_signed',$1||'-historical-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['terminal','files','private_access'],$8||i,$9 FROM generate_series(1,200) i`, access, machine, account, environment, cli, "terminal_history_"+suffix, "files_history_"+suffix, "operation_history_"+suffix, now.Add(-time.Second))
 	execute(`INSERT INTO config_compare_admissions(id,account_id,environment_id,machine_id,installation_generation,assignment_id,assignment_version,config_path,conflict_revision,expected_remote_revision,native_cli_session_id,source_machine_id,workspace_id,expires_at,operation_id)
  SELECT 'token_'||gen_random_uuid(),a.account_id,a.environment_id,a.machine_id,a.installation_generation,a.assignment_id,a.assignment_version,a.config_path,a.conflict_revision,a.expected_remote_revision,a.native_cli_session_id,a.source_machine_id,a.workspace_id,$2,a.operation_id||'-history-'||i
  FROM config_compare_admissions a CROSS JOIN generate_series(1,200) i WHERE a.assignment_id=$1`, assignment, now.Add(-time.Second))
@@ -153,7 +153,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	// of 96 access scopes held only 32 of them: the 33rd and later were refused with "virtual UDP requires explicit peer and
 	// port admission".
 	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
- SELECT 'external_issuer',$1||'-term-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['terminal','files','private_access'],$8||i,$9 FROM generate_series(1,100) i`, access, machine, account, environment, cli, "terminal_hundred_"+suffix, "files_hundred_"+suffix, "operation_hundred_"+suffix, now.Add(2*time.Minute))
+ SELECT 'control_plane_signed',$1||'-term-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['terminal','files','private_access'],$8||i,$9 FROM generate_series(1,100) i`, access, machine, account, environment, cli, "terminal_hundred_"+suffix, "files_hundred_"+suffix, "operation_hundred_"+suffix, now.Add(2*time.Minute))
 	for _, endpoint := range []string{cli, machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "hundred_terminals_" + suffix, UserID: account, EndpointID: endpoint})
 		if err != nil {
@@ -167,7 +167,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 	// Admitted work outranks newer grants: on pbvm4 ~3 exec grants/s (2 min each) pushed a running `pb exec` and
 	// terminal past the grant bound after ~45 s, and the client's scope lease closed them.
 	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
- SELECT 'external_issuer',$1||'-fresh-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['exec'],$8||i,$9 FROM generate_series(1,400) i`, access, machine, account, environment, cli, "terminal_fresh_"+suffix, "files_fresh_"+suffix, "operation_fresh_"+suffix, now.Add(2*time.Minute))
+ SELECT 'control_plane_signed',$1||'-fresh-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['exec'],$8||i,$9 FROM generate_series(1,400) i`, access, machine, account, environment, cli, "terminal_fresh_"+suffix, "files_fresh_"+suffix, "operation_fresh_"+suffix, now.Add(2*time.Minute))
 	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id=$1`, access, now.Add(5*time.Second))
 	for _, endpoint := range []string{cli, machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "admitted_first_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})

@@ -90,7 +90,7 @@ func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 			callCtx, cancel := context.WithTimeout(teamCtx, 5*time.Second)
 			defer cancel()
 			id := fmt.Sprintf("session_pt_%s_%d", suffix, i)
-			errs <- service.createAccessSession(callCtx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: member, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + member, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{"terminal"}, OperationID: session.ID}, machineCredentialExternal)
+			errs <- service.createAccessSession(callCtx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: member, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + member, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{"terminal"}, OperationID: session.ID})
 		}()
 	}
 	for i := range 10 {
@@ -98,7 +98,7 @@ func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			id := fmt.Sprintf("session_pa_%s_%d", suffix, i)
-			errs <- service.createAccessSession(callCtx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: owner, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + owner, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{"exec"}, OperationID: session.ID}, machineCredentialExternal)
+			errs <- service.createAccessSession(callCtx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: owner, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + owner, HttpBaseUrl: "https://invalid.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: []string{"exec"}, OperationID: session.ID})
 		}()
 	}
 	for range 20 {
@@ -146,7 +146,7 @@ func TestPostgresAccessSessionWakesTheHostOnlyForCapabilitiesThatNeedAScope(t *t
 	}{{[]string{"exec"}, false}, {[]string{"terminal"}, false}, {[]string{"terminal", "exec"}, false}, {[]string{"files"}, true}, {[]string{"terminal", "files"}, true}} {
 		before := generation()
 		id := fmt.Sprintf("session_aw_%s_%d", suffix, i)
-		if err := service.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: owner, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + owner, HttpBaseUrl: "https://example.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: test.capabilities, OperationID: id}, machineCredentialExternal); err != nil {
+		if err := service.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{ID: id, UserMachineID: machine, UserID: owner, EnvironmentID: "env_" + suffix, CLIClientSessionID: "cli_" + owner, HttpBaseUrl: "https://example.test", HelperTerminalSessionID: "jti_" + id, ExpiresAt: time.Now().Add(time.Minute), Capabilities: test.capabilities, OperationID: id}); err != nil {
 			t.Fatalf("%v: %v", test.capabilities, err)
 		}
 		if woke := generation() != before; woke != test.wakes {

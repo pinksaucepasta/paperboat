@@ -91,7 +91,7 @@ func TestPostgresTeamPaidEntitlementAdmissionExpiryAndRecovery(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT paperboat.terminal_session_role($1,$2)`, member, terminal).Scan(&role); err != nil || role == nil || *role != "viewer" {
 		t.Fatalf("paid terminal grant: role=%v err=%v", role, err)
 	}
-	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,team_id,capabilities,operation_id) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://invalid.test',$6,$7,$8,ARRAY['terminal'],$9)`, access, machine, member, "env_"+suffix, "cli_"+suffix, "jti_"+suffix, now.Add(time.Hour), team, terminal)
+	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,team_id,capabilities,operation_id) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'https://invalid.test',$6,$7,$8,ARRAY['terminal'],$9)`, access, machine, member, "env_"+suffix, "cli_"+suffix, "jti_"+suffix, now.Add(time.Hour), team, terminal)
 
 	// Expiring the paid period fences the team and revokes the existing access.
 	exec(`UPDATE paperboat.billing_workspaces SET period_start=$2,period_end=$3 WHERE id=$1`, workspace, now.Add(-2*time.Hour), now.Add(-time.Hour))

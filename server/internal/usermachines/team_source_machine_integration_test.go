@@ -53,7 +53,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
+	configureSigned(t, service, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
 	quota := &runtimeQuotaFixture{exhausted: true}
 	service.ConfigureRuntimeQuota(quota)

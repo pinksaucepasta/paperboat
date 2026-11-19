@@ -94,7 +94,7 @@ SELECT $1,'preview','gone_'||g,$2,true,1 FROM generate_series(1,9981) g`, team, 
 	addSessions := func(round string) {
 		t.Helper()
 		exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,expires_at,team_id,capabilities,operation_id)
-SELECT 'external_issuer','session_'||$4||$1||g,$1||'_m_'||g,$1,$1||'_env_'||g,$2,'https://invalid.test','term_'||$4||g,now()+interval '1 hour',$3,ARRAY['terminal'],'op_'||$4||$1||g FROM generate_series(0,19) g`, user, cli, team, round)
+SELECT 'control_plane_signed','session_'||$4||$1||g,$1||'_m_'||g,$1,$1||'_env_'||g,$2,'https://invalid.test','term_'||$4||g,now()+interval '1 hour',$3,ARRAY['terminal'],'op_'||$4||$1||g FROM generate_series(0,19) g`, user, cli, team, round)
 	}
 	revoked := func() int64 {
 		return value(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND state='revoked' AND revocation_reason='machine_permission_revoked'`, user)

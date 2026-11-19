@@ -85,7 +85,7 @@ VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to($2,'UTF8')),sha256(convert_to(
 		user, machine, cli, int(net[0])%64, int(net[1]))
 	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,
 helper_terminal_session_id,expires_at,capabilities,operation_id)
-VALUES('external_issuer',$1||'_access',$2,$1,$1||'_env',$3,'https://invalid.test','jti_'||$1,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1)`, user, machine, cli)
+VALUES('control_plane_signed',$1||'_access',$2,$1,$1||'_env',$3,'https://invalid.test','jti_'||$1,now()+interval '1 hour',ARRAY['terminal'],'op_'||$1)`, user, machine, cli)
 
 	step("machine marked offline", `UPDATE paperboat.user_machines SET state='offline',online=false WHERE user_id=$1`)
 	step("machine back online", `UPDATE paperboat.user_machines SET state='online',online=true WHERE user_id=$1`)

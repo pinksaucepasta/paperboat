@@ -17,12 +17,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
-type machineCredentialKind string
-
-const (
-	machineCredentialSigned   machineCredentialKind = "control_plane_signed"
-	machineCredentialExternal machineCredentialKind = "external_issuer"
-)
+// machineCredentialSigned is the only credential kind the server issues.
+const machineCredentialSigned = "control_plane_signed"
 
 // ErrAmbiguousTeamAccess requires the caller to choose a team before an
 // access session can be billed and fenced to team authority.
@@ -147,10 +143,7 @@ func (s *Service) describeTags(ctx context.Context, account string, teamID any, 
 
 // Persist authority under the same lock as team mutations. A permission withdrawn
 // while a descriptor is prepared must never escape as an active access session.
-func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams, kind machineCredentialKind) error {
-	if kind != machineCredentialSigned && kind != machineCredentialExternal {
-		return errors.New("user-machine credential kind is invalid")
-	}
+func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams) error {
 	// No team write lock: an access session only reads team state and inserts its own row, so sessions do
 	// not conflict with each other, and SERIALIZABLE orders one against a concurrent membership, grant or
 	// machine revoke (one of the two retries). Under the global lock every exec/ssh/terminal setup on the
@@ -246,7 +239,7 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 				return err
 			}
 		}
-		in.CredentialKind = string(kind)
+		in.CredentialKind = machineCredentialSigned
 		if err := tx.Queries().CreateUserMachineAccessSession(ctx, in); err != nil {
 			return err
 		}

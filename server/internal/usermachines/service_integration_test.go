@@ -27,7 +27,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat/server/internal/access"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	authservice "github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -109,7 +108,7 @@ func TestSetupIsIdempotentAndPreservesCapabilities(t *testing.T) {
 	}
 	input := SetupInput{Alias: "studio", Platform: "linux", Architecture: "amd64", WorkspaceRoot: "/home/paperboat", PublicIdentityKey: base64.RawURLEncoding.EncodeToString(public), RuntimeVersions: json.RawMessage(`{"pb":"test"}`)}
 	service := New(store, audit.NewWriter(store), Policy{AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +218,7 @@ func TestOnlineMachinePairingPreservesIdentity(t *testing.T) {
 	publicKey := base64.RawURLEncoding.EncodeToString(public)
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("client-upgrade-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_client_upgrade_" + suffix, HelperID: "helper_client_upgrade_" + suffix, Credential: "client-upgrade-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -280,7 +279,7 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 	setupEnrollments := controlplane.NewEnrollmentService(store, setupSigner, audit.NewWriter(store), "https://api.paperboat.test", "authenticated-host-setup-enrollment-key")
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("authenticated-host-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureCLIAuth("paperboat-cli", []string{"account:read", "machines:connect", "session:refresh"}, 5*time.Minute, 24*time.Hour, "authenticated-host-cli-hash-key")
 	service.ConfigureHelperEnrollment(func(_ context.Context, gotUserID, operationKey, environmentID string, _ time.Duration) (HelperEnrollmentGrant, error) {
 		if gotUserID != userID || !strings.Contains(operationKey, clientSessionID) || environmentID == "" {
@@ -1074,7 +1073,7 @@ authenticated_setup_cli_session_id,authenticated_setup_operation_id,authenticate
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("client-pairing-host-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "enr_client_pairing_material_" + suffix, HelperID: "hlp_client_pairing_material_" + suffix, Credential: strings.Repeat("m", 48), ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -1696,7 +1695,7 @@ func TestDashboardEnrollmentIsIdempotentSingleClaimAndIssuesMaterial(t *testing.
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -1798,7 +1797,7 @@ func TestFreshEnrollmentTakesTheNameOnceTheRetiredRecordIsRemoved(t *testing.T) 
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -1870,7 +1869,7 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-isolation-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -2036,7 +2035,7 @@ func TestEnrollmentDenialAndImmediateApprovalOnPostgres(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -2153,7 +2152,7 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_install_replay_" + suffix, HelperID: "helper_install_replay_" + suffix, Credential: "install-replay-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
@@ -2250,7 +2249,7 @@ func testExpiredInstallationRecovery(t *testing.T, revoke bool) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-recovery-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureCLIAuth("paperboat-cli", []string{"account:read", "machines:connect", "session:refresh"}, 5*time.Minute, 24*time.Hour, "test-cli-hash-key")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
@@ -2568,7 +2567,7 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-install-key")
-	service.ConfigureAccess(nil, "https://control.example.test")
+	service.ConfigureMachineControl(nil, "https://control.example.test")
 	if err := service.ConfigureRuntimeRoute("example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
@@ -2920,7 +2919,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureInstallationEncryption("test-key")
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
+	configureSigned(t, service, "https://api.paperboat.test")
 	signer, err := mint.NewEphemeral(5 * time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -3007,7 +3006,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureInstallationEncryption("test-key")
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
+	configureSigned(t, service, "https://api.paperboat.test")
 	signer, err := mint.NewEphemeral(5 * time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -3115,7 +3114,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(fakeCredentialIssuer{}, "https://api.paperboat.test")
+	configureSigned(t, service, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
 	operationID := "operation_exec_" + suffix
 	descriptor, err := service.ExecDescriptor(ctx, userID, sourceMachineID, machineID, "cli_exec_1", operationID, false)
@@ -3262,7 +3261,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	}
 	policy := terminalprotocol.FileTransferPolicy{Revision: "file-transfer-v1", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureTerminalSessions(signer, nil)
 	service.ConfigureFileTransfer(policy)
 
@@ -3370,10 +3369,9 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,'session_00000000-0000-4000-8000-0000000
 	if _, err := store.Queries().CreateUserMachineTerminalSession(ctx, dbsqlc.CreateUserMachineTerminalSessionParams{OwnerAccount: userID, ID: terminalSessionID, UserMachineID: userMachineID, Name: "bright-beacon", LaunchCwd: "/Users/paperboat"}); err != nil {
 		t.Fatal(err)
 	}
-	issuer := &recordingIssuer{}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	service.ConfigureInstallationEncryption("test-key")
-	service.ConfigureAccess(issuer, "https://api.paperboat.test")
+	configureSigned(t, service, "https://api.paperboat.test")
 	if _, err := service.ConnectTerminalSession(ctx, userID, sourceMachineID, userMachineID, "cls_1", terminalSessionID); err != nil {
 		t.Fatal(err)
 	}
@@ -3384,9 +3382,8 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,'session_00000000-0000-4000-8000-0000000
 	if active != 1 {
 		t.Fatalf("active access sessions = %d, want 1", active)
 	}
-	issuer.failRevocation = true
-	if err := service.Disconnect(ctx, userID, userMachineID); err == nil {
-		t.Fatal("Disconnect succeeded while Helper was unavailable")
+	if err := service.Disconnect(ctx, userID, userMachineID); err != nil {
+		t.Fatal(err)
 	}
 	var environmentState, helperState, enrollmentState, connectorState, routeState, machineState, seatState string
 	var online bool
@@ -3407,10 +3404,9 @@ WHERE e.id=$1`, environmentID).Scan(&environmentState, &helperState, &enrollment
 	if err := store.SQL().QueryRowContext(ctx, `SELECT helper_revoked_at IS NOT NULL FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, userMachineID).Scan(&propagated); err != nil {
 		t.Fatal(err)
 	}
-	if propagated {
-		t.Fatal("revocation was marked propagated after a failed downstream call")
+	if !propagated {
+		t.Fatal("a signed credential's revocation needs no helper call and must be marked at once")
 	}
-	issuer.failRevocation = false
 	if err := service.RetryPendingRevocations(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -3420,15 +3416,6 @@ WHERE e.id=$1`, environmentID).Scan(&environmentState, &helperState, &enrollment
  (SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1) +
  (SELECT count(*) FROM paperboat.control_environments WHERE id=$2)`, userMachineID, environmentID).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("delivered machine, session and environment rows remaining=%d: %v", remaining, err)
-	}
-	fixtureRevocations := 0
-	for _, revocation := range issuer.revocations {
-		if revocation.EnvironmentID == environmentID {
-			fixtureRevocations++
-		}
-	}
-	if fixtureRevocations != 2 {
-		t.Fatalf("fixture revocations=%d, want 2", fixtureRevocations)
 	}
 }
 
@@ -3551,32 +3538,14 @@ WHERE m.id=$1`, machine.id).Scan(&machineState, &seatState, &online, &environmen
 	}
 }
 
-type recordingIssuer struct {
-	fakeCredentialIssuer
-	failRevocation bool
-	revocations    []access.CredentialRevocationInput
-}
-
-type fakeCredentialIssuer struct{}
-
-func (fakeCredentialIssuer) CheckCLI(context.Context, access.CredentialInput) error { return nil }
-func (fakeCredentialIssuer) IssueCLI(_ context.Context, input access.CredentialInput) (access.CLICredentials, error) {
-	return access.CLICredentials{
-		TerminalAuth:      &terminalprotocol.Auth{Method: "bearer", Token: "test-terminal", ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}},
-		FileTransferAuth:  &terminalprotocol.Auth{Method: "bearer", Token: "test-transfer", ExpiresAt: input.ExpiresAt, Scopes: []string{"file:transfer"}},
-		TerminalSessionID: "test-terminal-session", FileSessionID: "test-file-session",
-	}, nil
-}
-func (fakeCredentialIssuer) RevokeCLI(context.Context, access.CredentialRevocationInput) error {
-	return nil
-}
-
-func (i *recordingIssuer) RevokeCLI(_ context.Context, input access.CredentialRevocationInput) error {
-	i.revocations = append(i.revocations, input)
-	if i.failRevocation {
-		return errors.New("helper unavailable")
+// configureSigned gives the service a real mint provider: every credential it issues is control-plane signed.
+func configureSigned(t *testing.T, service *Service, issuer string) {
+	t.Helper()
+	signer, err := mint.NewEphemeral(time.Hour)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return nil
+	service.ConfigureMachineControl(signer, issuer)
 }
 
 func fatalWithPostgresLocks(t *testing.T, store *db.DB, format string, args ...any) {
@@ -4062,7 +4031,7 @@ func TestSecondWindowsOSUserPairsWithAManagedSSHTarget(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"windows"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)

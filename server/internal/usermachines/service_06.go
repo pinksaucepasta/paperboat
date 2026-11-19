@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/server/internal/access"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -110,7 +109,7 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 		sessions[i] = dbsqlc.RevokeUserMachineAccessSessionsRow(row)
 	}
 	var errs []error
-	if err := s.revokeSessionCredentials(ctx, sessions, ""); err != nil {
+	if err := s.revokeSessionCredentials(ctx, sessions); err != nil {
 		errs = append(errs, err)
 	}
 	// One machine per transaction, like headscale's per-node DeleteNode (hscontrol/db/node.go): a serialization
@@ -191,72 +190,21 @@ func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, ma
 	return false, nil
 }
 
-// revokeSessionCredentials ends each session at its helper, then marks the ones that ended, many ids per statement:
-// a statement per session made the revoke of a machine with 20,000 sessions take 90 s. An empty reason uses the
-// session's own revocation reason.
-func (s *Service) revokeSessionCredentials(ctx context.Context, rows []dbsqlc.RevokeUserMachineAccessSessionsRow, reason string) error {
-	var errs []error
-	ended := make([]string, 0, len(rows))
-	for _, row := range rows {
-		why := reason
-		if why == "" {
-			why = "revoked"
-			if row.RevocationReason.Valid && strings.TrimSpace(row.RevocationReason.String) != "" {
-				why = row.RevocationReason.String
-			}
-		}
-		if err := s.revokeCredentialSessions(ctx, machineAccessSession{ID: row.ID, UserID: row.UserID, UserMachineID: row.UserMachineID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: row.CLIClientSessionID, HTTPBaseURL: row.HttpBaseUrl, TerminalSessionID: row.HelperTerminalSessionID, FileSessionID: row.HelperFileSessionID, CredentialKind: machineCredentialKind(row.CredentialKind)}, why); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		ended = append(ended, row.ID)
+// revokeSessionCredentials marks the sessions whose helper revocation is done, many ids per statement: a signed
+// credential needs no helper call, and a statement per session made the revoke of a machine with 20,000 sessions
+// take 90 s.
+func (s *Service) revokeSessionCredentials(ctx context.Context, rows []dbsqlc.RevokeUserMachineAccessSessionsRow) error {
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
 	}
-	for ids := range slices.Chunk(ended, 1000) {
-		if _, err := s.db.Queries().MarkUserMachineAccessSessionsRevoked(ctx, ids); err != nil {
+	var errs []error
+	for chunk := range slices.Chunk(ids, 1000) {
+		if _, err := s.db.Queries().MarkUserMachineAccessSessionsRevoked(ctx, chunk); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
-}
-
-type machineAccessSession struct {
-	ID, UserID, UserMachineID, EnvironmentID, CLIClientSessionID, HTTPBaseURL string
-	TerminalSessionID, FileSessionID                                          string
-	CredentialKind                                                            machineCredentialKind
-}
-
-func (s *Service) revokeCredentialSessions(ctx context.Context, session machineAccessSession, reason string) error {
-	sessionIDs := compactSessionIDs(session.TerminalSessionID, session.FileSessionID)
-	if len(sessionIDs) == 0 {
-		return nil
-	}
-	kind := session.CredentialKind
-	if kind == "" {
-		if session.ID == "" {
-			return errors.New("user-machine credential kind is missing")
-		}
-		if err := s.db.SQL().QueryRowContext(ctx, `SELECT credential_kind FROM user_machine_access_sessions WHERE id=$1`, session.ID).Scan(&kind); err != nil {
-			return err
-		}
-	}
-	if kind == machineCredentialSigned {
-		// The owning environment/helper revocation fences signed credentials.
-		return nil
-	}
-	if kind != machineCredentialExternal {
-		return errors.New("user-machine credential kind is invalid")
-	}
-	if s.credentials == nil {
-		return errors.New("user-machine credential issuer is unavailable")
-	}
-	if err := s.credentials.RevokeCLI(ctx, access.CredentialRevocationInput{
-		UserID: session.UserID, MachineID: session.UserMachineID, EnvironmentID: session.EnvironmentID,
-		CLIClientSessionID: session.CLIClientSessionID, HTTPBaseURL: session.HTTPBaseURL,
-		SessionIDs: sessionIDs, Reason: reason,
-	}); err != nil {
-		return fmt.Errorf("revoke user-machine sessions for %s: %w", session.UserMachineID, err)
-	}
-	return nil
 }
 
 func compactSessionIDs(values ...string) []string {

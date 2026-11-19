@@ -39,12 +39,10 @@ func TestFinalDeleteWaitsForRevocationAndRetainsAccounting(t *testing.T) {
 			}
 			session := newID("session")
 			token := newID("token")
-			exec(`INSERT INTO user_machine_access_sessions(id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,credential_kind,expires_at) VALUES($1,$2,$3,$4,'fixture-client','https://host.example.test',$5,'external_issuer',now()-interval '1 year')`, session, machine, owner, env, token)
+			exec(`INSERT INTO user_machine_access_sessions(id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,credential_kind,expires_at) VALUES($1,$2,$3,$4,'fixture-client','https://host.example.test',$5,'control_plane_signed',now()+interval '1 hour')`, session, machine, owner, env, token)
 			exec(`INSERT INTO control_helpers(id,environment_id) VALUES($1,$2)`, "helper_"+suffix, env)
 			exec(`INSERT INTO user_favorites(user_id,kind,resource_id) VALUES($1,'machine',$2)`, owner, machine)
-			issuer := &recordingIssuer{failRevocation: true}
 			service := New(store, audit.NewWriter(store), Policy{}, nil)
-			service.ConfigureAccess(issuer, "https://api.example.test")
 			if _, err := service.Rename(ctx, owner, machine, "renamed-host"); err != nil {
 				t.Fatal(err)
 			}
@@ -53,26 +51,18 @@ func TestFinalDeleteWaitsForRevocationAndRetainsAccounting(t *testing.T) {
 				exec(`UPDATE user_machines SET state='revoked' WHERE id=$1`, machine)
 				removalEvent = "user_machine.revoked"
 			} else if action == "disconnect" {
-				if err := service.Disconnect(ctx, owner, machine); err == nil {
-					t.Fatal("offline revocation unexpectedly succeeded")
+				if err := service.Disconnect(ctx, owner, machine); err != nil {
+					t.Fatal(err)
 				}
 				removalEvent = "user_machine.disconnected"
-			} else if err := service.Delete(ctx, owner, machine); err == nil {
-				t.Fatal("offline revocation unexpectedly succeeded")
+			} else if err := service.Delete(ctx, owner, machine); err != nil {
+				t.Fatal(err)
 			}
 			var envRevoked bool
 			if err := store.SQL().QueryRowContext(ctx, `SELECT desired_state='revoked' FROM control_environments WHERE id=$1`, env).Scan(&envRevoked); err != nil || !envRevoked {
 				t.Fatalf("%s did not revoke environment: %v %v", action, envRevoked, err)
 			}
 
-			if err := service.RetryPendingRevocations(ctx); err == nil {
-				t.Fatal("offline retry unexpectedly succeeded")
-			}
-			var retained bool
-			if err := store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM user_machines WHERE id=$1 AND deleted_at IS NOT NULL) AND EXISTS(SELECT 1 FROM user_machine_access_sessions WHERE id=$2 AND helper_revoked_at IS NULL)`, machine, session).Scan(&retained); err != nil || !retained {
-				t.Fatalf("undelivered revocation lost its tombstone: %v %v", retained, err)
-			}
-			issuer.failRevocation = false
 			if err := service.RetryPendingRevocations(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +123,6 @@ func TestFinalDeleteBatchIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
 	if err := service.RetryPendingRevocations(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +185,6 @@ func (f removedMachineFixture) exists(t *testing.T) bool {
 
 func finalDeleteTestService(store *db.DB) *Service {
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
 	return service
 }
 
@@ -307,7 +295,6 @@ func TestFinalDeleteUnderConcurrentMachineTraffic(t *testing.T) {
 		}
 	}
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
 	err := service.RetryPendingRevocations(ctx)
 	close(stop)
 	wg.Wait()
@@ -344,7 +331,6 @@ func TestFinalDeleteTwoWorkersDrain(t *testing.T) {
 	for i := range errs {
 		store := testStore(t)
 		service := New(store, audit.NewWriter(store), Policy{}, nil)
-		service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

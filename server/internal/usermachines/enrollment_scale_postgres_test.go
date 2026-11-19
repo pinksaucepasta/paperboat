@@ -28,7 +28,7 @@ func TestPairedMachineHasALocalAddressLease(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("pair-lease-key")
-	service.ConfigureAccess(nil, "https://api.example.test")
+	service.ConfigureMachineControl(nil, "https://api.example.test")
 	service.ConfigureHelperEnrollment(func(context.Context, string, string, string, time.Duration) (HelperEnrollmentGrant, error) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_pair_lease_" + suffix, HelperID: "helper_pair_lease_" + suffix, Credential: "pair-lease-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})

@@ -250,7 +250,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 
 	accessID := "umas_network_" + suffix
 	grantExpiry := now.Add(4 * time.Minute)
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('external_issuer',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, accessID, machineID, userID, envID, cliID, "jti_terminal_"+suffix, "jti_file_"+suffix, "operation_access_"+suffix, grantExpiry); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'https://machine.example.test',$6,$7,ARRAY['terminal','files','private_access'],$8,$9)`, accessID, machineID, userID, envID, cliID, "jti_terminal_"+suffix, "jti_file_"+suffix, "operation_access_"+suffix, grantExpiry); err != nil {
 		t.Fatal(err)
 	}
 	cliConfig, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "operation_config_cli_" + suffix, UserID: userID, EndpointID: cliID})
@@ -369,7 +369,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 		t.Fatalf("runtime carrier fixture is not ready: route=%s err=%v", route.ID, err)
 	}
 	machineService := usermachines.New(store, audit.NewWriter(store), usermachines.Policy{}, nil)
-	machineService.ConfigureAccess(nil, "https://api.example.test")
+	machineService.ConfigureMachineControl(nil, "https://api.example.test")
 	machineService.ConfigureTerminalSessions(provider, nil)
 	machineService.ConfigureFileTransfer(terminalprotocol.FileTransferPolicy{Revision: "shared-native-v1", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
 	execOperationID := "operation_shared_exec_" + suffix

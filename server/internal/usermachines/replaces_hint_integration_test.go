@@ -48,7 +48,7 @@ func TestFreshEnrollmentReplacesTheNamedRetiredRecord(t *testing.T) {
 	}
 	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"linux"}}, testSeatAuthorizer{})
 	service.ConfigureInstallationEncryption("test-enrollment-key")
-	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureMachineControl(nil, "https://api.paperboat.test")
 	service.ConfigureBootstrapCommand("pb machine bootstrap")
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)

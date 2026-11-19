@@ -168,7 +168,7 @@ func (s *Service) issueFileTransferDescriptor(ctx context.Context, userID, sourc
 	if err := s.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
 		Capabilities: []string{"files"}, OperationID: operationID, ID: accessSessionID, UserMachineID: routeMachine.ID, UserID: userID, EnvironmentID: routeMachine.EnvironmentID,
 		CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpBaseURL, HelperFileSessionID: jti, ExpiresAt: expiresAt,
-	}, machineCredentialSigned); err != nil {
+	}); err != nil {
 		return FileTransferDescriptor{}, err
 	}
 	return FileTransferDescriptor{
@@ -312,8 +312,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	}
 	params := dbsqlc.CreateUserMachineAccessSessionParams{ID: accessID, UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpIngressURL, HelperTerminalSessionID: jti, ExpiresAt: expires, TeamID: sql.NullString{String: decision.TeamID, Valid: true}, Capabilities: []string{}, OperationID: sessionID, TerminalSessionID: sessionID, TerminalRole: decision.Role, TerminalGrantGeneration: sql.NullInt64{Int64: int64(decision.GrantGeneration), Valid: true}, TerminalBindingGeneration: sql.NullInt64{Int64: int64(decision.BindingGeneration), Valid: true}, TerminalMembershipGeneration: sql.NullInt64{Int64: int64(decision.MembershipGeneration), Valid: true}, TerminalTeamGeneration: sql.NullInt64{Int64: int64(decision.TeamGeneration), Valid: true}}
 	if err = s.createSharedTerminalAccessSession(ctx, params, sourceMachineID, decision); err != nil {
-		cleanupErr := s.revokeCredentialSessions(ctx, machineAccessSession{CredentialKind: machineCredentialSigned, UserID: userID, UserMachineID: row.ID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: cliClientSessionID, HTTPBaseURL: httpIngressURL, TerminalSessionID: jti}, "access_session_persistence_failed")
-		return ConnectionDescriptor{}, errors.Join(err, cleanupErr)
+		return ConnectionDescriptor{}, err
 	}
 	response.Connectable, response.Status, response.Reason, response.RetryAfterSeconds = true, "ready", "ready", 0
 	setCanonicalMachineIdentity(&response, row)
@@ -349,7 +348,7 @@ func (s *Service) createSharedTerminalAccessSession(ctx context.Context, in dbsq
 		if team != want.TeamID || role != want.Role || tg != want.TeamGeneration || mg != want.MembershipGeneration || bg != want.BindingGeneration || gg != want.GrantGeneration || pg != want.ProcessGeneration {
 			return ErrTerminalSessionNotFound
 		}
-		in.CredentialKind = string(machineCredentialSigned)
+		in.CredentialKind = machineCredentialSigned
 		if err := tx.Queries().CreateUserMachineAccessSession(ctx, in); err != nil {
 			return err
 		}
@@ -414,24 +413,10 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 		return ConnectionDescriptor{}, ingressErr
 	}
 	httpBaseURL, websocketBaseURL := httpIngressURL, runtimeWebsocketBase(httpIngressURL)
-	if cliClientSessionID == "" || s.controlSigner == nil && s.credentials == nil {
+	if cliClientSessionID == "" || s.controlSigner == nil {
 		return ConnectionDescriptor{}, errors.New("user-machine credential issuer is unavailable")
 	}
 	input := access.CredentialInput{UserID: userID, MachineID: row.ID, EnvironmentID: row.EnvironmentID, SourceMachineID: sourceMachineID, CLIClientSessionID: cliClientSessionID, HTTPBaseURL: httpBaseURL, ExpiresAt: expires}
-	if s.controlSigner == nil {
-		if err := s.credentials.CheckCLI(ctx, input); err != nil {
-			return ConnectionDescriptor{}, err
-		}
-		if checker, ok := s.credentials.(interface {
-			CheckHealth(context.Context, access.CredentialInput) error
-		}); ok {
-			if err := checker.CheckHealth(ctx, input); err != nil {
-				response.Status = "connector_connecting"
-				response.Reason = "helper_unhealthy"
-				return response, nil
-			}
-		}
-	}
 	// A pending create is left to the CLI's create-or-get on attach (and the worker): starting the shell here held
 	// every new-session descriptor ~2 s on a second edge round trip (prod p50 2.6 s per create).
 	if err := s.applyTerminalSessionOperations(ctx, row.ID, terminalSession.ID, true); err != nil {
@@ -446,7 +431,7 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 		personal = personal && scope.TeamID == ""
 	}
 	includeFiles := personal && slices.Contains(row.ConfiguredCapabilities, "file_receive") && slices.Contains(row.ObservedCapabilities, "file_receive")
-	credentials, credentialKind, err := s.issueUserMachineCredentials(ctx, input, terminalSession.ID, includeFiles)
+	credentials, err := s.issueUserMachineCredentials(ctx, input, terminalSession.ID, includeFiles)
 	if err != nil {
 		return ConnectionDescriptor{}, err
 	}
@@ -472,13 +457,8 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 		CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpBaseURL,
 		HelperTerminalSessionID: credentials.TerminalSessionID, HelperFileSessionID: credentials.FileSessionID,
 		ExpiresAt: expires,
-	}, credentialKind); err != nil {
-		cleanupErr := s.revokeCredentialSessions(ctx, machineAccessSession{
-			UserID: userID, UserMachineID: row.ID, EnvironmentID: row.EnvironmentID,
-			CLIClientSessionID: cliClientSessionID, HTTPBaseURL: httpBaseURL,
-			TerminalSessionID: credentials.TerminalSessionID, FileSessionID: credentials.FileSessionID, CredentialKind: credentialKind,
-		}, "access_session_persistence_failed")
-		return ConnectionDescriptor{}, errors.Join(err, cleanupErr)
+	}); err != nil {
+		return ConnectionDescriptor{}, err
 	}
 	response.Connectable, response.Status, response.Reason, response.RetryAfterSeconds = true, "ready", "ready", 0
 	setCanonicalMachineIdentity(&response, row)
@@ -501,11 +481,7 @@ func machineTerminalEndpoints(wss string) terminalprotocol.TerminalEndpoints {
 	return terminalprotocol.TerminalEndpoints{QUIC: "quic://" + host, WSS: "wss://" + u.Host + "/v1/runtime"}
 }
 
-func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.CredentialInput, terminalSessionID string, includeFiles bool) (access.CLICredentials, machineCredentialKind, error) {
-	if s.controlSigner == nil {
-		credentials, err := s.credentials.IssueCLI(ctx, input)
-		return credentials, machineCredentialExternal, err
-	}
+func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.CredentialInput, terminalSessionID string, includeFiles bool) (access.CLICredentials, error) {
 	issuedAt := s.now().UTC()
 	terminalJTI := newID("token")
 	transferJTI := newID("token")
@@ -518,20 +494,20 @@ func (s *Service) issueUserMachineCredentials(ctx context.Context, input access.
 	}
 	terminalToken, err := sign("terminal_operation", []string{"terminal:operate"}, terminalJTI)
 	if err != nil {
-		return access.CLICredentials{}, machineCredentialSigned, err
+		return access.CLICredentials{}, err
 	}
 	if !includeFiles {
-		return access.CLICredentials{TerminalAuth: &terminalprotocol.Auth{Method: "bearer", Token: terminalToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}}, TerminalSessionID: terminalJTI}, machineCredentialSigned, nil
+		return access.CLICredentials{TerminalAuth: &terminalprotocol.Auth{Method: "bearer", Token: terminalToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}}, TerminalSessionID: terminalJTI}, nil
 	}
 	transferToken, err := sign("file_transfer", []string{"file:transfer"}, transferJTI)
 	if err != nil {
-		return access.CLICredentials{}, machineCredentialSigned, err
+		return access.CLICredentials{}, err
 	}
 	return access.CLICredentials{
 		TerminalAuth:      &terminalprotocol.Auth{Method: "bearer", Token: terminalToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"terminal:operate"}},
 		FileTransferAuth:  &terminalprotocol.Auth{Method: "bearer", Token: transferToken, ExpiresAt: input.ExpiresAt, Scopes: []string{"file:transfer"}},
 		TerminalSessionID: terminalJTI, FileSessionID: transferJTI,
-	}, machineCredentialSigned, nil
+	}, nil
 }
 
 func (s *Service) ConnectionReadiness(ctx context.Context, userID, userMachineID string) (ConnectionDescriptor, error) {

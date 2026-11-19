@@ -322,7 +322,7 @@ WHERE k.key_id = $2`, cliSessionID, keyID).Scan(&keyRevoked, &certificateRevoked
 	if pairingState != "expired" || enrollmentState != "deleted" || terminalState != "deleted" {
 		t.Fatalf("pairing/enrollment/terminal states = %q/%q/%q, want expired/deleted/deleted", pairingState, enrollmentState, terminalState)
 	}
-	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
+	configureSigned(t, service, "https://api.example.test")
 	if err := service.RetryPendingRevocations(ctx); err != nil {
 		t.Fatal(err)
 	}

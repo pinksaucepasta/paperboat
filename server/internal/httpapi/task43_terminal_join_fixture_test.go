@@ -127,7 +127,7 @@ func TestTask43ServeTerminalJoinLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,capabilities,operation_id,expires_at,team_id,terminal_session_id,terminal_role,terminal_grant_generation,terminal_binding_generation,terminal_membership_generation,terminal_team_generation) VALUES('external_issuer',$1,$2,$3,$4,$5,'http://127.0.0.1',$6,ARRAY[]::text[],$6,now()+interval '3 minutes',$7,$6,'viewer',$8,$9,$10,$11)`, accessID, machineID, member, environmentID, clientID, terminalID, teamID, decision.GrantGeneration, decision.BindingGeneration, decision.MembershipGeneration, decision.TeamGeneration); err != nil {
+	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,capabilities,operation_id,expires_at,team_id,terminal_session_id,terminal_role,terminal_grant_generation,terminal_binding_generation,terminal_membership_generation,terminal_team_generation) VALUES('control_plane_signed',$1,$2,$3,$4,$5,'http://127.0.0.1',$6,ARRAY[]::text[],$6,now()+interval '3 minutes',$7,$6,'viewer',$8,$9,$10,$11)`, accessID, machineID, member, environmentID, clientID, terminalID, teamID, decision.GrantGeneration, decision.BindingGeneration, decision.MembershipGeneration, decision.TeamGeneration); err != nil {
 		t.Fatal(err)
 	}
 	signer, err := mint.NewEphemeral(5 * time.Minute)

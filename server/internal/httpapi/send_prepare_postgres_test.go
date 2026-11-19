@@ -77,7 +77,7 @@ func newSendPrepareFixture(t *testing.T) *sendPrepareFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userMachineService.ConfigureAccess(nil, "https://prepare.invalid.test")
+	userMachineService.ConfigureMachineControl(nil, "https://prepare.invalid.test")
 	userMachineService.ConfigureTerminalSessions(signer, nil)
 	userMachineService.ConfigureFileTransfer(terminalprotocol.FileTransferPolicy{Revision: "send-prepare-test", MaxBatchFiles: 10, AutomaticMaxBatchBytes: 2_000_000_000, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 2_000_000_000})
 	inbox, err := teaminbox.New(store, config.Default().Access.FileTransfer)

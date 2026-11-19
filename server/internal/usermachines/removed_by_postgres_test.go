@@ -32,7 +32,7 @@ func TestRemovedByAnswersOnlyForTheEnrollingOwnersRemovedMachine(t *testing.T) {
 	// A live machine the enroller cannot see (for example a team machine after leaving the team) is still live.
 	exec(`INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'alive','linux','amd64','/workspace','online','occupied')`, live, owner, liveEnv)
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	service.ConfigureAccess(&recordingIssuer{}, "https://api.example.test")
+	configureSigned(t, service, "https://api.example.test")
 
 	check := func(step, user, machine string, want bool) {
 		t.Helper()
