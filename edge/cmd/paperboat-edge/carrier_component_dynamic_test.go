@@ -112,3 +112,11 @@ type dynamicHTTPLink struct {
 
 func (l dynamicHTTPLink) Write(p []byte) (int, error) { return l.writer.Write(p) }
 func (l dynamicHTTPLink) Close() error                { _ = l.writer.Close(); return l.ReadCloser.Close() }
+
+func TestCarrierHandlerLimitFollowsNodeCapacity(t *testing.T) {
+	for capacity, want := range map[uint32]int{0: 64, 1: 1, 1024: 1024, 1025: 1025, 4096: 4096} {
+		if got := carrierHandlerLimit(capacity); got != want {
+			t.Fatalf("carrierHandlerLimit(%d) = %d, want %d", capacity, got, want)
+		}
+	}
+}

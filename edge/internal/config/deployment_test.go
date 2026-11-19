@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,16 @@ func TestRequestBodyIdleTimeoutDefaultsToNginxSixtySeconds(t *testing.T) {
 	for _, bad := range []string{`,"request_body_idle_timeout":-1}`, `,"request_body_idle_timeout":1000000}`, `,"request_body_idle_timeout":7200000000000}`} {
 		if _, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+bad)); err == nil {
 			t.Fatalf("accepted request body idle timeout %s", bad)
+		}
+	}
+}
+
+// A node_capacity the edge cannot serve is refused at load, not as an obscure registry error after startup.
+func TestLoadDeploymentBoundsNodeCapacity(t *testing.T) {
+	for capacity, ok := range map[int]bool{MaximumNodeCapacity: true, MaximumNodeCapacity + 1: false, 10000: false} {
+		value := strings.Replace(validDeploymentJSON(), `"node_capacity":128`, `"node_capacity":`+strconv.Itoa(capacity), 1)
+		if _, err := LoadDeployment(writeDeployment(t, value)); (err == nil) != ok {
+			t.Fatalf("node_capacity %d: err = %v, want accepted %v", capacity, err, ok)
 		}
 	}
 }

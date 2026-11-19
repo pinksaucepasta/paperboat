@@ -117,13 +117,7 @@ func newCarrierComponentWithTelemetry(
 		authorizers = append(authorizers, accessorExpected)
 	}
 	carrierConfig.Authorize = datacarrier.AnyAuthorizer(authorizers...)
-	maximumHandlers := 1024
-	if deployment.NodeCapacity < uint32(maximumHandlers) {
-		maximumHandlers = int(deployment.NodeCapacity)
-	}
-	if maximumHandlers == 0 {
-		maximumHandlers = 64
-	}
+	maximumHandlers := carrierHandlerLimit(deployment.NodeCapacity)
 	service, err := datacarrier.NewHTTPService(context.Background(), datacarrier.ServiceConfig{
 		Carrier:         carrierConfig,
 		MaximumCarriers: maximumHandlers,
@@ -349,4 +343,14 @@ func newCarrierComponentWithTelemetry(
 		return nil, nil, fmt.Errorf("create carrier assembly: %w", err)
 	}
 	return assembly, service.Close, nil
+}
+
+// carrierHandlerLimit is how many carriers one edge process holds: its configured node_capacity (the node's declared connection
+// capacity, at most config.MaximumNodeCapacity), not a second fixed number. A fixed 1024 refused the 1,025th machine of a node
+// declared for 4,096 (measured on a 2 vCPU / 4 GB node, which holds them at 270 KB and 0.8% of a core per 100 idle carriers).
+func carrierHandlerLimit(nodeCapacity uint32) int {
+	if nodeCapacity == 0 {
+		return 64
+	}
+	return int(nodeCapacity)
 }

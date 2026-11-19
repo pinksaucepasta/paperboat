@@ -21,7 +21,7 @@ var (
 
 const (
 	defaultCarrierHandlers = 64
-	maxCarrierHandlers     = 1024
+	maxCarrierHandlers     = 4096 // config.MaximumNodeCapacity
 )
 
 // CarrierService is the lifecycle boundary implemented by

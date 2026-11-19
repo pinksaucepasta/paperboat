@@ -22,6 +22,10 @@ const (
 	maximumGatewayHeaderBytes = 128 << 10
 )
 
+// MaximumNodeCapacity is the most one edge node holds: carriers, previews and tunnels each count against the node's 4,096-entry
+// admission, route and ingress tables (private access connections, the route registries and the server's snapshot bound).
+const MaximumNodeCapacity = 4096
+
 var routeBaseDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 type Deployment struct {
@@ -215,7 +219,7 @@ func (d Deployment) validate() error {
 	if d.RequestBodyIdleTimeout != 0 && (d.RequestBodyIdleTimeout < time.Second || d.RequestBodyIdleTimeout > time.Hour) {
 		return errors.New("request_body_idle_timeout must be between 1s and 1h")
 	}
-	if d.NodeCapacity == 0 || d.NodeCapacity > 10000 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
+	if d.NodeCapacity == 0 || d.NodeCapacity > MaximumNodeCapacity || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
 		return errors.New("deployment bounds are invalid")
 	}
 	return nil
