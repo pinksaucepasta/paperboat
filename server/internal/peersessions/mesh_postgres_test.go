@@ -39,23 +39,9 @@ func (meshTestSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error) { r
 // is linear: with 9,000 more endpoints and their revoked certificates in another account on the server, the first
 // build and a join each take well under a second (the build passed the 30 s statement timeout on CI before).
 func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T) {
-	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
-	if dsn == "" {
-		t.Skip("requires isolated PostgreSQL")
-	}
-	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	if err := db.Migrate(ctx, store); err != nil {
-		t.Fatal(err)
-	}
+	store := openMeshTestStore(t, ctx)
 	s := fmt.Sprint(time.Now().UnixNano())
 	account := "mesh_user_" + s
 	exec := func(query string, args ...any) {
@@ -75,17 +61,7 @@ func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T
 	net := sha256.Sum256([]byte(s))
 	joinAccount := func(account string, net byte, from, to int) {
 		t.Helper()
-		exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state,desired_version,applied_state,applied_version,created_at,updated_at)
-SELECT $1||'_env_'||g,$1||'_env_'||g,$1,'active',1,'ready',1,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to)
-		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation)
-SELECT $1||'_m_'||g,$1,$1||'_env_'||g,'m-'||g,'linux','amd64','/w','online','occupied',true,1 FROM generate_series($2::int,$3::int) g`, account, from, to)
-		exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
-SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,decode(repeat('00',200),'hex'),sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',
- sha256(convert_to('key'||$1||'_m_'||g,'UTF8')) FROM generate_series($2::int,$3::int) g`, account, from, to)
-		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
-wireguard_public_key,disco_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to('disco'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
- ('fd7a:115c:a1e0:'||to_hex($4::int)||'::'||to_hex(1+g))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net))
+		seedMeshMachines(t, ctx, store, account, net, from, to)
 	}
 	join := func(from, to int) { t.Helper(); joinAccount(account, net[0], from, to) }
 	for from := 0; from < 9000; from += 1000 { // statements of 1,000 rows stay far below the statement timeout
@@ -230,4 +206,47 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	if r, full := config(peernetwork.ConfigurationGeneration(stale)); r.ConfigurationDelta != nil || r.Configuration != full {
 		t.Fatal("an endpoint holding an older configuration got a delta, want the full configuration")
 	}
+}
+
+// openMeshTestStore opens and migrates the isolated test database, or skips without one.
+func openMeshTestStore(t *testing.T, ctx context.Context) *db.DB {
+	t.Helper()
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// seedMeshMachines adds personal machines from..to (with environments, certificates and identities) to account.
+func seedMeshMachines(t *testing.T, ctx context.Context, store *db.DB, account string, net byte, from, to int) {
+	t.Helper()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v\n%s", err, query)
+		}
+	}
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id,desired_state,desired_version,applied_state,applied_version,created_at,updated_at)
+SELECT $1||'_env_'||g,$1||'_env_'||g,$1,'active',1,'ready',1,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation)
+SELECT $1||'_m_'||g,$1,$1||'_env_'||g,'m-'||g,'linux','amd64','/w','online','occupied',true,1 FROM generate_series($2::int,$3::int) g`, account, from, to)
+	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
+SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,decode(repeat('00',200),'hex'),sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',
+ sha256(convert_to('key'||$1||'_m_'||g,'UTF8')) FROM generate_series($2::int,$3::int) g`, account, from, to)
+	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
+wireguard_public_key,disco_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
+SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to('disco'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
+ ('fd7a:115c:a1e0:'||to_hex($4::int)||'::'||to_hex(1+g))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net))
 }
