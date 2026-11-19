@@ -3466,6 +3466,7 @@ type UserMachineAccessSession struct {
 	MachineServiceSourceGeneration sql.NullInt64
 	MachineServiceTeamFence        sql.NullString
 	CredentialKind                 string
+	AdmittedSeenAt                 sql.NullTime
 }
 
 type UserMachineAvailabilityOperation struct {
