@@ -5,7 +5,7 @@ The Windows device (SMOKE_WINDOWS_SSH, PB_SMOKE_WINDOWS_PB, VICTUS_PASS for a pa
 `pb exec PEER -- sh -c 'while true; do echo; sleep 0.5; done'` and timestamps every line as it arrives on the device. The
 direct path to PEER (a Unix machine of the account on the same LAN) is then dropped with a firewall block of pb.exe's
 traffic to --peer-address (winhost.cut_network: pb.exe only, so the SSH that drives the device keeps working, with a
-timer on the device that lifts the rule whatever happens here). The stream must go on within --budget seconds (the
+timer on the device that lifts the rule whatever happens here; no pb.exe is restarted, a route ends the flows that exist). The stream must go on within --budget seconds (the
 relay path takes over); the longest gap between lines is the result. Prints one JSON receipt.
 """
 import argparse
@@ -69,8 +69,12 @@ def main():
                     time.sleep(args.cut_seconds)
                 step('the cut held (capture on the peer)', capture[0].startswith('capture') and ' sent=0 ' in capture[0], capture[0])
             else:
-                cut = device.cut_network(args.cut_seconds + 60, addresses=[args.peer_address])
+                cut = device.cut_network(args.cut_seconds + 60, addresses=[args.peer_address], keep_processes=True)
                 time.sleep(args.cut_seconds)
+                status = pb.run_remote(['status'], timeout=60).stdout
+                block = status.split(args.peer, 1)[-1][:400] if args.peer in status else ''
+                step('the cut dropped the direct path (pb.exe was not restarted)', 'Path: direct' not in block.split('\n\n')[0],
+                     block.split('\n\n')[0].replace('\n', ' | '))
                 cut.release()
                 cut = None
             time.sleep(10)
