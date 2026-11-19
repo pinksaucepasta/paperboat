@@ -882,8 +882,9 @@ try {
     const saved = world.installs
     world.installs = [...saved, ...Array.from({ length: 55 }, (_, n) => ({ ...saved[0], installation_id: `inst_x${n}`, node_id: `node_x${n}`, name: `extra ${n}` }))]
     await p.getByRole("tab", { name: "Self-hosted" }).click()
-    await p.waitForSelector('[data-table="installed nodes"] [data-list-range]')
-    expect((await text('[data-table="installed nodes"] [data-list-range]')).replace(/\s+/g, " ").startsWith("1–50 of"), "first self-hosted page range")
+    // The enrolment step above already cached this list (stale-while-revalidate): the first paint can be the old "N total";
+    // wait for the refetch that carries the 55 extra rows (it polls every 5 s) instead of reading the first paint.
+    await p.waitForFunction(() => document.querySelector('[data-table="installed nodes"] [data-list-range]')?.textContent?.replace(/\s+/g, " ").startsWith("1–50 of"), undefined, { timeout: 20000 })
     await p.locator('[data-table="installed nodes"]').getByRole("button", { name: "Next" }).click()
     await p.waitForFunction(() => document.querySelector('[data-table="installed nodes"] [data-list-range]')?.textContent?.startsWith("51"))
     world.installs = saved
