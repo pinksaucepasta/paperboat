@@ -527,12 +527,22 @@ func (s *WorkspaceService) HandleWebhook(ctx context.Context, event StripeWebhoo
 // reconcileSubscription applies an authoritative Stripe snapshot. Webhooks and
 // operator recovery share this path so neither can manufacture subscription state.
 func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscriptionID string, event *StripeWebhook) (bool, error) {
+	return s.reconcileSubscriptionWith(ctx, StripeSubscription{ID: subscriptionID}, event)
+}
+
+// reconcileSubscriptionWith applies known, a snapshot the caller just got from Stripe's answer to its own change, instead of
+// reading one that may still predate the change; a known with only an ID is read from Stripe.
+func (s *WorkspaceService) reconcileSubscriptionWith(ctx context.Context, known StripeSubscription, event *StripeWebhook) (bool, error) {
+	subscriptionID := known.ID
 	// One reconcile per subscription at a time in this process: the Stripe read happens before any
 	// database lock (F21-20), and the snapshot applied is the one read after the previous reconcile.
 	gate := &subscriptionReconcileGates[subscriptionGate(subscriptionID)]
 	gate.Lock()
 	defer gate.Unlock()
-	initial, err := s.stripe.GetSubscription(ctx, subscriptionID)
+	initial, err := known, error(nil)
+	if known.CustomerID == "" {
+		initial, err = s.stripe.GetSubscription(ctx, subscriptionID)
+	}
 	if err != nil {
 		return false, err
 	}

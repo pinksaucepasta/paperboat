@@ -310,7 +310,7 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 		PeriodEnd:   time.Unix(i.CurrentPeriodEnd, 0).UTC(),
 	}
 	if len(r.Items.Data) == 2 {
-		if addon.ID == "" || addon.Price.ID == "" {
+		if addon.ID == "" || addon.Price.ID == "" || addon.Quantity != 1 {
 			return StripeSubscription{}, errors.New("invalid stripe subscription response")
 		}
 		result.AddonItemID, result.AddonPriceID = addon.ID, addon.Price.ID
