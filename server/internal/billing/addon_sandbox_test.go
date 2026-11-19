@@ -45,7 +45,9 @@ func TestStripeSandboxAddon(t *testing.T) {
 	bothCents, _ := b.AddonPriceCents("sso_scim", "month")
 	plan, sso, both := price(1500), price(ssoCents), price(bothCents)
 	created := post("/v1/subscriptions", url.Values{"customer": {customer}, "items[0][price]": {plan}, "items[0][quantity]": {"2"}})
-	defer func() { _ = c.do(context.Background(), "DELETE", "/v1/subscriptions/"+created.ID, "", nil, &struct{ ID string }{}) }()
+	defer func() {
+		_ = c.do(context.Background(), "DELETE", "/v1/subscriptions/"+created.ID, "", nil, &struct{ ID string }{})
+	}()
 
 	get := func() StripeSubscription {
 		t.Helper()
