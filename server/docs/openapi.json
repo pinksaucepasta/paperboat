@@ -2625,7 +2625,6 @@
           "preview_base_domain",
           "tunnel_base_domain",
           "runtime_base_domain",
-          "control_regions",
           "purchase_consent"
         ],
         "properties": {
@@ -2689,13 +2688,6 @@
           "runtime_base_domain": {
             "type": "string",
             "format": "hostname"
-          },
-          "control_regions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ControlRegion"
-            },
-            "description": "Control-plane regions clients rank by measured latency; empty when the server has no regional nodes."
           }
         }
       },
@@ -17530,30 +17522,6 @@
             "type": "integer",
             "minimum": 0,
             "description": "Every machine shared into the team."
-          }
-        }
-      },
-      "ControlRegion": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "api_origin",
-          "state"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "api_origin": {
-            "type": "string",
-            "format": "uri"
-          },
-          "state": {
-            "enum": [
-              "healthy",
-              "draining"
-            ]
           }
         }
       },

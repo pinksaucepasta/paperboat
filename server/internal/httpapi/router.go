@@ -237,11 +237,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /helper-releases/tuf/{path...}", tufRepository("/helper-releases/tuf", opts.ReleaseFiles))
 		}
 		mux.HandleFunc("GET /readyz", ready(opts.ReadinessChecker))
-		var regions *servernodes.RegionCache
-		if opts.ServerNodes != nil {
-			regions = &servernodes.RegionCache{DB: opts.ServerNodes.DB, Domain: opts.Config.RegionalDomain}
-		}
-		mux.HandleFunc("GET /v1/client-configuration", clientConfiguration(opts.Config, regions))
+		mux.HandleFunc("GET /v1/client-configuration", clientConfiguration(opts.Config))
 		mux.Handle("GET /metrics", metrics(opts.ControlDiagnostics, opts.TelemetryMetrics, opts.TelemetryRouteMetrics))
 		mux.Handle(telemetryDiagnosticsPath, telemetryDiagnostics(opts.TelemetryDiagnostics))
 		if opts.MintKeys != nil {
