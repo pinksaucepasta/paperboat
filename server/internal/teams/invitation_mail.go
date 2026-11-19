@@ -139,7 +139,7 @@ func (s *Service) ResendInvitation(ctx context.Context, account, team, id string
 func invitationMessage(policy config.TransactionalMail, address, team string, expires time.Time) transactionalmail.Message {
 	return transactionalmail.Compose(policy, address, "Paperboat team invitation", transactionalmail.Content{
 		Heading:    "You are invited to join " + team + " on Paperboat",
-		Paragraphs: []string{"This invitation expires " + expires.UTC().Format(time.RFC3339) + "."},
+		Paragraphs: []string{"This invitation expires " + transactionalmail.Time(expires) + "."},
 		Button:     &transactionalmail.Button{Label: "Sign in to view your team invitation", URL: strings.TrimRight(policy.ConsoleOrigin, "/") + "/team"},
 		Why:        "You got this because a team admin invited this address.",
 	})

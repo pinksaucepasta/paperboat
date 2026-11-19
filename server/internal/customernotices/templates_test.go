@@ -51,17 +51,21 @@ func TestRenderEnforcesThePromisedNoticeAndBreachWindow(t *testing.T) {
 // Every notice kind renders into the shared layout, with its link as the one button.
 func TestEveryNoticeKindUsesTheSharedLayout(t *testing.T) {
 	link := "https://example.test/terms"
-	for name, in := range map[string]Input{
-		"notice-price-increase": {Kind: "price_increase", Detail: "Pro goes from $9 to $12.", Effective: "2027-01-30", Link: link},
-		"notice-terms-change":   {Kind: "terms_change", Detail: "Section 4 changes.", Effective: "2027-02-01", Link: link},
-		"notice-subprocessor":   {Kind: "subprocessor", Name: "Acme", Purpose: "send mail", Location: "EU", Contact: "privacy@example.test", Effective: "2026-12-30"},
-		"notice-breach":         {Kind: "breach", AwareAt: "2026-11-19T10:00:00Z", What: "w", Data: "d", Actions: "a", Contact: "privacy@example.test", Link: link},
+	for name, c := range map[string]struct {
+		in   Input
+		when string // how the date or time reads to a person
+	}{
+		"notice-price-increase": {Input{Kind: "price_increase", Detail: "Pro goes from $9 to $12.", Effective: "2027-01-30", Link: link}, "30 January 2027"},
+		"notice-terms-change":   {Input{Kind: "terms_change", Detail: "Section 4 changes.", Effective: "2027-02-01", Link: link}, "1 February 2027"},
+		"notice-subprocessor":   {Input{Kind: "subprocessor", Name: "Acme", Purpose: "send mail", Location: "EU", Contact: "privacy@example.test", Effective: "2026-12-30"}, "30 December 2026"},
+		"notice-breach":         {Input{Kind: "breach", AwareAt: "2026-11-19T10:00:00Z", What: "w", Data: "d", Actions: "a", Contact: "privacy@example.test", Link: link}, "19 November 2026, 10:00 UTC"},
 	} {
+		in := c.in
 		subject, content, _, _, err := render(in, now)
 		if err != nil {
 			t.Fatal(name, err)
 		}
 		button := in.Link
-		mailtest.Check(t, name, transactionalmail.Compose(mailtest.Policy, "a@example.test", subject, content), button)
+		mailtest.Check(t, name, transactionalmail.Compose(mailtest.Policy, "a@example.test", subject, content), button, c.when)
 	}
 }

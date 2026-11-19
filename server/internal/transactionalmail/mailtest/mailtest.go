@@ -5,6 +5,7 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -12,13 +13,23 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
 
+var rawTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}`)
+
 // Policy is the mail configuration every layout test renders with.
 var Policy = config.TransactionalMail{From: "Paperboat <notify@mail.example.test>", ConsoleOrigin: "https://console.example.test", SiteURL: "https://site.example.test", AbuseMailbox: "abuse@mail.example.test"}
 
 // Check fails unless m is branded in HTML and plain text, with button as its one link target (empty: no button).
-// With PB_EMAIL_PREVIEW_DIR set it writes <name>.html and <name>.txt there.
-func Check(t *testing.T, name string, m transactionalmail.Message, button string) {
+// Each of texts must appear in both bodies, and no raw timestamp may. With PB_EMAIL_PREVIEW_DIR set it writes <name>.html and <name>.txt there.
+func Check(t *testing.T, name string, m transactionalmail.Message, button string, texts ...string) {
 	t.Helper()
+	for _, want := range texts {
+		if !strings.Contains(m.HTML, want) || !strings.Contains(m.Text, want) {
+			t.Errorf("%s: HTML or text lacks %q", name, want)
+		}
+	}
+	if rawTime.MatchString(m.HTML) || rawTime.MatchString(m.Text) {
+		t.Errorf("%s: a raw timestamp is in the mail", name)
+	}
 	for _, want := range []string{"<!DOCTYPE html>", ">paperboat</a>", `class="mk"`, "Paperboat · site.example.test", "prefers-color-scheme: dark", "max-width:560px"} {
 		if !strings.Contains(m.HTML, want) {
 			t.Errorf("%s: HTML lacks %q", name, want)

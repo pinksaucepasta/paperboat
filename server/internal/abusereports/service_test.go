@@ -171,5 +171,5 @@ func TestAlertMessageEscapesReporterText(t *testing.T) {
 
 func TestAlertMailUsesTheSharedLayout(t *testing.T) {
 	m := alertMessage(mailtest.Policy, Report{ID: "abuse_x", Hostname: "a.example.test", URL: "https://a.example.test/", Reason: "phishing", Details: "Looks like a bank login.\nSecond line.", ReporterEmail: "r@example.test", CreatedAt: time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)})
-	mailtest.Check(t, "abuse-report", m, "")
+	mailtest.Check(t, "abuse-report", m, "", "Received 19 November 2026, 09:00 UTC.")
 }

@@ -155,7 +155,7 @@ func failingMessage(policy config.TransactionalMail, address, team, label, messa
 	return transactionalmail.Compose(policy, address, "Paperboat: audit log streaming is failing", transactionalmail.Content{
 		Heading: "Audit log streaming is failing",
 		Paragraphs: []string{
-			fmt.Sprintf("Paperboat has not been able to deliver the audit log of %s to its %s since %s (UTC): %s.", team, label, since.UTC().Format("2 Jan 2006 15:04"), message),
+			fmt.Sprintf("Paperboat has not been able to deliver the audit log of %s to its %s since %s: %s.", team, label, transactionalmail.Time(since), message),
 			"Events are kept and delivered in order once the destination accepts them again.",
 		},
 		Button: &transactionalmail.Button{Label: "Check the destination", URL: link},

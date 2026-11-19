@@ -210,7 +210,7 @@ func alertMessage(policy config.TransactionalMail, r Report) transactionalmail.M
 	}
 	return transactionalmail.Compose(policy, policy.AbuseMailbox, "Abuse report ("+r.Reason+"): "+r.Hostname, transactionalmail.Content{
 		Heading:    "Abuse report " + r.ID,
-		Paragraphs: []string{fmt.Sprintf("Received %s UTC. Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.", r.CreatedAt.Format("2006-01-02 15:04"), r.Hostname, r.ID)},
+		Paragraphs: []string{fmt.Sprintf("Received %s. Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.", transactionalmail.Time(r.CreatedAt), r.Hostname, r.ID)},
 		Details:    []transactionalmail.Detail{{Label: "Link", Value: r.URL}, {Label: "Reason", Value: r.Reason}, {Label: "Reporter", Value: reporter}, {Label: "Details", Value: r.Details}},
 		Why:        "You got this because this address receives abuse reports.",
 	})
