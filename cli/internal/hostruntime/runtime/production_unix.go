@@ -47,6 +47,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/offlineaudit"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtimeport"
@@ -791,7 +792,8 @@ func waitForPeerEnrollment(ctx context.Context, enrollment peerEnrollmentEnsurer
 
 // newInspectorService creates the daemon's one shared inspector capture
 // store, replay registry and loopback HTTP service. Captures stay in memory;
-// a restart deletes them. Every operation re-verifies the caller's grant
+// a restart deletes them, but the capture switches the owner set survive it
+// for every preview that resumes. Every operation re-verifies the caller's grant
 // against live server authority over the host's machine identity; there is no
 // local-owner substitution.
 func newInspectorService(controlURL, stateRoot string, transport http.RoundTripper) (*inspectorapi.Service, *inspector.Store, *inspector.Registry, error) {
@@ -804,6 +806,15 @@ func newInspectorService(controlURL, stateRoot string, transport http.RoundTripp
 		return nil, nil, nil, err
 	}
 	store := inspector.NewStore()
+	// An unreadable background file resumes nothing (its own loader reports it), so no policy is kept either.
+	resumable, _ := preview.NewBackgroundStore(filepath.Join(stateRoot, "preview", "background-previews.json")).Load()
+	resumes := map[string]bool{}
+	for _, record := range resumable {
+		resumes[record.Request.PreviewID] = true
+	}
+	if err := store.RestorePolicies(filepath.Join(stateRoot, "preview", "inspector-policies.json"), func(id string) bool { return resumes[id] }); err != nil {
+		return nil, nil, nil, err
+	}
 	registry := inspector.NewRegistry()
 	service, err := inspectorapi.New(inspectorapi.Config{Store: store, Registry: registry, Authorize: authorize})
 	if err != nil {

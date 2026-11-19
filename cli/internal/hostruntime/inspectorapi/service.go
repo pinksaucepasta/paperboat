@@ -818,7 +818,10 @@ func (s *Service) handlePurge(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	s.registry.Unregister(credential.ResourceID)
-	s.store.Revoke(credential.ResourceID)
+	if err := s.store.Forget(credential.ResourceID); err != nil {
+		writeOperationError(requestContext(request), writer, err, "diagnostic")
+		return
+	}
 	writeJSON(requestContext(request), writer, http.StatusOK, map[string]any{"schema": SchemaV1, "kind": "purged", "resource_id": resourceID})
 }
 

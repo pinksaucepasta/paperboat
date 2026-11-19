@@ -156,13 +156,14 @@ type resourceUsage struct {
 	ids           []string
 }
 
-// Store is the single daemon-local in-memory capture ring. It never writes
-// disk, never contacts the network, and a restart (new Store) deletes all
-// captures. All methods are safe for concurrent use.
+// Store is the single daemon-local in-memory capture ring. It never contacts
+// the network, and a restart (new Store) deletes all captures; only the
+// owner's capture policies are written to disk (RestorePolicies). All methods are safe for concurrent use.
 type Store struct {
 	mu                  sync.Mutex
 	now                 func() time.Time
 	policies            map[string]ResourcePolicy
+	policyPath          string // set by RestorePolicies; empty keeps policies in memory only
 	policyEpochs        map[string]uint64
 	pending             map[string]*Pending
 	records             map[string]*Record
@@ -228,7 +229,7 @@ func (s *Store) SetPolicy(resourceID string, policy ResourcePolicy) error {
 	s.policyEpochs[resourceID]++
 	s.policies[resourceID] = policy
 	s.signalCleanupLocked()
-	return nil
+	return s.savePoliciesLocked()
 }
 
 // Revoke immediately denies retrieval and purges every record, raw entry and
