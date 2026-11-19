@@ -2,6 +2,10 @@
 """F21-160 device check: a dead direct path is noticed in seconds and a running stream recovers over the relay.
 
   dead_path_stream.py PEER [--peer-address ADDRESS] [--bound 12]   (run on a paired Linux or macOS machine; needs sudo -n iptables or pfctl)
+  With PB_SMOKE_WINDOWS_PB (and SMOKE_WINDOWS_SSH, VICTUS_PASS) the stream client and every `pb status` run ON that Windows device (lines are
+  timestamped here as the ssh session delivers them); the cut must keep pb.exe running (pd.udp_blocked() restarts it), so
+  SMOKE_PEER_CUT is required (container_cut.sh `silent` drop on the peer's host; repeat --device-address for the address the peer sees the
+  device at, as direct_path_cut.py does).
   Without ADDRESS this machine's UDP is dropped (path_display.udp_blocked); with it only packets to that host address of PEER are dropped
   (as direct_path_cut.py does on Windows), which kills the direct path only when it runs to that one address.
   1. `pb ping PEER` until `pb status` says the selected path to PEER is direct;
@@ -15,6 +19,7 @@ Every run, pass or fail, saves what makes a slow cut provable (cut-16s.md, a 16.
 `arrivals.csv` (t_ms from the block, line), `status.csv` (a 1 s sampler of selected path, relay region and home relay), and
 the receipt names their directory (--trace-dir, default results/dead-path-<UTC>).
 """
+import contextlib
 import csv
 import datetime
 import json
@@ -25,6 +30,7 @@ import threading
 import time
 
 import path_display as pd
+import winhost
 from relay_home_wire import blocked
 from pairing_lifecycle import command_result  # noqa: F401  (path_display's pb() uses it)
 
@@ -75,12 +81,36 @@ def write_trace(directory, blocked_at, arrivals, samples):
             'home_relay_changed': len(homes) > 1, 'status_errors': sum(1 for _, reading in samples if 'error' in reading)}
 
 
+def stream_argv(peer, script, device=None):
+    """The command that runs the stream client: pb here, or pb.exe on the Windows device behind its ssh login (stdout comes back line by line)."""
+    if device is None:
+        return [str(pd.PB), 'exec', peer, '--', 'sh', '-c', script]
+    command = "& %s exec %s -- sh -c %s" % (winhost.ps_quote(device.pb_exe), winhost.ps_quote(peer), winhost.ps_quote(script))
+    return device.ssh_prefix(device.target, 'powershell -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ' +
+                             winhost._b64(command.encode('utf-16-le')))
+
+
+@contextlib.contextmanager
+def cut(address, device_addresses=()):
+    """Silently drop the direct path for the duration; a Windows device is cut without restarting its pb.exe."""
+    device = winhost.device()
+    if not device:
+        with (blocked(address) if address else pd.udp_blocked()):
+            yield
+    elif winhost.PEER_CUT:
+        with winhost.peer_cut_held('silent', *device_addresses):
+            yield
+    else:
+        raise RuntimeError('a Windows device needs SMOKE_PEER_CUT and --device-address: a cut on the device itself would restart its pb.exe')
+
+
 def main():
     peer = sys.argv[1]
     trace_dir = sys.argv[sys.argv.index('--trace-dir') + 1] if '--trace-dir' in sys.argv else str(
         pathlib.Path(__file__).parent / 'results' / ('dead-path-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
     bound = float(sys.argv[sys.argv.index('--bound') + 1]) if '--bound' in sys.argv else 12.0
     address = sys.argv[sys.argv.index('--peer-address') + 1] if '--peer-address' in sys.argv else None
+    device_addresses = [sys.argv[i + 1] for i, word in enumerate(sys.argv) if word == '--device-address']
     for _ in range(45):  # a path takes seconds to settle after a start
         pd.pb('ping', peer)
         if selected(peer) == 'direct':
@@ -90,8 +120,9 @@ def main():
         raise RuntimeError('no direct path to %s to kill (selected %s)' % (peer, selected(peer)))
     total = 900
     script = 'i=0; while [ $i -lt %d ]; do echo $i; i=$((i+1)); sleep 0.1; done' % total
-    stream = subprocess.Popen([str(pd.PB), 'exec', peer, '--', 'sh', '-c', script], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              stdin=subprocess.DEVNULL, bufsize=0)
+    device = winhost.device()
+    stream = subprocess.Popen(stream_argv(peer, script, device), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              stdin=subprocess.DEVNULL, bufsize=0, env=device.ssh_environment() if device else None)
     arrivals, samples, stop_sampling = [], [], threading.Event()
     threading.Thread(target=sample_status, args=(peer, stop_sampling, samples), daemon=True).start()
 
@@ -106,7 +137,7 @@ def main():
     if len(arrivals) < 30:
         raise RuntimeError('the stream did not start: %d lines in 60 s' % len(arrivals))
     during = None
-    with (blocked(address) if address else pd.udp_blocked()):
+    with cut(address, device_addresses):
         blocked_at = time.time()
         deadline = blocked_at + 120
         while stream.poll() is None and time.time() < deadline and len(arrivals) < total:
