@@ -118,9 +118,9 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 		t.Fatal("an unchanged healthy set was rewritten")
 	}
 	// The worker's sweep lists only workspaces ReconcileScope would change: not this settled one, however long it lasts.
-	listed := func() bool {
+	listedBy := func(query string) bool {
 		t.Helper()
-		rows, err := database.Pool().Query(ctx, scopesSQL, "", "", 100000, Size, time.Now(), fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
+		rows, err := database.Pool().Query(ctx, query, "", "", 100000, Size, time.Now(), fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,8 +136,11 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 		}
 		return false
 	}
-	if listed() {
-		t.Fatal("the sweep lists a settled workspace")
+	listed := func() bool { return listedBy(quickScopesSQL) }
+	for name, query := range map[string]string{"quick": quickScopesSQL, "full": fullScopesSQL} {
+		if listedBy(query) {
+			t.Fatalf("the %s sweep lists a settled workspace", name)
+		}
 	}
 	// A member silent for less than the ten-minute replacement window keeps its place...
 	lost := ids[0]
@@ -150,8 +153,10 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 	}
 	// ...but a member gone for longer is replaced and the survivor keeps its place.
 	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now()-interval '20 minutes' WHERE id=$1`, lost)
-	if !listed() {
-		t.Fatal("the sweep skips a workspace whose member is gone for twenty minutes")
+	for name, query := range map[string]string{"quick": quickScopesSQL, "full": fullScopesSQL} {
+		if !listedBy(query) {
+			t.Fatalf("the %s sweep skips a workspace whose member is gone for twenty minutes", name)
+		}
 	}
 	if !reconcile(time.Now()) {
 		t.Fatal("a member gone for twenty minutes was not replaced")

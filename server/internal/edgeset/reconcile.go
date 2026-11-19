@@ -194,39 +194,77 @@ func equal(a, b []string) bool {
 
 // scopesSQL lists, after ($1,$2), the workspaces whose stored set ReconcileScope would change: no set yet or a mode
 // that moved (and an edge that can serve it exists: with none, ReconcileScope keeps whatever it had), a member no longer
-// retained (silent past $6, eligible or not), more members than Size, or a free place with a usable edge outside the set to
-// fill it. Every other workspace keeps its set (choose keeps retained members), so it costs nothing: walking every
-// workspace each second was ~7 queries per workspace and grew with accounts, not machines.
-var scopesSQL = `SELECT s.kind,s.id,s.account FROM (
+// retained (silent past $6), more members than Size, or a free place with a usable edge outside the set to fill it.
+// Every other workspace keeps its set (choose keeps retained members), so it costs nothing: walking every workspace
+// each second was ~7 queries per workspace and grew with accounts, not machines.
+//
+// full adds the per-workspace eligibility of nodes (node_workspace_edge_eligible, ~1 ms per call and node). The quick
+// form leaves it out: a member that stopped being eligible without going silent, or a self-hosted workspace's free
+// place, is found by the next full pass. Mode is read from the pool policy row, not through workspace_edge_mode.
+func scopesSQL(full bool) string {
+	eligible := func(node string) string {
+		if !full {
+			return ""
+		}
+		return " AND paperboat.node_workspace_edge_eligible(" + node + ",s.account,s.team)"
+	}
+	managedOnly := ""
+	if !full {
+		managedOnly = " AND coalesce(pool.mode,'managed-only')='managed-only'"
+	}
+	return `SELECT s.kind,s.id,s.account FROM (
  SELECT 'account'::text AS kind,m.user_id AS id,m.user_id AS account,NULL::text AS team FROM user_machines m JOIN users u ON u.id=m.user_id AND u.status='active'
   WHERE m.owner_team_id IS NULL AND m.deleted_at IS NULL AND m.revoked_at IS NULL GROUP BY m.user_id
  UNION ALL SELECT 'team',t.team_id,t.owner_account,t.team_id FROM teams t WHERE t.deleted_at IS NULL AND NOT t.suspended
 ) s LEFT JOIN workspace_edge_sets e ON e.scope_kind=s.kind AND e.scope_id=s.id
+LEFT JOIN selfhost_pool_policies pool ON pool.capability='tunnel' AND pool.scope_kind=s.kind AND pool.scope_id=s.id
 WHERE (s.kind,s.id)>($1,$2) AND (
- ((e.scope_id IS NULL OR e.mode IS DISTINCT FROM paperboat.workspace_edge_mode(s.account,s.team))
-  AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `)
-  AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + ` AND paperboat.node_workspace_edge_eligible(n.id,s.account,s.team)))
+ ((e.scope_id IS NULL OR e.mode IS DISTINCT FROM coalesce(pool.mode,'managed-only'))
+  AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `)` + func() string {
+		if !full {
+			return ")"
+		}
+		return `
+  AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + eligible("n.id") + `))`
+	}() + `
  OR cardinality(e.node_ids)>$4
  OR EXISTS (SELECT 1 FROM unnest(e.node_ids) AS member(id) WHERE NOT EXISTS (
   SELECT 1 FROM control_tunnel_nodes n WHERE n.id=member.id AND n.roles @> ARRAY['edge']::text[]
-   AND n.last_heartbeat_at>$5::timestamptz-$6::interval AND paperboat.node_workspace_edge_eligible(n.id,s.account,s.team)))
- OR (cardinality(e.node_ids)<$4 AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `
-   AND n.id<>ALL(e.node_ids) AND paperboat.node_workspace_edge_eligible(n.id,s.account,s.team))))
+   AND n.last_heartbeat_at>$5::timestamptz-$6::interval` + eligible("n.id") + `))
+ OR (cardinality(e.node_ids)<$4` + managedOnly + ` AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `
+   AND n.id<>ALL(e.node_ids)` + eligible("n.id") + `)))
 ORDER BY s.kind,s.id LIMIT $3`
+}
+
+var quickScopesSQL, fullScopesSQL = scopesSQL(false), scopesSQL(true)
 
 // SweepEvery is how often the worker looks for workspaces whose set must change. Explicit changes (a self-hosted
 // pool edit, a machine's first attachment) reconcile or assign synchronously; the sweep is the safety net for a
 // member silent past ReplaceAfter (10 minutes), so seconds are enough.
 const SweepEvery = 15 * time.Second
 
-// ReconcileAll walks every workspace once, a page per transaction, and returns how many sets changed.
+// FullSweepEvery is how many sweeps pass between two full ones (every five minutes at SweepEvery).
+const FullSweepEvery = 20
+
+// ReconcileAll walks every workspace once with the full test, a page per transaction, and returns how many sets
+// changed.
 func ReconcileAll(ctx context.Context, database *db.DB, now time.Time) (int, error) {
+	return Sweep(ctx, database, now, true)
+}
+
+// Sweep reconciles the workspaces whose set would change: with full false only by the quick test (SweepEvery), with
+// full true by every test (the worker's every FullSweepEvery-th run, and ReconcileAll).
+func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool) (int, error) {
 	const page = 100
+	query := quickScopesSQL
+	if full {
+		query = fullScopesSQL
+	}
 	changed := 0
 	kind, id := "", ""
 	for {
 		var scopes []Scope
-		rows, err := database.Pool().Query(ctx, scopesSQL, kind, id, page, Size, now, fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
+		rows, err := database.Pool().Query(ctx, query, kind, id, page, Size, now, fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
 		if err != nil {
 			return changed, fmt.Errorf("list workspaces: %w", err)
 		}
