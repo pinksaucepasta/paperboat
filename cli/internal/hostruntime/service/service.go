@@ -3,11 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -433,10 +435,51 @@ func (i *Installer) VerifyPublishedDefinition() error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(actual, want) {
+	if !sameDefinition(actual, want) {
 		return ErrInvalidDefinition
 	}
 	return nil
+}
+
+// sameDefinition is whether a published declaration is the one want renders. The labels people read (a Windows service's
+// display name and description, a systemd unit's Description) are not compared: 252b2ada1 changed them and every install over a
+// build that published the old ones failed "invalid service definition" (victus, 2026-11-19). The executable, arguments, account
+// and environment still are; a launchd plist has no such field and compares byte for byte.
+func sameDefinition(actual, want []byte) bool {
+	if bytes.Equal(actual, want) {
+		return true
+	}
+	return sameJSONDefinition(actual, want) || sameUnitDefinition(actual, want)
+}
+
+func sameJSONDefinition(actual, want []byte) bool {
+	var left, right map[string]any
+	if json.Unmarshal(actual, &left) != nil || json.Unmarshal(want, &right) != nil {
+		return false
+	}
+	for _, field := range []string{"display_name", "description"} {
+		delete(left, field)
+		delete(right, field)
+	}
+	return reflect.DeepEqual(left, right)
+}
+
+func sameUnitDefinition(actual, want []byte) bool {
+	left, leftErr := unit.Deserialize(bytes.NewReader(actual))
+	right, rightErr := unit.Deserialize(bytes.NewReader(want))
+	if leftErr != nil || rightErr != nil || len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	strip := func(options []*unit.UnitOption) []*unit.UnitOption {
+		kept := options[:0:0]
+		for _, option := range options {
+			if option.Section != "Unit" || option.Name != "Description" {
+				kept = append(kept, option)
+			}
+		}
+		return kept
+	}
+	return unit.AllMatch(strip(left), strip(right))
 }
 
 // VerifyDefinitionNames accepts a declaration, whichever build rendered it, that names
