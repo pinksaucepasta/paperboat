@@ -117,15 +117,15 @@ func TestHelperEnrollmentExchangeIsSingleUseAndKeyBound(t *testing.T) {
 	if bytes.Contains(renewalCiphertext, []byte(renewed.Credential)) {
 		t.Fatal("stored renewal contains plaintext credential")
 	}
-	replacement, err := service.ReplaceHelper(ctx, "usr_test", "replace-helper-01", environmentID, grant.HelperID, "default")
+	replacement, err := service.ReplaceHelper(ctx, "usr_test", "replace-helper-01:"+environmentID, environmentID, grant.HelperID, "default")
 	if err != nil || replacement.ConnectorGeneration != 2 {
 		t.Fatalf("replacement = %#v, %v", replacement, err)
 	}
-	replacementReplay, err := service.ReplaceHelper(ctx, "usr_test", "replace-helper-01", environmentID, grant.HelperID, "default")
+	replacementReplay, err := service.ReplaceHelper(ctx, "usr_test", "replace-helper-01:"+environmentID, environmentID, grant.HelperID, "default")
 	if err != nil || replacementReplay != replacement {
 		t.Fatalf("replacement replay = %#v, %v", replacementReplay, err)
 	}
-	if _, err := service.ReplaceHelper(ctx, "usr_test", "replace-helper-02", environmentID, grant.HelperID, "default"); !errors.Is(err, ErrUsageOperationConflict) {
+	if _, err := service.ReplaceHelper(ctx, "usr_test", "replace-helper-02:"+environmentID, environmentID, grant.HelperID, "default"); !errors.Is(err, ErrUsageOperationConflict) {
 		t.Fatalf("replacement conflict = %v", err)
 	}
 }
@@ -236,12 +236,12 @@ func TestHelperEnrollmentReissuesExpiredCredentialForSamePendingHelper(t *testin
 	}
 	service := NewEnrollmentService(store, signer, nil, "https://api.example.test", "enrollment-test-encryption-key")
 	service.clock = func() time.Time { return now }
-	first, err := service.Issue(ctx, "usr_test", "reissue-first", environmentID, time.Minute)
+	first, err := service.Issue(ctx, "usr_test", "reissue-first:"+environmentID, environmentID, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	service.clock = func() time.Time { return now.Add(2 * time.Minute) }
-	second, err := service.Issue(ctx, "usr_test", "reissue-second", environmentID, time.Minute)
+	second, err := service.Issue(ctx, "usr_test", "reissue-second:"+environmentID, environmentID, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

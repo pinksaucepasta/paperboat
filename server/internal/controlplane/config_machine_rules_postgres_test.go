@@ -139,7 +139,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 		t.Fatalf("acknowledged resolution remained pending: count=%d error=%v", len(pending), err)
 	}
 	holder := ConfigLeaseHolder{RepositoryID: pushRepository.ID, AssignmentID: assignment.ID, EnvironmentID: environmentID, MachineID: identity.MachineID, InstallationGeneration: 1, BaseRemoteRevision: "head"}
-	lease, err := leases.Acquire(ctx, "custom-lease", holder, 30*time.Second)
+	lease, err := leases.Acquire(ctx, "custom-lease-"+suffix, holder, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

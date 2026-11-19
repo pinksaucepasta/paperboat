@@ -28,29 +28,29 @@ func TestRouteIntentOwnershipAndRevisionCAS(t *testing.T) {
 	service := NewRouteService(store, nil)
 	// A host is unique across the database: a fixed one collides with the route an earlier iteration left.
 	host := fmt.Sprintf("Preview-%d.Example.Test.", time.Now().UnixNano())
-	route, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", host, "127.0.0.1", 8080)
+	route, err := service.Create(ctx, owner, "route-create-01-"+suffix, environmentID, "runtime_https_wss", host, "127.0.0.1", 8080)
 	if err != nil || route.PublicHost != strings.ToLower(strings.TrimSuffix(host, ".")) || route.DesiredRevision != 1 {
 		t.Fatalf("route = %#v, %v", route, err)
 	}
-	replay, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", host, "127.0.0.1", 8080)
+	replay, err := service.Create(ctx, owner, "route-create-01-"+suffix, environmentID, "runtime_https_wss", host, "127.0.0.1", 8080)
 	if err != nil || replay.ID != route.ID {
 		t.Fatalf("create replay = %#v, %v", replay, err)
 	}
-	if _, err := service.Create(ctx, owner, "route-create-01", environmentID, "runtime_https_wss", "other.example.test", "127.0.0.1", 8080); !errors.Is(err, ErrRouteConflict) {
+	if _, err := service.Create(ctx, owner, "route-create-01-"+suffix, environmentID, "runtime_https_wss", "other.example.test", "127.0.0.1", 8080); !errors.Is(err, ErrRouteConflict) {
 		t.Fatalf("create conflict = %v", err)
 	}
 	if _, err := service.Transition(ctx, other, "route-transition-other", route.ID, "detaching", 1); !errors.Is(err, ErrRouteDenied) {
 		t.Fatalf("cross-owner transition = %v", err)
 	}
-	detaching, err := service.Transition(ctx, owner, "route-transition-01", route.ID, "detaching", 1)
+	detaching, err := service.Transition(ctx, owner, "route-transition-01-"+suffix, route.ID, "detaching", 1)
 	if err != nil || detaching.DesiredRevision != 2 {
 		t.Fatalf("detaching = %#v, %v", detaching, err)
 	}
-	replayedTransition, err := service.Transition(ctx, owner, "route-transition-01", route.ID, "detaching", 1)
+	replayedTransition, err := service.Transition(ctx, owner, "route-transition-01-"+suffix, route.ID, "detaching", 1)
 	if err != nil || replayedTransition.DesiredRevision != 2 {
 		t.Fatalf("transition replay = %#v, %v", replayedTransition, err)
 	}
-	if _, err := service.Transition(ctx, owner, "route-transition-02", route.ID, "detached", 1); !errors.Is(err, ErrRouteConflict) {
+	if _, err := service.Transition(ctx, owner, "route-transition-02-"+suffix, route.ID, "detached", 1); !errors.Is(err, ErrRouteConflict) {
 		t.Fatalf("stale transition = %v", err)
 	}
 }
