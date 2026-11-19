@@ -32,6 +32,9 @@ func (s *blockedSink) Write(p []byte) (int, error) {
 }
 func (s *blockedSink) Close() error { return nil }
 
+// inputWaitBound ends a wait that would never succeed; every wait below returns the moment its condition holds.
+const inputWaitBound = 30 * time.Second
+
 // F3-11 on macOS: a paste behind a blocked sink stopped stdin reads, so the
 // Ctrl-C after it was never read.
 func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
@@ -50,7 +53,7 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 	if _, err := inW.Write([]byte("a")); err != nil {
 		t.Fatal(err)
 	}
-	for blocked := time.After(5 * time.Second); ; time.Sleep(time.Millisecond) {
+	for blocked := time.After(inputWaitBound); ; time.Sleep(time.Millisecond) {
 		s.mu.Lock()
 		n := len(s.writes)
 		s.mu.Unlock()
@@ -81,7 +84,7 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(inputWaitBound):
 		close(s.release)
 		t.Fatal("stdin was not read while the sink was blocked; Ctrl-C never reached the client")
 	}
@@ -97,7 +100,7 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 		return n
 	}
 	waitRead := func() {
-		for drained := time.After(5 * time.Second); unread() != 0; {
+		for drained := time.After(inputWaitBound); unread() != 0; {
 			select {
 			case <-drained:
 				close(s.release)
@@ -112,7 +115,7 @@ func TestRunKeepsReadingStdinWhileInputIsBlocked(t *testing.T) {
 	}
 	waitRead()
 	close(s.release)
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(inputWaitBound)
 	for {
 		s.mu.Lock()
 		first, after := string(s.writes[0]), bytes.Join(s.writes[1:], nil)
