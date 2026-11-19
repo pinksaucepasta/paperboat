@@ -293,9 +293,18 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		insert(`INSERT INTO user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd,runtime_state) VALUES($1,$2,$3,$4,'/launch','running')`, fmt.Sprintf("slow_%s_%d", suffix, i), machine, owner, fmt.Sprintf("slow%d", i))
 	}
 	for _, global := range []bool{false, true} {
-		pageCtx, stop := context.WithTimeout(ctx, 500*time.Millisecond)
-		start := time.Now()
+		// The caller gives up once every observation worker is blocked in the slow runtime (not after a wall-clock
+		// delay that a loaded host can spend on the database reads before any probe starts).
+		pageCtx, stop := context.WithCancel(ctx)
 		beforeCalls := runtime.calls.Load()
+		gaveUp := make(chan struct{})
+		go func() {
+			defer close(gaveUp)
+			for deadline := time.Now().Add(10 * time.Second); runtime.calls.Load()-beforeCalls < terminalInventoryObservationConcurrency && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
+			}
+			stop()
+		}()
 		if global {
 			page, total, e := service.TerminalSessionInventory(pageCtx, owner, InventoryOptions{Limit: 20})
 			if e != nil || total != 9 || len(page) != 9 {
@@ -318,11 +327,9 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 			}
 		}
 		stop()
-		if probes := runtime.calls.Load() - beforeCalls; probes < 2 || probes > 4 {
-			t.Fatalf("slow runtime probes=%d, wanted bounded concurrent page", probes)
-		}
-		if time.Since(start) > time.Second {
-			t.Fatal("slow page exceeded bounded caller deadline")
+		<-gaveUp
+		if probes := runtime.calls.Load() - beforeCalls; probes != terminalInventoryObservationConcurrency {
+			t.Fatalf("slow runtime probes=%d, wanted the %d concurrent probes of a bounded page", probes, terminalInventoryObservationConcurrency)
 		}
 	}
 	// Shell completion asks for the stored rows only (live=false): the same sessions, no host probe,
