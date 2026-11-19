@@ -2,6 +2,7 @@
 """R-04 staging control plane on anvit: own Compose project, own PostgreSQL, own ports, never prod.
 
 Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcommands:
+  build-edge | build-relay <commit>  the same for paperboat-edge / paperboat-relay:stg-<short> (staging runs main's edge and relay)
   build <commit>       build paperboat-server:stg-<short> natively (arm64) on anvit from that commit
   init                 write the stack's files and secrets (kept on rerun); WorkOS ids and the Cloudflare DNS token
                        are read from the production server env over ssh and never printed
@@ -241,7 +242,7 @@ def require_main(full, what):
 
 def build(commit, target="server"):
     """Build paperboat-server:stg-<short> (target 'server') or paperboat-edge:stg-<short> (target 'edge') on HOST (a server build only from a commit on main)."""
-    dockerfile = {"server": "server/deploy/Dockerfile", "edge": "edge/deploy/Dockerfile"}[target]
+    dockerfile = {"server": "server/deploy/Dockerfile", "edge": "edge/deploy/Dockerfile", "relay": "relay/deploy/Dockerfile"}[target]
     short, full, tar = source_archive(commit)
     if target == "server":
         require_main(full, "the commit")
@@ -600,7 +601,7 @@ def reset():
     seed()
 
 
-COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "build-edge": (lambda commit: build(commit, "edge"), 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0), "check": (lambda: require_main_migrations(image_revision(existing_image())), 0),
+COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "build-edge": (lambda commit: build(commit, "edge"), 1), "build-relay": (lambda commit: build(commit, "relay"), 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0), "check": (lambda: require_main_migrations(image_revision(existing_image())), 0),
             "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "edge-b": (lambda image: print(json.dumps(edge(image, True))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 
