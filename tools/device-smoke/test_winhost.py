@@ -372,6 +372,20 @@ class WindowsChecksRunner(unittest.TestCase):
         cut.release()
         self.assertEqual(('remove', ['203.0.113.7', '2001:db8::1'], True), calls[-1])
 
+    def test_a_cut_whose_add_fails_lifts_what_it_added(self):
+        calls = []
+        device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+
+        def ps(step, script, **kw):
+            calls.append(kw.get('action'))
+            if kw.get('action') == 'add':
+                raise winhost.DeviceError('route to 203.0.113.7 failed')
+            return 0, ''
+        device.ps = ps
+        with self.assertRaises(winhost.DeviceError):
+            device.cut_network(30, addresses=['203.0.113.7'], keep_processes=True)
+        self.assertEqual(['add', 'remove'], calls)  # the firewall rule made before the route failed does not stay
+
     def test_udp_block_drops_every_port_except_the_allowed_ones(self):
         calls = []
         device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
