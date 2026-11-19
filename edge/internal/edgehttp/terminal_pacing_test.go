@@ -2,6 +2,7 @@ package edgehttp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -165,7 +166,11 @@ func TestKeystrokeIsNotQueuedBehindABulkUpload(t *testing.T) {
 	var workers sync.WaitGroup
 	arrived := make(chan time.Time, 1)
 	var key time.Time
-	in, done := terminalPacing{throttles: throttles, host: host}.start(ctx, &workers, func(err error) { t.Errorf("pacing failed: %v", err) }, func(frame []byte) error {
+	in, done := terminalPacing{throttles: throttles, host: host}.start(ctx, &workers, func(err error) {
+		if !errors.Is(err, context.Canceled) { // the test cancels the pacer when it has its answer
+			t.Errorf("pacing failed: %v", err)
+		}
+	}, func(frame []byte) error {
 		if len(frame) == 3 {
 			arrived <- time.Now()
 		}
