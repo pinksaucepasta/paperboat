@@ -44,6 +44,10 @@ var fleetBuckets = []struct{ name, where string }{
 	{"never_seen", `m.last_seen_at IS NULL`},
 }
 
+// unverifiedPrefix labels, in fleet_version_daily, the machines whose build is not a signed release target: the chart
+// orders versions, and a prefixed one has no order, so a custom build cannot count as updated by claiming a version.
+const unverifiedPrefix = "unverified:"
+
 // versionKey orders release versions (YYYY.M.D.build); a dev build or "unknown" has no order.
 func versionKey(v string) ([4]int, bool) {
 	var key [4]int
@@ -365,20 +369,21 @@ func (s *Service) fillRollout(ctx context.Context, tx *db.Tx, r *FleetRollout) e
 	if !ordered {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT `+fleetVersion+`,count(*),count(*) FILTER(WHERE m.last_seen_at IS NULL OR m.last_seen_at<$3),
- count(*) FILTER(WHERE NOT `+fleetOnline+` AND m.last_seen_at>=$3)`+fleetMachines+` AND m.platform=ANY($2) GROUP BY 1`, s.hostStaleAfter.Microseconds(), r.Platforms, r.StartedAt)
+	rows, err := tx.Query(ctx, `SELECT `+fleetVersion+`,`+fleetOfficial+`,count(*),count(*) FILTER(WHERE m.last_seen_at IS NULL OR m.last_seen_at<$3),
+ count(*) FILTER(WHERE NOT `+fleetOnline+` AND m.last_seen_at>=$3)`+fleetMachines+` AND m.platform=ANY($2) GROUP BY 1,2`, s.hostStaleAfter.Microseconds(), r.Platforms, r.StartedAt)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var version string
+		var official bool
 		var n, beforeStart, offlineNow int64
-		if err := rows.Scan(&version, &n, &beforeStart, &offlineNow); err != nil {
+		if err := rows.Scan(&version, &official, &n, &beforeStart, &offlineNow); err != nil {
 			return closeRowsError(rows, err)
 		}
 		key, ok := versionKey(version)
 		switch {
-		case !ok:
+		case !ok || !official: // an unverified build has no place in the order, whatever version it claims
 			r.Other += n
 		case versionLess(key, target):
 			r.Older += n
@@ -399,19 +404,20 @@ func (s *Service) fillRollout(ctx context.Context, tx *db.Tx, r *FleetRollout) e
 
 // fillRolloutFailures counts machines that tried this release and ended failed or rolled back while still older.
 func (s *Service) fillRolloutFailures(ctx context.Context, tx *db.Tx, r *FleetRollout, target [4]int) error {
-	rows, err := tx.Query(ctx, `SELECT `+fleetVersion+`,o.state,coalesce(o.error_code,''),count(*)`+fleetMachines+`
- AND o.target_version=$1 AND o.state IN ('failed','rolled_back') AND m.platform=ANY($2) GROUP BY 1,2,3`, r.Version, r.Platforms)
+	rows, err := tx.Query(ctx, `SELECT `+fleetVersion+`,`+fleetOfficial+`,o.state,coalesce(o.error_code,''),count(*)`+fleetMachines+`
+ AND o.target_version=$1 AND o.state IN ('failed','rolled_back') AND m.platform=ANY($2) GROUP BY 1,2,3,4`, r.Version, r.Platforms)
 	if err != nil {
 		return err
 	}
 	reasons := map[[2]string]int64{}
 	for rows.Next() {
 		var version, state, code string
+		var official bool
 		var n int64
-		if err := rows.Scan(&version, &state, &code, &n); err != nil {
+		if err := rows.Scan(&version, &official, &state, &code, &n); err != nil {
 			return closeRowsError(rows, err)
 		}
-		if key, ok := versionKey(version); !ok || !versionLess(key, target) {
+		if key, ok := versionKey(version); !ok || !official || !versionLess(key, target) {
 			continue
 		}
 		reasons[[2]string{state, code}] += n
@@ -613,7 +619,8 @@ func (s *Service) snapshotFleetVersions(ctx context.Context) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM fleet_version_daily WHERE day>=(now() AT TIME ZONE 'UTC')::date`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `WITH f AS (SELECT m.platform,`+fleetVersion+` AS v,`+fleetOnline+` AS up,o.state,o.target_version`+fleetMachines+`),
+		_, err := tx.Exec(ctx, `WITH f AS (SELECT m.platform,
+  CASE WHEN `+fleetOfficial+` THEN `+fleetVersion+` ELSE left('`+unverifiedPrefix+`'||`+fleetVersion+`,64) END AS v,`+fleetOnline+` AS up,o.state,o.target_version`+fleetMachines+`),
  a AS (SELECT platform,v AS version,count(*) AS machines,count(*) FILTER(WHERE up) AS online FROM f GROUP BY 1,2),
  b AS (SELECT platform,left(target_version,64) AS version,count(*) FILTER(WHERE state='failed') AS failed,count(*) FILTER(WHERE state='rolled_back') AS rolled_back
   FROM f WHERE state IN ('failed','rolled_back') AND target_version IS NOT NULL AND target_version<>v GROUP BY 1,2)

@@ -394,3 +394,52 @@ func TestFleetRecordsTheHashOfEverySignedTargetOnPostgres(t *testing.T) {
 		t.Fatalf("recorded rows = %d, %v", n, err)
 	}
 }
+
+// A build that is not a signed target has no place in the rollout order, whatever version it claims: it is not
+// "updated" to the release, its failed update is not the release's, and the daily chart does not total it.
+func TestFleetRolloutIgnoresUnverifiedBuildsOnPostgres(t *testing.T) {
+	s, store, suffix := fleetSeed(t)
+	ctx := context.Background()
+	read := func() (FleetRollout, FleetPoint) {
+		t.Helper()
+		if err := s.SnapshotFleet(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var found FleetRollout
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			ro, err := s.readFleetRollouts(ctx, tx)
+			for _, r := range ro.Rollouts {
+				if r.Version == "2099.2.1.1" {
+					found = r
+				}
+			}
+			return err
+		}); err != nil || len(found.Series) == 0 {
+			t.Fatalf("rollout %+v: %v", found, err)
+		}
+		return found, found.Series[len(found.Series)-1]
+	}
+	before, beforeToday := read()
+	user := "usr_fleet_" + suffix
+	for i, claim := range []string{"2099.2.1.1", "2098.1.1.1"} { // claims the release / an older version
+		id := fmt.Sprintf("host-fleet-forged%d-%s", i, suffix)
+		if _, err := store.Pool().Exec(ctx, `INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,alias,reporter_version,reporter_sha256,online,last_seen_at)
+ VALUES($1,$2,$1,'linux','amd64','/workspace','online','occupied',$3,$4,$5,true,now())`, id, user, id, claim, fleetHash("forged")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Pool().Exec(ctx, `INSERT INTO user_machine_update_observations(user_machine_id,environment_id,schema,current_version,target_version,channel,state,error_code,operation_id,installation_generation,worker_generation,os_boot_id,rollback_count,observed_at,payload_hash)
+ VALUES($1,$1,'test.fleet/v1',$2,'2099.2.1.1','stable','failed','signature_invalid','operation-'||$1,1,1,'boot',0,now(),decode(repeat('00',32),'hex'))`, id, claim); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, afterToday := read()
+	if after.Updated != before.Updated || after.Older != before.Older || after.Failed != before.Failed {
+		t.Errorf("unverified builds moved the rollout: updated %d->%d older %d->%d failed %d->%d", before.Updated, after.Updated, before.Older, after.Older, before.Failed, after.Failed)
+	}
+	if after.Other != before.Other+2 {
+		t.Errorf("other = %d, want %d (both unverified builds have no order)", after.Other, before.Other+2)
+	}
+	if afterToday.Updated != beforeToday.Updated || afterToday.Total != beforeToday.Total {
+		t.Errorf("today's chart point %+v -> %+v: unverified builds must not be totalled or updated", beforeToday, afterToday)
+	}
+}
