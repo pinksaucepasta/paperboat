@@ -56,6 +56,28 @@ class PrePushTest(unittest.TestCase):
         self.assertEqual(git(self.repo, "symbolic-ref", "--short", "HEAD"), "main")
         self.assertEqual(git(self.repo, "status", "--porcelain"), "")
 
+    def docs_package(self):
+        # Stands in for cli/cmd/pb: its TestCLIReference fails while docs/stale exists.
+        self.write("cli/cmd/pb/pb.go", "package main\n\nfunc main() {}\n")
+        self.write("cli/cmd/pb/docs_test.go", 'package main\n\nimport ("os"; "testing")\n\nfunc TestCLIReference(t *testing.T) {\n\tif _, err := os.Stat("../../../docs/stale"); err == nil {\n\t\tt.Fatal("missing or stale; run make cli-docs")\n\t}\n}\n')
+        self.write("docs/stale", "x\n")
+        return self.commit("docs package")
+
+    def test_help_text_changed_without_regenerated_docs_is_refused_before_push(self):
+        base = self.docs_package()
+        self.write("cli/cmd/pb/pb.go", "package main\n\nfunc main() { _ = \"new help\" }\n")
+        head = self.commit("change help")
+        result = self.push(head, base)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("TestCLIReference failed; run `make cli-docs`", result.stderr)
+
+    def test_the_docs_test_does_not_run_for_other_packages(self):
+        base = self.docs_package()
+        self.write("cli/a/b.go", "package a\n\nfunc B() int { return A() }\n")
+        head = self.commit("add b")
+        result = self.push(head, base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_a_commit_that_builds_passes(self):
         self.write("cli/a/b.go", "package a\n\nfunc B() int { return A() }\n")
         head = self.commit("add b")

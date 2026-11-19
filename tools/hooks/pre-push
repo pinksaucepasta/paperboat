@@ -16,6 +16,9 @@ from pathlib import Path
 ZERO = "0" * 40
 MODULES = ("cli", "relay", "edge", "server", "helper", "shared")
 TIMEOUT = 600
+# Generated docs that a change to a package's non-test Go files can leave stale; the test regenerates them in memory and
+# compares (`make cli-docs` rewrites them). It only failed in CI before, when help text changed without the docs.
+DOC_TESTS = {"cli": ("cmd/pb", "TestCLIReference")}
 
 
 # Git runs hooks with GIT_DIR (and in worktrees GIT_INDEX_FILE etc.) naming the pushing checkout.
@@ -142,6 +145,13 @@ def check(commit, modules, paths):
                 code, output = run(["go", "vet", *vettable], tree / module)
                 if code:
                     failures.append(f"{module}: go vet failed\n{output}")
+            if len(failures) == before and module in DOC_TESTS:
+                directory, name = DOC_TESTS[module]
+                changed = paths is None or any(p.startswith(f"{module}/{directory}/") and p.endswith(".go") and not p.endswith("_test.go") for p in paths)
+                if changed and (tree / module / directory).is_dir():
+                    code, output = run(["go", "test", "-count=1", "-run", f"^{name}$", "./" + directory], tree / module)
+                    if code:
+                        failures.append(f"{module}: {name} failed; run `make cli-docs` and commit the docs\n{output}")
             if module == "cli" and os.environ.get("PB_PREPUSH_CROSS") == "1":
                 for goos in ("darwin", "windows"):
                     code, output = run(["go", "build", "./..."], tree / module, dict(os.environ, GOOS=goos, CGO_ENABLED="0"))
