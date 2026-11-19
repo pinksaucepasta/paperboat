@@ -198,7 +198,7 @@ def checks(args):
     for name in ('status_bar_lifecycle', 'completion_lifecycle', 'bugreport_lifecycle', 'inventory_freshness',
                  'session_limit', 'doctor_lifecycle'):  # inventory-freshness renames the peer and back
         table[name.replace('_lifecycle', '').replace('_', '-')] = ([name + '.py', peer], ['--peer'])
-    for name in ('config_customize', 'cli_paging', 'network_inventory', 'update_observation', 'approve_refusals'):
+    for name in ('config_customize', 'cli_paging', 'network_inventory', 'approve_refusals'):
         table[name.replace('_', '-')] = ([name + '.py'], [])
     table['machine-tags'] = (['machine_tags.py', '--owner-cmd', winhost.WINDOWS, '--target', peer], ['--peer'])
     table['free-plan'] = (['free_plan.py', args.machine], ['--machine'])  # the device account must be a Free account
