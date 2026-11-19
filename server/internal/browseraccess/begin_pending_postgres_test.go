@@ -95,7 +95,7 @@ func TestBeginUnknownNameIsADeniedSignInPostgres(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() }) // the first cleanup runs last: later cleanups still use store
 	ctx := context.Background()
 	if e := db.Migrate(ctx, store); e != nil {
 		t.Fatal(e)

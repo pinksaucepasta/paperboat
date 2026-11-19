@@ -154,7 +154,7 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 	}
 	service.SetSigner(signer)
 	server := httptest.NewTLSServer(service.Handler())
-	defer server.Close()
+	t.Cleanup(func() { server.Close() }) // the first cleanup runs last: later cleanups still use server
 	transport := server.Client().Transport.(*http.Transport).Clone()
 	transport.MaxIdleConns = machines
 	transport.MaxIdleConnsPerHost = machines

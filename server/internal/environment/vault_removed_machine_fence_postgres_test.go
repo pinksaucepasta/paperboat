@@ -26,7 +26,7 @@ func TestRemovingAMachineLeavesEveryDeliveryAndKeyUntouchedPostgres(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() }) // the first cleanup runs last: later cleanups still use store
 	setup, cancelSetup := context.WithTimeout(context.Background(), 5*time.Minute)
 	err = db.Migrate(setup, store)
 	cancelSetup()

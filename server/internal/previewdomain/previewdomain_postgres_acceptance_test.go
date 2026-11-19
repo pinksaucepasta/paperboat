@@ -44,7 +44,7 @@ func TestPreviewDomainAtomicLifecycleOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() { database.Close() }) // the first cleanup runs last: later cleanups still use database
 	if err := db.Migrate(ctx, database); err != nil {
 		t.Fatal(err)
 	}

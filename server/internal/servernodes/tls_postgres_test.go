@@ -58,7 +58,7 @@ func TestRegionalCertificateIssueStoreAndServeOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() }) // the first cleanup runs last: later cleanups still use store
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
 	}
