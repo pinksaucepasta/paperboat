@@ -4,6 +4,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -32,5 +33,34 @@ func TestWindowsCarrierDeclarationBindsAccount(t *testing.T) {
 	other[5] = "fedcba9876543210fedcba9876543210"
 	if windowsServiceArgumentsMatch(name, foreign) || windowsServiceArgumentsMatch(name, other) || windowsServiceBaseNameFromName(name+"-extra") != "" || windowsServiceBaseNameFromName("PaperboatCarrier-"+instance) != "" {
 		t.Fatal("foreign account, another generation's command or a malformed carrier name admitted")
+	}
+}
+
+// Windows: a carrier declaration published by official 2026.11.19.0 carries the service name as its display name; the new
+// render says "Paperboat (carrier)", and the byte comparison refused every install over it (victus, 2026-11-19).
+func TestWindowsNewBuildVerifiesTheDeclarationThePreviousBuildPublished(t *testing.T) {
+	instance := "u0123456789abcdef01234567"
+	generation := "0123456789abcdef0123456789abcdef"
+	cfg := Config{Platform: "windows", Kind: CarrierKind, Instance: instance, Generation: generation, Executable: `C:\Program Files\Paperboat\users\` + instance + `\releases\versions\2026.10.12.1\pb.exe`, User: "Paperboat", Arguments: []string{"daemon", "__runtime-carrier", "--instance", instance, "--generation", generation}}
+	body, err := renderWindowsService(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var definition windowsServiceDefinition
+	if err := json.Unmarshal(body, &definition); err != nil {
+		t.Fatal(err)
+	}
+	definition.DisplayName = definition.Name // what the previous build wrote
+	previous, err := json.MarshalIndent(definition, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publishedBy(t, cfg, string(previous)).VerifyPublishedDefinition(); err != nil {
+		t.Fatalf("the previous build's declaration was refused: %v", err)
+	}
+	definition.Executable = `C:\evil.exe`
+	other, _ := json.MarshalIndent(definition, "", "  ")
+	if err := publishedBy(t, cfg, string(other)).VerifyPublishedDefinition(); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("a declaration for another executable was accepted: %v", err)
 	}
 }

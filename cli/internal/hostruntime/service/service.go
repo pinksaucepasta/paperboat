@@ -3,12 +3,15 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -433,10 +436,58 @@ func (i *Installer) VerifyPublishedDefinition() error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(actual, want) {
+	if !sameDefinition(actual, want) {
 		return ErrInvalidDefinition
 	}
 	return nil
+}
+
+// cosmeticDefinitionFields are what the Services app shows for a Windows service; they carry no identity or behavior.
+var cosmeticDefinitionFields = []string{"display_name", "description"}
+
+// tunedUnitOptions are systemd limits a build may change between releases without changing what the unit runs
+// (252b2ada1's neighbour 4c188a9f6 moved WatchdogSec 30s -> 300s and added TimeoutAbortSec).
+var tunedUnitOptions = []string{"WatchdogSec", "TimeoutAbortSec"}
+
+// sameDefinition is whether a published declaration is the one want renders. A declaration written by an earlier build differs
+// from the current render in cosmetic or tuned fields only (the Windows display labels, the systemd watchdog limits), and every
+// install over such a build failed "invalid service definition" in the carrier check; those fields are not compared. Everything
+// else (executable, arguments, account, environment) still is; a launchd plist compares byte for byte.
+func sameDefinition(actual, want []byte) bool {
+	if bytes.Equal(actual, want) {
+		return true
+	}
+	return sameJSONDefinition(actual, want) || sameUnitDefinition(actual, want)
+}
+
+func sameJSONDefinition(actual, want []byte) bool {
+	var left, right map[string]any
+	if json.Unmarshal(actual, &left) != nil || json.Unmarshal(want, &right) != nil {
+		return false
+	}
+	for _, field := range cosmeticDefinitionFields {
+		delete(left, field)
+		delete(right, field)
+	}
+	return reflect.DeepEqual(left, right)
+}
+
+func sameUnitDefinition(actual, want []byte) bool {
+	left, leftErr := unit.Deserialize(bytes.NewReader(actual))
+	right, rightErr := unit.Deserialize(bytes.NewReader(want))
+	if leftErr != nil || rightErr != nil || len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	strip := func(options []*unit.UnitOption) []*unit.UnitOption {
+		kept := options[:0:0]
+		for _, option := range options {
+			if option.Section != "Service" || !slices.Contains(tunedUnitOptions, option.Name) {
+				kept = append(kept, option)
+			}
+		}
+		return kept
+	}
+	return unit.AllMatch(strip(left), strip(right))
 }
 
 // VerifyDefinitionNames accepts a declaration, whichever build rendered it, that names

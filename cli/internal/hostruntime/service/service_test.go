@@ -694,3 +694,20 @@ func TestSystemdUpdaterYieldsToInteractiveRuntime(t *testing.T) {
 		}
 	}
 }
+
+// Every Windows install over a build older than 252b2ada1 failed "invalid service definition" at the carrier check: the published
+// declaration carried the service name as its display name, the new render "Paperboat (<role>)", and the check compared bytes.
+func TestPublishedDefinitionIgnoresItsDisplayLabels(t *testing.T) {
+	old := []byte(`{"schema":"paperboat.windows-service/v1","name":"PaperboatCarrier-u1-g1","display_name":"PaperboatCarrier-u1-g1","description":"Paperboat independent native carrier","executable":"C:\\pb.exe","arguments":["__carrier"]}`)
+	current := []byte(`{"schema":"paperboat.windows-service/v1","name":"PaperboatCarrier-u1-g1","display_name":"Paperboat (carrier)","description":"Paperboat independent native carrier","executable":"C:\\pb.exe","arguments":["__carrier"]}`)
+	if !sameDefinition(old, current) {
+		t.Fatal("a declaration that differs only in its display labels was refused")
+	}
+	other := []byte(`{"schema":"paperboat.windows-service/v1","name":"PaperboatCarrier-u1-g1","display_name":"Paperboat (carrier)","description":"x","executable":"C:\\other.exe","arguments":["__carrier"]}`)
+	if sameDefinition(old, other) {
+		t.Fatal("a declaration for another executable was accepted")
+	}
+	if sameDefinition([]byte("[Service]\nExecStart=/a\n"), []byte("[Service]\nExecStart=/b\n")) {
+		t.Fatal("different unit files were accepted")
+	}
+}
