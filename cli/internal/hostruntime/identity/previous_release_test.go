@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
@@ -16,11 +17,14 @@ func TestLoadsIdentityWrittenByPreviousRelease(t *testing.T) {
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	inbox := t.TempDir()
 	for _, name := range []string{"machine-identity.json", "machine-registration.json", "network-fingerprint-secret.json"} {
 		raw, err := os.ReadFile(filepath.Join("testdata", "2026.11.16.2-"+name))
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The fixture's inbox path is a Unix one; the previous release wrote the machine's own absolute path.
+		raw = bytes.ReplaceAll(raw, []byte("/home/fixture/inbox"), []byte(strings.ReplaceAll(filepath.Join(inbox, "inbox"), `\`, `\\`)))
 		atomicfiletest.WriteOwnerOnly(t, filepath.Join(root, name), raw)
 	}
 	store, err := Open(Config{StateRoot: root})
