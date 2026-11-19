@@ -49,8 +49,10 @@ type Config struct {
 		Admit(context.Context, string, string, string) (control.BrowserTerminalAdmission, error)
 	}
 	BrowserTerminalHub *BrowserTerminalHub
-	// Throttles holds the browser terminals' per-workspace cap (the registry's; nil paces nothing).
+	// Throttles holds the browser terminals' per-workspace cap and the allowance's bucket for their file transfers (the registry's; nil
+	// paces nothing). RuntimeUsage counts the file transfers (nil counts nothing).
 	Throttles                *Throttles
+	RuntimeUsage             IngressUsage
 	BrowserTerminalEdgeHost  string
 	InspectorAccess          *InspectorEdgeAccess
 	PreviewBaseDomain        string

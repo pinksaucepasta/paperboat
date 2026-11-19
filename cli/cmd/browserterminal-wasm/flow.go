@@ -13,6 +13,8 @@ type terminalWrite struct {
 	kind     byte
 	payloads [][]byte
 	bytes    int
+	// file marks a file-transfer request: its TLS records leave under terminalprotocol.BrowserFileEnvelope.
+	file bool
 }
 
 // Bytes remain reserved through the active write, so a slow socket cannot

@@ -37,18 +37,18 @@ func TestCappedTerminalKeepsInteractiveFramesResponsiveAndHoldsTheRate(t *testin
 	go func() {
 		// Eight 16 KiB bulk frames at once (a program dumping output), then, while the pacer waits on them, interactive frames.
 		for range 8 {
-			in <- bulk
+			in <- terminalFrame{payload: bulk}
 		}
 	}()
 	var echoSent []time.Time
 	for i := range 4 {
 		time.Sleep(200 * time.Millisecond)
 		echoSent = append(echoSent, time.Now())
-		in <- make([]byte, 40+i) // an echoed keystroke or a resize
+		in <- terminalFrame{payload: make([]byte, 40+i)} // an echoed keystroke or a resize
 	}
 	// More bulk follows: what was released early for the echoes is repaid here, so the whole dump still runs at the throttled rate.
 	for range 8 {
-		in <- bulk
+		in <- terminalFrame{payload: bulk}
 	}
 	close(in)
 	<-done
@@ -100,7 +100,7 @@ func TestUnthrottledTerminalIsNotPaced(t *testing.T) {
 	})
 	started := time.Now()
 	for range 20 {
-		in <- make([]byte, 64<<10)
+		in <- terminalFrame{payload: make([]byte, 64<<10)}
 	}
 	close(in)
 	<-done
@@ -132,7 +132,7 @@ func TestTerminalSessionsOfAWorkspaceShareOneCapBucket(t *testing.T) {
 		})
 		started := time.Now()
 		for range frames {
-			in <- make([]byte, 16<<10)
+			in <- terminalFrame{payload: make([]byte, 16<<10)}
 		}
 		close(in)
 		<-done
@@ -173,12 +173,12 @@ func TestKeystrokeIsNotQueuedBehindABulkUpload(t *testing.T) {
 	})
 	go func() {
 		for range 6 {
-			in <- make([]byte, 32<<10) // an upload far above the cap: seconds of tokens
+			in <- terminalFrame{payload: make([]byte, 32<<10)} // an upload far above the cap: seconds of tokens
 		}
 	}()
 	time.Sleep(300 * time.Millisecond)
 	key = time.Now()
-	in <- []byte("ls\n")
+	in <- terminalFrame{payload: []byte("ls\n")}
 	select {
 	case at := <-arrived:
 		if delay := at.Sub(key); delay > 100*time.Millisecond {
@@ -190,4 +190,62 @@ func TestKeystrokeIsNotQueuedBehindABulkUpload(t *testing.T) {
 	cancel()
 	workers.Wait()
 	_ = done
+}
+
+// A file transfer through the terminal counts toward the workspace's allowance and is slowed by it past the allowance; typing is
+// neither counted nor slowed by it. The browser marks the records of its file-transfer requests (the edge cannot read the encrypted
+// stream); the allowance's bucket is a separate entry from the terminal's cap, so only marked frames meet it.
+func TestTerminalFileTransferCountsAndIsSlowedPastTheAllowanceTypingIsNot(t *testing.T) {
+	throttles := newThrottles()
+	const host = "machine.runtime.example.test"
+	throttles.Set([]connectorprotocol.IngressThrottle{
+		{Hostname: host, Workspace: "personal:one", BytesPerSecond: 10 << 20, Terminal: true}, // the anti-abuse cap, far above the test's rate
+		{Hostname: "files:" + host, Workspace: "personal:one", BytesPerSecond: 64 << 10},      // the workspace past its allowance
+	})
+	run := func(frames []terminalFrame) (elapsed time.Duration, counted int) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		var workers sync.WaitGroup
+		pacing := terminalPacing{throttles: throttles, host: host, fileHost: "files:" + host, fileBytes: func(n int) { counted += n }}
+		in, done := pacing.start(ctx, &workers, func(err error) { t.Errorf("pacing failed: %v", err) }, func([]byte) error { return nil })
+		started := time.Now()
+		for _, f := range frames {
+			in <- f
+		}
+		close(in)
+		<-done
+		workers.Wait()
+		return time.Since(started), counted
+	}
+	// 192 KiB of marked upload records at 64 KiB/s (32 KiB burst): at least 2.5 s, and every byte counted.
+	var upload []terminalFrame
+	for range 12 {
+		upload = append(upload, terminalFrame{payload: make([]byte, 16<<10), file: true})
+	}
+	elapsed, counted := run(upload)
+	if counted != 192<<10 || elapsed < 2*time.Second {
+		t.Fatalf("upload: %d bytes counted in %v, want all 192 KiB counted and slowed to the allowance's rate", counted, elapsed)
+	}
+	// Typing and output (unmarked, however large) are never counted and never meet the allowance's bucket.
+	var typing []terminalFrame
+	for range 12 {
+		typing = append(typing, terminalFrame{payload: make([]byte, 16<<10)}, terminalFrame{payload: []byte("ls\n")})
+	}
+	elapsed, counted = run(typing)
+	if counted != 0 || elapsed > 500*time.Millisecond {
+		t.Fatalf("typing and output: %d bytes counted in %v, want none counted and no slowdown", counted, elapsed)
+	}
+}
+
+// The edge tells the browser's file-transfer records from the rest by the marker byte alone and strips it like the TLS marker.
+func TestBrowserTerminalFileMarkerIsRecognised(t *testing.T) {
+	if record, file, err := browserTerminalTLSMessagePayload([]byte{browserTerminalFileDiscriminator, 7, 8}); err != nil || !file || string(record) != string([]byte{7, 8}) {
+		t.Fatalf("file record = %v %v %v", record, file, err)
+	}
+	if record, file, err := browserTerminalTLSMessagePayload([]byte{browserTerminalTLSDiscriminator, 7, 8}); err != nil || file || string(record) != string([]byte{7, 8}) {
+		t.Fatalf("plain record = %v %v %v", record, file, err)
+	}
+	if _, _, err := browserTerminalTLSMessagePayload([]byte{browserTerminalSharedOutputDiscriminator, 7}); err == nil {
+		t.Fatal("a shared-output marker was accepted from the browser")
+	}
 }

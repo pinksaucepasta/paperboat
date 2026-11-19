@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/browserbroadcast"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 )
 
 func newBrowserWSConn(url string, protocols []string, depth int) (*browserWSConn, error) {
@@ -247,6 +248,10 @@ func (connection *browserWSConn) Write(data []byte) (written int, err error) {
 	bytesValue := js.Global().Get("Uint8Array").New(len(data) + 1)
 	wrapped := make([]byte, len(data)+1)
 	copy(wrapped[1:], data)
+	if connection.fileRecords.Load() {
+		// The edge cannot read the stream; this marker is how it tells a file upload's records (counted toward the allowance) from typing.
+		wrapped[0] = terminalprotocol.BrowserFileEnvelope
+	}
 	if js.CopyBytesToJS(bytesValue, wrapped) != len(wrapped) {
 		return 0, errors.New("TLS record could not be copied to WebSocket")
 	}

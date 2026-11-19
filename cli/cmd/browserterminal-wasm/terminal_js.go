@@ -727,11 +727,14 @@ func (connection *browserTerminal) writeLoop(writer io.Writer, ws *browserWSConn
 		case item := <-connection.writes.items:
 			var err error
 			if !connection.stopping.Load() {
+				// Only this loop writes application frames, so the marker holds for exactly this item's records.
+				ws.fileRecords.Store(item.file)
 				for _, payload := range item.payloads {
 					if err = writeApplicationFrame(writer, item.kind, payload); err != nil {
 						break
 					}
 				}
+				ws.fileRecords.Store(false)
 			}
 			connection.writes.release(item)
 			if err != nil {

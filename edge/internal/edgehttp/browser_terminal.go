@@ -16,15 +16,22 @@ const (
 	// browserTerminalLaggedDiscriminator alone tells the browser its shared output was dropped behind a flood:
 	// it asks the host for a fresh screen on its stream and keeps the connection.
 	browserTerminalLaggedDiscriminator byte = 0x02
+	// browserTerminalFileDiscriminator, browser to edge only, marks a TLS record the browser wrote for a FILE transfer request (an upload
+	// to the machine's Inbox). The records are as opaque as any other (the edge never decrypts); the marker is the browser's own, set
+	// by its writer for the one kind of request it sends for file transfers. The edge counts and paces what carries it with the
+	// workspace's allowance, and strips it like the TLS marker. Limit: a modified browser can send file bytes unmarked; they still pass
+	// through the terminal cap, so nothing goes through faster than that.
+	browserTerminalFileDiscriminator byte = terminalprotocol.BrowserFileEnvelope
 )
 
 var ErrBrowserTerminalMessage = errors.New("invalid browser terminal message")
 
-func browserTerminalTLSMessagePayload(message []byte) ([]byte, error) {
-	if len(message) < 2 || len(message) > browserTerminalMaxRecordBytes+1 || message[0] != browserTerminalTLSDiscriminator {
-		return nil, ErrBrowserTerminalMessage
+// browserTerminalTLSMessagePayload returns the TLS record of a browser message and whether the browser marked it as a file transfer's.
+func browserTerminalTLSMessagePayload(message []byte) (record []byte, file bool, err error) {
+	if len(message) < 2 || len(message) > browserTerminalMaxRecordBytes+1 || (message[0] != browserTerminalTLSDiscriminator && message[0] != browserTerminalFileDiscriminator) {
+		return nil, false, ErrBrowserTerminalMessage
 	}
-	return message[1:], nil
+	return message[1:], message[0] == browserTerminalFileDiscriminator, nil
 }
 
 func browserTerminalSharedOutputMessagePayload(record []byte) ([]byte, error) {
