@@ -38,7 +38,7 @@ const faq = [
   compare={["tailscale", "ngrok", "netbird"]}
 >
   <p slot="lede">Run the servers that carry your traffic on a Linux box of your own. Traffic through them never counts against your plan.</p>
-  <Term slot="aside" title="your server" lines={["$ curl -fsSL \\", `    ${selfhostInstallUrl} \\`, "    | sh -s -- --enable both", "$ pbh selfhost code"]} />
+  <Term slot="aside" title="your server" lines={["$ curl -fsSL \\", `    ${selfhostInstallUrl} \\`, "    | sh -s -- --both", "$ pbh selfhost code"]} />
 
   <Beat id="relay-title" title="Your relay">
     <p>When two of your machines can't connect directly, they meet at your server instead of ours. It still sees only encrypted traffic.</p>

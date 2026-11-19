@@ -4,10 +4,11 @@ Ubuntu 22.04/24.04 or Debian 12 on amd64/arm64, systemd and public inbound conne
 first; no account, team, or global scope is assigned by installation.
 
 ```sh
-curl -fsSL https://get.pprbt.dev/selfhost | sh
-# Choose tunnel or both instead of the default relay:
-curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable tunnel
-curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable both
+curl -fsSL https://get.pprbt.dev/selfhost | sh                              # asks what to run (relay, edge or both)
+# Without a terminal, say what to run; nothing else is required:
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --relay
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --edge
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --both
 ```
 
 The installer is one fixed script. It finds the newest `selfhost-<version>` GitHub release, downloads the package
@@ -53,7 +54,7 @@ For public browser HTTPS on the enrolled endpoint hostname, provide a valid
 browser-trusted certificate and owner-only private key during tunnel installation:
 
 ```sh
-pbh install --enable tunnel --endpoint-host edge.customer.example \
+pbh install --edge --endpoint-host edge.customer.example \
   --https-cert /etc/paperboat/edge-fullchain.pem \
   --https-key /etc/paperboat/edge-key.pem
 ```

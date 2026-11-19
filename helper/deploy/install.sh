@@ -19,6 +19,34 @@ esac
 # A missing download tool is an error that says what to install (Tailscale scripts/installer.sh 399-407).
 command -v curl >/dev/null 2>&1 || { echo 'The installer needs curl to download files.' >&2; echo 'Please install curl to proceed.' >&2; exit 1; }
 for tool in tar sha256sum install systemctl timeout; do command -v "$tool" >/dev/null 2>&1 || { echo "Required tool unavailable: $tool" >&2; exit 1; }; done
+# Choose what to run before anything is downloaded or changed. Stdin is the pipe from curl, so the
+# questions go to the terminal, as rustup-init.sh does. Nothing else is required: the host's public
+# address is detected and the claim code is printed at the end.
+install_url=https://get.pprbt.dev/selfhost
+components=0
+for arg in "$@"; do
+ case "$arg" in
+  --relay|--edge|--both) components=$((components + 1));;
+  --enable|--enable=*) echo 'The --enable flag no longer exists; use --relay, --edge or --both.' >&2; exit 2;;
+ esac
+done
+if [ "$components" -gt 1 ]; then echo 'Choose only one of --relay, --edge and --both.' >&2; exit 2; fi
+# An existing installation keeps its components, so upgrades ask nothing.
+if [ "$components" -eq 0 ] && ! systemctl cat paperboat-selfhost.service >/dev/null 2>&1; then
+ if ! (: </dev/tty) 2>/dev/null; then
+  echo 'Choose what to run on this host. Run the installer again with one of these flags:' >&2
+  for flag in relay edge both; do echo "  curl -fsSL $install_url | sh -s -- --$flag" >&2; done
+  exit 2
+ fi
+ printf 'What should this host run?\n  1) Relay - carries your machines'"'"' connections when they cannot connect directly\n  2) Edge  - serves your previews and tunnels\n  3) Both\n' >&2
+ printf 'Choose 1-3 [3]: ' >&2
+ read -r answer </dev/tty || answer=''
+ case "$answer" in 1) choice=relay; what='a relay';; 2) choice=edge; what='an edge';; 3|'') choice=both; what='a relay and an edge';; *) echo 'Invalid choice; installation unchanged.' >&2; exit 2;; esac
+ printf 'Install %s on this host? [Y/n] ' "$what" >&2
+ read -r answer </dev/tty || answer=''
+ case "$answer" in ''|y|Y|yes|YES) ;; *) echo 'Installation cancelled; nothing changed.' >&2; exit 1;; esac
+ set -- "--$choice" "$@"
+fi
 # Root helper found like NetBird's installer (release_files/install.sh 25-30): sudo, else doas, unless already root.
 elevate=
 if [ "$(id -u)" -ne 0 ]; then

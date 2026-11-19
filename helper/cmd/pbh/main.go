@@ -193,7 +193,9 @@ func elevated(ctx context.Context, args []string, out io.Writer) error {
 func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	enable := fs.String("enable", "relay", "relay, tunnel, or both")
+	fs.Bool("relay", false, "run a relay (the default)")
+	fs.Bool("edge", false, "run an edge for previews and tunnels")
+	fs.Bool("both", false, "run a relay and an edge")
 	fs.String("endpoint-host", "", "public IP or DNS name (auto-detected when omitted)")
 	fs.String("name", "", "installation name")
 	fs.String("region", "selfhost", "selection region")
@@ -220,8 +222,9 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	if fs.NArg() != 0 {
 		return commandError("unexpected install arguments")
 	}
-	if *enable != "relay" && *enable != "tunnel" && *enable != "both" {
-		return commandError("--enable must be relay, tunnel, or both")
+	enable, err := selectedMode(fs)
+	if err != nil {
+		return err
 	}
 	if err := containers.CheckHost(); err != nil {
 		return fmt.Errorf("%w: %w", commandError("unsupported self-host operating system"), err)
@@ -242,7 +245,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		return err
 	}
 	if existing {
-		*enable = installationMode(c)
+		enable = installationMode(c)
 	}
 	// A first install that fails before its runtime starts leaves no state
 	// behind; once the runtime is installed, failures keep the installation.
@@ -253,7 +256,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		}
 	}()
 	images := containers.Images{Relay: *relayImage, Edge: *edgeImage}
-	selected := strings.Split(strings.ReplaceAll(*enable, "both", "relay,tunnel"), ",")
+	selected := strings.Split(strings.ReplaceAll(enable, "both", "relay,tunnel"), ",")
 	for _, capability := range selected {
 		if _, err := images.Image(capability); err != nil {
 			return fmt.Errorf("%w: %w", commandError("configure the selected runtime image; use the release installer"), err)
@@ -268,7 +271,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		}
 	}
 	if !existing {
-		c, err = freshInstallConfig(ctx, fs)
+		c, err = freshInstallConfig(ctx, fs, enable)
 		if err != nil {
 			return err
 		}
@@ -300,7 +303,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		return nil
 	}
 	fmt.Fprintln(out, "Paperboat self-host installed. No account or workspace is assigned yet.")
-	if (*enable == "tunnel" || *enable == "both") && c.PublicHTTPSCertFile == "" {
+	if (enable == "tunnel" || enable == "both") && c.PublicHTTPSCertFile == "" {
 		fmt.Fprintln(out, "Browser HTTPS requires a certificate trusted by your clients covering --endpoint-host. Configure it with pbh configure-tls --https-cert /absolute/fullchain.pem --https-key /absolute/private-key.pem; the private key needs owner-only permissions.")
 	}
 	return run(ctx, []string{"selfhost", "code", "--state-dir", *dir}, out)
