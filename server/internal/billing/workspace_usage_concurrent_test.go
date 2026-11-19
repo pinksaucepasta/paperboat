@@ -56,4 +56,75 @@ func TestWorkspaceUsageFirstReportsOfAPeriodAtOnce(t *testing.T) {
 	if periods != 1 || observed != edges*bytes {
 		t.Fatalf("periods=%d observed=%d, want 1 and %d", periods, observed, edges*bytes)
 	}
+	t.Run("admission leaves the period row unchanged for a concurrent overview", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		before := store.TransactionStats()
+		ready, release := make(chan int32, 1), make(chan struct{})
+		admission := make(chan error, 1)
+		go func() {
+			admission <- store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+				if _, err := service.CheckWorkspaceBandwidthTx(ctx, tx, personal, time.Now().UTC()); err != nil {
+					return err
+				}
+				var pid int32
+				if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+					return err
+				}
+				ready <- pid
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+		}()
+		var pid int32
+		select {
+		case pid = <-ready:
+		case err := <-admission:
+			t.Fatalf("admission did not hold the workspace lock: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		overview := make(chan error, 1)
+		go func() {
+			w, err := service.Overview(ctx, user, "")
+			if err == nil && w.UsageBytes != observed {
+				err = fmt.Errorf("overview usage = %d, want %d", w.UsageBytes, observed)
+			}
+			overview <- err
+		}()
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			var waiting bool
+			if err := store.Pool().QueryRow(ctx, `SELECT EXISTS(
+SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+			if waiting {
+				break
+			}
+			select {
+			case err := <-overview:
+				t.Fatalf("overview finished while admission held the workspace lock: %v", err)
+			case <-ticker.C:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+		close(release)
+		if err := <-admission; err != nil {
+			t.Fatal(err)
+		}
+		if err := <-overview; err != nil {
+			t.Fatal(err)
+		}
+		if retries := store.TransactionStats().Serializable.Retries - before.Serializable.Retries; retries != 0 {
+			t.Fatalf("workspace overview retried %d transaction attempts (40001/40P01)", retries)
+		}
+	})
+
 }
