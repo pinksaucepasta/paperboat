@@ -16,8 +16,7 @@ export const featureGroups: { title: string; rows: { feature: string; cells: [Pl
   {
     title: "Limits",
     rows: [
-      { feature: "Edge bandwidth (previews, tunnels)", cells: [`${plans[0].bandwidth}/mo`, `${plans[1].bandwidth}/mo`, `${plans[2].bandwidth.replace(" a seat", "")}/mo a seat`] },
-      { feature: "Relay bandwidth", cells: [`${plans[0].bandwidth}/mo at ${speeds.relay}`, `${plans[1].bandwidth}/mo at ${speeds.relay}`, `${plans[2].bandwidth.replace(" a seat", "")}/mo a seat at ${speeds.relay}`] },
+      { feature: `Edge and relay bandwidth, combined (relays up to ${speeds.relay})`, cells: [`${plans[0].bandwidth}/mo`, `${plans[1].bandwidth}/mo`, `${plans[2].bandwidth.replace(" a seat", "")}/mo a seat`] },
       { feature: "After that", cells: [speeds.after[0], speeds.after[1], speeds.after[2]] },
       { feature: "Browser terminals", cells: ["Never slowed", "Never slowed", "Never slowed"] },
       { feature: "Your own edges and relays", cells: ["Unlimited", "Unlimited", "Unlimited"] },
@@ -77,7 +76,7 @@ export const faq = [
   },
   {
     q: "What happens when I use all my bandwidth?",
-    a: `Nothing stops. Traffic through our edges and relays is slowed to ${speeds.after[0]} on Free, or ${speeds.after[1]} on Pro and Team, until the month resets. Browser terminals and direct traffic are never slowed. On a paid plan you can add ${topUp.size} for ${topUp.price}.`,
+    a: `Nothing stops. Traffic through our edges and relays is slowed to ${speeds.after[0]} on Free, or ${speeds.after[1]} on Pro and Team, until the month resets. Browser terminals and direct traffic are never slowed. On a paid plan you can add ${topUp.size} for ${topUp.price}. See <a href="/legal/acceptable-use/#fair-use">fair use</a>.`,
   },
   {
     q: "Are features locked behind a paid plan?",

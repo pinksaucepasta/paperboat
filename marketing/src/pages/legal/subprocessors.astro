@@ -1,0 +1,52 @@
+---
+import Legal from "../../layouts/Legal.astro"
+import Fact from "../../components/Fact.astro"
+
+const sections: [string, string][] = [
+  ["list", "Current list"],
+  ["changes", "Changes"],
+]
+// [provider, purpose, data] (confirmed 2026-11-19). Self-hosted GlitchTip runs on our own server and is not a subprocessor.
+const providers = [
+  ["Hetzner Online GmbH", "Hosting: control plane, relays, edges, diagnostics", "Data the service holds; relayed ciphertext; public link requests in transit"],
+  ["PlanetScale, Inc.", "Database", "Data the service stores"],
+  ["WorkOS, Inc.", "Sign-in and single sign-on", "Email, name, sign-in identifiers"],
+  ["Stripe, Inc.", "Payments and tax", "Billing details and payment card"],
+  ["Resend, Inc.", "Service email", "Recipient address and message"],
+  ["PostHog, Inc.", "Product analytics", "Pseudonymous usage events"],
+  ["Functional Software, Inc. (Sentry)", "Error reports, from about 2 December 2026", "Error details with content and secrets removed"],
+  ["Cloudflare, Inc.", "DNS for certificates", "Domain names"],
+  ["GitHub, Inc.", "pb downloads", "Network address of downloaders"],
+]
+---
+
+<Legal slug="subprocessors" description="The service providers that process personal data for Paperboat, and what each one does and receives." {sections}>
+  <p slot="intro">
+    These providers process personal data for us under contracts at least as protective as ours. None can read end-to-end encrypted traffic or
+    ENV values. We run servers in several regions around the world.
+  </p>
+
+  <section id="list">
+    <h2>Current list</h2>
+    <div class="scroll">
+      <table class="facts">
+        <thead><tr><th scope="col">Provider</th><th scope="col">Purpose</th><th scope="col">Data</th></tr></thead>
+        <tbody>
+          {providers.map(([provider, ...cells]) => <tr><th scope="row">{provider}</th>{cells.map((cell) => <td>{cell}</td>)}</tr>)}
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>We use no advertising networks, data brokers or AI providers.</p>
+    </div>
+  </section>
+
+  <section id="changes">
+    <h2>Changes</h2>
+    <div class="prose">
+      <p>
+        We update this page 30 days before a new provider starts and email paid workspace owners. Objections go to <Fact name="privacyEmail" />.
+      </p>
+    </div>
+  </section>
+</Legal>

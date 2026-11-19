@@ -1,7 +1,8 @@
-/** Every page meant to be found. Legal drafts and the 404 page are left out (they are noindex). */
+/** Every page meant to be found. Legal pages while a company fact is missing, and the 404 page, are left out (they are noindex). */
 import type { APIRoute } from "astro"
 import { features, useCases } from "../features"
 import { compares } from "../compare-data"
+import { legalDraft, legalPages } from "../legal-data"
 
 export const paths = [
   "/",
@@ -15,6 +16,7 @@ export const paths = [
   "/docs/",
   "/docs/put-any-server-behind-paperboat/",
   "/report-abuse/",
+  ...(legalDraft ? [] : legalPages.map((page) => `/legal/${page.slug}/`)),
 ]
 
 export const GET: APIRoute = ({ site }) => {

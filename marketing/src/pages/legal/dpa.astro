@@ -1,0 +1,89 @@
+---
+import Legal from "../../layouts/Legal.astro"
+import Fact from "../../components/Fact.astro"
+
+const sections: [string, string][] = [
+  ["scope", "Scope and roles"],
+  ["processing", "Processing"],
+  ["obligations", "Our commitments"],
+  ["subprocessors", "Subprocessors"],
+  ["transfers", "Transfers"],
+  ["end", "Deletion"],
+]
+---
+
+<Legal slug="dpa" description="How Paperboat processes personal data for teams under the GDPR: roles, duties, subprocessors and transfers." {sections}>
+  <p slot="intro">
+    This addendum is part of the <a href="/legal/terms/">Terms</a> for every team and any customer whose data protection law requires it. No
+    signature needed. For a countersigned copy, email <Fact name="privacyEmail" />.
+  </p>
+
+  <section id="scope">
+    <h2>1. Scope and roles</h2>
+    <div class="prose">
+      <p>
+        You are the controller of personal data you put into Paperboat; we are your processor and act only on your instructions (the Terms,
+        your settings and written requests). For our own account, billing and abuse data, we are controller under the
+        <a href="/legal/privacy/">Privacy Policy</a>. This addendum wins over the Terms on personal data.
+      </p>
+    </div>
+  </section>
+
+  <section id="processing">
+    <h2>2. Processing</h2>
+    <div class="prose">
+      <ul>
+        <li><strong>Purpose:</strong> providing Paperboat.</li>
+        <li><strong>Data subjects:</strong> your members, invitees, and users of your machines and links.</li>
+        <li><strong>Data:</strong> account identifiers and emails, roles, machine metadata, connection metadata and network addresses, audit events, usage, ENV names. ENV values, recordings and traffic are end-to-end encrypted.</li>
+        <li><strong>Duration:</strong> while you use the service.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="obligations">
+    <h2>3. Our commitments</h2>
+    <div class="prose">
+      <ul>
+        <li>We tell you if an instruction appears to break data protection law, and pause that processing until you confirm or change it.</li>
+        <li>Everyone with access is bound to confidentiality.</li>
+        <li>We keep the measures on the <a href="/security/">Security</a> page.</li>
+        <li>We help with data subject requests, impact assessments and consultations.</li>
+        <li>We answer audit questionnaires; an audit or inspection can be agreed in writing once a year, at your cost. We hold no certification such as SOC 2 yet.</li>
+        <li>We tell you of an authority's request for your data first, unless the law forbids it.</li>
+        <li>We notify you of a personal data breach within 48 hours of becoming aware of it.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="subprocessors">
+    <h2>4. Subprocessors</h2>
+    <div class="prose">
+      <p>
+        You authorise those on the <a href="/legal/subprocessors/">Subprocessors</a> page. We bind them to equal terms and remain responsible
+        for them. We give 30 days' notice of a new one; you may object, and if we cannot resolve it, end the affected service with a refund of
+        the unused prepaid part.
+      </p>
+    </div>
+  </section>
+
+  <section id="transfers">
+    <h2>5. Transfers</h2>
+    <div class="prose">
+      <p>
+        Transfers from the EU, EEA, UK or Switzerland to countries without adequacy use the Standard Contractual Clauses (2021/914, module two
+        or three, with the UK Addendum where needed), incorporated by reference, or the EU–US Data Privacy Framework.
+      </p>
+    </div>
+  </section>
+
+  <section id="end">
+    <h2>6. Deletion</h2>
+    <div class="prose">
+      <p>
+        When you delete the team or account, we delete the data as the <a href="/legal/privacy/#retention">Privacy Policy</a> says, except what
+        the law requires us to keep. Export audit events from the console's Activity page first.
+      </p>
+    </div>
+  </section>
+</Legal>

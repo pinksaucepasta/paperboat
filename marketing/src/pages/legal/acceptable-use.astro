@@ -1,0 +1,99 @@
+---
+import Legal from "../../layouts/Legal.astro"
+import Fact from "../../components/Fact.astro"
+import { fairUse, withBytes } from "../../legal-data"
+import { abuseMailbox } from "../../site"
+
+const sections: [string, string][] = [
+  ["prohibited", "Not allowed"],
+  ["fair-use", "Fair use"],
+  ["enforcement", "Enforcement"],
+  ["report", "Reporting abuse"],
+  ["copyright", "Copyright"],
+]
+---
+
+<Legal slug="acceptable-use" description="What Paperboat may not be used for, the fair-use limits on our relays and edges, and how we handle abuse." {sections}>
+  <p slot="intro">
+    This policy is part of the <a href="/legal/terms/">Terms</a>. You are responsible for what your account, machines, previews and tunnels
+    do.
+  </p>
+
+  <section id="prohibited">
+    <h2>Not allowed</h2>
+    <div class="prose">
+      <ul>
+        <li><strong>Illegal or harmful content:</strong> phishing, impersonation, malware, child sexual abuse material, infringement, spam, fraud, terrorism, harassment, or sharing private data without consent.</li>
+        <li><strong>Attacking others:</strong> unauthorised access or scanning, denial of service, open proxies or relays, hiding the source of traffic, or crypto mining on our servers. Testing systems you are allowed to test is fine.</li>
+        <li><strong>Gaming the free plan:</strong> multiple accounts to get more limits, sharing one account between people, or automated sign-ups.</li>
+        <li><strong>Using us as a CDN or file host:</strong> previews and tunnels are for apps and APIs on your machines, not for serving large downloads, media streams or public files at volume.</li>
+        <li><strong>Attacking Paperboat:</strong> accessing what is not yours, getting around limits, blocks or billing, overloading our servers, or reselling the hosted service. Report vulnerabilities privately (<a href="/security/#report">Security</a>).</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="fair-use">
+    <h2>Fair use</h2>
+    <div class="prose">
+      <p>Traffic through our edges and relays has a monthly amount at full speed, then a slower rate until the month resets. Nothing is cut off.</p>
+    </div>
+    <div class="scroll">
+      <table class="facts">
+        <thead><tr><th scope="col">Traffic</th><th scope="col">Free</th><th scope="col">Pro and Team (per seat)</th></tr></thead>
+        <tbody>
+          <tr>
+            <th scope="row">Edge and relay together (previews, tunnels, relayed connections)</th>
+            <td>{fairUse.free.allowance} a month, then {withBytes(fairUse.free.slow)}</td>
+            <td>{fairUse.paid.allowance} a month, then {withBytes(fairUse.paid.slow)}</td>
+          </tr>
+          <tr>
+            <th scope="row">Direct, or your own relays and edges</th>
+            <td>Unlimited</td>
+            <td>Unlimited</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>Before the allowance is used, relays run at up to {withBytes(fairUse.relaySpeed)}. Browser terminals do not count toward the allowance; they are limited to {fairUse.terminalSpeed} per workspace to prevent abuse. Paid plans can <a href="/pricing/">add bandwidth</a>. Traffic that harms the service for others may be slowed further.</p>
+    </div>
+  </section>
+
+  <section id="enforcement">
+    <h2>Enforcement</h2>
+    <div class="prose">
+      <p>We use the smallest step that stops the harm. For serious or ongoing harm we act first and tell you after.</p>
+      <ol>
+        <li><strong>Block</strong> the preview, tunnel or hostname, and email its owner.</li>
+        <li><strong>Suspend</strong> the account or team: sessions, tokens and public links stop.</li>
+        <li><strong>Ban</strong>: also revoke its machines' certificates, and refuse new accounts from the same person.</li>
+        <li><strong>Block network addresses</strong> from signing up or in.</li>
+      </ol>
+      <p>
+        We report to authorities where the law requires. To appeal, reply to our message; we restore what we blocked by mistake. No refunds for
+        suspended or banned accounts.
+      </p>
+    </div>
+  </section>
+
+  <section id="report">
+    <h2>Reporting abuse</h2>
+    <div class="prose">
+      <p>
+        Use the <a href="/report-abuse/">report form</a>; no account needed{abuseMailbox && <>, or email <a href={`mailto:${abuseMailbox}`}>{abuseMailbox}</a></>}.
+      </p>
+    </div>
+  </section>
+
+  <section id="copyright">
+    <h2>Copyright</h2>
+    <div class="prose">
+      <p>
+        Send DMCA notices to our copyright agent: Paperboat, <Fact name="address" />, <Fact name="legalEmail" />. Include the work, the address
+        of the material, your contact details, a good-faith statement, a statement under penalty of perjury that you are authorised, and your
+        signature. We remove the material and notify the account holder, who may send a counter-notice. We close the accounts of repeat
+        infringers.
+      </p>
+    </div>
+  </section>
+</Legal>
