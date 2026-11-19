@@ -9,6 +9,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
@@ -38,6 +39,8 @@ type Snapshot struct {
 	revocationUpdatedAt                        time.Time
 	now                                        func() time.Time
 	watchers                                   map[*revocationOwner]revocationWatcher
+	refresher                                  func(context.Context) error
+	refreshedAt                                atomic.Int64 // unix nanos of the last kid-miss refresh
 }
 
 type revocationOwner struct {
@@ -77,10 +80,30 @@ func (s *Snapshot) ReplaceJWKS(data []byte) error {
 	s.mu.Unlock()
 	return nil
 }
-func (s *Snapshot) Key(_ context.Context, keyID string) (ed25519.PublicKey, error) {
+
+// keyRefreshInterval is the least time between kid-miss refreshes (cloudflared token/jwks.go jwksMinRefreshInterval: refetch once on a
+// verify failure, at most once a minute; relay/derpquic/jwks.go does the same), so a rotated key is trusted at once, not at the next poll.
+const keyRefreshInterval = time.Minute
+
+// SetKeyRefresher installs the fetch-and-apply run when a token names a key id this snapshot does not hold.
+func (s *Snapshot) SetKeyRefresher(refresh func(context.Context) error) {
+	s.mu.Lock()
+	s.refresher = refresh
+	s.mu.Unlock()
+}
+
+func (s *Snapshot) Key(ctx context.Context, keyID string) (ed25519.PublicKey, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	key := s.keys[keyID]
+	key, refresh, now := s.keys[keyID], s.refresher, s.now()
+	s.mu.RUnlock()
+	if key == nil && refresh != nil {
+		last := s.refreshedAt.Load()
+		if now.UnixNano()-last >= int64(keyRefreshInterval) && s.refreshedAt.CompareAndSwap(last, now.UnixNano()) && refresh(ctx) == nil {
+			s.mu.RLock()
+			key = s.keys[keyID]
+			s.mu.RUnlock()
+		}
+	}
 	if key == nil {
 		return nil, ErrSnapshotInvalid
 	}

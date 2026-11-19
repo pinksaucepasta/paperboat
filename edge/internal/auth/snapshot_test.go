@@ -151,3 +151,37 @@ func TestSnapshotWatcherReleaseOwnsExactRegistration(t *testing.T) {
 		t.Fatalf("second release retained watcher: %d", len(snapshot.watchers))
 	}
 }
+
+// A control-plane key rotation (a staging reset, a prod rotation) reaches a running edge without a restart: the first token naming the new
+// key id refreshes the document once, further misses wait out the interval, and a failed fetch leaves the key untrusted.
+func TestSnapshotRefreshesOnUnknownKeyIDWithoutRestart(t *testing.T) {
+	oldPublic, _, _ := ed25519.GenerateKey(rand.Reader)
+	newPublic, _, _ := ed25519.GenerateKey(rand.Reader)
+	snapshot := NewSnapshot()
+	clock := time.Unix(1_800_000_000, 0)
+	snapshot.now = func() time.Time { return clock }
+	if err := snapshot.ReplaceJWKS(makeJWKS(t, map[string]ed25519.PublicKey{"old": oldPublic})); err != nil {
+		t.Fatal(err)
+	}
+	fetches, fail := 0, false
+	snapshot.SetKeyRefresher(func(context.Context) error {
+		fetches++
+		if fail {
+			return errors.New("control unavailable")
+		}
+		return snapshot.ReplaceJWKS(makeJWKS(t, map[string]ed25519.PublicKey{"new": newPublic}))
+	})
+	if _, err := snapshot.Key(context.Background(), "old"); err != nil || fetches != 0 {
+		t.Fatalf("a known key refreshed: %v, %d fetches", err, fetches)
+	}
+	if key, err := snapshot.Key(context.Background(), "new"); err != nil || !key.Equal(newPublic) || fetches != 1 {
+		t.Fatalf("rotated key not trusted after one refresh: %v, %d fetches", err, fetches)
+	}
+	if _, err := snapshot.Key(context.Background(), "unknown"); err == nil || fetches != 1 {
+		t.Fatalf("a second miss inside the interval fetched again: %v, %d fetches", err, fetches)
+	}
+	clock, fail = clock.Add(keyRefreshInterval), true
+	if _, err := snapshot.Key(context.Background(), "unknown"); err == nil || fetches != 2 {
+		t.Fatalf("a miss after the interval did not retry: %v, %d fetches", err, fetches)
+	}
+}
