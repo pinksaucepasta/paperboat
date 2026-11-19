@@ -655,16 +655,12 @@ func TestCobraParsesNestedSessionFlagsWithoutRewriting(t *testing.T) {
 
 func TestRemovedPublicCommands(t *testing.T) {
 	root := newRootCommand()
-	for _, removed := range []string{"desktop", "sessions", "device"} {
+	for _, removed := range []string{"desktop", "__desktop", "sessions", "device"} {
 		for _, command := range root.Commands() {
 			if command.Name() == removed {
 				t.Fatalf("public command %q remains registered", removed)
 			}
 		}
-	}
-	internal, _, err := root.Find([]string{"__desktop", "request"})
-	if err != nil || internal == nil || internal.Name() != "request" || !internal.Parent().Hidden {
-		t.Fatalf("hidden desktop bridge unavailable: command=%v error=%v", internal, err)
 	}
 	for _, path := range [][]string{{"machine", "list"}, {"team", "machine", "grant"}, {"service", "status"}} {
 		command, _, err := root.Find(path)

@@ -1943,7 +1943,7 @@ class RemainingFamilyInPowerShell(unittest.TestCase):
 
 class RemainingFamilyPlumbing(unittest.TestCase):
     PORTED = ('status_bar_lifecycle', 'completion_lifecycle', 'config_customize', 'workspace_lifecycle', 'auth_lifecycle',
-              'bugreport_lifecycle', 'cli_paging', 'network_inventory', 'inventory_freshness', 'update_observation',
+              'bugreport_lifecycle', 'cli_paging', 'network_inventory', 'inventory_freshness',
               'send_self', 'approve_refusals', 'session_limit', 'doctor_lifecycle')
 
     def test_ported_scripts_take_pb_from_winhost_and_the_runner_names_them(self):
@@ -1964,7 +1964,7 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         self.assertEqual(['--empty_team'], windows_checks.missing(table['workspace-switch'][1], args))
         self.assertEqual(['--config_repository'], windows_checks.missing(table['config-team-default'][1], args))
         for check in ('status-bar', 'completion', 'bugreport', 'inventory-freshness', 'session-limit', 'doctor', 'send-self',
-                      'config-customize', 'cli-paging', 'network-inventory', 'update-observation', 'approve-refusals'):
+                      'config-customize', 'cli-paging', 'network-inventory', 'approve-refusals'):
             self.assertEqual([], windows_checks.missing(table[check][1], args), check)
         self.assertEqual('PASS', windows_checks.verdict(0, 'PASS F11-04 team-default-set - version 3\n{"x": {"ok": true}}\n'))
         self.assertEqual('FAIL', windows_checks.verdict(0, 'PASS a - b\nFAIL c - d\n'))

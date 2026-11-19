@@ -468,7 +468,6 @@ recovery instructions before retrying an operation that may have created resourc
 	root.AddCommand(teamCobraCommand())
 	root.AddCommand(accountCobraCommand())
 	root.AddCommand(versionCommand())
-	root.AddCommand(desktopCommand())
 
 	root.AddCommand(doctorCommandV1())
 	ping := &cobra.Command{Use: "ping <machine>", Short: "Measure authenticated connectivity to a machine", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionPing}

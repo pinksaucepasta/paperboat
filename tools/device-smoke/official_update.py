@@ -76,7 +76,7 @@ def main():
     removed = False
     official = False
     try:
-        p.invoke(staged, '--workspace', 'personal', '__desktop', 'request', input=json.dumps({'action': 'machine.remove', 'payload': {'machine_id': before['machine_id']}}))
+        p.confirmed_command(staged, '--workspace', 'personal', 'machine', 'revoke', before['machine_id'])
         removed = True
         p.invoke(staged, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', p.hostname(binary), '--json')
         if winhost.device():  # the removal finishes after the command returns
