@@ -12,6 +12,7 @@ import { useAllPages } from "@/lib/paging"
 import { ApiError, operatorAction, useApiQuery, useOperator, type Data } from "@/lib/api"
 
 type Workspace = Data<"/v1/admin/billing/workspaces/{workspace_id}">
+const addonNames: Record<string, string> = { sso: "SSO", scim: "SCIM", sso_scim: "SSO and SCIM" }
 type Products = Data<"/v1/admin/billing/products">
 
 /**
@@ -73,7 +74,7 @@ export function PlanGrant({ scope, id }: { scope: "personal" | "team"; id: strin
         rows={[
           ["Plan", w?.product_code ? <span className="inline-flex items-center gap-3">{w.product_code}<StatusBadge state={w.state} />{w.granted && <span className="text-xs text-muted-foreground" data-plan-granted>Granted</span>}</span> : "Free"],
           ["Ends", w?.period_end ? <Time iso={w.period_end} /> : "—"],
-          ...(scope === "team" && w ? [["Seats", w.quantity] as [string, React.ReactNode]] : []),
+          ...(scope === "team" && w ? [["Seats", w.quantity] as [string, React.ReactNode], ["SSO / SCIM add-on", w.addon ? addonNames[w.addon] ?? w.addon : "None"] as [string, React.ReactNode]] : []),
         ]}
       />
       <Entitlements workspaceId={workspaceId} scope={scope} />

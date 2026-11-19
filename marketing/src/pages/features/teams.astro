@@ -2,7 +2,7 @@
 import Feature from "../../layouts/Feature.astro"
 import Beat from "../../components/Beat.astro"
 import Term from "../../components/Term.astro"
-import { auditRetention, plans, ssoMinSeats } from "../../site"
+import { addonPrices, addons, auditRetention, plans } from "../../site"
 
 const faq = [
   {
@@ -11,7 +11,7 @@ const faq = [
   },
   {
     q: "Do I need the Team plan for tags, rules and API tokens?",
-    a: `No. They work on Free and Pro too, for example to give a CI token nothing but commands on machines tagged ci. Team adds members, roles and audit log export, and single sign-on and directory sync from ${ssoMinSeats} seats.`,
+    a: `No. They work on Free and Pro too, for example to give a CI token nothing but commands on machines tagged ci. Team adds members, roles and audit log export, and single sign-on and directory sync as add-ons (${addonPrices}).`,
   },
   {
     q: "What happens when someone leaves?",
@@ -19,7 +19,7 @@ const faq = [
   },
   {
     q: "Which identity providers work for single sign-on?",
-    a: `Any SAML or OpenID Connect provider, including Okta, Microsoft Entra ID and Google Workspace, for teams of ${ssoMinSeats} or more seats.`,
+    a: `Any SAML or OpenID Connect provider, including Okta, Microsoft Entra ID and Google Workspace, on a team of any size, as an add-on (SSO $${addons.sso}/mo).`,
   },
   {
     q: "What does the audit log record?",
@@ -73,7 +73,7 @@ const faq = [
         </div>
         <div>
           <h3 class="h3">Single sign-on</h3>
-          <p>SAML or OpenID Connect, with directory sync, from {ssoMinSeats} seats.</p>
+          <p>SAML or OpenID Connect, with directory sync, as add-ons: {addonPrices}.</p>
         </div>
         <div>
           <h3 class="h3">Tokens for machines</h3>

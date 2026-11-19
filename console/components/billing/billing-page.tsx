@@ -18,6 +18,7 @@ import {
   type BillingWorkspace,
   formatLimit,
 } from "@/lib/billing"
+import { Addons } from "@/components/billing/billing-addon"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
 import { useTrack } from "@/lib/analytics"
@@ -53,6 +54,7 @@ export function BillingPage() {
       <Plan workspace={workspace} billing={billing.data} confirming={confirming} />
       {(!subscribed || billing.data.granted) && !confirming && <Plans workspace={workspace} billing={billing.data} />}
       {subscribed && workspace.kind === "team" && <Seats workspace={workspace} billing={billing.data} />}
+      {subscribed && workspace.kind === "team" && <Addons workspace={workspace} billing={billing.data} />}
       <TopUps workspace={workspace} billing={billing.data} />
     </div>
   )
