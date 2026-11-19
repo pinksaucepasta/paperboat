@@ -27,9 +27,12 @@ type Recovery struct {
 	deadline        time.Time
 	policy          Policy
 	remaining, used int
+	now             func() time.Time // time.Now; a test clock in tests
 }
 
-func New(policy Policy) *Recovery  { return &Recovery{policy: policy, remaining: policy.Attempts} }
+func New(policy Policy) *Recovery {
+	return &Recovery{policy: policy, remaining: policy.Attempts, now: time.Now}
+}
 func (r *Recovery) Remaining() int { return r.remaining }
 
 // Run obtains fresh admission for every attempt. It never replays application
@@ -65,7 +68,7 @@ func (r *Recovery) Run(ctx context.Context, attempt func(context.Context) error)
 func (r *Recovery) AfterFailure(ctx context.Context) (context.Context, context.CancelFunc) {
 	r.mu.Lock()
 	if r.deadline.IsZero() && r.policy.Window > 0 {
-		r.deadline = time.Now().Add(r.policy.Window)
+		r.deadline = r.now().Add(r.policy.Window)
 	}
 	r.mu.Unlock()
 	return r.RequestContext(ctx)

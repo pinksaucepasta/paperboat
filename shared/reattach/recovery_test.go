@@ -62,30 +62,38 @@ func TestBackoffCapsWithoutOverflow(t *testing.T) {
 }
 
 // A committed chunk after recovery ends the window: the next request has no deadline, and a later failure starts a
-// new one. Without progress the first window stays (repeated failures cannot restart it).
+// new one. Without progress the first window stays (repeated failures cannot restart it). The clock is injected: a
+// coarse system clock (Windows ~15.6 ms) can read the same instant for both failures, which no real sleep can rule out.
 func TestProgressedEndsTheRecoveryWindow(t *testing.T) {
-	r := New(Policy{Window: time.Hour})
-	first, cancel := r.AfterFailure(t.Context())
-	firstDeadline, ok := first.Deadline()
-	cancel()
-	if !ok {
-		t.Fatal("a failure did not start the window")
-	}
-	again, cancel := r.AfterFailure(t.Context())
-	if deadline, _ := again.Deadline(); !deadline.Equal(firstDeadline) {
-		t.Fatal("a repeated failure restarted the window")
-	}
-	cancel()
-	r.Progressed()
-	healthy, cancel := r.RequestContext(t.Context())
-	if _, ok := healthy.Deadline(); ok {
-		t.Fatal("progress after recovery left the old deadline on healthy requests")
-	}
-	cancel()
-	time.Sleep(time.Millisecond)
-	next, cancel := r.AfterFailure(t.Context())
-	defer cancel()
-	if deadline, ok := next.Deadline(); !ok || !deadline.After(firstDeadline) {
-		t.Fatal("a failure after progress did not start a new window")
+	for name, step := range map[string]time.Duration{"coarse clock, same instant": 0, "clock advanced": time.Minute} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Now()
+			r := New(Policy{Window: time.Hour})
+			r.now = func() time.Time { return now }
+			first, cancel := r.AfterFailure(t.Context())
+			firstDeadline, ok := first.Deadline()
+			cancel()
+			if !ok {
+				t.Fatal("a failure did not start the window")
+			}
+			now = now.Add(step)
+			again, cancel := r.AfterFailure(t.Context())
+			if deadline, _ := again.Deadline(); !deadline.Equal(firstDeadline) {
+				t.Fatal("a repeated failure restarted the window")
+			}
+			cancel()
+			r.Progressed()
+			healthy, cancel := r.RequestContext(t.Context())
+			if _, ok := healthy.Deadline(); ok {
+				t.Fatal("progress after recovery left the old deadline on healthy requests")
+			}
+			cancel()
+			next, cancel := r.AfterFailure(t.Context())
+			defer cancel()
+			deadline, ok := next.Deadline()
+			if !ok || !deadline.Equal(now.Add(time.Hour)) || deadline.Before(firstDeadline) {
+				t.Fatalf("a failure after progress did not start a new window: %v (first %v, now %v)", deadline, firstDeadline, now)
+			}
+		})
 	}
 }
