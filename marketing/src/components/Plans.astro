@@ -3,15 +3,14 @@
  * The three plans in one hairline grid, monthly or yearly (a switch above; no script). Every column
  * has the same rows in the same order, then what the plan adds, then its action at the bottom.
  */
-import { auditRetention, consoleUrl, plans, publicTcp, speeds, ssoMinSeats, topUp } from "../site"
+import { auditRetention, consoleUrl, plans, publicTcp, ssoMinSeats, topUp } from "../site"
 
 const forWhom = ["For personal use", "Personal use, more traffic", "For teams"]
 const rows: [string, (i: number) => string][] = [
-  ["Bandwidth", (i) => plans[i].bandwidth.replace(" a seat", "/mo a seat").replace(/GB$/, "GB/mo")],
-  ["After that", (i) => speeds.after[i]],
+  ["Bandwidth", (i) => `${plans[i].bandwidth.replace(" a seat", "/seat")}/mo`],
   ["Machines", (i) => plans[i].machines],
   ["Previews and tunnels", (i) => plans[i].publications],
-  ["Public TCP addresses", (i) => publicTcp[i].replace(" per seat", " a seat")],
+  ["Public TCP addresses", (i) => publicTcp[i].replace(" per seat", "/seat")],
   ["Console terminals", (i) => plans[i].browserTerminals],
   ["Audit log", (i) => auditRetention[i]],
 ]

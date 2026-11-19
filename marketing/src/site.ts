@@ -77,6 +77,10 @@ export const plans = [
  * Traffic through our servers is never cut off (user decision 2026-11-19): once the plan's
  * bandwidth is used it is slowed until the month resets. Relays also have a top speed.
  */
+/** A plan's monthly bandwidth and the speed after it, for the pricing tables: "100 GB/seat/mo, then 1 Mbit/s". */
+export const bandwidthCell = (i: number) =>
+  `${plans[i].bandwidth.replace(" a seat", "/seat")}/mo, then ${speeds.after[i]}`
+
 export const speeds = {
   /** Once the plan's bandwidth is used: Free, Pro, Team. */
   after: ["512 kbit/s", "1 Mbit/s", "1 Mbit/s"],

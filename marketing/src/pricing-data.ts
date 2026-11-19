@@ -2,7 +2,7 @@
  * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
  * for personal use and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
-import { auditRetention, plans, publicTcp, speeds, ssoMinSeats, teamTrial, topUp } from "./site"
+import { auditRetention, bandwidthCell, plans, publicTcp, speeds, ssoMinSeats, teamTrial, topUp } from "./site"
 
 const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
   plans[0][key],
@@ -16,14 +16,13 @@ export const featureGroups: { title: string; rows: { feature: string; cells: [Pl
   {
     title: "Limits",
     rows: [
-      { feature: `Edge and relay bandwidth, combined (relays up to ${speeds.relay})`, cells: [`${plans[0].bandwidth}/mo`, `${plans[1].bandwidth}/mo`, `${plans[2].bandwidth.replace(" a seat", "")}/mo a seat`] },
-      { feature: "After that", cells: [speeds.after[0], speeds.after[1], speeds.after[2]] },
+      { feature: `Edge and relay bandwidth, combined (relays up to ${speeds.relay})`, cells: [bandwidthCell(0), bandwidthCell(1), bandwidthCell(2)] },
       { feature: "Browser terminals", cells: ["Never slowed", "Never slowed", "Never slowed"] },
       { feature: "Your own edges and relays", cells: ["Unlimited", "Unlimited", "Unlimited"] },
       { feature: "Direct traffic between your machines", cells: ["Unlimited", "Unlimited", "Unlimited"] },
       { feature: "Machines", cells: limitCells("machines") },
       { feature: "Previews and tunnels running at once", cells: limitCells("publications") },
-      { feature: "Public raw-TCP tunnel addresses", cells: [publicTcp[0], publicTcp[1], publicTcp[2]] },
+      { feature: "Public raw-TCP tunnel addresses", cells: [publicTcp[0], publicTcp[1], publicTcp[2].replace(" per seat", "/seat")] },
       { feature: "Terminals open in the web console at once", cells: limitCells("browserTerminals") },
       { feature: "Terminals from the pb command", cells: ["Unlimited", "Unlimited", "Unlimited"] },
       { feature: `Extra bandwidth, ${topUp.price} per ${topUp.size}`, cells: [false, true, true] },
