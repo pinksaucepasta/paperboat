@@ -30,6 +30,7 @@ type IngressAuthority struct {
 	OnThrottled   func([]connectorprotocol.IngressThrottle)
 	mu            sync.RWMutex // AdmitsPreview, asked on every missed request, only reads
 	decisions     []connectorprotocol.IngressDecision
+	byHost        map[string][]int                             // indexes into decisions by hostname: a request finds its decisions without walking (or copying) all of them
 	throttled     map[string]connectorprotocol.IngressThrottle // hostnames whose workspace used its fair-use bandwidth, from the same fetch
 	blocked       map[string]bool                              // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
 	ipRules       map[string]addressRule                       // owner IP allow/deny lists per hostname, from the same fetch
@@ -200,10 +201,26 @@ func (a *IngressAuthority) Shutdown(ctx context.Context) error {
 // edge meeting a route it has not heard of (force) or one fenced by Invalidate waits for one
 // bounded refresh, so a route just made ready is not refused. Without a loop (tests) it fetches inline.
 func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connectorprotocol.IngressDecision, error) {
+	return a.snapshotFor(ctx, force, "")
+}
+
+// snapshotFor is snapshot for one hostname's decisions (every decision when hostname is empty). A request asks for its own
+// name: copying all the decisions (each ~600 bytes) per request was 12% of an edge's CPU at 1,000 routes and grows with them.
+func (a *IngressAuthority) snapshotFor(ctx context.Context, force bool, hostname string) ([]connectorprotocol.IngressDecision, error) {
 	a.mu.Lock()
 	if a.stop == nil {
 		a.mu.Unlock()
-		return a.refresh(ctx, force)
+		decisions, err := a.refresh(ctx, force)
+		if hostname == "" || err != nil {
+			return decisions, err
+		}
+		var out []connectorprotocol.IngressDecision
+		for _, d := range decisions {
+			if d.Binding.Hostname == hostname {
+				out = append(out, d)
+			}
+		}
+		return out, nil
 	}
 	now := time.Now().UTC()
 	healthy := a.outOfSync.IsZero() && !now.Before(a.retryAt) && !a.fetched.IsZero()
@@ -221,6 +238,9 @@ func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connecto
 			return nil, a.lastErr
 		}
 		return nil, ErrControlUnavailable
+	}
+	if hostname != "" {
+		return a.servedHostLocked(now, hostname), nil
 	}
 	return a.servedLocked(now), nil
 }
@@ -330,6 +350,7 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 		return
 	}
 	a.decisions, a.fetched, a.version = snapshot.Decisions, now, snapshot.Version
+	a.indexDecisionsLocked()
 	a.markWarmLocked()
 	if fenced {
 		a.invalidated = false
@@ -387,7 +408,30 @@ func (a *IngressAuthority) refreshTimesLocked(now time.Time, snapshot IngressSna
 		}
 	}
 	a.decisions = next
+	a.indexDecisionsLocked()
 	return nil
+}
+
+// hostIndexesLocked are the positions of hostname's decisions. Decisions set through refresh are indexed; a set that is not (a
+// zero authority holding none, or one built field by field in a test) is searched.
+func (a *IngressAuthority) hostIndexesLocked(hostname string) []int {
+	if a.byHost != nil || len(a.decisions) == 0 {
+		return a.byHost[hostname]
+	}
+	var out []int
+	for i, d := range a.decisions {
+		if d.Binding.Hostname == hostname {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func (a *IngressAuthority) indexDecisionsLocked() {
+	a.byHost = make(map[string][]int, len(a.decisions))
+	for i, d := range a.decisions {
+		a.byHost[d.Binding.Hostname] = append(a.byHost[d.Binding.Hostname], i)
+	}
 }
 
 // HTTP01KeyAuthorization returns the key authorization the last good snapshot
@@ -411,18 +455,36 @@ func (a *IngressAuthority) HTTP01KeyAuthorization(host, token string) (string, b
 // expired restricted one is left out.
 func (a *IngressAuthority) servedLocked(now time.Time) []connectorprotocol.IngressDecision {
 	out := make([]connectorprotocol.IngressDecision, 0, len(a.decisions))
-	for i, d := range a.decisions {
-		overdue := !a.outOfSync.IsZero() || !now.Before(d.ExpiresAt)
-		if overdue && now.Add(connectorprotocol.IngressRefreshInterval).After(d.ExpiresAt) {
-			if d.Binding.Audience != "public" {
-				continue
-			}
-			d.IssuedAt, d.ExpiresAt = now, now.Add(connectorprotocol.IngressAuthorityLifetime)
-			a.decisions[i] = d
+	for i := range a.decisions {
+		if d, ok := a.servedDecisionLocked(now, i); ok {
+			out = append(out, d)
 		}
-		out = append(out, d)
 	}
 	return out
+}
+
+// servedHostLocked is servedLocked for the decisions of one hostname.
+func (a *IngressAuthority) servedHostLocked(now time.Time, hostname string) []connectorprotocol.IngressDecision {
+	var out []connectorprotocol.IngressDecision
+	for _, i := range a.hostIndexesLocked(hostname) {
+		if d, ok := a.servedDecisionLocked(now, i); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func (a *IngressAuthority) servedDecisionLocked(now time.Time, i int) (connectorprotocol.IngressDecision, bool) {
+	d := a.decisions[i]
+	overdue := !a.outOfSync.IsZero() || !now.Before(d.ExpiresAt)
+	if overdue && now.Add(connectorprotocol.IngressRefreshInterval).After(d.ExpiresAt) {
+		if d.Binding.Audience != "public" {
+			return d, false
+		}
+		d.IssuedAt, d.ExpiresAt = now, now.Add(connectorprotocol.IngressAuthorityLifetime)
+		a.decisions[i] = d
+	}
+	return d, true
 }
 
 func (a *IngressAuthority) kickLocked() {
@@ -483,7 +545,8 @@ func (a *IngressAuthority) previewDecision(hostname string) (connectorprotocol.I
 	now := time.Now()
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	for _, d := range a.decisions {
+	for _, i := range a.hostIndexesLocked(hostname) {
+		d := a.decisions[i]
 		if d.Binding.Hostname == hostname && d.EdgeNodeID == a.NodeID && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt)) {
 			return d, true
 		}
@@ -570,7 +633,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	if a == nil || a.Client == nil || ctx == nil || connectorprotocol.ValidateIdentifier(publication) != nil || len(hostname) == 0 || len(hostname) > 253 || revision == 0 || open.Validate() != nil {
 		return connectorprotocol.IngressDecision{}, ErrControlInvalid
 	}
-	decisions, err := a.snapshot(ctx, false)
+	decisions, err := a.snapshotFor(ctx, false, hostname)
 	if err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
@@ -618,7 +681,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 		case <-ctx.Done():
 			return connectorprotocol.IngressDecision{}, ctx.Err()
 		}
-		if decisions, err = a.snapshot(ctx, false); err == nil {
+		if decisions, err = a.snapshotFor(ctx, false, hostname); err == nil {
 			if d, ok := selectDecision(decisions); ok {
 				return d, nil
 			}
@@ -644,7 +707,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	}
 	a.mu.Unlock()
 	defer close(miss.done)
-	if decisions, err = a.snapshot(ctx, force); err != nil {
+	if decisions, err = a.snapshotFor(ctx, force, hostname); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
 	if d, ok := selectDecision(decisions); ok {

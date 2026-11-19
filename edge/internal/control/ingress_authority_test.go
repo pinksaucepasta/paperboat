@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
@@ -734,5 +735,47 @@ func TestIngressAuthorityPreviewServesTheNewerRouteGenerationNeverTheOlder(t *te
 	}
 	if _, err := a.ResolvePreview(context.Background(), d.Binding.PublicationID, d.Binding.Hostname, 6, open); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
 		t.Fatalf("an older decision served a newer carrier revision: %v", err)
+	}
+}
+
+// A request asks for its own hostname's decisions, with the same local renewal servedLocked gives the whole set.
+func TestSnapshotForHostServesTheSameDecisionsAsTheWholeSet(t *testing.T) {
+	now := time.Now().UTC()
+	var decisions []connectorprotocol.IngressDecision
+	for i := 0; i < 50; i++ {
+		var d connectorprotocol.IngressDecision
+		d.Binding.Hostname = fmt.Sprintf("r%d.preview.example.test", i%10)
+		d.Binding.PublicationID = fmt.Sprintf("endpoint_%d", i)
+		d.Binding.Audience = []string{"public", "team"}[i%2]
+		d.IssuedAt, d.ExpiresAt = now.Add(-time.Second), now.Add([]time.Duration{-time.Minute, time.Hour, time.Second}[i%3])
+		decisions = append(decisions, d)
+	}
+	a := &IngressAuthority{stop: func() {}, fetched: now, decisions: decisions}
+	a.mu.Lock()
+	a.indexDecisionsLocked()
+	a.mu.Unlock()
+	for host := range a.byHost {
+		whole, err := a.snapshot(context.Background(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want []connectorprotocol.IngressDecision
+		for _, d := range whole {
+			if d.Binding.Hostname == host {
+				want = append(want, d)
+			}
+		}
+		got, err := a.snapshotFor(context.Background(), false, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) || len(got) == 0 && host != "" && len(a.byHost[host]) == 0 {
+			t.Fatalf("host %s: %d decisions, the whole set has %d", host, len(got), len(want))
+		}
+		for i := range got {
+			if got[i].Binding.PublicationID != want[i].Binding.PublicationID {
+				t.Fatalf("host %s decision %d: %s, want %s", host, i, got[i].Binding.PublicationID, want[i].Binding.PublicationID)
+			}
+		}
 	}
 }
