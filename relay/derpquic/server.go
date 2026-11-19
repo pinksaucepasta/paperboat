@@ -295,11 +295,17 @@ func (s *Server) servePeer(p *peerConn) {
 			s.reject(p, ErrOverload)
 			return
 		}
-		// Payload over the account's fair-use speed is dropped and the carrier stays up, as for datagrams; control
-		// frames are bounded by the carrier's own budget only, so a saturated account can still ping and re-authenticate.
-		if kind == framePacket && !accountBudget.allow(now, len(b)) {
-			s.dropped.Add(1)
-			continue
+		// Payload over the account's fair-use speed waits for its tokens before the next frame is read, so the sender's TCP slows to
+		// the speed (nothing is dropped); control frames are bounded by the carrier's own budget only, so a saturated account can
+		// still ping and re-authenticate.
+		if kind == framePacket {
+			if delay, _ := accountBudget.reserve(now, len(b), time.Hour); delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-p.context().Done():
+					return
+				}
+			}
 		}
 		switch kind {
 		case frameAuth, frameAuthGeneration, frameAuthBatch:
@@ -490,9 +496,59 @@ func (s *Server) route(p *peerConn, msg packet) {
 		s.dropped.Add(1)
 	}
 }
+
+// readDatagrams receives a carrier's datagrams. Over the account's fair-use speed they are shaped, not dropped: each waits in the
+// carrier's queue (shapingMaxDelay at most; beyond it the buffer is full and the datagram is dropped) and is forwarded, in order, when
+// its tokens are there, so the account's own transport settles at its speed. One goroutine owns the reassembler: inline while the queue
+// is idle, the shaper goroutine while it is not.
 func (s *Server) readDatagrams(p *peerConn) {
 	defer p.close(0, "relay closed")
 	var r reassembler
+	forward := func(b []byte, now time.Time) bool {
+		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
+		})
+		if e != nil {
+			s.reject(p, e)
+			return false
+		}
+		if ok {
+			s.route(p, msg)
+		}
+		return true
+	}
+	type shaped struct {
+		b  []byte
+		at time.Time
+	}
+	queue := make(chan shaped, 4096)
+	var waiting atomic.Int32 // datagrams queued or being forwarded by the shaper goroutine
+	go func() {
+		timer := time.NewTimer(time.Hour)
+		defer timer.Stop()
+		for {
+			select {
+			case <-p.context().Done():
+				return
+			case item := <-queue:
+				if wait := time.Until(item.at); wait > 0 {
+					timer.Reset(wait)
+					select {
+					case <-timer.C:
+					case <-p.context().Done():
+						return
+					}
+				}
+				ok := forward(item.b, time.Now())
+				waiting.Add(-1)
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
 	for {
 		b, err := p.conn.ReceiveDatagram(p.context())
 		if err != nil {
@@ -502,21 +558,27 @@ func (s *Server) readDatagrams(p *peerConn) {
 		s.mu.Lock()
 		account := s.accounts[p.grant.AccountID]
 		s.mu.Unlock()
-		if !p.rate.allow(now, len(b)) || account == nil || !account.allow(now, len(b)) {
+		if !p.rate.allow(now, len(b)) || account == nil {
 			s.dropped.Add(1)
 			continue
 		}
-		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
-		})
-		if e != nil {
-			s.reject(p, e)
-			return
+		delay, ok := account.reserve(now, len(b), shapingMaxDelay)
+		if !ok {
+			s.dropped.Add(1)
+			continue
 		}
-		if ok {
-			s.route(p, msg)
+		if delay == 0 && waiting.Load() == 0 {
+			if !forward(b, now) {
+				return
+			}
+			continue
+		}
+		waiting.Add(1)
+		select {
+		case queue <- shaped{b, now.Add(delay)}:
+		default:
+			waiting.Add(-1)
+			s.dropped.Add(1)
 		}
 	}
 }
@@ -570,8 +632,8 @@ func (s *Server) writePackets(p *peerConn) {
 }
 
 // SetAccountSpeed sets the speed one account may use on this relay, shared by all its carriers (a token bucket per account:
-// Tailscale's DERP applies one per client the same way, derpserver.go rateLimit). Traffic above it is dropped and the carrier stays
-// up, so the account's own transport slows down. 0 lifts the cap to the relay's own overload ceiling (a customer-owned relay is
+// Tailscale's DERP applies one per client the same way, derpserver.go rateLimit). Traffic above it is delayed (a bounded queue for datagrams,
+// a wait before the next frame for streams), so the account's own transport settles at its speed. 0 lifts the cap to the relay's own overload ceiling (a customer-owned relay is
 // never limited by Paperboat).
 func (s *Server) SetAccountSpeed(mbit float64) error {
 	if mbit < 0 || mbit > MaxAccountMbit {
