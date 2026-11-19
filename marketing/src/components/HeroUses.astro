@@ -1,0 +1,401 @@
+---
+/**
+ * The home hero's showcase: one card, a tab per use case, each with what it looks like in the
+ * product. No script: radio inputs pick the tab, as in Install.astro.
+ */
+import Icon from "./Icon.astro"
+import Term from "./Term.astro"
+import { installerBase, localDomain, previewDomain } from "../site"
+
+const id = "uses"
+const tabs = [
+  { key: "agents", label: "AI agents", href: "/use-cases/ai-agents/", line: "Each sandbox gets its machine, secrets and preview in one line." },
+  { key: "teams", label: "Teams", href: "/use-cases/teams/", line: "Groups get exactly the access they need." },
+  { key: "homelab", label: "Home lab", href: "/use-cases/homelab/", line: "Every app at home by a short name." },
+]
+const recipe = [
+  "$ curl -fsSL \\",
+  `    ${installerBase} \\`,
+  "    | PB_RECIPE=$TOKEN sh",
+  "✓ Paired as sandbox-7",
+  "✓ Secrets loaded from agent-env",
+  "✓ Preview live at",
+  `  https://quiet-river-4821.${previewDomain}`,
+]
+const members = ["AN", "MK", "JS"]
+const apps = [
+  { name: `jellyfin.${localDomain}`, app: "Jellyfin" },
+  { name: `home.${localDomain}`, app: "Home Assistant" },
+  { name: `grafana.${localDomain}`, app: "Grafana" },
+  { name: `photos.${localDomain}`, app: "Immich", public: "photos.example.com" },
+]
+---
+
+<div class="card">
+  {tabs.map((tab, i) => <input class="tab-input" type="radio" name={id} id={`${id}-${tab.key}`} checked={i === 0} />)}
+  <div class="tabs" role="group" aria-label="Use cases">
+    {tabs.map((tab) => <label for={`${id}-${tab.key}`}>{tab.label}</label>)}
+  </div>
+
+  <div class="panels">
+    <section class="panel panel-agents" aria-label="AI agents">
+      <div class="stage">
+        <Term lines={recipe} title="sandbox-7" />
+      </div>
+    </section>
+
+    <section class="panel panel-teams" aria-label="Teams">
+      <div class="stage">
+        <div class="rule">
+          <div class="side">
+            <span class="kind">Group</span>
+            <span class="name">oncall</span>
+            <span class="avatars">{members.map((m) => <span class="avatar">{m}</span>)}</span>
+          </div>
+          <Icon name="arrow-right" size={18} class="rule-arrow" />
+          <div class="side">
+            <span class="kind">Machines</span>
+            <span class="name">tag:prod</span>
+            <span class="chips"><span class="chip">terminal</span><span class="chip">exec</span></span>
+          </div>
+        </div>
+        <div class="live">
+          <span class="dot"></span>
+          <span>Shared terminal on prod-api · 2 watching</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-homelab" aria-label="Home lab">
+      <div class="stage">
+        <ul class="apps">
+          {
+            apps.map((item) => (
+              <li>
+                <span class="dot" />
+                <span class="app-name">{item.name}</span>
+                <span class="app">{item.app}</span>
+                {item.public && (
+                  <span class="public">
+                    <Icon name="globe-simple" size={14} /> Public at {item.public}
+                  </span>
+                )}
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot">
+    {
+      tabs.map((tab) => (
+        <p class:list={["foot-row", `foot-${tab.key}`]}>
+          <span>{tab.line}</span>
+          <a href={tab.href}>
+            See how <Icon name="arrow-right" size={14} />
+          </a>
+        </p>
+      ))
+    }
+  </div>
+</div>
+
+<style>
+  .card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    border-radius: 12px;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px rgb(20 20 20 / 0.08),
+      0 1px 2px rgb(20 20 20 / 0.04),
+      0 32px 64px -32px rgb(20 20 20 / 0.18);
+    overflow: hidden;
+  }
+
+  .tab-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .tabs {
+    display: flex;
+    gap: var(--s1);
+    padding: var(--s2) var(--s3) 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tabs label {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding-inline: var(--s3);
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--fog);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .tabs label:hover {
+    color: var(--ink);
+  }
+
+  #uses-agents:checked ~ .tabs label[for="uses-agents"],
+  #uses-teams:checked ~ .tabs label[for="uses-teams"],
+  #uses-homelab:checked ~ .tabs label[for="uses-homelab"] {
+    border-bottom-color: var(--cobalt);
+    color: var(--ink);
+  }
+
+  #uses-agents:focus-visible ~ .tabs label[for="uses-agents"],
+  #uses-teams:focus-visible ~ .tabs label[for="uses-teams"],
+  #uses-homelab:focus-visible ~ .tabs label[for="uses-homelab"] {
+    outline: 2px solid var(--cobalt);
+    outline-offset: -2px;
+    border-radius: 6px 6px 0 0;
+  }
+
+  /* Panels share one cell, so the card keeps the height of the tallest. */
+  .panels {
+    flex: 1;
+    display: grid;
+    background: var(--surface);
+  }
+
+  .panel {
+    grid-area: 1 / 1;
+    display: grid;
+    visibility: hidden;
+  }
+
+  #uses-agents:checked ~ .panels .panel-agents,
+  #uses-teams:checked ~ .panels .panel-teams,
+  #uses-homelab:checked ~ .panels .panel-homelab {
+    visibility: visible;
+  }
+
+  /* Stacked under the install box, the card fits the open tab instead of the tallest. */
+  @media (max-width: 959px) {
+    .panel {
+      display: none;
+    }
+
+    #uses-agents:checked ~ .panels .panel-agents,
+    #uses-teams:checked ~ .panels .panel-teams,
+    #uses-homelab:checked ~ .panels .panel-homelab {
+      display: grid;
+    }
+  }
+
+  .stage {
+    display: grid;
+    align-content: center;
+    gap: var(--s3);
+    padding: var(--s4) var(--s5);
+  }
+
+  .stage :global(.term) {
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06);
+  }
+
+  .rule {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch;
+    gap: var(--s3);
+  }
+
+  .side {
+    display: grid;
+    gap: var(--s2);
+    justify-items: start;
+    padding: var(--s4);
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: 0 0 0 1px var(--rule);
+  }
+
+  .kind {
+    font-size: var(--text-small);
+    color: var(--fog);
+  }
+
+  .name {
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .rule :global(.rule-arrow) {
+    align-self: center;
+    color: var(--fog);
+  }
+
+  .avatars {
+    display: flex;
+  }
+
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    margin-left: -4px;
+    border-radius: 50%;
+    background: var(--hull);
+    box-shadow: 0 0 0 2px var(--paper);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--cobalt);
+  }
+
+  .avatar:first-child {
+    margin-left: 0;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1);
+  }
+
+  .chip {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-strong);
+    font-family: var(--font-mono);
+    font-size: var(--text-tiny);
+    color: var(--text);
+  }
+
+  .live {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: 0 0 0 1px var(--rule);
+    font-size: var(--text-small);
+    color: var(--text);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--good);
+  }
+
+  .apps {
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: 0 0 0 1px var(--rule);
+  }
+
+  .apps li {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    column-gap: var(--s3);
+    row-gap: var(--s1);
+    align-items: center;
+    padding: 12px var(--s4);
+    border-top: 1px solid var(--rule);
+  }
+
+  .apps li:first-child {
+    border-top: 0;
+  }
+
+  .app-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .app {
+    font-size: var(--text-small);
+    color: var(--fog);
+  }
+
+  .public {
+    grid-column: 2 / -1;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    justify-self: start;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--hull);
+    font-size: var(--text-tiny);
+    color: var(--cobalt);
+  }
+
+  .foot {
+    display: grid;
+    border-top: 1px solid var(--rule);
+  }
+
+  .foot-row {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s4);
+    padding: var(--s3) var(--s5);
+    font-size: var(--text-small);
+    color: var(--fog);
+    visibility: hidden;
+  }
+
+  #uses-agents:checked ~ .foot .foot-agents,
+  #uses-teams:checked ~ .foot .foot-teams,
+  #uses-homelab:checked ~ .foot .foot-homelab {
+    visibility: visible;
+  }
+
+  .foot-row a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .foot-row a:hover {
+    color: var(--cobalt);
+  }
+
+  @media (max-width: 479px) {
+    .stage {
+      padding: var(--s4);
+    }
+
+    .rule {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .rule :global(.rule-arrow) {
+      justify-self: center;
+      transform: rotate(90deg);
+    }
+
+    .foot-row {
+      padding-inline: var(--s4);
+    }
+  }
+</style>

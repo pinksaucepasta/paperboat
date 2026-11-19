@@ -11,8 +11,9 @@ import Closing from "../components/Closing.astro"
 import FeatureIndex from "../components/FeatureIndex.astro"
 import Addresses from "../components/Addresses.astro"
 import Term from "../components/Term.astro"
+import HeroUses from "../components/HeroUses.astro"
 import { softwareSchema } from "../schema"
-import { features, useCases } from "../features"
+import { features } from "../features"
 import { compares } from "../compare-data"
 import { installerBase, localDomain, previewDomain } from "../site"
 
@@ -55,22 +56,7 @@ const versus = compares.filter((item) => ["tailscale", "ngrok", "cloudflare-tunn
           <Install />
         </div>
       </div>
-      <nav class="uses" aria-label="Use cases">
-        <ul>
-          {
-            useCases.map((item) => (
-              <li>
-                <a href={`/use-cases/${item.slug}/`}>
-                  <Icon name={item.icon} size={20} class="uses-icon" />
-                  <span class="uses-name">{item.name}</span>
-                  <span class="uses-line">{item.line}</span>
-                  <Icon name="arrow-right" size={16} class="uses-arrow" />
-                </a>
-              </li>
-            ))
-          }
-        </ul>
-      </nav>
+      <HeroUses />
     </div>
     <figure class="hero-shot">
       <Image
@@ -277,58 +263,9 @@ const versus = compares.filter((item) => ["tailscale", "ngrok", "cloudflare-tunn
 
   @media (min-width: 960px) {
     .hero-grid {
-      grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
-      column-gap: var(--s8);
-      align-items: end;
+      grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+      column-gap: var(--s7);
     }
-  }
-
-  .uses ul {
-    border-top: 1px solid var(--rule);
-  }
-
-  .uses a {
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-    column-gap: var(--s3);
-    row-gap: 2px;
-    padding-block: var(--s4);
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .uses a :global(.uses-icon) {
-    grid-row: 1 / span 2;
-    margin-top: 2px;
-    color: var(--cobalt);
-  }
-
-  .uses-name {
-    font-weight: 500;
-    color: var(--ink);
-  }
-
-  .uses-line {
-    grid-column: 2;
-    font-size: var(--text-ui);
-    line-height: 1.5;
-    color: var(--fog);
-  }
-
-  .uses a :global(.uses-arrow) {
-    grid-column: 3;
-    grid-row: 1 / span 2;
-    align-self: center;
-    color: var(--fog);
-    transition: transform 0.15s ease;
-  }
-
-  .uses a:hover .uses-name,
-  .uses a:hover :global(.uses-arrow) {
-    color: var(--cobalt);
-  }
-
-  .uses a:hover :global(.uses-arrow) {
-    transform: translateX(3px);
   }
 
   /*
