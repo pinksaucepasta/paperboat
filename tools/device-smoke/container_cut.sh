@@ -44,10 +44,10 @@ remove)
     ssh "$host" "sudo kill \$(cat /tmp/pbcut-$ct.pid) 2>/dev/null; sleep 1  # the capture ends while the rules still hold
       dropped=\$(sudo iptables -vnxL DOCKER-USER | awk '/pbcut-$ct/ {n+=\$1} END {print n+0}')
       while sudo iptables -S DOCKER-USER | grep -q pbcut-$ct; do sudo iptables -D DOCKER-USER \$(sudo iptables -S DOCKER-USER | grep pbcut-$ct | head -1 | cut -d' ' -f3-); done
-      wire=\$(sudo tcpdump -nnr /tmp/pbcut-$ct.pcap 2>/dev/null | grep -v ' docker0 \| veth' | grep -c ' Out ')
+      wire=\$(sudo tcpdump -nnr /tmp/pbcut-$ct.pcap 2>/dev/null | grep -v ' docker0 \| veth' | grep ' Out ' | grep -c ' UDP')
       inner=\$(sudo tcpdump -nnr /tmp/pbcut-$ct.pcap 2>/dev/null | grep -c ' docker0 *In ')
       sudo rm -f /tmp/pbcut-$ct.pcap /tmp/pbcut-$ct.pid
-      echo \"capture during the cut on $host: sent=\$wire to the wire, \$inner from $ct dropped silently (rule counters \$dropped)\""
+      echo \"capture during the cut on $host: sent=\$wire UDP packets to the wire, \$inner from $ct dropped silently (rule counters \$dropped)\""
     exit
   fi
   ssh "$host" "ip=\$(sudo docker exec $ct sh -c \"ip -4 -o addr show eth0 | awk '{print \\\$4}' | cut -d/ -f1\")
