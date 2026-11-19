@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -30,21 +29,26 @@ func TestExecDialThatOpensAsTheCallerCancelsKeepsTheConnection(t *testing.T) {
 func TestExecSecondInterruptAbandonsTheRemoteCancel(t *testing.T) {
 	signals := make(chan os.Signal, 1)
 	callerDone, execDone := make(chan struct{}), make(chan struct{})
-	var cancels, abandons atomic.Int32
-	abandoned := make(chan struct{}, 2)
-	go watchExecSignals(signals, callerDone, execDone, func() { cancels.Add(1) },
-		func() { abandons.Add(1); abandoned <- struct{}{} }, func(os.Signal) {})
+	cancelled, abandoned := make(chan struct{}, 4), make(chan struct{}, 2)
+	go watchExecSignals(signals, callerDone, execDone, func() { cancelled <- struct{}{} },
+		func() { abandoned <- struct{}{} }, func(os.Signal) {})
 	defer close(execDone)
-	close(callerDone) // the first Ctrl-C cancels the invocation's context ...
-	signals <- os.Interrupt
-	time.Sleep(50 * time.Millisecond) // ... and arrives on the signal channel too
-	if abandons.Load() != 0 || cancels.Load() == 0 {
-		t.Fatalf("after one Ctrl-C: cancels=%d abandons=%d", cancels.Load(), abandons.Load())
+	close(callerDone)       // the first Ctrl-C cancels the invocation's context ...
+	signals <- os.Interrupt // ... and arrives on the signal channel too
+	// The watcher handles events one at a time: once both cancels are seen, the first Ctrl-C has been counted.
+	for range 2 {
+		select {
+		case <-cancelled:
+		case <-abandoned:
+			t.Fatal("one Ctrl-C abandoned the remote cancel")
+		case <-time.After(30 * time.Second):
+			t.Fatal("the first Ctrl-C did not cancel")
+		}
 	}
 	signals <- syscall.SIGTERM
 	select {
 	case <-abandoned:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("a second signal did not abandon the remote cancel")
 	}
 }
