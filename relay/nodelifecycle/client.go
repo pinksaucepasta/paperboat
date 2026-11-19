@@ -31,7 +31,7 @@ import (
 var ErrControl = errors.New("relay control authority unavailable or expired")
 var ErrFenced = errors.New("relay node authority rejected")
 
-// ErrUpdateRequired: the server answered 426, this release is below the minimum supported version. The relay
+// ErrUpdateRequired means the server answered 426, this release is below the minimum supported version. The relay
 // keeps serving and asks again every updateRequiredRetry; the server's answer says why.
 var ErrUpdateRequired = errors.New("this Paperboat relay release is below the minimum supported version: press Update for this node in the console (self-hosted) or admin (Paperboat-managed), or run the pbh install command on the host again")
 
