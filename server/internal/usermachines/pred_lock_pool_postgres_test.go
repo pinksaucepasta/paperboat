@@ -26,7 +26,7 @@ func TestRevokeCompletesWhenThePredicateLockPoolIsSmallOnPostgres(t *testing.T) 
 		t.Fatal(err)
 	}
 	if perTx > 10 {
-		t.Skipf("max_pred_locks_per_transaction is %d: start PostgreSQL with -c max_pred_locks_per_transaction=10 -c max_connections=10 (a restart-only setting) to run this test", perTx)
+		t.Skipf("max_pred_locks_per_transaction is %d: start PostgreSQL with -c max_pred_locks_per_transaction=10 -c max_connections=10 -c max_wal_senders=0 (a restart-only setting) to run this test", perTx)
 	}
 	exec := func(query string, args ...any) {
 		t.Helper()
