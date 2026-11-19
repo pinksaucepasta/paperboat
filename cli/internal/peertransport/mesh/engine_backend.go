@@ -208,6 +208,24 @@ func (b *locoBackend) resetPeerSession(k key.NodePublic) {
 	b.mu.Unlock()
 }
 
+// forgetPeerPath drops magicsock's endpoint for a client that restarted with the same keys (the disco key derives from
+// the node key, so it does not change): the direct address it held is dead, yet trusted for 6.5 s, and our handshake
+// response would go to it alone. Removing and re-adding the peer starts discovery over and sends over DERP until a
+// path is confirmed, as Tailscale does when a peer's disco key changes (magicsock endpoint.go updateFromNode ->
+// changedActiveDiscoLocked, which also distrusts bestAddr).
+func (b *locoBackend) forgetPeerPath(k key.NodePublic) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := b.clients[k]
+	if n == nil {
+		return
+	}
+	b.deleteClientLocked(k)
+	b.updateServerMapLocked()
+	b.setClientLocked(k, n)
+	b.updateServerMapLocked()
+}
+
 // peerByIP returns the public key of the peer that outbound packets
 // addressed to dst should be sent to (see
 // [wgengine.Engine.SetPeerByIPPacketFunc]).

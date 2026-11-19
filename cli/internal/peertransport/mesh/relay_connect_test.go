@@ -260,3 +260,37 @@ func TestHandshakeFailsWhenTheNonceSourceFails(t *testing.T) {
 		t.Fatal("a failed handshake left a waiter with a zero nonce")
 	}
 }
+
+// A client that restarts with the same keys keeps its (derived) disco key, so magicsock kept trusting its dead direct
+// address and our handshake response went there alone (TestTailcatQUIC round 1). Only a changed start id drops the
+// path, and the client stays admitted.
+func TestRestartedClientsPathIsForgottenOnItsPing(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	peer := key.NewNode().Public()
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::50"),
+		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::51")}}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{regions.Regions[1]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	disco := key.NewDisco().Public()
+	if !s.lb.onMeow(peer, disco) {
+		t.Fatal("fixture: peer not admitted")
+	}
+	first, second := [meowNonceLen]byte{1}, [meowNonceLen]byte{2}
+	if s.recordPeerStart(peer, first) || s.recordPeerStart(peer, first) {
+		t.Fatal("the first and a repeated start id reported a restart")
+	}
+	if !s.recordPeerStart(peer, second) {
+		t.Fatal("a changed start id did not report a restart")
+	}
+	s.lb.forgetPeerPath(peer)
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	if n := s.lb.clients[peer]; n == nil || n.DiscoKey != disco || s.lb.clientByAddr[n.Addresses[0].Addr()] != peer {
+		t.Fatal("the restarted client is no longer admitted with its address")
+	}
+}
