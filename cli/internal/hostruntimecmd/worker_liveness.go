@@ -9,6 +9,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/freeze"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 )
 
@@ -31,14 +32,14 @@ type workerLiveness struct {
 	epoch     uint64
 	heartbeat int64
 	since     time.Time
-	last      time.Time
+	gap       freeze.Gap
 }
 
 func (l *workerLiveness) silent(status hostdproto.Status, now time.Time) bool {
-	stalled := !l.last.IsZero() && now.Sub(l.last) > workerFrozenAfter
-	l.last = now
+	stalled := l.gap.Stalled(now, workerFrozenAfter)
+	gap := l.gap
 	if stalled || status.State != hostdproto.StateActive || l.since.IsZero() || status.Epoch != l.epoch || status.LastHeartbeatUnixMilli != l.heartbeat {
-		*l = workerLiveness{epoch: status.Epoch, heartbeat: status.LastHeartbeatUnixMilli, since: now, last: now}
+		*l = workerLiveness{epoch: status.Epoch, heartbeat: status.LastHeartbeatUnixMilli, since: now, gap: gap}
 		return false
 	}
 	return now.Sub(l.since) > workerFrozenAfter

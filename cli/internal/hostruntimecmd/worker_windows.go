@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/freeze"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostservice"
@@ -619,7 +620,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 			if err := workerFeatureHealthy(ctx, feature); err != nil {
 				return err
 			}
-			if err := candidate.Heartbeat(ctx); err != nil {
+			if err := freeze.Retry(ctx, workerFreezeLimit, func() error { return candidate.Heartbeat(ctx) }); err != nil {
 				return runtimeFailure("hostd worker heartbeat failed", err)
 			}
 		}

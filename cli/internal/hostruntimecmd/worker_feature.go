@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/freeze"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
@@ -256,7 +257,15 @@ func featureNativeDispatch(ctx context.Context, bridge *workloadbridge.Client) (
 // systemd restart; an owner that is really gone fails the retry too and ends the worker within a second.
 var workerHealthRetry = 250 * time.Millisecond
 
+// workerFreezeLimit: a feature health or hostd heartbeat call that fails after the process was frozen for longer
+// than this failed on the freeze, not on its peer, and is tried once more (internal/freeze).
+const workerFreezeLimit = 5 * time.Second
+
 func workerFeatureHealthy(ctx context.Context, feature workerFeature) error {
+	return freeze.Retry(ctx, workerFreezeLimit, func() error { return workerFeatureHealthyOnce(ctx, feature) })
+}
+
+func workerFeatureHealthyOnce(ctx context.Context, feature workerFeature) error {
 	err := feature.Health(ctx)
 	if err == nil || ctx.Err() != nil || errors.Is(err, workloadbridge.ErrFenced) { // fenced: end at once
 		return err

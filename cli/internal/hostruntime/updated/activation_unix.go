@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/freeze"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"golang.org/x/sys/unix"
 
@@ -628,7 +629,7 @@ func (s *Service) runActivationHelperOnce(ctx context.Context) (resultErr error)
 		if timeout <= 0 {
 			timeout = 2 * time.Minute
 		}
-		recoveryCtx, cancel := context.WithTimeout(ctx, timeout)
+		recoveryCtx, cancel := freeze.WithTimeout(ctx, timeout)
 		readinessErr := readiness.probe(recoveryCtx, state.ActiveVersion)
 		cancel()
 		if readinessErr != nil {
