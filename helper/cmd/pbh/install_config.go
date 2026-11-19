@@ -11,6 +11,24 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
+// selectedMode is the component set named by --relay, --edge or --both (relay when none is given).
+// The stored capability for an edge is still "tunnel".
+func selectedMode(fs *flag.FlagSet) (string, error) {
+	var chosen []string
+	for flagName, mode := range map[string]string{"relay": "relay", "edge": "tunnel", "both": "both"} {
+		if fs.Lookup(flagName).Value.String() == "true" {
+			chosen = append(chosen, mode)
+		}
+	}
+	switch len(chosen) {
+	case 0:
+		return "relay", nil
+	case 1:
+		return chosen[0], nil
+	}
+	return "", commandError("choose only one of --relay, --edge and --both")
+}
+
 func installationMode(c selfhost.Config) string {
 	if len(c.Components) == 2 {
 		return "both"
@@ -28,7 +46,7 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	if err != nil {
 		return c, false, err
 	}
-	expected := map[string]string{"enable": installationMode(c), "endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-access": strconv.FormatBool(c.BrowserAccess)}
+	expected := map[string]string{"endpoint-host": c.EndpointHost, "name": c.Name, "claim-listen": c.Listen, "preview-domain": c.PreviewDomain, "tunnel-domain": c.TunnelDomain, "runtime-domain": c.RuntimeDomain, "browser-access": strconv.FormatBool(c.BrowserAccess)}
 	staged := map[string]struct {
 		file   trustFile
 		stored string
@@ -40,6 +58,9 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 		if s, ok := staged[f.Name]; ok {
 			err = matchStoredTrustFile(dir, s.file, f.Name, f.Value.String(), s.stored)
 			return
+		}
+		if mode, ok := map[string]string{"relay": "relay", "edge": "tunnel", "both": "both"}[f.Name]; ok && f.Value.String() == "true" && mode != installationMode(c) {
+			err = commandError(fmt.Sprintf("existing installation is not --%s; omit that flag to preserve installation settings", f.Name))
 		}
 		if value, ok := expected[f.Name]; ok && value != f.Value.String() {
 			err = commandError(fmt.Sprintf("existing --%s differs; omit that flag to preserve installation settings", f.Name))
@@ -59,7 +80,7 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	return c, true, err
 }
 
-func freshInstallConfig(ctx context.Context, fs *flag.FlagSet) (selfhost.Config, error) {
+func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode string) (selfhost.Config, error) {
 	value := func(name string) string { return fs.Lookup(name).Value.String() }
 	host := value("endpoint-host")
 	if host == "" {
@@ -78,7 +99,6 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet) (selfhost.Config,
 		failure = host
 	}
 	c := selfhost.Config{Name: name, EndpointHost: host, Listen: value("claim-listen"), PreviewDomain: value("preview-domain"), TunnelDomain: value("tunnel-domain"), RuntimeDomain: value("runtime-domain"), BrowserAccess: value("browser-access") == "true"}
-	mode := value("enable")
 	if mode == "relay" || mode == "both" {
 		tcp := 443
 		if mode == "both" {

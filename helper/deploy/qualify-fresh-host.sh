@@ -1,11 +1,11 @@
 #!/bin/sh
 # Fresh-host qualification of the one-liner installer (S4-02/S4-04) in a throwaway systemd
 # container: install, health, idempotent re-run, uninstall, reinstall, data removal.
-#   qualify-fresh-host.sh --base ubuntu:24.04 --enable relay|tunnel|both [--platform linux/amd64]
+#   qualify-fresh-host.sh --base ubuntu:24.04 --relay|--edge|--both [--platform linux/amd64]
 #   qualify-fresh-host.sh --base ubuntu:20.04 --expect-refusal
-#   qualify-fresh-host.sh --base ubuntu:24.04 --enable both --published https://<get host>/selfhost
+#   qualify-fresh-host.sh --base ubuntu:24.04 --both --published https://<get host>/selfhost
 #     (the real published one-liner and its auto-detected address instead of the local origin)
-#   qualify-fresh-host.sh --ssh HOST --enable both --published URL
+#   qualify-fresh-host.sh --ssh HOST --both --published URL
 #     (the same run on a real machine reached over ssh with passwordless sudo, e.g. amd64 hardware;
 #      Docker stays installed afterwards, everything pbh created is removed)
 # Needs docker (set DOCKER="sudo docker" if required), PAPERBOAT_SELFHOST_RELAY_IMAGE and
@@ -14,10 +14,11 @@ set -eu
 base=ubuntu:24.04 enable=relay platform='' refusal=false published='' ssh=''
 while [ "$#" -gt 0 ]; do
  case "$1" in
-  --base) base=$2; shift 2;; --enable) enable=$2; shift 2;; --platform) platform=$2; shift 2;;
+  --base) base=$2; shift 2;; --relay) enable=relay; shift;; --edge) enable=tunnel; shift;; --both) enable=both; shift;; --platform) platform=$2; shift 2;;
   --published) published=$2; shift 2;; --ssh) ssh=$2; shift 2;; --expect-refusal) refusal=true; shift;; *) echo "unknown argument: $1" >&2; exit 2;;
  esac
 done
+mode_flag=--$(echo "$enable" | sed s/tunnel/edge/)
 docker=${DOCKER:-docker}
 [ -n "$published" ] || : "${PAPERBOAT_SELFHOST_RELAY_IMAGE:?set the published relay image}" "${PAPERBOAT_SELFHOST_EDGE_IMAGE:?set the published edge image}"
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -87,7 +88,7 @@ fi
 
 if [ "$refusal" = true ]; then
  step "unsupported system is refused before anything changes"
- if inside "$installer --enable relay --endpoint-host 203.0.113.10" > "$work/out" 2>&1; then fail "installer accepted $base"; fi
+ if inside "$installer --relay --endpoint-host 203.0.113.10" > "$work/out" 2>&1; then fail "installer accepted $base"; fi
  grep -qi 'unsupported' "$work/out" || { cat "$work/out"; fail "refusal does not say the system is unsupported"; }
  inside '! command -v docker && ! test -e /usr/local/bin/pbh && ! test -e /etc/systemd/system/paperboat-selfhost.service' || fail "refused install changed the host"
  echo "PASS refusal on $base"; exit 0
@@ -96,8 +97,8 @@ fi
 host=203.0.113.10
 endpoint="--endpoint-host $host"
 [ -z "$published" ] || endpoint=''
-step "fresh install --enable $enable"
-inside "$installer --enable $enable $endpoint" > "$work/out" 2>&1 || { tail -30 "$work/out"; fail "install failed"; }
+step "fresh install $mode_flag"
+inside "$installer $mode_flag $endpoint" > "$work/out" 2>&1 || { tail -30 "$work/out"; fail "install failed"; }
 grep -qE "^Claim address: [0-9a-f.:]+:8443" "$work/out" || fail "claim address not printed"
 [ -n "$published" ] || grep -q "^Claim address: $host:8443" "$work/out" || fail "claim address is not the endpoint host"
 grep -qE '^Self-host code: pbh1\.' "$work/out" || fail "claim code not printed"
@@ -112,7 +113,7 @@ inside 'test "$(stat -c %a /var/lib/paperboat-selfhost)" = 700' || fail "state d
 before=$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')
 
 step "re-run is idempotent and keeps identity"
-inside "$installer --enable $enable $endpoint" > "$work/out2" 2>&1 || { tail -30 "$work/out2"; fail "re-run failed"; }
+inside "$installer $mode_flag $endpoint" > "$work/out2" 2>&1 || { tail -30 "$work/out2"; fail "re-run failed"; }
 inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "service not active after re-run"
 [ "$before" = "$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')" ] || fail "re-run changed the installation identity"
 
@@ -126,14 +127,14 @@ if [ -n "$published" ]; then
   ref=$(printf '%s' "$current" | sed -E "s/.*\"$capability\":\"([^\"]*)\".*/\1/")
   old_args="$old_args --$capability-image ${ref%:*}:$old_tag"
  done
- inside "$installer --enable $enable $endpoint $old_args" > "$work/out4" 2>&1 || { tail -30 "$work/out4"; fail "switching to the older images failed"; }
+ inside "$installer $mode_flag $endpoint $old_args" > "$work/out4" 2>&1 || { tail -30 "$work/out4"; fail "switching to the older images failed"; }
  [ "$(images)" != "$current" ] || fail "image versions did not change"
  inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "service not active on the older images"
- inside "$installer --enable $enable $endpoint" > "$work/out5" 2>&1 || { tail -30 "$work/out5"; fail "upgrade to the current images failed"; }
+ inside "$installer $mode_flag $endpoint" > "$work/out5" 2>&1 || { tail -30 "$work/out5"; fail "upgrade to the current images failed"; }
  [ "$(images)" = "$current" ] || fail "upgrade did not restore the current images"
  [ "$before" = "$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')" ] || fail "upgrade changed the installation identity"
  bad_args=$(echo "$old_args" | sed -E "s/:$old_tag/:no-such-tag/g")
- if inside "$installer --enable $enable $endpoint $bad_args" > "$work/out6" 2>&1; then fail "an upgrade to a missing image succeeded"; fi
+ if inside "$installer $mode_flag $endpoint $bad_args" > "$work/out6" 2>&1; then fail "an upgrade to a missing image succeeded"; fi
  [ "$(images)" = "$current" ] || fail "a failed upgrade changed the image configuration"
  inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "a failed upgrade stopped the service"
 fi
@@ -142,7 +143,7 @@ step "uninstall keeps data, reinstall reuses it, confirmed removal deletes it"
 inside 'pbh uninstall' >/dev/null 2>&1 || fail "uninstall failed"
 inside '! test -e /etc/systemd/system/paperboat-selfhost.service && ! test -e /usr/local/bin/pbh && test -z "$(docker ps -aq --filter label=io.paperboat.pbh-owner)"' || fail "uninstall left service, command or containers"
 inside 'test -f /var/lib/paperboat-selfhost/tls.crt' || fail "uninstall removed data without confirmation"
-inside "$installer --enable $enable $endpoint" > "$work/out3" 2>&1 || fail "reinstall failed"
+inside "$installer $mode_flag $endpoint" > "$work/out3" 2>&1 || fail "reinstall failed"
 [ "$before" = "$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')" ] || fail "reinstall did not reuse the retained identity"
 inside 'pbh uninstall --remove-data --confirm-remove-data' >/dev/null 2>&1 || fail "confirmed removal failed"
 inside '! test -e /var/lib/paperboat-selfhost/tls.crt' || fail "confirmed removal kept data"

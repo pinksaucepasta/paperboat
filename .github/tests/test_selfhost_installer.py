@@ -264,5 +264,12 @@ true''')
         self.assertEqual(pm, [])
 
 
+class SelfhostFlagsTest(unittest.TestCase):
+    def test_flags_prompts_and_no_terminal_failure(self):
+        result = subprocess.run(["bash", str(ROOT / "helper" / "deploy" / "test-install-args.sh")],
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

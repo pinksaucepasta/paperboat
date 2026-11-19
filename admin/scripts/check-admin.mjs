@@ -740,7 +740,7 @@ try {
     await p.waitForSelector("[data-enrol-node]")
     await p.getByLabel("Public hostname or IP").fill("relay-1.example.test")
     await p.getByLabel("Label", { exact: true }).fill("Hetzner Helsinki")
-    expect((await text("[data-install-command]")) === "sudo pbh install --enable relay --endpoint-host relay-1.example.test --region selfhost --name 'Hetzner Helsinki'", `command was ${await text("[data-install-command]")}`)
+    expect((await text("[data-install-command]")) === "sudo pbh install --relay --endpoint-host relay-1.example.test --region selfhost --name 'Hetzner Helsinki'", `command was ${await text("[data-install-command]")}`)
     await p.getByRole("button", { name: "I ran it, enrol the node" }).click()
     const d = dialog("Enrol the node")
     await d.waitFor()

@@ -48,8 +48,8 @@ test("the audit reference accepts the server's charset and nothing else", () => 
 })
 
 test("the pbh install command carries the kind, host, region and a quote-safe label", () => {
-  expect(installCommand("relay", "relay-1.example.test", "hel", "")).toBe("sudo pbh install --enable relay --endpoint-host relay-1.example.test --region hel")
-  expect(installCommand("both", "h.example.test", "sin", "Bob's box")).toBe("sudo pbh install --enable both --endpoint-host h.example.test --region sin --name 'Bobs box'")
+  expect(installCommand("relay", "relay-1.example.test", "hel", "")).toBe("sudo pbh install --relay --endpoint-host relay-1.example.test --region hel")
+  expect(installCommand("both", "h.example.test", "sin", "Bob's box")).toBe("sudo pbh install --both --endpoint-host h.example.test --region sin --name 'Bobs box'")
 })
 
 test("the server-node enrol command names region, instance and host", () => {

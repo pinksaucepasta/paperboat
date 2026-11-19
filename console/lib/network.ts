@@ -149,7 +149,7 @@ export function groupNodes(installations: Installation[]): Node[] {
 
 /** The installer for a node, run on the server. */
 export const installCommand = (installerBaseUrl: string, components: "relay" | "tunnel" | "both") =>
-  `curl -fsSL ${installerBaseUrl}/selfhost | sh${components === "relay" ? "" : ` -s -- --enable ${components}`}`
+  `curl -fsSL ${installerBaseUrl}/selfhost | sh -s -- --${components === "tunnel" ? "edge" : components}`
 
 /** One of a workspace's two edges: a Paperboat edge or one of your tunnel servers. */
 export type PairEdge = Data<"/v1/edges/pair">["primary"]

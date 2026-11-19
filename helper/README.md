@@ -11,9 +11,8 @@ from Docker's official apt repository when missing), and public inbound connecti
 ## Install
 
 ```sh
-curl -fsSL https://get.pprbt.dev/selfhost | sh                    # relay (default)
-curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable tunnel
-curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --enable both
+curl -fsSL https://get.pprbt.dev/selfhost | sh                              # asks what to run
+curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --relay                  # or --edge, or --both: no questions
 ```
 
 It prints a claim address and a single-use code that lasts fifteen minutes. Paste both into the dashboard.

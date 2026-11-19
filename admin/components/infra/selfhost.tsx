@@ -25,7 +25,7 @@ const host = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/
 
 /** The command the operator runs on the new host; the one-time code is made there, by `pbh`, not by the server. */
 export function installCommand(kind: string, endpointHost: string, region: string, name: string): string {
-  const parts = ["sudo pbh install", `--enable ${kind}`, `--endpoint-host ${endpointHost}`, `--region ${region}`]
+  const parts = ["sudo pbh install", `--${kind === "tunnel" ? "edge" : kind}`, `--endpoint-host ${endpointHost}`, `--region ${region}`]
   if (name) parts.push(`--name '${name.replaceAll("'", "")}'`)
   return parts.join(" ")
 }

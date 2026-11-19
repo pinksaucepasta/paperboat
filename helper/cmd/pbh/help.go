@@ -27,14 +27,14 @@ Run pbh <command> --help for a command's description and flags.
 
 // commandHelp is the paragraph printed above a command's flags by `pbh <command> --help`.
 var commandHelp = map[string]string{
-	"install": `Install a local Paperboat node (relay, tunnel or both) as the paperboat-selfhost systemd service.
+	"install": `Install a local Paperboat node (--relay, --edge or --both) as the paperboat-selfhost systemd service.
 Installation assigns no account or team: claim the node in Dashboard → Network → Add self-hosted
 node with the address and code printed here (pbh selfhost code prints a new one). Re-running the
 same command upgrades in place and keeps data. Needs root (it re-runs itself with sudo) unless
 --no-service is given.
 Examples:
-  pbh install --enable both --endpoint-host edge.example.com
-  pbh install --enable tunnel --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
+  pbh install --both --endpoint-host edge.example.com
+  pbh install --edge --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
 	"selfhost code": `Print this installation's claim address and a fresh single-use code (valid for 15 minutes) for
 Dashboard → Network → Add self-hosted node. The code carries no account identity.`,
 	"status": `Show the paperboat-selfhost service state (systemctl status). A running service is not
