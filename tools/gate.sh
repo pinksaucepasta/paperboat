@@ -19,7 +19,8 @@ step() { printf '\n== %s\n' "$1"; }
 for m in shared cli relay edge server helper; do
   [ -d "$m" ] || continue
   step "go vet + test: $m"
-  (cd "$m" && go vet ./... && go test ./...) || { echo "FAIL: $m"; fail=1; }
+  # PostgreSQL suites truncate their whole schema: each package runs on its own database (no-op without a DSN).
+  (cd "$m" && go vet ./... && go test -exec "$PWD/../tools/pg-test-exec.sh" ./...) || { echo "FAIL: $m"; fail=1; }
 done
 
 step "source policy and static analysis (staticcheck, deadcode) for every module"
@@ -50,6 +51,9 @@ python3 tools/check_doc_links.py && python3 tools/check_doc_envvars.py && (cd to
 
 step "migrations: expand/contract and index locks (F21-04)"
 python3 tools/check_migrations.py && (cd tools && python3 -m unittest test_check_migrations) || { echo "FAIL: migration lint"; fail=1; }
+
+step "PostgreSQL per-package database wrapper tests"
+(cd tools && python3 -m unittest test_pg_test_exec) || { echo "FAIL: pg-test-exec"; fail=1; }
 
 step "server-first check tests"
 (cd tools && python3 -m unittest test_check_server_deployed) || { echo "FAIL: server-first check"; fail=1; }

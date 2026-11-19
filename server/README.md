@@ -46,11 +46,15 @@ make check
 
 PostgreSQL integration tests require a separate, disposable PostgreSQL 17 database.
 Without `PAPERBOAT_TEST_DATABASE_DSN`, those tests are skipped by `make check`.
-Create a database whose name ends in `_test`, then run, for example:
+Create a database named `lane_test` on a server where the role may create databases, then run, for example:
 
 ```sh
-PAPERBOAT_TEST_DATABASE_DSN='postgres://localhost:5432/paperboat_test?sslmode=disable' make check
+PAPERBOAT_TEST_DATABASE_DSN='postgres://localhost:5432/lane_test?sslmode=disable' make check
 ```
+
+`make test` and `make race` run every package through `tools/pg-test-exec.sh`, which gives each package its own
+empty `lane_<package>_test` database on that server; the suites truncate their whole schema, so never run several
+packages against one database yourself (`go test -exec "$PWD/../tools/pg-test-exec.sh" ...` for a direct `go test`).
 
 Use your local test credentials if authentication is required. Never point this variable
 at an application database; integration tests can change or remove test data.

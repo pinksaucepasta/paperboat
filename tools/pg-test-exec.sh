@@ -9,6 +9,8 @@
 set -euo pipefail
 base=${PAPERBOAT_TEST_DATABASE_DSN:-}
 [ -n "$base" ] || exec "$@"
+# A DSN naming any other database would be cut wrongly below and every package would share one database.
+case $base in */lane_test\?*) ;; *) echo "pg-test-exec: PAPERBOAT_TEST_DATABASE_DSN must name the database lane_test followed by ?options" >&2; exit 1 ;; esac
 root=$PWD
 while [ ! -f "$root/go.mod" ]; do root=$(dirname "$root"); done # go test runs the binary in its package directory
 rel=${PWD#"$root"}; rel=${rel#/}; rel=${rel:-root}

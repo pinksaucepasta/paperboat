@@ -71,13 +71,17 @@ scenario-matrix-generate:
 scenario-matrix-check:
 	$(GO) run ./tools/scenario-matrix -check testdata/topology/scenarios.json internal/testtopology/topology_test.go ../.github/server-generated/topology-matrix.json
 
+# Every PostgreSQL suite truncates its whole schema, so packages must never share a database: with
+# PAPERBOAT_TEST_DATABASE_DSN (database lane_test) the wrapper gives each package its own; without it, it just runs the binary.
+PGEXEC := -exec $(CURDIR)/../tools/pg-test-exec.sh
+
 ## test: run the test suite
 test:
-	$(GO) test ./...
+	$(GO) test $(PGEXEC) ./...
 
-# TESTFLAGS: CI passes -json and -exec tools/pg-test-exec.sh (a fresh PostgreSQL database per package).
+# TESTFLAGS: CI passes -json.
 race:
-	$(GO) test -race $(TESTFLAGS) ./...
+	$(GO) test -race $(PGEXEC) $(TESTFLAGS) ./...
 
 reproducible-builds: verify-toolchain
 	@../tools/verify-reproducible-builds.sh server

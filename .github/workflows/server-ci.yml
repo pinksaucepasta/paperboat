@@ -63,7 +63,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$GOTEST_EVENTS"
-          make race TESTFLAGS="-json -timeout 30m -exec ${{ github.workspace }}/tools/pg-test-exec.sh" |
+          make race TESTFLAGS="-json -timeout 30m" |
             python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/server.jsonl"
       # A skipped PostgreSQL suite must not look green: these two named in the PR that added the service container.
       - name: PostgreSQL suites really ran
