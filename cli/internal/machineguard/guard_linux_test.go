@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -168,7 +169,8 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 			t.Error("guard cleanup timed out")
 		}
 	}()
-	const port = 48086
+	ports := freeTCPPorts(t, 2)
+	port, gatewayPort := ports[0], ports[1]
 	listener, address, err := client.AcquireMachine(t.Context(), "account-1", "machine-1", "office.local.example.test", netip.MustParseAddr("127.100.23.45"), port)
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +220,6 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	echo()
 	program.Close() // the release check below binds the port on every address itself
 	// The same holds for a browser gateway port (https://<machine>.<domain>:<port>).
-	gatewayPort := port + 1
 	gateway, err := client.Acquire(t.Context(), splitdns.BrowserGatewayHostname, netip.MustParseAddr(splitdns.BrowserGatewayIP), gatewayPort)
 	if err != nil {
 		t.Fatal(err)
@@ -361,9 +362,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	}
 	// Keep the duplicate descriptor open while simulating the rule tool becoming
 	// unavailable. Shared-socket shutdown must revoke admission even then.
-	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", t.TempDir())
-	defer os.Setenv("PATH", oldPath)
+	t.Setenv("PATH", t.TempDir())
 	if _, file, err := client.exchange(t.Context(), request{Operation: "release", IP: address.String(), Port: port}); err == nil {
 		if file != nil {
 			file.Close()
@@ -387,6 +386,10 @@ func TestMachineGuardOtherUserProbe(t *testing.T) {
 	if os.Geteuid() != 65534 {
 		t.Fatal("probe did not drop UID")
 	}
+	_, portText, err := net.SplitHostPort(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
 	conn, err := net.DialTimeout("tcp4", destination, 200*time.Millisecond)
 	if err == nil {
 		conn.Close()
@@ -397,14 +400,18 @@ func TestMachineGuardOtherUserProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if stolen, err := client.Acquire(t.Context(), "office.local.example.test", netip.MustParseAddr("127.100.23.45"), 48086); err == nil {
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stolen, err := client.Acquire(t.Context(), "office.local.example.test", netip.MustParseAddr("127.100.23.45"), port); err == nil {
 		stolen.Close()
 		t.Fatal("foreign owner stole reserved name/address")
 	}
 	if _, err := client.Status(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	listener, otherIP, err := client.AcquireMachine(t.Context(), "account-2", "machine-2", "studio.local.example.test", netip.MustParseAddr("127.100.23.46"), 48086)
+	listener, otherIP, err := client.AcquireMachine(t.Context(), "account-2", "machine-2", "studio.local.example.test", netip.MustParseAddr("127.100.23.46"), port)
 	if err != nil {
 		t.Fatalf("disjoint OS-user listener: %v", err)
 	}
@@ -426,7 +433,7 @@ func TestMachineGuardOtherUserProbe(t *testing.T) {
 		_, err = accepted.Write([]byte("owned"))
 		ready <- err
 	}()
-	own, err := net.DialTimeout("tcp4", "127.100.23.46:48086", time.Second)
+	own, err := net.DialTimeout("tcp4", net.JoinHostPort("127.100.23.46", portText), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

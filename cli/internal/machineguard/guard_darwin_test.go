@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -57,9 +58,14 @@ func TestDarwinGuardOtherUser(t *testing.T) {
 	if socket == "" {
 		t.Skip("isolated child only")
 	}
+	machinePort, otherPort := os.Getenv("PAPERBOAT_GUARD_PORT"), os.Getenv("PAPERBOAT_GUARD_OTHER_PORT")
+	otherNumber, err := strconv.Atoi(otherPort)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if connection, err := net.DialTimeout("tcp4", "127.100.253.68:54369", 250*time.Millisecond); err == nil {
+	if connection, err := net.DialTimeout("tcp4", net.JoinHostPort("127.100.253.68", machinePort), 250*time.Millisecond); err == nil {
 		connection.Close()
 		t.Fatal("other owner reached guarded listener")
 	}
@@ -68,14 +74,14 @@ func TestDarwinGuardOtherUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if listener, err := client.Acquire(ctx, "office.local.example.test", netip.MustParseAddr("127.100.253.68"), 54370); err == nil {
+	if listener, err := client.Acquire(ctx, "office.local.example.test", netip.MustParseAddr("127.100.253.68"), otherNumber); err == nil {
 		listener.Close()
 		t.Fatal("foreign name/address reservation stolen")
 	}
 	if _, err = client.Status(ctx); err != nil {
 		t.Fatal(err)
 	}
-	listener, assigned, err := client.AcquireMachine(ctx, "account-2", "machine-2", "other.local.example.test", netip.MustParseAddr("127.100.253.69"), 54370)
+	listener, assigned, err := client.AcquireMachine(ctx, "account-2", "machine-2", "other.local.example.test", netip.MustParseAddr("127.100.253.69"), otherNumber)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +99,7 @@ func TestDarwinGuardOtherUser(t *testing.T) {
 			_, _ = io.Copy(connection, connection)
 		}
 	}()
-	connection, err := net.DialTimeout("tcp4", "127.100.253.69:54370", time.Second)
+	connection, err := net.DialTimeout("tcp4", net.JoinHostPort("127.100.253.69", otherPort), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +195,9 @@ func TestDarwinGuardKernel(t *testing.T) {
 	if _, err = client.Status(ctx); err != nil { // learns the guard's claims feature
 		t.Fatal(err)
 	}
-	listener, address, err := client.AcquireMachine(ctx, "account-1", "machine-1", "office.local.example.test", netip.MustParseAddr("127.100.253.68"), 54369)
+	ports := freeTCPPorts(t, 4)
+	port, otherPort, retainedPort, gatewayPort := ports[0], ports[1], ports[2], ports[3]
+	listener, address, err := client.AcquireMachine(ctx, "account-1", "machine-1", "office.local.example.test", netip.MustParseAddr("127.100.253.68"), port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +223,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 	}
 	echo := func() {
 		t.Helper()
-		connection, err := net.DialTimeout("tcp4", "127.100.253.68:54369", time.Second)
+		connection, err := net.DialTimeout("tcp4", net.JoinHostPort("127.100.253.68", strconv.Itoa(port)), time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +242,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 	// A program of another OS user (Vite --host, docker -p) can still bind the machine port on every address, and
 	// the protected name still reaches the guard, not the program.
 	program := exec.Command(os.Args[0], "-test.run=^TestDarwinGuardProgramBind$", "-test.v")
-	program.Env = append(os.Environ(), "PAPERBOAT_GUARD_PROGRAM_PORT=54369")
+	program.Env = append(os.Environ(), fmt.Sprintf("PAPERBOAT_GUARD_PROGRAM_PORT=%d", port))
 	program.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 501, Gid: 20}}
 	hold, err := program.StdinPipe()
 	if err != nil {
@@ -264,9 +272,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 	if err = program.Wait(); err != nil {
 		t.Fatal("program child", err)
 	}
-	const port = 54369
 	// The same holds for a browser gateway port (https://<machine>.<domain>:<port>).
-	gatewayPort := port + 1
 	gateway, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, netip.MustParseAddr(splitdns.BrowserGatewayIP), gatewayPort)
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +291,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := exec.Command(os.Args[0], "-test.run=^TestDarwinGuardOtherUser$", "-test.v")
-	child.Env = append(os.Environ(), "PAPERBOAT_GUARD_SOCKET="+cfg.Socket)
+	child.Env = append(os.Environ(), "PAPERBOAT_GUARD_SOCKET="+cfg.Socket, fmt.Sprintf("PAPERBOAT_GUARD_PORT=%d", port), fmt.Sprintf("PAPERBOAT_GUARD_OTHER_PORT=%d", otherPort))
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 501, Gid: 20}}
 	if output, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("other OS user: %v %s", err, output)
@@ -299,21 +305,21 @@ func TestDarwinGuardKernel(t *testing.T) {
 	}
 	// Closing the protected lease retires its alias; an unrelated wildcard must
 	// not inherit cached traffic, even when the caller is the former owner.
-	wildcard, err := net.Listen("tcp4", "0.0.0.0:54369")
+	wildcard, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer wildcard.Close()
-	if connection, err := net.DialTimeout("tcp4", "127.100.253.68:54369", 250*time.Millisecond); err == nil {
+	if connection, err := net.DialTimeout("tcp4", net.JoinHostPort("127.100.253.68", strconv.Itoa(port)), 250*time.Millisecond); err == nil {
 		connection.Close()
 		t.Fatal("cached address reached wildcard replacement")
 	}
-	retainedWildcard, err := net.Listen("tcp4", "0.0.0.0:54371")
+	retainedWildcard, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", retainedPort))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer retainedWildcard.Close()
-	if connection, err := net.DialTimeout("tcp4", "127.100.253.67:54371", 250*time.Millisecond); err == nil {
+	if connection, err := net.DialTimeout("tcp4", net.JoinHostPort("127.100.253.67", strconv.Itoa(retainedPort)), 250*time.Millisecond); err == nil {
 		connection.Close()
 		t.Fatal("retired lease address reached wildcard listener")
 	}
