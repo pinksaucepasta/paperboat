@@ -66,7 +66,7 @@ func TestWorkspaceEdgeSetOnPostgres(t *testing.T) {
 		var changed bool
 		err := database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			var inner error
-			changed, inner = ReconcileScope(ctx, tx, scope, at)
+			changed, inner = ReconcileScope(ctx, tx, scope, nil, at)
 			return inner
 		})
 		if err != nil {
@@ -204,8 +204,13 @@ func (f *nearestFixture) machine(name string, rtt map[string]int, age string) {
 
 func (f *nearestFixture) pair() []string {
 	f.t.Helper()
-	err := f.db.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
-		_, err := ReconcileScope(ctx, tx, Scope{Kind: "account", ID: f.account, Account: f.account}, time.Now())
+	scope := Scope{Kind: "account", ID: f.account, Account: f.account}
+	rtt, err := ReadLatency(f.ctx, f.db.Pool(), scope, time.Now())
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	err = f.db.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		_, err := ReconcileScope(ctx, tx, scope, rtt, time.Now())
 		return err
 	})
 	if err != nil {
@@ -238,5 +243,46 @@ func TestWorkspaceEdgeSetRanksByMedianMachineOnPostgres(t *testing.T) {
 	}
 	if ids := f.pair(); len(ids) != 2 || ids[0] != b || ids[1] != a {
 		t.Fatalf("pair = %v, want [%s %s]: three machines near B outvote the one near A", ids, b, a)
+	}
+}
+
+// The latency ranking is read before the serializable reconcile transaction: inside it, its SIREAD locks over
+// every machine's samples exhausted Postgres's predicate-lock memory (08:48Z 2026-11-19) and made revokes of
+// those machines fail. The reconcile holds no predicate lock on machines or samples, and a revoke of one of
+// the scope's machines commits while the reconcile is still open.
+func TestReconcileLeavesMachinesAloneAndARevokeCommitsOnPostgres(t *testing.T) {
+	f := newNearestFixture(t)
+	a, b := f.node("a"), f.node("b")
+	for _, name := range []string{"m1", "m2", "m3"} {
+		f.machine(name, map[string]int{a: 5, b: 50}, "1 hour")
+	}
+	scope := Scope{Kind: "account", ID: f.account, Account: f.account}
+	rtt, err := ReadLatency(f.ctx, f.db.Pool(), scope, time.Now())
+	if err != nil || len(rtt) != 2 {
+		t.Fatalf("ReadLatency = %v, %v", rtt, err)
+	}
+	start := time.Now()
+	err = f.db.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, err := ReconcileScope(ctx, tx, scope, rtt, time.Now()); err != nil {
+			return err
+		}
+		var held int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE mode='SIReadLock' AND pid=pg_backend_pid() AND (relation IN ('paperboat.user_machines'::regclass,'paperboat.machine_node_latency'::regclass) OR relation IN (SELECT indexrelid FROM pg_index WHERE indrelid IN ('paperboat.user_machines'::regclass,'paperboat.machine_node_latency'::regclass)))`).Scan(&held); err != nil {
+			return err
+		}
+		if held != 0 {
+			t.Errorf("the reconcile transaction holds %d predicate locks on machines or their latency samples", held)
+		}
+		// A revoke of one of the scope's machines, while the reconcile is open.
+		return f.db.InTx(ctx, func(ctx context.Context, other *db.Tx) error {
+			_, err := other.Exec(ctx, `UPDATE paperboat.user_machines SET revoked_at=now(), state='disconnected' WHERE id=$1`, "edgenear_machine_m1_"+f.stamp)
+			return err
+		})
+	})
+	if err != nil {
+		t.Fatalf("reconcile with a concurrent revoke: %v", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("reconcile and revoke took %v, want under 2 s", took)
 	}
 }

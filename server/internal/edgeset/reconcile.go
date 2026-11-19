@@ -41,8 +41,11 @@ AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)`
 
 // ReconcileScope makes the workspace's stored edge set current: a set keeps its members while they
 // stay eligible and recently seen, a gone member is replaced, and a change of mode (managed pool
-// versus the workspace's own servers) starts over. It returns whether the stored set changed.
-func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) (bool, error) {
+// versus the workspace's own servers) starts over. It returns whether the stored set changed. rtt is the
+// latency ranking from ReadLatency, read before the transaction: its SIREAD locks over every machine's
+// samples would otherwise exhaust Postgres's predicate-lock memory and fail writes to those machines
+// (a revoke). The ranking is advisory, so a stale or empty one only changes which edges fill free places.
+func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, rtt map[string]int, now time.Time) (bool, error) {
 	if scope.ID == "" || scope.Account == "" || (scope.Kind != "account" && scope.Kind != "team") {
 		return false, errors.New("edge set scope is invalid")
 	}
@@ -84,10 +87,6 @@ func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) 
 	if err != nil {
 		return false, fmt.Errorf("read retained edges: %w", err)
 	}
-	rtt, err := readLatency(ctx, tx, scope, now)
-	if err != nil {
-		return false, err
-	}
 	chosen := choose(scope.Kind+"/"+scope.ID, current, retained, rtt, usable, Size)
 	if len(chosen) == 0 {
 		// No edge can serve the workspace right now; keep whatever it had.
@@ -111,8 +110,12 @@ WHERE l.role='edge' AND m.deleted_at IS NULL AND m.revoked_at IS NULL
  AND l.measured_at>$3::timestamptz-make_interval(secs=>$4::float8)
 GROUP BY l.node_id`
 
-func readLatency(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) (map[string]int, error) {
-	rows, err := tx.Query(ctx, latencySQL, scope.Kind, scope.ID, now, LatencyFresh.Seconds())
+// ReadLatency reads the ranking outside the reconcile transaction (a plain read on the pool or any
+// read-committed handle), never inside the serializable one.
+func ReadLatency(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, scope Scope, now time.Time) (map[string]int, error) {
+	rows, err := q.Query(ctx, latencySQL, scope.Kind, scope.ID, now, LatencyFresh.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("read edge latency: %w", err)
 	}
@@ -216,9 +219,13 @@ func ReconcileAll(ctx context.Context, database *db.DB, now time.Time) (int, err
 		}
 		for _, scope := range scopes {
 			var did bool
+			rtt, err := ReadLatency(ctx, database.Pool(), scope, now)
+			if err != nil {
+				return changed, fmt.Errorf("reconcile %s %s: %w", scope.Kind, scope.ID, err)
+			}
 			err = database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 				var inner error
-				did, inner = ReconcileScope(ctx, tx, scope, now)
+				did, inner = ReconcileScope(ctx, tx, scope, rtt, now)
 				return inner
 			})
 			if err != nil {
@@ -262,6 +269,7 @@ func EnsureTx(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) error 
 	if found, err := present(); err != nil || found {
 		return err
 	}
-	_, err := ReconcileScope(ctx, tx, scope, now)
+	// The first assignment has no latency samples to rank by (the machine is only attaching).
+	_, err := ReconcileScope(ctx, tx, scope, nil, now)
 	return err
 }
