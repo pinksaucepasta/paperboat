@@ -469,8 +469,9 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 			// Without its worker the machine is not serving; the nonzero exit makes the SCM recovery action
 			// restart this service and a fresh worker (as Restart=always does on Unix).
 			return lost
-		case now := <-livenessTicker.C:
-			if liveness.silent(server.Status(), now) {
+		case <-livenessTicker.C:
+			// The tick's own timestamp can predate a freeze; the gap check needs the time the checker really ran.
+			if liveness.silent(server.Status(), time.Now()) {
 				owned.dumpActiveStacks(ctx, os.Stderr)
 				return runtimeFailure("the runtime worker stopped sending heartbeats", errWorkerSilent)
 			}
