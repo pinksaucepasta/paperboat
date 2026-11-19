@@ -112,33 +112,18 @@ func meshSignal(ctx context.Context, tx *sql.Tx, account string) (int64, error) 
 }
 
 // latestMeshEntries is the account's mesh as the log holds it at seq (endpoint -> entry; removed endpoints absent).
-func latestMeshEntries(ctx context.Context, tx *sql.Tx, account string, seq int64, endpoints []string) (map[string]networkBinding, error) {
-	query := `SELECT DISTINCT ON (endpoint_id) endpoint_id,op,entry FROM paperboat.peer_mesh_log
- WHERE account_id=$1 AND mesh_seq<=$2 AND ($3::text[] IS NULL OR endpoint_id=ANY($3)) ORDER BY endpoint_id,mesh_seq DESC`
-	var filter any
-	if endpoints != nil {
-		filter = endpoints
-	}
-	rows, err := tx.QueryContext(ctx, query, account, seq, filter)
+func latestMeshEntries(ctx context.Context, tx *sql.Tx, account string, seq int64) (map[string]networkBinding, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (endpoint_id) endpoint_id,op,entry FROM paperboat.peer_mesh_log
+ WHERE account_id=$1 AND mesh_seq<=$2 ORDER BY endpoint_id,mesh_seq DESC`, account, seq)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string]networkBinding{}
 	for rows.Next() {
-		var endpoint, op string
-		var raw []byte
-		if err := rows.Scan(&endpoint, &op, &raw); err != nil {
+		if err := scanMeshEntry(rows, out); err != nil {
 			return nil, err
 		}
-		if op == "remove" {
-			continue
-		}
-		var b networkBinding
-		if err := json.Unmarshal(raw, &b); err != nil {
-			return nil, err
-		}
-		out[endpoint] = b
 	}
 	return out, rows.Err()
 }
@@ -176,7 +161,7 @@ func (s *NetworkService) refreshMesh(ctx context.Context, account string) (int64
 	if err != nil {
 		return 0, err
 	}
-	previous, err := latestMeshEntries(ctx, tx, account, seq, nil)
+	previous, err := s.mesh.at(ctx, tx, account, seq)
 	if err != nil {
 		return 0, err
 	}

@@ -102,7 +102,7 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mesh, err := latestMeshEntries(ctx, tx, account, seq, nil)
+	mesh, err := latestMeshEntries(ctx, tx, account, seq)
 	if err != nil {
 		t.Fatal(err)
 	}

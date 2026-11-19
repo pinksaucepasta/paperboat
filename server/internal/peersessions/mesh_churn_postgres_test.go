@@ -3,7 +3,10 @@ package peersessions
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"fmt"
+	"reflect"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,10 +90,44 @@ SELECT account_id,$2+row_number() OVER (ORDER BY r,mesh_seq),endpoint_id,'update
 		Endpoints: []string{"198.51.100.7:41641"}, Authority: AuthorityUntilRevoked}, &trace); err != nil {
 		t.Fatal(err)
 	}
+	rowsBefore := service.mesh.rows
 	changed := round("after one change")
+	rowsRead := service.mesh.rows - rowsBefore
 	if changed.builds > machines {
 		t.Fatalf("one change rebuilt %d documents for %d endpoints", changed.builds, machines)
 	}
 	perBuild := changed.build / time.Duration(max(changed.builds, 1))
-	t.Logf("RESULT one change, %d endpoints: %d builds, %d queries, %v building, %v per build", machines, changed.builds, changed.queries, changed.build, perBuild)
+	t.Logf("RESULT one change, %d endpoints: %d builds, %d queries, %d mesh log rows read, %v building, %v per build",
+		machines, changed.builds, changed.queries, rowsRead, changed.build, perBuild)
+	// The renewals read the changed entry once between them, not the account's log once each (10,200 rows x 200).
+	if rowsRead > 2 {
+		t.Fatalf("one change read %d mesh log rows, want its changed entry only", rowsRead)
+	}
+	if perBuild > 50*time.Millisecond {
+		t.Fatalf("a renewal after one change took %v to build, want well under 50 ms", perBuild)
+	}
+	// What the renewals read is exactly the log's view of the account, and it carries the change.
+	seq, err = service.refreshMesh(ctx, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := store.SQL().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	held, err := service.mesh.at(ctx, tx, account, seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logged, err := latestMeshEntries(ctx, tx, account, seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != machines || !reflect.DeepEqual(held, logged) {
+		t.Fatalf("held mesh (%d entries) differs from the log's (%d)", len(held), len(logged))
+	}
+	if got := held[account+"_m_0"].Endpoints; !slices.Equal(got, []string{"198.51.100.7:41641"}) {
+		t.Fatalf("the changed machine's entry has endpoints %v", got)
+	}
 }
