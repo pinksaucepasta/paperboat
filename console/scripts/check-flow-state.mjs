@@ -107,7 +107,7 @@ async function round(label, originPath, originLink, way, open, interact, clean, 
     else await page.keyboard.press("Escape")
   } else if (way === "cancel") {
     // Leave inside the same section (Cancel link to the list), the way a user abandons a wizard page.
-    const link = page.getByRole("link", { name: /^(Cancel|Back)$/ }).filter({ visible: true })
+    const link = page.locator("a, button").filter({ hasText: /^(Cancel|Back)$/ }).filter({ visible: true })
     if ((await link.count()) === 0) return pass(`${label} / ${way}`, true, "SKIP: no Cancel link")
     await link.first().click()
   } else if (way === "sidebar") await side("Terminals")
