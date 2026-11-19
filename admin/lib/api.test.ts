@@ -61,6 +61,6 @@ test("each role sees only the pages it may read", () => {
   expect(titles("admin")).toContain("/audit")
   expect(titles("support")).not.toContain("/audit")
   expect(titles("support")).not.toContain("/infrastructure")
-  expect(titles("operations")).toEqual(["/machines", "/abuse", "/capacity", "/backups", "/infrastructure"])
+  expect(titles("operations")).toEqual(["/machines", "/abuse", "/capacity", "/backups", "/status", "/infrastructure"])
   expect(titles("billing")).toContain("/billing")
 })
