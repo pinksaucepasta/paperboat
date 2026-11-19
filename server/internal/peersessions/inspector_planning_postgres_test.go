@@ -49,7 +49,7 @@ func TestInspectorAdmissionPlanningIsBoundedOnPostgres(t *testing.T) {
 }
 
 // A new database connection planned the expanded inspector view on its first configuration (the function keeps its
-// generic plan per connection afterwards): 75-115 ms on prod, 7 ms with join_collapse_limit=1 (migration 456).
+// generic plan per connection afterwards): 75-115 ms on prod, 7 ms with join_collapse_limit=1 (migration 459).
 // The best of several fresh connections, so a loaded host cannot fail it.
 func TestInspectorAdmissionFirstCallOfANewConnectionPlansFastOnPostgres(t *testing.T) {
 	f := newEndpointsFixture(t)
