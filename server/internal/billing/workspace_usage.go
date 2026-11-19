@@ -137,8 +137,11 @@ WHERE workspace_id=$1 AND paid=$2 AND coalesce(budget_start,period_start)=$3`, w
 	if included.Valid {
 		granted = min(bytes, max(int64(0), included.Int64-consumed))
 	}
-	if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET consumed_bytes=consumed_bytes+$4,observed_bytes=observed_bytes+$5 WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`, workspaceID, window.start, window.end, granted, bytes); err != nil {
-		return 0, false, err
+	// A check (bytes == 0) only reads: rewriting the period row for +0 made every edge admission lock and write it.
+	if bytes > 0 {
+		if _, err = tx.Exec(ctx, `UPDATE billing_workspace_usage_periods SET consumed_bytes=consumed_bytes+$4,observed_bytes=observed_bytes+$5 WHERE workspace_id=$1 AND period_start=$2 AND period_end=$3`, workspaceID, window.start, window.end, granted, bytes); err != nil {
+			return 0, false, err
+		}
 	}
 	if bytes > 0 && included.Valid && included.Int64 > 0 && (consumed+granted)*5 >= included.Int64*4 {
 		if err = s.noticeBandwidthWarningTx(ctx, tx, workspaceID, window, included.Int64); err != nil {

@@ -286,3 +286,54 @@ func assertPriceSwitchBudget(t *testing.T, store *db.DB, service *billing.Worksp
 	// Historical traffic still belongs to the closed paid segment.
 	debit(expired.Add(-time.Second), 1, 0)
 }
+
+// An admission check reads the workspace's usage; it must not rewrite the period row (it was +0 on every edge
+// admission, and every admission of a workspace serialised on that row).
+func TestBandwidthCheckDoesNotRewriteThePeriodRow(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	user, personal := "usr_usage_check_"+suffix, "personal:usr_usage_check_"+suffix
+	insertUser(t, store, user, "usage-check-"+suffix+"@example.test")
+	t.Cleanup(func() {
+		for _, q := range []string{`DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id=$1`, `DELETE FROM paperboat.billing_workspaces WHERE id=$1`} {
+			if _, err := store.SQL().ExecContext(context.Background(), q, personal); err != nil {
+				t.Error(err)
+			}
+		}
+		if _, err := store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, user); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,user_id,team_id,state) VALUES($1,$2,NULL,'active')`, personal, user); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspace_usage_periods(workspace_id,period_start,period_end,included_bytes) VALUES($1,$2,$3,100)`, personal, now.Add(-time.Hour), now.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	service := billing.NewWorkspaceService(store, nil, "")
+	check := func() {
+		t.Helper()
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+			_, err := service.CheckWorkspaceBandwidthTx(ctx, tx, personal, now)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	version := func() (xmin string) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT xmin::text FROM paperboat.billing_workspace_usage_periods WHERE workspace_id=$1 ORDER BY period_start DESC LIMIT 1`, personal).Scan(&xmin); err != nil {
+			t.Fatal(err)
+		}
+		return xmin
+	}
+	check()
+	before := version()
+	check()
+	check()
+	if after := version(); after != before {
+		t.Fatalf("a bandwidth check rewrote the period row (xmin %s -> %s)", before, after)
+	}
+}
