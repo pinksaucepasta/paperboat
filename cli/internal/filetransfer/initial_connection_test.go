@@ -6,42 +6,51 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
 
+// The recovery window starts at the first failure; the first connection, however long the peer takes to answer, runs
+// on the caller's own deadline. The request's deadline is the observable: any budget applied before a failure would
+// replace it, with no wait on a real clock.
 func TestNativeInitialConnectionDoesNotConsumeRetryWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"batch_id":"fb_connect","transfers":[]}`))
 	}))
 	defer server.Close()
-	stop := make(chan struct{})
-	defer close(stop)
 	client, err := NewNativeClient("https://machine.example/v1/file-transfers", Auth{Token: "token"}, testBinding(), func(ctx context.Context) (net.Conn, error) {
-		timer := time.NewTimer(operationRecoveryWindow + 100*time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-stop:
-			return nil, context.Canceled
-		}
+		return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), operationRecoveryWindow+3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Hour)
 	defer cancel()
+	callerDeadline, _ := ctx.Deadline()
+	var deadlines []time.Time
+	var mu sync.Mutex
+	inner := client.HTTPClient.Transport
+	client.HTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		deadline, _ := r.Context().Deadline()
+		mu.Lock()
+		deadlines = append(deadlines, deadline)
+		mu.Unlock()
+		return inner.RoundTrip(r)
+	})
 	var batch Batch
 	if err := client.retryJSONRequest(ctx, http.MethodPost, client.Endpoint, "op_connect", "application/json", 0, []byte(`{"batch_id":"fb_connect"}`), &batch); err != nil {
-		t.Fatalf("initial native connection was cut off by retry budget: %v", err)
+		t.Fatalf("initial native connection failed: %v", err)
 	}
 	if batch.BatchID != "fb_connect" {
 		t.Fatalf("batch=%q", batch.BatchID)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(deadlines) != 1 || !deadlines[0].Equal(callerDeadline) {
+		t.Fatalf("the initial request ran on deadlines %v, want exactly the caller's %v", deadlines, callerDeadline)
 	}
 }
 
