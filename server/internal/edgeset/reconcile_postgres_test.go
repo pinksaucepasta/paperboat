@@ -197,7 +197,7 @@ func (f *nearestFixture) node(name string) string {
 // machine adds a live machine with one edge sample (rtt in ms, age as an interval) per node.
 func (f *nearestFixture) machine(name string, rtt map[string]int, age string) {
 	id := "edgenear_machine_" + name + "_" + f.stamp
-	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','online','occupied',true,1)`, id, f.account, f.env)
+	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, id, f.account, f.env, name)
 	for node, ms := range rtt {
 		f.exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'edge',$3,now()-$4::interval)`, id, node, ms, age)
 	}
