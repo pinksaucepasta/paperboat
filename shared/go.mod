@@ -3,7 +3,6 @@ module github.com/pinksaucepasta/paperboat/shared
 go 1.27.4
 
 require (
-	github.com/BurntSushi/toml v1.6.0
 	github.com/getsentry/sentry-go v0.49.0
 	github.com/google/uuid v1.6.0
 	github.com/quic-go/quic-go v0.61.0
@@ -13,4 +12,8 @@ require (
 	golang.org/x/sys v0.50.0
 )
 
-require golang.org/x/text v0.43.0 // indirect
+require (
+	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
+	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+)

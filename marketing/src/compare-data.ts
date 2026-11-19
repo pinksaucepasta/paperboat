@@ -495,7 +495,7 @@ export const products: Product[] = [
           "Tailscale records SSH sessions through Tailscale PAM, and new devices join with an auth key. What runs on them after that is up to you.",
           ours.extras,
         ],
-        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+        us: "$ pb recordings start\n$ pb recipe create -f ci.jsonc",
       },
     ],
     pricing: {
@@ -922,7 +922,7 @@ export const products: Product[] = [
           "NetBird documents no session recording, and new peers join with a setup key. Setting them up after that is up to you.",
           ours.extras,
         ],
-        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+        us: "$ pb recordings start\n$ pb recipe create -f ci.jsonc",
       },
     ],
     pricing: {
@@ -1119,7 +1119,7 @@ export const products: Product[] = [
           "Twingate records SSH sessions through a gateway you deploy in your own network.",
           ours.extras,
         ],
-        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+        us: "$ pb recordings start\n$ pb recipe create -f ci.jsonc",
       },
     ],
     pricing: {
@@ -1226,7 +1226,7 @@ export const products: Product[] = [
           "Cloudflare logs SSH commands through Access for Infrastructure, encrypted with a key you provide.",
           ours.extras,
         ],
-        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+        us: "$ pb recordings start\n$ pb recipe create -f ci.jsonc",
       },
     ],
     pricing: {
@@ -1420,7 +1420,7 @@ export const products: Product[] = [
           "OpenSSH doesn't record sessions, and setting up a new server is a job for your own scripts.",
           ours.extras,
         ],
-        us: "$ pb recordings start\n$ pb recipe create -f ci.toml",
+        us: "$ pb recordings start\n$ pb recipe create -f ci.jsonc",
       },
     ],
     pricing: {

@@ -580,8 +580,7 @@ func TestLocalFileURLNoGitPublish(t *testing.T) {
 
 func TestGitOperationsOutliveAdmissionAndHonorWithdrawal(t *testing.T) {
 	bare, _ := transportFixture(t)
-	setSharedSource(t, bare, []byte(`"version" = 1
-`))
+	setSharedSource(t, bare, []byte(`{"version": 1}`))
 	handler := smartGitHandler(t, bare, "reader", "fixture-password")
 	var deadline atomic.Int64
 	var delay atomic.Bool

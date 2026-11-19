@@ -17,7 +17,7 @@ is allowed, the reason and the rules that decided it. With --dst and --action
 only, list who can do it; with --src only, list what that user can do. --file
 explains a draft instead of the saved policy and --api-token narrows the answer
 to one of your API tokens. Members can explain their own access; owners and
-admins anyone's.`, Example: "  pb policy explain --src user:ana@example.test --dst machine:db --action private_access --port 5432\n  pb policy explain --dst machine:db --action exec\n  pb policy explain --src user:ana@example.test --file draft.hujson", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+admins anyone's.`, Example: "  pb policy explain --src user:ana@example.test --dst machine:db --action private_access --port 5432\n  pb policy explain --dst machine:db --action exec\n  pb policy explain --src user:ana@example.test --file draft.jsonc", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		var request api.PolicyExplainRequest
 		request.Src, _ = command.Flags().GetString("src")
 		request.Dst, _ = command.Flags().GetString("dst")

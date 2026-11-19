@@ -76,17 +76,10 @@ def main():
         assert FIXTURE_NAME in json.dumps(run('config', 'repository', 'list'))
         assert run('config', 'sync', 'path')
         machine_file.parent.mkdir(parents=True, exist_ok=True)
-        machine_file.write_text(f'''version = 1
-enabled = true
-mode = "bidirectional"
-[pull]
-repository_id = "{repository_id}"
-[push]
-repository_id = "{repository_id}"
-[paths.aliases]
-local_path = "{local}"
-kind = "file"
-''')
+        machine_file.write_text(json.dumps({
+            'version': 1, 'enabled': True, 'mode': 'bidirectional',
+            'pull': {'repository_id': repository_id}, 'push': {'repository_id': repository_id},
+            'paths': {'aliases': {'local_path': str(local), 'kind': 'file'}}}))
         projection = run('config', 'sync', 'validate')
         assert projection['pull_repository_id'] == repository_id and projection['enabled']
         assert projection['mode'] == 'bidirectional'

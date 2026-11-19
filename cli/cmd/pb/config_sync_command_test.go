@@ -103,12 +103,12 @@ func configSyncSourceBackendFixture(t *testing.T, sources map[string]string) *co
 }
 func TestConfigSyncSourceInitNoOverwriteOrLinkedParent(t *testing.T) {
 	root := shorttemp.Dir(t)
-	path := filepath.Join(root, "new", "config-sync.toml")
+	path := filepath.Join(root, "new", "config-sync.jsonc")
 	if err := initMachineConfigSource(path); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if string(data) != "# Paperboat config sync\n" {
+	if string(data) != "// Paperboat config sync\n" {
 		t.Fatal("unexpected initialized source")
 	}
 	if err := initMachineConfigSource(path); err == nil || !errors.Is(err, os.ErrExist) || !errors.Is(err, errUsage) {
@@ -134,23 +134,14 @@ func TestConfigSyncSourceInitNoOverwriteOrLinkedParent(t *testing.T) {
 	if err := initMachineConfigSource(recoveryPath); err != nil {
 		t.Fatalf("source initialization did not recover after repairing its parent: %v", err)
 	}
-	if data, err := os.ReadFile(recoveryPath); err != nil || string(data) != "# Paperboat config sync\n" {
+	if data, err := os.ReadFile(recoveryPath); err != nil || string(data) != "// Paperboat config sync\n" {
 		t.Fatalf("recovered source was not initialized: %q %v", data, err)
 	}
 }
 func TestConfigSyncSourceProjectionActualFilesOnlyAndMachineOverride(t *testing.T) {
 	t.Setenv("PATH", "")
-	backend := configSyncSourceBackendFixture(t, map[string]string{"one": `"version" = 1
-"automatic_updates" = true
-["paths"]
-["paths"."editor"]
-"local_path" = "~/editor.json"
-"kind" = "file"
-`})
-	machine, err := configsync.ParseSourceConfig([]byte(`["paths"]
-["paths"."editor"]
-"local_path" = "~/local.json"
-`), configsync.DefaultSourceConfigLimits())
+	backend := configSyncSourceBackendFixture(t, map[string]string{"one": `{"version": 1, "automatic_updates": true, "paths": {"editor": {"local_path": "~/editor.json", "kind": "file"}}}`})
+	machine, err := configsync.ParseSourceConfig([]byte(`{"paths": {"editor": {"local_path": "~/local.json"}}}`), configsync.DefaultSourceConfigLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,13 +150,7 @@ func TestConfigSyncSourceProjectionActualFilesOnlyAndMachineOverride(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, _ := configsync.ParseSourceConfig([]byte(`"version" = 1
-"automatic_updates" = true
-["paths"]
-["paths"."editor"]
-"local_path" = "~/editor.json"
-"kind" = "file"
-`), configsync.DefaultSourceConfigLimits())
+	shared, _ := configsync.ParseSourceConfig([]byte(`{"version": 1, "automatic_updates": true, "paths": {"editor": {"local_path": "~/editor.json", "kind": "file"}}}`), configsync.DefaultSourceConfigLimits())
 	effective, _ := configsync.MergeSourceConfigs(shared, machine, "")
 	if projection.Revision != effective.Revision || projection.PullRepositoryID != "one" || projection.PushRepositoryID != "one" || len(projection.PathRules) != 1 || projection.PathRules[0].LocalPath != "~/local.json" || !projection.AutomaticUpdates {
 		t.Fatalf("bad projection %+v", projection)
@@ -176,28 +161,17 @@ func TestConfigSyncSourceProjectionActualFilesOnlyAndMachineOverride(t *testing.
 }
 func TestConfigSyncSourceRedirectPrimaryBoundedAndBranchStrict(t *testing.T) {
 	t.Setenv("PATH", "")
-	backend := configSyncSourceBackendFixture(t, map[string]string{"one": `["pull"]
-"repository_id" = "two"
-`, "two": `["pull"]
-"repository_id" = "two"
-`})
+	backend := configSyncSourceBackendFixture(t, map[string]string{"one": `{"pull": {"repository_id": "two"}}`, "two": `{"pull": {"repository_id": "two"}}`})
 	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "one", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil || projection.PullRepositoryID != "two" {
 		t.Fatal("author-selected primary not followed", err)
 	}
-	backend = configSyncSourceBackendFixture(t, map[string]string{"one": `["pull"]
-"repository_id" = "two"
-`, "two": `["pull"]
-"repository_id" = "one"
-`})
+	backend = configSyncSourceBackendFixture(t, map[string]string{"one": `{"pull": {"repository_id": "two"}}`, "two": `{"pull": {"repository_id": "one"}}`})
 	if _, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "one", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err == nil || !strings.Contains(err.Error(), "repeatedly") {
 		t.Fatal("primary loop accepted", err)
 	}
 	backend = configSyncSourceBackendFixture(t, map[string]string{"one": ""})
-	machine, _ := configsync.ParseSourceConfig([]byte(`["pull"]
-"repository_id" = "one"
-"branch" = "other"
-`), configsync.DefaultSourceConfigLimits())
+	machine, _ := configsync.ParseSourceConfig([]byte(`{"pull": {"repository_id": "one", "branch": "other"}}`), configsync.DefaultSourceConfigLimits())
 	if _, err := buildConfigSyncProjection(context.Background(), backend, machine, "", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err == nil {
 		t.Fatal("unauthorized branch accepted")
 	}
@@ -237,12 +211,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 	previous := xdg.ConfigHome
 	xdg.ConfigHome = filepath.Join(root, "xdg")
 	t.Cleanup(func() { xdg.ConfigHome = previous })
-	bare := configSyncSourceBare(t, `"version" = 1
-["paths"]
-["paths"."editor"]
-"local_path" = "~/editor.json"
-"kind" = "file"
-`)
+	bare := configSyncSourceBare(t, `{"version": 1, "paths": {"editor": {"local_path": "~/editor.json", "kind": "file"}}}`)
 	mutations, consents, started := 0, 0, 0
 	version := int64(0)
 	var submitted map[string]any
@@ -344,13 +313,12 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 		t.Fatal("preview skipped")
 	}
 	token = previewConfirmationCode(t, output)
-	machine := []byte(`"automatic_updates" = true
-`)
+	machine := []byte(`{"automatic_updates": true}`)
 	os.WriteFile(path, machine, 0600)
 	if _, err := execute("apply", "--confirm", token); err == nil || mutations != 0 {
 		t.Fatal("changed file confirmed silently")
 	}
-	os.WriteFile(path, []byte("# Paperboat config sync\n"), 0600)
+	os.WriteFile(path, []byte("// Paperboat config sync\n"), 0600)
 	output, err = execute("apply")
 	if err == nil {
 		t.Fatal("preview skipped")
@@ -382,12 +350,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 	if mutations != 1 || consents != 1 || started != 1 {
 		t.Fatalf("missing configure/consent/service: %d %d %d", mutations, consents, started)
 	}
-	shared, _ := configsync.ParseSourceConfig([]byte(`"version" = 1
-["paths"]
-["paths"."editor"]
-"local_path" = "~/editor.json"
-"kind" = "file"
-`), configsync.DefaultSourceConfigLimits())
+	shared, _ := configsync.ParseSourceConfig([]byte(`{"version": 1, "paths": {"editor": {"local_path": "~/editor.json", "kind": "file"}}}`), configsync.DefaultSourceConfigLimits())
 	effective, _ := configsync.MergeSourceConfigs(shared, configsync.SourceConfig{}, "")
 	if submitted["configuration_revision"] != effective.Revision {
 		t.Fatal("API configuration revision differs from actual files")
@@ -408,18 +371,8 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 func TestConfigSyncSourcePushOnlyIgnoresInheritedPull(t *testing.T) {
 	t.Setenv("PATH", "")
 	backend := configSyncSourceBackendFixture(t, map[string]string{
-		"bootstrap": `"mode" = "push_only"
-["pull"]
-"repository_id" = "inactive-pull"
-["push"]
-"repository_id" = "active-push"
-`,
-		"active-push": `"mode" = "push_only"
-["pull"]
-"repository_id" = "inactive-pull"
-["push"]
-"repository_id" = "active-push"
-`,
+		"bootstrap": `{"mode": "push_only", "pull": {"repository_id": "inactive-pull"}, "push": {"repository_id": "active-push"}}`,
+		"active-push": `{"mode": "push_only", "pull": {"repository_id": "inactive-pull"}, "push": {"repository_id": "active-push"}}`,
 	})
 	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "bootstrap", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil || projection.PullRepositoryID != "" || projection.PushRepositoryID != "active-push" {
@@ -430,12 +383,7 @@ func TestConfigSyncSourcePushOnlyIgnoresInheritedPull(t *testing.T) {
 			t.Fatal("inactive inherited pull was authorized or fetched")
 		}
 	}
-	machine, _ := configsync.ParseSourceConfig([]byte(`"mode" = "push_only"
-["pull"]
-"repository_id" = "inactive-pull"
-["push"]
-"repository_id" = "active-push"
-`), configsync.DefaultSourceConfigLimits())
+	machine, _ := configsync.ParseSourceConfig([]byte(`{"mode": "push_only", "pull": {"repository_id": "inactive-pull"}, "push": {"repository_id": "active-push"}}`), configsync.DefaultSourceConfigLimits())
 	if _, err := buildConfigSyncProjection(context.Background(), backend, machine, "", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t)); err != nil {
 		t.Fatal("inactive machine pull selected for bootstrap", err)
 	}
@@ -559,9 +507,7 @@ func TestConfigSyncSourceIgnoresARevokedAssignmentsRepositories(t *testing.T) {
 	backend := configSyncSourceBackendFixture(t, map[string]string{"one": ""})
 	team := "team-repository"
 	current := api.ConfigAssignment{ID: "cfgteam", Version: 4, ConsentState: "revoked", PullRepositoryID: &team, Mode: "pull_only"}
-	machine, _ := configsync.ParseSourceConfig([]byte(`["pull"]
-"repository_id" = "one"
-`), configsync.DefaultSourceConfigLimits())
+	machine, _ := configsync.ParseSourceConfig([]byte(`{"pull": {"repository_id": "one"}}`), configsync.DefaultSourceConfigLimits())
 	projection, err := buildConfigSyncProjection(context.Background(), backend, machine, "", current, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
 	if err != nil {
 		t.Fatal(err)

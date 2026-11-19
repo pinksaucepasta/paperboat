@@ -55,7 +55,7 @@ func policyGetCommand() *cobra.Command {
 comments included, so it can be edited and saved again with pb policy set.
 Use --version to print an earlier version; pb policy versions lists them. With
 --json, print the whole policy record: version, digest, author and the names
-the policy may use.`, Example: "  pb policy get > policy.hujson\n  pb policy get --version 3\n  pb policy get --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+the policy may use.`, Example: "  pb policy get > policy.jsonc\n  pb policy get --version 3\n  pb policy get --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		client, workspace, err := policyClient(command, args)
 		if err != nil {
 			return err
@@ -173,7 +173,7 @@ func policySetCommand() *cobra.Command {
 policy, print any errors, test results and the access each change grants or
 removes, then save it. A save that changes anyone's access asks for
 confirmation; --yes confirms the printed changes without asking. --dry-run
-stops after validation. Use - to read the file from standard input.`, Example: "  pb policy set policy.hujson\n  pb policy set policy.hujson --dry-run\n  pb policy get | pb policy set - --yes --message \"tidy\"", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+stops after validation. Use - to read the file from standard input.`, Example: "  pb policy set policy.jsonc\n  pb policy set policy.jsonc --dry-run\n  pb policy get | pb policy set - --yes --message \"tidy\"", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
 		text, err := readPolicyFile(command, args[0])
 		if err != nil {
 			return err
@@ -257,7 +257,7 @@ func policyTestCommand() *cobra.Command {
 	return &cobra.Command{Use: "test [file]", Short: "Validate a policy file and run its tests", Long: `Validate a policy file on the server without saving it, run the tests it
 contains and print errors, test results and the access changes against the
 saved policy. Without a file, the saved policy is tested. The command exits
-with status 0 only when the policy is valid and every test passes.`, Example: "  pb policy test\n  pb policy test policy.hujson", Args: commandArgs(cobra.MaximumNArgs(1)), RunE: func(command *cobra.Command, args []string) error {
+with status 0 only when the policy is valid and every test passes.`, Example: "  pb policy test\n  pb policy test policy.jsonc", Args: commandArgs(cobra.MaximumNArgs(1)), RunE: func(command *cobra.Command, args []string) error {
 		var text string
 		if len(args) == 1 {
 			var err error

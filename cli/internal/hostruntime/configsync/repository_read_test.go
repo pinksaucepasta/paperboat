@@ -59,9 +59,7 @@ func TestRepositoryReadLocalOptionalInvalidAndAuthority(t *testing.T) {
 	bare, target := transportFixture(t)
 	t.Setenv("PATH", "")
 	assertBootstrapRead(t, bare, "local", "")
-	setSharedSource(t, bare, []byte(`"version" = 1
-"enabled" = true
-`))
+	setSharedSource(t, bare, []byte(`{"version": 1, "enabled": true}`))
 	before, _ := target.Head()
 	root := shorttemp.Dir(t)
 	source, rev, err := ReadSharedRepositoryConfig(context.Background(), root, "", readGrant(bare, "local"), DefaultSourceConfigLimits())
@@ -82,8 +80,7 @@ func TestRepositoryReadLocalOptionalInvalidAndAuthority(t *testing.T) {
 	if _, _, err = ReadSharedRepositoryConfig(context.Background(), root, "", a, DefaultSourceConfigLimits()); !errors.Is(err, ErrAuthorization) {
 		t.Fatal("expired grant accepted")
 	}
-	setSharedSource(t, bare, []byte(`"unexpected" = true
-`))
+	setSharedSource(t, bare, []byte(`{"unexpected": true}`))
 	if _, _, err = ReadSharedRepositoryConfig(context.Background(), root, "", readGrant(bare, "local"), DefaultSourceConfigLimits()); !errors.Is(err, ErrSourceConfigInvalid) {
 		t.Fatal("invalid source accepted", err)
 	}
@@ -99,8 +96,7 @@ func TestRepositoryReadLocalOptionalInvalidAndAuthority(t *testing.T) {
 }
 func TestRepositoryReadHTTPS(t *testing.T) {
 	bare, _ := transportFixture(t)
-	setSharedSource(t, bare, []byte(`"version" = 1
-`))
+	setSharedSource(t, bare, []byte(`{"version": 1}`))
 	srv := httptest.NewTLSServer(smartGitHandler(t, bare, "reader", "read-secret"))
 	defer srv.Close()
 	root := shorttemp.Dir(t)

@@ -46,5 +46,6 @@ pb config sync [flags]
 * [pb config sync apply](pb_config_sync_apply.md)	 - Apply the reviewed file configuration to this machine
 * [pb config sync init](pb_config_sync_init.md)	 - Create an empty machine configuration without overwriting existing files
 * [pb config sync path](pb_config_sync_path.md)	 - Show the authoritative machine configuration path
+* [pb config sync schema](pb_config_sync_schema.md)	 - Print the config sync file JSON Schema
 * [pb config sync validate](pb_config_sync_validate.md)	 - Review the effective file configuration on this machine
 

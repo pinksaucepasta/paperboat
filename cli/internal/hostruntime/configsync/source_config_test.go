@@ -3,8 +3,8 @@ package configsync
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/BurntSushi/toml"
 	git "github.com/go-git/go-git/v5"
 	"os"
 	"path/filepath"
@@ -19,12 +19,12 @@ func completeRule(local, kind string) RuleConfig {
 	return RuleConfig{LocalPath: stringPointer(local), Kind: stringPointer(kind)}
 }
 func TestSourceConfigStrictPresentAndOptionalMissing(t *testing.T) {
-	for _, data := range []string{`{}`, `paths = null`, `version = 2`, "mode = 'pull_only'\nmode = 'push_only'", "[paths.a]\nkind = 'file'\nkind = 'directory'", `secret = 'password'`, "[paths.a]\ninclude = 1", `[os.plan9]`, `[os.linux.os]`, "[paths.a]\ninclude = ['[']", `enabled = 'true'`, `version = 1.0`, `paths = 3`, `os = 3`, `pull = 3`, `[Paths.a]`, "[paths.a]\nexclude = [1]"} {
+	for _, data := range []string{`[]`, `{"paths": null}`, `{"version": 2}`, `{"secret": "password"}`, `{"paths": {"a": {"include": 1}}}`, `{"os": {"plan9": {}}}`, `{"os": {"linux": {"os": {}}}}`, `{"paths": {"a": {"include": ["["]}}}`, `{"enabled": "true"}`, `{"version": 1.5}`, `{"paths": 3}`, `{"os": 3}`, `{"pull": 3}`, `{"Paths": {"a": {}}}`, `{"paths": {"a": {"exclude": [1]}}}`, `{"paths": {"a": {"kind": "file"},}`} {
 		if _, err := ParseSourceConfig([]byte(data), DefaultSourceConfigLimits()); !errors.Is(err, ErrSourceConfigInvalid) {
 			t.Fatalf("accepted invalid config %s: %v", data, err)
 		}
 	}
-	path := filepath.Join(resolvedTempDir(t), "config-sync.toml")
+	path := filepath.Join(resolvedTempDir(t), "config-sync.jsonc")
 	missing, err := LoadSourceConfig(path, DefaultSourceConfigLimits())
 	if err != nil || missing.Paths != nil {
 		t.Fatalf("missing %v %#v", err, missing)
@@ -35,7 +35,7 @@ func TestSourceConfigStrictPresentAndOptionalMissing(t *testing.T) {
 	if _, err := LoadSourceConfig(path, DefaultSourceConfigLimits()); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`unexpected = true`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"unexpected": true}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadSourceConfig(path, DefaultSourceConfigLimits()); !errors.Is(err, ErrSourceConfigInvalid) {
@@ -132,7 +132,7 @@ func TestSourceConfigChangesPauseBeforeMappedLocalIO(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := marshalTestSource(SourceConfig{AutomaticUpdates: boolPointer(true)})
-	if err := os.WriteFile(filepath.Join(repoRoot, ".paperboat/config-sync.toml"), data, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, ".paperboat/config-sync.jsonc"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	head := commitAll(t, repository, "new shared defaults")
@@ -214,14 +214,14 @@ func TestSharedFileDefaultsWithEmptyMachineFileReconcileWithoutCopyingDefaults(t
 		t.Fatal(err)
 	}
 	data, _ := marshalTestSource(shared)
-	if err := os.WriteFile(filepath.Join(repoRoot, ".paperboat/config-sync.toml"), data, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, ".paperboat/config-sync.jsonc"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(repoRoot, "editor"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	writeTestFile(t, filepath.Join(repoRoot, "editor/settings.json"), "shared settings")
-	machinePath := filepath.Join(resolvedTempDir(t), "config-sync.toml")
+	machinePath := filepath.Join(resolvedTempDir(t), "config-sync.jsonc")
 	writeTestFile(t, machinePath, "")
 	machine, err := LoadSourceConfig(machinePath, DefaultSourceConfigLimits())
 	if err != nil {
@@ -307,7 +307,7 @@ func TestPresentInvalidSharedSourceCannotFallBackToApprovedMachineRules(t *testi
 	if err := os.Mkdir(filepath.Join(repoRoot, ".paperboat"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	writeTestFile(t, filepath.Join(repoRoot, ".paperboat/config-sync.toml"), `paths = 3`)
+	writeTestFile(t, filepath.Join(repoRoot, ".paperboat/config-sync.jsonc"), `{"paths": 3}`)
 	writeTestFile(t, filepath.Join(repoRoot, "config"), "remote")
 	repo := initSourceTestRepository(t, repoRoot)
 	head := commitAll(t, repo, "invalid shared present")
@@ -343,12 +343,12 @@ func TestNestedSourceOwnersReconcileRealFilesWithoutReadingLosingPayload(t *test
 	writeTestFile(t, filepath.Join(sharedRoot, "sub/private.secret"), "retained local")
 	shared := SourceConfig{Paths: map[string]RuleConfig{"configs": completeRule(sharedRoot, "directory")}}
 	data, _ := marshalTestSource(shared)
-	if err := os.WriteFile(filepath.Join(repoRoot, ".paperboat/config-sync.toml"), data, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, ".paperboat/config-sync.jsonc"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	machine := SourceConfig{Paths: map[string]RuleConfig{"configs/sub": {LocalPath: stringPointer(machineRoot), Kind: stringPointer("directory"), Exclude: patternsPointer("*.secret")}}}
 	data, _ = marshalTestSource(machine)
-	machinePath := filepath.Join(resolvedTempDir(t), "config-sync.toml")
+	machinePath := filepath.Join(resolvedTempDir(t), "config-sync.jsonc")
 	if err := os.WriteFile(machinePath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -389,24 +389,24 @@ func TestNestedSourceOwnersReconcileRealFilesWithoutReadingLosingPayload(t *test
 
 func marshalTestSource(source SourceConfig) ([]byte, error) {
 	var buf bytes.Buffer
-	err := toml.NewEncoder(&buf).Encode(source)
+	err := json.NewEncoder(&buf).Encode(source)
 	return buf.Bytes(), err
 }
 
-func TestSourceTOMLCommentsQuotedPathsAndLiteralWindowsStrings(t *testing.T) {
-	source, err := ParseSourceConfig([]byte("# empty defaults are valid\n"), DefaultSourceConfigLimits())
+func TestSourceCommentsTrailingCommasQuotedPathsAndLiteralWindowsStrings(t *testing.T) {
+	source, err := ParseSourceConfig([]byte("// empty defaults are valid\n"), DefaultSourceConfigLimits())
 	if err != nil || source.Paths != nil {
 		t.Fatalf("comment-only source: %#v %v", source, err)
 	}
-	data := `version = 1
-# A literal string preserves the user's Windows destination.
-[os.windows.paths."editor/settings.json"]
-local_path = 'C:\Users\Sailor\AppData\Roaming\editor\settings.json'
-kind = 'file'
-[paths."shell/config"]
-local_path = '~/shell/config'
-kind = 'file'
-exclude = []
+	data := `{
+  "version": 1,
+  // Backslashes are escaped, as in any JSON string.
+  "os": {"windows": {"paths": {"editor/settings.json": {
+    "local_path": "C:\\Users\\Sailor\\AppData\\Roaming\\editor\\settings.json",
+    "kind": "file",
+  }}}},
+  "paths": {"shell/config": {"local_path": "~/shell/config", "kind": "file", "exclude": []}},
+}
 `
 	source, err = ParseSourceConfig([]byte(data), DefaultSourceConfigLimits())
 	if err != nil {
@@ -420,23 +420,14 @@ exclude = []
 	}
 }
 
-const machineSectionSource = `
-[paths.editor]
-local_path = "~/default"
-kind = "directory"
-
-[os.linux.paths.editor]
-local_path = "~/os"
-
-[machine.hp.paths.editor]
-local_path = "~/hp"
-
-[machine.hp]
-mode = "pull_only"
-
-[machine.laptop.paths.editor]
-exclude = ["private/**"]
-`
+const machineSectionSource = `{
+  "paths": {"editor": {"local_path": "~/default", "kind": "directory"}},
+  "os": {"linux": {"paths": {"editor": {"local_path": "~/os"}}}},
+  "machine": {
+    "hp": {"paths": {"editor": {"local_path": "~/hp"}}, "mode": "pull_only"},
+    "laptop": {"paths": {"editor": {"exclude": ["private/**"]}}}
+  }
+}`
 
 func TestMachineSectionPrecedenceBetweenOSAndMachineFile(t *testing.T) {
 	shared, err := ParseSourceConfig([]byte(machineSectionSource), DefaultSourceConfigLimits())
@@ -493,12 +484,12 @@ func TestMachineSectionNeedsMachineNameAndKnownSyntax(t *testing.T) {
 	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{Machine: map[string]SourceConfig{"hp": {}}}, "linux", "hp"); !errors.Is(err, ErrSourceConfigInvalid) {
 		t.Fatal("machine file accepted a [machine] section")
 	}
-	for _, data := range []string{"[machine.HP]", "[machine.-hp]", "[machine.hp-]", "[machine.'a b']", "[machine.hp.os.linux]", "[machine.hp.machine.other]", "[os.linux.machine.hp]", "machine = 3", "[machine.hp]\nmode = 3", "[machine.hp]\nunknown = 1", "[machine.hp.pull]\nrepository_id = 3"} {
+	for _, data := range []string{`{"machine": {"HP": {}}}`, `{"machine": {"-hp": {}}}`, `{"machine": {"hp-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"hp": {"os": {"linux": {}}}}}`, `{"machine": {"hp": {"machine": {"other": {}}}}}`, `{"os": {"linux": {"machine": {"hp": {}}}}}`, `{"machine": 3}`, `{"machine": {"hp": {"mode": 3}}}`, `{"machine": {"hp": {"unknown": 1}}}`, `{"machine": {"hp": {"pull": {"repository_id": 3}}}}`} {
 		if _, err := ParseSourceConfig([]byte(data), DefaultSourceConfigLimits()); !errors.Is(err, ErrSourceConfigInvalid) {
 			t.Fatalf("accepted %q: %v", data, err)
 		}
 	}
-	if _, err := ParseSourceConfig([]byte("[machine.hp.pull]\nrepository_id = 'r'\n[machine.hp.paths.a]\nlocal_path = 'x'\nkind = 'file'"), DefaultSourceConfigLimits()); err != nil {
+	if _, err := ParseSourceConfig([]byte(`{"machine": {"hp": {"pull": {"repository_id": "r"}, "paths": {"a": {"local_path": "x", "kind": "file"}}}}}`), DefaultSourceConfigLimits()); err != nil {
 		t.Fatalf("valid section rejected: %v", err)
 	}
 }

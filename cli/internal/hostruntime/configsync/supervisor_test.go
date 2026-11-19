@@ -429,7 +429,7 @@ func TestSupervisorFileEditImmediatelyReportsActionablePauseBeforeInvalidation(t
 func TestSupervisorMachineFileChangesStopOldRuntimeWithoutFlushOffline(t *testing.T) {
 	for _, change := range []string{"replace", "invalid", "remove"} {
 		t.Run(change, func(t *testing.T) {
-			path := filepath.Join(resolvedTempDir(t), "config-sync.toml")
+			path := filepath.Join(resolvedTempDir(t), "config-sync.jsonc")
 			if err := os.WriteFile(path, []byte(""), 0600); err != nil {
 				t.Fatal(err)
 			}

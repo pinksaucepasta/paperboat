@@ -108,14 +108,14 @@ func refusal(t *testing.T, err error, code string) {
 
 func TestRecipeLifecycle(t *testing.T) {
 	f := newFixture(t)
-	ci := "# CI\ntags = [\"ci\"]\nmax_machines = 1\nremove_after_offline = \"10m\"\n\n[[reach]]\ndst = [\"machine:web\"]\nallow = [\"exec\"]\n"
+	ci := "// CI\n{\"tags\": [\"ci\"], \"max_machines\": 1, \"remove_after_offline\": \"10m\", \"reach\": [{\"dst\": [\"machine:web\"], \"allow\": [\"exec\"]}]}\n"
 	// An agent recipe may reach tag:ci before any machine carries it (the CI recipe comes later).
 	agent := f.token()
-	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "agent", Source: "max_machines = 1\n\n[[reach]]\ndst = [\"tag:ci\"]\nallow = [\"exec\"]\n", Format: "toml", TokenID: agent.ID, Auth: agent.Auth(), PublicKey: agent.PublicKey()}); err != nil {
+	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "agent", Source: "{\"max_machines\": 1, \"reach\": [{\"dst\": [\"tag:ci\"], \"allow\": [\"exec\"]}]}", TokenID: agent.ID, Auth: agent.Auth(), PublicKey: agent.PublicKey()}); err != nil {
 		t.Fatalf("reach to a tag no machine carries yet: %v", err)
 	}
 	tok := f.token()
-	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
+	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,19 +123,19 @@ func TestRecipeLifecycle(t *testing.T) {
 		t.Fatalf("created %+v", created)
 	}
 	// A lost response retried with the same token returns the same recipe; another token is a name clash.
-	if again, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()}); err != nil || again.ID != created.ID {
+	if again, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()}); err != nil || again.ID != created.ID {
 		t.Fatalf("retry: %v", err)
 	}
 	other := f.token()
-	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, Format: "toml", TokenID: other.ID, Auth: other.Auth(), PublicKey: other.PublicKey()}); !errors.Is(err, ErrNameTaken) {
+	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: ci, TokenID: other.ID, Auth: other.Auth(), PublicKey: other.PublicKey()}); !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("duplicate name: %v", err)
 	}
 	var file *FileError
-	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "bad", Source: "tag = [\"x\"]\n", Format: "toml", TokenID: other.ID, Auth: other.Auth(), PublicKey: other.PublicKey()}); !errors.As(err, &file) || !strings.Contains(err.Error(), `Did you mean "tags"?`) {
+	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "bad", Source: "{\"tag\": [\"x\"]}", TokenID: other.ID, Auth: other.Auth(), PublicKey: other.PublicKey()}); !errors.As(err, &file) || !strings.Contains(err.Error(), `Did you mean "tags"?`) {
 		t.Fatalf("file error: %v", err)
 	}
 	var reach *ReachError
-	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "agent", Source: "[[reach]]\ndst = [\"machine:nope\"]\nallow = [\"exec\"]\n", Format: "toml", TokenID: other.ID, Auth: other.Auth(), PublicKey: other.PublicKey()}); !errors.As(err, &reach) {
+	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "agent", Source: "{\"reach\": [{\"dst\": [\"machine:nope\"], \"allow\": [\"exec\"]}]}", TokenID: other.ID, Auth: other.Auth(), PublicKey: other.PublicKey()}); !errors.As(err, &reach) {
 		t.Fatalf("unknown reach target: %v", err)
 	}
 
@@ -155,13 +155,13 @@ func TestRecipeLifecycle(t *testing.T) {
 
 	// Update raises the revision, keeps the token and tells the recipe's machines at once.
 	moved := f.topicWatch(f.web)
-	before, after, err := f.service.Update(f.ctx, f.account, f.personal, Input{Name: "ci", Source: strings.Replace(ci, "max_machines = 1", "max_machines = 5", 1), Format: "toml"})
+	before, after, err := f.service.Update(f.ctx, f.account, f.personal, Input{Name: "ci", Source: strings.Replace(ci, "\"max_machines\": 1", "\"max_machines\": 5", 1)})
 	if err != nil || before.Revision != 1 || after.Revision != 2 || after.TokenID != created.TokenID || after.MaxMachines != 5 {
 		t.Fatalf("update: %+v %v", after, err)
 	}
 	moved()
 	// The same file again is no new revision (F26-01 device check: "unchanged (revision 3)").
-	if same, again, err := f.service.Update(f.ctx, f.account, f.personal, Input{Name: "ci", Source: strings.Replace(ci, "max_machines = 1", "max_machines = 5", 1), Format: "toml"}); err != nil || same.Revision != 2 || again.Revision != 2 {
+	if same, again, err := f.service.Update(f.ctx, f.account, f.personal, Input{Name: "ci", Source: strings.Replace(ci, "\"max_machines\": 1", "\"max_machines\": 5", 1)}); err != nil || same.Revision != 2 || again.Revision != 2 {
 		t.Fatalf("unchanged update: %d -> %d %v", same.Revision, again.Revision, err)
 	}
 
@@ -225,15 +225,15 @@ func TestRecipeVaults(t *testing.T) {
 	}
 	tok := f.token()
 	var name *NameError
-	_, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "[env]\nvaults = [\"canary\"]\n", Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
+	_, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "{\"env\": {\"vaults\": [\"canary\"]}}", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
 	if !errors.As(err, &name) || name.Suggestion != "canary-env" {
 		t.Fatalf("unknown vault: %v", err)
 	}
 	var missing *WrapMissingError
-	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "[env]\nvaults = [\"canary-env\"]\n", Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()}); !errors.As(err, &missing) {
+	if _, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "{\"env\": {\"vaults\": [\"canary-env\"]}}", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()}); !errors.As(err, &missing) {
 		t.Fatalf("no wrap: %v", err)
 	}
-	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "[env]\nvaults = [\"canary-env\"]\n", Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey(),
+	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "{\"env\": {\"vaults\": [\"canary-env\"]}}", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey(),
 		Wraps: []VaultWrap{{Vault: "canary-env", Wrapped: []byte("recipe-wrap")}}})
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestRecipeVaults(t *testing.T) {
 func TestCollectMachines(t *testing.T) {
 	f := newFixture(t)
 	tok := f.token()
-	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "remove_after_offline = \"10m\"\n", Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
+	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "ci", Source: "{\"remove_after_offline\": \"10m\"}", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestRecipeReadsOnlyItsConfigRepository(t *testing.T) {
 		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_config_repositories WHERE owner_user_id=$1`, f.account)
 	})
 	tok := f.token()
-	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "cfg", Source: "[config]\nrepository = \"dotfiles\"\n", Format: "toml", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
+	created, err := f.service.Create(f.ctx, f.account, f.personal, Input{Name: "cfg", Source: "{\"config\": {\"repository\": \"dotfiles\"}}", TokenID: tok.ID, Auth: tok.Auth(), PublicKey: tok.PublicKey()})
 	if err != nil {
 		t.Fatal(err)
 	}

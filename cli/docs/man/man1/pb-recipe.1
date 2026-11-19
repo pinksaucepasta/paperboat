@@ -10,10 +10,10 @@ pb-recipe - Create and manage recipes that pair and set up machines
 
 
 .SH DESCRIPTION
-A recipe is a small TOML or JSON file that says what happens on a machine when it
+A recipe is a small JSON file (with comments, .jsonc) that says what happens on a machine when it
 joins: its tags, what it may reach, which ENV vaults it reads, which repository it
 pulls config from, which preview or tunnel it opens, and when it is removed. Create
-one with pb recipe create -f ci.toml; the printed token, set as PB_RECIPE, pairs and
+one with pb recipe create -f ci.jsonc; the printed token, set as PB_RECIPE, pairs and
 sets up a machine with one command and no prompt.
 
 .PP
@@ -47,4 +47,4 @@ With --json, this command group lists its available commands.
 
 
 .SH SEE ALSO
-\fBpb(1)\fP, \fBpb-recipe-create(1)\fP, \fBpb-recipe-list(1)\fP, \fBpb-recipe-revoke(1)\fP, \fBpb-recipe-rotate(1)\fP, \fBpb-recipe-show(1)\fP, \fBpb-recipe-update(1)\fP
+\fBpb(1)\fP, \fBpb-recipe-create(1)\fP, \fBpb-recipe-list(1)\fP, \fBpb-recipe-revoke(1)\fP, \fBpb-recipe-rotate(1)\fP, \fBpb-recipe-schema(1)\fP, \fBpb-recipe-show(1)\fP, \fBpb-recipe-update(1)\fP

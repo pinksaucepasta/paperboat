@@ -3,7 +3,7 @@
 
 Runs ON the paired machine (copy tools/device-smoke there, `python3 config_sync_lifecycle.py ALIAS`).
 Everything it creates lives under ~/.cache/pb-cfg-lifecycle and is removed at the end; the machine's own
-config-sync.toml is saved and restored. Three repositories are connected and used: a local bare repository,
+config-sync.jsonc is saved and restored. Three repositories are connected and used: a local bare repository,
 an HTTP repository served by a small Git smart-HTTP server on 127.0.0.1 with a token profile, and an SSH
 repository on this machine's own sshd with a throwaway key (skipped with a note when sshd is unavailable).
 
@@ -45,7 +45,7 @@ import winhost
 HOME = Path.home()
 ROOT = HOME / '.cache' / 'pb-cfg-lifecycle'
 CONFIG_DIR = HOME / '.config' / 'paperboat'
-MACHINE_FILE = CONFIG_DIR / 'config-sync.toml'
+MACHINE_FILE = CONFIG_DIR / 'config-sync.jsonc'
 RUNTIME_ROOT = HOME / '.local/state/paperboat/runtime'
 UNIT = 'paperboat-runtime-config.service'
 DARWIN = platform.system() == 'Darwin'
@@ -325,13 +325,13 @@ def api_token_request(path, method='GET'):
         return response.status
 
 
-def write_machine_file(repository_id, local, automatic='true', extra=''):
+def write_machine_file(repository_id, local, automatic='true'):
     MACHINE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    MACHINE_FILE.write_text('version = 1\nenabled = true\nautomatic_updates = %s\nmode = "bidirectional"\n%s'
-                            '[pull]\nrepository_id = "%s"\n[push]\nrepository_id = "%s"\n'
-                            '[paths."cfg/value.txt"]\nlocal_path = "%s"\nkind = "file"\n'
-                            # a Windows path: its backslashes are escapes in a TOML basic string
-                            % (automatic, extra, repository_id, repository_id, str(local).replace('\\', '\\\\')))
+    # json.dumps escapes a Windows path's backslashes
+    MACHINE_FILE.write_text(json.dumps({
+        'version': 1, 'enabled': True, 'automatic_updates': automatic == 'true', 'mode': 'bidirectional',
+        'pull': {'repository_id': repository_id}, 'push': {'repository_id': repository_id},
+        'paths': {'cfg/value.txt': {'local_path': str(local), 'kind': 'file'}}}))
     private(MACHINE_FILE)
 
 

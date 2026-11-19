@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -19,13 +18,22 @@ import (
 
 // pb recipe (PLAN F26): a recipe is a small file that says what a machine becomes when it pairs.
 func recipeCobraCommand() *cobra.Command {
-	root := &cobra.Command{Use: "recipe", Short: "Create and manage recipes that pair and set up machines", Long: `A recipe is a small TOML or JSON file that says what happens on a machine when it
+	root := &cobra.Command{Use: "recipe", Short: "Create and manage recipes that pair and set up machines", Long: `A recipe is a small JSON file (with comments, .jsonc) that says what happens on a machine when it
 joins: its tags, what it may reach, which ENV vaults it reads, which repository it
 pulls config from, which preview or tunnel it opens, and when it is removed. Create
-one with pb recipe create -f ci.toml; the printed token, set as PB_RECIPE, pairs and
+one with pb recipe create -f ci.jsonc; the printed token, set as PB_RECIPE, pairs and
 sets up a machine with one command and no prompt.`, Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
-	root.AddCommand(recipeCreateCommand(), recipeListCommand(), recipeShowCommand(), recipeUpdateCommand(), recipeRotateCommand(), recipeRevokeCommand())
+	root.AddCommand(recipeCreateCommand(), recipeListCommand(), recipeShowCommand(), recipeUpdateCommand(), recipeRotateCommand(), recipeRevokeCommand(), recipeSchemaCommand())
 	return root
+}
+
+func recipeSchemaCommand() *cobra.Command {
+	return &cobra.Command{Use: "schema", Short: "Print the recipe file JSON Schema", Long: `Print the JSON Schema of the recipe file, for editors and AI agents that write it.
+The schema is built into pb, so this command works offline and needs no sign-in.
+Point a file at it with a "$schema" key.`, Example: "  pb recipe schema > recipe.schema.json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error {
+		_, err := command.OutOrStdout().Write(recipe.Schema)
+		return err
+	}}
 }
 
 // recipeFileRefusal is a problem in the recipe file: its own message (file:line:col), without the
@@ -35,43 +43,43 @@ func recipeFileRefusal(message string) error {
 }
 
 // readRecipeFile reads and validates a recipe file on this computer, with file:line:col errors.
-func readRecipeFile(path string) (name, format, source string, parsed recipe.Recipe, err error) {
+func readRecipeFile(path string) (name, source string, parsed recipe.Recipe, err error) {
 	if name, err = recipe.NameFromFile(path); err != nil {
-		return "", "", "", parsed, recipeFileRefusal(err.Error())
+		return "", "", parsed, recipeFileRefusal(err.Error())
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return "", "", "", parsed, recipeFileRefusal(fmt.Sprintf("read the recipe file: %v", err))
+		return "", "", parsed, recipeFileRefusal(fmt.Sprintf("read the recipe file: %v", err))
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, recipe.MaxSourceBytes+1))
 	if err != nil {
-		return "", "", "", parsed, recipeFileRefusal(fmt.Sprintf("read the recipe file: %v", err))
+		return "", "", parsed, recipeFileRefusal(fmt.Sprintf("read the recipe file: %v", err))
 	}
 	if parsed, err = recipe.Parse(path, data); err != nil {
-		return "", "", "", parsed, recipeFileRefusal(err.Error())
+		return "", "", parsed, recipeFileRefusal(err.Error())
 	}
-	return name, strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."), string(data), parsed, nil
+	return name, string(data), parsed, nil
 }
 
 func recipeFileFlag(command *cobra.Command) (string, error) {
 	path, _ := command.Flags().GetString("file")
 	if strings.TrimSpace(path) == "" {
-		return "", localArgumentError("give the recipe file with -f, like pb recipe " + command.Name() + " -f ci.toml")
+		return "", localArgumentError("give the recipe file with -f, like pb recipe " + command.Name() + " -f ci.jsonc")
 	}
 	return path, nil
 }
 
 func recipeCreateCommand() *cobra.Command {
-	command := &cobra.Command{Use: "create -f <file>", Short: "Create a recipe from a file and print its token once", Long: `Create a recipe from a TOML or JSON file; its name is the file's base name (ci.toml
+	command := &cobra.Command{Use: "create -f <file>", Short: "Create a recipe from a file and print its token once", Long: `Create a recipe from a .jsonc file (JSON with comments); its name is the file's base name (ci.jsonc
 makes ci). The file is checked on this computer first, with file:line:col errors.
 The token is made here and printed once: save it as the secret PB_RECIPE. Paperboat
-stores only a hash of it and can never read the ENV vaults the recipe reads.`, Example: "  pb recipe create -f ci.toml\n  pb recipe create -f ci.toml --workspace acme", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+stores only a hash of it and can never read the ENV vaults the recipe reads.`, Example: "  pb recipe create -f ci.jsonc\n  pb recipe create -f ci.jsonc --workspace acme", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		path, err := recipeFileFlag(command)
 		if err != nil {
 			return err
 		}
-		name, format, source, parsed, err := readRecipeFile(path)
+		name, source, parsed, err := readRecipeFile(path)
 		if err != nil {
 			return err
 		}
@@ -87,7 +95,7 @@ stores only a hash of it and can never read the ENV vaults the recipe reads.`, E
 		if err != nil {
 			return err
 		}
-		created, err := client.CreateRecipe(command.Context(), workspace, api.RecipeCreate{Name: name, Source: source, Format: format, TokenID: token.ID, Auth: token.Auth(), PublicKey: token.PublicKey(), VaultWraps: wraps})
+		created, err := client.CreateRecipe(command.Context(), workspace, api.RecipeCreate{Name: name, Source: source, TokenID: token.ID, Auth: token.Auth(), PublicKey: token.PublicKey(), VaultWraps: wraps})
 		if err != nil {
 			return friendlyCommandError(err)
 		}
@@ -104,7 +112,7 @@ stores only a hash of it and can never read the ENV vaults the recipe reads.`, E
 		fmt.Fprintf(out, "\nToken (shown once; save it as the secret PB_RECIPE):\n  %s\n\nInstall, with PB_RECIPE set:\n  Linux, macOS  %s\n  Windows       %s\n  pb installed  pb pair\n", token, install["linux_macos"], install["windows"])
 		return nil
 	}}
-	command.Flags().StringP("file", "f", "", "the recipe file (.toml or .json)")
+	command.Flags().StringP("file", "f", "", "the recipe file (.jsonc)")
 	command.Flags().Bool("json", false, "print JSON (the token included, once)")
 	return command
 }
@@ -270,12 +278,12 @@ func recipeUpdateCommand() *cobra.Command {
 	command := &cobra.Command{Use: "update -f <file>", Short: "Change a recipe from its file", Long: `Change a recipe to what its file now says; the recipe is named by the file's base
 name. The token stays the same. Online machines from the recipe apply the new
 revision at once (tags change server-side; ENV, config, preview and tunnel sections
-are created, changed or removed on each machine).`, Example: "  pb recipe update -f ci.toml", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+are created, changed or removed on each machine).`, Example: "  pb recipe update -f ci.jsonc", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		path, err := recipeFileFlag(command)
 		if err != nil {
 			return err
 		}
-		name, format, source, parsed, err := readRecipeFile(path)
+		name, source, parsed, err := readRecipeFile(path)
 		if err != nil {
 			return err
 		}
@@ -296,7 +304,7 @@ are created, changed or removed on each machine).`, Example: "  pb recipe update
 				return err
 			}
 		}
-		updated, err := client.UpdateRecipe(command.Context(), workspace, name, api.RecipeUpdate{Source: source, Format: format, VaultWraps: wraps})
+		updated, err := client.UpdateRecipe(command.Context(), workspace, name, api.RecipeUpdate{Source: source, VaultWraps: wraps})
 		if err != nil {
 			return friendlyCommandError(err)
 		}
@@ -311,7 +319,7 @@ are created, changed or removed on each machine).`, Example: "  pb recipe update
 		_, err = fmt.Fprintf(command.OutOrStdout(), "Recipe %s updated to revision %d: %s changed. %d online machine%s will apply it now.\n", name, updated.Recipe.Revision, strings.Join(changed, ", "), updated.OnlineMachines, plural(updated.OnlineMachines))
 		return err
 	}}
-	command.Flags().StringP("file", "f", "", "the recipe file (.toml or .json)")
+	command.Flags().StringP("file", "f", "", "the recipe file (.jsonc)")
 	command.Flags().Bool("json", false, "print JSON")
 	return command
 }

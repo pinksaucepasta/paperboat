@@ -6,7 +6,7 @@
 For every ordered pair A>B: name resolution (`pb resolve`), `pb exec` (the target's own hostname comes back), ENV (one variable set
 once is seen by the target), a file sent into the target's Inbox (sha256), private TCP (xplat_access.t_access). Per machine: the console
 inventory lists it online with its OS, a preview of a local origin is reachable, `pb doctor` is healthy. Config sync with one
-shared TOML runs through xplat_config.py (X-01). Then the Linux container restarts (a reboot of that machine) and loses and regains its
+shared config file runs through xplat_config.py (X-01). Then the Linux container restarts (a reboot of that machine) and loses and regains its
 network (`docker network disconnect/connect`): the other machines reach it again without any user action and doctor is healthy
 on all three. A hosted Mac or Windows runner cannot reboot or change networks (README, macpool/winpool), so those two
 steps run on L only. Results: results/xpc-daily-<stamp>.json (`X-22:<step>:<A>><B>`).
@@ -144,7 +144,7 @@ def t_config():
     done = subprocess.run([sys.executable, str(HERE / 'xplat_config.py'), '--only', 'X-01'], capture_output=True, text=True, timeout=1800)
     lines = [line for line in done.stdout.splitlines() if line.startswith(('PASS', 'FAIL'))]
     assert done.returncode == 0, '\n'.join(lines)[-500:]
-    return 'config sync with one shared TOML (xplat_config X-01): %d checks PASS' % len([x for x in lines if x.startswith('PASS')])
+    return 'config sync with one shared config file (xplat_config X-01): %d checks PASS' % len([x for x in lines if x.startswith('PASS')])
 
 
 def wait_online(src, target, seconds=240):

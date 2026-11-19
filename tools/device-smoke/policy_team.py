@@ -170,14 +170,14 @@ def deny_checks(a, owner, member, step, doc, marker):
     # The owner guard (PLAN F18 evaluation step 2) is the personal workspace's: a draft that denies
     # everything still leaves the owner every action on their own machine.
     me = 'user:' + email(a.owner_cmd, a.owner_pb)
-    deny_all = scratch(a.owner_cmd, 'f18-deny-all.hujson')
+    deny_all = scratch(a.owner_cmd, 'f18-deny-all.jsonc')
     put(a.owner_cmd, deny_all, json.dumps({'rules': [{'src': ['*'], 'dst': ['machine:*'], 'deny': ['*']}]}))
     dec = explain(owner, 'personal', '--src', me, '--dst', target, '--action', 'exec', '--file', deny_all).get('decision') or {}
     step('F18-04 the owner guard holds against any deny (personal draft)', dec.get('allowed') is True and dec.get('reason') == 'owner', str(dec))
     what = explain(owner, a.team, '--src', who).get('what_can') or []
     step('F18-04 what-can has no exec on the machine for the member',
          not any(x.get('target') == target and x.get('action') == 'exec' for x in what), str(what)[:300])
-    path = scratch(a.owner_cmd, 'f18-draft.hujson')
+    path = scratch(a.owner_cmd, 'f18-draft.jsonc')
     put(a.owner_cmd, path, granted)
     dec = explain(owner, a.team, '--src', who, '--dst', target, '--action', 'exec', '--file', path).get('decision') or {}
     step('F18-04 explain on a draft without the deny allows the member', dec.get('allowed') is True and dec.get('reason') == 'rule', str(dec))

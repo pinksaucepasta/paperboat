@@ -67,7 +67,7 @@ CLI logout uses `/v1/auth/token/revoke`. Account suspension and client revocatio
 current access and propagate revocation to affected runtime sessions.
 
 GitHub linking is optional configuration-repository authorization. Current repository
-operations and TOML machine settings are defined in [configuration sync](contracts/config-sync.md).
+operations and machine settings (HuJSON) are defined in [configuration sync](contracts/config-sync.md).
 Personal and team subscriptions use the workspace billing API described below.
 The registered operations and request/response schemas are maintained in
 [OpenAPI](openapi.json), with [HTTP contracts](contracts/http-api.md) describing resource

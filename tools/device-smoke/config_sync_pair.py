@@ -10,7 +10,7 @@ On a Mac use its own ssh ("ssh admin@mac"); the pb machine file, config and os.<
 SHELL_X `windows` is the Windows device (PB_SMOKE_WINDOWS_PB, winhost): only pb.exe and PowerShell snippets run
 there. It reaches the repository through an ssh -R loopback port to ADDR (the repository host as this controller
 reaches it, default REPO_ADDR) and binds the one registered repository to that endpoint in its machine file
-(`url` under [pull]/[push]); the other machine keeps the registered URL.
+(`url` under pull/push); the other machine keeps the registered URL.
 
 A Git smart-HTTP server with a token on the repository host serves one bare repository, so the account
 registers it once and both machines use the same URL. Checks:
@@ -18,8 +18,8 @@ registers it once and both machines use the same URL. Checks:
   pair-assign       both validate their own destination, apply, pull the seed and become healthy
   pair-a-to-b       an edit on A reaches the repository and then B, byte-identical
   pair-b-to-a       the same from B to A
-  pair-precedence   (--machine-sections) [machine.<A>] moves A's destination over [os.linux]; B keeps the
-                    [os.linux] one; then A's own file wins over its [machine.<A>] section
+  pair-precedence   (--machine-sections) machine.<A> moves A's destination over os.linux; B keeps the
+                    os.linux one; then A's own file wins over its machine.<A> entry
 Everything is removed at the end: assignments, machine files, files, credentials, repository, server.
 """
 import base64
@@ -105,14 +105,14 @@ class Machine(Shell):
 
     @property
     def sync_file(self):
-        """Shell expression for this machine's config-sync.toml."""
-        return '"$(pb config sync path)"' if self.os == 'darwin' else '~/.config/paperboat/config-sync.toml'
+        """Shell expression for this machine's config-sync.jsonc."""
+        return '"$(pb config sync path)"' if self.os == 'darwin' else '~/.config/paperboat/config-sync.jsonc'
 
     def write_sync_file(self, text):
         if self.os == 'darwin':
             script = 'mkdir -p "$(dirname {0})" && cat > {0} && chmod 600 {0}'.format(self.sync_file)
         else:
-            script = 'mkdir -p ~/.config/paperboat && cat > ~/.config/paperboat/config-sync.toml && chmod 600 ~/.config/paperboat/config-sync.toml'
+            script = 'mkdir -p ~/.config/paperboat && cat > ~/.config/paperboat/config-sync.jsonc && chmod 600 ~/.config/paperboat/config-sync.jsonc'
         self.sh(script, stdin=text, check=True)
 
     def outputs(self):
@@ -230,19 +230,22 @@ def check(name, action):
         raise
 
 
+def value_path(local_path, **rule):
+    return {'paths': {'cfg/value.txt': dict(rule, local_path=local_path)}}
+
+
 def shared_file(a_alias, sections, platforms=('linux',)):
-    text = 'version = 1\n[paths."cfg/value.txt"]\nkind = "file"\nlocal_path = "~/%s/value.txt"\n' % DIR
+    config = {'version': 1, **value_path('~/%s/value.txt' % DIR, kind='file')}
     if sections:
-        for platform in platforms:
-            text += '[os.%s.paths."cfg/value.txt"]\nlocal_path = "~/%s/value-%s.txt"\n' % (platform, DIR, platform)
-        text += '[machine.%s.paths."cfg/value.txt"]\nlocal_path = "~/%s/value-%s.txt"\n' % (a_alias, DIR, a_alias)
-    return text
+        config['os'] = {p: value_path('~/%s/value-%s.txt' % (DIR, p)) for p in platforms}
+        config['machine'] = {a_alias: value_path('~/%s/value-%s.txt' % (DIR, a_alias))}
+    return json.dumps(config)
 
 
-def machine_file(repository_id, extra='', url=None):
-    target = 'repository_id = "%s"\n' % repository_id + ('url = "%s"\n' % url if url else '')
-    return ('version = 1\nenabled = true\nautomatic_updates = true\nmode = "bidirectional"\n'
-            '[pull]\n%s[push]\n%s%s' % (target, target, extra))
+def machine_file(repository_id, paths=None, url=None):
+    target = {'repository_id': repository_id, **({'url': url} if url else {})}
+    return json.dumps({'version': 1, 'enabled': True, 'automatic_updates': True, 'mode': 'bidirectional',
+                       'pull': target, 'push': target, **(paths or {})})
 
 
 def run_checks(repo, a, b, url, profile, password, sections, repository):
@@ -284,13 +287,13 @@ def run_checks(repo, a, b, url, profile, password, sections, repository):
 
     if sections:
         def local_wins():
-            extra = '[paths."cfg/value.txt"]\nlocal_path = "~/%s/value-own.txt"\n' % DIR
-            a.write_sync_file(machine_file(repository['id'], extra, a.own_url))
+            own = value_path('~/%s/value-own.txt' % DIR)
+            a.write_sync_file(machine_file(repository['id'], own, a.own_url))
             rules = [(r['local_path'], r['source']) for r in a.pb('config', 'sync', 'validate')['path_rules']]
             assert rules == [('~/%s/value-own.txt' % DIR, 'machine')], rules
             a.apply()
             wait('A pulled to its own path', lambda: a.read('value-own.txt') == repo.value())
-            return 'machine-local > [machine.A] > [os.linux] > shared'
+            return 'machine-local > machine.A > os.linux > shared'
         check('pair-precedence', local_wins)
 
 
@@ -317,7 +320,7 @@ def main():
     profile = json.dumps({'transport': 'http', 'auth': 'token', 'username': 'cfguser', 'password': password, 'allow_insecure_http': True})
     repository = {}
     try:
-        repo.seed({'.paperboat/config-sync.toml': shared_file(a.alias, sections, sorted({a.os, b.os})), 'cfg/value.txt': 'seed\n'})
+        repo.seed({'.paperboat/config-sync.jsonc': shared_file(a.alias, sections, sorted({a.os, b.os})), 'cfg/value.txt': 'seed\n'})
         port = repo.serve(password)
         url = 'http://%s:%d/pair.git' % (args[1], port)
         for side in (a, b):

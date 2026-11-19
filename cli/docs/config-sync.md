@@ -1,8 +1,8 @@
 # Configuration sync
 
-All targets are machines. Configuration sync has one authoritative TOML file
+All targets are machines. Configuration sync has one authoritative HuJSON file (JSON with comments, `.jsonc`)
 per machine and one optional shared file in the repository. Run `pb config sync path`
-to find the machine file. Shared defaults belong in `.paperboat/config-sync.toml`.
+to find the machine file. Shared defaults belong in `.paperboat/config-sync.jsonc`.
 Both use the v1 format; an empty or comment-only file is valid. No additional include/ignore files
 or server-side rule editor are required.
 
@@ -35,53 +35,50 @@ elevate to write protected paths.
 
 The shared file can define common settings and explicit OS-specific rules. For example:
 
-```toml
-version = 1
-mode = "pull_only"
-automatic_updates = false
-
-[os.linux.paths."myapp/settings.json"]
-local_path = "~/.config/myapp/settings.json"
-kind = "file"
-
-[os.darwin.paths."myapp/settings.json"]
-local_path = "~/Library/Application Support/myapp/settings.json"
-kind = "file"
-
-[os.windows.paths."myapp/settings.json"]
-local_path = "%APPDATA%/myapp/settings.json"
-kind = "file"
+```jsonc
+{
+  "version": 1,
+  "mode": "pull_only",
+  "automatic_updates": false,
+  "os": {
+    "linux": {"paths": {"myapp/settings.json": {
+      "local_path": "~/.config/myapp/settings.json", "kind": "file"}}},
+    "darwin": {"paths": {"myapp/settings.json": {
+      "local_path": "~/Library/Application Support/myapp/settings.json", "kind": "file"}}},
+    "windows": {"paths": {"myapp/settings.json": {
+      "local_path": "%APPDATA%/myapp/settings.json", "kind": "file"}}},
+  },
+}
 ```
 
 These paths are chosen by the user; Paperboat never translates or infers destinations.
-Precedence is **machine file → `[machine.<name>]` section → matching OS section → shared
+Precedence is **machine file → `machine.<name>` entry → matching OS entry → shared
 defaults**. An empty machine file inherits applicable defaults. To change only one machine
 setting, add that setting locally; all other defaults remain inherited. The machine file
 cannot contain OS or machine sections. OS keys are `linux`, `darwin`, and `windows`.
 
 A device-specific difference that every machine of the repository should know about goes
-in a `[machine.<name>]` section of the shared file, where `<name>` is the machine's
+in a `machine.<name>` entry of the shared file, where `<name>` is the machine's
 Paperboat name (shown by `pb machine list`; lowercase letters, digits and hyphens). It
-takes the same keys as an OS section and applies only to that machine, on top of the OS
-section:
+takes the same keys as an OS entry and applies only to that machine, on top of the OS
+entry:
 
-```toml
-[os.linux.paths."myapp/settings.json"]
-local_path = "~/.config/myapp/settings.json"
-kind = "file"
-
-[machine.build-server]
-mode = "pull_only"
-
-[machine.build-server.paths."myapp/settings.json"]
-local_path = "/srv/myapp/settings.json"
+```jsonc
+{
+  "os": {"linux": {"paths": {"myapp/settings.json": {
+    "local_path": "~/.config/myapp/settings.json", "kind": "file"}}}},
+  "machine": {"build-server": {
+    "mode": "pull_only",
+    "paths": {"myapp/settings.json": {"local_path": "/srv/myapp/settings.json"}},
+  }},
+}
 ```
 
 If a machine is renamed, its section no longer matches and the machine falls back to the
 OS section and shared defaults; its configuration revision changes, so config sync pauses
 until you run `pb config sync apply` again. `pb config sync validate` and `apply` warn
-about a `[machine.<name>]` section that matches none of your machines, usually a
-misspelled name. A shared file with machine sections needs pb with this feature on every
+about a `machine.<name>` entry that matches none of your machines, usually a
+misspelled name. A shared file with machine entries needs pb with this feature on every
 machine that reads it; older releases reject the file until they are updated. While a
 machine's name is not yet known to its daemon, sync stays paused instead of guessing.
 
@@ -94,19 +91,15 @@ Empty effective rules synchronize no files.
 
 A machine override can select direction, repositories and only the files it needs:
 
-```toml
-mode = "push_only"
-
-[push]
-repository_id = "cfgrepo_example"
-
-[paths."myapp/settings.json"]
-local_path = "~/.config/myapp/settings.json"
-kind = "file"
-
-[paths."myapp/keybindings.json"]
-local_path = "~/.config/myapp/keybindings.json"
-kind = "file"
+```jsonc
+{
+  "mode": "push_only",
+  "push": {"repository_id": "cfgrepo_example"},
+  "paths": {
+    "myapp/settings.json": {"local_path": "~/.config/myapp/settings.json", "kind": "file"},
+    "myapp/keybindings.json": {"local_path": "~/.config/myapp/keybindings.json", "kind": "file"},
+  },
+}
 ```
 
 Directory rules preserve relative suffixes. `include` and `exclude` arrays use relative
@@ -158,7 +151,7 @@ pb config repository credentials remove <repository-id> --json
 ```
 
 `connect` reads the repository before registering it. Any Git repository works if it has
-the branch with at least one commit; if it has `.paperboat/config-sync.toml`, that file must
+the branch with at least one commit; if it has `.paperboat/config-sync.jsonc`, that file must
 be a valid config sync file. A refused connect names what to fix (missing branch, empty
 repository, the file's error, missing credentials). SSH repositories need
 `--credentials-file`, which is also saved as this machine's credentials.
@@ -166,7 +159,7 @@ repository, the file's error, missing credentials). SSH repositories need
 ### Choosing a repository per machine, recipe or tag
 
 A machine uses the repository its owner chose: `pb config sync apply --repository <name>`,
-`[pull]`/`[push]` in the machine file, or a recipe's `[config] repository` (a recipe applies
+`pull`/`push` in the machine file, or a recipe's `config.repository` (a recipe applies
 the same way). Without such a choice, a `config_sync` rule in the workspace policy picks it by
 tag; team admins edit it with `pb policy` (see `shared/policy/README.md`):
 
@@ -192,12 +185,11 @@ explicitly mounted path: being on the same LAN does not itself expose a local re
 A machine can select an explicit endpoint alias for a registered custom repository in
 its configuration file. For example:
 
-```toml
-mode = "pull_only"
-
-[pull]
-repository_id = "cfgrepo_example"
-url = "/mnt/shared/config.git"
+```jsonc
+{
+  "mode": "pull_only",
+  "pull": {"repository_id": "cfgrepo_example", "url": "/mnt/shared/config.git"},
+}
 ```
 
 Aliases must refer to the same actual repository and branch; Paperboat's assignment,

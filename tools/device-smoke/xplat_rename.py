@@ -1,4 +1,4 @@
-# X-02 rename: xplat_rename.py 'L>W' 'W>L' ... (fleet, one account). a has [machine.<a>] in the shared file; b renames a; a's status
+# X-02 rename: xplat_rename.py 'L>W' 'W>L' ... (fleet, one account). a has machine.<a> in the shared file; b renames a; a's status
 # must reach configuration_changed and `pb config sync apply` must restore healthy. Exit 1 unless every pair does both.
 import json, os, re, sys, time
 sys.path.insert(0, os.getcwd())
@@ -15,7 +15,7 @@ def status(dev, machine_id):
 def fields(e): return json.dumps({k: e.get(k) for k in ('alias', 'state', 'error_code', 'recovery_actions')})
 def one(a_key, b_key):
     a, b = devs[a_key], devs[b_key]
-    section = c.SHARED + '[machine.%s.paths."cfg/settings.json"]\nlocal_path = "%s/settings-section.json"\n' % (a.name, c.RULE_ROOT[a.os])
+    section = c.shared_with_machine(a.name, c.RULE_ROOT[a.os] + '/settings-section.json')
     c.put(ctx, section)
     mid = fleet.machines()[a.name]['id']
     src = lambda: c.rules(a, c.pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']['source']
@@ -50,7 +50,7 @@ def one(a_key, b_key):
     print('RESULT %s>%s paused_configuration_changed=%s apply_restored=%s' % (a_key, b_key, paused, restored), flush=True)
     if not (paused and restored): failed.append(a_key + '>' + b_key)
 try:
-    ctx.start({'.paperboat/config-sync.toml': c.SHARED.encode(), 'cfg/settings.json': b'{}\n'})
+    ctx.start({'.paperboat/config-sync.jsonc': c.SHARED.encode(), 'cfg/settings.json': b'{}\n'})
     for k in devs: ctx.assign(k)
     for p in sys.argv[1:]:
         try: one(*p.split('>'))

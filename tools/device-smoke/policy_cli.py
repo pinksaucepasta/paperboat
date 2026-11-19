@@ -64,7 +64,7 @@ def main():
     step('C248-versions', lambda: len(parsed(out)['versions']) >= 1, text)
     saved = created = False
     with winhost.workdir('pb-policy-') as directory:
-        good, bad = directory / 'lkpol.hujson', directory / 'lkbad.json'
+        good, bad = directory / 'lkpol.jsonc', directory / 'lkbad.jsonc'
         good.write_text(policy_file(email, target))
         bad.write_text('{"rules": [{"src": ["*"], "dst": ["machine:nope"], "allow": ["exec"]}]}')
         try:

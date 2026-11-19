@@ -19,8 +19,8 @@ pb policy set <file|-> [flags]
 ### Examples
 
 ```
-  pb policy set policy.hujson
-  pb policy set policy.hujson --dry-run
+  pb policy set policy.jsonc
+  pb policy set policy.jsonc --dry-run
   pb policy get | pb policy set - --yes --message "tidy"
 ```
 

@@ -12,7 +12,6 @@ import { newToken, type NewToken } from "@/lib/recipe-token"
 import {
   createRecipe,
   fileProblems,
-  formatOf,
   nameFromFile,
   nameHint,
   updateRecipe,
@@ -24,11 +23,13 @@ import { queryKeys } from "@/lib/query-keys"
 import { createNamedVault, unknownVault, VaultLockedError } from "@/lib/recipe-vaults"
 import { sections } from "@/lib/sections"
 import { EnvUnlock } from "@/components/environment/env-unlock"
+import { RecipeForm } from "@/components/recipes/recipe-form"
 import { TokenOnce } from "@/components/recipes/token-once"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorMessage } from "@/components/error-reference"
 
 const maxBytes = 64 << 10
@@ -55,16 +56,15 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
   const token = useRef<NewToken>(undefined)
   const [name, setName] = useState(recipe?.name ?? start?.name ?? "")
   const [source, setSource] = useState(recipe?.source ?? start?.source ?? "")
-  const [fileName, setFileName] = useState<string>()
   const [problem, setProblem] = useState<string>()
+  const [view, setView] = useState<"file" | "form">("file")
   const [created, setCreated] = useState<string>()
-  const format = recipe?.format ?? formatOf(source, fileName)
   const save = useMutation({
     mutationFn: async () => {
       if (!workspace) throw new Error("Choose a workspace first.")
-      if (recipe) return { updated: await updateRecipe(workspace.id, recipe, { source, format }) }
+      if (recipe) return { updated: await updateRecipe(workspace.id, recipe, { source }) }
       token.current ??= await newToken()
-      await createRecipe(workspace.id, { name, source, format }, token.current)
+      await createRecipe(workspace.id, { name, source }, token.current)
       return { token: token.current.token }
     },
     onSuccess: async (result) => {
@@ -117,7 +117,6 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
       setProblem(undefined)
       save.reset()
       setSource(text)
-      setFileName(file.name)
       if (!recipe && !name) setName(nameFromFile(file.name))
     })
   }
@@ -159,6 +158,33 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
             )}
           </Field>
         )}
+        <ToggleGroup
+          aria-label="View"
+          value={[view]}
+          onValueChange={(next) => next[0] && setView(next[0] as "file" | "form")}
+          variant="outline"
+          spacing={2}
+        >
+          <ToggleGroupItem value="file">File</ToggleGroupItem>
+          <ToggleGroupItem value="form">Form</ToggleGroupItem>
+        </ToggleGroup>
+        {view === "form" && (
+          <>
+            <RecipeForm text={source} onChange={setSource} openFile={() => setView("file")} />
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor="recipe-generated">Generated file</FieldLabel>
+              <Textarea
+                id="recipe-generated"
+                value={source}
+                readOnly
+                rows={10}
+                spellCheck={false}
+                className="min-h-40 font-mono text-xs leading-relaxed whitespace-pre"
+              />
+            </Field>
+          </>
+        )}
+        {view === "file" && (
         <Field className="gap-1.5">
           <div className="flex items-center justify-between gap-2">
             <FieldLabel htmlFor="recipe-file">File</FieldLabel>
@@ -169,7 +195,7 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
             <input
               ref={upload}
               type="file"
-              accept=".toml,.json,text/plain,application/json"
+              accept=".jsonc,.json,text/plain,application/json"
               className="hidden"
               aria-label="Upload a recipe file"
               onChange={(event) => {
@@ -186,12 +212,13 @@ export function RecipeEditor({ recipe, start }: { recipe?: Recipe; start?: { nam
             rows={18}
             spellCheck={false}
             autoCapitalize="off"
-            placeholder={'tags = ["ci"]\nmax_machines = 20\n'}
+            placeholder={'{\n  "tags": ["ci"],\n  "max_machines": 20\n}\n'}
             aria-invalid={found.length > 0}
             className="min-h-72 font-mono text-xs leading-relaxed whitespace-pre"
             onChange={(event) => setSource(event.target.value)}
           />
         </Field>
+        )}
         {found.length > 0 && (
           <ul className="flex flex-col gap-1 text-sm text-destructive" data-recipe-errors>
             {found.map((item, index) => (

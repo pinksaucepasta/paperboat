@@ -20,7 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/recipe"
 )
 
-const recipeColumns = `r.id, r.token_id, r.account_id, coalesce(r.team_id,''), r.name, r.revision, r.source, r.source_format,
+const recipeColumns = `r.id, r.token_id, r.account_id, coalesce(r.team_id,''), r.name, r.revision, r.source,
  r.canonical, 'user:'||u.primary_email, r.created_at, r.updated_at, r.expires_at, r.last_used_at, r.rotated_at, r.revoked_at,
  coalesce(r.max_machines,0), coalesce(r.public_key,''::bytea), (SELECT count(*) FROM recipe_machines rm JOIN live_user_machines m ON m.id=rm.machine_id WHERE rm.recipe_id=r.id)`
 
@@ -58,10 +58,10 @@ func (s *Service) Create(ctx context.Context, actor string, ws workspace.Scope, 
 			return err
 		}
 		now := s.now().UTC()
-		if _, err := tx.Exec(ctx, `INSERT INTO recipes(id,token_id,account_id,team_id,name,source,source_format,canonical,auth_hash,
+		if _, err := tx.Exec(ctx, `INSERT INTO recipes(id,token_id,account_id,team_id,name,source,canonical,auth_hash,
 		 max_machines,remove_after_offline,machine_lifetime,created_at,updated_at,expires_at,public_key)
-		 VALUES($1,$2,$3,nullif($4,''),$5,$6,$7,$8,$9,nullif($10,0),$11,$12,$13,$13,$14,$15)`,
-			id, in.TokenID, actor, ws.TeamID, in.Name, in.Source, in.Format, r.Canonical(), recipe.AuthHash(in.Auth),
+		 VALUES($1,$2,$3,nullif($4,''),$5,$6,$7,$8,nullif($9,0),$10,$11,$12,$12,$13,$14)`,
+			id, in.TokenID, actor, ws.TeamID, in.Name, in.Source, r.Canonical(), recipe.AuthHash(in.Auth),
 			r.MaxMachines, interval(r.OfflineAfter()), interval(r.Lifetime()), now, now.Add(r.ExpiresIn()), in.PublicKey); err != nil {
 			return mapInsertError(err)
 		}
@@ -97,7 +97,7 @@ func (s *Service) Update(ctx context.Context, actor string, ws workspace.Scope, 
 		if before, err = byNameTx(ctx, tx, ws, actor, in.Name, true); err != nil {
 			return err
 		}
-		if before.Source == in.Source && before.Format == in.Format {
+		if before.Source == in.Source {
 			after = before // the same file again: no new revision, nothing for the machines to apply
 			return nil
 		}
@@ -109,9 +109,9 @@ func (s *Service) Update(ctx context.Context, actor string, ws workspace.Scope, 
 		if r.Expires != before.Recipe.Expires {
 			expires = s.now().UTC().Add(r.ExpiresIn()) // a changed expires counts from now
 		}
-		if _, err := tx.Exec(ctx, `UPDATE recipes SET source=$2,source_format=$3,canonical=$4,revision=revision+1,max_machines=nullif($5,0),
-		 remove_after_offline=$6,machine_lifetime=$7,expires_at=$8,updated_at=$9 WHERE id=$1`,
-			before.ID, in.Source, in.Format, r.Canonical(), r.MaxMachines, interval(r.OfflineAfter()), interval(r.Lifetime()), expires, s.now().UTC()); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE recipes SET source=$2,canonical=$3,revision=revision+1,max_machines=nullif($4,0),
+		 remove_after_offline=$5,machine_lifetime=$6,expires_at=$7,updated_at=$8 WHERE id=$1`,
+			before.ID, in.Source, r.Canonical(), r.MaxMachines, interval(r.OfflineAfter()), interval(r.Lifetime()), expires, s.now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM recipe_reach_rules WHERE recipe_id=$1`, before.ID); err != nil {
@@ -354,13 +354,13 @@ func scanRecipe(row pgx.Row) (Recipe, error) {
 	var teamID string
 	var canonical []byte
 	var lastUsed, rotated, revoked sql.NullTime
-	if err := row.Scan(&r.ID, &r.TokenID, &r.AccountID, &teamID, &r.Name, &r.Revision, &r.Source, &r.Format, &canonical, &r.CreatedBy,
+	if err := row.Scan(&r.ID, &r.TokenID, &r.AccountID, &teamID, &r.Name, &r.Revision, &r.Source, &canonical, &r.CreatedBy,
 		&r.CreatedAt, &r.UpdatedAt, &r.ExpiresAt, &lastUsed, &rotated, &revoked, &r.MaxMachines, &r.PublicKey, &r.Machines); err != nil {
 		return Recipe{}, err
 	}
 	r.Workspace = scopeFor(teamID)
 	r.LastUsedAt, r.RotatedAt, r.RevokedAt = timePtr(lastUsed), timePtr(rotated), timePtr(revoked)
-	parsed, err := recipe.ParseJSON("stored recipe", canonical)
+	parsed, err := recipe.Parse("stored recipe", canonical)
 	if err != nil {
 		return Recipe{}, fmt.Errorf("stored recipe %s: %w", r.ID, err)
 	}

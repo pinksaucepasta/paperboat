@@ -2,7 +2,7 @@
 """Main/error paths for C127, C132–C134, C138, C169/C172/C177/C179–C181 on an enrolled Linux or macOS fixture.
 
 Requires a signed-in pb account (also used by config_sync_lifecycle.py to delete the exact test repository),
-an unassigned machine without config-sync.toml, Git, and sudo access (password on stdin if needed).
+an unassigned machine without config-sync.jsonc, Git, and sudo access (password on stdin if needed).
 Reuses the existing local-access settings lifecycle and config-sync Git/file helpers. Only synthetic data is
 synced. Local access is restored by its owner; assignment, credentials, repository and files are cleaned.
 """
@@ -184,7 +184,7 @@ class Suite:
         repository = None
         applied = False
         require(shutil.which('git') is not None, 'install Git before running repository config checks')
-        require(not sync.MACHINE_FILE.exists(), 'fixture already has config-sync.toml; refusing to replace it')
+        require(not sync.MACHINE_FILE.exists(), 'fixture already has config-sync.jsonc; refusing to replace it')
         require(self.state()['state'] == 'disabled', 'fixture already has an active config assignment')
         # Validate cleanup authority before creating a server-owned repository.
         try:

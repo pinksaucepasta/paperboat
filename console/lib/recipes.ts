@@ -18,7 +18,6 @@ export type FileProblem = { line: number; column: number; path: string; message:
 
 export type Impact = Schemas["RecipeImpact"]
 
-export type RecipeFormat = Recipe["format"]
 
 const ws = (workspace: string) => `workspaces/${encodeURIComponent(workspace)}`
 const recipePath = (workspace: string, name: string) => `${ws(workspace)}/recipes/${encodeURIComponent(name)}`
@@ -45,7 +44,7 @@ export const recipeQuery = (workspace: string, name: string) =>
   })
 
 /** Creates the recipe; a vault it reads is wrapped to its token here (ENV unlocked), as `pb recipe create` does. */
-export const createRecipe = (workspace: string, file: { name: string; source: string; format: RecipeFormat }, token: NewToken) =>
+export const createRecipe = (workspace: string, file: { name: string; source: string }, token: NewToken) =>
   withVaultKeys(workspace, token, (vault_wraps) =>
     write<Data<"/v1/workspaces/{ws}/recipes", "post">>(`${ws(workspace)}/recipes`, "POST", {
       ...file,
@@ -62,7 +61,7 @@ export const recipeKey = (recipe: Recipe) => {
   return id && recipe.public_key ? { id, publicKey: recipe.public_key } : undefined
 }
 
-export async function updateRecipe(workspace: string, recipe: Recipe, file: { source: string; format: RecipeFormat }, wraps: VaultWrap[] = []) {
+export async function updateRecipe(workspace: string, recipe: Recipe, file: { source: string }, wraps: VaultWrap[] = []) {
   const send = (vault_wraps: VaultWrap[]) =>
     write<Data<"/v1/workspaces/{ws}/recipes/{name}", "put">>(recipePath(workspace, recipe.name), "PUT", { ...file, vault_wraps })
   const key = recipeKey(recipe)
@@ -107,14 +106,7 @@ export function failedSections(machine: RecipeMachine): string[] {
   })
 }
 
-/** `toml` or `json` for a file name or, for pasted text, by its first character. */
-export function formatOf(text: string, fileName?: string): RecipeFormat {
-  if (fileName?.toLowerCase().endsWith(".json")) return "json"
-  if (fileName?.toLowerCase().endsWith(".toml")) return "toml"
-  return text.trimStart().startsWith("{") ? "json" : "toml"
-}
-
-/** A recipe name from a file name: `ci.toml` is `ci`. */
+/** A recipe name from a file name: `ci.jsonc` is `ci`. */
 export const nameFromFile = (fileName: string) => fileName.replace(/\.[^.]*$/, "").toLowerCase()
 
 export const nameHint = "Lowercase letters, numbers and dashes. Up to 63."
@@ -127,17 +119,14 @@ export const templates = [
     title: "CI runner",
     about: "Tests with ENV and a preview",
     name: "ci",
-    source: `# A CI runner: secrets for the tests, a 2-hour preview of the app.
-tags = ["ci"]
-max_machines = 20
-remove_after_offline = "30m"
-
-[env]
-vaults = ["canary-env"]
-
-[[preview]]
-port = 3000
-ttl = "2h"
+    source: `// A CI runner: secrets for the tests, a 2-hour preview of the app.
+{
+  "tags": ["ci"],
+  "max_machines": 20,
+  "remove_after_offline": "30m",
+  "env": { "vaults": ["canary-env"] },
+  "preview": [{ "port": 3000, "ttl": "2h" }],
+}
 `,
   },
   {
@@ -145,17 +134,14 @@ ttl = "2h"
     title: "Homelab fleet",
     about: "Config from a repository, a tunnel per machine",
     name: "homelab",
-    source: `# Every VM made from this image pulls dotfiles and publishes its dashboard.
-tags = ["homelab"]
-expires = "365d"
-remove_after_offline = "7d"
-
-[config]
-repository = "dotfiles"
-
-[[tunnel]]
-port = 8123
-private = true
+    source: `// Every VM made from this image pulls dotfiles and publishes its dashboard.
+{
+  "tags": ["homelab"],
+  "expires": "365d",
+  "remove_after_offline": "7d",
+  "config": { "repository": "dotfiles" },
+  "tunnel": [{ "port": 8123, "private": true }],
+}
 `,
   },
   {
@@ -163,13 +149,12 @@ private = true
     title: "Agent sandbox",
     about: "May run commands only on tag:ci",
     name: "agent",
-    source: `# A disposable sandbox for a coding agent: it can run commands and copy files on CI machines, nothing else.
-max_machines = 1
-remove_after_offline = "10m"
-
-[[reach]]
-dst = ["tag:ci"]
-allow = ["exec", "managed_ssh", "files"]
+    source: `// A disposable sandbox for a coding agent: it can run commands and copy files on CI machines, nothing else.
+{
+  "max_machines": 1,
+  "remove_after_offline": "10m",
+  "reach": [{ "dst": ["tag:ci"], "allow": ["exec", "managed_ssh", "files"] }],
+}
 `,
   },
 ] as const

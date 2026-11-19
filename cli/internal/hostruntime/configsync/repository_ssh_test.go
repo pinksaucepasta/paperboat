@@ -44,8 +44,7 @@ func sshFixtureKey(t *testing.T) (ssh.Signer, []byte) {
 }
 func TestCustomSSHNoGitStrictHostKeyAndAuth(t *testing.T) {
 	bare, _ := transportFixture(t)
-	setSharedSource(t, bare, []byte(`"version" = 1
-`))
+	setSharedSource(t, bare, []byte(`{"version": 1}`))
 	host, _ := sshFixtureKey(t)
 	client, key := sshFixtureKey(t)
 	conf := &ssh.ServerConfig{PublicKeyCallback: func(c ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {

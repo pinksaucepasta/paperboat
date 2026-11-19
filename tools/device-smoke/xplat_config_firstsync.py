@@ -25,7 +25,7 @@ def main():
     writer, reader = devices[keys[0]], devices[keys[1]]
     ctx = c.Context(devices)
     try:
-        ctx.start({'.paperboat/config-sync.toml': c.SHARED.encode(), 'cfg/settings.json': b'{}\n'})
+        ctx.start({'.paperboat/config-sync.jsonc': c.SHARED.encode(), 'cfg/settings.json': b'{}\n'})
         folder = c.real(writer, 'app', 'firstsync')
         loop = ('mkdir -p %s; i=0; while [ $i -lt %d ]; do printf "file $i\\n" > %s/f$i.txt.part && mv %s/f$i.txt.part %s/f$i.txt; '
                 'i=$((i+1)); sleep 0.05; done' % (folder, COUNT, folder, folder, folder))

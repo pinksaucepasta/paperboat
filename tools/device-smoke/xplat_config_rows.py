@@ -223,9 +223,9 @@ def x06_windows_case(ctx, a, b, direction):
     for dev in (a, b):
         if dev.os != 'windows':
             continue
-        upper = (dev.home + '\\x06w\\App.json').replace('\\', '\\\\')
-        lower = (dev.home.swapcase() + '\\x06w\\APP.json').replace('\\', '\\\\')
-        x.refuses(dev, ctx, x.rule('cfg/x06w-1.txt', upper) + x.rule('cfg/x06w-2.txt', lower), 'two destinations that differ only by case')
+        upper = dev.home + '\\x06w\\App.json'
+        lower = dev.home.swapcase() + '\\x06w\\APP.json'
+        x.refuses(dev, ctx, x.rule('cfg/x06w-1.txt', upper, 'cfg/x06w-2.txt', lower), 'two destinations that differ only by case')
         return 'refused on ' + dev.name
     return 'n/a: no Windows device in this pair'
 

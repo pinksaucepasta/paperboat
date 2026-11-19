@@ -7,9 +7,9 @@ import (
 
 // DefaultMachineSourcePath is the single authoritative configuration file for this user and machine.
 func DefaultMachineSourcePath() (string, error) {
-	name := "Paperboat/config-sync.toml"
+	name := "Paperboat/config-sync.jsonc"
 	if runtime.GOOS == "linux" {
-		name = "paperboat/config-sync.toml"
+		name = "paperboat/config-sync.jsonc"
 	}
 	return userpaths.Config(name)
 }

@@ -104,7 +104,7 @@ func runPolicyCLI(t *testing.T, serverURL string, args ...string) (int, string, 
 
 func writePolicyDraft(t *testing.T, text string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "policy.hujson")
+	path := filepath.Join(t.TempDir(), "policy.jsonc")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestPolicySetAcceptsWindowsEncodedFiles(t *testing.T) {
 			fake, url := newPolicyFake(t)
 			fake.on("GET "+policyBase, 200, data(testPolicyJSON))
 			fake.on("POST "+policyBase+"/validate", 200, data(`{"valid":true,"errors":[],"tests":{"passed":2,"failed":0},"access_changes":`+changesJSON+`,"confirm":"sha256:c1"}`))
-			path := filepath.Join(t.TempDir(), "policy.hujson")
+			path := filepath.Join(t.TempDir(), "policy.jsonc")
 			if err := os.WriteFile(path, content, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -405,7 +405,7 @@ func TestPolicySetAcceptsWindowsEncodedFiles(t *testing.T) {
 		})
 	}
 	fake, url := newPolicyFake(t)
-	path := filepath.Join(t.TempDir(), "cut.hujson")
+	path := filepath.Join(t.TempDir(), "cut.jsonc")
 	if err := os.WriteFile(path, []byte{0xFF, 0xFE, '{', 0, '}'}, 0o600); err != nil {
 		t.Fatal(err)
 	}

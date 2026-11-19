@@ -481,7 +481,7 @@ func (s *ConfigAssignmentService) Warning(ctx context.Context, userID, machineID
 	return ConfigWarningFacts{
 		Revision: s.warningRevision, MachineName: item.MachineName, RepositoryName: item.RepositoryName,
 		CanonicalScope: item.CanonicalScope, Mode: item.Mode,
-		ManifestScope:        "Only files selected by the effective .paperboat/config-sync.toml TOML shared defaults, matching OS section, and this machine's TOML config file are managed. Machine fields override matching OS fields, which override shared defaults. Destinations must be explicit; they are never inferred. Exclusions narrow the selected scope.",
+		ManifestScope:        "Only files selected by the effective .paperboat/config-sync.jsonc shared defaults, matching OS section, and this machine's config-sync.jsonc file are managed. Machine fields override matching OS fields, which override shared defaults. Destinations must be explicit; they are never inferred. Exclusions narrow the selected scope.",
 		RepositoryVisibility: "Selected configuration content and history are ordinary plaintext in the connected Git repository. Repository visibility and storage access are controlled by its owner; custom repositories are not guaranteed private.",
 		HistoryRetention:     "Git history can retain earlier and removed versions after files are changed, un-managed, or deleted.",
 		ConflictBehavior:     "Only conflicting paths pause; choose this machine's version or the repository version while unrelated paths continue.",

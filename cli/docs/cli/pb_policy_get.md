@@ -19,7 +19,7 @@ pb policy get [flags]
 ### Examples
 
 ```
-  pb policy get > policy.hujson
+  pb policy get > policy.jsonc
   pb policy get --version 3
   pb policy get --json
 ```

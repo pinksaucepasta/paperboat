@@ -19,23 +19,23 @@ import (
 )
 
 // pb config repository connect reads the repository first: any Git repository with the branch
-// and a commit is accepted, a broken .paperboat/config-sync.toml or a missing branch is refused
+// and a commit is accepted, a broken .paperboat/config-sync.jsonc or a missing branch is refused
 // with what to fix, and nothing is left behind in the state directory.
 func TestCheckConfigRepositoryAcceptsAnyValidRepositoryAndNamesWhatIsWrong(t *testing.T) {
 	state := shorttemp.Dir(t)
 	check := func(endpoint, branch string) error {
 		return checkConfigRepository(context.Background(), state, endpoint, "local", branch, nil)
 	}
-	for _, source := range []string{"", "\"version\" = 1\n"} {
+	for _, source := range []string{"", `{"version": 1}`} {
 		if err := check(configSyncSourceBare(t, source), "main"); err != nil {
 			t.Fatalf("valid repository %q refused: %v", source, err)
 		}
 	}
-	err := check(configSyncSourceBare(t, "mode = [\n"), "main")
+	err := check(configSyncSourceBare(t, `{"mode": [`), "main")
 	if err == nil || !strings.Contains(err.Error(), configsync.SharedSourceConfigPath) || !strings.Contains(err.Error(), "line") {
 		t.Fatalf("broken manifest: %v", err)
 	}
-	err = check(configSyncSourceBare(t, "colour = 1\n"), "main")
+	err = check(configSyncSourceBare(t, `{"colour": 1}`), "main")
 	if err == nil || !strings.Contains(err.Error(), `unknown key "colour"`) {
 		t.Fatalf("unknown manifest key: %v", err)
 	}

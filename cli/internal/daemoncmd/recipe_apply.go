@@ -60,7 +60,7 @@ type recipeApplier struct {
 	statePath string
 	machine   func() string // tunnel name when the recipe gives none: this machine's name
 	// machineSource is this machine's config sync file: a recipe's [config] pulls only (PLAN F26), so the
-	// file is created with mode = "pull_only" when there is none; an existing file is the user's.
+	// file is created with "mode": "pull_only" when there is none; an existing file is the user's.
 	machineSource string
 	run           recipeRunner
 }
@@ -113,7 +113,7 @@ func recipeCommandError(args []string, stdout, stderr []byte, err error) error {
 	return fmt.Errorf("pb %s: %s", name, reason)
 }
 
-// ensurePullOnlySource creates the machine's config sync file with mode = "pull_only" unless it exists.
+// ensurePullOnlySource creates the machine's config sync file with "mode": "pull_only" unless it exists.
 func ensurePullOnlySource(path string) error {
 	if path == "" {
 		return nil
@@ -128,7 +128,7 @@ func ensurePullOnlySource(path string) error {
 	if err != nil {
 		return fmt.Errorf("create the config sync file: %w", err)
 	}
-	_, err = file.WriteString("# Written by pb for this machine's recipe: its [config] repository is pulled, never pushed.\nmode = \"pull_only\"\n")
+	_, err = file.WriteString("// Written by pb for this machine's recipe: its \"config\" repository is pulled, never pushed.\n{\"mode\": \"pull_only\"}\n")
 	return errors.Join(err, file.Close())
 }
 

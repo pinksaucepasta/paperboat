@@ -1,0 +1,351 @@
+{
+  "$defs": {
+    "kind": {
+      "description": "Whether a path is a single file or a directory tree.",
+      "enum": [
+        "file",
+        "directory"
+      ],
+      "examples": [
+        "file",
+        "directory"
+      ],
+      "type": "string"
+    },
+    "mode": {
+      "description": "pull_only: this machine only receives changes. push_only: it only publishes them. bidirectional: both.",
+      "enum": [
+        "pull_only",
+        "push_only",
+        "bidirectional"
+      ],
+      "examples": [
+        "pull_only"
+      ],
+      "type": "string"
+    },
+    "repositoryTarget": {
+      "additionalProperties": false,
+      "description": "A registered config sync repository.",
+      "properties": {
+        "branch": {
+          "description": "The Git branch to sync. Default: the repository's branch.",
+          "examples": [
+            "main"
+          ],
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "repository_id": {
+          "description": "The registered config sync repository to use: its id or name (pb config repository list).",
+          "examples": [
+            "dotfiles"
+          ],
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "description": "The repository's Git URL. Normally left out: the registered repository's own URL is used.",
+          "examples": [
+            "https://git.example.test/me/dotfiles.git"
+          ],
+          "maxLength": 4096,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository_id"
+      ],
+      "type": "object"
+    },
+    "ruleConfig": {
+      "additionalProperties": false,
+      "description": "How one path syncs. Leave a key out to inherit it from the os section or the shared file.",
+      "properties": {
+        "exclude": {
+          "description": "Files matching one of these patterns never sync. Same pattern rules as include.",
+          "examples": [
+            [
+              "**/*.tmp",
+              "private/**"
+            ]
+          ],
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "include": {
+          "description": "For a directory: only files matching one of these patterns sync (** matches across directories). Patterns are relative, use /, and contain no ..",
+          "examples": [
+            [
+              "*.json",
+              "snippets/**"
+            ]
+          ],
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/kind",
+          "description": "file or directory.",
+          "examples": [
+            "directory"
+          ]
+        },
+        "local_path": {
+          "description": "Where the path lives on this machine: absolute, or starting with ~ or %APPDATA%. Destinations are never inferred.",
+          "examples": [
+            "~/.config/editor",
+            "%APPDATA%/editor/settings.json"
+          ],
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "section": {
+      "additionalProperties": false,
+      "description": "One os or machine section: the keys of the file except os and machine.",
+      "examples": [
+        {
+          "mode": "pull_only"
+        }
+      ],
+      "properties": {
+        "$schema": {
+          "description": "The JSON Schema of this file, so editors check and complete it. Ignored by Paperboat.",
+          "examples": [
+            "https://example.test/schemas/config-sync.json"
+          ],
+          "type": "string"
+        },
+        "automatic_updates": {
+          "default": false,
+          "description": "Whether changes found in the repository are applied without asking.",
+          "examples": [
+            true
+          ],
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether config sync runs on this machine.",
+          "examples": [
+            false
+          ],
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/mode",
+          "default": "bidirectional",
+          "description": "Which way files move: pull_only, push_only or bidirectional.",
+          "examples": [
+            "pull_only"
+          ]
+        },
+        "paths": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ruleConfig"
+          },
+          "description": "The files and directories that sync, keyed by their path inside the repository, like editor/settings.json: a relative path with / separators, no .. and no Windows reserved names. Two paths may not contain one another.",
+          "examples": [
+            {
+              "shell/zshrc": {
+                "kind": "file",
+                "local_path": "~/.zshrc"
+              }
+            }
+          ],
+          "propertyNames": {
+            "pattern": "^[^\\\\\\x00]+$"
+          },
+          "type": "object"
+        },
+        "pull": {
+          "$ref": "#/$defs/repositoryTarget",
+          "description": "The repository this machine pulls from.",
+          "examples": [
+            {
+              "repository_id": "dotfiles"
+            }
+          ]
+        },
+        "push": {
+          "$ref": "#/$defs/repositoryTarget",
+          "description": "The repository this machine pushes to. Default: the pull repository.",
+          "examples": [
+            {
+              "branch": "laptop",
+              "repository_id": "dotfiles"
+            }
+          ]
+        },
+        "version": {
+          "default": 1,
+          "description": "The file format version. Only 1 exists.",
+          "examples": [
+            1
+          ],
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Which files and directories config sync keeps in a Git repository, where they live on each machine, and which way they move. It is the shared file .paperboat/config-sync.jsonc in the repository, or one machine's own config-sync.jsonc (pb config sync path); the machine's file wins over the shared one. It may hold // comments and trailing commas (HuJSON); an empty file is valid.",
+  "examples": [
+    {
+      "version": 1,
+      "mode": "pull_only",
+      "paths": {
+        "shell/zshrc": {
+          "local_path": "~/.zshrc",
+          "kind": "file"
+        },
+        "editor": {
+          "local_path": "~/.config/editor",
+          "kind": "directory",
+          "exclude": [
+            "**/*.tmp"
+          ]
+        }
+      }
+    }
+  ],
+  "properties": {
+    "$schema": {
+      "description": "The JSON Schema of this file, so editors check and complete it. Ignored by Paperboat.",
+      "examples": [
+        "https://example.test/schemas/config-sync.json"
+      ],
+      "type": "string"
+    },
+    "automatic_updates": {
+      "default": false,
+      "description": "Whether changes found in the repository are applied without asking.",
+      "examples": [
+        true
+      ],
+      "type": "boolean"
+    },
+    "enabled": {
+      "default": true,
+      "description": "Whether config sync runs on this machine.",
+      "examples": [
+        false
+      ],
+      "type": "boolean"
+    },
+    "machine": {
+      "additionalProperties": {
+        "$ref": "#/$defs/section"
+      },
+      "description": "Settings for one machine, keyed by its Paperboat name. They override the os section. Only in the shared file in the repository, never in a machine's own file. A section holds the same keys, except os and machine.",
+      "examples": [
+        {
+          "laptop": {
+            "mode": "pull_only"
+          }
+        }
+      ],
+      "propertyNames": {
+        "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+      },
+      "type": "object"
+    },
+    "mode": {
+      "$ref": "#/$defs/mode",
+      "default": "bidirectional",
+      "description": "Which way files move: pull_only, push_only or bidirectional.",
+      "examples": [
+        "pull_only"
+      ]
+    },
+    "os": {
+      "additionalProperties": {
+        "$ref": "#/$defs/section"
+      },
+      "description": "Settings for one operating system, keyed linux, darwin or windows. They override the file's top-level settings on that system. A section holds the same keys, except os and machine.",
+      "examples": [
+        {
+          "windows": {
+            "paths": {
+              "editor/settings.json": {
+                "local_path": "%APPDATA%/editor/settings.json"
+              }
+            }
+          }
+        }
+      ],
+      "propertyNames": {
+        "pattern": "^(linux|darwin|windows)$"
+      },
+      "type": "object"
+    },
+    "paths": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ruleConfig"
+      },
+      "description": "The files and directories that sync, keyed by their path inside the repository, like editor/settings.json: a relative path with / separators, no .. and no Windows reserved names. Two paths may not contain one another.",
+      "examples": [
+        {
+          "shell/zshrc": {
+            "kind": "file",
+            "local_path": "~/.zshrc"
+          }
+        }
+      ],
+      "propertyNames": {
+        "pattern": "^[^\\\\\\x00]+$"
+      },
+      "type": "object"
+    },
+    "pull": {
+      "$ref": "#/$defs/repositoryTarget",
+      "description": "The repository this machine pulls from.",
+      "examples": [
+        {
+          "repository_id": "dotfiles"
+        }
+      ]
+    },
+    "push": {
+      "$ref": "#/$defs/repositoryTarget",
+      "description": "The repository this machine pushes to. Default: the pull repository.",
+      "examples": [
+        {
+          "branch": "laptop",
+          "repository_id": "dotfiles"
+        }
+      ]
+    },
+    "version": {
+      "default": 1,
+      "description": "The file format version. Only 1 exists.",
+      "examples": [
+        1
+      ],
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "title": "Paperboat config sync file",
+  "type": "object"
+}

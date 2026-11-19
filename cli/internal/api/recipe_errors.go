@@ -93,7 +93,7 @@ func recipeErrorMessage(code string, details map[string]any) (string, bool) {
 		recipe := text("recipe")
 		max, _ := details["max_machines"].(float64)
 		if recipe != "" && max >= 1 {
-			return fmt.Sprintf("Recipe %s already has %d of %d machines. A machine leaves the recipe when it is removed (`pb machine revoke <machine>`, or by remove_after_offline). To allow more, raise max_machines and run `pb recipe update -f %s.toml`.", recipe, int64(max), int64(max), recipe), true
+			return fmt.Sprintf("Recipe %s already has %d of %d machines. A machine leaves the recipe when it is removed (`pb machine revoke <machine>`, or by remove_after_offline). To allow more, raise max_machines and run `pb recipe update -f %s.jsonc`.", recipe, int64(max), int64(max), recipe), true
 		}
 	}
 	return "", false

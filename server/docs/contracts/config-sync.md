@@ -82,18 +82,18 @@ revision are bootstrap metadata only: they cannot accept consent or become eligi
 Migration revokes existing unfenced projections; users must explicitly apply their file
 configuration and accept current consent again.
 
-Both user-edited source files use TOML. Shared `.paperboat/config-sync.toml`
+Both user-edited source files use HuJSON (JSON with comments and trailing commas, `.jsonc`). Shared `.paperboat/config-sync.jsonc`
 defaults and the machine configuration file reported by `pb config sync path` own
-repositories, operating mode, update preferences, and path rules. The machine file overrides the shared file's `[machine.<name>]` section for this
-machine's Paperboat name, which overrides the matching `[os.<os>]` section, which overrides
-shared defaults. Empty or comment-only TOML machine
+repositories, operating mode, update preferences, and path rules. The machine file overrides the shared file's `machine.<name>` entry for this
+machine's Paperboat name, which overrides the matching `os.<os>` entry, which overrides
+shared defaults. Empty or comment-only machine
 files inherit; no server form reconstructs or edits these source files. Repository eligibility exclusions
 and mandatory secret exclusions can only narrow the effective selection; they never
 supply a destination. Configuration content remains ordinary Git plaintext.
-Quoted TOML path table keys preserve repository slashes and dots, for example
-`[os.windows.paths."myapp/settings.json"]`. TOML literal strings preserve Windows
-backslashes, for example `local_path = '%APPDATA%\MyApp\settings.json'`.
-The user files have one TOML reader; assignment and runtime HTTP bodies remain JSON.
+JSON path keys preserve repository slashes and dots, for example
+`"os": {"windows": {"paths": {"myapp/settings.json": {...}}}}`. Windows backslashes are
+escaped as in any JSON string, for example `"local_path": "%APPDATA%\\MyApp\\settings.json"`.
+The user files have one HuJSON reader; assignment and runtime HTTP bodies are plain JSON.
 
 ## Writer lease
 
