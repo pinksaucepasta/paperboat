@@ -31,18 +31,18 @@ func TestComposeBrandsEveryPartAndEscapesContent(t *testing.T) {
 	}
 }
 
-func TestComposeWithoutLogoShowsTheWordmarkAlone(t *testing.T) {
+func TestComposeWithoutSiteURLLinksAndNamesTheConsole(t *testing.T) {
 	m := transactionalmail.Compose(config.TransactionalMail{From: "n@example.test", ConsoleOrigin: "https://console.example.test/"}, "a@example.test", "S", transactionalmail.Content{Paragraphs: []string{"Hi"}})
-	if strings.Contains(m.HTML, "<img") || !strings.Contains(m.HTML, ">paperboat</a>") || strings.Contains(m.HTML, `class="btn"`) || !strings.Contains(m.Text, "Paperboat · console.example.test") {
+	if strings.Contains(m.HTML, "<img") || !strings.Contains(m.HTML, `<a href="https://console.example.test" class="ink wm"`) || strings.Contains(m.HTML, "padding:10px 16px") || !strings.Contains(m.Text, "Paperboat · console.example.test") {
 		t.Fatalf("unexpected HTML: %s", m.HTML)
 	}
 }
 
-// A long unbreakable URL must wrap inside the card instead of widening the mail on a phone, and the dark button keeps
-// white text at 4.5:1.
-func TestComposeWrapsLongWordsAndKeepsTheDarkButtonReadable(t *testing.T) {
+// A long unbreakable URL must wrap inside the card instead of widening the mail on a phone, and the lockup turns white in
+// dark mode while the button keeps the brand blue.
+func TestComposeWrapsLongWordsAndReversesTheLockupInDarkMode(t *testing.T) {
 	m := transactionalmail.Compose(mailtest.Policy, "a@example.test", "S", transactionalmail.Content{Paragraphs: []string{"POST /v1/admin/publications/" + strings.Repeat("a", 80) + "/block"}, Button: &transactionalmail.Button{Label: "Open", URL: "https://x.example.test"}})
-	if strings.Count(m.HTML, "overflow-wrap:anywhere") < 2 || !strings.Contains(m.HTML, ".btn{background:#3868f0!important}") {
+	if strings.Count(m.HTML, "overflow-wrap:anywhere") < 2 || !strings.Contains(m.HTML, ".mk{background:#ffffff!important}") {
 		t.Fatalf("missing wrapping or dark button colour: %s", m.HTML)
 	}
 }

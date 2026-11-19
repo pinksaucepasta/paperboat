@@ -11,8 +11,8 @@ type TransactionalMail struct {
 	Endpoint      string `json:"endpoint"`
 	From          string `json:"from"`
 	ConsoleOrigin string `json:"console_origin"`
-	// SiteURL is the marketing site origin: mail shows its /apple-touch-icon.png beside the wordmark and names its
-	// host in the footer. Empty shows the text wordmark alone and names the console host.
+	// SiteURL is the marketing site origin: the lockup in every mail links to it and the footer names its host.
+	// Empty links and names the console instead.
 	SiteURL                   string `json:"site_url"`
 	InvitationLifetimeSeconds int64  `json:"invitation_lifetime_seconds"`
 	// InvitationMailDedupSeconds: a new invitation to an address that already got one for the same
