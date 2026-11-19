@@ -104,7 +104,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/billing/workspaces/{workspace_id}/grant":                        {"admin", "workspace_id", ""},
 	"POST /v1/admin/billing/workspaces/{workspace_id}/revoke":                       {"admin", "workspace_id", ""},
 	"GET /v1/admin/announcements":                                                   {"admin", "", "announcements"},
-	"GET /v1/admin/notices":                                                         {"operations", "", "announcements"},
+	"GET /v1/admin/node-notices":                                                    {"operations", "", "announcements"},
 	"POST /v1/admin/announcements":                                                  {"admin", "", "announcements"},
 	"PUT /v1/admin/announcements/{announcement_id}":                                 {"admin", "announcement_id", ""},
 	"POST /v1/admin/announcements/{announcement_id}/retract":                        {"admin", "announcement_id", ""},
