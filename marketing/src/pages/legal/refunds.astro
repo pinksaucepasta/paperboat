@@ -3,52 +3,24 @@ import Legal from "../../layouts/Legal.astro"
 import Fact from "../../components/Fact.astro"
 
 const sections: [string, string][] = [
-  ["short", "In short"],
   ["no-refunds", "No refunds"],
   ["cancel", "Cancelling"],
-  ["consent", "Starting at once"],
-  ["statutory", "Rights the law gives you"],
+  ["consent", "Checkout consent"],
   ["mistakes", "Billing mistakes"],
-  ["contact", "Questions and complaints"],
+  ["contact", "Contact"],
 ]
 ---
 
-<Legal slug="refunds" description="Paperboat payments are not refunded. Cancelling stops the next renewal. How this works with consumer law." {sections}>
-  <p slot="intro">
-    Every feature is free for personal use, so you can try Paperboat fully before you pay. Because of that, payments are final. This page says
-    exactly what that means and where the law gives you more.
-  </p>
-
-  <section id="short">
-    <h2>In short</h2>
-    <div class="prose">
-      <ul>
-        <li>Payments for plans, seats and extra bandwidth are not refunded, in full or in part.</li>
-        <li>You can cancel at any time. Cancelling stops the next renewal; your plan keeps working until the end of the period you paid for.</li>
-        <li>There are no prorated refunds for cancelling, downgrading, removing seats or unused bandwidth.</li>
-        <li>If we charge you by mistake, we put it right.</li>
-      </ul>
-    </div>
-  </section>
+<Legal slug="refunds" description="Paperboat payments are not refunded. Cancelling stops the next renewal." {sections}>
+  <p slot="intro">Every feature is free for personal use, so you can try Paperboat fully before paying. Payments are final.</p>
 
   <section id="no-refunds">
     <h2>No refunds</h2>
     <div class="prose">
       <p>
-        When you pay for a plan, extra seats or extra bandwidth, the service starts at once and you can use all of it straight away. We do not
-        refund those payments, in full or in part, including when:
-      </p>
-      <ul>
-        <li>you cancel, or stop using Paperboat, before the end of a period;</li>
-        <li>you move to a cheaper plan or from yearly to monthly;</li>
-        <li>you remove seats from a team (removed seats stay paid until the next billing date);</li>
-        <li>extra bandwidth you bought is not used before it ends;</li>
-        <li>you forgot to cancel before a renewal;</li>
-        <li>we suspend or close your account because it broke the <a href="/legal/terms/">Terms</a> or the <a href="/legal/acceptable-use/">Acceptable Use Policy</a>.</li>
-      </ul>
-      <p>
-        The one exception is our own decision: if we close your account without a breach on your part, or stop offering the hosted service,
-        we refund the unused part of any period you paid for in advance (<a href="/legal/terms/#suspension">Terms, section 8</a>).
+        Payments for plans, seats and extra bandwidth are not refunded, in full or in part. That includes cancelling early, downgrading,
+        removing seats, unused bandwidth, forgetting to cancel, and suspension for breaking our terms. The one exception: if we close your
+        account without cause or stop the service, we refund the unused prepaid part.
       </p>
     </div>
   </section>
@@ -57,89 +29,41 @@ const sections: [string, string][] = [
     <h2>Cancelling</h2>
     <div class="prose">
       <p>
-        Paid plans renew automatically, monthly or yearly, until you cancel. Cancel in the console under <strong>Billing</strong>, at any time,
-        in a few clicks; you do not need to contact us. After you cancel, your plan keeps working until the end of the current period and is
-        not charged again. When it ends, the workspace moves to the Free plan's limits. Your machines and data stay unless you delete them.
-      </p>
-      <p>
-        You can undo a cancellation before the period ends with <strong>Keep plan</strong>. If a renewal payment fails, we tell you and retry;
-        the plan ends if it is still unpaid after a 7-day grace period (see the <a href="/pricing/">pricing page</a>).
+        Paid plans renew automatically until you cancel. Cancel any time in the console under <strong>Billing</strong>. The plan runs to the end
+        of the paid period, then moves to Free. Your machines and data stay.
       </p>
     </div>
   </section>
 
   <section id="consent">
-    <h2>Starting at once</h2>
+    <h2>Checkout consent</h2>
     <div class="prose">
-      <p>
-        Before every purchase, Checkout asks you to tick a box that says:
-      </p>
+      <p>Before paying, you confirm in the console:</p>
       <blockquote>
         <p>
-          “Start the service now. I agree to the Terms of Service and the Refund Policy: the plan renews automatically until I cancel,
-          cancelling stops the next renewal, and payments are not refunded. I ask for the service to start during the 14-day withdrawal
-          period and understand that if I withdraw, I pay for the service up to that point.”
+          “I agree to the Terms of Service and the Refund Policy: the plan renews automatically until I cancel, cancelling stops the next
+          renewal, and payments are not refunded.”
         </p>
       </blockquote>
-      <p>
-        The purchase buttons in the console stay disabled until you tick it. Stripe emails you a receipt for each payment.
-      </p>
+      <p>Stripe emails you a receipt for each payment.</p>
     </div>
   </section>
 
-  <section id="statutory">
-    <h2>Rights the law gives you</h2>
-    <div class="prose">
-      <p>
-        Nothing on this page takes away a right that the law of your country gives you and that cannot be given up by agreement. In
-        particular:
-      </p>
-      <ul>
-        <li>
-          <strong>Consumers in the European Union, the EEA and the United Kingdom</strong> have 14 days to withdraw from an online purchase.
-          At Checkout you ask us to start the service during that time. If you withdraw, tell us within the 14 days by email to <Fact name="legalEmail" /> with a clear statement that you
-          withdraw. We then refund what you paid for that period, minus an amount in proportion to the service you received up to the time you
-          told us, within 14 days, to the same payment method.
-        </li>
-        <li>
-          <strong>Consumers in India</strong> keep their rights under the Consumer Protection Act, 2019, including where a service was not
-          provided as described. Complaints go to our grievance officer (below).
-        </li>
-        <li>
-          <strong>Everyone</strong> keeps any right to a remedy for a service that was not provided at all, or not as described, and any right
-          the law of their country does not allow a contract to exclude.
-        </li>
-      </ul>
-      <p>
-        These rights apply to consumers. A purchase made wholly or mainly for business purposes is not a consumer purchase, and then payments
-        are final; the plan's name alone does not decide this.
-      </p>
-    </div>
-  </section>
 
   <section id="mistakes">
     <h2>Billing mistakes</h2>
     <div class="prose">
       <p>
-        If you were charged twice, charged after a cancellation took effect, or charged an amount different from the price shown at Checkout,
-        tell us within 60 days of the charge. We check it and return the wrong amount to the same payment method. This is correcting our
-        mistake, not a refund.
-      </p>
-      <p>
-        Please contact us before you dispute a charge with your bank. A chargeback on a correct charge may lead us to suspend the workspace
-        until it is settled.
+        If you were charged twice, after a cancellation took effect, or a price other than the one shown, tell us within 60 days and we return
+        the difference. Please contact us before disputing a charge with your bank.
       </p>
     </div>
   </section>
 
   <section id="contact">
-    <h2>Questions and complaints</h2>
+    <h2>Contact</h2>
     <div class="prose">
-      <p>
-        Write to <Fact name="legalEmail" />. Grievance officer (India Consumer Protection (E-Commerce) Rules, 2020): <Fact name="grievanceOfficer" />,
-        at the same address. We acknowledge a complaint within 48 hours and answer it within one month.
-      </p>
-      <p>Paperboat, operated by <Fact name="operators" />. Postal address: <Fact name="address" />.</p>
+      <p>Paperboat, operated by <Fact name="operators" />. <Fact name="address" />. <Fact name="legalEmail" />.</p>
     </div>
   </section>
 </Legal>
