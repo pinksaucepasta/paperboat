@@ -57,7 +57,9 @@ func runOld(dir string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = drainer.Drain(ctx, server, l, 3*time.Second) // the edge's drain (runtime.HTTPServer.Drain)
-	time.Sleep(500 * time.Millisecond)               // the drain: UDP stays this process's until it exits
+	// UDP stays this process's until it exits: stay alive, still holding it, until the test closes our stdin
+	// (the test asserts that state; a stalled host cannot make the old process exit first).
+	_, _ = io.Copy(io.Discard, os.Stdin)
 	_ = udp.Close()
 	os.Exit(0)
 }
@@ -77,6 +79,10 @@ func TestHandoverServesEveryRequestAcrossTheSwitch(t *testing.T) {
 	old := exec.Command(os.Args[0], "-test.run=^$")
 	old.Env = append(os.Environ(), "PB_HANDOVER_OLD="+dir)
 	stdout, err := old.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldGate, err := old.StdinPipe() // closed to let the old process exit once the test checked it still holds UDP
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,8 +168,11 @@ func TestHandoverServesEveryRequestAcrossTheSwitch(t *testing.T) {
 	select {
 	case <-handover.UDPReady():
 		t.Fatal("UDP handed over while the old process still runs")
+	case <-exited:
+		t.Fatal("the old process exited before the test released it")
 	default:
 	}
+	_ = oldGate.Close()
 	select {
 	case <-exited:
 	case <-time.After(loadedHostBudget):
