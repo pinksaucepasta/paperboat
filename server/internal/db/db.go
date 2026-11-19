@@ -433,7 +433,12 @@ func (c *transactionCounters) snapshot() TransactionStats {
 }
 
 // isSerializationFailure reports whether err is a Postgres serialization
-// failure (40001) or deadlock (40P01) — both are safe to retry.
+// failure (40001), a deadlock (40P01) or an exhausted predicate-lock pool (53200 whose hint names
+// max_pred_locks_per_transaction, 2026-11-19: it cleared within seconds and failed a revoke) — all safe to retry.
+func predicateLocksExhausted(e *pgconn.PgError) bool {
+	return e.Code == "53200" && strings.Contains(e.Hint, "max_pred_locks_per_transaction")
+}
+
 func isSerializationFailure(err error) (retryable bool) {
 	defer func() {
 		if recover() != nil {
@@ -449,7 +454,7 @@ func isSerializationFailure(err error) (retryable bool) {
 			}
 		}
 		if pgErr, ok := err.(*pgconn.PgError); ok {
-			return pgErr.Code == "40001" || pgErr.Code == "40P01"
+			return pgErr.Code == "40001" || pgErr.Code == "40P01" || predicateLocksExhausted(pgErr)
 		}
 		if _, joined := err.(interface{ Unwrap() []error }); joined {
 			return false

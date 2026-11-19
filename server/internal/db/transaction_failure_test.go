@@ -24,6 +24,24 @@ func TestIsSerializationFailureRetriesOnlyPurePostgresLeaves(t *testing.T) {
 		})
 	}
 
+	// The predicate-lock pool running full is transient and retried; any other 53200 is a real out-of-memory.
+	full := &pgconn.PgError{Code: "53200", Message: "out of shared memory", Hint: `You might need to increase "max_pred_locks_per_transaction".`}
+	if !isSerializationFailure(full) || !isSerializationFailure(fmt.Errorf("wrapped: %w", full)) {
+		t.Fatal("an exhausted predicate-lock pool was not recognized")
+	}
+	if isSerializationFailure(&pgconn.PgError{Code: "53200", Message: "out of shared memory", Hint: `You might need to increase "max_locks_per_transaction".`}) {
+		t.Fatal("another out-of-memory error was retried")
+	}
+	calls := 0
+	if err := retrySerializable(context.Background(), func() error {
+		if calls++; calls < 3 {
+			return full
+		}
+		return nil
+	}); err != nil || calls != 3 {
+		t.Fatalf("retry on an exhausted pool: calls=%d err=%v", calls, err)
+	}
+
 	serializable := &pgconn.PgError{Code: "40001"}
 	for _, test := range []struct {
 		name string
