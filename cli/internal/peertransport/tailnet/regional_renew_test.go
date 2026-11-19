@@ -56,8 +56,8 @@ func TestAdmissionRenewalGivesUpOnASetThatStaysRefused(t *testing.T) {
 	if !errors.Is(err, ErrRegionalAuthority) || err.Error() == ErrRegionalAuthority.Error() {
 		t.Fatalf("error %q, want ErrRegionalAuthority naming the failed check", err)
 	}
-	if asked.Load() != 3 {
-		t.Fatalf("%d renewals, want %d", asked.Load(), 3)
+	if asked.Load() != admissionRefusedRetries+1 {
+		t.Fatalf("%d renewals, want %d", asked.Load(), admissionRefusedRetries+1)
 	}
 }
 
@@ -86,7 +86,9 @@ func TestRegionalSetIsRenewedWithHalfItsLifeLeft(t *testing.T) {
 	}
 }
 
-type relayCounting struct{ answer func() api.PeerNetworkConfigurationResult }
+type relayCounting struct {
+	answer func() api.PeerNetworkConfigurationResult
+}
 
 func (relayCounting) RegisterPeerNetwork(context.Context, api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
 	return api.PeerNetworkRegistrationResult{}, nil

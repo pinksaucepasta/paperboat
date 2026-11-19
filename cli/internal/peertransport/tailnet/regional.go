@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,9 @@ const (
 type RegionalNode = peernetwork.RegionalNode
 type RegionalCandidates = peernetwork.RegionalCandidates
 
+// regionalRefused is ErrRegionalAuthority naming the check that refused the set, so a refused renewal says which one.
+func regionalRefused(reason string) error { return fmt.Errorf("%w: %s", ErrRegionalAuthority, reason) }
+
 func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) error {
 	return a.applyRegionalCandidates(ctx, token, false)
 }
@@ -38,12 +42,12 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 func (a *Authority) applyRegionalCandidates(ctx context.Context, token string, restored bool) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || len(token) > MaxConfigurationBytes {
-		return ErrRegionalAuthority
+		return regionalRefused("the set is not a bounded signed token")
 	}
 	decode := func(s string) ([]byte, error) {
 		b, e := base64.RawURLEncoding.Strict().DecodeString(s)
 		if e != nil || base64.RawURLEncoding.EncodeToString(b) != s {
-			return nil, ErrRegionalAuthority
+			return nil, regionalRefused("the set is not canonical base64")
 		}
 		return b, nil
 	}
@@ -57,22 +61,28 @@ func (a *Authority) applyRegionalCandidates(ctx context.Context, token string, r
 	}
 	var c RegionalCandidates
 	if e1 != nil || e2 != nil || e3 != nil || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != peernetwork.RegionalCandidatesType || !peernetwork.ValidID(h.KeyID) || peernetwork.DecodeSigned(body, &c) != nil {
-		return ErrRegionalAuthority
+		return regionalRefused("the set's header or body is malformed")
 	}
 	if !restored {
 		pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
 		if err != nil || !found || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
-			return ErrRegionalAuthority
+			return regionalRefused("the signature does not verify against a known key")
 		}
 	}
 	now := serverclock.Now().UTC()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.current == nil || c.AuthorizationGeneration != a.current.Generation {
-		return ErrRegionalAuthority
+		return regionalRefused("the set belongs to another configuration generation")
 	}
-	if c.Check(now) != nil || c.Issuer != a.options.Issuer || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.ExpiresAt <= now.Unix() {
-		return ErrRegionalAuthority
+	if err := c.Check(now); err != nil {
+		return regionalRefused(err.Error())
+	}
+	if c.Issuer != a.options.Issuer || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID {
+		return regionalRefused("the set names another issuer or endpoint")
+	}
+	if c.ExpiresAt <= now.Unix() {
+		return regionalRefused("the set has expired")
 	}
 	if a.regional != nil && c.Generation < a.regional.Generation {
 		return ErrStaleAuthority

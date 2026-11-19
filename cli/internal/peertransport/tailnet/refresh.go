@@ -169,20 +169,39 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 // that renewal: a burst of new operations is one request, not one each (a test VM feat9: per-stream renewals hit
 // the machine's 429, refused a stream and held every admission 12 s).
 func (a *Authority) RefreshForAdmission(ctx context.Context, client NetworkAPI) error {
-	asked := time.Now()
-	for retry := false; ; retry = true {
+	since := time.Now()
+	for retry, refused := false, 0; ; retry = true {
 		if retry || a.budgeted() {
 			if err := renewalBudget.wait(ctx, true); err != nil {
 				return err
 			}
 		}
-		err := a.refresh(ctx, client, asked)
+		err := a.refresh(ctx, client, since)
 		var apiErr *api.APIError
-		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests {
+		switch {
+		case errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests:
+		case errors.Is(err, ErrRegionalAuthority) && refused < admissionRefusedRetries:
+			// The answer's candidate set was refused (a pair signed under another generation, a set not yet
+			// valid): the next answer is signed afresh, so an operation waits a moment for it instead of failing.
+			refused++
+			since = time.Time{} // the refused renewal satisfies nobody: ask again
+			select {
+			case <-time.After(backoff.Jitter(admissionRefusedWait)):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		default:
 			return err
 		}
 	}
 }
+
+// admissionRefusedRetries and admissionRefusedWait bound how often an admission renewal whose signed regional
+// candidate set the authority refused is asked again, and the wait before each ask.
+const (
+	admissionRefusedRetries = 2
+	admissionRefusedWait    = 250 * time.Millisecond
+)
 
 // budgeted reports whether this engine's renewals count against the machine's renewal budget: every engine
 // on a machine credential. The CLI daemon renews on the user's credential and a user command must not wait.
@@ -272,9 +291,9 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 	if a.options.OnAuthority != nil {
 		a.options.OnAuthority(nil)
 	}
-	a.refreshedFrom = started
 	a.saveRelays(result.CandidateSet, result.RelayGrants)
 	if result.CandidateSet == "" {
+		a.refreshedFrom = started
 		a.relay.mu.Lock()
 		a.relay.tokens = nil
 		a.relay.grants = nil
@@ -288,6 +307,8 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		a.relay.mu.Unlock()
 		return err
 	}
+	// Only a renewal whose candidate set was applied too is shared with the admissions that asked before it.
+	a.refreshedFrom = started
 	return a.ApplyRelayGrants(ctx, result.RelayGrants)
 }
 
@@ -494,8 +515,7 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
 	}
 	// A signed configuration may be much shorter than the regional cadence.
-	// Reserve half its remaining lifetime (at most the request bound) for
-	// renewal. A failed refresh retries after a short, growing, jittered
+	// Reserve half its remaining lifetime for renewal. A failed refresh retries after a short, growing, jittered
 	// delay; cached authority still expires independently, including while a
 	// request is pending.
 	if err != nil {
@@ -576,16 +596,17 @@ func (a *Authority) idleRefreshDelay() time.Duration {
 
 // refreshDelay never extends signed validity and avoids a busy loop when the
 // issuer repeatedly returns a configuration at the end of its grant lifetime.
+// A renewal is due with half of the remaining life of the configuration and of the signed regional candidate
+// set left, as Teleport announces at two thirds of a TTL (lib/srv/heartbeatv2.go) and not in its last seconds:
+// a timer that fires late (a frozen host, coalesced timers) still lands inside the validity.
 func (a *Authority) refreshDelay(cadence time.Duration) time.Duration {
-	if expiry := a.expiresAt.Load(); expiry != 0 {
-		remaining := serverclock.Until(time.Unix(expiry, 0))
-		margin := remaining / 2
-		if margin > 10*time.Second {
-			margin = 10 * time.Second
-		}
+	for _, expiry := range []int64{a.expiresAt.Load(), a.regionalExpiresAt()} {
 		// Past exp (Paperboat unreachable) the configuration stays in force; retry at the normal cadence
 		// instead of every 100 ms.
-		if due := remaining - margin; due > 0 && due < cadence {
+		if expiry == 0 {
+			continue
+		}
+		if due := serverclock.Until(time.Unix(expiry, 0)) / 2; due > 0 && due < cadence {
 			cadence = due
 		}
 	}
@@ -596,4 +617,14 @@ func (a *Authority) refreshDelay(cadence time.Duration) time.Duration {
 		return 100 * time.Millisecond
 	}
 	return cadence
+}
+
+// regionalExpiresAt is when the held regional candidate set expires, or 0 without one.
+func (a *Authority) regionalExpiresAt() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.regional == nil {
+		return 0
+	}
+	return a.regional.ExpiresAt
 }
