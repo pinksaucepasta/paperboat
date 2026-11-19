@@ -291,6 +291,12 @@ func TestThrottledWorkspaceIsPacedAcrossItsRoutesAndRecovers(t *testing.T) {
 	}
 }
 
+type failingIngressUsage struct{}
+
+func (*failingIngressUsage) Record(string, string, uint64, uint64, uint64, string) error {
+	return syscall.EIO
+}
+
 type failingIngressClose struct{ net.Conn }
 
 func (s failingIngressClose) Close() error { return errors.Join(s.Conn.Close(), syscall.EIO) }
