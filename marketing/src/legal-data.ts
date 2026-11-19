@@ -1,4 +1,4 @@
-import { plans, speeds } from "./site"
+import { abuseMailbox, plans, speeds } from "./site"
 
 /**
  * The legal pages, and the facts only the company can supply. Every `TODO-USER` value below must be filled in
@@ -20,6 +20,13 @@ export const legalPages: Legal[] = [
 
 export const legalPage = (slug: string) => legalPages.find((page) => page.slug === slug)!
 
+/** The legal mailboxes share the domain of the abuse mailbox the server publishes. */
+function mailbox(name: string) {
+  const domain = abuseMailbox?.split("@")[1]
+  if (!domain) throw new Error("The server's client configuration publishes no abuse_mailbox; the legal pages need its domain")
+  return `${name}@${domain}`
+}
+
 /** Facts about the operating company. Only the company can supply these; never guess them. */
 export const company = {
   /** The two individuals who operate Paperboat (user decision 2026-11-19). */
@@ -28,9 +35,9 @@ export const company = {
   address: "3869 Miramar Street #4208, La Jolla, CA 92092, USA",
   law: "the State of California, United States, without regard to its conflict-of-law rules",
   courts: "the state and federal courts located in California",
-  legalEmail: "legal@mail.paperboat.cloud",
-  abuseEmail: "abuse@mail.paperboat.cloud",
-  privacyEmail: "privacy@mail.paperboat.cloud",
+  legalEmail: mailbox("legal"),
+  abuseEmail: mailbox("abuse"),
+  privacyEmail: mailbox("privacy"),
   /** The user's final answer (2026-11-19). */
   effective: "14 November 2026",
 }

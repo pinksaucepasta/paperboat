@@ -29,7 +29,8 @@ const addresses: [string, string][] = [
 const recipe = [
   "# in your sandbox template",
   "$ curl -fsSL \\",
-  `    ${installerBase}/recipe | bash`,
+  `    ${installerBase} \\`,
+  "    | PB_RECIPE=$TOKEN sh",
   "✓ Paired as sandbox-7",
   "✓ Secrets loaded from sandbox-env",
   `✓ Preview live for 2 hours`,

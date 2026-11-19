@@ -23,8 +23,7 @@ export const abuseMailbox = config.abuse_mailbox
 export const consoleUrl = config.console_url
 /** Where the installers are served, e.g. https://get.example.test. */
 export const installerBase = config.installer_base_url
-export const installUrl = `${config.installer_base_url}/install`
-export const selfhostInstallUrl = `${config.installer_base_url}/selfhost/install`
+export const selfhostInstallUrl = `${config.installer_base_url}/selfhost`
 export const localDomain = config.local_access_base_domain
 export const previewDomain = config.preview_base_domain
 export const tunnelDomain = config.tunnel_base_domain
@@ -32,9 +31,9 @@ export const tunnelDomain = config.tunnel_base_domain
 /** The public source repository (LICENSE: MIT and AGPL-3.0). */
 export const sourceUrl = "https://github.com/pinksaucepasta/paperboat"
 
-export const installCommand = `curl -fsSL ${installUrl} | bash`
-/** The Windows installer (server /install.ps1), run in PowerShell. */
-export const windowsInstallCommand = `irm ${installUrl}.ps1 | iex`
+/** One address: it serves install.sh to curl and install.ps1 to PowerShell. */
+export const installCommand = `curl -fsSL ${installerBase} | sh`
+export const windowsInstallCommand = `irm ${installerBase} | iex`
 
 /** Plans and prices (PLAN 1.3): the one place the site states them. */
 export const plans = [

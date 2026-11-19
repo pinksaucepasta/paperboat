@@ -66,7 +66,7 @@ const faq = [
 
   <Beat id="many-title" title="One line, any number of machines" flip>
     <p>Put the same line in a sandbox template, a CI job, a cloud-init script or a Dockerfile. Start one machine or a hundred; each is set up the same way.</p>
-    <Term slot="visual" title="sandbox-7" lines={["$ curl -fsSL \\", `    ${installerBase}/recipe | bash`, "✓ Paired as sandbox-7", "✓ Secrets loaded from sandbox-env", "✓ Preview live for 2 hours"]} />
+    <Term slot="visual" title="sandbox-7" lines={["$ curl -fsSL \\", `    ${installerBase} \\`, "    | PB_RECIPE=$TOKEN sh", "✓ Paired as sandbox-7", "✓ Secrets loaded from sandbox-env", "✓ Preview live for 2 hours"]} />
   </Beat>
 
   <Beat id="reach-title" title="Reachable from the first second">
