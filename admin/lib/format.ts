@@ -32,6 +32,16 @@ export function formatRelative(iso: string, now: number): string {
   return "just now"
 }
 
+/** How long ago: "5 min", "3 h" under a day, "12 days" from a day on. "" until the clock is known (`now` is 0). */
+export function formatUnseen(iso: string, now: number): string {
+  if (!now) return ""
+  const minutes = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000))
+  if (minutes < 60) return `${minutes} min`
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} h`
+  const days = Math.floor(minutes / 1440)
+  return `${days} ${days === 1 ? "day" : "days"}`
+}
+
 /*
  * Timestamps arrive from the server in UTC. They are shown in the viewer's own time zone with
  * the zone named (as Tailscale and NetBird do), and the exact UTC instant is one hover away.

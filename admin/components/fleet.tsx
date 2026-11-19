@@ -8,8 +8,9 @@ import { Panel, Stat } from "@/components/page"
 import { Time } from "@/components/time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApiQuery, type Data } from "@/lib/api"
-import { formatPlatform } from "@/lib/format"
+import { formatPlatform, formatUnseen } from "@/lib/format"
 import { useCursorList } from "@/lib/paging"
+import { useTimeFormat } from "@/lib/use-time-format"
 import { cn } from "@/lib/utils"
 
 type Versions = Data<"/v1/admin/fleet/versions">
@@ -165,6 +166,13 @@ export function FleetRollouts() {
 
 const buckets: [string, string][] = [["under_1_day", "Under 1 day"], ["1_to_7_days", "1–7 days"], ["7_to_30_days", "7–30 days"], ["over_30_days", "Over 30 days"], ["never_seen", "Never seen"]]
 
+/** The exact time since last seen; before the clock is known (first render) the bucket's name. */
+function UnseenFor({ m }: { m: Offline["items"][number] }) {
+  const { now } = useTimeFormat(60_000)
+  if (!m.last_seen_at) return "Never seen"
+  return formatUnseen(m.last_seen_at, now) || (buckets.find(([key]) => key === m.bucket)?.[1] ?? m.bucket)
+}
+
 export function FleetOffline() {
   const [q, setQ] = useState("")
   const [bucket, setBucket] = useState("")
@@ -201,7 +209,7 @@ export function FleetOffline() {
           { header: "OS", cell: (m) => `${formatPlatform(m.platform)} · ${m.architecture}` },
           { header: "Last version", cell: (m) => <Mono>{m.version}</Mono> },
           { header: "Last seen", cell: (m) => (m.last_seen_at ? <Time iso={m.last_seen_at} ist /> : "Never") },
-          { header: "Unseen for", cell: (m) => buckets.find(([key]) => key === m.bucket)?.[1] ?? m.bucket },
+          { header: "Unseen for", cell: (m) => <UnseenFor m={m} /> },
           { header: "Owner", cell: (m) => <Mono>{m.team_id || m.account_id}</Mono> },
         ]}
       />

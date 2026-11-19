@@ -1051,6 +1051,7 @@ try {
     expect((await text("[data-list-range]")) === "1–50 of 120", "first page of 120")
     expect((await text('[data-bucket="over_30_days"]')).includes("24"), "bucket count")
     expect((await text("[data-table=fleet-offline] tbody tr")).includes("IST"), "last seen in IST")
+    expect(/\d+ (min|h|days?)\b/.test(await text("[data-table=fleet-offline] tbody tr")), "unseen for is an exact count, not a bucket name")
     await p.getByRole("button", { name: "Next" }).click()
     await p.waitForFunction(() => document.querySelector("[data-list-range]")?.textContent?.startsWith("51"))
     await p.screenshot({ path: `${shots}/fleet-offline-light.png`, fullPage: true })
