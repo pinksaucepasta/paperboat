@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +91,31 @@ WHERE l.pid=pg_backend_pid() AND l.mode='SIReadLock' AND c.relname='peer_network
 	}
 	if heapLocks != 0 {
 		t.Fatalf("pairing's seat update holds %d predicate locks (%s) on the account's peer identities; it changes none", heapLocks, kinds)
+	}
+}
+
+// The other triggers of the family (migration 457) select identities the same way: from a materialised array, planned
+// with its values, never `= ANY (ARRAY(<subquery>))`, whose planner estimate sent them through the account's user_id index.
+func TestPeerNetworkGenerationTriggersProbeThePrimaryKeyOnPostgres(t *testing.T) {
+	f := newPeerContentionFixture(t)
+	rows, err := f.store.SQL().QueryContext(f.ctx, `SELECT p.proname,p.prosrc,coalesce(p.proconfig,'{}') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='paperboat' AND p.proname IN ('advance_peer_network_for_machine','advance_peer_network_for_cli_session','advance_peer_network_for_certificate','advance_peer_network_for_identity','advance_peer_network_for_environment')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	checked := 0
+	for rows.Next() {
+		var name, src, config string
+		if err := rows.Scan(&name, &src, &config); err != nil {
+			t.Fatal(err)
+		}
+		checked++
+		if strings.Contains(src, "ANY (ARRAY(") || !strings.Contains(config, "plan_cache_mode=force_custom_plan") {
+			t.Errorf("%s selects identities with an InitPlan array or a cached generic plan; it must use a materialised array and force_custom_plan", name)
+		}
+	}
+	if checked != 5 {
+		t.Fatalf("checked %d advance_peer_network_for_* functions, want the five that update identities", checked)
 	}
 }
