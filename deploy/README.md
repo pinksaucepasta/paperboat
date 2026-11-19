@@ -332,7 +332,7 @@ the stored regional certificate is kept so Let's Encrypt duplicate limits are no
 numbers: on 2026-11-18 staging applied a branch's `421`/`422`, main later reused those numbers, and goose skipped the real
 migrations (objects missing). So `staging.py build` refuses a commit that is not an ancestor of `origin/main`, and `staging.py up`
 refuses an image whose revision label is not on `origin/main` (or has none). Test a branch on staging by landing it on main first.
-`staging.py reset` refuses an image that is not on `origin/main`, and `up`, `reset` and `check` fail when the applied goose versions differ from the migrations main holds at the running image's commit (unknown or missing versions are named). If staging's migration table ever disagrees with its objects, rebuild it (`staging.py reset`, zero compatibility: never patch the table).
+`staging.py reset` refuses an image that is not on `origin/main`, and `up`, `reset` and `check` fail when the applied goose versions differ from the migrations main holds at the running image's commit (unknown or missing versions are named). `reset` also creates `staging_guard.migration_files` (a schema the server never touches) and every apply records each migration file's SHA-256 there; `check` fails when a number's file no longer matches (a branch migration whose number main later reused). If staging's migration table ever disagrees with its objects, rebuild it (`staging.py reset`, zero compatibility: never patch the table).
 
 Staging machines: containers `pb-stg-a` and `pb-stg-b` on anvit paired with a `pb` built with that `DefaultServerURL`.
 Staging never reads or writes prod data; it copies only the WorkOS client id/key and the Cloudflare DNS token from the

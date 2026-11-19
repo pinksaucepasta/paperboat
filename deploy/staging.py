@@ -19,7 +19,7 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
 The API is https://<region>.<regional domain>:<port>, served by the server itself (regional TLS with a Let's
 Encrypt wildcard, DNS-01 on the dev zone), the same way a production regional node serves its name.
 """
-import base64, datetime, hashlib, json, os, secrets, subprocess, sys, time, urllib.request
+import base64, datetime, hashlib, io, json, os, secrets, subprocess, sys, tarfile, time, urllib.request
 from pathlib import Path
 
 HOST = os.environ.get("STAGING_HOST", "ubuntu@anvit")
@@ -267,26 +267,56 @@ def image_revision(image):
 
 
 def main_migrations(revision):
-    """Migration versions that main holds at `revision` (file names NNN_name.sql in server/internal/db/migrations)."""
-    names = subprocess.run(["git", "ls-tree", "--name-only", revision, "server/internal/db/migrations/"], capture_output=True, text=True, check=True, cwd=REPO).stdout.split()
-    return {int(n.rsplit("/", 1)[1].split("_", 1)[0]) for n in names if n.endswith(".sql")}
+    """{version: sha256 of the file} for the migrations main holds at `revision` (server/internal/db/migrations/NNN_name.sql)."""
+    tar = subprocess.run(["git", "archive", revision, "--", "server/internal/db/migrations"], capture_output=True, check=True, cwd=REPO).stdout
+    with tarfile.open(fileobj=io.BytesIO(tar)) as files:
+        return {int(m.name.rsplit("/", 1)[1].split("_", 1)[0]): hashlib.sha256(files.extractfile(m).read()).hexdigest()
+                for m in files.getmembers() if m.isfile() and m.name.endswith(".sql")}
+
+
+HASH_TABLE = "staging_guard.migration_files"
+
+
+def create_hash_table():
+    """Staging-only record of each applied migration file's SHA-256 (a schema the server never touches); made on the empty database."""
+    remote("docker compose exec -T postgres psql -U postgres -d paperboat_staging -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA staging_guard' "
+           f"-c 'CREATE TABLE {HASH_TABLE} (version bigint PRIMARY KEY, sha256 text NOT NULL)'")
+
+
+def applied_versions():
+    return {int(v) for v in sql("SELECT version_id FROM paperboat.goose_db_version WHERE is_applied AND version_id > 0").split()}
+
+
+def record_migration_hashes(revision):
+    """At apply time: every applied version not yet recorded gets the hash of main's file at the image's commit (the commit is on main and
+    the image was built from it, so that file is what migrate ran). Missing table = a database not made by `reset`."""
+    if sql(f"SELECT to_regclass('{HASH_TABLE}') IS NOT NULL").strip() != "t":
+        raise SystemExit("staging: the migration-hash table is missing, so applied files cannot be verified. Run `staging.py reset`.")
+    recorded = {int(v) for v in sql(f"SELECT version FROM {HASH_TABLE}").split()}
+    files = main_migrations(revision)
+    rows = [f"({v},'{files[v]}')" for v in sorted(applied_versions() - recorded) if v in files]
+    if rows:
+        sql(f"INSERT INTO {HASH_TABLE} (version, sha256) VALUES " + ",".join(rows))
 
 
 def require_main_migrations(revision):
-    """Staging's applied goose versions equal main's set at the running revision: an unknown version came from a branch, a missing one means
-    a skipped migration. Either way the database is rebuilt with `reset` (never patched: goose compares only numbers)."""
-    applied = {int(v) for v in sql("SELECT version_id FROM paperboat.goose_db_version WHERE is_applied AND version_id > 0").split()}
-    expected = main_migrations(revision)
-    unknown, missing = sorted(applied - expected), sorted(expected - applied)
-    if unknown or missing:
-        raise SystemExit(f"staging: applied migrations differ from main at {revision[:9]}: not on main {unknown}, missing {missing}. "
-                         "Run `staging.py reset` to rebuild the database from main's migrations.")
+    """Staging's applied goose versions equal main's set at the running revision and each applied file still has the hash recorded when it
+    was applied. An unknown version came from a branch, a missing one is a skipped migration, a changed one is a number reused with other
+    contents (goose compares numbers only). Either way the database is rebuilt with `reset`, never patched."""
+    applied, expected = applied_versions(), main_migrations(revision)
+    recorded = dict(line.split("|") for line in sql(f"SELECT version, sha256 FROM {HASH_TABLE}").split())
+    unknown, missing = sorted(applied - set(expected)), sorted(set(expected) - applied)
+    changed = sorted(v for v in applied if recorded.get(str(v)) != expected.get(v))
+    if unknown or missing or changed:
+        raise SystemExit(f"staging: applied migrations differ from main at {revision[:9]}: not on main {unknown}, missing {missing}, "
+                         f"changed or unrecorded {changed}. Run `staging.py reset` to rebuild the database from main's migrations.")
 
 
 def up(image):
     revision = image_revision(image)
     remote(f"sed -i 's|^PAPERBOAT_SERVER_IMAGE=.*|PAPERBOAT_SERVER_IMAGE={image}|' .env && docker compose up -d --remove-orphans")
     wait_ready()
+    record_migration_hashes(revision)
     require_main_migrations(revision)
     print(json.dumps(status()))
 
@@ -560,10 +590,12 @@ def reset():
     keep = "/tmp/pb-staging-acme-cache.sql"
     remote(f"docker compose exec -T postgres pg_dump -U postgres -d paperboat_staging --data-only -t paperboat.control_server_node_acme_cache > {keep}", check=False)
     remote("docker compose exec -T postgres psql -U postgres -c 'DROP DATABASE IF EXISTS paperboat_staging WITH (FORCE)' -c 'CREATE DATABASE paperboat_staging'")
+    create_hash_table()
     remote("docker compose run --rm migrate")
     remote(f"test -s {keep} && docker compose exec -T postgres psql -U postgres -d paperboat_staging -v ON_ERROR_STOP=1 < {keep}; rm -f {keep}", check=False)
     remote("docker compose up -d server")
     wait_ready()
+    record_migration_hashes(revision)
     require_main_migrations(revision)
     seed()
 

@@ -79,27 +79,56 @@ class MainOnlyTest(unittest.TestCase):
 
 
 class MigrationSetTest(unittest.TestCase):
-    def check(self, applied):
+    FILES = {1: 'aa', 2: 'bb', 4: 'dd'}
+
+    def check(self, applied, recorded):
+        """applied: goose versions on staging; recorded: {version: sha256} written when they were applied."""
         original = staging.sql, staging.main_migrations
-        staging.sql = lambda statement: applied
-        staging.main_migrations = lambda revision: {1, 2, 4}
+        staging.sql = lambda statement: ('\n'.join(map(str, applied)) if 'goose_db_version' in statement
+                                        else '\n'.join(f'{v}|{h}' for v, h in recorded.items()))
+        staging.main_migrations = lambda revision: self.FILES
         try:
             staging.require_main_migrations('abcdef0123456789abcdef0123456789abcdef01')
         finally:
             staging.sql, staging.main_migrations = original
 
     def test_the_applied_set_must_equal_mains_set_exactly(self):
-        self.check('1\n2\n4\n')
+        self.check([1, 2, 4], self.FILES)
         with self.assertRaisesRegex(SystemExit, r'not on main \[3\], missing \[\]'):
-            self.check('1\n2\n3\n4\n')
+            self.check([1, 2, 3, 4], {**self.FILES, 3: 'cc'})
         with self.assertRaisesRegex(SystemExit, r'not on main \[\], missing \[4\]'):
-            self.check('1\n2\n')
+            self.check([1, 2], self.FILES)
+
+    def test_a_number_reused_with_other_contents_is_refused(self):
+        # the 2026-11-18 incident: a branch's 2 was applied, main then reused the number for another file
+        with self.assertRaisesRegex(SystemExit, r'changed or unrecorded \[2\]'):
+            self.check([1, 2, 4], {**self.FILES, 2: 'branch'})
+        with self.assertRaisesRegex(SystemExit, r'changed or unrecorded \[4\]'):
+            self.check([1, 2, 4], {1: 'aa', 2: 'bb'})
+
+    def test_hashes_are_recorded_only_for_versions_not_yet_recorded_and_a_missing_table_refuses(self):
+        original = staging.sql, staging.main_migrations
+        statements = []
+        def sql(statement):
+            statements.append(statement)
+            return {'to_regclass': 't', 'SELECT version FROM': '1', 'goose_db_version': '1\n2'}.get(next((k for k in ('to_regclass', 'SELECT version FROM', 'goose_db_version') if k in statement), ''), '')
+        staging.sql, staging.main_migrations = sql, lambda revision: self.FILES
+        try:
+            staging.record_migration_hashes('rev')
+            self.assertIn("VALUES (2,'bb')", statements[-1])
+            staging.sql = lambda statement: 'f'
+            with self.assertRaisesRegex(SystemExit, 'migration-hash table is missing'):
+                staging.record_migration_hashes('rev')
+        finally:
+            staging.sql, staging.main_migrations = original
 
     def test_main_migrations_reads_the_versions_main_holds_at_a_commit(self):
-        versions = staging.main_migrations('origin/main')
-        self.assertIn(1, versions)
-        self.assertEqual(len(versions), len(set(versions)))
-        self.assertGreaterEqual(max(versions), 453)
+        files = staging.main_migrations('origin/main')
+        self.assertEqual(len(files[1]), 64)
+        self.assertGreaterEqual(max(files), 453)
+        self.assertEqual(files[453], hashlib.sha256(subprocess.run(
+            ['git', 'show', 'origin/main:server/internal/db/migrations/453_policy_ignores_route_preview_service_topics.sql'],
+            capture_output=True, check=True, cwd=staging.REPO).stdout).hexdigest())
 
     def test_reset_refuses_an_image_that_is_not_on_main_before_touching_the_database(self):
         original = staging.ssh, staging.subprocess.run, staging.remote, staging.existing_image
