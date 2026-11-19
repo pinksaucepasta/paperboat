@@ -79,30 +79,43 @@ func updateApply(ctx context.Context, args []string, out io.Writer) error {
 	dir := fs.String("state-dir", defaultState, "installation state directory")
 	request := fs.String("request", "", "update request id")
 	target := fs.String("to", "", "release version")
-	if err := fs.Parse(args); err != nil || *request == "" || *target == "" || fs.NArg() != 0 {
+	if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
+		printHelp(out, "update-apply", fs)
+		return nil
+	} else if err != nil || *request == "" || *target == "" || fs.NArg() != 0 {
 		return commandError("usage: pbh update-apply --request ID --to VERSION")
 	}
 	node, err := containers.OpenUpdateNode(*dir)
 	if err != nil {
 		return err
 	}
-	work := filepath.Join(*dir, "update")
-	if err := os.MkdirAll(work, 0o700); err != nil {
+	steps, err := updateStepsFor(ctx, node, *dir, *target, func(state, detail, reference string) {
+		fmt.Fprintf(out, "update %s: %s %s %s\n", *target, state, detail, reference)
+		report, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := node.Report(report, *request, state, detail, reference); err != nil {
+			fmt.Fprintf(out, "update %s: reporting %s failed: %v\n", *target, state, err)
+		}
+	})
+	if err != nil {
 		return err
 	}
+	return runUpdate(ctx, steps)
+}
+
+// updateStepsFor is the one update path: update-apply (the console's Update button) and `pbh update` both run
+// it. report receives each step; the caller decides where it goes.
+func updateStepsFor(ctx context.Context, node *containers.UpdateNode, dir, target string, report func(state, detail, reference string)) (updateSteps, error) {
+	work := filepath.Join(dir, "update")
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		return updateSteps{}, err
+	}
 	arch := runtime.GOARCH
-	steps := updateSteps{
-		report: func(state, detail, reference string) {
-			fmt.Fprintf(out, "update %s: %s %s %s\n", *target, state, detail, reference)
-			report, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			if err := node.Report(report, *request, state, detail, reference); err != nil {
-				fmt.Fprintf(out, "update %s: reporting %s failed: %v\n", *target, state, err)
-			}
-		},
+	return updateSteps{
+		report: report,
 		download: func(ctx context.Context) (string, error) {
 			path := filepath.Join(work, "bundle.tar.gz")
-			_, url, err := selfupdate.Target(ctx, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(work, "tuf"), *target, arch, node.DownloadClient())
+			_, url, err := selfupdate.Target(ctx, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(work, "tuf"), target, arch, node.DownloadClient())
 			if err != nil {
 				return "", err
 			}
@@ -117,13 +130,12 @@ func updateApply(ctx context.Context, args []string, out io.Writer) error {
 			return path, downloadBundle(ctx, client, url, path)
 		},
 		verify: func(ctx context.Context, bundle string) error {
-			return selfupdate.Verify(ctx, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(work, "tuf"), *target, arch, bundle, node.DownloadClient())
+			return selfupdate.Verify(ctx, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(work, "tuf"), target, arch, bundle, node.DownloadClient())
 		},
 		extract: func(bundle string) (string, error) { return extractPBH(bundle, filepath.Join(work, "release")) },
-		backup:  func() (func() error, error) { return backupInstallation(ctx, *dir) },
+		backup:  func() (func() error, error) { return backupInstallation(ctx, dir) },
 		install: func(ctx context.Context, binary string) error { return installRelease(ctx, binary) },
-	}
-	return runUpdate(ctx, steps)
+	}, nil
 }
 
 func downloadBundle(ctx context.Context, client *http.Client, url, path string) error {

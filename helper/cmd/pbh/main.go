@@ -173,6 +173,12 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		return doctor(ctx, args[1:], out)
 	case "update-apply":
 		return updateApply(ctx, args[1:], out)
+	case "logs":
+		return logsCommand(ctx, args[1:], out)
+	case "restart":
+		return restartCommand(ctx, args[1:], out)
+	case "update":
+		return updateCommand(ctx, args[1:], out)
 	case "uninstall":
 		return uninstall(ctx, args[1:], out)
 	default:
