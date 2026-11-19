@@ -786,13 +786,29 @@ func TestSharedOutputCountsDroppedBacklogs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	go func() { _, _ = io.Copy(io.Discard, reader) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for registry.Lags(sessionID) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("a dropped backlog was not counted")
+	// The publisher stays blocked on the unread stream until more than the queue plus its one held record has been
+	// published, so the backlog is dropped whatever the PTY reader's pace; only then does the stream drain and the
+	// publisher find the drop. Draining earlier lets a fast publisher keep up and never lag.
+	waitUntil(t, "the PTY output to outgrow the attachment queue", func() bool {
+		snapshot, err := manager.Snapshot(sessionID)
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		return snapshot.LatestSequence > 2<<20
+	})
+	go func() { _, _ = io.Copy(io.Discard, reader) }()
+	waitUntil(t, "a dropped backlog to be counted", func() bool { return registry.Lags(sessionID) != 0 })
+}
+
+// waitUntil returns the moment condition holds; the bound only ends a test that would never succeed.
+func waitUntil(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
