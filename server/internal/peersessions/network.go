@@ -101,6 +101,8 @@ type NetworkService struct {
 	policySync func(context.Context) error
 	// What each endpoint was last sent, for delta answers (sent_configurations.go).
 	sent sentConfigurations
+	// Each account's mesh as of its latest mesh_seq read here (mesh_cache.go).
+	mesh meshCache
 }
 
 func NewNetworkService(store *db.DB, signer interface {
@@ -600,7 +602,11 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 	}
 	// Durable personal-machine connectivity is distinct from application access.
 	// Exact access-session scopes above still authorize every application stream.
-	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"], meshSeq)
+	meshEntries, err := s.mesh.at(ctx, tx, self.AccountID, meshSeq)
+	if err != nil {
+		return nil, err
+	}
+	mesh, err := personalNetworkPeers(ctx, tx, self, now, &expiry, admittedPeers, live["machine_network"], meshEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -777,7 +783,7 @@ func personalNetworkScope(self, peer networkBinding, expiresAt int64) networkSco
 	return networkScope{ResourceKind: "machine_network", ResourceID: personalNetworkScopeID(self, peer), ResourceGeneration: 1, Capability: "connect", Direction: direction, Port: peernetwork.NetworkPort, ExpiresAt: expiresAt}
 }
 
-func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, meshSeq int64) ([]networkBinding, error) {
+func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, mesh map[string]networkBinding) ([]networkBinding, error) {
 	if self.Role == peernetwork.RoleMachine {
 		var personal bool
 		if err := tx.QueryRowContext(ctx, `SELECT owner_team_id IS NULL FROM paperboat.user_machines WHERE id=$1 AND user_id=$2`, self.EndpointID, self.AccountID).Scan(&personal); err != nil {
@@ -817,10 +823,6 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	// The shared mesh (mesh.go) holds every peer with a current certificate, built once per change: a peer is read
 	// from it, not loaded again per endpoint (3 queries per peer). A peer this endpoint reports as admitted may keep
 	// a superseded or expired certificate, so it alone is loaded as before.
-	mesh, err := latestMeshEntries(ctx, tx, self.AccountID, meshSeq, nil)
-	if err != nil {
-		return nil, err
-	}
 	var validUntil sql.NullTime
 	if err = tx.QueryRowContext(ctx, `SELECT valid_until FROM paperboat.peer_mesh_accounts WHERE account_id=$1`, self.AccountID).Scan(&validUntil); err != nil && err != sql.ErrNoRows {
 		return nil, err
