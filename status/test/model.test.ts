@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { ago, byMonth, dayLines, duration, incidentsOn, lastDays, overall, shownState, trackedDays, type Component, type Incident, type Payload } from "../src/scripts/model.ts"
+import { ago, byMonth, dayLines, duration, incidentsOn, kindOf, lastDays, overall, shownState, type Component, type Incident, type Payload } from "../src/scripts/model.ts"
 
 const NOW = Date.UTC(2026, 10, 18, 12, 0, 0)
 const comp = (state: Component["state"]): Component => ({ id: "api", name: "API", note: "", state, since: 0, units: [], days: [], uptime: null })
@@ -71,15 +71,10 @@ test("durations read naturally", () => {
   assert.equal(duration(72 * 3600_000), "3 days")
 })
 
-test("history is drawn only from when tracking started, with no filler before it", () => {
-  const none = trackedDays([], NOW)
-  assert.deepEqual([none.days.length, none.since], [0, null])
-  const fresh = trackedDays([{ day: "2026-11-18", up: 300, degraded: 0, down: 0, delayed: 0 }], NOW)
-  assert.deepEqual([fresh.days.length, fresh.since, fresh.full], [1, "2026-11-18", false])
-  const three = trackedDays([{ day: "2026-11-16", up: 1440, degraded: 0, down: 0, delayed: 0 }, { day: "2026-11-18", up: 10, degraded: 0, down: 0, delayed: 0 }], NOW)
-  assert.deepEqual(three.days.map((d) => d.day), ["2026-11-16", "2026-11-17", "2026-11-18"]) // the gap day stays, as an empty day
-  const old = trackedDays([{ day: "2026-01-01", up: 1, degraded: 0, down: 0, delayed: 0 }], NOW)
-  assert.deepEqual([old.days.length, old.full], [90, true])
+test("90 days are always drawn: days before tracking started are empty (grey), not hidden", () => {
+  const days = lastDays([{ day: "2026-11-18", up: 300, degraded: 0, down: 0, delayed: 0 }], NOW)
+  assert.equal(days.length, 90)
+  assert.deepEqual([kindOf(days[0]), kindOf(days[88]), kindOf(days[89])], ["none", "none", "up"])
 })
 
 test("'Updated … ago' reads naturally as it ticks", () => {
