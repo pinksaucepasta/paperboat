@@ -94,7 +94,7 @@ WHERE l.pid=pg_backend_pid() AND l.mode='SIReadLock' AND c.relname='peer_network
 	}
 }
 
-// The other triggers of the family (migration 457) select identities the same way: from a materialised array, planned
+// The other triggers of the family (migration 460) select identities the same way: from a materialised array, planned
 // with its values, never `= ANY (ARRAY(<subquery>))`, whose planner estimate sent them through the account's user_id index.
 func TestPeerNetworkGenerationTriggersProbeThePrimaryKeyOnPostgres(t *testing.T) {
 	f := newPeerContentionFixture(t)

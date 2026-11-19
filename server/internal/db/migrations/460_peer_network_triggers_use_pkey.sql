@@ -80,5 +80,5 @@ END $$;
 
 -- +goose Down
 -- +goose StatementBegin
-DO $$ BEGIN RAISE EXCEPTION '457 is forward-only: restore the five advance_peer_network_for_* functions from migrations 297 and 131'; END $$;
+DO $$ BEGIN RAISE EXCEPTION '460 is forward-only: restore the five advance_peer_network_for_* functions from migrations 297 and 131'; END $$;
 -- +goose StatementEnd
