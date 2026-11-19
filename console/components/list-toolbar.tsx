@@ -32,6 +32,8 @@ import { ErrorMessage } from "@/components/error-reference"
 const PickedMachine = createContext<string | null>(null)
 /** `?view=`, as `UrlScope` reads it (the Terminals page opens on Recordings from a link). */
 const PickedView = createContext<string | null>(null)
+/** The whole query string, as `UrlScope` reads it; null in the static shell, which cannot know it. */
+const UrlParams = createContext<URLSearchParams | null>(null)
 
 export const usePickedView = () => useContext(PickedView)
 
@@ -51,10 +53,33 @@ export function UrlScope({ children }: { children: React.ReactNode }) {
 function FromUrl({ children }: { children: React.ReactNode }) {
   const params = useSearchParams()
   return (
-    <PickedMachine value={params.get("machine")}>
-      <PickedView value={params.get("view")}>{children}</PickedView>
-    </PickedMachine>
+    <UrlParams value={params}>
+      <PickedMachine value={params.get("machine")}>
+        <PickedView value={params.get("view")}>{children}</PickedView>
+      </PickedMachine>
+    </UrlParams>
   )
+}
+
+/**
+ * A filter that lives in the URL (`?key=value`, absent at its default). Next shows the static shell
+ * of a page first on a client navigation and swaps in the server-rendered page a second or two
+ * later, which remounts it: plain state chosen meanwhile would be lost, the URL is not. Needs `UrlScope`.
+ */
+export function useUrlFilter(key: string, initial: string): [string, (value: string) => void] {
+  const params = useContext(UrlParams)
+  const [value, setValue] = useState(params?.get(key) ?? initial)
+  return [
+    value,
+    (next) => {
+      setValue(next)
+      if (!params) return
+      const url = new URL(window.location.href)
+      if (next === initial) url.searchParams.delete(key)
+      else url.searchParams.set(key, next)
+      window.history.replaceState(null, "", url)
+    },
+  ]
 }
 
 /**

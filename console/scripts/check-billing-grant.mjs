@@ -12,6 +12,8 @@
 //   checkout return     ?checkout=done on a granted workspace says "Confirming payment…", offers no plan to buy meanwhile, drops the
 //                       parameter from the address, and shows the paid plan once the payment is confirmed
 //   refused sign-in     /auth/failed?reason=account_banned|ip_blocked names the reason and the support reference; anything else stays plain
+//   switch period     "Switch to yearly" shows the plan's own yearly price from the catalog, never an add-on's (the catalog lists add-ons first)
+//   activity filters  a filter chosen right after a client navigation (while the server renders) survives the page the server then sends
 //   paid (control)    Manage billing, Renews, top-ups and the quota banner's Add bandwidth ARE shown, so the checks above can fail
 // usage: PW_CHROMIUM=<chromium> [PW_MODULE=<playwright-core index.mjs>] [NEXT_DIST_DIR=.next] [APP_PORT=3197] [FIXTURE_PORT=3196]
 //        [SHOT_DIR=<dir>] node scripts/check-billing-grant.mjs
@@ -31,8 +33,8 @@ if (!process.env.PW_CHROMIUM) throw new Error("PW_CHROMIUM is not set; see the h
 const day = 86400e3
 const iso = (ms) => new Date(Date.now() + ms).toISOString()
 const product = (code, type, interval, amount) => ({ code, name: code.includes("team") ? "Team" : "Pro", catalog_type: type, unit_amount: amount, currency: "usd", interval, price_verified: true, version: 1 })
-const personalProducts = [product("pro-month", "personal_subscription", "month", 900), product("pro-year", "personal_subscription", "year", 9000), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
-const teamProducts = [product("team-month", "team_subscription", "month", 1500), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
+const personalProducts = [product("pro-month", "personal_subscription", "month", 900), product("sso-year", "team_addon", "year", 100000), product("pro-year", "personal_subscription", "year", 9000), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
+const teamProducts = [product("team-month", "team_subscription", "month", 1500), product("scim-year", "team_addon", "year", 100000), product("team-year", "team_subscription", "year", 15000), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
 const limits = { machines: { used: 2, limit: 100 }, publications: { used: 1, limit: 10 }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: 10 } }
 const base = { usage_bytes: 5e9, allowance_bytes: 1e12, allowance_period_start: iso(-5 * day), allowance_period_end: iso(25 * day), topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], limits, can_manage: true, cancel_at_period_end: false, granted: false, throttled: false, throttle_lifted: false, throttle_mbit: 10, relay_mbit: 10, sso_addon: false, scim_addon: false }
 const states = {
@@ -45,7 +47,7 @@ const states = {
   extras: (kind) => ({ ...states.paid(kind), allowance_granted_bytes: 2.5e11, allowance_bytes: 1.25e12, limits: { ...limits, machines: { used: 2, limit: 500, granted: true } }, ...(kind === "team" ? { seats_granted: 20 } : {}) }),
   paid: (kind) => ({ ...states.granted(kind), cancel_at_period_end: false, granted: false, granted_until: undefined, period_end: iso(20 * day), paid_benefits_until: iso(20 * day) }),
 }
-const world = { mode: "granted" }
+const world = { mode: "granted", hold: null } // hold: a promise the activity answer waits for
 const seen = []
 function route(url) {
   const p = url.pathname
@@ -59,9 +61,10 @@ function route(url) {
   // Everything else the shell asks for (invitations, the team inbox, ...): an empty list.
   return { items: [], pagination: { limit: 10, offset: 0, total: 0, next_offset: null } }
 }
-const fixture = http.createServer((req, res) => {
+const fixture = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${FIXTURE_PORT}`)
   seen.push(`${req.method} ${url.pathname}`)
+  if (url.pathname === "/v1/activity") await world.hold
   const out = route(url)
   res.writeHead(200, { "content-type": "application/json" })
   res.end(JSON.stringify({ data: out }))
@@ -208,6 +211,39 @@ try {
     world.mode = "paid" // the webhook lands
     await page.waitForFunction(() => /Renews/.test(document.querySelector("main")?.innerText ?? "") && !/Confirming payment/.test(document.querySelector("main")?.innerText ?? ""), null, { timeout: 30000 })
     expect((await buttons()).includes("Manage billing"), "the paid plan has no Manage billing after the return")
+  })
+  await step("Switch to yearly shows the plan's own yearly price from the catalog, never an add-on's", async () => {
+    for (const [workspace, products, plan] of [["personal", personalProducts, "pro-year"], ["tg", teamProducts, "team-year"]]) {
+      await open(workspace, "paid", /Renews/)
+      const catalog = products.find((p) => p.code === plan)
+      const addons = products.filter((p) => p.catalog_type === "team_addon")
+      expect(catalog && addons.length > 0 && products.indexOf(addons[0]) < products.indexOf(catalog), "the fixture catalog must list an add-on before the plan's yearly price")
+      const button = (await buttons()).find((name) => /^Switch to yearly/.test(name))
+      expect(button, `${workspace}: no Switch to yearly button: ${await buttons()}`)
+      const price = Number(button.match(/\$([\d,]+(?:\.\d+)?)/)?.[1]?.replace(/,/g, ""))
+      expect(price * 100 === catalog.unit_amount, `${workspace}: "${button}" is not the plan's yearly price ${catalog.unit_amount / 100}`)
+      expect(!addons.some((a) => a.unit_amount === price * 100), `${workspace}: "${button}" is an add-on's price`)
+    }
+  })
+  await step("an Activity filter chosen right after a client navigation survives the server-rendered page that replaces the static shell", async () => {
+    world.mode = "paid"
+    await context.addCookies([{ name: "pb-workspace", value: "personal", url: ORIGIN }])
+    const prefetched = page.waitForResponse((r) => /\/activity\?_rsc=/.test(r.url()), { timeout: 30000 })
+    await page.goto(`${ORIGIN}/billing`)
+    await page.getByText("Traffic included").first().waitFor({ timeout: 30000 })
+    await prefetched // the static shell of the Activity page is in the router cache
+    let release
+    world.hold = new Promise((resolve) => (release = resolve)) // the server's Activity render waits for this: no sleeping
+    await page.getByRole("link", { name: "Activity", exact: true }).first().click()
+    // The static shell shows the filters at once; the server render is held, so this choice is made on it.
+    await page.getByRole("button", { name: "All results" }).click({ timeout: 30000 })
+    await page.getByRole("menuitemradio", { name: "Only denied" }).click()
+    await page.getByRole("button", { name: "Only denied" }).waitFor({ timeout: 5000 }).catch(() => expect(false, "the choice is not shown on the static shell"))
+    expect(await page.locator(".shell-delay").count() > 0, "the server page had already replaced the shell: the choice was not made on the shell")
+    release() // the server page now arrives and replaces the shell
+    await page.waitForFunction(() => !document.querySelector(".shell-delay"), null, { timeout: 30000 })
+    await page.getByRole("button", { name: "Only denied" }).waitFor({ timeout: 5000 }).catch(() => expect(false, "the filter was reset when the server page replaced the shell"))
+    expect(page.url().includes("result=denied"), `the filter is not in the address: ${page.url()}`)
   })
   await step("control: a paid plan shows Manage billing, Renews and top-ups, so the checks above can fail", async () => {
     const text = await open("personal", "paid", /Renews/)

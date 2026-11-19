@@ -3,7 +3,7 @@
 import { ClockCounterClockwiseIcon, DownloadSimpleIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import Link from "next/link"
-import { Fragment, useDeferredValue, useState } from "react"
+import { Fragment, useDeferredValue, useMemo, useState } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { teamQuery } from "@/lib/teams"
 import {
@@ -23,7 +23,7 @@ import {
   type ActivityPeriod,
 } from "@/lib/activity"
 import { AuditStreams } from "@/components/activity/audit-streams"
-import { SearchField, useListScope, ViewToggle } from "@/components/list-toolbar"
+import { SearchField, useListScope, useUrlFilter, ViewToggle } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { Choice } from "@/components/choice"
 import { Badge } from "@/components/ui/badge"
@@ -62,17 +62,25 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
   const { data: me } = useApiQuery(meQuery)
   const { data: team } = useApiQuery({ ...teamQuery(workspace?.id ?? ""), enabled: workspace?.kind === "team" })
   const memberNames = new Map(team?.members?.map((member) => [member.account_id, member.display_name || member.email]))
-  const [area, setArea] = useState<ActivityArea>("all")
-  const [search, setSearch] = useState("")
-  const [denied, setDenied] = useState(false)
-  const [period, setPeriod] = useState<{ name: ActivityPeriod; since?: string }>({ name: "all" })
+  const [areaName, setArea] = useUrlFilter("show", "all")
+  const [search, setSearch] = useUrlFilter("q", "")
+  const [deniedName, setDenied] = useUrlFilter("result", "all")
+  const [periodName, setPeriod] = useUrlFilter("period", "all")
+  // The URL can say anything: an unknown value reads as the default.
+  const area = (Object.hasOwn(activityAreas, areaName) ? areaName : "all") as ActivityArea
+  const denied = deniedName === "denied"
+  const period = (Object.hasOwn(activityPeriods, periodName) ? periodName : "all") as ActivityPeriod
+  // Fixed once the clock is known (`now` is 0 until hydrated) or the period changes, so the list's key does not move every minute.
+  const clockKnown = time.now > 0
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const since = useMemo(() => periodStart(period, time.now), [period, clockKnown])
   const q = useDeferredValue(search.trim())
-  const filter: ActivityFilter = { workspace: workspace?.id ?? "", machineId: scope, area, q, denied, since: period.since }
+  const filter: ActivityFilter = { workspace: workspace?.id ?? "", machineId: scope, area, q, denied, since }
   const activity = useInfiniteQuery({ ...activityQuery(filter), enabled: Boolean(workspace) })
   // The audit log is exported by the owner, admins and auditors of a team (teams-business.md).
   const canExport =
     activityLive.export && workspace?.kind === "team" && ["owner", "admin", "auditor"].includes(workspace.role ?? "")
-  const filtered = q || area !== "all" || denied || period.name !== "all"
+  const filtered = q || area !== "all" || denied || period !== "all"
   // Streaming: owners and admins configure it, auditors see it (teams-business.md).
   const role = workspace?.kind === "team" ? (workspace.role ?? "") : ""
   const streaming = activityLive.streaming && !tabMachine && ["owner", "admin", "auditor"].includes(role)
@@ -107,18 +115,16 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
             label={activityAreas[area]}
             value={area}
             options={Object.entries(activityAreas).map(([value, label]) => ({ value, label }))}
-            onChange={(value) => setArea(value as ActivityArea)}
+            onChange={setArea}
           />
         </span>
         {activityLive.filters && (
           <>
             <Choice
-              label={activityPeriods[period.name]}
-              value={period.name}
+              label={activityPeriods[period]}
+              value={period}
               options={Object.entries(activityPeriods).map(([value, label]) => ({ value, label }))}
-              onChange={(value) =>
-                setPeriod({ name: value as ActivityPeriod, since: periodStart(value as ActivityPeriod, time.now) })
-              }
+              onChange={setPeriod}
             />
             <Choice
               label={denied ? "Only denied" : "All results"}
@@ -127,7 +133,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
                 { value: "all", label: "All results" },
                 { value: "denied", label: "Only denied" },
               ]}
-              onChange={(value) => setDenied(value === "denied")}
+              onChange={setDenied}
             />
           </>
         )}

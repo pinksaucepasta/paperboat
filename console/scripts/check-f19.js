@@ -90,25 +90,12 @@
       return realFetch(input, init)
     }
     try {
-      // The filters show at once, but the page resets them while the workspace and its role load: wait for Export (owner only)
-      // and for the first list, then choose.
+      // Choose right after arriving, on the static shell the server page is about to replace (a client navigation shows the
+      // shell first): the filter must live through that swap. Export (owner only) shows once the workspace role is known.
       await open(
         "/activity",
-        () =>
-          /Any time/.test(text()) &&
-          [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Export") &&
-          !main().querySelector('[data-slot="skeleton"]'),
+        () => /Any time/.test(text()) && [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Export"),
       )
-      // The page remounts (and resets its filters) a second or two after it first shows, while the workspace
-      // loads: choose only once the same filter button has stayed in the DOM for 4 s.
-      const anchor = () => [...main().querySelectorAll("button")].find((b) => b.textContent.trim() === "Any time")
-      let steady = anchor()
-      let since = Date.now()
-      await until(() => {
-        const now = anchor()
-        if (now !== steady) [steady, since] = [now, Date.now()]
-        return steady && Date.now() - since > 4000
-      }, 30000)
       const choose = async (current, wanted) => {
         const trigger = [...main().querySelectorAll("button")].find((b) => b.textContent.trim() === current)
         if (!trigger) return false
@@ -124,6 +111,13 @@
         return Boolean(await until(() => [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === wanted), 5000))
       }
       pass("Last 7 days can be chosen", await choose("Any time", "Last 7 days"))
+      // The server page has replaced the shell once nothing is hidden behind the shell delay and no skeleton is left.
+      await until(() => !document.querySelector(".shell-delay") && !main().querySelector('[data-slot="skeleton"]'), 30000)
+      pass(
+        "the filter chosen on arrival survives the server page replacing the shell",
+        [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Last 7 days") && /[?&]period=week/.test(location.search),
+        location.search,
+      )
       pass("the list asks the server for the period", seen.some((url) => /[?&]since=/.test(url)), seen.at(-1) ?? "")
       pass("Only denied can be chosen", await choose("All results", "Only denied"))
       pass("the list asks for denied events only", seen.some((url) => /result=denied/.test(url)), seen.at(-1) ?? "")
