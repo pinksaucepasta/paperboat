@@ -66,7 +66,8 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 		f.t.Fatalf("insert machines: %v", err)
 	}
 	// The machines (up to 65,024 in the exhaustion test) would otherwise stay in the shared test database and slow every
-	// later test (the team machine list timed out at 30 s). Triggers and cascades are off for this delete only.
+	// later test (the team machine list timed out at 30 s). Triggers and cascades are off for the machine rows only: the
+	// user is deleted with its cascades, or its topic bumps stay behind and the worker's next fold fails on their foreign key.
 	f.t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -81,7 +82,6 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 				`DELETE FROM paperboat.account_topic_bumps WHERE account_id=$1`,
 				`DELETE FROM paperboat.account_topic_base WHERE account_id=$1`,
 				`DELETE FROM paperboat.user_machines WHERE user_id=$1`,
-				`DELETE FROM paperboat.users WHERE id=$1`,
 			} {
 				if _, err := tx.Exec(ctx, statement, user); err != nil {
 					return err
@@ -89,6 +89,9 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,'m-'||g,'linux','amd64','/w','online','occupie
 			}
 			return nil
 		})
+		if err == nil {
+			_, err = f.store.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, user)
+		}
 		if err != nil {
 			f.t.Errorf("lease fixture cleanup of %s: %v", user, err)
 		}
@@ -286,5 +289,21 @@ SELECT $1,$1||'_m'||n,s FROM (SELECT s,row_number() OVER (ORDER BY s) n FROM gen
 	}
 	if got := f.slots(t, free, free+"_m1"); got[free+"_m1"] != 2 {
 		t.Fatalf("another account while one is full: %v", got)
+	}
+}
+
+// A lease fixture's cleanup leaves no topic bump of its account: bumps whose user is gone fail the worker's next
+// fold on the account_topic_base foreign key, which broke TestAccountTopicBumpsAreFoldedByTheWorkerOnPostgres.
+func TestLeaseFixtureCleanupLeavesNoTopicBumps(t *testing.T) {
+	store := testStore(t)
+	user := "lease_bumps_" + fmt.Sprint(time.Now().UnixNano())
+	t.Run("fixture", func(t *testing.T) {
+		f := newLeaseFixture(t)
+		f.account(user, 1)
+		f.exec(`SELECT paperboat.publish_account_topic(ARRAY[$1::text], 'inventory')`, user)
+	})
+	var left int
+	if err := store.SQL().QueryRowContext(context.Background(), `SELECT count(*) FROM paperboat.account_topic_bumps WHERE account_id=$1`, user).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d topic bumps of the removed account remain (%v)", left, err)
 	}
 }
