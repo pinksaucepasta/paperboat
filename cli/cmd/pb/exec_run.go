@@ -212,7 +212,7 @@ func execInputClosedOnly(err error) bool {
 		if value.Kind() == reflect.Pointer && value.IsNil() {
 			return false
 		}
-		if current == io.EOF || current == io.ErrClosedPipe || current == net.ErrClosed || current == syscall.EPIPE {
+		if current == io.EOF || current == io.ErrClosedPipe || current == net.ErrClosed || current == syscall.EPIPE || execPipeClosed(current) {
 			continue
 		}
 		if !value.Type().Comparable() || seen[current] {
