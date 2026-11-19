@@ -267,7 +267,8 @@ func TestActivationPostgres(t *testing.T) {
 	if err = database.SQL().QueryRowContext(ctx, `SELECT user_deadline FROM preview_leases WHERE id=$1`, preview).Scan(&userDeadline); err != nil {
 		t.Fatal(err)
 	}
-	if userDeadline.After(req.AuthorityDeadline.Add(time.Microsecond)) {
+	// PostgreSQL stores microseconds: the lease may differ from the nanosecond authority deadline only by that rounding.
+	if userDeadline.After(req.AuthorityDeadline.Round(time.Microsecond)) {
 		t.Fatal("lease outlived initiating authority")
 	}
 	requestCancel()
