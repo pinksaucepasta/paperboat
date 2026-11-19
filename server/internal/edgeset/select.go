@@ -16,6 +16,9 @@ const (
 	// ReplaceAfter is how long a member may be silent before it is replaced; a restart or a short
 	// network cut keeps its place.
 	ReplaceAfter = 10 * time.Minute
+	// LatencyFresh is how old a machine's edge measurement may be and still place a workspace; older
+	// samples are ignored. Machines repeat their samples on every attachment, so a day is generous.
+	LatencyFresh = 24 * time.Hour
 )
 
 // Candidate is an edge that may serve a workspace right now.
@@ -25,9 +28,11 @@ type Candidate struct {
 }
 
 // choose keeps the members of current that are still retained, then fills the remaining places
-// from usable candidates: edges in failure domains the set does not use yet first, highest
-// rendezvous score first, so each workspace lands on a stable, evenly spread pair.
-func choose(scope string, current []string, retained map[string]bool, usable []Candidate, size int) []string {
+// from usable candidates: edges in failure domains the set does not use yet first. Inside that,
+// edges the workspace's machines measured come first, lowest best RTT first (rtt: node id to
+// milliseconds, empty when there is no fresh sample); the rest, and ties, go by highest rendezvous
+// score, so a workspace without samples lands on a stable, evenly spread pair.
+func choose(scope string, current []string, retained map[string]bool, rtt map[string]int, usable []Candidate, size int) []string {
 	chosen := make([]string, 0, size)
 	domains := map[string]bool{}
 	taken := map[string]bool{}
@@ -46,6 +51,14 @@ func choose(scope string, current []string, retained map[string]bool, usable []C
 	}
 	ranked := append([]Candidate(nil), usable...)
 	sort.Slice(ranked, func(i, j int) bool {
+		ri, iok := rtt[ranked[i].NodeID]
+		rj, jok := rtt[ranked[j].NodeID]
+		if iok != jok {
+			return iok
+		}
+		if iok && ri != rj {
+			return ri < rj
+		}
 		si, sj := score(scope, ranked[i].NodeID), score(scope, ranked[j].NodeID)
 		if si != sj {
 			return si > sj

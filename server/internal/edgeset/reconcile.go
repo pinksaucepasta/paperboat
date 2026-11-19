@@ -84,7 +84,11 @@ func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) 
 	if err != nil {
 		return false, fmt.Errorf("read retained edges: %w", err)
 	}
-	chosen := choose(scope.Kind+"/"+scope.ID, current, retained, usable, Size)
+	rtt, err := readLatency(ctx, tx, scope, now)
+	if err != nil {
+		return false, err
+	}
+	chosen := choose(scope.Kind+"/"+scope.ID, current, retained, rtt, usable, Size)
 	if len(chosen) == 0 {
 		// No edge can serve the workspace right now; keep whatever it had.
 		return false, nil
@@ -96,6 +100,34 @@ func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) 
 		return false, err
 	}
 	return true, nil
+}
+
+// latencySQL is the lowest RTT any live machine of the workspace measured to each edge within LatencyFresh.
+const latencySQL = `SELECT l.node_id,min(l.rtt_ms) FROM machine_node_latency l JOIN user_machines m ON m.id=l.machine_id
+WHERE l.role='edge' AND m.deleted_at IS NULL AND m.revoked_at IS NULL
+ AND CASE WHEN $1='team' THEN m.owner_team_id=$2 ELSE m.user_id=$2 AND m.owner_team_id IS NULL END
+ AND l.measured_at>$3::timestamptz-make_interval(secs=>$4::float8)
+GROUP BY l.node_id`
+
+func readLatency(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) (map[string]int, error) {
+	rows, err := tx.Query(ctx, latencySQL, scope.Kind, scope.ID, now, LatencyFresh.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("read edge latency: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var rtt int
+		if err := rows.Scan(&id, &rtt); err != nil {
+			return nil, fmt.Errorf("read edge latency: %w", err)
+		}
+		out[id] = rtt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read edge latency: %w", err)
+	}
+	return out, nil
 }
 
 // Store writes the workspace's edge set, in order (the first is the primary, the second the fallback): a

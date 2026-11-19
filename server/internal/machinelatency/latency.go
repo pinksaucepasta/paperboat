@@ -1,6 +1,7 @@
 // Package machinelatency stores the connect time each machine measured to the edges and relays it
-// can use. The numbers are display data for the console and CLI: they never select a path and
-// never confer access. A machine's edge numbers arrive on its runtime attachment (the server
+// can use. They feed two things: the console and CLI show them, and the edgeset package ranks the
+// edges for a workspace's default pair by the best fresh edge RTT across its machines. They never
+// pick a path per connection, never override a pair chosen in the console, and never confer access. A machine's edge numbers arrive on its runtime attachment (the server
 // accepts them only for candidates it issued); its relay numbers arrive from its signed-in daemon.
 package machinelatency
 
