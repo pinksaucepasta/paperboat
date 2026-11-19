@@ -48,7 +48,7 @@ func TestTrafficRollupSumsRetentionAndPagesOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() }) // registered first, so it runs after the cleanups that use the store
 	ctx := context.Background()
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
