@@ -117,11 +117,12 @@ if (existsSync(join(repo, "cli/cmd/pb"))) {
 
 // Numbers that have a source in the code are compared with it, when this build runs inside the repository.
 //   Checked here: machine, preview/tunnel, browser-terminal and public-TCP limits, the free bandwidth
-//   allowance, the trial length, shared-terminal viewers (server/internal/config/config.go); audit log
+//   allowance, the trial length, shared-terminal viewers, the fair-use pool's slow speeds, relay speed and Team's
+//   per-seat pool (server/internal/config/config.go Billing.FairUse); audit log
 //   retention and the SSO seat minimum (config/business.go); the top-up size (billing/workspace_topups.go);
 //   the file-send limits (config.go).
 //   NOT checked, because no code holds them (they live in Stripe or the database): the prices ($8, $80,
-//   $15, $150), the 100 GB of Pro and Team, the top-up price ($5), the 7-day grace after a failed payment.
+//   $15, $150), the 100 GB of Pro, the top-up price ($5), the 7-day grace after a failed payment.
 //   Those follow PLAN.md 1.3 and are only asserted to be on the page.
 const source = (path) => (existsSync(join(repo, path)) ? readFileSync(join(repo, path), "utf8") : "")
 const serverConfig = source("server/internal/config/config.go")
@@ -142,6 +143,14 @@ if (serverConfig) {
   expect("/pricing/", `Public raw-TCP tunnel addresses ${tcpFree} ${tcpPro} ${number(serverConfig, /TeamPerSeat: (\d+)/)} per seat`, "public TCP limits")
   expect("/pricing/", `${number(serverConfig, /TeamTrialDays: (\d+)/)}-day`, "Team trial length")
   expect("/pricing/", `${number(serverConfig, /PersonalAllowanceBytes: new\(int64\(([\d_]+)/) / 1e9} GB`, "free bandwidth")
+  // One combined edge-and-relay pool, slowed past it (bytes per second in the config, kbit/s or Mbit/s on the page).
+  const rate = (bytes) => (bytes * 8 >= 1e6 ? `${bytes * 8 / 1e6} Mbit/s` : `${bytes * 8 / 1e3} kbit/s`)
+  for (const page of ["/pricing/", "/legal/acceptable-use/"]) {
+    expect(page, rate(number(serverConfig, /EdgeFreeBytesPerSecond: ([\d_]+)/)), "Free slow speed")
+    expect(page, rate(number(serverConfig, /EdgeBytesPerSecond: ([\d_]+)/)), "paid slow speed")
+    expect(page, `${number(serverConfig, /RelayMbit: ([\d.]+)/)} Mbit/s`, "relay speed")
+  }
+  expect("/pricing/", `${number(serverConfig, /TeamPerSeatBytes: ([\d_]+)/) / 1e9} GB/mo a seat`, "Team pool per seat")
   expect("/pricing/", `${number(serverConfig, /ViewersPerSharedTerminal: (\d+)/)} possible viewers`, "shared terminal viewers")
   const days = (plan) => number(business, new RegExp(`AuditRetention${plan}: +(\\d+) \\* day`))
   expect("/pricing/", `Audit log kept for ${days("Free")} days ${days("Pro")} days ${days("Team")} days`, "audit log retention")
