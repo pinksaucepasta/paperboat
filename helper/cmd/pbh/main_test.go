@@ -76,6 +76,13 @@ func TestHelpDescribesEveryCommand(t *testing.T) {
 			t.Fatalf("pbh help line is longer than 100 characters: %q", line)
 		}
 	}
+	if strings.Contains(top.String(), "configure-tls") {
+		t.Fatal("customer help lists the operator-only configure-tls")
+	}
+	var install bytes.Buffer
+	if err := run(context.Background(), []string{"install", "--help"}, &install); err != nil || strings.Contains(install.String(), "https-cert") || strings.Contains(install.String(), "https-key") {
+		t.Fatalf("customer install help shows operator certificate flags: %v", err)
+	}
 	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"--help"}, {"uninstall", "--help"}, {"serve", "--help"}, {"logs", "--help"}, {"restart", "--help"}, {"update", "--help"}, {"update-apply", "--help"}} {
 		var out bytes.Buffer
 		if err := run(context.Background(), args, &out); err != nil {

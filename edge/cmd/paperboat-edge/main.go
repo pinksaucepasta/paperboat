@@ -749,9 +749,9 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	trackedCarrier := &trackedCarrierComponent{Component: carrierComponent}
 	carrierComponent = trackedCarrier
 	redirectHandler := portEightyHandler()
-	publicTLS := certificateSelector.TLSConfig()
-	if deployment.SelfHosted {
-		publicTLS = infrastructureTLS(deployment.ConnectorAdvertiseHost, carrierTrust.Certificate, publicTLS)
+	publicTLS, err := infrastructureTLS(deployment, carrierTrust.Certificate, certificateSelector.TLSConfig())
+	if err != nil {
+		return nil, err
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
 	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {

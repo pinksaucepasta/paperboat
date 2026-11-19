@@ -7,9 +7,11 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -46,15 +48,64 @@ func installationChallenge(node, host, credential string, next http.Handler) htt
 	})
 }
 
-// infrastructureTLS serves the enrolled carrier certificate on the endpoint host. No browser trusts it:
-// browser terminals use managed edges, and the control plane pins this identity (tls_spki_sha256) when it
-// verifies ingress. Named publication routes keep their own distributed certificates.
-func infrastructureTLS(host string, identity tls.Certificate, base *tls.Config) *tls.Config {
+// Public infrastructure HTTPS on a managed edge uses an operator-provided browser certificate (browser
+// terminals are served here). A customer self-hosted edge serves no browser on this host: it presents its
+// enrolled identity, which the control plane pins (tls_spki_sha256) when it verifies ingress.
+// Named publication routes continue to use their own certificates.
+func infrastructureTLS(d config.Deployment, identity tls.Certificate, base *tls.Config) (*tls.Config, error) {
+	if d.PublicHTTPSCertFile == "" && d.PublicHTTPSKeyFile == "" {
+		if !d.SelfHosted {
+			return base, nil
+		}
+		return serveCertificateOnHost(base, d.ConnectorAdvertiseHost, identity), nil
+	}
+	if d.PublicHTTPSCertFile == "" || d.PublicHTTPSKeyFile == "" {
+		return nil, errors.New("public infrastructure HTTPS TLS needs both certificate and key files")
+	}
+	for _, path := range []string{d.PublicHTTPSCertFile, d.PublicHTTPSKeyFile} {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("read public HTTPS TLS files: %w", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() > 1<<20 {
+			return nil, errors.New("public HTTPS TLS files must be bounded regular files")
+		}
+		if path == d.PublicHTTPSKeyFile && info.Mode().Perm()&0077 != 0 {
+			return nil, errors.New("public HTTPS TLS private key requires owner-only permissions")
+		}
+	}
+	certificate, err := tls.LoadX509KeyPair(d.PublicHTTPSCertFile, d.PublicHTTPSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load public infrastructure HTTPS TLS certificate and key: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("parse public infrastructure HTTPS TLS certificate: %w", err)
+	}
+	if err := leaf.VerifyHostname(d.ConnectorAdvertiseHost); err != nil {
+		return nil, fmt.Errorf("verify public infrastructure HTTPS TLS hostname: %w", err)
+	}
+	if time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
+		return nil, fmt.Errorf("verify public infrastructure HTTPS TLS validity: %w", x509.CertificateInvalidError{Cert: leaf, Reason: x509.Expired})
+	}
+	if len(leaf.ExtKeyUsage) > 0 {
+		allowed := false
+		for _, usage := range leaf.ExtKeyUsage {
+			allowed = allowed || usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageAny
+		}
+		if !allowed {
+			return nil, errors.New("public HTTPS TLS certificate does not permit server authentication")
+		}
+	}
+	return serveCertificateOnHost(base, d.ConnectorAdvertiseHost, certificate), nil
+}
+
+func serveCertificateOnHost(base *tls.Config, host string, certificate tls.Certificate) *tls.Config {
 	result := base.Clone()
 	fallback := result.GetCertificate
 	result.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		if hello.ServerName == "" || strings.EqualFold(hello.ServerName, host) {
-			return &identity, nil
+			return &certificate, nil
 		}
 		return fallback(hello)
 	}

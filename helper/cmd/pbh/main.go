@@ -63,8 +63,11 @@ func execute(ctx context.Context, reporter *reporting.Reporter, args []string, o
 		fault := reporter.CaptureFailure(ctx, "selfhost_command", err)
 		message := "operation failed; state retained for retry"
 		var owned commandError
+		var operator selfhost.OperatorError
 		if errors.As(err, &owned) {
 			message = owned.Error()
+		} else if errors.As(err, &operator) {
+			message = operator.Error()
 		}
 		fmt.Fprintf(diagnostic, "pbh: %s (%s); support reference %s\n", message, fault.Cause, fault.SupportReference)
 		return 1
@@ -106,6 +109,8 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 	case "version", "--version":
 		fmt.Fprintf(out, "pbh %s\n", version)
 		return nil
+	case "configure-tls":
+		return configureTLS(ctx, args[1:], out)
 	case "install":
 		return install(ctx, args[1:], out)
 	case "selfhost":
@@ -206,6 +211,8 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.String("tunnel-domain", "", "durable tunnel base domain")
 	fs.String("runtime-domain", "", "runtime base domain")
 	fs.Bool("browser-access", false, "let browsers sign in to private previews and tunnels through the console")
+	fs.String("https-cert", "", "browser-trusted HTTPS certificate file for the endpoint hostname")
+	fs.String("https-key", "", "owner-only private key file for browser HTTPS")
 	fs.String("control-ca", "", "CA certificate file for a private control plane (default: public roots)")
 	dir := fs.String("state-dir", defaultState, "protected installation directory")
 	noService := fs.Bool("no-service", false, "initialize without systemd (isolated testing)")
@@ -408,3 +415,62 @@ WantedBy=multi-user.target
 type commandError string
 
 func (e commandError) Error() string { return string(e) }
+
+func configureTLS(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("configure-tls", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dir := fs.String("state-dir", defaultState, "protected installation directory")
+	cert := fs.String("https-cert", "", "browser-trusted HTTPS certificate file covering the enrolled endpoint hostname")
+	key := fs.String("https-key", "", "owner-only private key file for browser HTTPS")
+	noService := fs.Bool("no-service", false, "save configuration for a separately managed process; restart it to apply")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printHelp(out, "configure-tls", fs)
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 0 || *cert == "" || *key == "" {
+		return commandError("configure-tls requires --https-cert and --https-key")
+	}
+	if !*noService && *dir != defaultState {
+		return commandError("automatic restart requires the default state directory; use --no-service for separately managed processes")
+	}
+	if !*noService && os.Geteuid() != 0 {
+		return elevated(ctx, append([]string{"configure-tls"}, args...), out)
+	}
+	certFile, err := stageTrustFile(*dir, publicCertFile, *cert)
+	if err != nil {
+		return err
+	}
+	keyFile, err := stageTrustFile(*dir, publicKeyFile, *key)
+	if err != nil {
+		return err
+	}
+	rollback, err := selfhost.ConfigurePublicHTTPS(*dir, certFile, keyFile)
+	var operator selfhost.OperatorError
+	if errors.As(err, &operator) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", commandError("browser HTTPS configuration was not changed; check certificate hostname, validity, key pairing, and owner-only key permissions"), err)
+	}
+	if *noService {
+		fmt.Fprintln(out, "Browser HTTPS certificate paths saved. Restart the separately managed pbh process to apply; carrier identity and enrollment are unchanged.")
+		return nil
+	}
+	if err := exec.CommandContext(ctx, "systemctl", "restart", "paperboat-selfhost.service").Run(); err != nil {
+		restoreErr := rollback()
+		if restoreErr != nil {
+			return fmt.Errorf("%w: %w", commandError("service restart failed and certificate configuration could not be restored; repair configuration with pbh configure-tls before restarting"), errors.Join(err, restoreErr))
+		}
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if recoveryErr := exec.CommandContext(recoveryCtx, "systemctl", "restart", "paperboat-selfhost.service").Run(); recoveryErr != nil {
+			return fmt.Errorf("%w: %w", commandError("service restart failed; previous certificate configuration restored, but service recovery failed; run systemctl restart paperboat-selfhost.service after resolving the service error"), errors.Join(err, recoveryErr))
+		}
+		return fmt.Errorf("%w: %w", commandError("new certificate configuration was not applied; previous configuration and service restored"), err)
+	}
+	fmt.Fprintln(out, "Browser HTTPS certificate paths saved and self-host service restarted. Carrier identity and enrollment are unchanged. The certificate owner must renew these files and rerun pbh configure-tls to reload them.")
+	return nil
+}

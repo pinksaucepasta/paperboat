@@ -16,10 +16,13 @@ func TestDeploymentExampleLoads(t *testing.T) {
 }
 
 func TestLoadDeploymentStrictProfile(t *testing.T) {
-	path := writeDeployment(t, validDeploymentJSON())
+	path := writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+`,"public_https_cert_file":"/cert.pem","public_https_key_file":"/key.pem"}`)
 	deployment, err := LoadDeployment(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if deployment.PublicHTTPSCertFile != "/cert.pem" || deployment.PublicHTTPSKeyFile != "/key.pem" {
+		t.Fatal("public HTTPS certificate paths were not retained")
 	}
 	if deployment.CarrierTCPListenAddress != "0.0.0.0:27443" || deployment.CarrierQUICListenAddress != "0.0.0.0:27444" || deployment.PreviewBaseDomain != "preview.example.test" || deployment.TunnelBaseDomain != "tunnels.example.test" || deployment.RuntimeBaseDomain != "runtime.example.test" || deployment.NodeCapacity != 128 || deployment.MaxBodyBytes != 100<<20 || deployment.MaxHeaderBytes != 32<<10 {
 		t.Fatalf("deployment = %+v", deployment)
@@ -40,6 +43,12 @@ func TestBrowserAccessNeedsNoLoginOriginHere(t *testing.T) {
 
 func TestLoadDeploymentRejectsUnsafeProfiles(t *testing.T) {
 	for _, mutate := range []func(string) string{
+		func(value string) string {
+			return strings.TrimSuffix(value, "}") + `,"public_https_cert_file":"/cert.pem"}`
+		},
+		func(value string) string {
+			return strings.TrimSuffix(value, "}") + `,"public_https_cert_file":"relative","public_https_key_file":"/key.pem"}`
+		},
 		func(value string) string { return strings.Replace(value, "https://", "http://", 1) },
 		func(value string) string {
 			return strings.Replace(value, `"node_capacity":128`, `"node_capacity":0`, 1)

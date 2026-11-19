@@ -72,6 +72,10 @@ v6-only host: `getent ahostsv6 <name>` returns a `64:ff9b::` address, `pb ping` 
 
 ## Public HTTPS for enrolled IP edges
 
+Operator-only: `pbh configure-tls` and the install flags `--https-cert`/`--https-key` work on Paperboat-managed
+(global-scope) installations only and refuse a customer self-hosted node (those need no certificate: the control
+plane pins the node's enrolled identity, and browser terminals use managed edges). They are not in `pbh help`.
+
 Relay/edge installations live on their own hosts. An installation advertising a
 public IP needs a publicly trusted IP certificate in addition to its enrolled
 carrier certificate. These identities serve different connections; keep the

@@ -28,6 +28,8 @@ type Deployment struct {
 	SelfHosted                bool   `json:"self_hosted,omitempty"`
 	InfrastructureTLSCertFile string `json:"infrastructure_tls_cert_file"`
 	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file"`
+	PublicHTTPSCertFile       string `json:"public_https_cert_file,omitempty"`
+	PublicHTTPSKeyFile        string `json:"public_https_key_file,omitempty"`
 	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
 	ControlURL                string `json:"control_url"`
 	CredentialIssuer          string `json:"credential_issuer"`
@@ -132,6 +134,14 @@ func (d Deployment) validate() error {
 	}
 	if d.ControlCAFile != "" && (!filepath.IsAbs(d.ControlCAFile) || len(d.ControlCAFile) > 4096) {
 		return errors.New("control_ca_file must be a bounded absolute path")
+	}
+	if (d.PublicHTTPSCertFile == "") != (d.PublicHTTPSKeyFile == "") {
+		return errors.New("public HTTPS TLS needs both certificate and key files")
+	}
+	for _, path := range []string{d.PublicHTTPSCertFile, d.PublicHTTPSKeyFile} {
+		if path != "" && (!filepath.IsAbs(path) || len(path) > 4096) {
+			return errors.New("public HTTPS TLS paths must be bounded and absolute")
+		}
 	}
 	// Canonical preview traffic always has both dedicated carrier transports.
 	// There is no safe legacy-only deployment: buildService cannot construct a

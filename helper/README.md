@@ -32,7 +32,6 @@ Run `pbh help` for the list and `pbh <command> --help` for flags and examples.
 | `pbh restart [relay\|edge]` | Restart the service, or only the relay or the edge. |
 | `pbh update` | Update to the latest signed release (the dashboard's Update button runs the same steps); shows current → latest, asks to confirm, rolls back on failure. |
 | `pbh doctor` | Check that the host can serve public tunnel ports (firewall, connection limits, reachability from the control plane). |
-| `pbh configure-tls` | Set or rotate the browser-trusted HTTPS certificate for a tunnel node. |
 | `pbh uninstall` | Remove the service and containers, keeping identity and configuration unless you confirm deleting them. |
 | `pbh serve` | Run the node in the foreground; the systemd unit runs this. |
 | `pbh check-host`, `pbh version` | Check that the host is supported; print the version. |

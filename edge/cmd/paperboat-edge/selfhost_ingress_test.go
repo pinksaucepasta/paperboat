@@ -83,11 +83,22 @@ func TestInfrastructureTLSNoSNIAndNamedRouteSelection(t *testing.T) {
 		}
 		return cert, certPEM, keyPEM
 	}
-	infrastructure, _, _ := makeCertificate("infra.example.test", net.ParseIP("127.0.0.1"))
+	infrastructure, certPEM, keyPEM := makeCertificate("infra.example.test", net.ParseIP("127.0.0.1"))
 	browser, _, _ := makeCertificate("route.example.test", nil)
+	directory := t.TempDir()
+	certPath, keyPath := filepath.Join(directory, "cert.pem"), filepath.Join(directory, "key.pem")
+	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		t.Fatal(err)
+	}
 	base := &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) { return &browser, nil }}
 	for _, host := range []string{"127.0.0.1", "infra.example.test"} {
-		server := infrastructureTLS(host, infrastructure, base)
+		server, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: host, PublicHTTPSCertFile: certPath, PublicHTTPSKeyFile: keyPath}, tls.Certificate{}, base)
+		if err != nil {
+			t.Fatal(err)
+		}
 		tests := []struct {
 			name string
 			cert tls.Certificate
@@ -156,7 +167,7 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 	if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath}
+	deployment := config.Deployment{SelfHosted: true, InfrastructureTLSCertFile: certPath, InfrastructureTLSKeyFile: keyPath, PublicHTTPSCertFile: "/unused-public-cert", PublicHTTPSKeyFile: "/unused-public-key"}
 	for _, customerOwned := range []bool{true, false} {
 		deployment.SelfHosted = customerOwned
 		for _, epoch := range []string{"first", "replacement"} {
@@ -177,5 +188,34 @@ func TestSelfhostCarrierUsesClaimedInfrastructureIdentity(t *testing.T) {
 	}
 	if _, err := carrierServerTrust(config.Deployment{}, "node", "hosted", "127.0.0.1", now); err == nil {
 		t.Fatal("an edge without its stable carrier certificate minted a per-process one")
+	}
+}
+
+// A customer self-hosted edge presents its enrolled identity on the endpoint host, with no certificate files;
+// a managed edge without files keeps the distributed certificates only.
+func TestInfrastructureTLSWithoutFilesServesIdentityOnlyOnSelfHostedEdge(t *testing.T) {
+	identity, other := tls.Certificate{Certificate: [][]byte{{1}}}, tls.Certificate{Certificate: [][]byte{{2}}}
+	base := &tls.Config{GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &other, nil }}
+	pick := func(config *tls.Config, sni string) *tls.Certificate {
+		t.Helper()
+		got, err := config.GetCertificate(&tls.ClientHelloInfo{ServerName: sni})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	selfHosted, err := infrastructureTLS(config.Deployment{SelfHosted: true, ConnectorAdvertiseHost: "edge.example.test"}, identity, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pick(selfHosted, "edge.example.test").Certificate[0][0] != 1 || pick(selfHosted, "").Certificate[0][0] != 1 {
+		t.Fatal("self-hosted endpoint host does not serve the enrolled identity")
+	}
+	if pick(selfHosted, "route.example.test").Certificate[0][0] != 2 {
+		t.Fatal("self-hosted publication SNI lost its distributed certificate")
+	}
+	managed, err := infrastructureTLS(config.Deployment{ConnectorAdvertiseHost: "edge.example.test"}, identity, base)
+	if err != nil || managed != base {
+		t.Fatalf("managed edge without files must keep the base TLS config: %v", err)
 	}
 }

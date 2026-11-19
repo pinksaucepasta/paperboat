@@ -2,12 +2,17 @@ package selfhost
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,5 +48,65 @@ func TestPublicIngressRejectsSelfSignedHTTPSBeforeNodeProof(t *testing.T) {
 	}
 	if requests.Load() != 0 {
 		t.Fatal("public ingress reached node proof over untrusted HTTPS")
+	}
+}
+
+// pinnedProbe runs probeIngress against server with the pinned-identity transport VerifyIngress uses, minus the
+// fixed port 443.
+func pinnedProbe(t *testing.T, serverURL string, pin []byte) error {
+	t.Helper()
+	address := strings.TrimPrefix(strings.TrimPrefix(serverURL, "https://"), "http://")
+	_, _, err := probeIngress(t.Context(), "127.0.0.1", "node_a", "secret", func(netip.Addr) bool { return true }, func(string, netip.Addr) *http.Transport {
+		return PinnedTransport(pin, address)
+	})
+	return err
+}
+
+func challengeHandler(node, credential string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		challenge := r.URL.Query().Get("challenge")
+		mac := hmac.New(sha256.New, []byte(credential))
+		mac.Write([]byte("paperboat-installation/v1\n" + node + "\n" + challenge))
+		_ = json.NewEncoder(w).Encode(map[string]string{"node_id": node, "challenge": challenge, "proof": base64.RawURLEncoding.EncodeToString(mac.Sum(nil))})
+	})
+}
+
+// A self-hosted node serves its enrolled (self-signed) identity and no publicly trusted certificate: the probe
+// accepts exactly that identity, and fails closed on any other certificate or on plain HTTP.
+func TestPinnedIngressProbeAcceptsOnlyTheEnrolledIdentity(t *testing.T) {
+	server := httptest.NewUnstartedServer(challengeHandler("node_a", "secret"))
+	server.EnableHTTP2 = false
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	spki := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
+	if err := pinnedProbe(t, server.URL, spki[:]); err != nil {
+		t.Fatalf("enrolled identity without a public certificate was refused: %v", err)
+	}
+	wrong := sha256.Sum256([]byte("another identity"))
+	if err := pinnedProbe(t, server.URL, wrong[:]); err == nil {
+		t.Fatal("a certificate that is not the enrolled identity was accepted")
+	}
+	plain := httptest.NewServer(challengeHandler("node_a", "secret"))
+	t.Cleanup(plain.Close)
+	if err := pinnedProbe(t, plain.URL, spki[:]); err == nil {
+		t.Fatal("plain HTTP was accepted")
+	}
+	wrongCredential := httptest.NewUnstartedServer(challengeHandler("node_a", "other credential"))
+	wrongCredential.StartTLS()
+	t.Cleanup(wrongCredential.Close)
+	pin := sha256.Sum256(wrongCredential.Certificate().RawSubjectPublicKeyInfo)
+	if err := pinnedProbe(t, wrongCredential.URL, pin[:]); !errors.Is(err, ErrIngress) {
+		t.Fatalf("right identity with the wrong node proof was not refused: %v", err)
+	}
+}
+
+func TestPinnedIngressTransportDialsPort443OfTheProbedAddress(t *testing.T) {
+	transport := pinnedIngressTransport(make([]byte, 32), netip.MustParseAddr("203.0.113.9"))
+	conn, err := transport.DialContext(t.Context(), "tcp", "ignored.example.test:1")
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "203.0.113.9:443") {
+		t.Fatalf("pinned ingress transport did not target 203.0.113.9:443: %v", err)
 	}
 }

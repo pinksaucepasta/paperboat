@@ -42,7 +42,11 @@ func TestStageTrustFileCopiesOwnerOnlyIntoStateDirectory(t *testing.T) {
 	state := t.TempDir()
 	cert := filepath.Join(source, "fullchain.pem")
 	writeTestCertificate(t, cert, 0644)
-	staged, err := stageTrustFile(state, controlCAFile, cert)
+	key := filepath.Join(source, "privkey.pem")
+	if err := os.WriteFile(key, []byte("key material"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := stageTrustFile(state, publicCertFile, cert)
 	if err != nil {
 		t.Fatalf("certificate was not staged: %v", err)
 	}
@@ -58,9 +62,16 @@ func TestStageTrustFileCopiesOwnerOnlyIntoStateDirectory(t *testing.T) {
 	if string(original) != string(copied) {
 		t.Fatal("staged certificate content differs from the source")
 	}
-	again, err := stageTrustFile(state, controlCAFile, cert)
+	again, err := stageTrustFile(state, publicCertFile, cert)
 	if err != nil || again != staged {
 		t.Fatalf("restaging the same content changed the copy: %s %v", again, err)
+	}
+	stagedKey, err := stageTrustFile(state, publicKeyFile, key)
+	if err != nil {
+		t.Fatalf("private key was not staged: %v", err)
+	}
+	if info, err := os.Stat(stagedKey); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("staged private key is not owner-only: %v", err)
 	}
 }
 
@@ -69,16 +80,23 @@ func TestStageTrustFileErrorsNameTheFile(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing-fullchain.pem")
 	directory := t.TempDir()
 	for _, src := range []string{missing, directory} {
-		_, err := stageTrustFile(state, controlCAFile, src)
+		_, err := stageTrustFile(state, publicCertFile, src)
 		if err == nil || !strings.Contains(err.Error(), src) {
 			t.Fatalf("read error does not name %s: %v", src, err)
 		}
+	}
+	key := filepath.Join(t.TempDir(), "privkey.pem")
+	if err := os.WriteFile(key, []byte("key"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stageTrustFile(state, publicKeyFile, key); err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "owner-only") {
+		t.Fatalf("group-readable key error does not name the file and rule: %v", err)
 	}
 	notCertificate := filepath.Join(t.TempDir(), "fullchain.pem")
 	if err := os.WriteFile(notCertificate, []byte("not pem"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stageTrustFile(state, controlCAFile, notCertificate); err == nil || !strings.Contains(err.Error(), notCertificate) {
+	if _, err := stageTrustFile(state, publicCertFile, notCertificate); err == nil || !strings.Contains(err.Error(), notCertificate) {
 		t.Fatalf("non-certificate error does not name the file: %v", err)
 	}
 }
@@ -87,15 +105,24 @@ func TestStageInstallFilesPointsConfigurationAtCopies(t *testing.T) {
 	source := t.TempDir()
 	cert := filepath.Join(source, "fullchain.pem")
 	writeTestCertificate(t, cert, 0644)
+	key := filepath.Join(source, "privkey.pem")
+	if err := os.WriteFile(key, []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.String("https-cert", "", "")
+	fs.String("https-key", "", "")
 	fs.String("control-ca", "", "")
-	if err := fs.Parse([]string{"--control-ca", cert}); err != nil {
+	if err := fs.Parse([]string{"--https-cert", cert, "--https-key", key, "--control-ca", cert}); err != nil {
 		t.Fatal(err)
 	}
 	state := filepath.Join(t.TempDir(), "state")
 	c, err := stageInstallFiles(state, fs, selfhost.Config{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if filepath.Dir(c.PublicHTTPSCertFile) != state || filepath.Dir(c.PublicHTTPSKeyFile) != state {
+		t.Fatalf("configuration still points outside the state directory: %s %s", c.PublicHTTPSCertFile, c.PublicHTTPSKeyFile)
 	}
 	if filepath.Dir(c.ControlCA) != state {
 		t.Fatalf("control CA not staged into the state directory: %q", c.ControlCA)
@@ -104,6 +131,8 @@ func TestStageInstallFilesPointsConfigurationAtCopies(t *testing.T) {
 
 func TestStageInstallFilesDefaultsToPublicRoots(t *testing.T) {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.String("https-cert", "", "")
+	fs.String("https-key", "", "")
 	fs.String("control-ca", "", "")
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
@@ -120,6 +149,8 @@ func TestStageInstallFilesRefusesControlCAThatIsNotACertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.String("https-cert", "", "")
+	fs.String("https-key", "", "")
 	fs.String("control-ca", "", "")
 	if err := fs.Parse([]string{"--control-ca", bad}); err != nil {
 		t.Fatal(err)
@@ -135,16 +166,16 @@ func TestMatchStoredTrustFileAcceptsOnlyStagedContent(t *testing.T) {
 	cert := filepath.Join(source, "fullchain.pem")
 	writeTestCertificate(t, cert, 0644)
 	state := t.TempDir()
-	staged, err := stageTrustFile(state, controlCAFile, cert)
+	staged, err := stageTrustFile(state, publicCertFile, cert)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := matchStoredTrustFile(state, controlCAFile, "control-ca", cert, staged); err != nil {
+	if err := matchStoredTrustFile(state, publicCertFile, "https-cert", cert, staged); err != nil {
 		t.Fatalf("repeated flag with the staged content was refused: %v", err)
 	}
 	other := filepath.Join(source, "renewed.pem")
 	writeTestCertificate(t, other, 0644)
-	if err := matchStoredTrustFile(state, controlCAFile, "control-ca", other, staged); err == nil || !strings.Contains(err.Error(), "existing --control-ca differs") {
-		t.Fatalf("changed certificate was accepted : %v", err)
+	if err := matchStoredTrustFile(state, publicCertFile, "https-cert", other, staged); err == nil || !strings.Contains(err.Error(), "existing --https-cert differs") {
+		t.Fatalf("changed certificate was accepted without configure-tls: %v", err)
 	}
 }
