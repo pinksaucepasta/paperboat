@@ -61,8 +61,11 @@ func Compose(policy config.TransactionalMail, to, subject string, c Content) Mes
 // lockup is the mark as table cells (an image would be blocked or invisible in dark mode) beside the lowercase wordmark.
 func lockup(site string) string {
 	var b strings.Builder
+	cell := strconv.Itoa(markCell)
 	b.WriteString(`<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr><td style="padding:0 16px 0 0;vertical-align:middle">` +
-		`<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse" aria-hidden="true">`)
+		`<table role="presentation" cellpadding="0" cellspacing="0" aria-hidden="true" style="border-collapse:collapse;table-layout:fixed;width:` + strconv.Itoa(20*markCell) + `px"><tr>`)
+	// The first row fixes the 20 column widths; every later row spans them in runs.
+	b.WriteString(strings.Repeat(`<td width="`+cell+`" style="width:`+cell+`px;height:0;padding:0;font-size:0;line-height:0"></td>`, 20) + `</tr>`)
 	for _, row := range markRows {
 		b.WriteString(`<tr>`)
 		for i := 0; i < len(row); {
@@ -70,11 +73,12 @@ func lockup(site string) string {
 			for j < len(row) && row[j] == row[i] {
 				j++
 			}
-			style := `width:` + strconv.Itoa((j-i)*markCell) + `px;height:` + strconv.Itoa(2*markCell) + `px;font-size:0;line-height:0`
+			style := `height:` + strconv.Itoa(2*markCell) + `px;padding:0;font-size:0;line-height:0`
 			if row[i] == '#' {
-				b.WriteString(`<td class="mk" style="` + style + `;background:#1d52eb">&nbsp;</td>`)
+				style += `;background:#1d52eb`
+				b.WriteString(`<td colspan="` + strconv.Itoa(j-i) + `" class="mk" style="` + style + `"></td>`)
 			} else {
-				b.WriteString(`<td style="` + style + `">&nbsp;</td>`)
+				b.WriteString(`<td colspan="` + strconv.Itoa(j-i) + `" style="` + style + `"></td>`)
 			}
 			i = j
 		}
