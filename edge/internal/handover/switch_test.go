@@ -20,6 +20,20 @@ import (
 
 const tcpAddress, udpAddress = "127.0.0.1:0", "127.0.0.1:0"
 
+// loadedHostBudget bounds every wait of the switch test that returns the moment its condition holds: it elapses only
+// when the handover is stuck, never because the host is slow (a CI host at load 20 stalls processes for seconds).
+const loadedHostBudget = time.Minute
+
+// waitUntil polls condition until it holds, within loadedHostBudget.
+func waitUntil(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(loadedHostBudget); !condition(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: not reached within %v", what, loadedHostBudget)
+		}
+	}
+}
+
 // The serving ("old") process of TestHandoverServesEveryRequestAcrossTheSwitch: it serves "old"
 // until a replacement is ready, then drains like the edge does and exits.
 func runOld(dir string) {
@@ -86,7 +100,7 @@ func TestHandoverServesEveryRequestAcrossTheSwitch(t *testing.T) {
 		clients.Add(1)
 		go func() {
 			defer clients.Done()
-			client := &http.Client{Timeout: 5 * time.Second}
+			client := &http.Client{Timeout: loadedHostBudget}
 			for {
 				select {
 				case <-stop:
@@ -108,7 +122,7 @@ func TestHandoverServesEveryRequestAcrossTheSwitch(t *testing.T) {
 			}
 		}()
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "the old process answers", func() bool { _, ok := answers.Load("old"); return ok })
 
 	inheritance, err := handover.Inherit(dir)
 	if err != nil || inheritance == nil {
@@ -140,7 +154,7 @@ func TestHandoverServesEveryRequestAcrossTheSwitch(t *testing.T) {
 	if fromNew.Load() != 0 {
 		t.Fatal("the new process accepted before it was ready")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), loadedHostBudget)
 	defer cancel()
 	if err := inheritance.Ready(ctx); err != nil {
 		t.Fatal(err)
@@ -152,16 +166,16 @@ func TestHandoverServesEveryRequestAcrossTheSwitch(t *testing.T) {
 	}
 	select {
 	case <-exited:
-	case <-time.After(10 * time.Second):
+	case <-time.After(loadedHostBudget):
 		t.Fatal("old process did not drain and exit")
 	}
 	select {
 	case <-handover.UDPReady():
-	case <-time.After(5 * time.Second):
+	case <-time.After(loadedHostBudget):
 		t.Fatal("UDP not handed over after the old process exited")
 	}
 	before := fromNew.Load()
-	time.Sleep(200 * time.Millisecond)
+	waitUntil(t, "the new process answers after the old one exited", func() bool { return fromNew.Load() > before })
 	close(stop)
 	clients.Wait()
 	if failures.Load() != 0 {
