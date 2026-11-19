@@ -78,6 +78,9 @@ func TestSelfhostRuntimeReadinessAuthenticatesExactNodeOnPostgres(t *testing.T) 
 		router.ServeHTTP(w, r)
 		return w
 	}
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id=$1`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
 	for i, id := range ids {
 		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now() WHERE id=$1`, id); err != nil {
 			t.Fatal(err)
@@ -91,11 +94,12 @@ func TestSelfhostRuntimeReadinessAuthenticatesExactNodeOnPostgres(t *testing.T) 
 		}
 		var wire struct {
 			Data struct {
-				NodeID       string    `json:"node_id"`
-				Ready        bool      `json:"ready"`
-				ProcessEpoch string    `json:"process_epoch"`
-				ValidUntil   time.Time `json:"valid_until"`
-				ServerTime   time.Time `json:"server_time"`
+				NodeID       string     `json:"node_id"`
+				Ready        bool       `json:"ready"`
+				ProcessEpoch string     `json:"process_epoch"`
+				ValidUntil   time.Time  `json:"valid_until"`
+				ServerTime   time.Time  `json:"server_time"`
+				IngressAt    *time.Time `json:"public_ingress_verified_at"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &wire); err != nil {
@@ -103,6 +107,9 @@ func TestSelfhostRuntimeReadinessAuthenticatesExactNodeOnPostgres(t *testing.T) 
 		}
 		if wire.Data.NodeID != id || !wire.Data.Ready || wire.Data.ProcessEpoch != id+"_epoch" || !wire.Data.ValidUntil.After(wire.Data.ServerTime) {
 			t.Fatal("readiness was not fenced to the authenticated current node")
+		}
+		if (wire.Data.IngressAt != nil) != (i == 1) {
+			t.Fatal("readiness did not report exactly this node's ingress verification")
 		}
 		if bytes.Contains(w.Body.Bytes(), []byte(credentials[i])) || bytes.Contains(w.Body.Bytes(), []byte("runtime_ciphertext")) {
 			t.Fatal("runtime credential material was disclosed")

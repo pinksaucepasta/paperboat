@@ -2,9 +2,11 @@ package containers
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -118,6 +120,35 @@ func TestReadinessBaselineAcceptsTheInheritedEpochOfAHandover(t *testing.T) {
 	}{{false, false, "epoch_a"}, {true, false, ""}, {false, true, ""}} {
 		if got := readinessBaseline("epoch_a", tc.adopted, tc.handedOver); got != tc.want {
 			t.Fatalf("readinessBaseline(adopted=%v, handedOver=%v) = %q, want %q", tc.adopted, tc.handedOver, got, tc.want)
+		}
+	}
+}
+
+func TestProbeEndpointNamesWhatTheHostSees(t *testing.T) {
+	server := httptest.NewUnstartedServer(http.NotFoundHandler())
+	server.EnableHTTP2 = false
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+	own := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
+	other := sha256.Sum256([]byte("another node"))
+	found := func(context.Context, string) ([]string, error) { return []string{"127.0.0.1"}, nil }
+	missing := func(context.Context, string) ([]string, error) { return nil, errors.New("no such host") }
+	closed := httptest.NewServer(http.NotFoundHandler())
+	_, closedPort, _ := net.SplitHostPort(closed.Listener.Addr().String())
+	closed.Close()
+	for name, test := range map[string]struct {
+		port, want string
+		pin        [32]byte
+		lookup     func(context.Context, string) ([]string, error)
+	}{
+		"own identity":      {port, "pending", own, found},
+		"another node":      {port, "identity_mismatch", other, found},
+		"nothing listening": {closedPort, "unreachable", own, found},
+		"no DNS record":     {port, "unresolved", own, missing},
+	} {
+		if got := probeEndpoint(t.Context(), "edge.example.test", test.port, test.pin, test.lookup); got != test.want {
+			t.Errorf("%s: reason = %q, want %q", name, got, test.want)
 		}
 	}
 }

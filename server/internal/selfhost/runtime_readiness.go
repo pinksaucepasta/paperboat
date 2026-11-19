@@ -17,7 +17,9 @@ type RuntimeReadiness struct {
 	ProcessEpoch    string     `json:"process_epoch"`
 	LastHeartbeatAt *time.Time `json:"last_heartbeat_at"`
 	ValidUntil      *time.Time `json:"valid_until"`
-	ServerTime      time.Time  `json:"server_time"`
+	// PublicIngressVerifiedAt is when the control plane last proved the endpoint host reaches this node.
+	PublicIngressVerifiedAt *time.Time `json:"public_ingress_verified_at"`
+	ServerTime              time.Time  `json:"server_time"`
 }
 
 // RuntimeReadiness derives only the credential's node. It accepts no caller
@@ -31,11 +33,11 @@ func (s *Service) RuntimeReadiness(ctx context.Context, credential string, stale
 	}
 	now := s.now().UTC()
 	out := RuntimeReadiness{ServerTime: now}
-	var heartbeat sql.NullTime
-	err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,i.capability,n.state,n.ready,n.process_epoch,n.last_heartbeat_at
+	var heartbeat, verified sql.NullTime
+	err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,i.capability,n.state,n.ready,n.process_epoch,n.last_heartbeat_at,n.public_ingress_verified_at
 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
 WHERE i.runtime_hash=$1 AND i.state='active' AND i.claim_complete
-AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), now).Scan(&out.NodeID, &out.Capability, &out.State, &out.Ready, &out.ProcessEpoch, &heartbeat)
+AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), now).Scan(&out.NodeID, &out.Capability, &out.State, &out.Ready, &out.ProcessEpoch, &heartbeat, &verified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RuntimeReadiness{}, ErrUnauthorized
 	}
@@ -43,6 +45,10 @@ AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), now).Scan(&ou
 		return RuntimeReadiness{}, err
 	}
 	out.Ready = out.Ready && out.State == "ready" && out.ProcessEpoch != "" && heartbeat.Valid && heartbeat.Time.After(now.Add(-staleAfter))
+	if verified.Valid {
+		at := verified.Time.UTC()
+		out.PublicIngressVerifiedAt = &at
+	}
 	if heartbeat.Valid {
 		at, until := heartbeat.Time.UTC(), heartbeat.Time.UTC().Add(staleAfter)
 		out.LastHeartbeatAt, out.ValidUntil = &at, &until

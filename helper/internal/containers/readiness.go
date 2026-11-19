@@ -3,11 +3,15 @@ package containers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,6 +31,8 @@ type NodeReadiness struct {
 	ProcessEpoch string     `json:"process_epoch"`
 	ServerTime   time.Time  `json:"server_time"`
 	ValidUntil   *time.Time `json:"valid_until"`
+	// PublicIngressVerifiedAt is when the control plane last reached this node at its endpoint host.
+	PublicIngressVerifiedAt *time.Time `json:"public_ingress_verified_at"`
 }
 
 type ResponseError struct{ Status int }
@@ -193,4 +199,63 @@ func ProbePort(ctx context.Context, dir string, port int, nonce string) (PortPro
 		return PortProbe{}, errors.New("port probe response is invalid")
 	}
 	return wire.Data, nil
+}
+
+// IngressState is the control plane's verdict on this node's endpoint host. Reason says what a probe from
+// this host sees there when the control plane has not verified it: unresolved, unreachable,
+// identity_mismatch, or pending (this host sees the node's own identity; the control plane has not looked yet).
+type IngressState struct {
+	Verified bool
+	Reason   string
+}
+
+// CheckIngress reads the verdict with the node's own credential. dir is the installation state directory.
+func CheckIngress(ctx context.Context, dir, host string) (IngressState, error) {
+	node, err := newNodeClient("tunnel", filepath.Join(dir, "tunnel"))
+	if err != nil {
+		return IngressState{}, err
+	}
+	readiness, err := node.readiness(ctx)
+	if err != nil {
+		return IngressState{}, err
+	}
+	if readiness.PublicIngressVerifiedAt != nil {
+		return IngressState{Verified: true}, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "tls.crt"))
+	if err != nil {
+		return IngressState{}, fmt.Errorf("read the node identity: %w", err)
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return IngressState{}, errors.New("the node identity file holds no certificate")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return IngressState{}, fmt.Errorf("parse the node identity: %w", err)
+	}
+	return IngressState{Reason: probeEndpoint(ctx, host, "443", sha256.Sum256(leaf.RawSubjectPublicKeyInfo), net.DefaultResolver.LookupHost)}, nil
+}
+
+// probeEndpoint dials every address of host and checks that the server there presents the node identity
+// (the same pin the control plane uses).
+func probeEndpoint(ctx context.Context, host, port string, pin [32]byte, lookup func(context.Context, string) ([]string, error)) string {
+	addresses, err := lookup(ctx, host)
+	if err != nil || len(addresses) == 0 {
+		return "unresolved"
+	}
+	reason := "pending"
+	for _, address := range addresses {
+		dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 4 * time.Second}, Config: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, ServerName: host}}
+		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(address, port))
+		if err != nil {
+			return "unreachable"
+		}
+		peers := conn.(*tls.Conn).ConnectionState().PeerCertificates
+		conn.Close()
+		if len(peers) == 0 || sha256.Sum256(peers[0].RawSubjectPublicKeyInfo) != pin {
+			reason = "identity_mismatch"
+		}
+	}
+	return reason
 }

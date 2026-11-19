@@ -26,6 +26,9 @@ func doctorFixture(t *testing.T, outgoing string, answers map[string]string, pro
 		paths:  f.paths,
 		probe:  func(context.Context, int, string) (containers.PortProbe, error) { return probe, probeErr },
 		listen: func(string) (int, func(), error) { return 25000, func() {}, nil },
+		ingress: func(context.Context, string) (containers.IngressState, error) {
+			return containers.IngressState{Verified: true}, nil
+		},
 	}
 	return deps, &strings.Builder{}
 }
@@ -106,5 +109,31 @@ func TestTestListenerEchoesTheNonceInsideThePublicRange(t *testing.T) {
 	got, _ := io.ReadAll(connection)
 	if string(got) != "the-nonce-0123456789" {
 		t.Fatalf("echo = %q", got)
+	}
+}
+
+func TestDoctorReportsEndpointHostVerificationWithTheFix(t *testing.T) {
+	config := tunnelConfig()
+	config.EndpointHost = "edge.example.test"
+	for reason, want := range map[string]string{
+		"unresolved":        "add an A/AAAA record",
+		"unreachable":       "open TCP 443",
+		"identity_mismatch": "points at another server",
+		"pending":           "wait a minute",
+	} {
+		deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
+		deps.ingress = func(context.Context, string) (containers.IngressState, error) {
+			return containers.IngressState{Reason: reason}, nil
+		}
+		if err := runDoctor(t.Context(), config, deps, out); err == nil {
+			t.Fatalf("%s: an unverified endpoint host passed doctor:\n%s", reason, out)
+		}
+		if !strings.Contains(out.String(), "FIX  the control plane has not verified edge.example.test") || !strings.Contains(out.String(), want) {
+			t.Fatalf("%s: advice lacks %q:\n%s", reason, want, out)
+		}
+	}
+	deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
+	if err := runDoctor(t.Context(), config, deps, out); err != nil || !strings.Contains(out.String(), "ok   the control plane verified edge.example.test reaches this node") {
+		t.Fatalf("verified endpoint host not reported: %v\n%s", err, out)
 	}
 }
