@@ -97,13 +97,15 @@ class PinnedRelay(unittest.TestCase):
         return sr.run_checks([{"unit": "relay_x", "kind": "relay", "url": self.url, **extra}])[0]
 
     def test_the_right_key_passes(self):
-        self.assertTrue(self.check(pin=self.pin)["ok"])
+        got = self.check(pin=self.pin)
+        self.assertTrue(got["ok"], got)
 
     def test_another_key_fails(self):
         self.assertFalse(self.check(pin="sha256//" + base64.b64encode(b"x" * 32).decode())["ok"])
 
     def test_a_relay_the_set_does_not_name_is_judged_on_validity_and_its_answer_only(self):
-        self.assertTrue(self.check()["ok"])
+        got = self.check()
+        self.assertTrue(got["ok"], got)
 
     def relay_file(self, spki_b64std, exp=4102444800):
         """A relay file like the daemon keeps: a signed candidate set (the signature is not read here) naming this relay's key."""
@@ -117,12 +119,14 @@ class PinnedRelay(unittest.TestCase):
         return sr.run_checks(checks)[0]
 
     def test_identity_comes_from_the_signed_set_not_from_config(self):
-        self.assertTrue(self.checked(self.relay_file(self.pin))["ok"])
+        got = self.checked(self.relay_file(self.pin))
+        self.assertTrue(got["ok"], got)
 
     def test_a_rotation_follows_the_set_with_no_config_change(self):
         stale = self.relay_file("sha256//" + base64.b64encode(b"o" * 32).decode())  # the set still names the old key: the relay is not who the set says
         self.assertFalse(self.checked(stale)["ok"])
-        self.assertTrue(self.checked(self.relay_file(self.pin))["ok"])  # the set was refreshed with the rotated key: green again, same config
+        got = self.checked(self.relay_file(self.pin))
+        self.assertTrue(got["ok"], got)  # the set was refreshed with the rotated key: green again, same config
 
     def test_an_expired_or_unreadable_set_names_no_identity(self):
         self.assertEqual(sr.relay_pins(self.relay_file(self.pin, exp=1)), {})
