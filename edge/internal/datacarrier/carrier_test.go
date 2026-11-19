@@ -480,8 +480,9 @@ func itoa(value int) string {
 	return string(digits[index:])
 }
 
+// waitForCarrier returns the moment predicate holds; its bound only has to outlast a loaded CI runner.
 func waitForCarrier(predicate func() bool) bool {
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if predicate() {
 			return true

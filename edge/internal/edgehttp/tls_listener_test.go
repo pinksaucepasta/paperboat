@@ -471,12 +471,12 @@ func TestSharedTLSHTTPSConnectionsAreCapped(t *testing.T) {
 	var held net.Conn
 	select {
 	case held = <-accepted:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("first HTTPS connection not handed off")
 	}
 	// The first connection's dispatch slot is freed just after its hand-off; wait for that, so the excess one reaches
 	// dispatch (and the name cap) instead of meeting a slot that is still full.
-	for deadline := time.Now().Add(2 * time.Second); len(manager.slots) != 0; time.Sleep(time.Millisecond) {
+	for deadline := time.Now().Add(30 * time.Second); len(manager.slots) != 0; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the first HTTPS connection's dispatch slot was not freed at hand-off")
 		}

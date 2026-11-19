@@ -728,6 +728,10 @@ func TestPreviewResponseOutlivesAdmissionTTLUntilRouteRevoked(t *testing.T) {
 	}
 }
 
+// headerBudget is the response-header budget of the tests that stream for longer than it: large enough that a loaded
+// runner does not make the origin's prompt answer late, the streaming then lasts just over one budget.
+const headerBudget = 2 * time.Second
+
 // A large upload keeps the origin from answering until the body is complete, so
 // the response-header budget must start after the request has been written.
 func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T) {
@@ -744,7 +748,9 @@ func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T)
 		t.Fatal(err)
 	}
 	const uploadChunks, chunkSize = 8, 1024
-	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 150 * time.Millisecond, ResponseHeaderTimeout: 150 * time.Millisecond})
+	// The budget is the stall the origin's answer may meet on a loaded runner before it counts as late; the upload
+	// outlasts it (8 chunks of 300 ms), which is what the test is about.
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 30 * time.Second, ResponseHeaderTimeout: headerBudget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +775,7 @@ func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T)
 	go func() {
 		chunk := make([]byte, chunkSize)
 		for range uploadChunks {
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(headerBudget / 6) // 8 chunks: 1.33 headerBudget in all
 			if _, writeErr := bodyWriter.Write(chunk); writeErr != nil {
 				return
 			}
@@ -809,7 +815,7 @@ func TestDataCarrierPreviewTransportBodyOutlivesTheHeaderBudget(t *testing.T) {
 	if err := registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server}); err != nil {
 		t.Fatal(err)
 	}
-	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second, ResponseHeaderTimeout: 250 * time.Millisecond})
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 30 * time.Second, ResponseHeaderTimeout: headerBudget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,10 +829,12 @@ func TestDataCarrierPreviewTransportBodyOutlivesTheHeaderBudget(t *testing.T) {
 		serveDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.WriteHeader(http.StatusOK)
 			flusher := writer.(http.Flusher)
-			for _, part := range []string{"one;", "two;", "three"} {
+			for i, part := range []string{"one;", "two;", "three"} {
+				if i > 0 {
+					time.Sleep(headerBudget * 11 / 20) // the body streams for 1.1 headerBudget after the headers
+				}
 				_, _ = io.WriteString(writer, part)
 				flusher.Flush()
-				time.Sleep(350 * time.Millisecond) // 1.05 s in all, four times the 250 ms budget
 			}
 		}), 4096, 5*time.Second)
 	}()

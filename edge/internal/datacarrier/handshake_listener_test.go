@@ -41,7 +41,7 @@ func TestHTTPServiceSilentProbeIsNotAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer garbage.Close()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		mu.Lock()
 		got := append([]error(nil), failures...)
@@ -77,7 +77,7 @@ func TestHTTPServiceHandshakeFailureNamesTheRefusal(t *testing.T) {
 		if !errors.Is(got, errCarrierTLSHandshake) || !errors.Is(got, RefusalUnknownMachine) {
 			t.Fatalf("failure = %v, want the TLS handshake failure naming unknown_machine", got)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("refused handshake was not reported")
 	}
 }

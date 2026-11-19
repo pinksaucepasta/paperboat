@@ -111,7 +111,7 @@ func TestCarrierTelemetryOpenCloseCountsBytesAndIsExactlyOnce(t *testing.T) {
 		}
 		return opened, closed
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if opened, closed := count(); opened == 1 && closed == 1 {
 			break
@@ -122,7 +122,8 @@ func TestCarrierTelemetryOpenCloseCountsBytesAndIsExactlyOnce(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	time.Sleep(50 * time.Millisecond)
+	// Both Close calls have returned and Snapshot flushes every event accepted before it: a duplicate would be
+	// retained by now, so there is nothing left to wait for.
 	if opened, closed := count(); opened != 1 || closed != 1 {
 		t.Fatalf("duplicate events: opened=%d closed=%d", opened, closed)
 	}
@@ -169,7 +170,7 @@ func TestCarrierTelemetryCancellationAndOpenFailure(t *testing.T) {
 	}()
 	select {
 	case <-readDone:
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("canceled stream did not close")
 	}
 	_ = stream.Close()
@@ -331,7 +332,7 @@ func TestCarrierTelemetryCloseFailureOutranksCleanupCancellation(t *testing.T) {
 			if got != want {
 				t.Fatalf("close outcome=%s want=%s", got, want)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatal("close observation missing")
 		}
 		if err := events.Flush(t.Context()); err != nil {

@@ -3,6 +3,7 @@ package datacarrier
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,9 +15,12 @@ import (
 type blockedOpenSession struct {
 	release chan struct{}
 	closed  chan struct{}
+	entered chan struct{} // closed when OpenStream is first called
+	once    sync.Once
 }
 
 func (s *blockedOpenSession) OpenStream(context.Context) (StreamLink, error) {
+	s.once.Do(func() { close(s.entered) })
 	<-s.release
 	var none *yamux.Stream
 	return none, errors.New("session is shutting down")
@@ -32,7 +36,7 @@ func (s *blockedOpenSession) CloseChan() <-chan struct{} { return s.closed }
 // A canceled open whose underlying OpenStream later fails must release its permit and must not close
 // the failed attempt's nil stream (that crashed the edge with a nil dereference in yamux).
 func TestCanceledOpenThatLaterFailsReleasesItsPermitWithoutClosingANilStream(t *testing.T) {
-	session := &blockedOpenSession{release: make(chan struct{}), closed: make(chan struct{})}
+	session := &blockedOpenSession{release: make(chan struct{}), closed: make(chan struct{}), entered: make(chan struct{})}
 	server, err := NewServerWithSession(t.Context(), session, testCarrierConfig(4))
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +48,11 @@ func TestCanceledOpenThatLaterFailsReleasesItsPermitWithoutClosingANilStream(t *
 		_, err := server.OpenStream(ctx, testStreamOpen("route-a", "request-canceled"))
 		opened <- err
 	}()
-	time.Sleep(20 * time.Millisecond)
+	select { // cancel an open that is blocked in the session, not one that has not started
+	case <-session.entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the open never reached the session")
+	}
 	cancel()
 	if err := <-opened; !errors.Is(err, context.Canceled) {
 		t.Fatalf("open error = %v, want canceled", err)
