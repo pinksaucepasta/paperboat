@@ -62,6 +62,12 @@ export function FleetVersions() {
         <Stat label="Teams" value={n(d.teams)} note="Teams that own a machine" />
         <Stat label="Oldest version online" value={d.oldest_online_version ? <Mono>{d.oldest_online_version}</Mono> : "—"} note="Release versions only; dev builds are not ordered" />
       </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-fleet-extra>
+        <Stat label="Non-official builds" value={n(d.non_official.machines)} note={`${n(d.non_official.online)} online · ${n(d.non_official.versions)} ${d.non_official.versions === 1 ? "version" : "versions"} (dev and custom builds)`} />
+        <Stat label="Self-hosted relays" value={n(d.self_hosted.relays.registered)} note={`${n(d.self_hosted.relays.online)} online · ${n(d.self_hosted.relays.reporting)} reporting traffic`} />
+        <Stat label="Self-hosted edges" value={n(d.self_hosted.edges.registered)} note={`${n(d.self_hosted.edges.online)} online · ${n(d.self_hosted.edges.reporting)} reporting traffic`} />
+        <Stat label="Teams with self-hosted nodes" value={n(d.self_hosted.teams)} note={`Plus ${n(d.self_hosted.accounts)} personal ${d.self_hosted.accounts === 1 ? "account" : "accounts"}. Customer nodes only`} />
+      </div>
       <Panel title="By OS">
         <Cells
           tag="fleet-platforms"

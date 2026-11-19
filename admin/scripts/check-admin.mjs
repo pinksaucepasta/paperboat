@@ -395,6 +395,8 @@ function route(req, url) {
       platforms: [{ platform: "linux", machines: 200, online: 180, users: 90, teams: 6, oldest_online_version: "2026.10.28.2" }, { platform: "darwin", machines: 100, online: 90, users: 70, teams: 3, oldest_online_version: "2026.11.5.1" }, { platform: "windows", machines: 40, online: 31, users: 20, teams: 2, oldest_online_version: "2026.11.12.1" }],
       versions: [{ platform: "darwin", version: "2026.11.12.1", machines: 70, online: 66, users: 55, teams: 3 }, { platform: "darwin", version: "2026.11.5.1", machines: 30, online: 24, users: 25, teams: 1 }, { platform: "linux", version: "2026.11.12.1", machines: 150, online: 140, users: 80, teams: 5 }, { platform: "linux", version: "2026.10.28.2", machines: 45, online: 40, users: 30, teams: 2 }, { platform: "linux", version: "dev-abc1234", machines: 5, online: 0, users: 2, teams: 0 }, { platform: "windows", version: "2026.11.12.1", machines: 40, online: 31, users: 20, teams: 2 }],
       failures: [{ target_version: "2026.11.12.1", state: "failed", error_code: "signature_invalid", machines: 3 }, { target_version: "2026.11.12.1", state: "rolled_back", error_code: "health_check_failed", machines: 2 }],
+      non_official: { machines: 5, online: 0, versions: 1 },
+      self_hosted: { relays: { registered: 4, online: 3, reporting: 3 }, edges: { registered: 6, online: 5, reporting: 4 }, teams: 3, accounts: 5 },
     }
   if (p === "/v1/admin/fleet/rollouts")
     return {
@@ -1035,6 +1037,10 @@ try {
     expect((await text('[data-stat="Machines"]')).includes("340"), "machines")
     expect((await text('[data-stat="Oldest version online"]')).includes("2026.10.28.2"), "oldest online version")
     expect((await p.locator("[data-table=fleet-versions] tbody tr").count()) === 6, "six version rows")
+    expect((await text('[data-stat="Non-official builds"]')).includes("5") && (await text('[data-stat="Non-official builds"]')).includes("1 version"), "non-official builds card")
+    expect((await text('[data-stat="Self-hosted relays"]')).includes("3 online · 3 reporting traffic"), "self-hosted relays card")
+    expect((await text('[data-stat="Self-hosted edges"]')).includes("5 online · 4 reporting traffic"), "self-hosted edges card")
+    expect((await text('[data-stat="Teams with self-hosted nodes"]')).includes("3"), "teams with self-hosted nodes")
     expect((await text("[data-table=fleet-failures]")).includes("signature invalid"), "failure reason")
     await p.screenshot({ path: `${shots}/fleet-versions-light.png`, fullPage: true })
     await p.getByRole("tab", { name: "Rollouts" }).click()
