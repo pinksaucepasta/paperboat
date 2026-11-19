@@ -33,7 +33,7 @@ const iso = (ms) => new Date(Date.now() + ms).toISOString()
 const product = (code, type, interval, amount) => ({ code, name: code.includes("team") ? "Team" : "Pro", catalog_type: type, unit_amount: amount, currency: "usd", interval, price_verified: true, version: 1 })
 const personalProducts = [product("pro-month", "personal_subscription", "month", 900), product("pro-year", "personal_subscription", "year", 9000), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
 const teamProducts = [product("team-month", "team_subscription", "month", 1500), { ...product("topup", "top_up", "one_time", 500), unit_bytes: 1e11, max_quantity: 100 }]
-const limits = { machines: { used: 2, limit: 100 }, publications: { used: 1, limit: 100 }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: 10 } }
+const limits = { machines: { used: 2, limit: 100 }, publications: { used: 1, limit: 10 }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: 10 } }
 const base = { usage_bytes: 5e9, allowance_bytes: 1e12, allowance_period_start: iso(-5 * day), allowance_period_end: iso(25 * day), topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], limits, can_manage: true, cancel_at_period_end: false, granted: false }
 const states = {
   granted: (kind) => ({ ...base, id: kind === "team" ? "team:tg" : "personal:u", state: "active", product_code: kind === "team" ? "team-month" : "pro-month", product: (kind === "team" ? teamProducts : personalProducts)[0], seats_bought: kind === "team" ? 10 : 0, seats_used: kind === "team" ? 12 : 0, members: kind === "team" ? 12 : 1, period_start: iso(-day), period_end: iso(9 * day), cancel_at_period_end: true, granted: true, granted_until: iso(9 * day) }),
