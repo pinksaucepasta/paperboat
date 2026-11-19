@@ -21,7 +21,7 @@ const (
 	maximumCertificateBytes = encodedClaimsLen + ed25519.SignatureSize
 )
 
-// ErrUnsupportedVersion: the certificate uses a layout newer than this build; update Paperboat.
+// ErrUnsupportedVersion means the certificate uses a layout newer than this build; update Paperboat.
 var ErrUnsupportedVersion = errors.New("endpoint certificate uses a newer format; update Paperboat on this machine")
 
 // ValidIdentifier reports whether value is 1 to 128 ASCII letters, digits, "_" or "-", not
