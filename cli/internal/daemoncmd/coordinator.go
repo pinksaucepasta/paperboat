@@ -106,6 +106,12 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 	if cfg.ReconcileTimeout <= 0 {
 		cfg.ReconcileTimeout = reconcileTimeout
 	}
+	if cfg.RetryBase <= 0 {
+		cfg.RetryBase = reconcileRetryBase
+	}
+	if cfg.RetryMax <= 0 {
+		cfg.RetryMax = reconcileRetryMax
+	}
 	coordinator := &Coordinator{
 		cfg:           cfg,
 		nameClient:    cfg.NameClient,
@@ -486,7 +492,7 @@ func (c *Coordinator) scheduleReconcileRetry(peers []*daemonrpc.PeerUpdate, revi
 		return
 	}
 	c.retryAttempt++
-	delay := backoff.Retry(c.retryAttempt, reconcileRetryBase, reconcileRetryMax)
+	delay := backoff.Retry(c.retryAttempt, c.cfg.RetryBase, c.cfg.RetryMax)
 	c.retryTimer = time.AfterFunc(delay, func() {
 		c.retryMu.Lock()
 		c.retryTimer = nil

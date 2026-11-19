@@ -16,9 +16,6 @@ import (
 // A browser certificate that fails once at start (a second macOS user's daemon on a test Mac timed out issuing it)
 // comes back by the coordinator's own retry: no restart and no new topology snapshot.
 func TestCoordinatorRetriesTheBrowserGatewayAfterAFailedCertificate(t *testing.T) {
-	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
-	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { reconcileRetryBase, reconcileRetryMax = restoreBase, restoreMax })
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
@@ -26,6 +23,7 @@ func TestCoordinatorRetriesTheBrowserGatewayAfterAFailedCertificate(t *testing.T
 	var issued atomic.Int32
 	names := &coordinatorNameClient{}
 	c, err := NewCoordinator(CoordinatorConfig{
+		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond,
 		NameClient:  names,
 		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
 		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
@@ -71,11 +69,9 @@ func TestCoordinatorRetriesTheBrowserGatewayAfterAFailedCertificate(t *testing.T
 // A machine name the guard refuses degrades only that item (multi-account hosts): the reconcile succeeds, native
 // access stays, doctor's pending step is machine_names, and the retry publishes the names once the guard accepts.
 func TestCoordinatorKeepsLocalAccessWhenTheGuardRefusesANameAndRetries(t *testing.T) {
-	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
-	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { reconcileRetryBase, reconcileRetryMax = restoreBase, restoreMax })
 	names := &coordinatorNameClient{refuseNames: 1}
 	c, err := NewCoordinator(CoordinatorConfig{
+		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond,
 		NameClient:  names,
 		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
 		IssueCertificate: func(context.Context, string, string, int) (tls.Certificate, error) {
@@ -115,15 +111,13 @@ func TestCoordinatorKeepsLocalAccessWhenTheGuardRefusesANameAndRetries(t *testin
 // only https://<machine>:<port>: native access stays, doctor's pending step is browser_port_listener instead of
 // a silent skip, and the retry serves the port once the guard can bind it.
 func TestCoordinatorNamesAFailedBrowserPortListenerAndRetries(t *testing.T) {
-	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
-	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { reconcileRetryBase, reconcileRetryMax = restoreBase, restoreMax })
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{failGatewayPorts: 1}
 	c, err := NewCoordinator(CoordinatorConfig{
+		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond,
 		NameClient:  names,
 		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
 		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
@@ -214,19 +208,16 @@ func TestCoordinatorDoesNotNagAboutABrowserPortAnotherProgramOwns(t *testing.T) 
 // Another program on :80 turns the browser gateway off. Native access stays, doctor's pending step is
 // browser_gateway_port with the owner the OS named, and the retry brings the URLs back once the port is free.
 func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *testing.T) {
-	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
-	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
 	restoreOwner := browserGatewayPortOwner
 	browserGatewayPortOwner = func() string { return "nginx, PID 4242" }
-	t.Cleanup(func() {
-		reconcileRetryBase, reconcileRetryMax, browserGatewayPortOwner = restoreBase, restoreMax, restoreOwner
-	})
+	t.Cleanup(func() { browserGatewayPortOwner = restoreOwner })
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
 	c, err := NewCoordinator(CoordinatorConfig{
+		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond,
 		NameClient:  names,
 		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
 		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {

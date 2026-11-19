@@ -86,14 +86,17 @@ type guardedNameClient interface {
 }
 
 type CoordinatorConfig struct {
-	SocketAddress        string
-	NameClient           guardedNameClient
-	AccountID            string // the signed-in account this daemon serves; CLI requests must carry it
-	AccountLabel         string
-	ConnectNameClient    func(context.Context) (guardedNameClient, error)
-	DialMachine          func(context.Context, string, int) (net.Conn, error)
-	ApprovePeer          func(context.Context, string, bool) error
-	ReconcileTimeout     time.Duration
+	SocketAddress     string
+	NameClient        guardedNameClient
+	AccountID         string // the signed-in account this daemon serves; CLI requests must carry it
+	AccountLabel      string
+	ConnectNameClient func(context.Context) (guardedNameClient, error)
+	DialMachine       func(context.Context, string, int) (net.Conn, error)
+	ApprovePeer       func(context.Context, string, bool) error
+	ReconcileTimeout  time.Duration
+	// RetryBase and RetryMax bound the reconcile-retry backoff; zero means the package defaults.
+	RetryBase            time.Duration
+	RetryMax             time.Duration
 	ReportReconcileError func(error)
 	IssueCertificate     func(context.Context, string, string, int) (tls.Certificate, error)
 }

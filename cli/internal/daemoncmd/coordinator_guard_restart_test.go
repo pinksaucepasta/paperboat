@@ -66,17 +66,16 @@ func TestCoordinatorReconnectsAtOnceWhenARestartedGuardClosesItsListeners(t *tes
 
 func reconnectsToARestartedGuard(t *testing.T, watch time.Duration, kill func(*restartableGuardClient)) {
 	t.Helper()
-	restoreBase, restoreMax, restoreWatch := reconcileRetryBase, reconcileRetryMax, guardWatchInterval
-	reconcileRetryBase, reconcileRetryMax, guardWatchInterval = 10*time.Millisecond, 50*time.Millisecond, watch
-	t.Cleanup(func() {
-		reconcileRetryBase, reconcileRetryMax, guardWatchInterval = restoreBase, restoreMax, restoreWatch
-	})
+	restoreWatch := guardWatchInterval
+	guardWatchInterval = watch
+	t.Cleanup(func() { guardWatchInterval = restoreWatch })
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	var clients []*restartableGuardClient
 	c, err := NewCoordinator(CoordinatorConfig{
+		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond,
 		SocketAddress: socketAddress(shorttemp.Dir(t)),
 		ConnectNameClient: func(context.Context) (guardedNameClient, error) {
 			client := &restartableGuardClient{coordinatorNameClient: &coordinatorNameClient{}}
