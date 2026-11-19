@@ -366,6 +366,23 @@ function route(req, url) {
         { id: "server-main", kind: "server", version: "dev-abc1234", cpu_percent: 3, cpu_sustained_percent: 3, rss_bytes: 500e6, last_heartbeat_at: "2026-11-18T08:59:40Z", metrics_at: "2026-11-18T08:59:40Z", warnings: [] },
       ],
     }
+  if (p === "/v1/admin/traffic") {
+    // Seeded: 7 relays of 10 report (partial), direct from 3 of 4 active machines; the period decides the bucket.
+    const period = url.searchParams.get("period"), hourly = period === "today"
+    const at = (i) => hourly ? `2026-11-18T${String(i).padStart(2, "0")}:00:00Z` : `2026-11-${String(10 + i).padStart(2, "0")}T00:00:00Z`
+    const series = []
+    for (let i = 0; i < 8; i++) for (const [category, base] of [["direct", 4e9], ["relay_managed", 2e9], ["edge_managed", 3e9], ["edge_self_hosted", 5e8]]) series.push({ at: at(i), category, upload_bytes: base * (i + 1), download_bytes: base * (i + 2) })
+    const tot = (c) => series.filter((x) => x.category === c).reduce((a, x) => [a[0] + x.upload_bytes, a[1] + x.download_bytes], [0, 0])
+    const cover = { direct: [3, 4], relay_managed: [7, 10], relay_self_hosted: [0, 0], edge_managed: [4, 4], edge_self_hosted: [1, 1] }
+    return { period, from: "2026-11-01T00:00:00Z", to: "2026-11-18T09:00:00Z", grain: hourly ? "hour" : "day", series,
+      totals: Object.keys(cover).map((category) => ({ category, upload_bytes: tot(category)[0], download_bytes: tot(category)[1], reporting: cover[category][0], expected: cover[category][1], coverage_percent: cover[category][1] ? cover[category][0] * 100 / cover[category][1] : null })) }
+  }
+  if (p === "/v1/admin/traffic/nodes") {
+    const kind = url.searchParams.get("kind"), all = Array.from({ length: 60 }, (_, i) => `${kind}-${String(i).padStart(2, "0")}`)
+    const start = all.findIndex((id) => id > (url.searchParams.get("after") ?? "")) , limit = Number(url.searchParams.get("limit") ?? 50)
+    const items = (start < 0 ? [] : all.slice(start, start + limit)).map((node_id) => ({ node_id, region: "hel", state: "ready", reporting: node_id !== `${kind}-03`, upload_bytes: node_id === `${kind}-03` ? 0 : 1e9, download_bytes: node_id === `${kind}-03` ? 0 : 2e9 }))
+    return { period: url.searchParams.get("period"), kind, items, ...(start >= 0 && start + limit < all.length ? { next_after: items.at(-1).node_id } : {}) }
+  }
   const entitlementRead = /^\/v1\/admin\/billing\/workspaces\/([^/]+)\/entitlements$/.exec(p)
   if (entitlementRead) {
     const workspace = decodeURIComponent(entitlementRead[1])
@@ -961,6 +978,24 @@ try {
     expect((await text('[data-node="edge-old"]')).includes("older build"), "node without metrics says so")
     expect((await text('[data-stat="Need attention"]')).includes("2"), "two nodes need attention")
     await p.screenshot({ path: `${shots}/capacity-light.png`, fullPage: true })
+  })
+  await step("traffic: five totals, split bar, partial coverage labelled, period picker, paged node tables", async () => {
+    await p.goto(`${ORIGIN}/traffic`)
+    await p.waitForSelector("[data-traffic-ready]")
+    for (const label of ["Direct", "Our relays", "Self-hosted relays", "Our edges", "Self-hosted edges"]) expect((await p.locator(`[data-stat="${label}"]`).count()) === 1, `${label} total`)
+    expect((await text('[data-coverage="relay_managed"]')).includes("Partial") && (await text('[data-coverage="relay_managed"]')).includes("7 of 10"), "partial relay coverage is labelled")
+    expect((await text('[data-coverage="edge_managed"]')).includes("4 of 4") && !(await text('[data-coverage="edge_managed"]')).includes("Partial"), "complete edge coverage is not labelled partial")
+    expect((await text('[data-coverage="relay_self_hosted"]')).includes("No nodes expected"), "no self-hosted relays expected")
+    expect((await p.locator("[data-split] [title]").count()) >= 3, "split bar segments")
+    expect((await p.locator('[data-series="ready"] li').count()) === 8, "eight hourly buckets today")
+    await p.getByRole("button", { name: "7 days" }).click()
+    await p.waitForFunction(() => document.querySelector("[data-series=ready]")?.getAttribute("aria-label")?.includes("per day"))
+    await p.waitForSelector("[data-table=traffic-relay] tbody tr")
+    expect((await p.locator("[data-table=traffic-relay] tbody tr").count()) === 50, "first page of relays")
+    expect((await text('[data-table=traffic-relay] [data-node="relay-03"]')).includes("no report in this period"), "a silent node is flagged")
+    await p.locator("[data-table=traffic-relay]").locator("xpath=ancestor::section").getByRole("button", { name: "Next" }).click()
+    await p.waitForFunction(() => document.querySelectorAll("[data-table=traffic-relay] tbody tr").length === 10)
+    await p.screenshot({ path: `${shots}/traffic-light.png`, fullPage: true })
   })
   await step("billing: workspaces, operations and plans", async () => {
     await p.goto(`${ORIGIN}/billing`)

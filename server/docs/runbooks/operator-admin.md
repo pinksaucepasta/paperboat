@@ -106,6 +106,12 @@ filters. Accounts take `q` (email, name or id contains) and `status`; teams take
   `_FILE`; a personal key with `query:read` only). Unset: status says not
   configured and overview answers `analytics_not_configured`. Retention and
   console country/device views need events the sites do not send yet.
+- `/v1/admin/traffic?period=today|7d|30d|month` and `/v1/admin/traffic/nodes?period=&kind=relay|edge` (operations): how
+  many bytes went direct (machine to machine, as the hosts report them), through our relays and edges and through
+  customers' own, with a time series, per-category coverage (reporting of expected machines or nodes) and a per-node
+  table of our own nodes. Hour totals (`traffic_hourly`) are folded into day totals (`traffic_daily`) after
+  `retention.traffic_hourly` (8 days) and the days pruned after `retention.traffic_daily` (400 days). Counts only: no
+  connection, address or content. "month" is the calendar month in UTC.
 - `/v1/admin/infrastructure/capacity` (operations): every edge, relay and control-plane
   server with CPU (now and a five minute average), memory, connections, version,
   last heartbeat, location, and bytes today and this month (UTC) against the

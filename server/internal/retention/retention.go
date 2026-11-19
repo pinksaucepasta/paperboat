@@ -236,6 +236,18 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.NodeCapacityDaily })},
 	{"node_capacity", batchOf("node_capacity", `reported_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.NodeCapacityDaily })},
+	// Hour totals of the traffic dashboard move into day totals (one statement: a crash cannot lose or repeat them);
+	// the statement returns one row per hour row moved, so a pass knows when it has caught up.
+	{"traffic_hourly_to_daily", `WITH moved AS (DELETE FROM paperboat.traffic_hourly WHERE ctid = ANY(ARRAY(
+  SELECT ctid FROM paperboat.traffic_hourly WHERE hour < now()-make_interval(secs=>$2) LIMIT $1 FOR UPDATE SKIP LOCKED))
+  RETURNING hour,category,node_id,upload_bytes,download_bytes),
+ days AS (INSERT INTO paperboat.traffic_daily(day,category,node_id,upload_bytes,download_bytes)
+  SELECT (hour AT TIME ZONE 'UTC')::date,category,node_id,sum(upload_bytes),sum(download_bytes) FROM moved GROUP BY 1,2,3
+  ON CONFLICT(day,category,node_id) DO UPDATE SET upload_bytes=traffic_daily.upload_bytes+EXCLUDED.upload_bytes,download_bytes=traffic_daily.download_bytes+EXCLUDED.download_bytes)
+ SELECT 1 FROM moved`,
+		seconds(func(c config.Retention) time.Duration { return c.TrafficHourly })},
+	{"traffic_daily", batchOf("traffic_daily", `day < (now()-make_interval(secs=>$2))::date`),
+		seconds(func(c config.Retention) time.Duration { return c.TrafficDaily })},
 	// An announcement ended or retracted, or an open-ended notice that started that long ago (the bell shows the newest
 	// few); its receipts cascade. An open-ended banner stays until it is retracted.
 	{"announcements", batchOf("announcements", `coalesce(retracted_at, ends_at, CASE WHEN kind='notice' THEN starts_at END) < now()-make_interval(secs=>$2)`),
