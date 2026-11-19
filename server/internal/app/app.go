@@ -771,7 +771,7 @@ func New(opts Options) (*App, error) {
 		OperatorActions:          operatorActions,
 		AbuseReports:             abuseReports,
 		IPRules:                  accessrules.New(store),
-		OperatorBilling:          billing.NewOperatorService(store, priceReader),
+		OperatorBilling:          billing.NewOperatorService(store, priceReader, opts.Config.Business),
 		OperatorAudit:            auditWriter,
 		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService},
 		Config:                   opts.Config,

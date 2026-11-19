@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
@@ -26,7 +27,8 @@ var (
 	ErrForbidden         = errors.New("your team role cannot manage SSO and directory sync")
 	ErrNotFound          = errors.New("team not found")
 	ErrInvalid           = errors.New("invalid SSO or directory setting")
-	ErrTooFewSeats       = errors.New("SSO and directory sync need more seats")
+	ErrNeedsSSOAddon     = errors.New("single sign-on needs the SSO add-on")
+	ErrNeedsSCIMAddon    = errors.New("directory sync needs the SCIM add-on")
 	ErrNotReady          = errors.New("connect an identity provider and verify a domain before requiring SSO")
 	ErrExemptLimit       = errors.New("too many SSO-exempt members")
 )
@@ -68,9 +70,9 @@ func New(store *db.DB, workos WorkOS, cfg config.Business, invitationLifetimeSec
 }
 
 type Status struct {
-	Eligible     bool      `json:"eligible"`
-	MinSeats     int       `json:"min_seats"`
-	Seats        int       `json:"seats"`
+	// SSOAddon and SCIMAddon say whether the team has the paid add-on (or an operator's grant) for single sign-on and directory sync.
+	SSOAddon     bool      `json:"sso_addon"`
+	SCIMAddon    bool      `json:"scim_addon"`
 	Organization bool      `json:"organization"`
 	SSO          SSO       `json:"sso"`
 	Directory    DirStatus `json:"directory"`
@@ -109,7 +111,7 @@ type teamRow struct {
 	sessionSeconds      *int
 	required, jit       bool
 	mappedOnly          bool
-	seats               int
+	sso, scim           bool
 }
 
 // authorizeTx returns the team and whether account may manage it (security.manage); auditors
@@ -121,9 +123,8 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	}
 	var role *string
 	err := tx.QueryRow(ctx, `SELECT t.owner_account,coalesce(t.workos_organization_id,''),t.sso_session_seconds,t.sso_required,t.sso_jit,t.directory_mapped_only,
- coalesce((SELECT quantity FROM billing_workspaces w WHERE w.team_id=t.team_id AND w.user_id IS NULL),0),
  (SELECT CASE WHEN t.owner_account=$2 THEN 'owner' ELSE m.role END FROM team_members m WHERE m.team_id=t.team_id AND m.account_id=$2 AND m.active)
- FROM teams t WHERE t.team_id=$1 AND t.deleted_at IS NULL`, team, account).Scan(&t.owner, &t.organization, &t.sessionSeconds, &t.required, &t.jit, &t.mappedOnly, &t.seats, &role)
+ FROM teams t WHERE t.team_id=$1 AND t.deleted_at IS NULL`, team, account).Scan(&t.owner, &t.organization, &t.sessionSeconds, &t.required, &t.jit, &t.mappedOnly, &role)
 	if err != nil || role == nil {
 		return t, false, ErrNotFound
 	}
@@ -131,19 +132,20 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 	if !canManage && (manage || !teams.Allowed(*role, teams.PermissionAuditRead)) {
 		return t, false, ErrForbidden
 	}
-	return t, canManage, nil
+	t.sso, t.scim, err = planlimits.AddonsTx(ctx, tx, team)
+	return t, canManage, err
 }
 
 // Status reads the team's SSO and directory state as last synced from WorkOS.
 func (s *Service) Status(ctx context.Context, account, team string) (Status, error) {
-	out := Status{MinSeats: s.cfg.SSOMinSeats}
+	out := Status{}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		t, canManage, err := authorizeTx(ctx, tx, account, team, false)
 		if err != nil {
 			return err
 		}
-		out.CanManage, out.Seats, out.Organization = canManage, t.seats, t.organization != ""
-		out.Eligible = t.seats >= s.cfg.SSOMinSeats
+		out.CanManage, out.Organization = canManage, t.organization != ""
+		out.SSOAddon, out.SCIMAddon = t.sso, t.scim
 		out.SSO = SSO{Required: t.required, JIT: t.jit, SessionSeconds: int(s.cfg.SSOSessionDefault.Seconds()),
 			SessionMin: int(s.cfg.SSOSessionMin.Seconds()), SessionMax: int(s.cfg.SSOSessionMax.Seconds()), ExemptMax: s.cfg.SSOExemptMax,
 			Connections: []Connection{}, Domains: []Domain{}, Exempt: []string{}}
@@ -238,8 +240,11 @@ func (s *Service) PortalLink(ctx context.Context, account, team, intent string) 
 		if t, _, err = authorizeTx(ctx, tx, account, team, true); err != nil {
 			return err
 		}
-		if t.seats < s.cfg.SSOMinSeats {
-			return ErrTooFewSeats
+		if intent == "dsync" && !t.scim {
+			return ErrNeedsSCIMAddon
+		}
+		if intent != "dsync" && !t.sso {
+			return ErrNeedsSSOAddon
 		}
 		return tx.QueryRow(ctx, `SELECT coalesce(display_name,team_id) FROM teams WHERE team_id=$1`, team).Scan(&name)
 	})
@@ -321,8 +326,8 @@ func (s *Service) UpdateSSO(ctx context.Context, account, team string, in SSOSet
 }
 
 func (s *Service) readyForRequiredTx(ctx context.Context, tx *db.Tx, team string, t teamRow) error {
-	if t.seats < s.cfg.SSOMinSeats {
-		return ErrTooFewSeats
+	if !t.sso {
+		return ErrNeedsSSOAddon
 	}
 	var ready bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_sso_domains WHERE team_id=$1) AND EXISTS(SELECT 1 FROM team_identity_state s, jsonb_array_elements(s.connections) c WHERE s.team_id=$1 AND c->>'state'='active')`, team).Scan(&ready)

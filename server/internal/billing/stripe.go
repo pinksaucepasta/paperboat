@@ -62,12 +62,14 @@ type StripeCheckoutInput struct {
 
 type StripeSubscription struct {
 	ID, CustomerID, PriceID, ItemID, Status string
-	CheckoutOperation                       string
-	Quantity                                int
-	PeriodStart, PeriodEnd                  time.Time
-	RenewalInvoiceID                        string
-	RenewalFailureAt                        time.Time
-	CancelAtPeriodEnd                       bool
+	// AddonItemID and AddonPriceID are the SSO/SCIM add-on item of the subscription, when it has one.
+	AddonItemID, AddonPriceID string
+	CheckoutOperation         string
+	Quantity                  int
+	PeriodStart, PeriodEnd    time.Time
+	RenewalInvoiceID          string
+	RenewalFailureAt          time.Time
+	CancelAtPeriodEnd         bool
 }
 
 type HTTPStripeClient struct {
@@ -274,6 +276,9 @@ type stripeSubscriptionResponse struct {
 			CurrentPeriodStart int64 `json:"current_period_start"`
 			CurrentPeriodEnd   int64 `json:"current_period_end"`
 			Price              struct{ ID string }
+			Metadata           struct {
+				Addon string `json:"paperboat_addon"`
+			} `json:"metadata"`
 		}
 	} `json:"items"`
 }
@@ -286,10 +291,20 @@ func (r stripeSubscriptionResponse) cancelsAtCurrentPeriodEnd(periodEnd int64) b
 }
 
 func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
-	if r.ID == "" || r.Customer == "" || r.Status == "" || len(r.Items.Data) != 1 {
+	if r.ID == "" || r.Customer == "" || r.Status == "" || len(r.Items.Data) < 1 || len(r.Items.Data) > 2 {
 		return StripeSubscription{}, errors.New("invalid stripe subscription response")
 	}
-	i := r.Items.Data[0]
+	// The plan item has no add-on metadata; at most one other item (the add-on) may follow it.
+	i, addon := r.Items.Data[0], r.Items.Data[len(r.Items.Data)-1]
+	if len(r.Items.Data) == 2 && (i.Metadata.Addon != "") == (addon.Metadata.Addon != "") {
+		return StripeSubscription{}, errors.New("invalid stripe subscription response")
+	}
+	if i.Metadata.Addon != "" {
+		i, addon = addon, i
+	}
+	if len(r.Items.Data) == 1 && i.Metadata.Addon != "" {
+		return StripeSubscription{}, errors.New("invalid stripe subscription response")
+	}
 	if i.ID == "" || i.Price.ID == "" || i.Quantity < 1 ||
 		i.CurrentPeriodStart <= 0 || i.CurrentPeriodEnd <= i.CurrentPeriodStart {
 		return StripeSubscription{}, errors.New("invalid stripe subscription response")
@@ -300,6 +315,12 @@ func (r stripeSubscriptionResponse) subscription() (StripeSubscription, error) {
 		Quantity: i.Quantity, CancelAtPeriodEnd: r.CancelAtPeriodEnd || r.cancelsAtCurrentPeriodEnd(i.CurrentPeriodEnd),
 		PeriodStart: time.Unix(i.CurrentPeriodStart, 0).UTC(),
 		PeriodEnd:   time.Unix(i.CurrentPeriodEnd, 0).UTC(),
+	}
+	if len(r.Items.Data) == 2 {
+		if addon.ID == "" || addon.Price.ID == "" {
+			return StripeSubscription{}, errors.New("invalid stripe subscription response")
+		}
+		result.AddonItemID, result.AddonPriceID = addon.ID, addon.Price.ID
 	}
 	if invoice := r.LatestInvoice; invoice != nil &&
 		(r.Status == "past_due" || r.Status == "unpaid") &&
