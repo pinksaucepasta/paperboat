@@ -151,6 +151,9 @@ func TestAdminListsSearchTotalsAndAuditSearch(t *testing.T) {
 	}
 
 	// An operator's live sessions are paged by id; revoked and expired ones are not counted.
+	t.Cleanup(func() {
+		store.Pool().Exec(context.Background(), `DELETE FROM operator_sessions WHERE operator_id=$1`, actorID)
+	})
 	for i, state := range []string{"live", "live", "live", "revoked", "expired"} {
 		exec(`INSERT INTO operator_sessions(token_hash,operator_id,csrf_hash,expires_at,revoked_at) VALUES(decode(repeat($1,32),'hex'),$2,decode(repeat('00',32),'hex'),CASE WHEN $3='expired' THEN now()-interval '1 hour' ELSE now()+interval '1 hour' END,CASE WHEN $3='revoked' THEN now() END)`, fmt.Sprintf("%02x", i+1), actorID, state)
 	}

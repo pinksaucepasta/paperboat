@@ -153,13 +153,14 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	service := NewService(store)
 	actor := auth.User{ID: actorID, Role: auth.Role("admin")}
 	tunnelID, otherTunnelID := "tun_operator_"+suffix, "tun_other_"+suffix
+	hostID, otherHostID := "host-test-"+suffix, "host-other-"+suffix // machine ids are unique across the database
 	endpointID, otherEndpointID := testutil.EndpointID("operator-read:"+suffix), testutil.EndpointID("operator-other:"+suffix)
 	for _, statement := range []struct {
 		q    string
 		args []any
 	}{
-		{`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES('host-test',$1,'host-test','linux','amd64','/workspace','offline','released'),('host-other',$1,'host-other','linux','amd64','/workspace','offline','released')`, []any{accountID}},
-		{`INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES($1,$2,$3,'active','private',7,$4,$5,'host-test',$2,'degraded'),($6,$2,$7,'active','private',3,$8,$9,'host-other',$2,'ready')`, []any{tunnelID, accountID, "operator-" + suffix, endpointID, "https://operator-" + suffix + ".tunnels.test", otherTunnelID, "other-" + suffix, otherEndpointID, "https://other-" + suffix + ".tunnels.test"}},
+		{`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($2,$1,$2,'linux','amd64','/workspace','offline','released'),($3,$1,$3,'linux','amd64','/workspace','offline','released')`, []any{accountID, hostID, otherHostID}},
+		{`INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_code) VALUES($1,$2,$3,'active','private',7,$4,$5,$10,$2,'degraded'),($6,$2,$7,'active','private',3,$8,$9,$11,$2,'ready')`, []any{tunnelID, accountID, "operator-" + suffix, endpointID, "https://operator-" + suffix + ".tunnels.test", otherTunnelID, "other-" + suffix, otherEndpointID, "https://other-" + suffix + ".tunnels.test", hostID, otherHostID}},
 	} {
 		if _, err := store.Pool().Exec(ctx, statement.q, statement.args...); err != nil {
 			t.Fatal(err)
@@ -167,6 +168,7 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		store.Pool().Exec(context.Background(), `DELETE FROM tunnels WHERE id IN($1,$2)`, tunnelID, otherTunnelID)
+		store.Pool().Exec(context.Background(), `DELETE FROM user_machines WHERE id IN($1,$2)`, hostID, otherHostID)
 	})
 	teamID, workspaceID, billingOpID, controlOpID := "zzzz_operator_"+suffix, "team:operator_"+suffix, "billop_operator_"+suffix, "ctrlop_operator_"+suffix
 	fixtureSQL := []struct {
@@ -245,7 +247,7 @@ func TestReadUsesCurrentDatabaseRoleAndAuditsAvailability(t *testing.T) {
 	if status.ID != tunnelID || status.Generation != 7 || status.SummaryCode != "degraded" {
 		t.Fatalf("tunnel status=%+v", status)
 	}
-	if raw, err := json.Marshal(status); err != nil || bytes.Contains(raw, []byte("secret-ref")) || bytes.Contains(raw, []byte("thumbprint")) || bytes.Contains(raw, []byte("host-test")) {
+	if raw, err := json.Marshal(status); err != nil || bytes.Contains(raw, []byte("secret-ref")) || bytes.Contains(raw, []byte("thumbprint")) || bytes.Contains(raw, []byte(hostID)) {
 		t.Fatalf("unsafe tunnel status=%s err=%v", raw, err)
 	}
 	functionName, triggerName := "operator_audit_fail_"+suffix, "operator_audit_trigger_"+suffix
