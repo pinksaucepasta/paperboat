@@ -34,8 +34,9 @@ func TestStripeSandboxAddon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	post("/v1/payment_methods/pm_card_visa/attach", url.Values{"customer": {customer}})
-	post("/v1/customers/"+customer, url.Values{"invoice_settings[default_payment_method]": {"pm_card_visa"}})
+	method := post("/v1/payment_methods", url.Values{"type": {"card"}, "card[token]": {"tok_visa"}}).ID
+	post("/v1/payment_methods/"+method+"/attach", url.Values{"customer": {customer}})
+	post("/v1/customers/"+customer, url.Values{"invoice_settings[default_payment_method]": {method}})
 	product := post("/v1/products", url.Values{"name": {"Paperboat sandbox add-on test " + x}}).ID
 	price := func(cents int64) string {
 		return post("/v1/prices", url.Values{"product": {product}, "currency": {"usd"}, "unit_amount": {strconv.FormatInt(cents, 10)}, "recurring[interval]": {"month"}}).ID
