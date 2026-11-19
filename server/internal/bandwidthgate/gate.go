@@ -59,34 +59,19 @@ func New(store *db.DB) *Gate {
 }
 
 // accountPaid is whether account $1 is on a paid plan: its personal workspace has a paid period, or it is an active member of a
-// team with a paid entitlement (the plan whose slower relay speed applies to it).
-const accountPaid = `(` + personalPaid + `
+// team with a paid entitlement (the plan whose slow speed applies to its relayed traffic).
+const accountPaid = `(EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=$1 AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())
  OR EXISTS(SELECT 1 FROM paperboat.team_members m WHERE m.account_id=$1 AND m.active AND paperboat.team_paid_entitled(m.team_id)))`
 
-// personalPaid is whether account $1's personal workspace has a paid period.
-const personalPaid = `EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=$1 AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())`
-
-// relayBytes is the managed-relay bytes of workspace expression $w in the calendar month (UTC) of $4.
-func relayBytes(workspace string) string {
-	return `(SELECT coalesce(sum(e.upload_bytes+e.download_bytes),0) FROM paperboat.resource_bandwidth_events e WHERE e.workspace_id=` + workspace + `
- AND e.mode='relay' AND e.hosting='managed' AND e.interval_end >= date_trunc('month',$4::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')`
-}
-
-// NewRelayVolume is a gate with the same cache and fail-safe rules whose question is another: has the account used up its relay
-// allowance this calendar month (UTC)? Its personal workspace has carried its plan's included bytes through Paperboat's managed relays
-// (freeIncluded, or perSeat on a paid plan), or a paid team it belongs to has carried perSeat times its seats, pooled over all its
-// members. A relay then holds the account to the plan's slow speed. A failed lookup answers "not over" (full speed), so a slow
-// database never slows an account on its own.
-func NewRelayVolume(store *db.DB, freeIncluded, perSeat int64) *Gate {
+// NewRelayPool is a gate with the same cache and fail-safe rules whose question is another: has any workspace the account belongs to
+// (its personal workspace, an active team) used its pool this period? Edge and relay traffic share one pool per workspace, but a relay
+// cannot tell which workspace a packet is for, so it holds the account to the plan's slow speed while any of its workspaces is out
+// (the account's own traffic is the only traffic it can slow). A failed lookup answers "not out" (full speed), so a slow database never
+// slows an account on its own.
+func NewRelayPool(store *db.DB) *Gate {
 	g := &Gate{store: store, timeout: defaultLookupTimeout}
 	g.lookup = func(ctx context.Context, account string, at time.Time) (bool, error) {
-		var over bool
-		err := store.SQL().QueryRowContext(ctx, `SELECT `+relayBytes(`'personal:'||$1`)+` >= CASE WHEN `+personalPaid+` THEN $2::bigint ELSE $3::bigint END
- OR EXISTS(SELECT 1 FROM paperboat.team_members m JOIN paperboat.billing_workspaces tw ON tw.team_id=m.team_id AND tw.user_id IS NULL
-  WHERE m.account_id=$1 AND m.active AND paperboat.team_paid_entitled(m.team_id)
-  AND `+relayBytes(`'team:'||m.team_id`)+` >= $2::bigint * greatest(coalesce((SELECT g.amount FROM paperboat.billing_workspace_grants g WHERE g.workspace_id='team:'||m.team_id AND g.kind='seats' AND g.revoked_at IS NULL AND (g.ends_at IS NULL OR g.ends_at>now()) ORDER BY g.created_at DESC LIMIT 1),tw.quantity),1))`,
-			account, perSeat, freeIncluded, at).Scan(&over)
-		return over, err
+		return g.lookupExhausted(ctx, account, at, "bool_or")
 	}
 	return g
 }
@@ -280,6 +265,11 @@ func (g *Gate) Cached(account string) (denied, known bool) {
 // that workspace is out of allowance; an account ID is denied when every workspace the account
 // can use is.
 func (g *Gate) Lookup(ctx context.Context, key string, at time.Time) (bool, error) {
+	return g.lookupExhausted(ctx, key, at, "bool_and")
+}
+
+// lookupExhausted answers for the workspaces of key: aggregate is bool_and (every workspace is out) or bool_or (any is).
+func (g *Gate) lookupExhausted(ctx context.Context, key string, at time.Time, aggregate string) (bool, error) {
 	workspaces := `WITH ws AS (
  SELECT 'personal:'||$1::text AS id
  UNION
@@ -291,7 +281,7 @@ func (g *Gate) Lookup(ctx context.Context, key string, at time.Time) (bool, erro
 	}
 	var denied bool
 	err := g.store.SQL().QueryRowContext(ctx, workspaces+`
-SELECT coalesce(bool_and(coalesce((
+SELECT coalesce(`+aggregate+`(coalesce((
  SELECT true FROM billing_workspace_usage_periods p
  WHERE p.workspace_id=ws.id AND p.period_start<=$2 AND p.period_end>$2 AND p.included_bytes IS NOT NULL AND NOT workspace_throttle_lifted(ws.id)
   AND (SELECT coalesce(sum(q.consumed_bytes),0) FROM billing_workspace_usage_periods q

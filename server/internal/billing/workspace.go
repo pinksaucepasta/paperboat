@@ -53,14 +53,12 @@ type Workspace struct {
 	// ThrottleMbit is the speed a throttled workspace's edge traffic runs at (the edges' configured rate).
 	ThrottleMbit float64 `json:"throttle_mbit"`
 	// AllowanceSeats and AllowancePerSeatBytes: a paid team's included public traffic is the per-seat amount times its seats, pooled
-	// in the team workspace (AllowanceBytes is the product, relay_included_bytes likewise per seat times seats).
+	// in the team workspace (AllowanceBytes is the product).
 	AllowanceSeats        int   `json:"allowance_seats,omitempty"`
 	AllowancePerSeatBytes int64 `json:"allowance_per_seat_bytes,omitempty"`
-	// Relays are never cut off and never count against the edge allowance; one account is held to RelayMbit on a Paperboat relay,
-	// and to RelaySlowMbit once it has carried RelayIncludedBytes through relays in the month (the plan's tier).
-	RelayMbit          float64 `json:"relay_mbit"`
-	RelayIncludedBytes int64   `json:"relay_included_bytes"`
-	RelaySlowMbit      float64 `json:"relay_slow_mbit"`
+	// One pool counts edge and relay traffic together. Until it is used up one account runs at RelayMbit on a Paperboat relay and edges
+	// run at full speed; once it is, both run at ThrottleMbit.
+	RelayMbit float64 `json:"relay_mbit"`
 	// SeatsGranted is an operator's override of the team's seats, replacing what it bought.
 	SeatsGranted      *int       `json:"seats_granted,omitempty"`
 	ID                string     `json:"id"`

@@ -228,8 +228,8 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 }
 
 // relayFairUse puts the speeds in a Paperboat-operated relay's lease (read after the commit and outside the transaction: cached,
-// bounded, fail-safe). An account's speed is the fast speed, or its plan's slower speed once it carried the plan's included relay
-// bytes this month, and it is ONE bucket across relays: the connected account's speed is divided by the number of relays it is on, so
+// bounded, fail-safe). An account's speed is the fast speed, or its plan's slower speed once any workspace it belongs to used its
+// pool (edge and relay traffic together) this month, and it is ONE bucket across relays: the connected account's speed is divided by the number of relays it is on, so
 // the shares add up to the account's speed (the total across relays never exceeds it; an idle relay's share is not handed to the busy
 // one until the account is seen on one relay only, within the cache interval below). A customer-owned relay gets none, so it is never
 // limited.
@@ -251,8 +251,8 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 		}
 	}
 	var slow []string
-	if s.relayVolume != nil {
-		slow = s.relayVolume.DeniedAmong(ctx, accounts, now, relayVolumeFreshLookups)
+	if s.relayPool != nil {
+		slow = s.relayPool.DeniedAmong(ctx, accounts, now, relayPoolFreshLookups)
 	}
 	paid := map[string]bool{}
 	if len(slow) > 0 {
@@ -269,9 +269,10 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 	for _, account := range accounts {
 		mbit := s.fairUse.RelayMbit
 		if isSlow[account] {
-			mbit = s.fairUse.RelayFreeSlowMbit
+			// the plan's slow speed, the same one the account's edge traffic runs at (one pool, one slow speed)
+			mbit = float64(s.fairUse.EdgeFreeBytesPerSecond) * 8 / 1e6
 			if paid[account] {
-				mbit = s.fairUse.RelaySlowMbit
+				mbit = float64(s.fairUse.EdgeBytesPerSecond) * 8 / 1e6
 			}
 		}
 		count := max(relays[account], 1)
@@ -352,8 +353,8 @@ GROUP BY 1 HAVING count(DISTINCT s.node_id) > 1`, now.Add(-relayNodeLease))
 	return counts
 }
 
-// relayVolumeFreshLookups bounds the uncached usage reads one relay observation may cost.
-const relayVolumeFreshLookups = 64
+// relayPoolFreshLookups bounds the uncached usage reads one relay observation may cost.
+const relayPoolFreshLookups = 64
 
 // observeRelayNodeTx is one attempt of ObserveRelayNode's transaction; RetrySerializable may replay it.
 func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObservation, now time.Time) (out relayNodeLeaseDocument, set relaySubjectSet, required bool, err error) {
