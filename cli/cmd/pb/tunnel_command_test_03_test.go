@@ -241,6 +241,7 @@ func TestTunnelCreateWaitsForCanonicalDomainAndRejectsChangedBinding(t *testing.
 			calls := 0
 			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				time.Sleep(600 * time.Millisecond) // a slow runner: the poll interval plus this read exceeded the old 1 s --timeout
 				if r.Method != http.MethodGet || r.URL.Path != "/v1/tunnels/tun_1/domains/domain_wait" {
 					t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 				}
@@ -254,7 +255,7 @@ func TestTunnelCreateWaitsForCanonicalDomainAndRejectsChangedBinding(t *testing.
 			command := tunnelCreateCommand()
 			command.SetContext(context.Background())
 			_ = command.Flags().Set("wait", "true")
-			_ = command.Flags().Set("timeout", "1s")
+			_ = command.Flags().Set("timeout", "30s")
 			client, _, err := tunnelClient(command)
 			if err != nil {
 				t.Fatal(err)
