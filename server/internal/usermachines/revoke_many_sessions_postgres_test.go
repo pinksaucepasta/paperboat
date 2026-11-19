@@ -18,11 +18,12 @@ import (
 // stay active for the retention period) could not be revoked: the session cascade ran 15 s inside the revoke's first
 // statement while the account's peer writes queued behind it. On a 100-machine account whose revoked machine holds
 // 20,000 active sessions (all but 100 expired), with peer config writes and SSH CA authority locks running on other
-// machines, the revoke commits in under 2 s, revokes every unexpired session of that machine and no other (the
-// worker's next tick retires the expired ones), keeps the usage
+// machines, the revoke revokes every unexpired session of that machine and no other without touching the expired ones (the
+// worker's next tick retires them in batches), keeps the usage
 // authority of expired sessions as it was, and bumps the client endpoint's peer generation. The concurrent writers all
-// resume once it committed, and a second machine's revoke commits while the first's final delete is under way: both are
-// observed with barriers (completed writes, committed state), not elapsed-time windows, which storage stalls trip.
+// resume once it committed, and a second machine's revoke commits while the first's final delete is under way: all are
+// observed with barriers (completed writes, committed state, rows left untouched), not elapsed-time bounds, which
+// storage stalls trip.
 func TestRevokeMachineWithManyAccessSessionsOnPostgres(t *testing.T) {
 	store := testStore(t)
 	ctx := t.Context()
@@ -124,11 +125,9 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	defer func() { stopLoad(); load.Wait() }()
 	waitFor("the concurrent writers to run", func() bool { return writes.Load() >= 20 })
 
-	revokeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	start := time.Now()
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
-	err := service.Disconnect(revokeCtx, user, machine(0))
+	err := service.Disconnect(ctx, user, machine(0))
 	took := time.Since(start)
 	var before [5]int64
 	for w := range before {
@@ -136,9 +135,6 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	}
 	if err != nil {
 		t.Fatalf("revoke failed after %v: %v", took, err)
-	}
-	if took > 2*time.Second {
-		t.Fatalf("revoke of a machine with 20,000 access sessions took %v, want under 2 s", took)
 	}
 	// A writer may wait for the revoke's transaction; none may stay blocked once it committed (prod: the writers queued
 	// behind the cascade). No elapsed-time window: storage flush stalls delay a write, they do not wedge it.
@@ -165,6 +161,11 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	// the worker's next tick retires them, in batches.
 	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1 AND state<>'revoked' AND expires_at>now()`, machine(0)); n != 0 {
 		t.Fatalf("%d unexpired sessions of the revoked machine are not revoked", n)
+	}
+	// The revoke's own work is bounded: it did not touch the 17,700 expired sessions (prod: the cascade over all of
+	// them ran 15 s in one statement). Left for the worker, they are what makes it fast, whatever the storage speed.
+	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1 AND state<>'revoked' AND expires_at<=now()`, machine(0)); n != 17700 {
+		t.Fatalf("the revoke rewrote expired sessions: %d of 17700 are left for the worker", n)
 	}
 	if err := service.retireExpiredAccessSessions(ctx); err != nil {
 		t.Fatal(err)
