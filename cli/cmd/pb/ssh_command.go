@@ -217,7 +217,7 @@ func openSSHSecurityArguments(destination managedssh.Destination) []string {
 // command). It overrides Hostname with 127.0.0.1, so the managed fragment's `Match host` group does not apply and
 // the managed identity is passed here instead (identity: managedssh.ManagedIdentityArguments).
 func windowsLoopbackOpenSSHArguments(destination managedssh.Destination, port uint16, executable string, identity, passthrough []string, includePassthrough bool) []string {
-	knownHostsCommand := quoteWindowsOpenSSHCommand(executable) + " __ssh-known-hosts --host " + destination.Host + " --port " + strconv.Itoa(int(destination.Port))
+	knownHostsCommand := quoteWindowsOpenSSHCommand(executable) + " __ssh-known-hosts --host " + destination.Host + " --port " + strconv.Itoa(int(destination.Port)) + " --alias-lines"
 	arguments := openSSHSecurityArguments(destination)
 	if destination.Managed {
 		arguments = append(arguments, identity...)
@@ -520,7 +520,11 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	knownHosts, err := managedssh.FormatKnownHosts(host, target.Port, keys)
+	format := managedssh.FormatKnownHosts
+	if aliasLines, _ := command.Flags().GetBool("alias-lines"); aliasLines { // the caller sets HostKeyAlias: ssh looks the alias up without its port
+		format = managedssh.FormatKnownHostsForAlias
+	}
+	knownHosts, err := format(host, target.Port, keys)
 	if err != nil {
 		return err
 	}
