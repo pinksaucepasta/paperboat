@@ -349,3 +349,8 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 - The form needs a phone number: use a forwarding number (e.g. Google Voice), never a personal mobile. The site shows none.
 - Stripe requires a public support phone (shown on receipts) and will not remove it: swap it for the same forwarding number.
 - Amend the designation when the company is incorporated.
+
+## Self-hosted control server through pbh — after launch (user 2026-11-19)
+
+- `pbh` already installs self-hosted relays and edges. Extend it to install the whole server (API, database, console), so a company can run Paperboat entirely on its own machines.
+- Needs real work first: database setup and upgrades, sign-in without our WorkOS account, email, TLS and domains, backups, and updates through the same signed release path.
