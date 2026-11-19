@@ -26,6 +26,14 @@ func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, 409, "seats_in_use", "Seat quantity must cover the owner, active members and pending invitations.")
 	case errors.Is(err, billing.ErrSeatSubscription):
 		writeError(w, r, 409, "subscription_required", "An active team subscription is required to change seats.")
+	case errors.Is(err, billing.ErrAddonInvalid):
+		writeError(w, r, http.StatusBadRequest, "addon_invalid", "Choose SSO, SCIM, or SSO and SCIM.")
+	case errors.Is(err, billing.ErrAddonConsent):
+		writeError(w, r, http.StatusBadRequest, "refund_policy_required", "Accept the Refund Policy to add or change an add-on.")
+	case errors.Is(err, billing.ErrAddonUnavailable):
+		writeError(w, r, http.StatusConflict, "addon_unavailable", "This add-on is not available for sale yet.")
+	case errors.Is(err, billing.ErrAddonSubscription):
+		writeError(w, r, http.StatusConflict, "subscription_required", "An active team subscription with no pending cancellation or seat reduction is required to change the add-on.")
 	case errors.Is(err, billing.ErrProductChanged):
 		writeError(w, r, http.StatusConflict, "product_changed", "This price changed. Reload the plan and review its price before Checkout.")
 	case errors.Is(err, billing.ErrUnknownProduct):
@@ -45,7 +53,7 @@ func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, billing.ErrProviderOutcomeUnknown):
 		writeError(w, r, http.StatusServiceUnavailable, "provider_outcome_unknown", "The payment provider outcome is not confirmed. Keep the same operation ID; do not start another purchase.", err)
 	case errors.As(err, &provider) && provider.StatusCode == http.StatusPaymentRequired:
-		writeError(w, r, http.StatusPaymentRequired, "payment_required", "Payment failed. Update your payment method in Manage billing, then start a new seat change.")
+		writeError(w, r, http.StatusPaymentRequired, "payment_required", "Payment failed. Update your payment method in Manage billing, then try again.")
 	default:
 		writeError(w, r, http.StatusServiceUnavailable, "billing_unavailable", "Billing is unavailable. No subscription change has been confirmed.", err)
 	}

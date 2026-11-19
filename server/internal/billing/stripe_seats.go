@@ -59,10 +59,18 @@ func (c HTTPStripeClient) seatSchedule(ctx context.Context, in SeatChange) (stri
 	if current.ID != in.SubscriptionID || current.Customer != in.CustomerID {
 		return "", ErrProviderOutcomeUnknown
 	}
-	if len(current.Items.Data) != 1 {
+	// The plan item, plus the SSO/SCIM add-on item when the team has one.
+	if len(current.Items.Data) < 1 || len(current.Items.Data) > 2 || (len(current.Items.Data) == 2) != (in.AddonPriceID != "") {
 		return "", ErrProviderOutcomeUnknown
 	}
 	item := current.Items.Data[0]
+	if len(current.Items.Data) == 2 {
+		if other := current.Items.Data[1]; other.ID == in.ItemID {
+			item = other
+		} else if item.ID != in.ItemID {
+			return "", ErrProviderOutcomeUnknown
+		}
+	}
 	if item.ID != in.ItemID || item.Price.ID != in.PriceID || item.Start != in.PeriodStart.Unix() || item.End != in.PeriodEnd.Unix() || (item.Quantity != in.PreviousQuantity && item.Quantity != in.Quantity) {
 		return "", ErrProviderOutcomeUnknown
 	}
@@ -103,6 +111,12 @@ func (c HTTPStripeClient) ChangeSeats(ctx context.Context, in SeatChange, key st
 			"phases[1][items][0][price]":    {in.PriceID}, "phases[1][items][0][quantity]": {strconv.Itoa(in.Quantity)},
 			"phases[1][proration_behavior]": {"none"},
 			"phases[1][duration][interval]": {price.Interval}, "phases[1][duration][interval_count]": {"1"},
+		}
+		if in.AddonPriceID != "" { // both phases keep the add-on item
+			for _, phase := range []string{"phases[0]", "phases[1]"} {
+				values.Set(phase+"[items][1][price]", in.AddonPriceID)
+				values.Set(phase+"[items][1][quantity]", "1")
+			}
 		}
 		var updated struct{ ID string }
 		if err = c.do(ctx, http.MethodPost, "/v1/subscription_schedules/"+url.PathEscape(schedule), key+":phases", values, &updated); err != nil {

@@ -60,7 +60,13 @@ type Workspace struct {
 	// run at full speed; once it is, both run at ThrottleMbit.
 	RelayMbit float64 `json:"relay_mbit"`
 	// SeatsGranted is an operator's override of the team's seats, replacing what it bought.
-	SeatsGranted      *int       `json:"seats_granted,omitempty"`
+	SeatsGranted *int `json:"seats_granted,omitempty"`
+	// Addon is the SSO/SCIM add-on the team pays for (sso, scim or sso_scim); AddonUntil is set once it was removed and only
+	// runs to the end of the paid period. SSOAddon and SCIMAddon say what the team may use, including an operator's grant.
+	Addon             string     `json:"addon,omitempty"`
+	AddonUntil        *time.Time `json:"addon_until,omitempty"`
+	SSOAddon          bool       `json:"sso_addon"`
+	SCIMAddon         bool       `json:"scim_addon"`
 	ID                string     `json:"id"`
 	UserID            string     `json:"user_id,omitempty"`
 	TeamID            string     `json:"team_id,omitempty"`

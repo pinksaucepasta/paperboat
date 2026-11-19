@@ -24,6 +24,9 @@ const (
 	Seats Kind = "seats"
 	// ViewersPerTerminal overrides the viewer cap of one shared terminal.
 	ViewersPerTerminal Kind = "viewers_per_terminal"
+	// SSO and SCIM grant a team the SAML single sign-on or directory sync add-on without a subscription item (amount 1).
+	SSO  Kind = "sso"
+	SCIM Kind = "scim"
 )
 
 // GrantKinds are the kinds an operator can grant on a workspace, with whether it applies to personal and team workspaces.
@@ -36,6 +39,8 @@ var GrantKinds = map[Kind]struct{ Personal, Team bool }{
 	PublicTCP:          {true, true},
 	Seats:              {false, true},
 	ViewersPerTerminal: {true, true},
+	SSO:                {false, true},
+	SCIM:               {false, true},
 }
 
 // MaxGrantAmount bounds a grant (bytes or a count), far above any real use and far below int64 overflow.
@@ -94,6 +99,25 @@ func TeamCeilingFor(ctx context.Context, q queryer, team string, kind Kind) (int
 func SeatsOverrideTx(ctx context.Context, q queryer, team string) (int, bool, error) {
 	value, ok, err := OverrideTx(ctx, q, Scope{Team: team}.workspaceID(), Seats)
 	return int(min(value, int64(1<<31-1))), ok, err
+}
+
+// AddonsTx says whether the team may use SAML single sign-on and directory sync: it has the paid add-on (or its removal has not
+// reached the end of the paid period) while its plan is paid, or an operator granted it.
+func AddonsTx(ctx context.Context, q queryer, team string) (sso, scim bool, err error) {
+	var addon string
+	if err = q.QueryRow(ctx, `SELECT coalesce((SELECT w.addon FROM billing_workspaces w WHERE w.team_id=$1 AND w.user_id IS NULL AND w.addon IS NOT NULL
+ AND (w.addon_until IS NULL OR w.addon_until>now()) AND team_paid_entitled($1)),'')`, team).Scan(&addon); err != nil {
+		return false, false, err
+	}
+	sso, scim = addon == "sso" || addon == "sso_scim", addon == "scim" || addon == "sso_scim"
+	for kind, set := range map[Kind]*bool{SSO: &sso, SCIM: &scim} {
+		if _, granted, e := OverrideTx(ctx, q, "team:"+team, kind); e != nil {
+			return false, false, e
+		} else if granted {
+			*set = true
+		}
+	}
+	return sso, scim, nil
 }
 
 // Grant is one row of billing_workspace_grants.

@@ -85,7 +85,7 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status,email_verified) VALUES($1,$1,'owner@'||$5,'active',true),($2,$2,'alice@'||$5,'active',true),($3,$3,'bob@'||$5,'active',true),($4,$4,'dave@'||$5,'active',true)`, owner, alice, bob, dave, domain)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation,display_name) VALUES($1,$2,1,'SSO team')`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
-	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active',10,now()-interval '1 day',now()+interval '30 days')`, team)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,addon,period_start,period_end) VALUES('team:'||$1,$1,'active',2,'sso_scim',now()-interval '1 day',now()+interval '30 days')`, team)
 	exec(`DELETE FROM paperboat.users WHERE id=$1`, bob) // bob has no account yet
 	fake := &fakeWorkOS{}
 	seats := &fakeSeats{}
@@ -299,4 +299,55 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE resource_id=$1 AND event_type IN ('team.directory_provisioned','team.directory_invited','team.directory_deprovisioned','team.directory_owner_kept','team.jit_provisioned','team.sso_signed_in')`, team).Scan(&events); err != nil || events < 6 {
 		t.Fatalf("audit events=%d err=%v", events, err)
 	}
+}
+
+// The add-ons gate setup and Require SSO (PLAN F19-02/04): no add-on refuses, SSO alone does not open directory sync, a
+// removed add-on runs to the end of the paid period, and an operator's grant counts like the paid add-on.
+func TestPostgresAddonGatesSSOAndDirectorySync(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	owner, team := "addon_owner_"+x, "addon-"+x
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status,email_verified) VALUES($1,$1,'owner@addon.test','active',true)`, owner)
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation,display_name) VALUES($1,$2,1,'Addon team')`, team, owner)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active',50,now()-interval '1 day',now()+interval '30 days')`, team)
+	s := New(store, &fakeWorkOS{}, config.Default().Business, config.Default().Mail.InvitationLifetimeSeconds, "https://console.example.test/team", &fakeSeats{})
+	expect := func(step, intent string, want error) {
+		t.Helper()
+		if _, err := s.PortalLink(ctx, owner, team, intent); !errors.Is(err, want) {
+			t.Fatalf("%s: %s link err=%v, want %v", step, intent, err, want)
+		}
+	}
+	yes := true
+	// 50 seats is no longer enough: SSO needs the add-on.
+	expect("no add-on", "sso", ErrNeedsSSOAddon)
+	expect("no add-on", "domain_verification", ErrNeedsSSOAddon)
+	expect("no add-on", "dsync", ErrNeedsSCIMAddon)
+	if _, err := s.UpdateSSO(ctx, owner, team, SSOSettings{Required: &yes}); !errors.Is(err, ErrNeedsSSOAddon) {
+		t.Fatalf("require SSO without add-on: %v", err)
+	}
+	exec(`UPDATE paperboat.billing_workspaces SET addon='sso' WHERE team_id=$1`, team)
+	expect("sso only", "sso", nil)
+	expect("sso only", "dsync", ErrNeedsSCIMAddon)
+	st, err := s.Status(ctx, owner, team)
+	if err != nil || !st.SSOAddon || st.SCIMAddon {
+		t.Fatalf("status sso only = %+v, %v", st, err)
+	}
+	exec(`INSERT INTO paperboat.billing_workspace_grants(id,workspace_id,kind,amount,reason,created_by) VALUES('grant_'||$1,'team:'||$1,'scim',1,'test','op')`, team)
+	expect("scim granted", "dsync", nil)
+	// Removed in Stripe: the add-on still runs to the end of the paid period, then stops.
+	exec(`UPDATE paperboat.billing_workspaces SET addon_until=now()+interval '1 day' WHERE team_id=$1`, team)
+	expect("removed, paid period left", "sso", nil)
+	exec(`UPDATE paperboat.billing_workspaces SET addon_until=now()-interval '1 minute' WHERE team_id=$1`, team)
+	expect("removed, period over", "sso", ErrNeedsSSOAddon)
+	// A lapsed plan takes the paid add-on with it.
+	exec(`UPDATE paperboat.billing_workspaces SET addon_until=NULL,state='canceled' WHERE team_id=$1`, team)
+	expect("plan canceled", "sso", ErrNeedsSSOAddon)
 }

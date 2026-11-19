@@ -796,7 +796,7 @@ func New(opts Options) (*App, error) {
 		OperatorActions:          operatorActions,
 		AbuseReports:             abuseReports,
 		IPRules:                  accessrules.New(store),
-		OperatorBilling:          billing.NewOperatorService(store, priceReader),
+		OperatorBilling:          billing.NewOperatorService(store, priceReader, opts.Config.Business),
 		OperatorAudit:            auditWriter,
 		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService, Floors: map[string]httpapi.NodeUpdatePolicy{"pbh": nodeFloors["pbh"], "edge": nodeFloors["edge"], "relay": nodeFloors["relay"]}},
 		Config:                   opts.Config,
