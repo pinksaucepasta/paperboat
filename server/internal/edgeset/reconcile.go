@@ -102,8 +102,10 @@ func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) 
 	return true, nil
 }
 
-// latencySQL is the lowest RTT any live machine of the workspace measured to each edge within LatencyFresh.
-const latencySQL = `SELECT l.node_id,min(l.rtt_ms) FROM machine_node_latency l JOIN user_machines m ON m.id=l.machine_id
+// latencySQL is the median, over the workspace's live machines with a sample within LatencyFresh, of
+// each machine's RTT to each edge (one stored sample per machine and edge), so one outlier machine cannot
+// decide placement. An even count takes the lower middle value.
+const latencySQL = `SELECT l.node_id,percentile_disc(0.5) WITHIN GROUP (ORDER BY l.rtt_ms) FROM machine_node_latency l JOIN user_machines m ON m.id=l.machine_id
 WHERE l.role='edge' AND m.deleted_at IS NULL AND m.revoked_at IS NULL
  AND CASE WHEN $1='team' THEN m.owner_team_id=$2 ELSE m.user_id=$2 AND m.owner_team_id IS NULL END
  AND l.measured_at>$3::timestamptz-make_interval(secs=>$4::float8)
