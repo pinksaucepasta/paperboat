@@ -139,7 +139,7 @@ func (connection *browserTerminal) fileRequest(payload json.RawMessage) any {
 		return errorObject("file_busy", "Wait for the current file upload.")
 	}
 	connection.fileRequests[requestID] = reply
-	err = connection.writes.enqueue(terminalWrite{kind: appKindStructured, payloads: [][]byte{encoded}, bytes: len(encoded) + 5})
+	err = connection.writes.enqueue(terminalWrite{kind: appKindStructured, payloads: [][]byte{encoded}, bytes: len(encoded) + 5, file: true})
 	connection.mu.Unlock()
 	defer func() { connection.mu.Lock(); delete(connection.fileRequests, requestID); connection.mu.Unlock() }()
 	if err != nil {

@@ -90,12 +90,15 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+	attached, err := s.attachedTerminals(ctx, nodeID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	throttled = s.addFileThrottles(ctx, attached, throttled)
 	if err = s.assignThrottleRates(ctx, throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if throttled, err = s.addTerminalCaps(ctx, nodeID, throttled); err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
+	throttled = s.addTerminalCaps(attached, throttled)
 	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -103,12 +106,16 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 	return decisions, throttled, blocked, ipRules, offline, err
 }
 
-// addTerminalCaps lists, for each workspace with a console browser terminal attached on this edge, the runtime hostname of the
-// terminal's machine with this edge's share of the workspace's terminal cap (config.FairUse.TerminalMbit divided by the edges the
-// workspace's terminals are attached on), so all the workspace's terminal traffic together stays under the cap however many sessions
-// or edges carry it. Terminals have no ingress decision of their own; the attachments (native usage authorities, renewed while
-// attached) say which workspaces to list. The cap is anti-abuse only: terminals are not counted toward the allowance and never slowed by it.
-func (s *EdgeService) addTerminalCaps(ctx context.Context, nodeID string, throttled []wire.IngressThrottle) ([]wire.IngressThrottle, error) {
+// attachedTerminal is one runtime hostname with a console browser terminal attached on this edge, the workspace that pays for it and the
+// number of edges that workspace's terminals are attached on.
+type attachedTerminal struct {
+	workspace, host string
+	edges           int64
+}
+
+// attachedTerminals lists the console browser terminals attached on this edge. Terminals have no ingress decision of their own; the
+// attachments (native usage authorities, renewed while attached) say which workspaces and hosts to list.
+func (s *EdgeService) attachedTerminals(ctx context.Context, nodeID string) ([]attachedTerminal, error) {
 	rows, err := s.store.SQL().QueryContext(ctx, `SELECT DISTINCT n.workspace_id,r.public_host,
  (SELECT count(DISTINCT a.edge_node_id) FROM paperboat.native_usage_authorities a WHERE a.workspace_id=n.workspace_id AND a.resource_kind='terminal' AND coalesce(a.attached_until,a.expires_at)>now())
 FROM paperboat.native_usage_authorities n
@@ -120,16 +127,44 @@ LIMIT 4096`, nodeID)
 		return nil, err
 	}
 	defer rows.Close()
-	capBytes := int64(s.fairUse.TerminalMbit * 125_000)
+	var out []attachedTerminal
 	for rows.Next() {
-		var workspace, host string
-		var edges int64
-		if err := rows.Scan(&workspace, &host, &edges); err != nil {
+		var t attachedTerminal
+		if err := rows.Scan(&t.workspace, &t.host, &t.edges); err != nil {
 			return nil, err
 		}
-		throttled = append(throttled, wire.IngressThrottle{Hostname: host, Workspace: workspace, BytesPerSecond: max(capBytes/max(edges, 1), minThrottleBytesPerSecond), Terminal: true})
+		out = append(out, t)
 	}
-	return throttled, rows.Err()
+	return out, rows.Err()
+}
+
+// fileThrottleHost is the hostname a terminal's FILE transfers are listed and paced under: apart from the terminal's own entry
+// (its anti-abuse cap), so the two buckets never mix.
+func fileThrottleHost(host string) string { return "files:" + host }
+
+// addFileThrottles lists, for each workspace past its included traffic that has a terminal attached here, the terminal's file-transfer key,
+// so the edge paces the files the browser tags (see edgehttp.terminalPacing) with the workspace's allowance bucket like its other
+// public traffic. The gate is cached and fails open (a slow database never throttles an upload). Typing and terminal output are not
+// listed: they are neither counted nor slowed by the allowance.
+func (s *EdgeService) addFileThrottles(ctx context.Context, attached []attachedTerminal, throttled []wire.IngressThrottle) []wire.IngressThrottle {
+	now := s.clock()
+	for _, t := range attached {
+		if s.workspaceGate.Denied(ctx, t.workspace, now) {
+			throttled = append(throttled, wire.IngressThrottle{Hostname: fileThrottleHost(t.host), Workspace: t.workspace})
+		}
+	}
+	return throttled
+}
+
+// addTerminalCaps lists each attached terminal's runtime hostname with this edge's share of the workspace's terminal cap
+// (config.FairUse.TerminalMbit divided by the edges the workspace's terminals are attached on), so all the workspace's terminal traffic
+// together stays under the cap however many sessions or edges carry it. The cap is anti-abuse only.
+func (s *EdgeService) addTerminalCaps(attached []attachedTerminal, throttled []wire.IngressThrottle) []wire.IngressThrottle {
+	capBytes := int64(s.fairUse.TerminalMbit * 125_000)
+	for _, t := range attached {
+		throttled = append(throttled, wire.IngressThrottle{Hostname: t.host, Workspace: t.workspace, BytesPerSecond: max(capBytes/max(t.edges, 1), minThrottleBytesPerSecond), Terminal: true})
+	}
+	return throttled
 }
 
 // minThrottleBytesPerSecond keeps one edge's share of a throttled workspace able to move a request at all.
