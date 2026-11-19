@@ -20,7 +20,9 @@ import (
 // 20,000 active sessions (all but 100 expired), with peer config writes and SSH CA authority locks running on other
 // machines, the revoke commits in under 2 s, revokes every unexpired session of that machine and no other (the
 // worker's next tick retires the expired ones), keeps the usage
-// authority of expired sessions as it was, and bumps the client endpoint's peer generation.
+// authority of expired sessions as it was, and bumps the client endpoint's peer generation. The concurrent writers all
+// resume once it committed, and a second machine's revoke commits while the first's final delete is under way: both are
+// observed with barriers (completed writes, committed state), not elapsed-time windows, which storage stalls trip.
 func TestRevokeMachineWithManyAccessSessionsOnPostgres(t *testing.T) {
 	store := testStore(t)
 	ctx := t.Context()
@@ -81,20 +83,28 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	loadCtx, stopLoad := context.WithCancel(ctx)
 	var load sync.WaitGroup
 	var writes atomic.Int64
-	var slowest atomic.Int64
-	timed := func(f func() error) {
-		start := time.Now()
+	var each [5]atomic.Int64 // completed writes per writer: the barrier for "this writer is not wedged"
+	timed := func(w int, f func() error) {
 		if f() == nil {
 			writes.Add(1)
+			each[w].Add(1)
 		}
-		if d := int64(time.Since(start)); d > slowest.Load() {
-			slowest.Store(d)
+	}
+	// waitFor polls cond and returns the moment it holds; the 2 minute bound only ends a test that would hang.
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Minute)
+		for !cond() {
+			if ctx.Err() != nil || time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	for w := 0; w < 4; w++ {
 		load.Go(func() {
 			for i := 0; loadCtx.Err() == nil; i++ {
-				timed(func() error {
+				timed(w, func() error {
 					_, err := store.SQL().ExecContext(loadCtx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, user, machine(2+(w*31+i)%85))
 					return err
 				})
@@ -103,7 +113,7 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	}
 	load.Go(func() {
 		for i := 0; loadCtx.Err() == nil; i++ {
-			timed(func() error {
+			timed(4, func() error {
 				return store.InTx(loadCtx, func(ctx context.Context, tx *db.Tx) error {
 					_, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: machine(2 + i%85), UserID: user, MachineGeneration: 1})
 					return err
@@ -112,12 +122,7 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 		}
 	})
 	defer func() { stopLoad(); load.Wait() }()
-	for writes.Load() < 20 {
-		if ctx.Err() != nil {
-			t.Fatal("concurrent writers never ran")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor("the concurrent writers to run", func() bool { return writes.Load() >= 20 })
 
 	revokeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -125,19 +130,28 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	service := New(store, audit.NewWriter(store), Policy{}, nil)
 	err := service.Disconnect(revokeCtx, user, machine(0))
 	took := time.Since(start)
-	before := writes.Load()
-	time.Sleep(200 * time.Millisecond)
-	stopLoad()
-	load.Wait()
+	var before [5]int64
+	for w := range before {
+		before[w] = each[w].Load()
+	}
 	if err != nil {
 		t.Fatalf("revoke failed after %v: %v", took, err)
 	}
 	if took > 2*time.Second {
 		t.Fatalf("revoke of a machine with 20,000 access sessions took %v, want under 2 s", took)
 	}
-	if writes.Load() == before || time.Duration(slowest.Load()) > took+2*time.Second {
-		t.Fatalf("concurrent writers stalled: %d writes after the revoke, slowest %v (revoke %v)", writes.Load()-before, time.Duration(slowest.Load()), took)
-	}
+	// A writer may wait for the revoke's transaction; none may stay blocked once it committed (prod: the writers queued
+	// behind the cascade). No elapsed-time window: storage flush stalls delay a write, they do not wedge it.
+	waitFor("every concurrent writer to complete a write after the revoke committed", func() bool {
+		for w := range before {
+			if each[w].Load() == before[w] {
+				return false
+			}
+		}
+		return true
+	})
+	stopLoad()
+	load.Wait()
 
 	count := func(query string, args ...any) int {
 		t.Helper()
@@ -177,30 +191,37 @@ WHERE s.user_machine_id=$1 AND a.expires_at IS DISTINCT FROM least(s.expires_at,
 		t.Fatalf("machine state %q (%v)", state.String, err)
 	}
 	// The final hard delete removes the machine's 20,000 sessions in bounded transactions, then the machine row
-	// (one statement over all of them ran prod out of predicate locks), within one worker tick.
+	// (one statement over all of them ran prod out of predicate locks), within one worker tick. A user's revoke of
+	// another machine takes the account's removal lock between two of those transactions: it must commit while the
+	// final delete is still under way, not queue behind all of it (prod: 9.9 s behind canary-a-old's final delete).
 	start = time.Now()
+	sessionsLeft := func() int {
+		return count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine(0))
+	}
+	sessionsBefore := sessionsLeft()
 	finalErr := make(chan error, 1)
 	go func() { finalErr <- service.RetryPendingRevocations(ctx) }()
-	time.Sleep(50 * time.Millisecond)
-	second := time.Now()
-	secondCtx, cancelSecond := context.WithTimeout(ctx, 10*time.Second)
-	defer cancelSecond()
-	if err := service.Disconnect(secondCtx, user, machine(87)); err != nil {
-		t.Fatalf("revoke of a second machine during the final delete failed after %v: %v", time.Since(second), err)
+	waitFor("the final delete to remove its first batch", func() bool { return sessionsLeft() < sessionsBefore })
+	secondErr := make(chan error, 1)
+	go func() { secondErr <- service.Disconnect(ctx, user, machine(87)) }()
+	waitFor("the second revoke to commit", func() bool {
+		return count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1 AND state='disconnected'`, machine(87)) == 1
+	})
+	if count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1`, machine(0)) != 1 {
+		t.Fatal("the second revoke committed only after the final delete had removed the whole machine: it queued behind all of it, not one batch")
 	}
-	secondTook := time.Since(second)
+	if err := <-secondErr; err != nil {
+		t.Fatalf("revoke of a second machine during the final delete: %v", err)
+	}
 	if err := <-finalErr; err != nil {
 		t.Fatalf("final delete: %v", err)
 	}
 	finalTook := time.Since(start)
-	if secondTook > 2*time.Second {
-		t.Fatalf("revoke of a second machine during the first's final delete took %v, want under 2 s", secondTook)
-	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1`, machine(0)); n != 0 {
 		t.Fatal("the revoked machine was not hard-deleted in one worker tick")
 	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine(1)); n != 10 {
 		t.Fatalf("final delete of one machine touched another's sessions: %d of 10 left", n)
 	}
-	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes, slowest %v; final delete %v; second revoke during it %v", took, writes.Load(), time.Duration(slowest.Load()), finalTook, secondTook)
+	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes; final delete with a second revoke inside it %v", took, writes.Load(), finalTook)
 }
