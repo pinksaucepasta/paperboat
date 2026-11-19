@@ -1,6 +1,7 @@
 package datacarrier
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -8,7 +9,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	quic "github.com/quic-go/quic-go"
@@ -403,9 +403,10 @@ func (l *QUICListener) closed() bool {
 
 // A final keepalive restarts QUIC's idle clock; idle plus keepalive stays within 15 s.
 func endpointQUICConfig(config Config) *quic.Config {
+	idle := cmp.Or(config.QUICIdleTimeout, defaultQUICIdleTimeout) // keepalive at half the idle: 10 s idle, 5 s keepalive
 	return &quic.Config{
-		MaxIdleTimeout:                 10 * time.Second,
-		KeepAlivePeriod:                min(config.KeepAliveInterval, 5*time.Second),
+		MaxIdleTimeout:                 idle,
+		KeepAlivePeriod:                min(config.KeepAliveInterval, idle/2),
 		MaxIncomingStreams:             int64(config.MaximumStreams + config.QueueDepth + 1),
 		MaxIncomingUniStreams:          -1,
 		InitialStreamReceiveWindow:     uint64(config.StreamWindow),

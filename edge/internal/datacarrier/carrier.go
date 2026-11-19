@@ -25,6 +25,7 @@ const (
 	defaultQueueDepth        = connectorprotocol.DataCarrierDefaultQueueDepth
 	defaultStreamWindow      = connectorprotocol.DataCarrierDefaultStreamWindow
 	defaultKeepAliveInterval = connectorprotocol.DataCarrierDefaultKeepAlive
+	defaultQUICIdleTimeout   = 10 * time.Second
 	defaultWriteLimit        = connectorprotocol.DataCarrierDefaultWriteLimit
 	defaultOpenLimit         = connectorprotocol.DataCarrierDefaultOpenLimit
 	defaultCloseLimit        = connectorprotocol.DataCarrierDefaultCloseLimit
@@ -99,6 +100,7 @@ type Config struct {
 	QueueDepth           int
 	StreamWindow         uint32
 	KeepAliveInterval    time.Duration
+	QUICIdleTimeout      time.Duration // the endpoint's QUIC idle timeout; zero is defaultQUICIdleTimeout (production)
 	ConnectionWriteLimit time.Duration
 	StreamOpenLimit      time.Duration
 	StreamCloseLimit     time.Duration
@@ -173,6 +175,9 @@ func (c Config) validate(allowUnboundIdentity bool) error {
 	}
 	if c.StreamWindow < defaultStreamWindow || c.StreamWindow > maxStreamWindow {
 		return fmt.Errorf("%w: stream window must be in [%d,%d]", ErrInvalidConfig, defaultStreamWindow, maxStreamWindow)
+	}
+	if c.QUICIdleTimeout < 0 || c.QUICIdleTimeout > time.Hour {
+		return fmt.Errorf("%w: QUIC idle timeout is outside the supported range", ErrInvalidConfig)
 	}
 	if c.KeepAliveInterval <= 0 || c.KeepAliveInterval > time.Hour || !validTimeout(c.ConnectionWriteLimit) || !validTimeout(c.StreamOpenLimit) || !validTimeout(c.StreamCloseLimit) {
 		return fmt.Errorf("%w: transport timeout is outside the supported range", ErrInvalidConfig)
