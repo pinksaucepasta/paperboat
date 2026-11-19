@@ -22,11 +22,15 @@ const kinds: Record<string, { label: string; team?: boolean }> = {
   public_tcp: { label: "Public TCP tunnels" },
   seats: { label: "Seats", team: true },
   viewers_per_terminal: { label: "Viewers per shared terminal" },
+  sso: { label: "SSO add-on", team: true },
+  scim: { label: "SCIM add-on", team: true },
 }
+/** The add-ons are on or off: their grant has no value (amount 1). */
+const isAddon = (kind: string) => kind === "sso" || kind === "scim"
 const label = (kind: string) => (kind === "bandwidth" ? "Bandwidth" : kinds[kind]?.label ?? kind)
 /** 1234567 as "1,234,567" (not toLocaleString: its output depends on the viewer's locale). */
 const count = (v: number) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-const amount = (g: Grant) => (g.kind === "bandwidth" ? formatBytes(g.amount) : count(g.amount))
+const amount = (g: Grant) => (g.kind === "bandwidth" ? formatBytes(g.amount) : isAddon(g.kind) ? "On" : count(g.amount))
 
 /** An <input type=datetime-local> value to RFC 3339 UTC, "" when empty, undefined when it is not a future time. */
 const endsAt = (local: string, now: number): string | undefined => {
@@ -54,7 +58,7 @@ export function Entitlements({ workspaceId, scope }: { workspaceId: string; scop
   const bytes = Number(gb)
   const gbOk = /^\d{1,7}(\.\d{1,3})?$/.test(gb) && bytes > 0
   const limitKinds = Object.entries(kinds).filter(([, k]) => !k.team || scope === "team")
-  const valueOk = /^\d{1,9}$/.test(value) && Number(value) >= 1
+  const valueOk = isAddon(kind) || (/^\d{1,9}$/.test(value) && Number(value) >= 1)
   const ending = endsAt(ends, now)
   const plan = e.bandwidth.plan_bytes
   const running = e.grants.filter((g) => g.running)
@@ -77,19 +81,19 @@ export function Entitlements({ workspaceId, scope }: { workspaceId: string; scop
         </ActionDialog>
         <ActionDialog
           title={`Override a limit of ${workspaceId}`}
-          description="Replaces the plan's value for this workspace, higher or lower, and a newer override of the same limit replaces this one."
+          description="Replaces the plan's value for this workspace, higher or lower, and a newer override of the same limit replaces this one. The SSO and SCIM add-ons are switched on instead, with no value."
           target={workspaceId}
           submitLabel="Set limit"
           valid={valueOk && ending !== undefined}
           trigger={(open) => <Button variant="outline" size="lg" onClick={open} data-action="override-limit">Override a limit</Button>}
-          run={(h) => operatorAction("POST", path, h, { entitlement: kind, amount: Number(value), ...(ending ? { ends_at: ending } : {}) })}
+          run={(h) => operatorAction("POST", path, h, { entitlement: kind, amount: isAddon(kind) ? 1 : Number(value), ...(ending ? { ends_at: ending } : {}) })}
           onDone={() => {
             setValue("")
             setEnds("")
           }}
         >
           <SelectField label="Limit" value={kind} onChange={setKind} options={limitKinds.map(([k, v]): [string, string] => [k, v.label])} />
-          <TextField label="Value" value={value} onChange={setValue} inputMode="numeric" hint="The new limit: at least 1." />
+          {!isAddon(kind) && <TextField label="Value" value={value} onChange={setValue} inputMode="numeric" hint="The new limit: at least 1." />}
           <TextField label="Ends" optional type="datetime-local" value={ends} onChange={setEnds} hint={ending === undefined ? "Pick a time in the future." : "Empty keeps it until you revoke it."} />
         </ActionDialog>
       </div>

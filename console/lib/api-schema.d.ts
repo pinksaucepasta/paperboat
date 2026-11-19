@@ -5623,7 +5623,7 @@ export interface paths {
         put?: never;
         /**
          * Operator grant bandwidth or override a limit
-         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), sso or scim (teams; the add-on switched on, amount 1), or viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.
          */
         post: operations["post_v1_admin_billing_workspaces_workspace_id_entitlements"];
         delete?: never;
@@ -7401,6 +7401,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/billing/workspaces/teams/{team_id}/addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Purchase, switch or removal of the SSO/SCIM add-on
+         * @description Sets the team add-on (sso, scim, sso_scim; empty removes it) on the team subscription. Adding or switching charges the prorated difference now and needs accept_refund_policy; removing gives no credit and the add-on runs to the end of the paid period.
+         */
+        put: operations["workspace_team_addon_change"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/billing/workspaces/teams/{team_id}/seats": {
         parameters: {
             query?: never;
@@ -7874,7 +7894,7 @@ export interface paths {
         put?: never;
         /**
          * Open the WorkOS Admin Portal
-         * @description Creates the team WorkOS organization on first use and returns a short-lived Admin Portal link. Team needs business.sso_min_seats seats.
+         * @description Creates the team WorkOS organization on first use and returns a short-lived Admin Portal link. Needs the SSO add-on (domain verification, sso) or the SCIM add-on (dsync): 409 sso_needs_addon or scim_needs_addon. A removed add-on runs to the end of the paid period.
          */
         post: operations["team_identity_portal"];
         delete?: never;
@@ -11883,12 +11903,26 @@ export interface components {
             allowance_granted_bytes?: number;
             /** @description An operator's override of the team's seats. */
             seats_granted?: number;
+            /**
+             * @description The SSO/SCIM add-on the team pays for.
+             * @enum {string}
+             */
+            addon?: "sso" | "scim" | "sso_scim";
+            /**
+             * Format: date-time
+             * @description Set once the add-on was removed: it keeps working until then.
+             */
+            addon_until?: string;
+            /** @description The team may use single sign-on (paid add-on or operator grant). */
+            sso_addon: boolean;
+            /** @description The team may use directory sync (paid add-on or operator grant). */
+            scim_addon: boolean;
         };
         WorkspaceBillingProduct: {
             code: string;
             name: string;
             /** @enum {string} */
-            catalog_type: "personal_subscription" | "team_subscription" | "top_up";
+            catalog_type: "personal_subscription" | "team_subscription" | "top_up" | "team_addon";
             /** @description Verified currency minor units. Null is unknown, not free. */
             unit_amount: number | null;
             currency: string;
@@ -12125,6 +12159,11 @@ export interface components {
             observed_at: string;
             /** @description A support comp: an active plan with no Stripe subscription behind it. */
             granted: boolean;
+            /**
+             * @description The team's paid SSO/SCIM add-on.
+             * @enum {string}
+             */
+            addon?: "sso" | "scim" | "sso_scim";
         };
         OperatorControlOperation: {
             id: string;
@@ -12268,7 +12307,7 @@ export interface components {
             display_name: string;
             provider_price_id: string;
             /** @enum {string} */
-            catalog_type: "personal_subscription" | "team_subscription" | "top_up";
+            catalog_type: "personal_subscription" | "team_subscription" | "top_up" | "team_addon";
             active: boolean;
             allowance_bytes: number | null;
             /** @description Top-up products only: the bytes one unit adds (must equal the fixed top-up unit). */
@@ -13527,9 +13566,6 @@ export interface components {
         };
         /** @description Team SSO and directory sync (PLAN F19), as last read from WorkOS. */
         TeamIdentityStatus: {
-            eligible: boolean;
-            min_seats: number;
-            seats: number;
             organization: boolean;
             can_manage: boolean;
             sso: {
@@ -13567,6 +13603,8 @@ export interface components {
                 synced_at?: string;
                 error?: string;
             };
+            sso_addon: boolean;
+            scim_addon: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -14562,7 +14600,7 @@ export interface components {
              * @description grant only.
              * @enum {string}
              */
-            entitlement?: "bandwidth" | "machines" | "publications" | "browser_terminals" | "public_tcp" | "seats" | "viewers_per_terminal";
+            entitlement?: "bandwidth" | "machines" | "publications" | "browser_terminals" | "public_tcp" | "seats" | "viewers_per_terminal" | "sso" | "scim";
             /**
              * Format: int64
              * @description grant only: bytes for bandwidth, else the limit; at least 1, and seats at most 128 (the most a team can hold).
@@ -32718,6 +32756,47 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    workspace_team_addon_change: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-CSRF-Token": string;
+            };
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    addon: "" | "sso" | "scim" | "sso_scim";
+                    accept_refund_policy: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Authorized workspace result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BillingWorkspace"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            402: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
             503: components["responses"]["Error"];

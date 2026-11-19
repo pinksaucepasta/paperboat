@@ -169,6 +169,25 @@ export const seatPreviewQuery = (workspace: Workspace, quantity: number) =>
 export const setSeats = (workspace: Workspace, quantity: number) =>
   post(`${billingPath(workspace)}/seats`, { quantity })
 
+/** The SSO and SCIM add-ons of a team ("" is none); their products are `addon-<kind>-<interval>`. */
+export type Addon = "" | "sso" | "scim" | "sso_scim"
+export const addonNames: Record<Addon, string> = { "": "None", sso: "SSO", scim: "SCIM", sso_scim: "SSO and SCIM" }
+
+/** The add-on product a team on this interval would buy, with its price. */
+export const addonProduct = (products: BillingProduct[] | undefined, addon: Addon, interval: string) =>
+  products?.find((p) => p.code === `addon-${addon}-${interval}` && p.price_verified)
+
+/**
+ * Sets the team's add-on ("" removes it). Adding or switching charges the prorated difference now, so the server needs the
+ * buyer's acceptance of the refund policy (the checkout consent, legal/refunds).
+ */
+export const setAddon = (workspace: Workspace, addon: Addon) =>
+  api<BillingWorkspace>(`${billingPath(workspace)}/addon`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
+    body: JSON.stringify({ addon, accept_refund_policy: addon !== "" }),
+  })
+
 /**
  * Top-up size rules (user decision 2026-10-18): multiples of 100 GB, at most 10,000 GB per
  * purchase. The server enforces them and publishes them on the top-up product as `unit_bytes`

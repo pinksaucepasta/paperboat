@@ -50,7 +50,7 @@ In the workspace policy, `role:billing` and `role:auditor` name the people holdi
 
 ## Single sign-on (SAML and OIDC)
 
-Teams with at least `business.sso_min_seats` seats (10) can sign their members in through their
+Teams of any size with the **SSO add-on** (see Billing) can sign their members in through their
 company identity provider: Okta, Microsoft Entra ID, Google Workspace, OneLogin, JumpCloud or any
 SAML 2.0 or OpenID Connect provider. Paperboat uses WorkOS for this; the company's IT admin sets
 it up in the WorkOS Admin Portal, which has a step-by-step guide for every provider. Paperboat
@@ -81,7 +81,8 @@ through the team's SSO become members automatically (a seat is added).
 
 ## Directory sync (SCIM)
 
-Connect your directory from the same Security page (`pb team scim setup`). Paperboat then follows
+Directory sync needs the **SCIM add-on** (see Billing). Connect your directory from the same
+Security page (`pb team scim setup`). Paperboat then follows
 it within seconds:
 
 - Active directory users become members. Someone without a Paperboat account gets a seat held
@@ -270,6 +271,16 @@ open **Manage billing** in the console Billing page. It is the Stripe Customer P
 and receipts (view, download, pay), payment methods, and the billing email, company name, address
 and tax ID printed on every later invoice. Stripe stores all of it; Paperboat keeps no copy.
 
+- **SSO and SCIM add-ons:** paid monthly add-ons on the Team plan at any team size, set in the
+  console Billing page (`PUT /v1/billing/workspaces/teams/{team_id}/addon`, owner and billing
+  admins, refund-policy consent required): SSO $100, SCIM $100, both $150 a month; a year costs
+  10 months. Each is a second item on the team's Stripe subscription (item metadata
+  `paperboat_addon`). Adding or switching is charged now, prorated; removing gives no credit and the
+  add-on keeps working to the end of the paid period. The prices are `business.sso_addon_cents`,
+  `scim_addon_cents`, `sso_scim_addon_cents` and `addon_yearly_months`; the Stripe prices are products
+  `addon-{sso,scim,sso_scim}-{month,year}` (catalog type `team_addon`) and the operator product
+  editor refuses a price that differs. Operators can grant either add-on without a subscription
+  (entitlement kinds `sso`, `scim`).
 - **Tax:** Checkout asks companies for their tax ID, name and address. Stripe Tax computes VAT and
   sales tax only when the server setting `business.stripe_tax` (environment
   `PAPERBOAT_BILLING_STRIPE_TAX=true`) is on; it is turned on once the business has tax

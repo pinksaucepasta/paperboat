@@ -2,7 +2,7 @@
  * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
  * for personal use and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
-import { auditRetention, bandwidthCell, plans, publicTcp, speeds, ssoMinSeats, teamTrial, topUp } from "./site"
+import { auditRetention, bandwidthCell, plans, publicTcp, speeds, addonPrices, addons, teamTrial, topUp } from "./site"
 
 const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
   plans[0][key],
@@ -58,7 +58,7 @@ export const featureGroups: { title: string; rows: { feature: string; cells: [Pl
       { feature: "Audit log kept for", cells: [auditRetention[0], auditRetention[1], auditRetention[2]] },
       { feature: "Team members with lasting access to shared machines", cells: [false, false, true] },
       { feature: "Roles: owner, admin, billing, auditor, member", cells: [false, false, true] },
-      { feature: "Single sign-on (SAML, OIDC) and directory sync (SCIM)", cells: [false, false, `From ${ssoMinSeats} seats`] },
+      { feature: "Single sign-on (SAML, OIDC) and directory sync (SCIM), as add-ons", cells: [false, false, addonPrices] },
       { feature: "Audit log export and streaming", cells: [false, false, true] },
       { feature: "Session recordings archived to your own S3 bucket, with recording by rule", cells: [false, false, true] },
       { feature: "Invoices and receipts", cells: [false, true, true] },
@@ -79,7 +79,7 @@ export const faq = [
   },
   {
     q: "Are features locked behind a paid plan?",
-    a: `No. Free and Pro have the same features and differ in limits and bandwidth. Team adds what a company needs: members, roles and audit log export, and single sign-on and directory sync for teams of ${ssoMinSeats} seats or more.`,
+    a: `No. Free and Pro have the same features and differ in limits and bandwidth. Team adds what a company needs: members, roles and audit log export, and, for any team size, single sign-on and directory sync as paid add-ons (${addonPrices}). A year of an add-on costs ${addons.yearlyMonths} months.`,
   },
   {
     q: "Do I need Team to share with someone?",

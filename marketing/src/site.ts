@@ -94,8 +94,10 @@ export const topUp = { size: "100 GB", price: "$5" }
 /** Audit log retention per plan (server config business.audit_retention_*; server/docs/teams-business.md). */
 export const auditRetention = ["30 days", "90 days", "365 days"] as const
 
-/** Single sign-on and directory sync need a team of at least this many seats (server config business.sso_min_seats). */
-export const ssoMinSeats = 10
+/** SSO and SCIM are paid add-ons on a Team at any size, dollars a month (server config business.sso_addon_cents, scim_addon_cents,
+ * sso_scim_addon_cents); a year costs addon_yearly_months months. checks/site-check.mjs compares them with business.go. */
+export const addons = { sso: 100, scim: 100, both: 150, yearlyMonths: 10 }
+export const addonPrices = `SSO $${addons.sso}/mo, SCIM $${addons.scim}/mo, both $${addons.both}/mo`
 
 /** Public raw-TCP tunnel addresses per plan (server config billing.limits.public_tcp). */
 export const publicTcp = ["1", "10", "10 per seat"] as const

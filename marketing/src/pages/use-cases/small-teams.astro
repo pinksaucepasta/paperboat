@@ -2,12 +2,12 @@
 import UseCase from "../../layouts/UseCase.astro"
 import Beat from "../../components/Beat.astro"
 import Term from "../../components/Term.astro"
-import { plans, ssoMinSeats } from "../../site"
+import { addonPrices, plans } from "../../site"
 
 const faq = [
   {
     q: "Do we need the Team plan to work together?",
-    a: `Sharing a live terminal or a preview link works on every plan. Team, at ${plans[2].price} a seat a month, adds lasting access to each other's machines, roles and an exportable audit log. Single sign-on starts at ${ssoMinSeats} seats.`,
+    a: `Sharing a live terminal or a preview link works on every plan. Team, at ${plans[2].price} a seat a month, adds lasting access to each other's machines, roles and an exportable audit log. Single sign-on and directory sync are add-ons at any team size (${addonPrices}).`,
   },
   {
     q: "Who owns a machine a member brings?",

@@ -118,7 +118,7 @@ if (existsSync(join(repo, "cli/cmd/pb"))) {
 // Numbers that have a source in the code are compared with it, when this build runs inside the repository.
 //   Checked here: machine, preview/tunnel, browser-terminal and public-TCP limits, the free bandwidth
 //   allowance, the trial length, shared-terminal viewers (server/internal/config/config.go); audit log
-//   retention and the SSO seat minimum (config/business.go); the top-up size (billing/workspace_topups.go);
+//   retention and the SSO and SCIM add-on prices (config/business.go); the top-up size (billing/workspace_topups.go);
 //   the file-send limits (config.go).
 //   NOT checked, because no code holds them (they live in Stripe or the database): the prices ($8, $80,
 //   $15, $150), the 100 GB of Pro and Team, the top-up price ($5), the 7-day grace after a failed payment.
@@ -145,7 +145,9 @@ if (serverConfig) {
   expect("/pricing/", `${number(serverConfig, /ViewersPerSharedTerminal: (\d+)/)} possible viewers`, "shared terminal viewers")
   const days = (plan) => number(business, new RegExp(`AuditRetention${plan}: +(\\d+) \\* day`))
   expect("/pricing/", `Audit log kept for ${days("Free")} days ${days("Pro")} days ${days("Team")} days`, "audit log retention")
-  expect("/pricing/", `From ${number(business, /SSOMinSeats: (\d+)/)} seats`, "SSO seat minimum")
+  const dollars = (field) => number(business, new RegExp(`\\b${field}: (\\d+)`)) / 100
+  expect("/pricing/", `SSO $${dollars("SSOAddonCents")}/mo, SCIM $${dollars("SCIMAddonCents")}/mo, both $${dollars("SSOSCIMAddonCents")}/mo`, "SSO and SCIM add-on prices")
+  expect("/pricing/", `A year of an add-on costs ${number(business, /AddonYearlyMonths: (\d+)/)} months`, "add-on yearly price")
   expect("/pricing/", `per ${number(source("server/internal/billing/workspace_topups.go"), /TopupUnitBytes int64 = ([\d_]+)/) / 1e9} GB`, "top-up size")
   expect("/features/files/", `Up to ${number(serverConfig, /AutomaticMaxBatchBytes: ([\d_]+)/) / 1e9} GB per send`, "file size limit")
   expect("/features/files/", `Up to ${number(serverConfig, /MaxBatchFiles: (\d+)/)} per send`, "files per send")

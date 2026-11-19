@@ -15,7 +15,7 @@ type Product = Data<"/v1/admin/billing/products">["products"][number]
 const codePattern = /^[a-z][a-z0-9_-]{1,63}$/
 /** The one top-up unit the server accepts (shared constant on the server: billing.TopupUnitBytes). */
 const topUpUnitBytes = 100_000_000_000
-const catalogTypes: [string, string][] = [["personal_subscription", "Personal subscription"], ["team_subscription", "Team subscription"], ["top_up", "Extra bandwidth top-up"]]
+const catalogTypes: [string, string][] = [["personal_subscription", "Personal subscription"], ["team_subscription", "Team subscription"], ["top_up", "Extra bandwidth top-up"], ["team_addon", "Team SSO / SCIM add-on"]]
 
 /** A non-negative whole number of bytes from a text field; "" means none (null). */
 const bytesOrNull = (text: string) => (text.trim() === "" ? null : Number(text))

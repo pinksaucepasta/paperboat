@@ -158,6 +158,10 @@ const sentences: Record<string, string> = {
   file_transfer_path_not_allowed:
     "Unlimited transfers don’t use Paperboat’s relays. Connect the machines directly or add your own relay.",
   team_sso_required: "This team requires your company's SSO. Sign out and sign in with your work email.",
+  sso_needs_addon: "Single sign-on needs the SSO add-on. Add it under Billing.",
+  scim_needs_addon: "Directory sync needs the SCIM add-on. Add it under Billing.",
+  addon_unavailable: "This add-on is not available for sale yet.",
+  refund_policy_required: "Accept the Refund Policy to add or change an add-on.",
   team_suspended:
     "This team is suspended, so changes are paused. Ask the team owner to restore billing or resume the team.",
 }

@@ -9888,7 +9888,9 @@
           "topup_bytes_purchased",
           "topups",
           "limits",
-          "granted"
+          "granted",
+          "sso_addon",
+          "scim_addon"
         ],
         "properties": {
           "limits": {
@@ -10169,6 +10171,28 @@
           "seats_granted": {
             "type": "integer",
             "description": "An operator's override of the team's seats."
+          },
+          "addon": {
+            "type": "string",
+            "enum": [
+              "sso",
+              "scim",
+              "sso_scim"
+            ],
+            "description": "The SSO/SCIM add-on the team pays for."
+          },
+          "addon_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Set once the add-on was removed: it keeps working until then."
+          },
+          "sso_addon": {
+            "type": "boolean",
+            "description": "The team may use single sign-on (paid add-on or operator grant)."
+          },
+          "scim_addon": {
+            "type": "boolean",
+            "description": "The team may use directory sync (paid add-on or operator grant)."
           }
         }
       },
@@ -10197,7 +10221,8 @@
             "enum": [
               "personal_subscription",
               "team_subscription",
-              "top_up"
+              "top_up",
+              "team_addon"
             ]
           },
           "unit_amount": {
@@ -11085,6 +11110,15 @@
           "granted": {
             "type": "boolean",
             "description": "A support comp: an active plan with no Stripe subscription behind it."
+          },
+          "addon": {
+            "type": "string",
+            "enum": [
+              "sso",
+              "scim",
+              "sso_scim"
+            ],
+            "description": "The team's paid SSO/SCIM add-on."
           }
         },
         "required": [
@@ -11643,7 +11677,8 @@
             "enum": [
               "personal_subscription",
               "team_subscription",
-              "top_up"
+              "top_up",
+              "team_addon"
             ]
           },
           "active": {
@@ -16330,24 +16365,14 @@
         "description": "Team SSO and directory sync (PLAN F19), as last read from WorkOS.",
         "additionalProperties": true,
         "required": [
-          "eligible",
-          "min_seats",
-          "seats",
           "organization",
           "sso",
           "directory",
-          "can_manage"
+          "can_manage",
+          "sso_addon",
+          "scim_addon"
         ],
         "properties": {
-          "eligible": {
-            "type": "boolean"
-          },
-          "min_seats": {
-            "type": "integer"
-          },
-          "seats": {
-            "type": "integer"
-          },
           "organization": {
             "type": "boolean"
           },
@@ -16505,6 +16530,12 @@
               "groups",
               "mapped_only"
             ]
+          },
+          "sso_addon": {
+            "type": "boolean"
+          },
+          "scim_addon": {
+            "type": "boolean"
           }
         }
       },
@@ -20035,7 +20066,9 @@
               "browser_terminals",
               "public_tcp",
               "seats",
-              "viewers_per_terminal"
+              "viewers_per_terminal",
+              "sso",
+              "scim"
             ],
             "description": "grant only."
           },
@@ -46833,7 +46866,7 @@
           }
         ],
         "x-operator-capability": "admin",
-        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result. Operator-Target is the workspace id (`personal:<account>` or `team:<team>`). `entitlement` is `bandwidth` (amount in bytes, added to the allowance together with other running bandwidth grants) or one of machines, publications, browser_terminals, public_tcp, seats (teams), sso or scim (teams; the add-on switched on, amount 1), or viewers_per_terminal (amount is the limit; it replaces the plan's value and an earlier override of that kind). `ends_at` (RFC 3339, in the future) ends it by itself; without it the grant runs until revoked. Enforcement reads the grants table: no other change is needed.",
         "requestBody": {
           "required": true,
           "content": {
@@ -55102,6 +55135,112 @@
         }
       }
     },
+    "/v1/billing/workspaces/teams/{team_id}/addon": {
+      "put": {
+        "operationId": "workspace_team_addon_change",
+        "summary": "Purchase, switch or removal of the SSO/SCIM add-on",
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingWorkspace"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "402": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "addon",
+                  "accept_refund_policy"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "addon": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "sso",
+                      "scim",
+                      "sso_scim"
+                    ]
+                  },
+                  "accept_refund_policy": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Sets the team add-on (sso, scim, sso_scim; empty removes it) on the team subscription. Adding or switching charges the prorated difference now and needs accept_refund_policy; removing gives no credit and the add-on runs to the end of the paid period."
+      }
+    },
     "/v1/billing/workspaces/teams/{team_id}/seats": {
       "post": {
         "operationId": "workspace_team_seat_change",
@@ -57207,7 +57346,7 @@
       "post": {
         "operationId": "team_identity_portal",
         "summary": "Open the WorkOS Admin Portal",
-        "description": "Creates the team WorkOS organization on first use and returns a short-lived Admin Portal link. Team needs business.sso_min_seats seats.",
+        "description": "Creates the team WorkOS organization on first use and returns a short-lived Admin Portal link. Needs the SSO add-on (domain verification, sso) or the SCIM add-on (dsync): 409 sso_needs_addon or scim_needs_addon. A removed add-on runs to the end of the paid period.",
         "security": [
           {
             "cookieSession": [],
