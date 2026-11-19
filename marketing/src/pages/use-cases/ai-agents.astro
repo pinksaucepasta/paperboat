@@ -2,6 +2,7 @@
 import UseCase from "../../layouts/UseCase.astro"
 import Beat from "../../components/Beat.astro"
 import Term from "../../components/Term.astro"
+import { installerBase, previewDomain } from "../../site"
 
 const faq = [
   {
@@ -30,14 +31,28 @@ const faq = [
   description="Keep coding agents running on your other machines, with scoped, expiring access and secrets they never see."
   headline="Let your agents work on any machine"
   faq={faq}
-  related={["exec", "env", "teams", "recordings"]}
+  related={["recipes", "env", "exec", "previews"]}
 >
   <p slot="lede">Run Claude Code or Codex on the machine with the code and the GPU. It keeps working when you close the laptop, with exactly the access you give it.</p>
   <Term slot="aside" lines={["$ pb connect gpu-box", "ana@gpu-box:~/repo$ claude", "# close the laptop; the agent keeps going", "$ pb connect gpu-box"]} />
 
+  <Beat id="recipe-title" title="One line gives an agent its own machine">
+    <p>Put one line in a sandbox template or a CI job. The machine pairs, loads its secrets and opens a preview, set up the way the recipe says.</p>
+    <Term
+      slot="visual"
+      title="agent-3"
+      lines={["# in your sandbox or CI job", "$ curl -fsSL \\", `    ${installerBase} \\`, "    | PB_RECIPE=$TOKEN sh", "✓ Paired as agent-3", "✓ Secrets loaded from agent-env", "✓ Preview live for 2 hours"]}
+    />
+  </Beat>
+
+  <Beat id="secrets-title" title="Secrets that never touch the image" flip>
+    <p>Keep API keys in a vault. Sandboxes get them when they start, and a command gets them only while it runs.</p>
+    <Term slot="visual" lines={["$ pb env vault create agent-env", "$ pb env set API_KEY --vault agent-env", "# on the sandbox", "$ pb env run -- npm test"]} />
+  </Beat>
+
   <Beat id="token-title" title="A token that does one job">
-    <p>Tag the machines an agent may use, give it a token for those machines and those actions, and let it expire in a week.</p>
-    <Term slot="visual" lines={["$ pb machine tag build-01 add agents", "$ pb api-token create agent --expires 7d \\", "    --scope-file agent-scope.json"]} />
+    <p>Tag the machines an agent may use and give it a token for those machines and actions that expires in a week. SSH works with no keys to copy.</p>
+    <Term slot="visual" lines={["$ pb api-token create agent --expires 7d \\", "    --scope-file agent-scope.json", "$ pb ssh build-01"]} />
   </Beat>
 
   <Beat id="exec-title" title="Commands a model can't get wrong" flip>
@@ -45,8 +60,13 @@ const faq = [
     <Term slot="visual" lines={["$ pb exec build-01 -- make test", "ok   128 tests passed", "$ echo $?", "0"]} />
   </Beat>
 
-  <Beat id="watch-title" title="Watch it, or step in">
-    <p>Share the agent's terminal and a teammate sees it live. Record it, and replay every step later.</p>
-    <Term slot="visual" lines={["$ pb recordings start", "$ pb session share S12 --team acme --all"]} />
+  <Beat id="preview-title" title="See what it built">
+    <p>The agent puts its dev server on a link, and you open it from your phone. Every request is kept.</p>
+    <Term slot="visual" lines={["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain}`]} />
+  </Beat>
+
+  <Beat id="watch-title" title="Watch it, or cut it off" flip>
+    <p>Record its terminal and replay every step later. If something looks wrong, revoke the machine and it is disconnected at once.</p>
+    <Term slot="visual" lines={["$ pb recordings start", "$ pb machine revoke agent-3"]} />
   </Beat>
 </UseCase>

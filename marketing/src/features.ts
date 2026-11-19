@@ -140,16 +140,19 @@ export const useCases = [
   {
     slug: "ai-agents",
     name: "AI agents",
-    line: "Give a coding agent your other machines, with a token that can do only what you allow.",
+    icon: "robot",
+    line: "Your machines, with only the access you allow.",
+  },
+  {
+    slug: "teams",
+    name: "Teams",
+    icon: "users-three",
+    line: "Shared machines, team secrets and an audit log.",
   },
   {
     slug: "homelab",
     name: "Home lab",
-    line: "Reach the server at home from anywhere, with nothing opened on your router.",
-  },
-  {
-    slug: "small-teams",
-    name: "Small teams",
-    line: "Shared machines, review links and team secrets, in one place.",
+    icon: "house-line",
+    line: "Every app at home by a short name.",
   },
 ] as const

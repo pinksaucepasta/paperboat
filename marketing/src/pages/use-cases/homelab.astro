@@ -3,7 +3,7 @@ import UseCase from "../../layouts/UseCase.astro"
 import Beat from "../../components/Beat.astro"
 import Term from "../../components/Term.astro"
 import Addresses from "../../components/Addresses.astro"
-import { localDomain, plans, tunnelDomain } from "../../site"
+import { localDomain, plans } from "../../site"
 
 const addresses: [string, string][] = [
   [`grafana.homelab.${localDomain}`, "Grafana"],
@@ -40,27 +40,42 @@ const faq = [
   slug="homelab"
   name="Home lab"
   title="Reach your home lab from anywhere | Paperboat"
-  description="Reach your home server and its apps from anywhere, even behind CGNAT. No port forwarding, no dynamic DNS."
+  description="Open every app at home by a short name, share one on your own domain, and sync your config. No port forwarding."
   headline="Your home lab, from anywhere"
   faq={faq}
-  related={["private-access", "ssh", "tunnels", "self-hosting"]}
+  related={["private-access", "tunnels", "files", "self-hosting"]}
   compare={["tailscale", "cloudflare-tunnel", "zerotier"]}
 >
-  <p slot="lede">Install Paperboat on the server at home and on your laptop. From any café or hotel, every app on it is one name away.</p>
+  <p slot="lede">Install Paperboat on the server at home and on your laptop. Every app on it opens by a short name, wherever you are.</p>
   <Addresses slot="aside" rows={addresses} />
 
-  <Beat id="router-title" title="Leave the router alone">
+  <Beat id="names-title" title="Short names for every app">
+    <p>Name an app once and it opens at <code>jellyfin.{localDomain}</code> on all your machines, with real HTTPS. Only you can reach it.</p>
+    <Term slot="visual" lines={["$ pb port name set jellyfin 8096 \\", "    --machine homelab --top-level", `# https://jellyfin.${localDomain}`]} />
+  </Beat>
+
+  <Beat id="router-title" title="Leave the router alone" flip>
     <p>No port forwarding, no dynamic DNS, nothing open on the internet. It works behind any NAT, including your ISP's.</p>
     <Term slot="visual" lines={["$ pb ssh homelab", "ana@homelab:~$ docker ps", "CONTAINER   IMAGE        STATUS", "a41f        jellyfin     Up 3 days"]} />
   </Beat>
 
-  <Beat id="jobs-title" title="Leave a job running" flip>
-    <p>Start a long copy or a build, close the laptop, check on it from your phone's browser in the console.</p>
-    <Term slot="visual" lines={["$ pb connect homelab", "ana@homelab:~$ rsync -a /srv/ /backup/", "# close the laptop; it keeps going"]} />
+  <Beat id="public-title" title="Share one app on your own domain">
+    <p>Your blog or a photo album for the family gets a permanent HTTPS address on your domain, even when your home IP changes.</p>
+    <Term slot="visual" lines={["$ pb domain add example.com", "$ pb domain verify example.com", "$ pb tunnel create photos --port 2342 \\", "    --domain photos.example.com"]} />
   </Beat>
 
-  <Beat id="public-title" title="Share the one public thing">
-    <p>Your blog or a photo album for the family gets a permanent HTTPS address, even when your home IP changes.</p>
-    <Term slot="visual" lines={["$ pb tunnel create blog --port 8080", "✓ Created tunnel blog", `https://amber-quiet-harbor-5120.${tunnelDomain}`]} />
+  <Beat id="config-title" title="The same config on every machine" flip>
+    <p>Keep your dotfiles in a Git repository. Config sync puts them on every machine and keeps them in step.</p>
+    <Term slot="visual" lines={["$ pb config repository connect \\", "    git@github.com:ana/dotfiles.git", "$ pb config status", "homelab   in sync", "laptop    in sync"]} />
+  </Beat>
+
+  <Beat id="files-title" title="Files in, terminal from any browser">
+    <p>Send a file to the server from any of your machines. No laptop with you? Open its terminal in the console from any browser.</p>
+    <Term slot="visual" lines={["$ pb send movie.mkv --to homelab", "✓ movie.mkv delivered to homelab"]} />
+  </Beat>
+
+  <Beat id="selfhost-title" title="Run your own relay and edge" flip>
+    <p>Put a relay and a tunnel server on a small VPS. Your traffic goes through servers you run, and none of it is counted.</p>
+    <Term slot="visual" lines={["$ pb relay list", "home-relay   yours    12 ms", "eu-central   hosted   31 ms"]} />
   </Beat>
 </UseCase>

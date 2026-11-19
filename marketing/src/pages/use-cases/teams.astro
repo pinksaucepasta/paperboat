@@ -1,0 +1,73 @@
+---
+import UseCase from "../../layouts/UseCase.astro"
+import Beat from "../../components/Beat.astro"
+import Term from "../../components/Term.astro"
+import { installerBase, plans, ssoMinSeats } from "../../site"
+
+const faq = [
+  {
+    q: "Do we need the Team plan to work together?",
+    a: `Sharing a live terminal or a preview link works on every plan. Team, at ${plans[2].price} a seat a month, adds lasting access to each other's machines, roles and an exportable audit log. Single sign-on starts at ${ssoMinSeats} seats.`,
+  },
+  {
+    q: "Who owns a machine a member brings?",
+    a: "They do, until they transfer it. Sharing a personal machine with the team lends it; a machine added to the team belongs to the team.",
+  },
+  {
+    q: "How is bandwidth counted for a team?",
+    a: `${plans[2].bandwidth} a month. After that, traffic is slowed, never stopped. Direct traffic between machines is never counted.`,
+  },
+  {
+    q: "Is there a contract or a minimum?",
+    a: "No. One seat is the minimum, billed monthly or yearly by card, and you can cancel in the console.",
+  },
+]
+---
+
+<UseCase
+  slug="teams"
+  name="Teams"
+  title="Shared machines for teams | Paperboat"
+  description="Give teammates exactly the access they need, as rules anyone can read. Every session is logged."
+  headline="Shared machines for your team"
+  faq={faq}
+  related={["teams", "recipes", "env", "recordings"]}
+  compare={["teleport", "tailscale", "twingate"]}
+>
+  <p slot="lede">Stop passing keys around. Give each person what they need on each machine, and take it back in one step.</p>
+  <Term slot="aside" lines={["$ pb team invite acme maya@acme.com \\", "    --generation 7", "# Maya installs Paperboat and signs in", "maya@laptop:~$ pb ssh staging"]} />
+
+  <Beat id="rules-title" title="Rules anyone can read">
+    <p>Put people in groups and machines under tags, then allow each group what it needs. Roles decide who manages the team.</p>
+    <Term slot="visual" title="policy.json" lines={['{', '  "src": ["group:ops"],', '  "dst": ["tag:prod"],', '  "allow": ["terminal", "exec"]', '}']} />
+  </Beat>
+
+  <Beat id="night-title" title="Fix it together at 2 a.m." flip>
+    <p>Share your terminal. A colleague watches, then types, in the same shell. Record it, and keep a copy in the team's own S3 bucket.</p>
+    <Term slot="visual" lines={["$ pb session share S12 --team acme --all", "$ pb recordings start"]} />
+  </Beat>
+
+  <Beat id="secrets-title" title="One place for team secrets">
+    <p>The API key lives in the team's ENV. Deploy scripts get it, and nobody pastes it into chat.</p>
+    <Term slot="visual" lines={["$ pb env set STRIPE_KEY --team acme", "$ pb env run -- ./deploy.sh"]} />
+  </Beat>
+
+  <Beat id="recipe-title" title="New machines and CI runners, ready at once" flip>
+    <p>One line in a setup script or a CI job joins the machine to the team with its tags, secrets and config. Runners that go away are removed by themselves.</p>
+    <Term
+      slot="visual"
+      title="ci-runner-12"
+      lines={["# in your CI job", "$ curl -fsSL \\", `    ${installerBase} \\`, "    | PB_RECIPE=$TOKEN sh", "✓ Paired as ci-runner-12 in acme", "✓ Secrets loaded from ci-env"]}
+    />
+  </Beat>
+
+  <Beat id="audit-title" title="Every action in the log">
+    <p>See who did what, on which machine, and whether it was allowed. Export it for your auditors.</p>
+    <Term slot="visual" lines={["$ pb team activity acme --since 1h", "09:14  maya  exec      db       denied", "$ pb team activity export acme \\", "    --since 30d --format csv"]} />
+  </Beat>
+
+  <Beat id="sso-title" title="Sign in with your company" flip>
+    <p>Single sign-on and directory sync, from {ssoMinSeats} seats. Map directory groups to roles. Remove someone and their sessions end at once.</p>
+    <Term slot="visual" lines={["$ pb team scim map acme engineering member", "$ pb team sso enforce acme on"]} />
+  </Beat>
+</UseCase>
