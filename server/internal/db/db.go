@@ -398,6 +398,8 @@ func (d *DB) InReadOnlySnapshot(ctx context.Context, fn func(context.Context, *T
 // LOCKED and explicit row versions. Serializable predicate locking conflicts
 // with concurrent skip-locked claimers even when their committed rows are
 // disjoint; read committed preserves the row-lock contract for that pattern.
+// It is also for a transaction whose every decision rests on rows it locks (the runtime attach): concurrent
+// transactions over disjoint rows then never abort each other on predicate locks.
 func (d *DB) InReadCommittedTx(ctx context.Context, fn func(context.Context, *Tx) error) error {
 	const maxAttempts = 5
 	d.readCommitted.calls.Add(1)

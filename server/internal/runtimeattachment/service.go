@@ -86,18 +86,24 @@ func (s *Service) Attach(ctx context.Context, proof previewattachment.MachinePro
 	if err := s.ensureEdgeSet(ctx, proof); err != nil {
 		return out, err
 	}
-	err := s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// READ COMMITTED with explicit row locks (NetBird's model, management/server/store): every read the attach decides on
+	// is either locked (the machine and route FOR UPDATE, its account and environment FOR SHARE, its own carrier rows FOR
+	// UPDATE) or this machine's own rows, which LockMachine orders. Under SERIALIZABLE, 50 machines of one account
+	// attaching at once aborted each other on index-page predicate locks over rows they did not share (211 retries).
+	err := s.DB.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var route, environment, host, managedHost, publicKey, mode string
 		var revision int64
 		var teamID sql.NullString
-		// Serialize attachment renewal/replacement with machine generation changes.
+		// Serialize attachment renewal/replacement with machine generation changes and revocation (m), and with other
+		// attaches of the route from any server process (r); a suspension of the account or an environment change waits
+		// for the attach, or the attach for it, and then sees it (u, e).
 		err := tx.QueryRow(ctx, `SELECT r.id,r.environment_id,r.public_host,r.desired_revision,m.public_identity_key,m.owner_team_id,r.managed_public_host,paperboat.workspace_edge_mode(m.user_id,m.owner_team_id)
 FROM user_machines m JOIN users u ON u.id=m.user_id JOIN control_environments e ON e.id=m.environment_id
 JOIN control_routes r ON r.environment_id=e.id AND r.connector_id='runtime' AND r.kind='runtime_https_wss'
 WHERE m.id=$1 AND m.user_id=$2 AND m.installation_generation=$3 AND m.worker_generation=$4
 AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND m.seat_state='occupied' AND u.status='active'
 AND e.desired_state='active' AND r.desired_state IN ('attached','replacing')
-ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r`, proof.MachineID, proof.UserID, proof.InstallationGeneration, request.WorkerGeneration).Scan(&route, &environment, &host, &revision, &publicKey, &teamID, &managedHost, &mode)
+ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proof.UserID, proof.InstallationGeneration, request.WorkerGeneration).Scan(&route, &environment, &host, &revision, &publicKey, &teamID, &managedHost, &mode)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Another worker generation is registered (a pb update overlap): a state the worker retries, not an outage.
 			var otherWorker bool

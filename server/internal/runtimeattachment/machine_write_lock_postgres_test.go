@@ -63,7 +63,11 @@ VALUES($1,$2,$3,$3,$4,'owner_session_mlock','foreground','http','127.0.0.1:3000'
 				t.Fatal(err)
 			}
 
-			before := f.database.TransactionStats().Serializable.Retries
+			retries := func() uint64 {
+				s := f.database.TransactionStats()
+				return s.Serializable.Retries + s.ReadCommitted.Retries
+			}
+			before := retries()
 			done := make(chan error, 1)
 			go func() { _, err := f.service.Attach(ctx, f.proof, request); done <- err }()
 			time.Sleep(300 * time.Millisecond) // the attach is now waiting: on the lock (fixed) or on the row (before)
@@ -74,7 +78,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_mlock','foreground','http','127.0.0.1:3000'
 			if err := <-done; err != nil {
 				t.Fatalf("attach behind another writer of the machine: %v", err)
 			}
-			if retries := f.database.TransactionStats().Serializable.Retries - before; retries != 0 {
+			if retries := retries() - before; retries != 0 {
 				t.Fatalf("the attach was retried %d times after a serialization failure, want 0 (it must queue)", retries)
 			}
 		})
@@ -123,5 +127,6 @@ func TestFiftyMachinesAttachAtOnceOnPostgres(t *testing.T) {
 	if used := f.database.Direct().Stat().AcquireCount() - direct; used != 0 {
 		t.Fatalf("50 attaches took %d direct connections, want 0", used)
 	}
-	t.Logf("50 attaches at once: %+v", f.database.TransactionStats().Serializable)
+	stats := f.database.TransactionStats()
+	t.Logf("50 attaches at once: serializable %+v, read committed %+v", stats.Serializable, stats.ReadCommitted)
 }
