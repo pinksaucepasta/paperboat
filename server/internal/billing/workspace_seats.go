@@ -151,7 +151,7 @@ func (s *WorkspaceService) ChangeSeats(ctx context.Context, account, team string
 // sameSeatChange compares everything Stripe priced except the proration instant and the preview itself.
 func sameSeatChange(a, b SeatChange) bool {
 	return a.TeamID == b.TeamID && a.SubscriptionID == b.SubscriptionID && a.CustomerID == b.CustomerID &&
-		a.ItemID == b.ItemID && a.PriceID == b.PriceID && a.Quantity == b.Quantity &&
+		a.ItemID == b.ItemID && a.PriceID == b.PriceID && a.AddonPriceID == b.AddonPriceID && a.Quantity == b.Quantity &&
 		a.PreviousQuantity == b.PreviousQuantity && a.HadScheduledReduction == b.HadScheduledReduction &&
 		a.PeriodStart.Equal(b.PeriodStart) && a.PeriodEnd.Equal(b.PeriodEnd)
 }

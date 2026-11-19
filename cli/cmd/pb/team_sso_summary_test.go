@@ -17,10 +17,13 @@ import (
 // session length in days (it printed "false", an empty list and "168h0m0s").
 func TestSSOSummaryReadsAsSettings(t *testing.T) {
 	var s api.TeamIdentity
-	s.Seats, s.MinSeats = 10, 10
+	s.SSOAddon = true
 	var out bytes.Buffer
 	if err := ssoSummary(&out, s); err != nil {
 		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "SSO add-on: yes\nSCIM add-on: no (add it in Billing)\n") {
+		t.Fatalf("add-ons:\n%s", got)
 	}
 	if got := out.String(); !strings.Contains(got, "Require SSO: off\nJIT provisioning: off\nSSO exempt: none\n") {
 		t.Fatalf("defaults:\n%s", got)

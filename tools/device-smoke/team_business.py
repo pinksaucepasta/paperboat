@@ -255,8 +255,8 @@ def roles(c, team):
 def identity(c, team):
     """F19-14 (before the WorkOS dashboard steps): SSO and directory status read the team's state."""
     sso = c.pbj('team', 'sso', 'status', team)
-    c.step('pb team sso status reads eligibility and SSO state', isinstance(sso, dict) and sso.get('eligible') is True
-           and sso.get('seats', 0) >= sso.get('min_seats', 1) and 'required' in (sso.get('sso') or {}), sso)
+    c.step('pb team sso status reads the add-on and SSO state', isinstance(sso, dict) and sso.get('sso_addon') is True
+           and sso.get('scim_addon') is True and 'required' in (sso.get('sso') or {}), sso)
     rc, out, err = c.pb('team', 'scim', 'status', team)
     c.step('pb team scim status reads the directory state', rc == 0 and 'Directory:' in out, out + err)
 
