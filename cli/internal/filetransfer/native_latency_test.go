@@ -235,9 +235,6 @@ func latencyManifest(item Source) Manifest {
 }
 
 func TestNativeSendCutsAStreamThatStopsMovingAndResumesFromWhatArrived(t *testing.T) {
-	saved := nativeStallTimeout
-	nativeStallTimeout = time.Second
-	defer func() { nativeStallTimeout = saved }()
 	data := make([]byte, 24<<20)
 	for i := range data {
 		data[i] = byte(i >> 3)
@@ -261,6 +258,7 @@ func TestNativeSendCutsAStreamThatStopsMovingAndResumesFromWhatArrived(t *testin
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	client := nativeClientFor(t, server)
+	client.stallTimeout = time.Second
 	var refreshes atomic.Int32
 	client.RefreshAuth = func(context.Context) (Auth, error) { refreshes.Add(1); return Auth{Token: "t"}, nil }
 	if _, err := client.SendBatch(ctx, "batch_stream", "", []Source{item}); err != nil {

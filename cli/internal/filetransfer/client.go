@@ -165,6 +165,9 @@ type Client struct {
 	// run ahead of the receiver's durable offset), the receiver's confirmed offset when it answers, never backwards.
 	Committed func(transferID string, offset int64)
 	retryWait func(context.Context, int) error
+	// stallTimeout is how long a stream may accept no bytes before it is cut; zero is nativeStallTimeout. Read by the
+	// transport's body goroutines, so it is set before the first send and never changed.
+	stallTimeout time.Duration
 	// renewDelay is the pause before the n-th renewal in a row without progress (a field only so tests can shorten it).
 	renewDelay func(int) time.Duration
 	authMu     sync.RWMutex

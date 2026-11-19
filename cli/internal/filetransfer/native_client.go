@@ -1,6 +1,7 @@
 package filetransfer
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -149,8 +150,9 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 }
 
 // nativeStallTimeout bounds a segment whose transport accepts no more bytes: the stream is cut and the send
-// resumes from the receiver's committed offset instead of waiting for a dead peer.
-var nativeStallTimeout = 2 * time.Minute
+// resumes from the receiver's committed offset instead of waiting for a dead peer. Client.stallTimeout (a field only
+// so a test can shorten its own client's) replaces it when set.
+const nativeStallTimeout = 2 * time.Minute
 
 // nativeStallStep is the least progress that restarts the stall timer.
 const nativeStallStep = 32 << 10
@@ -173,6 +175,7 @@ func receiverBusy(err error) bool {
 // to the transport (once per MiB), and the caller reports the confirmed offset when the receiver answers.
 func (c *Client) patchNative(ctx context.Context, id string, offset int64, source Source, report func(int64)) (committed int64, resultErr error) {
 	length := min(source.Size-offset, nativeSegmentBytes)
+	stallTimeout := cmp.Or(c.stallTimeout, nativeStallTimeout)
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	// The timer starts with the first byte handed over, so waiting for a stream or a path is not a stall.
@@ -195,7 +198,7 @@ func (c *Client) patchNative(ctx context.Context, id string, offset int64, sourc
 				stall.Stop()
 			} else if sent-b.lastReset >= nativeStallStep {
 				b.lastReset = sent
-				stall.Reset(nativeStallTimeout)
+				stall.Reset(stallTimeout)
 			}
 			if sent-b.lastReport >= 1<<20 || sent == length {
 				b.lastReport = sent
