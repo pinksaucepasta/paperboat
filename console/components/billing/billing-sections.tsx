@@ -142,7 +142,9 @@ export function PlanActions({ workspace, billing }: { workspace: Workspace; bill
     onSuccess: (url) => window.location.assign(url),
   })
   const current = billing.product
-  const other = current && products.data?.find((p) => p.interval !== current.interval && p.price_verified)
+  const other =
+    current &&
+    products.data?.find((p) => p.catalog_type === current.catalog_type && p.interval !== current.interval && p.price_verified)
   if (!current || !billing.can_manage || billing.granted || planEnded(billing, time.now)) return null
   return (
     <>
