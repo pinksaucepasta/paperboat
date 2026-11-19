@@ -28,6 +28,7 @@ type Message struct {
 	To      []string `json:"to"`
 	Subject string   `json:"subject"`
 	HTML    string   `json:"html"`
+	Text    string   `json:"text"`
 }
 
 type Service struct {

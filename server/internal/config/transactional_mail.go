@@ -8,9 +8,11 @@ import (
 )
 
 type TransactionalMail struct {
-	Endpoint                  string `json:"endpoint"`
-	From                      string `json:"from"`
-	ConsoleOrigin             string `json:"console_origin"`
+	Endpoint      string `json:"endpoint"`
+	From          string `json:"from"`
+	ConsoleOrigin string `json:"console_origin"`
+	// LogoURL is the hosted PNG shown beside the wordmark in every mail; empty shows the wordmark alone.
+	LogoURL                   string `json:"logo_url"`
 	InvitationLifetimeSeconds int64  `json:"invitation_lifetime_seconds"`
 	// InvitationMailDedupSeconds: a new invitation to an address that already got one for the same
 	// team within this window sends no mail (pending or cancelled and re-created). Resend always mails.
@@ -42,6 +44,11 @@ func (m TransactionalMail) Validate(key string) error {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.ForceQuery || u.RawQuery != "" || u.Fragment != "" {
 			return errors.New("mail endpoint and console_origin must be HTTPS URLs without credentials, queries or fragments")
+		}
+	}
+	if m.LogoURL != "" {
+		if u, err := url.Parse(m.LogoURL); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+			return errors.New("mail.logo_url must be an HTTPS URL without credentials")
 		}
 	}
 	u, _ := url.Parse(m.ConsoleOrigin)

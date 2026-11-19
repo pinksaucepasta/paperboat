@@ -2,12 +2,13 @@ package customernotices
 
 import (
 	"fmt"
-	"html"
 	"net/mail"
 	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
 
 const (
@@ -63,10 +64,9 @@ func effective(value string, now time.Time, urgent bool) (time.Time, error) {
 	return day, nil
 }
 
-// render validates the notice of in.Kind and writes its subject and HTML. late says a breach notice goes out more than
+// render validates the notice of in.Kind and writes its subject and content. late says a breach notice goes out more than
 // BreachHours after the operator became aware; deadline is that moment.
-func render(in Input, now time.Time) (subject, body string, late bool, deadline time.Time, err error) {
-	e := html.EscapeString
+func render(in Input, now time.Time) (subject string, c transactionalmail.Content, late bool, deadline time.Time, err error) {
 	var p [6]string
 	get := func(i int, name, value string, required bool) {
 		if err == nil {
@@ -94,7 +94,12 @@ func render(in Input, now time.Time) (subject, body string, late bool, deadline 
 			return
 		}
 		subject = "Paperboat: prices change on " + day.Format("2 Jan 2006")
-		body = fmt.Sprintf("<p>Paperboat's prices change from your next renewal on or after %s.</p><p>%s</p><p>This email is our notice, given at least %d days ahead. If you do not agree, cancel in the console under Billing before your renewal; cancelling stops the next renewal.</p>", day.Format("2 Jan 2006"), e(p[0]), NoticeDays)
+		c.Heading = "Prices change on " + day.Format("2 Jan 2006")
+		c.Paragraphs = []string{
+			fmt.Sprintf("Paperboat's prices change from your next renewal on or after %s.", day.Format("2 Jan 2006")),
+			p[0],
+			fmt.Sprintf("This email is our notice, given at least %d days ahead. If you do not agree, cancel in the console under Billing before your renewal; cancelling stops the next renewal.", NoticeDays),
+		}
 	case "terms_change":
 		get(0, "detail", in.Detail, true)
 		get(1, "urgent_reason", in.UrgentReason, false)
@@ -107,11 +112,13 @@ func render(in Input, now time.Time) (subject, body string, late bool, deadline 
 			return
 		}
 		subject = "Paperboat: our terms change on " + day.Format("2 Jan 2006")
-		body = fmt.Sprintf("<p>Our terms change on %s.</p><p>%s</p>", day.Format("2 Jan 2006"), e(p[0]))
+		c.Heading = "Our terms change on " + day.Format("2 Jan 2006")
+		c.Paragraphs = []string{p[0]}
 		if p[1] != "" {
-			body += "<p>We are changing them sooner than " + fmt.Sprint(NoticeDays) + " days because " + e(p[1]) + ".</p>"
+			c.Paragraphs = append(c.Paragraphs, fmt.Sprintf("We are changing them sooner than %d days because %s.", NoticeDays, p[1]))
 		}
-		body += fmt.Sprintf("<p>Read the new text: <a href=\"%s\">%s</a></p><p>If you do not agree, cancel and stop using the service before then. A payment you already made for the current period is not affected.</p>", e(p[5]), e(p[5]))
+		c.Paragraphs = append(c.Paragraphs, "If you do not agree, cancel and stop using the service before then. A payment you already made for the current period is not affected.")
+		c.Button = &transactionalmail.Button{Label: "Read the new terms", URL: p[5]}
 	case "subprocessor":
 		get(0, "name", in.Name, true)
 		get(1, "purpose", in.Purpose, true)
@@ -129,7 +136,11 @@ func render(in Input, now time.Time) (subject, body string, late bool, deadline 
 			return
 		}
 		subject = "Paperboat: new subprocessor " + p[0]
-		body = fmt.Sprintf("<p>From %s we will use <b>%s</b> to %s, in %s, to process personal data.</p><p>You may object within %d days, on reasonable data protection grounds, by writing to %s. If we cannot resolve the objection you may end the affected service and we refund the unused part of any period you paid in advance.</p>", day.Format("2 Jan 2006"), e(p[0]), e(p[1]), e(p[2]), NoticeDays, e(p[3]))
+		c.Heading = "New subprocessor: " + p[0]
+		c.Paragraphs = []string{
+			fmt.Sprintf("From %s we will use %s to %s, in %s, to process personal data.", day.Format("2 Jan 2006"), p[0], p[1], p[2]),
+			fmt.Sprintf("You may object within %d days, on reasonable data protection grounds, by writing to %s. If we cannot resolve the objection you may end the affected service and we refund the unused part of any period you paid in advance.", NoticeDays, p[3]),
+		}
 	case "breach":
 		get(0, "what", in.What, true)
 		get(1, "data", in.Data, true)
@@ -151,12 +162,15 @@ func render(in Input, now time.Time) (subject, body string, late bool, deadline 
 		deadline = aware.Add(BreachHours * time.Hour)
 		late = now.After(deadline)
 		subject = "Paperboat: notice of a personal data breach"
-		body = fmt.Sprintf("<p>We became aware on %s (UTC) of a personal data breach that affects your data. We are telling you so you can meet your own duty to notify within 72 hours.</p><p><b>What happened:</b> %s</p><p><b>Data involved:</b> %s</p><p><b>What we are doing:</b> %s</p><p><b>Who to contact:</b> %s</p>", aware.UTC().Format("2 Jan 2006 15:04"), e(p[0]), e(p[1]), e(p[2]), e(p[3]))
+		c.Heading = "Notice of a personal data breach"
+		c.Paragraphs = []string{fmt.Sprintf("We became aware on %s (UTC) of a personal data breach that affects your data. We are telling you so you can meet your own duty to notify within 72 hours.", aware.UTC().Format("2 Jan 2006 15:04"))}
+		c.Details = []transactionalmail.Detail{{Label: "What happened", Value: p[0]}, {Label: "Data involved", Value: p[1]}, {Label: "What we are doing", Value: p[2]}, {Label: "Who to contact", Value: p[3]}}
 	default:
-		return "", "", false, time.Time{}, bad("kind is price_increase, terms_change, subprocessor or breach")
+		return "", c, false, time.Time{}, bad("kind is price_increase, terms_change, subprocessor or breach")
 	}
 	if p[5] != "" && in.Kind != "terms_change" {
-		body += fmt.Sprintf("<p>More: <a href=\"%s\">%s</a></p>", e(p[5]), e(p[5]))
+		c.Button = &transactionalmail.Button{Label: "Read more", URL: p[5]}
 	}
-	return subject, body, late, deadline, nil
+	c.Why = "You got this because you have a Paperboat account. It is a notice we owe our customers."
+	return subject, c, late, deadline, nil
 }

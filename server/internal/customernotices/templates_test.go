@@ -5,6 +5,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail/mailtest"
 )
 
 var now = time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
@@ -37,8 +41,27 @@ func TestRenderEnforcesThePromisedNoticeAndBreachWindow(t *testing.T) {
 		})
 	}
 	breach := Input{Kind: "breach", AwareAt: "2026-11-17T11:00:00Z", What: "<b>w</b>", Data: "d", Actions: "a", Contact: "privacy@example.test"}
-	_, body, late, deadline, err := render(breach, now)
-	if err != nil || !late || !deadline.Equal(time.Date(2026, 11, 19, 11, 0, 0, 0, time.UTC)) || strings.Contains(body, "<b>w</b>") || !strings.Contains(body, "72 hours") {
+	_, content, late, deadline, err := render(breach, now)
+	body := transactionalmail.Compose(config.TransactionalMail{}, "a@example.test", "s", content).HTML
+	if err != nil || !late || !deadline.Equal(time.Date(2026, 11, 19, 11, 0, 0, 0, time.UTC)) || strings.Contains(body, "<b>w</b>") || !strings.Contains(body, "&lt;b&gt;w&lt;/b&gt;") || !strings.Contains(body, "72 hours") {
 		t.Fatalf("late breach: err=%v late=%v deadline=%v body=%s", err, late, deadline, body)
+	}
+}
+
+// Every notice kind renders into the shared layout, with its link as the one button.
+func TestEveryNoticeKindUsesTheSharedLayout(t *testing.T) {
+	link := "https://example.test/terms"
+	for name, in := range map[string]Input{
+		"notice-price-increase": {Kind: "price_increase", Detail: "Pro goes from $9 to $12.", Effective: "2027-01-30", Link: link},
+		"notice-terms-change":   {Kind: "terms_change", Detail: "Section 4 changes.", Effective: "2027-02-01", Link: link},
+		"notice-subprocessor":   {Kind: "subprocessor", Name: "Acme", Purpose: "send mail", Location: "EU", Contact: "privacy@example.test", Effective: "2026-12-30"},
+		"notice-breach":         {Kind: "breach", AwareAt: "2026-11-19T10:00:00Z", What: "w", Data: "d", Actions: "a", Contact: "privacy@example.test", Link: link},
+	} {
+		subject, content, _, _, err := render(in, now)
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		button := in.Link
+		mailtest.Check(t, name, transactionalmail.Compose(mailtest.Policy, "a@example.test", subject, content), button)
 	}
 }

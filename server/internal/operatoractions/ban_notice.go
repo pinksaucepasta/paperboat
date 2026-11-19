@@ -3,8 +3,8 @@ package operatoractions
 import (
 	"context"
 	"fmt"
-	"html"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
@@ -24,16 +24,23 @@ func (s *Service) noticeBannedTx(ctx context.Context, tx *db.Tx, account, banID,
 	if err != nil {
 		return err
 	}
-	appeal := "reply to this email"
-	if s.mail.AbuseMailbox != "" {
-		appeal = "write to " + html.EscapeString(s.mail.AbuseMailbox)
-	}
-	message := transactionalmail.Message{
-		From: s.mail.From, To: []string{address}, Subject: "Paperboat: " + subject + " was banned",
-		HTML: fmt.Sprintf("<p>Paperboat banned %s because it broke the Terms of Service or the Acceptable Use Policy. Sign-in sessions and tokens ended, machines can no longer connect, and public links stopped. Your data is kept.</p>"+
-			"<p>Reason: %s. Reference for an appeal: %s.</p><p>If you think we got it wrong, %s and quote that reference. A person reviews every appeal, and we restore what we blocked if it was a mistake.</p>",
-			html.EscapeString(subject), html.EscapeString(reason), html.EscapeString(banID), appeal),
-	}
+	message := bannedMessage(s.mail, address, subject, reason, banID)
 	_, err = transactionalmail.EnqueueOnceTx(ctx, tx, "account-banned:"+banID, message)
 	return err
+}
+
+func bannedMessage(policy config.TransactionalMail, address, subject, reason, banID string) transactionalmail.Message {
+	appeal := "reply to this email"
+	if policy.AbuseMailbox != "" {
+		appeal = "write to " + policy.AbuseMailbox
+	}
+	return transactionalmail.Compose(policy, address, "Paperboat: "+subject+" was banned", transactionalmail.Content{
+		Heading: subject + " was banned",
+		Paragraphs: []string{
+			fmt.Sprintf("Paperboat banned %s because it broke the Terms of Service or the Acceptable Use Policy. Sign-in sessions and tokens ended, machines can no longer connect, and public links stopped. Your data is kept.", subject),
+			fmt.Sprintf("Reason: %s. Reference for an appeal: %s.", reason, banID),
+			fmt.Sprintf("If you think we got it wrong, %s and quote that reference. A person reviews every appeal, and we restore what we blocked if it was a mistake.", appeal),
+		},
+		Why: "You got this because the ban applies to your account.",
+	})
 }

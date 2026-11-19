@@ -3,12 +3,12 @@ package teams
 import (
 	"context"
 	"errors"
-	"html"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
@@ -57,7 +57,7 @@ func (s *Service) enqueueInvitation(ctx context.Context, tx *db.Tx, id string, e
 		}
 	}
 	mailID := "mail_" + uuid.NewString()
-	message := transactionalmail.Message{From: s.mail.From, To: []string{address}, Subject: "Paperboat team invitation", HTML: "<p>You are invited to join " + html.EscapeString(name) + " on Paperboat.</p><p>This invitation expires " + expires.UTC().Format(time.RFC3339) + ".</p><p><a href=\"" + html.EscapeString(strings.TrimRight(s.mail.ConsoleOrigin, "/")+"/team") + "\">Sign in to view your team invitation</a></p>"}
+	message := invitationMessage(s.mail, address, name, expires)
 	if err = transactionalmail.EnqueueTx(ctx, tx, mailID, &id, message); err != nil {
 		return err
 	}
@@ -134,4 +134,13 @@ func (s *Service) ResendInvitation(ctx context.Context, account, team, id string
 		return InvitationSummary{}, err
 	}
 	return s.Invitation(ctx, account, id)
+}
+
+func invitationMessage(policy config.TransactionalMail, address, team string, expires time.Time) transactionalmail.Message {
+	return transactionalmail.Compose(policy, address, "Paperboat team invitation", transactionalmail.Content{
+		Heading:    "You are invited to join " + team + " on Paperboat",
+		Paragraphs: []string{"This invitation expires " + expires.UTC().Format(time.RFC3339) + "."},
+		Button:     &transactionalmail.Button{Label: "Sign in to view your team invitation", URL: strings.TrimRight(policy.ConsoleOrigin, "/") + "/team"},
+		Why:        "You got this because a team admin invited this address.",
+	})
 }

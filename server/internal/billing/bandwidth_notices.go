@@ -9,7 +9,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"html"
 	"strings"
 	"time"
 
@@ -160,14 +159,22 @@ AND u.status='active' AND u.email_verified AND u.primary_email<>'' ORDER BY u.id
 	}
 	billing := strings.TrimRight(s.mail.ConsoleOrigin, "/") + "/billing"
 	for _, r := range recipients {
-		message := transactionalmail.Message{
-			From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: traffic reduced",
-			HTML: fmt.Sprintf("<p>Traffic through Paperboat's edges and relays for %s is reduced to %s because its included traffic is used up. It is never cut off and never billed extra. Direct machine-to-machine traffic and your own edges and relays are not slowed.</p><p>Full speed returns on %s (UTC), or as soon as you add bandwidth.</p><p><a href=\"%s\">Add bandwidth or upgrade</a></p>",
-				html.EscapeString(r.name), speed(mbit), window.end.UTC().Format("2 Jan 2006"), html.EscapeString(billing)),
-		}
+		message := throttledMessage(s.mail, r.address, r.name, speed(mbit), window.end, billing)
 		if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "bandwidth-throttled:"+workspaceID+":"+period+":"+r.account, message); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func throttledMessage(policy config.TransactionalMail, address, name, reduced string, fullSpeed time.Time, billingURL string) transactionalmail.Message {
+	return transactionalmail.Compose(policy, address, "Paperboat: traffic reduced", transactionalmail.Content{
+		Heading: "Traffic is reduced",
+		Paragraphs: []string{
+			fmt.Sprintf("Traffic through Paperboat's edges and relays for %s is reduced to %s because its included traffic is used up. It is never cut off and never billed extra. Direct machine-to-machine traffic and your own edges and relays are not slowed.", name, reduced),
+			fmt.Sprintf("Full speed returns on %s (UTC), or as soon as you add bandwidth.", fullSpeed.UTC().Format("2 Jan 2006")),
+		},
+		Button: &transactionalmail.Button{Label: "Add bandwidth or upgrade", URL: billingURL},
+		Why:    "You got this because you manage billing for this workspace.",
+	})
 }
