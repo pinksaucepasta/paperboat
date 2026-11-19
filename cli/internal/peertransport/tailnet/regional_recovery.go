@@ -35,6 +35,10 @@ const regionalProbeTimeout = 5 * time.Second
 const regionalAcknowledgedRouteWait = 250 * time.Millisecond
 const regionalProbeInterval = 3 * time.Second
 
+// regionalParkedRecheck is how often a parked loop (no bound pair) reads its own relay state to see that the home carrier
+// is still connected. Local only; a carrier found down starts the usual repair.
+const regionalParkedRecheck = 30 * time.Second
+
 // regionalStaleRetry is how soon recovery looks again after finding no usable relay.
 const regionalStaleRetry = time.Second
 const regionalDwell = 10 * time.Second
@@ -695,7 +699,11 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		r.releaseIdlePair()
 		if r.pair() == "" && !r.repair.Load() {
 			if !r.relayDown() {
-				timer.Stop()
+				// Parked, not stopped: relayDown reads local state only, so a healthy listener still makes no request, no
+				// probe and no map publication, but a home carrier that ends while nothing wakes the loop (a latched
+				// refusal, a half-dead connection) is found within regionalParkedRecheck and redialed, not at the first
+				// relay use after a long idle direct period (cut-16s.md: 16.1 s against the 6.5 s trust window).
+				timer.Reset(backoff.Jitter(regionalParkedRecheck))
 				continue
 			}
 			r.repair.Store(true) // the standing relay connection is gone: look again below

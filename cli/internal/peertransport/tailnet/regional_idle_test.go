@@ -158,3 +158,51 @@ func TestIdleBoundPairIsReleasedUnlessAnAssociationIsLive(t *testing.T) {
 		t.Fatal("an idle pair with no live association was kept")
 	}
 }
+
+// A parked listener whose home carrier ends (a latched refusal, a half-dead connection) with nothing to wake the loop was
+// found only at the next wake, so the first relay use after a long idle direct period paid a redial (cut-16s.md). It now
+// reads its own relay state every regionalParkedRecheck and repairs a carrier that is gone; a healthy one stays silent.
+type carrierEngine struct {
+	idleRegionalEngine
+	down atomic.Bool
+}
+
+func (e *carrierEngine) RelayTransport(tailcfg.DERPRegionID) string {
+	if e.down.Load() {
+		return ""
+	}
+	return "derp_quic"
+}
+
+func TestParkedListenerNoticesAHomeCarrierThatEnded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a, cfg, signer, _ := networkTestAuthority(t)
+		now := time.Now().Unix()
+		cfg.ExpiresAt, cfg.Peers[0].Scopes[0].ExpiresAt = now+600, now+600
+		cfg.Peers[0].Identity = networkTestBinding("machine", "machine_test", "fd7a:115c:a1e0::2", key.NewNode())
+		if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+			t.Fatal(err)
+		}
+		node := RegionalNode{NodeID: "relay_idle", NodeGeneration: 1, ProcessEpoch: "epoch_idle", Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+		a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: []RegionalNode{node}}
+		a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 600}}
+		e := &carrierEngine{}
+		r := a.newRegionalRecoveryLocked()
+		r.engine = e
+		a.relay.recovery = r
+		ctx, cancel := context.WithCancel(t.Context())
+		go r.run(ctx)
+		defer func() { cancel(); <-r.done }()
+		time.Sleep(2 * regionalParkedRecheck)
+		synctest.Wait()
+		if e.sweeps.Load() != 0 || e.probes.Load() != 0 {
+			t.Fatalf("a healthy parked listener did work: sweeps=%d probes=%d", e.sweeps.Load(), e.probes.Load())
+		}
+		e.down.Store(true) // the home carrier ends; nothing wakes the loop
+		time.Sleep(2 * regionalParkedRecheck)
+		synctest.Wait()
+		if e.sweeps.Load() == 0 {
+			t.Fatal("the parked listener never noticed that its home carrier ended")
+		}
+	})
+}
