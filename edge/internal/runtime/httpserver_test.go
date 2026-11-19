@@ -43,15 +43,11 @@ func TestPublicRedirectServerAcceptsCleartextWildcardListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, port, err := net.SplitHostPort(reserved.Addr().String())
+	server, err := NewHTTPServer(HTTPServerSpec{Address: reserved.Addr().String(), Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 4096, Role: HTTPServerPublicRedirect})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = reserved.Close()
-	server, err := NewHTTPServer(HTTPServerSpec{Address: net.JoinHostPort("0.0.0.0", port), Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 4096, Role: HTTPServerPublicRedirect})
-	if err != nil {
-		t.Fatal(err)
-	}
+	server.listen = func(string, string) (net.Listener, error) { return reserved, nil }
 	if err = server.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -98,11 +94,11 @@ func TestHTTPServerEnforcesConfiguredHeaderLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	address := reserved.Addr().String()
-	_ = reserved.Close()
 	server, err := NewHTTPServer(HTTPServerSpec{Address: address, Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 1024})
 	if err != nil {
 		t.Fatal(err)
 	}
+	server.listen = func(string, string) (net.Listener, error) { return reserved, nil }
 	if err := server.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
