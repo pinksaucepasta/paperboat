@@ -160,19 +160,17 @@ type nearestFixture struct {
 	db      *db.DB
 	stamp   string
 	account string
-	env     string
 }
 
 func newNearestFixture(t *testing.T) *nearestFixture {
 	f := &nearestFixture{t: t, ctx: context.Background(), db: openIsolated(t), stamp: fmt.Sprint(time.Now().UnixNano())}
-	f.account, f.env = "edgenear_account_"+f.stamp, "edgenear_env_"+f.stamp
+	f.account = "edgenear_account_" + f.stamp
 	f.exec(`UPDATE paperboat.control_tunnel_nodes SET ready=false WHERE id NOT LIKE $1 AND roles @> ARRAY['edge']`, "edgenear_%"+f.stamp)
 	f.exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, f.account)
-	f.exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, f.env, f.account)
 	t.Cleanup(func() {
 		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, f.account)
-		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.user_machines WHERE environment_id=$1`, f.env)
-		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.control_environments WHERE id=$1`, f.env)
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.user_machines WHERE user_id=$1`, f.account)
+		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.control_environments WHERE owner_user_id=$1`, f.account)
 		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.users WHERE id=$1`, f.account)
 	})
 	return f
@@ -196,8 +194,9 @@ func (f *nearestFixture) node(name string) string {
 
 // machine adds a live machine with one edge sample (rtt in ms, age as an interval) per node.
 func (f *nearestFixture) machine(name string, rtt map[string]int, age string) {
-	id := "edgenear_machine_" + name + "_" + f.stamp
-	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, id, f.account, f.env, name)
+	id, env := "edgenear_machine_"+name+"_"+f.stamp, "edgenear_env_"+name+"_"+f.stamp
+	f.exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, env, f.account)
+	f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,$4,'linux','amd64','/workspace','online','occupied',true,1)`, id, f.account, env, name)
 	for node, ms := range rtt {
 		f.exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'edge',$3,now()-$4::interval)`, id, node, ms, age)
 	}
