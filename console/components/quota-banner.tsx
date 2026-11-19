@@ -7,8 +7,8 @@ import { useApiQuery, useWorkspace } from "@/lib/api"
 import { useTimeFormat } from "@/lib/use-time-format"
 
 /**
- * Shown on every page while this workspace's included public traffic is used up: speed through Paperboat's edges is
- * reduced until the period ends. Nothing is cut off; direct connections, relays and your own edges are not
+ * Shown on every page while this workspace's included traffic is used up: speed through Paperboat's edges and relays is
+ * reduced until the period ends. Nothing is cut off; direct connections and your own edges and relays are not
  * affected. One sentence and what can be done about it.
  */
 export function QuotaBanner() {
@@ -28,7 +28,7 @@ export function QuotaBanner() {
       <GaugeIcon weight="fill" className="size-4 shrink-0 text-muted-foreground" />
       <p className="min-w-0 flex-1">
         <span className="font-medium">
-          {workspace.name} used its included public traffic. Speed is reduced to {formatSpeed(data.throttle_mbit)}
+          {workspace.name} used its included traffic. Speed is reduced to {formatSpeed(data.throttle_mbit)}
           {end ? ` until ${time.date(end, "day")}` : ""}.
         </span>{" "}
         <span className="text-muted-foreground">
