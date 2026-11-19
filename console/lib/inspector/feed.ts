@@ -37,6 +37,12 @@ export type CaptureState = "unknown" | "on" | "off"
 
 type Channel = ReturnType<typeof useInspectorChannel>
 
+/**
+ * The daemon keeps the capture policy in memory, so a runtime restart drops it and the next list answers
+ * inspector_not_enabled. Capture the user had on is switched on again; one that was off or unknown just reads "off".
+ */
+export const afterPolicyLost = (was: CaptureState): "reenable" | "off" => (was === "on" ? "reenable" : "off")
+
 const MAX_KEPT = 500
 const scopeOf = (previewId: string) => ({ kind: "preview", resource: previewId, route: previewId })
 
@@ -49,6 +55,14 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
   const [records, setRecords] = useState<Map<string, Capture>>(() => new Map())
   const [capture, setCapture] = useState<CaptureState>("unknown")
   const [bodies, setBodies] = useState(false)
+  // Read inside poll, which setPolicy (below) calls: refs keep the two from depending on each other.
+  const captureRef = useRef(capture)
+  const bodiesRef = useRef(bodies)
+  const reenable = useRef<(enabled: boolean, withBodies: boolean) => Promise<void>>(async () => undefined)
+  useEffect(() => {
+    captureRef.current = capture
+    bodiesRef.current = bodies
+  }, [capture, bodies])
   const cursor = useRef("")
   const busy = useRef(false)
   // Read after each await: a page that lands after Pause is dropped without moving the cursor,
@@ -91,7 +105,10 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
     } catch (error) {
       // Channel failures show as the channel's phase; the next tick retries.
       if (!(error instanceof InspectorError)) return
-      if (error.code === "inspector_not_enabled") setCapture("off")
+      if (error.code === "inspector_not_enabled") {
+        if (afterPolicyLost(captureRef.current) === "off") setCapture("off")
+        else await reenable.current(true, bodiesRef.current).catch(() => setCapture("off"))
+      }
       // The cursor record expired (15 min retention): start over; ids keep rows unique.
       if (error.code === "invalid_inspector_request") cursor.current = ""
     } finally {
@@ -142,6 +159,10 @@ export function useCaptureFeed(channel: Channel, previewId: string, paused: bool
     },
     [poll, previewId, request],
   )
+
+  useEffect(() => {
+    reenable.current = setPolicy
+  }, [setPolicy])
 
   /** Purging drops the daemon's policy with the captures; capture that was on stays on. */
   const clear = useCallback(async () => {
