@@ -963,7 +963,7 @@ func (c *localPeerConn) ackTaken(count int) {
 // Write sends one data frame; the daemon acts only on whole frames, so a failed write sent nothing.
 func (c *localPeerConn) Write(value []byte) (int, error) {
 	if err := c.writer.write(localPeerData, value); err != nil {
-		return 0, errors.Join(ErrInputNotSent, err)
+		return 0, errors.Join(ErrInputNotSent, localDaemonLost(err))
 	}
 	return len(value), nil
 }
@@ -989,7 +989,14 @@ func (c *localPeerConn) Resize(rows, cols uint16) error {
 	binary.BigEndian.PutUint16(payload[2:], cols)
 	return c.writer.write(localPeerResize, payload)
 }
-func (c *localPeerConn) CloseWrite() error { return c.writer.write(localPeerCloseWrite, nil) }
+// CloseWrite reports a failed write as a lost daemon link like Write and Wait: an errno the caller does not know (Windows
+// names a closed socket several ways) must not veto resuming a started exec.
+func (c *localPeerConn) CloseWrite() error {
+	if err := c.writer.write(localPeerCloseWrite, nil); err != nil {
+		return localDaemonLost(err)
+	}
+	return nil
+}
 func (c *localPeerConn) Wait() (int, error) {
 	select {
 	case result := <-c.result:

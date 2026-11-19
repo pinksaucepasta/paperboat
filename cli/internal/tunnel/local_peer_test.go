@@ -986,3 +986,32 @@ func TestLocalPeerReadFailureIsALostTransportWhateverTheErrno(t *testing.T) {
 		t.Fatalf("the unrecognised errno stayed in the cause tree: %v", waitErr)
 	}
 }
+
+type failingWriteConn struct {
+	net.Conn
+	err error
+}
+
+func (c failingWriteConn) Write([]byte) (int, error) { return 0, c.err }
+
+// Input written to a daemon link that has gone is a lost transport whatever errno the platform gives, like a failed
+// read: the exec recovery refuses to resume over an errno it does not know (TestExecRecoveryKeepsItsBudgetAfterTransientReplacementHandshake
+// failed on Windows when the daemon closed the link before the end-of-input frame was written).
+func TestLocalPeerWriteFailureIsALostTransportWhateverTheErrno(t *testing.T) {
+	unknown := syscall.Errno(4242)
+	local, peer := net.Pipe()
+	defer peer.Close()
+	go func() { _, _ = io.Copy(io.Discard, peer) }()
+	connection, err := NewLocalExecPeerConn(failingWriteConn{Conn: local, err: &net.OpError{Op: "write", Net: "pipe", Err: unknown}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_, writeErr := connection.Write([]byte("in"))
+	closeErr := connection.(InputHalfCloser).CloseWrite()
+	for name, got := range map[string]error{"Write": writeErr, "CloseWrite": closeErr} {
+		if !errors.Is(got, ErrLocalDaemonLost) || !errors.Is(got, ErrTransportLost) || errors.Is(got, unknown) {
+			t.Fatalf("%s = %v, want a lost local daemon without the errno in the cause tree", name, got)
+		}
+	}
+}
