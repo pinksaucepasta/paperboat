@@ -256,7 +256,7 @@ func TestCapBlockedKeepsTheEdgesBound(t *testing.T) {
 	}
 }
 
-// The Free request rates, the browser-terminal cap and the fair-use file throttles are Paperboat's limits on hosted traffic: a
+// The byte pacing, the Free request rates, the browser-terminal cap and the fair-use file throttles are Paperboat's limits on hosted traffic: a
 // Paperboat-run edge (a plain node, or a global installation) is sent them, a customer-owned edge (account or team
 // installation) never is, so the same Free publication is limited on the one and unlimited on the other.
 func TestHostedLimitsReachPaperboatEdgesAndNeverCustomerOwnedOnesPostgres(t *testing.T) {
@@ -312,11 +312,15 @@ func TestHostedLimitsReachPaperboatEdgesAndNeverCustomerOwnedOnesPostgres(t *tes
 	for kind, node := range nodes {
 		customerOwned := kind == "account" || kind == "team"
 		limits := service.ingressLimitsFor(ctx, node)
-		if limits.Validate() != nil || (limits.FreeRequests == edgelimits.FreeRequests{}) != customerOwned {
-			t.Errorf("%s edge: free request rates = %+v, want sent only to Paperboat's own", kind, limits.FreeRequests)
+		if limits.Validate() != nil {
+			t.Errorf("%s edge: invalid set %+v", kind, limits)
 		}
-		if customerOwned && limits.FreeRequests != (edgelimits.FreeRequests{}) {
-			t.Errorf("%s edge was sent request limits", kind)
+		// A Paperboat edge is sent every limit; a customer-owned one is sent the zero set: no byte pacing, no Free request rates.
+		if customerOwned && limits != (edgelimits.IngressLimits{}) {
+			t.Errorf("%s edge was sent limits: %+v", kind, limits)
+		}
+		if !customerOwned && (limits.Publication == (edgelimits.Limit{}) || limits.Account == (edgelimits.Limit{}) || limits.FreeRequests == (edgelimits.FreeRequests{})) {
+			t.Errorf("%s edge was not sent every limit: %+v", kind, limits)
 		}
 		_, throttled, _, _, _, err := service.ingressProjection(ctx, node, "epoch_"+x+"_hostedlimits", true)
 		if err != nil {

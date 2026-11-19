@@ -372,19 +372,48 @@ func TestServerIngressLimitsApplyToCurrentKeys(t *testing.T) {
 	}
 }
 
-// F21-47: an edge that has not heard from the server (self-hosted without an answer yet) enforces
-// the shared defaults, the same set the server sends.
-func TestEdgeWithoutAnswerUsesTheSharedDefaultLimits(t *testing.T) {
+// An edge that has not heard from the server enforces no byte pacing (it enforces only what it is told); the server's answer
+// sets the limits, and the zero set it sends a customer-owned edge removes them again.
+func TestEdgeWithoutAnswerPacesNothingAndTheZeroSetRemovesLimits(t *testing.T) {
 	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer registry.Close()
+	if registry.ingressLimits.Publication != unlimitedIngress || registry.ingressLimits.Account != unlimitedIngress {
+		t.Fatalf("edge limits before an answer = %+v / %+v", registry.ingressLimits.Publication, registry.ingressLimits.Account)
+	}
 	set := edgelimits.Default()
-	if registry.ingressLimits.Publication != ingressLimitConfig(set.Publication) || registry.ingressLimits.Account != ingressLimitConfig(set.Account) {
-		t.Fatalf("edge limits = %+v / %+v", registry.ingressLimits.Publication, registry.ingressLimits.Account)
+	if err := registry.SetIngressLimits(set); err != nil {
+		t.Fatal(err)
+	}
+	if registry.ingressLimits.Publication != ingressLimitConfig(set.Publication) || registry.ingressLimits.Publication == unlimitedIngress {
+		t.Fatalf("server limits not applied: %+v", registry.ingressLimits.Publication)
+	}
+	if err := registry.SetIngressLimits(edgelimits.IngressLimits{}); err != nil {
+		t.Fatal(err)
+	}
+	if registry.ingressLimits.Publication != unlimitedIngress || registry.ingressLimits.Account != unlimitedIngress {
+		t.Fatalf("zero set left limits: %+v / %+v", registry.ingressLimits.Publication, registry.ingressLimits.Account)
+	}
+	// A live stream under the unlimited config moves 8 MiB at once (a paced one would wait on its burst).
+	lease, err := registry.AcquireIngress(context.Background(), publicTCPDecision(time.Now().UTC(), 4100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	stream := &meteredIngressStream{ctx: context.Background(), lease: lease, stream: nopReadWriteCloser{}}
+	start := time.Now()
+	if err := stream.wait(8 << 20); err != nil || time.Since(start) > time.Second {
+		t.Fatalf("unlimited pacing waited %v (err %v)", time.Since(start), err)
 	}
 }
+
+type nopReadWriteCloser struct{}
+
+func (nopReadWriteCloser) Read([]byte) (int, error)    { return 0, io.EOF }
+func (nopReadWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (nopReadWriteCloser) Close() error                { return nil }
 
 // An operator reads back what an edge applies from one log line, including the first answer, which equals
 // the defaults and used to change nothing silently (F21-47).

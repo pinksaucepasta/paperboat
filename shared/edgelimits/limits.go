@@ -92,10 +92,14 @@ func (r Rate) validate() error {
 }
 
 // Validate rejects a set with a missing, zero or absurd value, or an account rate below its
-// publication's.
+// publication's. The zero byte limits (both) mean no pacing: a customer-owned edge is sent the zero set, since
+// every cap is Paperboat's limit on hosted traffic and the edge enforces only what it is told.
 func (l IngressLimits) Validate() error {
 	if l.FreeRequests.Validate() != nil {
 		return ErrInvalid
+	}
+	if l.Publication == (Limit{}) && l.Account == (Limit{}) {
+		return nil
 	}
 	if l.Publication.validate() != nil || l.Account.validate() != nil || l.Account.BytesPerSecond < l.Publication.BytesPerSecond {
 		return ErrInvalid

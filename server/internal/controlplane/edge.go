@@ -830,14 +830,14 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	writeHeartbeatAnswer(w, limits)
 }
 
-// ingressLimitsFor is the set one edge is sent: a customer-owned edge gets no Free request rates (the edge enforces only
-// what it is told), and neither does one whose owner cannot be read: a customer's own edge is never limited by mistake.
+// ingressLimitsFor is the set one edge is sent. A customer-owned edge gets the zero set (no byte pacing, no Free request
+// rates): every cap is Paperboat's limit on hosted traffic and the edge enforces only what it is told. An edge whose owner
+// cannot be read gets it too: a customer's own edge is never limited by mistake.
 func (s *EdgeService) ingressLimitsFor(ctx context.Context, nodeID string) edgelimits.IngressLimits {
-	limits := s.ingressLimits
 	if owned, err := s.customerOwnedNode(ctx, nodeID); err != nil || owned {
-		limits.FreeRequests = edgelimits.FreeRequests{}
+		return edgelimits.IngressLimits{}
 	}
-	return limits
+	return s.ingressLimits
 }
 
 // writeHeartbeatAnswer answers a recorded heartbeat with exactly the ingress limits the edge enforces (T11):

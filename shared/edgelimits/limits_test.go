@@ -36,3 +36,15 @@ func TestDefaultLimitsAreValidAndKeepOneStreamAbove150Mbps(t *testing.T) {
 		}
 	}
 }
+
+// The zero set is the no-limit answer a customer-owned edge gets; half of it is still a mistake.
+func TestZeroLimitsMeanNoLimitsAndHalfZeroIsInvalid(t *testing.T) {
+	if err := (IngressLimits{}).Validate(); err != nil {
+		t.Fatalf("zero set: %v", err)
+	}
+	half := Default()
+	half.Account = Limit{}
+	if half.Validate() == nil {
+		t.Fatal("account limit zero with a publication limit accepted")
+	}
+}

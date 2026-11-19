@@ -53,15 +53,28 @@ type ingressLimitState struct {
 	lastUsed time.Time
 }
 
-// DefaultIngressLimits is the server's default set (edgelimits.Default), used until the first
-// heartbeat answer carries the configured one.
+// unlimitedIngress paces nothing: an edge enforces only the limits the server sends, and the server sends none to a
+// customer-owned edge (the zero edgelimits set).
+var unlimitedIngress = IngressLimitConfig{ByteRate: rate.Inf, ByteBurst: ingressPacingChunk}
+
+// DefaultIngressLimits is what an edge applies until the first heartbeat answer carries the server's set: none.
 func DefaultIngressLimits() *IngressLimits {
-	set := edgelimits.Default()
-	return &IngressLimits{Publication: ingressLimitConfig(set.Publication), Account: ingressLimitConfig(set.Account)}
+	return &IngressLimits{Publication: unlimitedIngress, Account: unlimitedIngress}
 }
 
 func ingressLimitConfig(l edgelimits.Limit) IngressLimitConfig {
+	if l == (edgelimits.Limit{}) {
+		return unlimitedIngress
+	}
 	return IngressLimitConfig{ByteRate: rate.Limit(l.BytesPerSecond), ByteBurst: l.ByteBurst}
+}
+
+// loggedRate is a pacing rate for the log line: 0 means unlimited.
+func loggedRate(r rate.Limit) float64 {
+	if r == rate.Inf {
+		return 0
+	}
+	return float64(r)
 }
 
 // SetIngressLimits applies the server's configured set to new and current keys alike.
@@ -84,8 +97,8 @@ func (l *IngressLimits) apply(publication, account IngressLimitConfig) error {
 	}
 	l.reported = true
 	slog.Info("ingress_limits_applied",
-		"publication_bytes_per_second", float64(publication.ByteRate), "publication_byte_burst", publication.ByteBurst,
-		"account_bytes_per_second", float64(account.ByteRate), "account_byte_burst", account.ByteBurst)
+		"publication_bytes_per_second", loggedRate(publication.ByteRate), "publication_byte_burst", publication.ByteBurst,
+		"account_bytes_per_second", loggedRate(account.ByteRate), "account_byte_burst", account.ByteBurst)
 	l.Publication, l.Account = publication, account
 	for _, state := range l.publications {
 		state.reconfigure(publication, now)
