@@ -36,13 +36,14 @@ func TestWebSocketOutputSkipsCompressionOfIncompressibleChunks(t *testing.T) {
 		done <- err2
 	}))
 	defer server.Close()
+	// Before Dial: the handler starts encoding as soon as the connection is accepted.
+	before := protocol.TerminalCompressionMetrics()
 	client, _, err := websocket.Dial(ctx, "ws"+server.URL[len("http"):], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.CloseNow()
 	client.SetReadLimit(protocol.MaxBinaryFrame + 64)
-	before := protocol.TerminalCompressionMetrics()
 	for i := 0; i < 80; i++ {
 		_, message, err := client.Read(ctx)
 		if err != nil {
