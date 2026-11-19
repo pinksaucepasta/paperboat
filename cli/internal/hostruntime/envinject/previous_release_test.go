@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 )
 
 // The MAC'd ENV layer state 2026.11.16.2 wrote (testdata from that release's writeLayerState) reads after an update.
@@ -13,9 +15,7 @@ func TestReadsLayerStateWrittenByPreviousRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "floor.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	atomicfiletest.WriteOwnerOnly(t, path, raw)
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i)

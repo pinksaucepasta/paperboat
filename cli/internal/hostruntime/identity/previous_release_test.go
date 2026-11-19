@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile/atomicfiletest"
 )
 
 // The identity, registration and network secret 2026.11.16.2 wrote (testdata from that release's Store) load as
@@ -19,9 +21,7 @@ func TestLoadsIdentityWrittenByPreviousRelease(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, name), raw, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		atomicfiletest.WriteOwnerOnly(t, filepath.Join(root, name), raw)
 	}
 	store, err := Open(Config{StateRoot: root})
 	if err != nil {
