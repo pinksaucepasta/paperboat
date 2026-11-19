@@ -2,10 +2,10 @@ package session
 
 import (
 	"context"
-	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 )
@@ -28,14 +28,21 @@ type outputWriter struct {
 	manager   *Manager
 	mu        sync.Mutex
 	dirty     map[*managedSession]struct{}
-	decisions []store.InputDecision // input outcomes, written with the next group commit
+	urgent    map[*managedSession]int // sessions a close or shutdown is waiting on; written first
+	decisions []store.InputDecision   // input outcomes, written with the next group commit
 	wake      chan struct{}
 	committed chan struct{}
+	done      chan struct{} // closed when the manager stops; run returns and flush gives up
+	stopOnce  sync.Once
+}
+
+func newOutputWriter(m *Manager) *outputWriter {
+	return &outputWriter{manager: m, dirty: map[*managedSession]struct{}{}, urgent: map[*managedSession]int{}, wake: make(chan struct{}, 1), committed: make(chan struct{}), done: make(chan struct{})}
 }
 
 func (m *Manager) writer() *outputWriter {
 	m.writerOnce.Do(func() {
-		m.output = &outputWriter{manager: m, dirty: map[*managedSession]struct{}{}, wake: make(chan struct{}, 1), committed: make(chan struct{})}
+		m.output = newOutputWriter(m)
 		go m.output.run()
 	})
 	return m.output
@@ -118,6 +125,17 @@ func (w *outputWriter) mark(session *managedSession) {
 
 // flush waits until the session's output up to now is persisted or ctx ends.
 func (w *outputWriter) flush(ctx context.Context, session *managedSession) error {
+	// A close waits for its own backlog, not for every flooding neighbour's: see commit.
+	w.mu.Lock()
+	w.urgent[session]++
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		if w.urgent[session]--; w.urgent[session] == 0 {
+			delete(w.urgent, session)
+		}
+		w.mu.Unlock()
+	}()
 	_, target, _ := session.history.Bounds()
 	for {
 		session.persistMu.Lock()
@@ -135,14 +153,23 @@ func (w *outputWriter) flush(ctx context.Context, session *managedSession) error
 		w.mark(session)
 		select {
 		case <-committed:
+		case <-w.done:
+			return ErrManagerStopped
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 }
 
+func (w *outputWriter) stop() { w.stopOnce.Do(func() { close(w.done) }) }
+
 func (w *outputWriter) run() {
-	for range w.wake {
+	for {
+		select {
+		case <-w.wake:
+		case <-w.done:
+			return
+		}
 		//paperboat:allow-source-policy sleep owner=hostruntime-session reason=grouped-commit-batch-pacing
 		time.Sleep(outputCommitInterval)
 		w.commit()
@@ -165,9 +192,26 @@ func (w *outputWriter) commit() {
 		sessions = append(sessions, session)
 	}
 	w.dirty = map[*managedSession]struct{}{}
+	// A close waits for this commit: write only the sessions someone waits on when there are any,
+	// so its latency is their backlog, not a full group commit of every flooding neighbour.
+	var deferred []*managedSession
+	if len(w.urgent) > 0 {
+		kept := sessions[:0]
+		for _, session := range sessions {
+			if w.urgent[session] > 0 {
+				kept = append(kept, session)
+			} else {
+				deferred = append(deferred, session)
+			}
+		}
+		sessions = kept
+	}
 	decisions := w.decisions
 	w.decisions = nil
 	w.mu.Unlock()
+	for _, session := range deferred {
+		w.mark(session)
+	}
 	if len(decisions) > 0 {
 		if err := w.manager.config.Store.UpdateInputDecisions(context.Background(), decisions); err != nil && w.manager.config.Metrics != nil {
 			_ = w.manager.config.Metrics.Record("paperboat_runtime_terminal_persistence_failures_total", 1, nil)

@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,7 @@ func TestManagerRecoversHistoryInputAndRestartGeneration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		shutdownAtEnd(t, manager)
 		return manager
 	}
 	random := make([]byte, 64)
@@ -128,6 +130,7 @@ func TestManagerLiveOutputDoesNotWaitForSQLitePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "nonblocking", Command: shellCommand("/bin/sh", workspace, "read line; printf live-output; read line")})
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +202,7 @@ func TestManagerPersistenceBacklogRetainsOnlyBoundedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := &Manager{config: ManagerConfig{Store: state, HistoryBytes: 64}}
+	shutdownAtEnd(t, manager)
 	session := &managedSession{id: "ses_backlog", history: retained}
 	manager.startOutputPersistence(session)
 	appendByte := func(value byte) {
@@ -256,6 +260,7 @@ func TestManagerMarksUnverifiedRunningGenerationLostOnRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	snapshot, err := manager.Snapshot("ses_lost")
 	if err != nil || snapshot.State != Exited || snapshot.Generation != 3 || snapshot.Exit == nil || snapshot.Exit.Signal != "runtime_restart" {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
@@ -277,6 +282,7 @@ func TestManagerMarksRunningGenerationLostOnMachineReboot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	t.Cleanup(func() { _ = state.Close() })
 	snapshot, err := manager.Snapshot("ses_reboot")
 	if err != nil || snapshot.State != Exited || snapshot.Generation != 4 || snapshot.Exit == nil || snapshot.Exit.Signal != "machine_reboot" {
@@ -299,6 +305,7 @@ func TestManagerShutdownPreservesRunningGenerationForBootRecovery(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "boot-recovery", Command: shellCommand("/bin/sh", workspace, "printf retained; read line")})
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +326,7 @@ func TestManagerShutdownPreservesRunningGenerationForBootRecovery(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, recovered)
 	snapshot, err := recovered.Snapshot(created.ID)
 	if err != nil || snapshot.State != Exited || snapshot.Exit == nil || snapshot.Exit.Signal != "machine_reboot" || snapshot.LatestSequence < uint64(len("retained")) {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
@@ -346,6 +354,7 @@ func TestManagerRecoveryClearsLegacyExitedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	snapshot, err := manager.Snapshot(record.ID)
 	if err != nil || snapshot.EarliestSequence != 9 || snapshot.LatestSequence != 9 {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
@@ -386,6 +395,7 @@ func TestManagerCloseRecoversPersistenceFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			shutdownAtEnd(t, manager)
 			defer manager.Shutdown(context.Background())
 			created, err := manager.Create(t.Context(), CreateRequest{Name: "close-recovery", Command: shellCommand("/bin/sh", workspace, "printf ready; read line")})
 			if err != nil {
@@ -457,10 +467,67 @@ func TestManagerCloseRecoversPersistenceFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			shutdownAtEnd(t, recovered)
 			snapshot, err := recovered.Snapshot(created.ID)
 			if err != nil || snapshot.State != Closed || snapshot.Generation != created.Generation {
 				t.Fatal("reopen lost closed generation")
 			}
 		})
+	}
+}
+
+// Closing a session waits for its own backlog, not for the share of every flooding neighbour:
+// a commit with a close waiting writes only that session (a full group commit of the flooding
+// neighbours is what made a close take seconds) and leaves the rest marked for the next one.
+func TestCommitWritesTheSessionACloseWaitsOnFirst(t *testing.T) {
+	const sessions, retained = 64, 64 << 10 // 64 x 64 KiB pending against a 256 KiB commit
+	state, err := store.Open(context.Background(), store.Config{Root: filepath.Join(t.TempDir(), "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	manager := &Manager{config: ManagerConfig{Store: state, HistoryBytes: retained}}
+	writer := newOutputWriter(manager)
+	now := time.Now().UTC()
+	var all []*managedSession
+	for i := 0; i < sessions; i++ {
+		id := fmt.Sprintf("ses_flood_%02d", i)
+		if err := state.CreateSession(context.Background(), store.Session{ID: id, Name: id, CWD: t.TempDir(), CommandPath: "/bin/sh", CommandArgs: []string{"-c", "exit"}, CommandEnv: []string{"PATH=/bin"}, Columns: 80, Rows: 24, State: "running", Generation: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		ring, err := history.New(retained)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ring.Append(1, bytes.Repeat([]byte("x"), retained)); err != nil {
+			t.Fatal(err)
+		}
+		session := &managedSession{id: id, history: ring}
+		manager.startOutputPersistence(session)
+		writer.mark(session)
+		all = append(all, session)
+	}
+	closing := all[sessions-1]
+	writer.urgent[closing] = 1
+	writer.commit()
+	closing.persistMu.Lock()
+	persisted := closing.persistedLatest
+	closing.persistMu.Unlock()
+	if _, latest, _ := closing.history.Bounds(); persisted != latest {
+		t.Fatalf("a commit left the session a close waits on at %d of %d", persisted, latest)
+	}
+	for _, other := range all[:sessions-1] {
+		other.persistMu.Lock()
+		written := other.persistedLatest
+		other.persistMu.Unlock()
+		if written != 0 {
+			t.Fatalf("a commit with a close waiting also wrote %s", other.id)
+		}
+	}
+	writer.mu.Lock()
+	queued := len(writer.dirty)
+	writer.mu.Unlock()
+	if queued != sessions-1 {
+		t.Fatalf("%d neighbours left marked for the next commit, want %d", queued, sessions-1)
 	}
 }

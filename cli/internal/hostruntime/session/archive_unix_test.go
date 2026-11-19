@@ -30,6 +30,7 @@ func TestManagerRetireRefusesLivePTYThenFencesAdmissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
 
 	created, err := manager.Create(context.Background(), CreateRequest{
@@ -118,6 +119,7 @@ func TestManagerRetireRetriesPersistenceAndRestoresStoppedHistory(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
+		shutdownAtEnd(t, manager)
 		return manager
 	}
 	manager := newManager(ManagerConfig{PreserveStoppedHistory: true})

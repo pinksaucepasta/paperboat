@@ -66,6 +66,7 @@ func TestConfiguredSessionCapacityRemainsBoundedAndShutsDownCleanly(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	var first Snapshot
 	for index := 0; index < maxSessions; index++ {
 		created, err := manager.Create(context.Background(), CreateRequest{Name: fmt.Sprintf("session-%02d", index), Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
@@ -134,6 +135,7 @@ func TestDeleteRunningSessionTerminatesAndReleasesCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "running", Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +169,7 @@ func TestDeleteRunningSessionPurgesPersistentState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "persistent", Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +198,7 @@ func TestClosedSessionsDoNotConsumeTheLiveSessionLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	create := func(name string) (Snapshot, error) {
 		return manager.Create(context.Background(), CreateRequest{Name: name, Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
 	}
@@ -283,6 +287,7 @@ func TestSlowStoreCannotMakeCloseHangOrCommitPerChunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	var ids []string
 	for i := 0; i < 3; i++ {
 		created, err := manager.Create(context.Background(), CreateRequest{Name: fmt.Sprintf("flood-%d", i), Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}})
@@ -312,7 +317,7 @@ func TestSlowStoreCannotMakeCloseHangOrCommitPerChunk(t *testing.T) {
 // Lane W load test: after closing every flooded session the heap kept ~0.9 MiB per closed
 // session, far above its 64 KiB history. A closed session keeps its listing, not its buffers.
 func TestClosedSessionsReleaseTheirOutputBuffers(t *testing.T) {
-	const sessions = 20
+	const sessions = 10 // each close waits out one group commit of the others still flooding, so cost grows with the square
 	const historyBytes = 64 << 10
 	state, err := store.Open(context.Background(), store.Config{Root: filepath.Join(t.TempDir(), "state")})
 	if err != nil {
@@ -329,6 +334,7 @@ func TestClosedSessionsReleaseTheirOutputBuffers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	defer manager.Shutdown(context.Background())
 	heap := func() uint64 {
 		runtime.GC()
@@ -396,6 +402,7 @@ func TestCreateWithoutARecordTerminatesTheShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	if _, err := manager.Create(context.Background(), CreateRequest{Name: "no-record", Command: pty.Command{Path: "/bin/sh", CWD: "/tmp", Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}}); err == nil {
 		t.Fatal("create succeeded without a committed record")
 	}

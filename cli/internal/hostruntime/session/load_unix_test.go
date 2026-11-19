@@ -68,6 +68,7 @@ func loadManager(t *testing.T) (*Manager, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	return manager, root
 }
 

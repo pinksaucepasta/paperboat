@@ -177,9 +177,18 @@ func TestCloseInterruptedRecordingEndsARecorderOfAGoneSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := startManualRecording(t, manager, created.ID, team)
+	gone, err := manager.get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	manager.mu.Lock()
 	delete(manager.sessions, created.ID) // the session is gone from the manager; its recorder is not
 	manager.mu.Unlock()
+	t.Cleanup(func() { // hand the shell back so the manager's shutdown ends it
+		manager.mu.Lock()
+		manager.sessions[created.ID] = gone
+		manager.mu.Unlock()
+	})
 	meta, err := manager.CloseInterruptedRecording(state.ID)
 	if err != nil || meta.EndedAt == nil {
 		t.Fatalf("close interrupted: %+v %v", meta, err)

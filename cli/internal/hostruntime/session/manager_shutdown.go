@@ -169,7 +169,15 @@ func (m *Manager) Retire(ctx context.Context) error {
 	m.mu.Lock()
 	m.retired = true
 	m.mu.Unlock()
+	m.stopWriter()
 	return nil
+}
+
+// stopWriter ends the output writer goroutine once the manager has persisted everything it owes.
+func (m *Manager) stopWriter() {
+	if m.config.Store != nil {
+		m.writer().stop()
+	}
 }
 
 func (m *Manager) Shutdown(ctx context.Context) error {
@@ -205,6 +213,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			return errors.Join(result, ctx.Err())
 		}
 	}
+	m.stopWriter()
 	return result
 }
 

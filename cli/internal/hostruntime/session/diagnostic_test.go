@@ -97,6 +97,7 @@ func TestCaptureObservesUnexpectedReadFailureWithoutPrivateText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	reference := supportref.New()
 	created, err := manager.Create(supportref.WithContext(context.Background(), reference), CreateRequest{Name: "diagnostic", Command: pty.Command{Path: "/bin/sh"}})
 	if err != nil {
@@ -130,6 +131,7 @@ func TestCaptureDoesNotReportNonzeroUserExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "expected-exit", Command: pty.Command{Path: "/bin/sh"}})
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +181,7 @@ func TestCaptureStopsUndeliverableOutputAndRecovers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			shutdownAtEnd(t, manager)
 			reference := supportref.New()
 			created, err := manager.Create(supportref.WithContext(t.Context(), reference), CreateRequest{Name: "delivery", Command: pty.Command{Path: "/bin/sh"}})
 			if err != nil {
@@ -289,6 +292,7 @@ func TestCaptureRetainsProcessWhenDeliveryTerminationFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	reference := supportref.New()
 	created, err := manager.Create(supportref.WithContext(t.Context(), reference), CreateRequest{Name: "termination", Command: pty.Command{Path: "/bin/sh"}})
 	if err != nil {

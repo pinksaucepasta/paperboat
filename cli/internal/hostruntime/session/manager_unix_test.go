@@ -38,6 +38,7 @@ func realManager(t *testing.T) (*Manager, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	shell := "/bin/sh"
 	if _, err := os.Stat(shell); err != nil {
 		shell = "/usr/bin/sh"
@@ -637,6 +638,7 @@ func TestManagerAttachmentLimitRejectsAndDetachReleasesCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shutdownAtEnd(t, manager)
 	created, err := manager.Create(context.Background(), CreateRequest{Name: "bounded", Command: shellCommand("/bin/sh", root, "read line")})
 	if err != nil {
 		t.Fatal(err)
