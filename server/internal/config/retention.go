@@ -53,6 +53,9 @@ type Retention struct {
 	// every period of the dashboard (today, 7 days, 30 days, this month) stays complete.
 	TrafficHourly time.Duration `json:"traffic_hourly"`
 	TrafficDaily  time.Duration `json:"traffic_daily"`
+	// FleetDaily: the operator Fleet page's per-day version counts (fleet_version_daily). At least 35 days, so a rollout
+	// chart of a month is complete.
+	FleetDaily time.Duration `json:"fleet_daily"`
 	// EndedAnnouncements: an operator announcement after it ended or was retracted (its receipts go with it).
 	EndedAnnouncements time.Duration `json:"ended_announcements"`
 	// DeletedTeams: what a deleted team held (members, invitations, settings, destinations and credentials) after the
@@ -70,7 +73,7 @@ func defaultRetention() Retention {
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day, EndedPublications: 30 * day,
 		FinishedEnrollments: 7 * day, AbandonedEnrollments: 30 * day, AccountDeletionJobs: 90 * day,
 		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
-		SupersededMeshEntries: time.Hour, Recordings: 90 * day, NodeCapacityDaily: 90 * day, TrafficHourly: 8 * day, TrafficDaily: 400 * day, EndedAnnouncements: 90 * day, DeletedTeams: 30 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
+		SupersededMeshEntries: time.Hour, Recordings: 90 * day, NodeCapacityDaily: 90 * day, TrafficHourly: 8 * day, TrafficDaily: 400 * day, FleetDaily: 400 * day, EndedAnnouncements: 90 * day, DeletedTeams: 30 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
 }
 
@@ -78,7 +81,7 @@ func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
 	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day, r.EndedPublications < day, r.FinishedEnrollments < 2*day, r.AbandonedEnrollments < 2*day, r.AccountDeletionJobs < day,
 		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
-		r.SupersededMeshEntries < time.Minute, r.NodeCapacityDaily < 35*day, r.TrafficHourly < 2*day, r.TrafficDaily < 62*day, r.EndedAnnouncements < day, r.DeletedTeams < day:
+		r.SupersededMeshEntries < time.Minute, r.NodeCapacityDaily < 35*day, r.TrafficHourly < 2*day, r.TrafficDaily < 62*day, r.FleetDaily < 35*day, r.EndedAnnouncements < day, r.DeletedTeams < day:
 		return fmt.Errorf("retention: a window is below its minimum")
 	case r.EndedSessions < accessSessionRetention:
 		return fmt.Errorf("retention.ended_sessions must be at least user_machines.expired_access_session_retention")

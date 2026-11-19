@@ -124,6 +124,14 @@ filters. Accounts take `q` (email, name or id contains) and `status`; teams take
   relays**, since an older server rejects the new field. Day totals live in
   `node_capacity_daily` and are pruned after `retention.node_capacity_daily` (90
   days).
+- `/v1/admin/fleet/versions`, `/rollouts` and `/offline` (admin, operations): the Fleet page. Versions counts
+  machines, users and teams per pb version and OS (the version each machine reports in its heartbeat), the oldest
+  version still online and the update failure reasons machines report. Rollouts takes each promoted release from
+  the signed release decisions and counts updated, still older, failed or rolled back, and older machines last seen
+  before the rollout began (offline for the whole window, so they could not have updated); its chart reads
+  `fleet_version_daily`, one row per day, OS and version, rewritten every 10 minutes and pruned after
+  `retention.fleet_daily` (400 days). Offline lists machines not seen within `user_machines.offline_after`, by how long
+  unseen (under 1 day, 1 to 7, 7 to 30, over 30, never), with real totals and offset paging.
 - `/v1/admin/teams` and `/{team_id}`: ownership/generation, suspension and bounded
   membership pages, plus the team's billing workspace ID.
 - `/v1/admin/billing/workspaces` and `/{workspace_id}`: subscription state, paid

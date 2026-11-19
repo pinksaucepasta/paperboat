@@ -19784,6 +19784,368 @@
           }
         }
       },
+      "OperatorFleetFailure": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "machines": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_version",
+          "state",
+          "error_code",
+          "machines"
+        ]
+      },
+      "OperatorFleetOffline": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "total": {
+            "type": "integer",
+            "description": "Offline machines matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
+          },
+          "fleet_machines": {
+            "type": "integer"
+          },
+          "offline": {
+            "type": "integer"
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetBucket"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetOfflineMachine"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "total",
+          "fleet_machines",
+          "offline",
+          "buckets",
+          "items"
+        ]
+      },
+      "OperatorFleetBucket": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "machines": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket",
+          "machines"
+        ]
+      },
+      "OperatorFleetOfflineMachine": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bucket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "alias",
+          "platform",
+          "architecture",
+          "version",
+          "state",
+          "account_id",
+          "bucket"
+        ]
+      },
+      "OperatorFleetPoint": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "updated": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "total",
+          "updated",
+          "failed"
+        ]
+      },
+      "OperatorFleetPlatform": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "users": {
+            "type": "integer"
+          },
+          "teams": {
+            "type": "integer"
+          },
+          "oldest_online_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "machines",
+          "online",
+          "users",
+          "teams"
+        ]
+      },
+      "OperatorFleetRollout": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action": {
+            "type": "string"
+          },
+          "rollout_percentage": {
+            "type": "integer"
+          },
+          "updated": {
+            "type": "integer"
+          },
+          "older": {
+            "type": "integer"
+          },
+          "other": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "rolled_back": {
+            "type": "integer"
+          },
+          "offline_since_start": {
+            "type": "integer"
+          },
+          "offline_now": {
+            "type": "integer"
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetFailure"
+            }
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetPoint"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "platforms",
+          "started_at",
+          "action",
+          "rollout_percentage",
+          "updated",
+          "older",
+          "other",
+          "failed",
+          "rolled_back",
+          "offline_since_start",
+          "offline_now",
+          "failures",
+          "series"
+        ]
+      },
+      "OperatorFleetRollouts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rollouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetRollout"
+            }
+          }
+        },
+        "required": [
+          "observed_at",
+          "rollouts"
+        ]
+      },
+      "OperatorFleetVersionRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "users": {
+            "type": "integer"
+          },
+          "teams": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "platform",
+          "version",
+          "machines",
+          "online",
+          "users",
+          "teams"
+        ]
+      },
+      "OperatorFleetVersions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "users": {
+            "type": "integer"
+          },
+          "teams": {
+            "type": "integer"
+          },
+          "oldest_online_version": {
+            "type": "string"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetPlatform"
+            }
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetVersionRow"
+            }
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorFleetFailure"
+            }
+          }
+        },
+        "required": [
+          "observed_at",
+          "machines",
+          "online",
+          "users",
+          "teams",
+          "platforms",
+          "versions",
+          "failures"
+        ]
+      },
       "OperatorCapacityPage": {
         "type": "object",
         "additionalProperties": false,
@@ -63743,6 +64105,289 @@
                     "type": "string",
                     "maxLength": 64,
                     "description": "A six-digit authenticator code or a recovery code."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fleet/offline": {
+      "get": {
+        "operationId": "get_v1_admin_fleet_offline",
+        "summary": "Offline machines by how long unseen",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "under_1_day",
+                "1_to_7_days",
+                "7_to_30_days",
+                "over_30_days",
+                "never_seen"
+              ]
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "linux",
+                "darwin",
+                "windows"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorFleetOffline"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fleet/rollouts": {
+      "get": {
+        "operationId": "get_v1_admin_fleet_rollouts",
+        "summary": "Release rollout progress",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.",
+        "parameters": [],
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorFleetRollouts"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fleet/versions": {
+      "get": {
+        "operationId": "get_v1_admin_fleet_versions",
+        "summary": "Machines per pb version and OS",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.",
+        "parameters": [],
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorFleetVersions"
+                    }
                   }
                 }
               }

@@ -141,6 +141,9 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/infrastructure/capacity":                                         {"operations", "", "node-capacity"},
 	"GET /v1/admin/traffic":                                                         {"operations", "", "traffic"},
 	"GET /v1/admin/traffic/nodes":                                                   {"operations", "", "traffic-nodes"},
+	"GET /v1/admin/fleet/versions":                                                  {"operations", "", "fleet"},
+	"GET /v1/admin/fleet/rollouts":                                                  {"operations", "", "fleet"},
+	"GET /v1/admin/fleet/offline":                                                   {"operations", "", "fleet"},
 	"GET /v1/admin/reporting":                                                       {"operations", "", "reporting"},
 	"GET /v1/admin/audit/{resource_id}":                                             {"admin", "resource_id", ""},
 	"GET /v1/admin/control-operations/{operation_id}":                               {"operations", "operation_id", ""},
@@ -365,6 +368,9 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/infrastructure/capacity", "capacity", ""},
 		{"GET /v1/admin/traffic", "traffic", ""},
 		{"GET /v1/admin/traffic/nodes", "traffic_nodes", ""},
+		{"GET /v1/admin/fleet/versions", "fleet_versions", ""},
+		{"GET /v1/admin/fleet/rollouts", "fleet_rollouts", ""},
+		{"GET /v1/admin/fleet/offline", "fleet_offline", ""},
 		{"GET /v1/admin/control-operations/{operation_id}", "control_operation", "operation_id"},
 		{"GET /v1/admin/billing/workspace-operations/{operation_id}", "billing_operation", "operation_id"},
 		{"GET /v1/admin/audit/{resource_id}", "audit", "resource_id"},
@@ -419,10 +425,11 @@ func operatorRead(service *operator.Service, kind, param string) http.Handler {
 
 // Filters each list accepts; the service validates the values.
 var operatorListFilters = map[string][]string{
-	"accounts":     {"q", "status"},
-	"teams":        {"q", "suspended"},
-	"machines":     {"q", "account", "team", "state", "platform", "stale", "deleted"},
-	"audit_events": {"actor", "event_type", "resource_type", "resource_id", "outcome", "since", "until"},
+	"accounts":      {"q", "status"},
+	"teams":         {"q", "suspended"},
+	"machines":      {"q", "account", "team", "state", "platform", "stale", "deleted"},
+	"fleet_offline": {"q", "bucket", "platform", "version"},
+	"audit_events":  {"actor", "event_type", "resource_type", "resource_id", "outcome", "since", "until"},
 }
 
 func operatorFilterTarget(query url.Values, keys []string) string {

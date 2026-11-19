@@ -248,6 +248,9 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.TrafficHourly })},
 	{"traffic_daily", batchOf("traffic_daily", `day < (now()-make_interval(secs=>$2))::date`),
 		seconds(func(c config.Retention) time.Duration { return c.TrafficDaily })},
+	// The Fleet page's per-day version counts.
+	{"fleet_version_daily", batchOf("fleet_version_daily", `day < (now()-make_interval(secs=>$2))::date`),
+		seconds(func(c config.Retention) time.Duration { return c.FleetDaily })},
 	// An announcement ended or retracted, or an open-ended notice that started that long ago (the bell shows the newest
 	// few); its receipts cascade. An open-ended banner stays until it is retracted.
 	{"announcements", batchOf("announcements", `coalesce(retracted_at, ends_at, CASE WHEN kind='notice' THEN starts_at END) < now()-make_interval(secs=>$2)`),

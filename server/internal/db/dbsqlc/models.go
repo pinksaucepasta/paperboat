@@ -1580,6 +1580,16 @@ type EnvironmentVaultTeamMember struct {
 	GrantEpoch int64
 }
 
+type FleetVersionDaily struct {
+	Day        time.Time
+	Platform   string
+	Version    string
+	Machines   int32
+	Online     int32
+	Failed     int32
+	RolledBack int32
+}
+
 type GithubNativeLink struct {
 	ID              string
 	UserID          string

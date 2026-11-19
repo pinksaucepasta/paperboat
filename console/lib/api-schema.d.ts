@@ -9011,6 +9011,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/fleet/offline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Offline machines by how long unseen
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_fleet_offline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/fleet/rollouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Release rollout progress
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_fleet_rollouts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/fleet/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Machines per pb version and OS
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_fleet_versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/infrastructure/capacity": {
         parameters: {
             query?: never;
@@ -14641,6 +14701,95 @@ export interface components {
             attention: number;
             /** @description Workspaces whose edge traffic is throttled now: fair-use bandwidth used and no operator lift. */
             throttled_workspaces: number;
+        };
+        OperatorFleetFailure: {
+            target_version: string;
+            state: string;
+            error_code: string;
+            machines: number;
+        };
+        OperatorFleetOffline: {
+            /** @description Offline machines matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
+            fleet_machines: number;
+            offline: number;
+            buckets: components["schemas"]["OperatorFleetBucket"][];
+            items: components["schemas"]["OperatorFleetOfflineMachine"][];
+            next_after?: string;
+        };
+        OperatorFleetBucket: {
+            bucket: string;
+            machines: number;
+        };
+        OperatorFleetOfflineMachine: {
+            id: string;
+            alias: string;
+            platform: string;
+            architecture: string;
+            version: string;
+            state: string;
+            account_id: string;
+            team_id?: string;
+            /** Format: date-time */
+            last_seen_at?: string;
+            bucket: string;
+        };
+        OperatorFleetPoint: {
+            day: string;
+            total: number;
+            updated: number;
+            failed: number;
+        };
+        OperatorFleetPlatform: {
+            platform: string;
+            machines: number;
+            online: number;
+            users: number;
+            teams: number;
+            oldest_online_version?: string;
+        };
+        OperatorFleetRollout: {
+            version: string;
+            platforms: string[];
+            /** Format: date-time */
+            started_at: string;
+            action: string;
+            rollout_percentage: number;
+            updated: number;
+            older: number;
+            other: number;
+            failed: number;
+            rolled_back: number;
+            offline_since_start: number;
+            offline_now: number;
+            failures: components["schemas"]["OperatorFleetFailure"][];
+            series: components["schemas"]["OperatorFleetPoint"][];
+        };
+        OperatorFleetRollouts: {
+            /** Format: date-time */
+            observed_at: string;
+            rollouts: components["schemas"]["OperatorFleetRollout"][];
+        };
+        OperatorFleetVersionRow: {
+            platform: string;
+            version: string;
+            machines: number;
+            online: number;
+            users: number;
+            teams: number;
+        };
+        OperatorFleetVersions: {
+            /** Format: date-time */
+            observed_at: string;
+            machines: number;
+            online: number;
+            users: number;
+            teams: number;
+            oldest_online_version?: string;
+            platforms: components["schemas"]["OperatorFleetPlatform"][];
+            versions: components["schemas"]["OperatorFleetVersionRow"][];
+            failures: components["schemas"]["OperatorFleetFailure"][];
         };
         OperatorCapacityPage: {
             summary: components["schemas"]["OperatorCapacitySummary"];
@@ -36977,6 +37126,187 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_v1_admin_fleet_offline: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+                bucket?: "under_1_day" | "1_to_7_days" | "7_to_30_days" | "over_30_days" | "never_seen";
+                platform?: "linux" | "darwin" | "windows";
+                version?: string;
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorFleetOffline"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_fleet_rollouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorFleetRollouts"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_fleet_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorFleetVersions"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };

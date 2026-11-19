@@ -914,6 +914,8 @@ func New(opts Options) (*App, error) {
 			return controlplane.NodeUpdateState(ctx, release, component, version, time.Now())
 		})
 	}), progress))
+	// The Fleet page's rollout chart: today's version counts, rewritten every 10 minutes (fleet_version_daily).
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_fleet_snapshot", periodicPreviewTunnelWorker(10*time.Minute, operatorService.SnapshotFleet), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_recipe_machines", periodicPreviewTunnelWorker(time.Minute, recipeService.CollectMachines), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)

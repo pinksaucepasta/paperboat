@@ -292,18 +292,18 @@ func allowed(role auth.Role, kind string) bool {
 	case "billing":
 		return kind == "account" || kind == "team" || kind == "billing" || kind == "billing_operation" || kind == "workspaces" || kind == "billing_operations" || kind == "machines" || kind == "machine"
 	case "operations":
-		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes"
+		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
 	default:
 		return false
 	}
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "traffic_nodes" || kind == "operators" || kind == "ip_blocks"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "traffic_nodes" || kind == "operators" || kind == "ip_blocks" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
 }
 
 func safeID(v string) bool {
@@ -375,6 +375,12 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 	case "traffic_nodes":
 		period, nodeKind, _ := strings.Cut(target, ":")
 		return s.readTrafficNodes(ctx, tx, period, nodeKind, after, limit)
+	case "fleet_versions":
+		return s.readFleetVersions(ctx, tx)
+	case "fleet_rollouts":
+		return s.readFleetRollouts(ctx, tx)
+	case "fleet_offline":
+		return s.readFleetOffline(ctx, tx, target, after, limit)
 	case "entitlements":
 		return readEntitlements(ctx, tx, target)
 	case "account_ips":
