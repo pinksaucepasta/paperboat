@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -91,5 +92,81 @@ func TestUnchangedUpdateObservationWritesNoRowPostgres(t *testing.T) {
 	}
 	if after := xmin(); after == stored {
 		t.Fatal("a new version was not written")
+	}
+}
+
+// Re-enrollment invalidates in-flight observations for the old installation.
+// Both reports must wait for the machine write, including the first report of
+// the new installation, which has no observation row to lock yet.
+func TestUpdateReportsWaitForInstallationChangePostgres(t *testing.T) {
+	f := newWorkspaceMachineFixture(t)
+	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+	defer cancel()
+	environment := "env_" + f.suffix
+	writer, err := f.store.Pool().Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Rollback(ctx)
+	var generation uint64
+	if err := writer.QueryRow(ctx, `UPDATE paperboat.user_machines
+SET installation_generation=installation_generation+1 WHERE id=$1
+RETURNING installation_generation`, f.machine).Scan(&generation); err != nil {
+		t.Fatal(err)
+	}
+	var pid int32
+	if err := writer.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+
+	old := validUpdateObservation()
+	old.InstallationGeneration = generation - 1
+	newReport := old
+	newReport.InstallationGeneration = generation
+	newReport.OperationID = "update-op-new-installation"
+	before := f.store.TransactionStats()
+	report := func(observation UpdateObservation) <-chan error {
+		done := make(chan error, 1)
+		go func() { done <- f.service.RecordUpdateObservation(ctx, environment, f.machine, observation) }()
+		return done
+	}
+	stale, current := report(old), report(newReport)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting bool
+		if err := f.store.Pool().QueryRow(ctx, `SELECT EXISTS(
+SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-stale:
+			t.Fatalf("old report finished before the installation write committed: %v", err)
+		case err := <-current:
+			t.Fatalf("new report finished before the installation write committed: %v", err)
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if err := writer.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stale; !errors.Is(err, ErrUpdateObservationStale) {
+		t.Fatalf("old installation report: %v", err)
+	}
+	if err := <-current; err != nil {
+		t.Fatalf("new installation report: %v", err)
+	}
+	after := f.store.TransactionStats()
+	if retries := after.Serializable.Retries - before.Serializable.Retries; retries != 0 {
+		t.Fatalf("update reports retried %d transaction attempts (40001/40P01)", retries)
+	}
+	got, err := f.service.GetUpdateObservation(ctx, f.account, f.machine)
+	if err != nil || got.InstallationGeneration != generation || got.OperationID != newReport.OperationID {
+		t.Fatalf("stored report = %+v, error = %v", got, err)
 	}
 }

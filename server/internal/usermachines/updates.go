@@ -124,18 +124,22 @@ func (s *Service) RecordUpdateObservation(ctx context.Context, environmentID, us
 		return ErrUpdateObservationInvalid
 	}
 	payloadHash := hashUpdateObservation(observation)
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		machine, err := tx.Queries().GetUserMachineForEnvironmentBandwidthUpdate(ctx, environmentID)
-		if errors.Is(err, sql.ErrNoRows) || err == nil && machine.ID != userMachineID {
+	// Lock the installation before reading its observation, which may not exist yet.
+	// Every reporter for this machine sees the previous report and the current generation.
+	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		var generation int64
+		err := tx.QueryRow(ctx, `SELECT installation_generation FROM user_machines
+WHERE id=$1 AND environment_id=$2 AND deleted_at IS NULL FOR NO KEY UPDATE`, userMachineID, environmentID).Scan(&generation)
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return err
 		}
-		if machine.InstallationGeneration < int64(observation.InstallationGeneration) {
+		if generation < int64(observation.InstallationGeneration) {
 			return ErrUpdateObservationInvalid
 		}
-		if machine.InstallationGeneration != int64(observation.InstallationGeneration) {
+		if generation != int64(observation.InstallationGeneration) {
 			return ErrUpdateObservationStale
 		}
 
