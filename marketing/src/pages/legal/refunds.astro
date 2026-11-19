@@ -1,19 +1,17 @@
 ---
 import Legal from "../../layouts/Legal.astro"
 import Fact from "../../components/Fact.astro"
-import { teamTrial } from "../../site"
 
 const sections: [string, string][] = [
   ["no-refunds", "No refunds"],
   ["cancel", "Cancelling"],
   ["consent", "Checkout consent"],
-  ["statutory", "Consumer rights"],
   ["mistakes", "Billing mistakes"],
   ["contact", "Contact"],
 ]
 ---
 
-<Legal slug="refunds" description="Paperboat payments are not refunded. Cancelling stops the next renewal. How this works with consumer law." {sections}>
+<Legal slug="refunds" description="Paperboat payments are not refunded. Cancelling stops the next renewal." {sections}>
   <p slot="intro">Every feature is free for personal use, so you can try Paperboat fully before paying. Payments are final.</p>
 
   <section id="no-refunds">
@@ -34,35 +32,23 @@ const sections: [string, string][] = [
         Paid plans renew automatically until you cancel. Cancel any time in the console under <strong>Billing</strong>. The plan runs to the end
         of the paid period, then moves to Free. Your machines and data stay.
       </p>
-      <p>{teamTrial}</p>
     </div>
   </section>
 
   <section id="consent">
     <h2>Checkout consent</h2>
     <div class="prose">
-      <p>The console's purchase buttons stay disabled until you tick this box:</p>
+      <p>Before paying, you confirm in the console:</p>
       <blockquote>
         <p>
-          “Start the service now. I agree to the Terms of Service and the Refund Policy: the plan renews automatically until I cancel,
-          cancelling stops the next renewal, and payments are not refunded. I ask for the service to start during the 14-day withdrawal
-          period and understand that if I withdraw, I pay for the service up to that point.”
+          “I agree to the Terms of Service and the Refund Policy: the plan renews automatically until I cancel, cancelling stops the next
+          renewal, and payments are not refunded.”
         </p>
       </blockquote>
       <p>Stripe emails you a receipt for each payment.</p>
     </div>
   </section>
 
-  <section id="statutory">
-    <h2>Consumer rights</h2>
-    <div class="prose">
-      <p>
-        This policy does not remove rights that consumer law gives you and that cannot be waived. Consumers in the EU, EEA and UK may withdraw
-        within 14 days of purchase by emailing <Fact name="legalEmail" />. We then refund the payment, minus the share of the period already
-        used, within 14 days. A purchase made mainly for business is not a consumer purchase.
-      </p>
-    </div>
-  </section>
 
   <section id="mistakes">
     <h2>Billing mistakes</h2>

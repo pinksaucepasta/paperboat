@@ -23,7 +23,6 @@ export const legalPage = (slug: string) => legalPages.find((page) => page.slug =
 /** Facts about the operating company. Only the company can supply these; never guess them. */
 export const company = {
   /** The two individuals who operate Paperboat (user decision 2026-11-19). */
-  /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) needs the trader's legal name and postal address. */
   operators: "Pujan Modha and Anvit Dadape",
   /** Postal address for legal notices and the DMCA agent (user, 2026-11-19). */
   address: "3869 Miramar Street #4208, La Jolla, CA 92092, USA",
