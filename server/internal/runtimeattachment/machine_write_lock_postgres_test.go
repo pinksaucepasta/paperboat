@@ -87,6 +87,9 @@ VALUES($1,$2,$3,$3,$4,'owner_session_mlock','foreground','http','127.0.0.1:3000'
 func TestFiftyMachinesAttachAtOnceOnPostgres(t *testing.T) {
 	f := newAgentFixture(t, "fifty")
 	ctx := f.ctx
+	// Real edges have verified public ingress, so the workspace's edge set exists after the first attach (the fixture's
+	// nodes are unverified, and an edge set over no usable edge is never created: every attach rebuilt it).
+	f.exec(t, `UPDATE control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id IN ($1,$2)`, f.node, f.backupNode)
 	proofs := []previewattachment.MachineProof{f.proof}
 	for i := range 49 {
 		machine, env, route := fmt.Sprintf("%s_m%02d", f.prefix, i), fmt.Sprintf("%s_e%02d", f.prefix, i), fmt.Sprintf("%s_r%02d", f.prefix, i)
