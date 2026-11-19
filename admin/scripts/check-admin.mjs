@@ -1343,7 +1343,8 @@ try {
     await p.setViewportSize({ width: 1280, height: 800 })
     await submit(d, "Send to 1")
     await p.waitForFunction(() => document.querySelector('[data-table="notices"]')?.textContent?.includes("prices change"))
-    const w = lastWrite()
+    // The dialog's preview may refetch once more after the send (the dialog invalidates every query): the send is the last write that is not a dry run.
+    const w = writes.findLast((x) => !x.body?.dry_run)
     expect(w.method === "POST" && w.path === "/v1/admin/notices" && w.target === "notices" && w.reason === "TICKET-42" && w.key.length >= 8 && !w.body.dry_run && w.body.kind === "price_increase" && w.body.audience_kind === "user" && w.body.audience_value === "usr_003" && w.body.effective === day(31), `send write ${JSON.stringify(w)}`)
     await p.goto(`${ORIGIN}/audit`)
     await waitReady("audit events")
