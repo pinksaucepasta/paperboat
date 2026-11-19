@@ -25,6 +25,8 @@ type doctorDeps struct {
 	paths  hostPaths
 	probe  func(ctx context.Context, port int, nonce string) (containers.PortProbe, error)
 	listen func(nonce string) (port int, stop func(), err error)
+	// ingress is the control plane's verdict on the endpoint host, with a reason when it is not verified.
+	ingress func(ctx context.Context, host string) (containers.IngressState, error)
 }
 
 func doctor(ctx context.Context, args []string, out io.Writer) error {
@@ -55,6 +57,9 @@ func doctor(ctx context.Context, args []string, out io.Writer) error {
 			return containers.ProbePort(ctx, *dir, port, nonce)
 		},
 		listen: listenTestPort,
+		ingress: func(ctx context.Context, host string) (containers.IngressState, error) {
+			return containers.CheckIngress(ctx, *dir, host)
+		},
 	}, out)
 }
 
@@ -98,6 +103,12 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	} else {
 		report(result.Reachable, fmt.Sprintf("test port %d is reachable from the control plane", port), reachabilityAdvice(port, result.Detail))
 	}
+	state, err := d.ingress(ctx, c.EndpointHost)
+	if err != nil {
+		report(false, "", "could not read the endpoint host status from the control plane ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
+	} else {
+		report(state.Verified, "the control plane verified "+c.EndpointHost+" reaches this node", ingressAdvice(c.EndpointHost, state.Reason))
+	}
 	if problems > 0 {
 		return commandError(fmt.Sprintf("%d problem(s) found; fix them and rerun pbh doctor", problems))
 	}
@@ -127,6 +138,21 @@ func reachabilityAdvice(port int, detail string) string {
 		return prefix + "the registered endpoint host does not resolve to a public address; fix --endpoint-host"
 	default:
 		return prefix + "check result '" + detail + "'; verify the endpoint host and firewalls"
+	}
+}
+
+// ingressAdvice turns what this host sees at the endpoint host into the one fix that is missing.
+func ingressAdvice(host, reason string) string {
+	prefix := "the control plane has not verified " + host + ": "
+	switch reason {
+	case "unresolved":
+		return prefix + "the name does not resolve; add an A/AAAA record for it that points at this server"
+	case "unreachable":
+		return prefix + "TCP 443 on it cannot be reached; point its DNS record at this server and open TCP 443 (host firewall and cloud security group)"
+	case "identity_mismatch":
+		return prefix + "the address answers, but not as this node; its DNS record points at another server, or a proxy or TLS terminator sits in front of port 443"
+	default:
+		return prefix + "this host reaches itself there, but the control plane has not checked yet; wait a minute, then rerun pbh doctor"
 	}
 }
 
