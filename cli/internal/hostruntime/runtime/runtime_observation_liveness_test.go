@@ -157,8 +157,10 @@ func TestRuntimeObservationServiceContinuesAfterInitialAcceptance(t *testing.T) 
 	transport.mu.Lock()
 	times := append([]time.Time(nil), transport.times...)
 	transport.mu.Unlock()
-	if len(times) < 3 || !times[0].Before(times[1]) || !times[1].Before(times[2]) {
-		t.Fatalf("observation timestamps = %v, want three increasing samples", times)
+	if len(times) < 3 || times[1].Before(times[0]) || times[2].Before(times[1]) {
+		// Equal is legal: samples 15 ms apart can read the same tick of a ~15.6 ms wall clock (Windows). Each
+		// sample is still its own request (calls >= 3 above).
+		t.Fatalf("observation timestamps = %v, want three non-decreasing samples", times)
 	}
 	if _, err := readServerHeartbeatReceipt(sender.receiptPath); err != nil {
 		t.Fatalf("heartbeat receipt after periodic observations: %v", err)
