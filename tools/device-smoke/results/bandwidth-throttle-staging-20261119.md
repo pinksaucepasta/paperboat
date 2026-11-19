@@ -51,6 +51,10 @@ relay burst). Extra: 10 MB exec in slow phase took 2,133 ms (37.5 Mbit/s);
 with TCP+UDP direct fully blocked it still took 488 ms for 1 MB, so exec bulk
 is relayed yet not throttled — exec output bypasses the per-account throttle
 (coverage gap for the parent lane).
+Follow-up (code read, /home/ubuntu/pb-wt/spark/bw-exec-path.md): the exec did go through the relay,
+but every bulk relay frame type (datagrams, stream packets) is paced per account; only 2 KB control
+frames are unpaced. Exec output is zstd-compressed, so the 10 MB was likely far fewer wire bytes: an
+artifact of the test payload, not a bypass. Re-test with incompressible output before any relay change.
 
 ## 2. Preview and tunnel through the staging edge — PASS
 
