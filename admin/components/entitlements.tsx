@@ -118,7 +118,7 @@ export function Entitlements({ workspaceId, scope }: { workspaceId: string; scop
             </span>,
           ],
           [
-            "Edge speed",
+            "Edge and relay speed",
             <span key="t" data-entitlement-throttle={e.bandwidth.throttled ? "throttled" : e.bandwidth.throttle_lifted ? "lifted" : "full"}>
               {e.bandwidth.throttled ? (
                 <>Throttled{e.bandwidth.resets_at && <> until <Time iso={e.bandwidth.resets_at} /></>}</>
