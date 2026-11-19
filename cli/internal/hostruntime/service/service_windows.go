@@ -276,19 +276,10 @@ func renderWindowsService(config Config) ([]byte, error) {
 	if validateCarrierConfig(config) != nil || validateSessionOwnerConfig(config) != nil || name == "" || config.Kind != SessionOwnerKind && config.Kind != CarrierKind && config.Kind != HostdKind && !safeWindowsServiceKind(config.Kind, config.Instance) {
 		return nil, ErrInvalidDefinition
 	}
-	description := "Paperboat host runtime"
-	if config.Kind == HostdKind {
-		description = "Paperboat stable host supervisor"
-	} else if config.Kind == CarrierKind {
-		description = "Paperboat independent native carrier"
-	} else if config.Kind == UpdaterKind {
-		description = "Paperboat signed update service"
-	} else if config.Kind == DaemonKind {
-		description = "Paperboat local daemon"
-	}
+	displayName, description := windowsServiceLabels(config.Kind)
 	definition := windowsServiceDefinition{
 		Schema: "paperboat.windows-service/v1", Name: name,
-		DisplayName: name, Description: description, Executable: config.Executable,
+		DisplayName: displayName, Description: description, Executable: config.Executable,
 		Arguments: append([]string(nil), config.Arguments...), Environment: copyEnvironment(config.Environment),
 		Account: config.User,
 	}
