@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -361,11 +362,42 @@ func TestPlatformCertificateLifecycleOnPostgres(t *testing.T) {
 	})
 }
 
-type platformAcceptanceClock struct{ value time.Time }
+type platformAcceptanceClock struct {
+	mu    sync.Mutex
+	value time.Time
+}
 
-func (c *platformAcceptanceClock) Now() time.Time { return c.value.UTC() }
+func (c *platformAcceptanceClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.value.UTC()
+}
 
-func (c *platformAcceptanceClock) Advance(delta time.Duration) { c.value = c.value.Add(delta) }
+func (c *platformAcceptanceClock) Advance(delta time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.value = c.value.Add(delta)
+}
+
+// The clock is read by worker goroutines while the test advances it; run under -race.
+func TestPlatformAcceptanceClockIsSafeForConcurrentNowAndAdvance(t *testing.T) {
+	clock := &platformAcceptanceClock{value: time.Unix(1_700_000_000, 0)}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				clock.Now()
+				clock.Advance(time.Second)
+			}
+		}()
+	}
+	wg.Wait()
+	if got, want := clock.Now(), time.Unix(1_700_000_000+2000, 0).UTC(); !got.Equal(want) {
+		t.Fatalf("clock=%v want %v", got, want)
+	}
+}
 
 type platformAcceptanceCAA struct{}
 
