@@ -9,3 +9,7 @@ const (
 	nodeLiveSQL          = `n.ready AND n.state='ready' AND n.last_heartbeat_at>now()-interval '15 seconds'`
 	installationReadySQL = `coalesce(i.claim_complete AND ` + nodeLiveSQL + ` AND(i.capability='relay' OR n.public_ingress_verified_at IS NOT NULL),false)`
 )
+
+// InstallationReadySQL is the readiness definition for other packages (the operator Fleet counts): installation i
+// joined to its node n.
+const InstallationReadySQL = installationReadySQL

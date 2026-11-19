@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
 // The operator Fleet page: which pb version every machine runs, how far each release rollout got and which machines
@@ -90,6 +91,32 @@ type FleetFailure struct {
 	Machines      int64  `json:"machines"`
 }
 
+// FleetBuilds counts the machines running a build that is not an official release version (a dev or custom build, as
+// the By-version table shows them). shortcut: official means the YYYY.M.D.build form, not "present in a signed
+// release bundle", so a custom build named like a release counts as official; upgrade when builds are signed per machine.
+type FleetBuilds struct {
+	Machines int64 `json:"machines"`
+	Online   int64 `json:"online"`
+	Versions int64 `json:"versions"`
+}
+
+// FleetSelfHostedKind counts customer-installed relays or edges: registered, online now (the installation is ready)
+// and reporting (its node sent a capacity report, which carries its traffic, within the node stale window).
+type FleetSelfHostedKind struct {
+	Registered int64 `json:"registered"`
+	Online     int64 `json:"online"`
+	Reporting  int64 `json:"reporting"`
+}
+
+// FleetSelfHosted counts nodes owned by teams and accounts; the operator's own (global) installations belong on
+// Infrastructure. Counts only: no node names, hosts or addresses.
+type FleetSelfHosted struct {
+	Relays   FleetSelfHostedKind `json:"relays"`
+	Edges    FleetSelfHostedKind `json:"edges"`
+	Teams    int64               `json:"teams"`
+	Accounts int64               `json:"accounts"`
+}
+
 type FleetVersions struct {
 	ObservedAt   time.Time         `json:"observed_at"`
 	Machines     int64             `json:"machines"`
@@ -100,6 +127,8 @@ type FleetVersions struct {
 	Platforms    []FleetPlatform   `json:"platforms"`
 	Versions     []FleetVersionRow `json:"versions"`
 	Failures     []FleetFailure    `json:"failures"`
+	NonOfficial  FleetBuilds       `json:"non_official"`
+	SelfHosted   FleetSelfHosted   `json:"self_hosted"`
 }
 
 func (s *Service) readFleetVersions(ctx context.Context, tx *db.Tx) (FleetVersions, error) {
@@ -156,7 +185,50 @@ func (s *Service) readFleetVersions(ctx context.Context, tx *db.Tx) (FleetVersio
 	for i := range out.Platforms {
 		out.Platforms[i].OldestOnline = oldestOnline(out.Versions, out.Platforms[i].Platform)
 	}
-	out.Failures, err = fleetFailures(ctx, tx)
+	versions := map[string]bool{}
+	for _, r := range out.Versions {
+		if _, official := versionKey(r.Version); !official && r.Version != "unknown" {
+			out.NonOfficial.Machines += r.Machines
+			out.NonOfficial.Online += r.Online
+			versions[r.Version] = true
+		}
+	}
+	out.NonOfficial.Versions = int64(len(versions))
+	if out.Failures, err = fleetFailures(ctx, tx); err != nil {
+		return out, err
+	}
+	out.SelfHosted, err = s.fleetSelfHosted(ctx, tx)
+	return out, err
+}
+
+// fleetSelfHosted counts the active customer installations (scope account or team, as the traffic page does); a
+// capability of relay is a relay, anything else an edge.
+func (s *Service) fleetSelfHosted(ctx context.Context, tx *db.Tx) (FleetSelfHosted, error) {
+	var out FleetSelfHosted
+	rows, err := tx.Query(ctx, `SELECT i.capability='relay',count(*),count(*) FILTER(WHERE `+selfhost.InstallationReadySQL+`),
+ count(*) FILTER(WHERE EXISTS(SELECT 1 FROM node_capacity c WHERE c.node_id=i.node_id AND c.reported_at>now()-($1*interval '1 microsecond')))
+ FROM selfhost_installations i JOIN control_tunnel_nodes n ON n.id=i.node_id
+ WHERE i.state='active' AND i.scope_kind IN ('account','team') GROUP BY 1`, s.nodeStaleAfter.Microseconds())
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var relay bool
+		var k FleetSelfHostedKind
+		if err := rows.Scan(&relay, &k.Registered, &k.Online, &k.Reporting); err != nil {
+			return out, closeRowsError(rows, err)
+		}
+		if relay {
+			out.Relays = k
+		} else {
+			out.Edges = k
+		}
+	}
+	if err := closeRowsError(rows, rows.Err()); err != nil {
+		return out, err
+	}
+	err = tx.QueryRow(ctx, `SELECT count(DISTINCT scope_id) FILTER(WHERE scope_kind='team'),count(DISTINCT scope_id) FILTER(WHERE scope_kind='account')
+ FROM selfhost_installations WHERE state='active' AND scope_kind IN ('account','team')`).Scan(&out.Teams, &out.Accounts)
 	return out, err
 }
 

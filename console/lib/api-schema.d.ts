@@ -14779,6 +14779,22 @@ export interface components {
             users: number;
             teams: number;
         };
+        OperatorFleetBuilds: {
+            machines: number;
+            online: number;
+            versions: number;
+        };
+        OperatorFleetSelfHostedKind: {
+            registered: number;
+            online: number;
+            reporting: number;
+        };
+        OperatorFleetSelfHosted: {
+            relays: components["schemas"]["OperatorFleetSelfHostedKind"];
+            edges: components["schemas"]["OperatorFleetSelfHostedKind"];
+            teams: number;
+            accounts: number;
+        };
         OperatorFleetVersions: {
             /** Format: date-time */
             observed_at: string;
@@ -14790,6 +14806,8 @@ export interface components {
             platforms: components["schemas"]["OperatorFleetPlatform"][];
             versions: components["schemas"]["OperatorFleetVersionRow"][];
             failures: components["schemas"]["OperatorFleetFailure"][];
+            non_official: components["schemas"]["OperatorFleetBuilds"];
+            self_hosted: components["schemas"]["OperatorFleetSelfHosted"];
         };
         OperatorCapacityPage: {
             summary: components["schemas"]["OperatorCapacitySummary"];

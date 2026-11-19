@@ -20093,6 +20093,70 @@
           "teams"
         ]
       },
+      "OperatorFleetBuilds": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "machines": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "versions": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "machines",
+          "online",
+          "versions"
+        ]
+      },
+      "OperatorFleetSelfHostedKind": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "registered": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "reporting": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "registered",
+          "online",
+          "reporting"
+        ]
+      },
+      "OperatorFleetSelfHosted": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "relays": {
+            "$ref": "#/components/schemas/OperatorFleetSelfHostedKind"
+          },
+          "edges": {
+            "$ref": "#/components/schemas/OperatorFleetSelfHostedKind"
+          },
+          "teams": {
+            "type": "integer"
+          },
+          "accounts": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "relays",
+          "edges",
+          "teams",
+          "accounts"
+        ]
+      },
       "OperatorFleetVersions": {
         "type": "object",
         "additionalProperties": false,
@@ -20133,6 +20197,12 @@
             "items": {
               "$ref": "#/components/schemas/OperatorFleetFailure"
             }
+          },
+          "non_official": {
+            "$ref": "#/components/schemas/OperatorFleetBuilds"
+          },
+          "self_hosted": {
+            "$ref": "#/components/schemas/OperatorFleetSelfHosted"
           }
         },
         "required": [
@@ -20143,7 +20213,9 @@
           "teams",
           "platforms",
           "versions",
-          "failures"
+          "failures",
+          "non_official",
+          "self_hosted"
         ]
       },
       "OperatorCapacityPage": {

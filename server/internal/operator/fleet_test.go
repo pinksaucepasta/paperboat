@@ -129,6 +129,75 @@ func fleetSeed(t *testing.T) (*Service, *db.DB, string) {
 	return NewService(store), store, suffix
 }
 
+// Customer-installed relays and edges are counted by capability and readiness; the operator's own (global) are not.
+func TestFleetCountsCustomerSelfHostedNodesOnPostgres(t *testing.T) {
+	s, store, suffix := fleetSeed(t)
+	ctx := context.Background()
+	var before FleetVersions
+	read := func() FleetVersions {
+		var v FleetVersions
+		if err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) { v, err = s.readFleetVersions(ctx, tx); return }); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	before = read()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.Pool().Exec(ctx, q, args...); err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+	}
+	var nodes, installs []string
+	t.Cleanup(func() {
+		bg := context.Background()
+		store.Pool().Exec(bg, `DELETE FROM selfhost_installations WHERE id=ANY($1)`, installs)
+		store.Pool().Exec(bg, `DELETE FROM node_capacity WHERE node_id=ANY($1)`, nodes)
+		store.Pool().Exec(bg, `DELETE FROM control_tunnel_nodes WHERE id=ANY($1)`, nodes)
+	})
+	team, account := "team_fleet_"+suffix, "usr_fleet_"+suffix
+	// capability, scope, scope id, ready, reporting
+	for i, n := range []struct {
+		capability, scope, scopeID string
+		ready, reporting           bool
+	}{
+		{"relay", "account", account, true, true},
+		{"tunnel", "team", team, true, true},
+		{"tunnel", "account", account, false, false},
+		{"relay", "global", "operator", true, true}, // ours: not counted
+	} {
+		node, install := fmt.Sprintf("node_fleet_%d_%s", i, suffix), fmt.Sprintf("inst_fleet_%d_%s", i, suffix)
+		nodes, installs = append(nodes, node), append(installs, install)
+		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,public_ingress_verified_at)
+ VALUES($1,'test','1.0','epoch',CASE WHEN $2 THEN 'ready' ELSE 'registered' END,$2,now(),now())`, node, n.ready)
+		exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete)
+ VALUES($1,$2,$3,$3,'fixture','fleet fixture',$4,$5,$6,$1,true)`, install, node, []byte((fmt.Sprintf("fleetkey%d%s", i, suffix) + strings.Repeat("x", 32))[:32]), n.capability, n.scope, n.scopeID)
+		if n.reporting {
+			role := "edge"
+			if n.capability == "relay" {
+				role = "relay"
+			}
+			exec(`INSERT INTO node_capacity(node_id,role,process_epoch,reported_at) VALUES($1,$2,'epoch',now())`, node, role)
+		}
+	}
+	after := read()
+	if d := after.SelfHosted.Relays.Registered - before.SelfHosted.Relays.Registered; d != 1 {
+		t.Errorf("relays registered +%d, want +1 (the global one is not a customer's)", d)
+	}
+	if after.SelfHosted.Relays.Online-before.SelfHosted.Relays.Online != 1 || after.SelfHosted.Relays.Reporting-before.SelfHosted.Relays.Reporting != 1 {
+		t.Errorf("relay online/reporting: %+v -> %+v", before.SelfHosted.Relays, after.SelfHosted.Relays)
+	}
+	if after.SelfHosted.Edges.Registered-before.SelfHosted.Edges.Registered != 2 || after.SelfHosted.Edges.Online-before.SelfHosted.Edges.Online != 1 || after.SelfHosted.Edges.Reporting-before.SelfHosted.Edges.Reporting != 1 {
+		t.Errorf("edges: %+v -> %+v (two registered, one online, one reporting)", before.SelfHosted.Edges, after.SelfHosted.Edges)
+	}
+	if after.SelfHosted.Teams-before.SelfHosted.Teams != 1 || after.SelfHosted.Accounts-before.SelfHosted.Accounts != 1 {
+		t.Errorf("teams/accounts: %d/%d -> %d/%d", before.SelfHosted.Teams, before.SelfHosted.Accounts, after.SelfHosted.Teams, after.SelfHosted.Accounts)
+	}
+	if after.NonOfficial.Machines < 1 || after.NonOfficial.Versions < 1 || after.NonOfficial.Online > after.NonOfficial.Machines {
+		t.Errorf("non-official builds = %+v (the dev-abc1234 machine is one)", after.NonOfficial)
+	}
+}
+
 func TestFleetVersionsRolloutsAndOfflineOnPostgres(t *testing.T) {
 	s, store, suffix := fleetSeed(t)
 	ctx := context.Background()
