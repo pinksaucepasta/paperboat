@@ -25,11 +25,12 @@ export const company = {
   /** Until Paperboat, Inc. (a Delaware C corporation) is formed, these two individuals operate Paperboat (user decision 2026-11-19). */
   /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) needs the trader's legal name and postal address. */
   operators: "Pujan Modha and Anvit Dadape",
-  /** Required only where consumer law needs a geographical address (Terms, Refund Policy); never a home address. */
-  address: "TODO-USER: postal address for legal notices (not a home address)",
+  /** Postal address for legal notices and the DMCA agent (user, 2026-11-19). */
+  address: "3869 Miramar Street #4208, La Jolla, CA 92037, USA",
   law: "the State of California, United States, without regard to its conflict-of-law rules",
   courts: "the state and federal courts located in California",
   legalEmail: "legal@mail.paperboat.cloud",
+  abuseEmail: "abuse@mail.paperboat.cloud",
   privacyEmail: "privacy@mail.paperboat.cloud",
   /** The user's final answer (2026-11-19). */
   effective: "14 November 2026",
