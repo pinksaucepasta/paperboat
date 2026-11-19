@@ -217,7 +217,7 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	if b.closed {
 		return errors.New("mesh: server is closed")
 	}
-	if !b.dm.Regions[id].HasDERP() {
+	if !b.dm.Regions[id].CanServeDERP() {
 		return errors.New("mesh: unknown relay region")
 	}
 	if b.clients[peer] == nil {
@@ -257,7 +257,7 @@ func (b *locoBackend) relayRegionIDs() []tailcfg.DERPRegionID {
 	defer b.mu.Unlock()
 	var ids []tailcfg.DERPRegionID
 	for id, r := range b.dm.Regions {
-		if r.HasDERP() {
+		if r.CanServeDERP() {
 			ids = append(ids, id)
 		}
 	}
