@@ -54,7 +54,7 @@ func TestCustomizationImportShowAndInvalidRecovery(t *testing.T) {
 	if code != 0 || errOut != "" || !strings.Contains(out, string(quotedConfigPath)) {
 		t.Fatalf("shortcut dispatch: %d %s %s", code, out, errOut)
 	}
-	if err := os.WriteFile(path, []byte(`{"version":1,"bogus":true}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	code, out, errOut = invoke("config", "path", "--json")
