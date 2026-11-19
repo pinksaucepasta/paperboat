@@ -40,7 +40,9 @@ const (
 )
 
 var (
-	ErrInvalidDefinition   = errors.New("invalid service definition")
+	ErrInvalidDefinition = errors.New("invalid service definition")
+	// ErrUndeclaredService: the service manager has the service, but its declaration (the ownership proof) is gone.
+	ErrUndeclaredService   = errors.New("registered service has no declaration")
 	ErrUnsupportedPlatform = errors.New("unsupported service platform")
 )
 

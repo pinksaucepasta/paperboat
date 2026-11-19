@@ -1,9 +1,15 @@
 package hostinstall
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
 
 // The Windows account sweep decides ownership from observed names and paths.
@@ -138,4 +144,42 @@ func windowsAccountLeftovers(services []string, processIDs []uint32, directories
 		leftovers = append(leftovers, "machine PATH entry")
 	}
 	return leftovers
+}
+
+// purgeServiceDeclarations removes the declared runtime services of one account instance and their declarations.
+// A service registered without its declaration (an interrupted uninstall deleted the declarations first, or a
+// delete is still pending) cannot be proven ours here; it is left to the account sweep that ends the purge, which
+// deletes this account's services by name and re-scans, so the purge fails only for a service the sweep cannot delete.
+func purgeServiceDeclarations(ctx context.Context, directory, instance string, remove func(context.Context, string) error) error {
+	var result error
+	for _, base := range []string{"PaperboatHost", "PaperboatLocalDaemon", "PaperboatUpdated"} {
+		path := filepath.Join(directory, base+"-"+instance+".json")
+		if err := remove(ctx, path); errors.Is(err, service.ErrUndeclaredService) {
+			continue
+		} else if err != nil {
+			result = errors.Join(result, hostInstallFailure("remove Windows service "+base, err))
+		} else {
+			result = errors.Join(result, removeInstallFile(path))
+		}
+	}
+	return result
+}
+
+// settledLeftovers repeats the re-scan until it finds nothing or timeout passes. A service that was deleted while a
+// handle to it was open stays listed, stopped, until the last handle closes; that happens a moment after the
+// processes holding it end, so a single scan right after the sweep reported services that were about to vanish
+// ("pb uninstall failed", two stopped Paperboat services, 2026-11-19).
+func settledLeftovers(ctx context.Context, timeout, delay time.Duration, scan func() ([]string, error)) ([]string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		leftovers, err := scan()
+		if err != nil || len(leftovers) == 0 || !time.Now().Add(delay).Before(deadline) {
+			return leftovers, err
+		}
+		select {
+		case <-ctx.Done():
+			return leftovers, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
 }

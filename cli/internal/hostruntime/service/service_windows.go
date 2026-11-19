@@ -793,7 +793,7 @@ func (WindowsController) Remove(ctx context.Context, definitionPath string) (res
 			return probeErr
 		}
 		if exists {
-			return fmt.Errorf("%w: registered service %q has no declaration", ErrInvalidDefinition, name)
+			return fmt.Errorf("%w: %w: %q", ErrInvalidDefinition, ErrUndeclaredService, name)
 		}
 		return nil
 	}
