@@ -119,7 +119,7 @@ func TestRecipeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Revision != 1 || created.Recipe.MaxMachines != 1 || !strings.Contains(created.Source, "# CI") || created.ExpiresAt.Sub(created.CreatedAt) != recipe.DefaultExpires {
+	if created.Revision != 1 || created.Recipe.MaxMachines != 1 || !strings.Contains(created.Source, "// CI") || created.ExpiresAt.Sub(created.CreatedAt) != recipe.DefaultExpires {
 		t.Fatalf("created %+v", created)
 	}
 	// A lost response retried with the same token returns the same recipe; another token is a name clash.
