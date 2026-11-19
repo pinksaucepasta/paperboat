@@ -60,6 +60,12 @@ func TestWorkspaceEdgeSetOnPostgres(t *testing.T) {
 		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.selfhost_installations WHERE scope_id=$1`, account)
 		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.users WHERE id=$1`, account)
 	})
+	// The sweep lists workspaces that own a machine.
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,enrolled_at,last_seen_at,alias,installation_generation,worker_generation,connector_state,configured_capabilities,observed_capabilities,host_service_version)
+VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'edgeset',1,1,'ready',ARRAY['terminal_host'],ARRAY['terminal_host'],'2026.11.19.1')`, "edgeset_machine_"+stamp, account, "edgeset_env_"+stamp)
+	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.user_machines WHERE id=$1`, "edgeset_machine_"+stamp)
+	})
 	scope := Scope{Kind: "account", ID: account, Account: account}
 	reconcile := func(at time.Time) bool {
 		t.Helper()
@@ -111,16 +117,47 @@ func TestWorkspaceEdgeSetOnPostgres(t *testing.T) {
 	if reconcile(time.Now()) {
 		t.Fatal("an unchanged healthy set was rewritten")
 	}
+	// The worker's sweep lists only workspaces ReconcileScope would change: not this settled one, however long it lasts.
+	listed := func() bool {
+		t.Helper()
+		rows, err := database.Pool().Query(ctx, scopesSQL, "", "", 100000, Size, time.Now(), fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var kind, id, owner string
+			if err := rows.Scan(&kind, &id, &owner); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "account" && id == account {
+				return true
+			}
+		}
+		return false
+	}
+	if listed() {
+		t.Fatal("the sweep lists a settled workspace")
+	}
 	// A member silent for less than the ten-minute replacement window keeps its place...
 	lost := ids[0]
 	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now()-interval '5 minutes' WHERE id=$1`, lost)
 	if reconcile(time.Now()) {
 		t.Fatal("a member that missed heartbeats for five minutes was replaced")
 	}
+	if listed() {
+		t.Fatal("the sweep lists a workspace whose member is silent for less than the replacement window")
+	}
 	// ...but a member gone for longer is replaced and the survivor keeps its place.
 	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now()-interval '20 minutes' WHERE id=$1`, lost)
+	if !listed() {
+		t.Fatal("the sweep skips a workspace whose member is gone for twenty minutes")
+	}
 	if !reconcile(time.Now()) {
 		t.Fatal("a member gone for twenty minutes was not replaced")
+	}
+	if listed() {
+		t.Fatal("the sweep still lists a workspace after its member was replaced")
 	}
 	_, replaced, generation := stored()
 	if generation != 2 || len(replaced) != 2 || replaced[0] != ids[1] || replaced[1] == lost {

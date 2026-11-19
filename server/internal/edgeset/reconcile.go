@@ -24,14 +24,20 @@ func (s Scope) team() sql.NullString {
 	return sql.NullString{String: s.ID, Valid: s.Kind == "team"}
 }
 
-const usableEdgesSQL = `SELECT n.id,coalesce(n.failure_domain,'') FROM control_tunnel_nodes n
-WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
+// usableEdge is the part of "an edge that may serve a workspace right now" that does not depend on the workspace; now
+// is the SQL placeholder holding the observation time. The workspace's own eligibility is added by the caller.
+func usableEdge(now string) string {
+	return `n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[]
-AND n.last_heartbeat_at>$1::timestamptz-interval '15 seconds' AND n.registry_expires_at>$1
-AND (n.drain_deadline IS NULL OR n.drain_deadline>$1)
+AND n.last_heartbeat_at>` + now + `::timestamptz-interval '15 seconds' AND n.registry_expires_at>` + now + `
+AND (n.drain_deadline IS NULL OR n.drain_deadline>` + now + `)
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
-AND n.public_ingress_verified_at IS NOT NULL
+AND n.public_ingress_verified_at IS NOT NULL`
+}
+
+var usableEdgesSQL = `SELECT n.id,coalesce(n.failure_domain,'') FROM control_tunnel_nodes n
+WHERE ` + usableEdge("$1") + `
 AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)
 ORDER BY n.id`
 
@@ -186,11 +192,32 @@ func equal(a, b []string) bool {
 	return true
 }
 
-const scopesSQL = `SELECT kind,id,account FROM (
- SELECT 'account'::text AS kind,m.user_id AS id,m.user_id AS account FROM user_machines m JOIN users u ON u.id=m.user_id AND u.status='active'
+// scopesSQL lists, after ($1,$2), the workspaces whose stored set ReconcileScope would change: no set yet or a mode
+// that moved (and an edge that can serve it exists: with none, ReconcileScope keeps whatever it had), a member no longer
+// retained (silent past $6, eligible or not), more members than Size, or a free place with a usable edge outside the set to
+// fill it. Every other workspace keeps its set (choose keeps retained members), so it costs nothing: walking every
+// workspace each second was ~7 queries per workspace and grew with accounts, not machines.
+var scopesSQL = `SELECT s.kind,s.id,s.account FROM (
+ SELECT 'account'::text AS kind,m.user_id AS id,m.user_id AS account,NULL::text AS team FROM user_machines m JOIN users u ON u.id=m.user_id AND u.status='active'
   WHERE m.owner_team_id IS NULL AND m.deleted_at IS NULL AND m.revoked_at IS NULL GROUP BY m.user_id
- UNION ALL SELECT 'team',t.team_id,t.owner_account FROM teams t WHERE t.deleted_at IS NULL AND NOT t.suspended
-) s WHERE (kind,id)>($1,$2) ORDER BY kind,id LIMIT $3`
+ UNION ALL SELECT 'team',t.team_id,t.owner_account,t.team_id FROM teams t WHERE t.deleted_at IS NULL AND NOT t.suspended
+) s LEFT JOIN workspace_edge_sets e ON e.scope_kind=s.kind AND e.scope_id=s.id
+WHERE (s.kind,s.id)>($1,$2) AND (
+ ((e.scope_id IS NULL OR e.mode IS DISTINCT FROM paperboat.workspace_edge_mode(s.account,s.team))
+  AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `)
+  AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + ` AND paperboat.node_workspace_edge_eligible(n.id,s.account,s.team)))
+ OR cardinality(e.node_ids)>$4
+ OR EXISTS (SELECT 1 FROM unnest(e.node_ids) AS member(id) WHERE NOT EXISTS (
+  SELECT 1 FROM control_tunnel_nodes n WHERE n.id=member.id AND n.roles @> ARRAY['edge']::text[]
+   AND n.last_heartbeat_at>$5::timestamptz-$6::interval AND paperboat.node_workspace_edge_eligible(n.id,s.account,s.team)))
+ OR (cardinality(e.node_ids)<$4 AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `
+   AND n.id<>ALL(e.node_ids) AND paperboat.node_workspace_edge_eligible(n.id,s.account,s.team))))
+ORDER BY s.kind,s.id LIMIT $3`
+
+// SweepEvery is how often the worker looks for workspaces whose set must change. Explicit changes (a self-hosted
+// pool edit, a machine's first attachment) reconcile or assign synchronously; the sweep is the safety net for a
+// member silent past ReplaceAfter (10 minutes), so seconds are enough.
+const SweepEvery = 15 * time.Second
 
 // ReconcileAll walks every workspace once, a page per transaction, and returns how many sets changed.
 func ReconcileAll(ctx context.Context, database *db.DB, now time.Time) (int, error) {
@@ -199,7 +226,7 @@ func ReconcileAll(ctx context.Context, database *db.DB, now time.Time) (int, err
 	kind, id := "", ""
 	for {
 		var scopes []Scope
-		rows, err := database.Pool().Query(ctx, scopesSQL, kind, id, page)
+		rows, err := database.Pool().Query(ctx, scopesSQL, kind, id, page, Size, now, fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
 		if err != nil {
 			return changed, fmt.Errorf("list workspaces: %w", err)
 		}
