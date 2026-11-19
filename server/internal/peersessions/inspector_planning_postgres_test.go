@@ -1,9 +1,14 @@
 package peersessions
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Every configuration used to plan the expanded inspector authorization view,
@@ -41,4 +46,31 @@ func TestInspectorAdmissionPlanningIsBoundedOnPostgres(t *testing.T) {
 		t.Fatalf("20 warm inspector lookups spent %.1f ms planning; budget 200 ms", total)
 	}
 	t.Logf("20 warm inspector lookups: %.3f ms planning", total)
+}
+
+// A new database connection planned the expanded inspector view on its first configuration (the function keeps its
+// generic plan per connection afterwards): 75-115 ms on prod, 7 ms with join_collapse_limit=1 (migration 456).
+// The best of several fresh connections, so a loaded host cannot fail it.
+func TestInspectorAdmissionFirstCallOfANewConnectionPlansFastOnPostgres(t *testing.T) {
+	f := newEndpointsFixture(t)
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	var times []time.Duration
+	for range 6 {
+		conn, err := pgx.Connect(f.ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		started := time.Now()
+		_, err = conn.Exec(f.ctx, `SELECT * FROM paperboat.peer_network_inspector_admissions($1,$2,now(),'{}')`, f.account+"_m_0", f.account)
+		times = append(times, time.Since(started))
+		_ = conn.Close(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	best := slices.Min(times)
+	t.Logf("RESULT first inspector lookup on a new connection: best of %d %v (all %v)", len(times), best, times)
+	if best > 40*time.Millisecond {
+		t.Fatalf("the first inspector lookup of a new connection took %v at best, want planning under 40 ms", best)
+	}
 }
