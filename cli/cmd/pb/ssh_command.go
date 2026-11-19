@@ -520,7 +520,11 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	knownHosts, err := managedssh.FormatKnownHosts(host, target.Port, keys)
+	format := managedssh.FormatKnownHosts
+	if aliasLines, _ := command.Flags().GetBool("alias-lines"); aliasLines { // the caller sets HostKeyAlias: ssh looks the alias up without its port
+		format = managedssh.FormatKnownHostsForAlias
+	}
+	knownHosts, err := format(host, target.Port, keys)
 	if err != nil {
 		return err
 	}

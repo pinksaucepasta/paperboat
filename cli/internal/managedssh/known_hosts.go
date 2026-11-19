@@ -14,12 +14,26 @@ import (
 
 var ErrKnownHosts = errors.New("managed SSH known-host authority is invalid")
 
+// FormatKnownHosts names the host as ssh looks it up without a HostKeyAlias: bare for port 22, [host]:port otherwise.
 func FormatKnownHosts(host string, port uint16, keys []HostPublicKey) ([]byte, error) {
+	return formatKnownHosts(host, port, false, keys)
+}
+
+// FormatKnownHostsForAlias names the host as ssh looks it up under a HostKeyAlias: the alias alone, whatever the port
+// (the Windows loopback connection of a machine whose sshd is not on port 22, victus 2026-11-19).
+func FormatKnownHostsForAlias(host string, port uint16, keys []HostPublicKey) ([]byte, error) {
+	return formatKnownHosts(host, port, true, keys)
+}
+
+func formatKnownHosts(host string, port uint16, alias bool, keys []HostPublicKey) ([]byte, error) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if !validSSHHostName(host) || port == 0 || len(keys) == 0 || len(keys) > 16 {
 		return nil, ErrKnownHosts
 	}
 	target := knownhosts.Normalize(net.JoinHostPort(host, strconv.Itoa(int(port))))
+	if alias {
+		target = host
+	}
 	var result bytes.Buffer
 	seen := make(map[[32]byte]bool, len(keys))
 	for _, key := range keys {

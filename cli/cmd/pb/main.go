@@ -458,6 +458,7 @@ recovery instructions before retrying an operation that may have created resourc
 	sshKnownHostsCommand := &cobra.Command{Use: "__ssh-known-hosts", Hidden: true, Args: commandArgs(cobra.NoArgs), RunE: actionSSHKnownHosts}
 	sshKnownHostsCommand.Flags().String("host", "", "")
 	sshKnownHostsCommand.Flags().String("port", "", "")
+	sshKnownHostsCommand.Flags().Bool("alias-lines", false, "")
 	root.AddCommand(sshKnownHostsCommand)
 
 	root.AddCommand(environmentsCobraCommand())
