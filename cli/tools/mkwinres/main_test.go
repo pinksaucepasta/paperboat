@@ -64,8 +64,8 @@ func TestCommittedObjectsNamePaperboat(t *testing.T) {
 
 // A plain `go build` of pb for Windows must link the Paperboat version resource (what dialogs read).
 func TestBuiltWindowsExecutableNamesPaperboat(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds cmd/pb for two Windows architectures")
+	if os.Getenv("PB_WINRES_BUILD_CHECK") == "" {
+		t.Skip("set PB_WINRES_BUILD_CHECK=1: builds cmd/pb for two Windows architectures (~7 min on a spare VM)")
 	}
 	for _, arch := range []string{"amd64", "arm64"} {
 		exe := filepath.Join(t.TempDir(), "pb.exe")
