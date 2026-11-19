@@ -3,7 +3,6 @@
 import { UsersThreeIcon } from "@phosphor-icons/react"
 import { useRouter } from "next/navigation"
 import { useApiQuery, workspacesQuery } from "@/lib/api"
-import { billingQuery, teamTrialDays } from "@/lib/billing"
 import { setWorkspace } from "@/lib/workspace"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -16,7 +15,7 @@ const reasons = {
 /**
  * Free and Pro are for one person; working with other people is Teams (pricing decisions
  * 2026-10-22). "Add member" and "Share machine" in Personal open this instead of failing: what a
- * team adds, the trial when the server offers one, what stays free, and the teams you're already in.
+ * team adds, what stays free, and the teams you're already in.
  */
 export function TeamsUpgradeDialog({
   reason,
@@ -29,10 +28,7 @@ export function TeamsUpgradeDialog({
 }) {
   const router = useRouter()
   const workspaces = useApiQuery(workspacesQuery).data
-  const personal = workspaces?.find((workspace) => workspace.kind === "personal")
   const teams = workspaces?.filter((workspace) => workspace.kind === "team") ?? []
-  const billing = useApiQuery({ ...billingQuery(personal), enabled: open && Boolean(personal) }).data
-  const trial = teamTrialDays(billing)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,14 +42,7 @@ export function TeamsUpgradeDialog({
           </DialogDescription>
         </DialogHeader>
         <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-muted-foreground">
-          {trial ? (
-            <>
-              <li>Free for {trial} days. Your card is taken at the start and billing begins on day {trial + 1}.</li>
-              <li>We remind you 3 days before, and cancelling during the trial costs nothing.</li>
-            </>
-          ) : (
-            <li>Teams are billed per seat. You take one seat and can add more any time.</li>
-          )}
+          <li>Teams are billed per seat. You take one seat and can add more any time.</li>
           <li>Sharing one terminal session or one preview link stays free, without a team.</li>
         </ul>
         {teams.length > 0 && (
@@ -87,7 +76,7 @@ export function TeamsUpgradeDialog({
               router.push("/team?create=1")
             }}
           >
-            {trial ? `Start ${trial}-day free trial` : "Create team"}
+            Create team
           </Button>
         </DialogFooter>
       </DialogContent>

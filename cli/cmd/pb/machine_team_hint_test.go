@@ -22,7 +22,7 @@ func workspaceMachinesServer(t *testing.T, machines map[string][]map[string]any)
 		case "/v1/workspaces":
 			writeAPIData(t, w, map[string]any{"items": []map[string]string{
 				{"id": "personal", "name": "Personal", "kind": "personal", "role": "owner"},
-				{"id": "laneo-f13-trial", "name": "Trial", "kind": "team", "role": "owner"},
+				{"id": "laneo-f13-team", "name": "Crew", "kind": "team", "role": "owner"},
 				{"id": "other-team", "name": "Other", "kind": "team", "role": "member"},
 			}})
 		case "/v1/machines":
@@ -53,10 +53,10 @@ func TestAMachineNameResolvesAcrossWorkspacesOnlyWhenUnique(t *testing.T) {
 		}
 		return client
 	}
-	unique := workspaceMachinesServer(t, map[string][]map[string]any{"laneo-f13-trial": {{"id": "machine_pb", "alias": "laneo-pb"}}})
+	unique := workspaceMachinesServer(t, map[string][]map[string]any{"laneo-f13-team": {{"id": "machine_pb", "alias": "laneo-pb"}}})
 	client := personalClient(unique)
 	machine, err := resolveUserMachine(context.Background(), client, "laneo-pb")
-	if err != nil || machine.ID != "machine_pb" || client.Workspace() != "laneo-f13-trial" || notice.String() != "laneo-pb (team laneo-f13-trial)\n" {
+	if err != nil || machine.ID != "machine_pb" || client.Workspace() != "laneo-f13-team" || notice.String() != "laneo-pb (team laneo-f13-team)\n" {
 		t.Fatalf("unique: machine=%+v err=%v workspace=%q notice=%q", machine, err, client.Workspace(), notice.String())
 	}
 	explicit := context.WithValue(context.Background(), workspaceExplicitKey{}, true)
@@ -64,13 +64,13 @@ func TestAMachineNameResolvesAcrossWorkspacesOnlyWhenUnique(t *testing.T) {
 		t.Fatalf("explicit --workspace looked elsewhere: %v", err)
 	}
 	several := workspaceMachinesServer(t, map[string][]map[string]any{
-		"laneo-f13-trial": {{"id": "machine_pb", "alias": "laneo-pb"}},
+		"laneo-f13-team": {{"id": "machine_pb", "alias": "laneo-pb"}},
 		"other-team":      {{"id": "machine_other", "alias": "laneo-pb"}},
 	})
 	client = personalClient(several)
 	_, err = resolveUserMachine(context.Background(), client, "laneo-pb")
 	message := commandFailureMessage(err, classifyCommandFailure(err))
-	if !errors.Is(err, resolver.ErrMachineAmbiguous) || client.Workspace() != "personal" || !strings.Contains(message, "--workspace laneo-f13-trial") || !strings.Contains(message, "--workspace other-team") || !strings.Contains(message, "machine_other (team other-team)") {
+	if !errors.Is(err, resolver.ErrMachineAmbiguous) || client.Workspace() != "personal" || !strings.Contains(message, "--workspace laneo-f13-team") || !strings.Contains(message, "--workspace other-team") || !strings.Contains(message, "machine_other (team other-team)") {
 		t.Fatalf("ambiguous: err=%v workspace=%q message=%q", err, client.Workspace(), message)
 	}
 	if _, err := resolveUserMachine(context.Background(), personalClient(unique), "nowhere"); !errors.Is(err, resolver.ErrMachineNotFound) {

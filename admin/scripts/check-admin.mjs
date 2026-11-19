@@ -286,7 +286,7 @@ function route(req, url) {
     if (process.env.__FIXTURE_MONEY === "off") return { __status: 503, code: "money_not_configured", message: "Stripe is not configured on this server." }
     if (process.env.__FIXTURE_MONEY === "down") return { __status: 503, code: "money_unavailable", message: "Stripe did not answer. Try again in a minute.", reference: "support_fixture_money" }
     const row = (i, extra = {}) => ({ customer: `cus_${i}`, ...(i % 3 ? { workspace: `bw_${i}` } : {}), plan: i % 2 ? "pro" : "team", seats: i, mrr: 1000 * (10 - i), ...extra })
-    const rows = { customers: Array.from({ length: 7 }, (_, i) => row(i + 1)), past_due: [row(2, { amount: 2000, attempts: 2, at: 1795000000, state: "past_due" })], renewals: [row(1, { amount: 12000, at: 1795000000 })], trials: [row(4, { at: 1795000000, state: "trialing" })] }
+    const rows = { customers: Array.from({ length: 7 }, (_, i) => row(i + 1)), past_due: [row(2, { amount: 2000, attempts: 2, at: 1795000000, state: "past_due" })], renewals: [row(1, { amount: 12000, at: 1795000000 })] }
     if (p === "/v1/admin/money/events") return { events: [{ id: "evt_1", type: "invoice.paid", created: 1795000000, object_id: "in_1" }, { id: "evt_2", type: "charge.failed", created: 1794990000 }] }
     if (p.startsWith("/v1/admin/money/lists/")) {
       const all = rows[p.split("/").pop()]
@@ -298,7 +298,6 @@ function route(req, url) {
       trend: [{ day: "2026-11-16", mrr: 100000 }, { day: "2026-11-17", mrr: 123456 }],
       plans: [{ plan: "team", subscriptions: 4, seats: 14, mrr: 90000 }, { plan: "pro", subscriptions: 8, seats: 8, mrr: 33456 }],
       movement: { new: { count: 3, mrr: 30000, previous_count: 1, previous_mrr: 5000 }, churned: { count: 1, mrr: 4000, previous_count: 2, previous_mrr: 9000 }, upgraded: { count: 2, mrr: 6000 }, downgraded: { count: 0, mrr: 0 }, logo_churn_percent: 8.3, previous_logo_churn_percent: 20, revenue_churn_percent: 3.2, previous_revenue_churn_percent: 9, changes_unavailable: false },
-      trials: { active: 1, ending_soon: 1, started: { value: 2, previous: 1 } },
       cash: { collected: { value: 150000, previous: 120000 }, refunds: { value: 5000, previous: 0 }, net: { value: 145000, previous: 120000 }, failed_payments: { value: 2, previous: 1 } },
       dunning: { count: 1, at_risk_mrr: 8000, rows: rows.past_due }, customers: { total: 7, rows: rows.customers.slice(0, 5) }, renewals: { total: 1, rows: rows.renewals }, ending: 1,
       errors: { balance_and_payouts: "unauthorized" },

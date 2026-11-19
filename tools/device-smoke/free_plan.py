@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F13-01 on a Free account: the paired machine works with no subscription or trial, on the allowance model.
+"""F13-01 on a Free account: the paired machine works with no subscription, on the allowance model.
 
 Reads the CLI's own access credential in memory (never printed). Usage: free_plan.py TARGET
 On the Windows device (PB_SMOKE_WINDOWS_PB, see winhost.py) the CLI token is DPAPI-protected, so the plan is read
@@ -91,7 +91,7 @@ def main():
         time.sleep(15)
     if code:
         raise RuntimeError('exec failed on the Free plan: ' + out[-160:])
-    # No subscription, trial or payment gate anywhere in what the CLI recorded locally.
+    # No subscription or payment gate anywhere in what the CLI recorded locally.
     gate = gate_events()
     if gate:
         raise RuntimeError('%d local diagnostics events mention a plan gate (402/machine_plan_inactive/subscription_required)' % gate)

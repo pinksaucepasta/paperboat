@@ -15,7 +15,7 @@ import { useCursorList } from "@/lib/paging"
 
 export type MoneyReport = Data<"/v1/admin/money">
 export type MoneyRow = MoneyReport["customers"]["rows"][number]
-export type ListKind = "customers" | "past_due" | "renewals" | "trials"
+export type ListKind = "customers" | "past_due" | "renewals"
 
 const when = (unix?: number) => (unix ? <Time iso={new Date(unix * 1000).toISOString()} relative /> : "—")
 
@@ -41,8 +41,6 @@ export function columnsFor(kind: ListKind, money: (n: number) => string): Column
       return [who, { header: "Owed", className: "text-right tabular-nums", cell: (r) => (r.amount ? money(r.amount) : "—") }, { header: "Tries", className: "hidden sm:table-cell text-right tabular-nums", cell: (r) => r.attempts ?? 0 }, { header: "Next retry", cell: (r) => (r.state === "unpaid" ? "Stopped" : when(r.at)) }]
     case "renewals":
       return [who, plan, { header: "Charge", className: "text-right tabular-nums", cell: (r) => money(r.amount ?? 0) }, { header: "Renews", cell: (r) => when(r.at) }]
-    case "trials":
-      return [who, plan, { header: "Becomes", className: "text-right tabular-nums", cell: (r) => `${money(r.mrr)}/mo` }, { header: "Ends", cell: (r) => when(r.at) }]
   }
 }
 
