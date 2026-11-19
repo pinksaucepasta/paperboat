@@ -197,3 +197,34 @@ func TestIngressSnapshotDropsOnlyTheDecisionItCannotAccept(t *testing.T) {
 		t.Fatalf("refresh sent held version %q while a decision was dropped", last)
 	}
 }
+
+// The snapshot marks the hostnames a Free account owns (a mark alone, with no lists, is an entry): RequestLimited is true for
+// them and false for a paid owner's host and an unlisted one, and the mark leaves the IP lists alone.
+func TestIngressAuthorityListsFreeOwnedHostnames(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision},
+			"ip_rules": []connectorprotocol.IngressIPRule{
+				{Hostname: "free.customer.test", FreeRequests: true},
+				{Hostname: "free-listed.customer.test", FreeRequests: true, Deny: []string{"203.0.113.0/24"}},
+				{Hostname: "paid-listed.customer.test", Deny: []string{"203.0.113.0/24"}},
+			}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	if _, err := authority.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]bool{"free.customer.test": true, "free-listed.customer.test": true, "paid-listed.customer.test": false, "paid.customer.test": false} {
+		if got := authority.RequestLimited(host); got != want {
+			t.Errorf("RequestLimited(%s) = %v, want %v", host, got, want)
+		}
+	}
+	if !authority.AddressAllowed("free.customer.test", "203.0.113.4") || authority.AddressAllowed("free-listed.customer.test", "203.0.113.4") {
+		t.Error("the Free mark changed who the IP lists admit")
+	}
+}

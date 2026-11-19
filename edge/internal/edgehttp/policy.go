@@ -94,6 +94,9 @@ type Config struct {
 	RevocationCheckInterval time.Duration
 	// AddressAllowed, when set, applies the owner's IP allow/deny lists for a host to the client address.
 	AddressAllowed func(host, address string) bool
+	// RequestLimited, when set with FreeRequests, reports a host a Free account owns: its requests meet the Free request rates.
+	RequestLimited func(host string) bool
+	FreeRequests   *FreeRequestLimits
 }
 
 type routeMatchContextKey struct{}
@@ -724,6 +727,13 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.config.AddressAllowed != nil && !p.config.AddressAllowed(host, p.clientIP(r)) {
 		writeIPRestricted(w, r)
 		return
+	}
+	if p.config.FreeRequests != nil && p.config.RequestLimited != nil && p.config.RequestLimited(host) {
+		if rates := p.config.FreeRequests.over(host, p.clientIP(r)); rates != nil {
+			edgetelemetry.NoteRefusal(host)
+			writeFreeRequestLimited(w, r, rates)
+			return
+		}
 	}
 	if r.ContentLength > p.config.MaxBodyBytes {
 		w.Header().Set("X-Paperboat-Error", "request_body_too_large")

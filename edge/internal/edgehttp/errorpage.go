@@ -238,6 +238,11 @@ func writeErrorPageBody(w http.ResponseWriter, status int, title, message, linkT
 // waiting helps. A WebSocket upgrade gets the same status before any 101, which the page that opened
 // it cannot read; that page shows its own error.
 func writeRefusal(w http.ResponseWriter, r *http.Request, status int, code, title, message string, retryAfter time.Duration) {
+	writeRefusalLink(w, r, status, code, title, message, retryAfter, "", "")
+}
+
+// writeRefusalLink is writeRefusal with one link as the page's action (and named in the problem document's detail).
+func writeRefusalLink(w http.ResponseWriter, r *http.Request, status int, code, title, message string, retryAfter time.Duration, linkText, linkURL string) {
 	seconds := 0
 	if retryAfter > 0 {
 		seconds = int((retryAfter + time.Second - 1) / time.Second)
@@ -246,12 +251,14 @@ func writeRefusal(w http.ResponseWriter, r *http.Request, status int, code, titl
 	w.Header().Set("X-Paperboat-Error", code)
 	ref := noteErrorPage(status)
 	if r != nil && strings.Contains(r.Header.Get("Accept"), "text/html") {
-		linkText := ""
-		if seconds > 0 {
+		if linkURL == "" && seconds > 0 {
 			linkText = "Try again"
 		}
-		writeErrorPageBody(w, status, title, message, linkText, "", ref, seconds)
+		writeErrorPageBody(w, status, title, message, linkText, linkURL, ref, seconds)
 		return
+	}
+	if linkURL != "" {
+		message += " " + linkURL
 	}
 	h := w.Header()
 	h.Set("Content-Type", "application/problem+json")

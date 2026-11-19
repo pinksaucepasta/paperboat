@@ -33,6 +33,7 @@ type IngressAuthority struct {
 	throttled     map[string]connectorprotocol.IngressThrottle // hostnames whose workspace used its fair-use bandwidth, from the same fetch
 	blocked       map[string]bool                              // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
 	ipRules       map[string]addressRule                       // owner IP allow/deny lists per hostname, from the same fetch
+	freeRequests  map[string]bool                              // hostnames a Free account owns (request rates apply), from the same fetch
 	offline       map[string]bool                              // preview hostnames whose owner machine is asleep, from the same fetch
 	http01        map[string]connectorprotocol.HTTP01Response  // by token, from the same fetch
 	fetched       time.Time
@@ -350,8 +351,12 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 		a.offline[o.Hostname] = true
 	}
 	a.ipRules = make(map[string]addressRule, len(snapshot.IPRules))
+	a.freeRequests = make(map[string]bool)
 	for _, r := range snapshot.IPRules {
 		a.ipRules[r.Hostname] = compileAddressRule(r)
+		if r.FreeRequests {
+			a.freeRequests[r.Hostname] = true
+		}
 	}
 	a.http01 = make(map[string]connectorprotocol.HTTP01Response, len(snapshot.HTTP01))
 	for _, r := range snapshot.HTTP01 {
@@ -484,6 +489,17 @@ func (a *IngressAuthority) previewDecision(hostname string) (connectorprotocol.I
 		}
 	}
 	return connectorprotocol.IngressDecision{}, false
+}
+
+// RequestLimited reports whether the last server snapshot lists hostname as owned by a Free account, whose requests
+// meet the Free request rates (edgehttp.FreeRequestLimits).
+func (a *IngressAuthority) RequestLimited(hostname string) bool {
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.freeRequests[hostname]
 }
 
 // OwnerOffline reports whether the last server snapshot lists the preview hostname as active with its owner

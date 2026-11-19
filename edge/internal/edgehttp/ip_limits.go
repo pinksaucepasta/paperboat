@@ -18,7 +18,7 @@ type addressRate struct{ perSecond, burst float64 }
 
 var (
 	// One address's HTTP requests (any number of links) and new WebSocket upgrades on this edge.
-	addressRequestRate = addressRate{perSecond: 100, burst: 1000}
+	addressRequestRate = addressRate{perSecond: 100, burst: 3000}
 	addressUpgradeRate = addressRate{perSecond: 20, burst: 40}
 	// One address's TLS handshakes on the shared 443 listener.
 	addressHandshakeRate = addressRate{perSecond: 20, burst: 50}
@@ -68,13 +68,14 @@ type addressShard struct {
 type addressLimiter struct {
 	opens, upgrades addressRate
 	streams         int // 0: no in-flight bound
+	shardKeys       int // addresses tracked per shard
 	seed            maphash.Seed
 	shards          [addressShards]addressShard
 	now             func() time.Time
 }
 
 func newAddressLimiter(opens, upgrades addressRate, streams int) *addressLimiter {
-	l := &addressLimiter{opens: opens, upgrades: upgrades, streams: streams, seed: maphash.MakeSeed(), now: time.Now}
+	l := &addressLimiter{opens: opens, upgrades: upgrades, streams: streams, shardKeys: addressShardKeys, seed: maphash.MakeSeed(), now: time.Now}
 	for i := range l.shards {
 		l.shards[i].keys = make(map[string]*addressState)
 	}
@@ -106,7 +107,7 @@ func (l *addressLimiter) admit(address string, upgrade bool) (release func(), ok
 		if now.Sub(shard.swept) >= addressSweepPeriod {
 			shard.sweep(now)
 		}
-		if len(shard.keys) >= addressShardKeys {
+		if len(shard.keys) >= l.shardKeys {
 			// shortcut: a flood from over 1M addresses is past what per-address limits can stop; new
 			// addresses pass untracked until idle ones expire (provider scrubbing and nftables still apply).
 			return func() {}, true

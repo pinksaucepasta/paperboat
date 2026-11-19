@@ -826,7 +826,18 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	recordEdgeErrorPages(r.Context(), input.ErrorPages)
 	s.recordEdgeRefusals(r.Context(), input.NodeID, input.Refusals)
 	s.recordNodeMetrics(r.Context(), "edge", input.NodeID, input.ProcessEpoch, int64(input.ActiveStreams), input.Metrics)
-	writeHeartbeatAnswer(w, s.ingressLimits)
+	limits := s.ingressLimitsFor(r.Context(), input.NodeID)
+	writeHeartbeatAnswer(w, limits)
+}
+
+// ingressLimitsFor is the set one edge is sent: a customer-owned edge gets no Free request rates (the edge enforces only
+// what it is told), and neither does one whose owner cannot be read: a customer's own edge is never limited by mistake.
+func (s *EdgeService) ingressLimitsFor(ctx context.Context, nodeID string) edgelimits.IngressLimits {
+	limits := s.ingressLimits
+	if owned, err := s.customerOwnedNode(ctx, nodeID); err != nil || owned {
+		limits.FreeRequests = edgelimits.FreeRequests{}
+	}
+	return limits
 }
 
 // writeHeartbeatAnswer answers a recorded heartbeat with exactly the ingress limits the edge enforces (T11):

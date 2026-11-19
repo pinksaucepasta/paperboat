@@ -3,10 +3,13 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 )
 
 // A heartbeat's flood-protection refusals add up per hostname, edge and hour; malformed entries are
@@ -84,7 +87,7 @@ func TestOwnerIPRulesFollowTheirResource(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	owner, machine := "user_rules_"+suffix, "host_rules_"+suffix
+	owner, machine, payer := "user_rules_"+suffix, "host_rules_"+suffix, "user_pro_"+suffix
 	ruled, other, preview := "tunnel_rules_"+suffix, "tunnel_other_"+suffix, "prv_rules_"+suffix
 	routeA, routeB, routeX := "route_a_"+suffix, "route_b_"+suffix, "route_x_"+suffix
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -100,13 +103,15 @@ func TestOwnerIPRulesFollowTheirResource(t *testing.T) {
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.access_ip_rules WHERE resource_id = ANY($1)`, []string{ruled, other, preview})
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.tunnels WHERE id = ANY($1)`, []string{ruled, other})
 		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
-		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.users WHERE id=$1`, owner)
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.billing_workspaces WHERE user_id=$1`, payer)
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.users WHERE id = ANY($1)`, []string{owner, payer})
 	})
-	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,'owner@test.invalid',false,'active')`, owner)
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,'owner@test.invalid',false,'active'),($2,$2,'payer@test.invalid',false,'active')`, owner, payer)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,provider_customer_id,provider_subscription_id,product_code,state,quantity,period_start,period_end) VALUES($1,$2,$3,$4,'pro-month','active',1,now()-interval '1 day',now()+interval '29 days')`, "personal:"+payer, payer, "cus_"+suffix, "sub_"+suffix)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'rules-host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_rules_"+suffix)
 	for i, tunnel := range []string{ruled, other} {
 		endpoint := fmt.Sprintf("%08d-0000-4000-8000-%s", i, suffix[len(suffix)-12:])
-		exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$3,'active','public',1,$4,$5,$6,$2,$7,$7)`, tunnel, owner, "rules-"+tunnel, "endpoint_"+endpoint, "https://"+endpoint+".tunnels.example.test", machine, now)
+		exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$3,'active','public',1,$4,$5,$6,$2,$7,$7)`, tunnel, map[bool]string{false: owner, true: payer}[tunnel == other], "rules-"+tunnel, "endpoint_"+endpoint, "https://"+endpoint+".tunnels.example.test", machine, now)
 	}
 	for _, route := range []struct{ id, tunnel string }{{routeA, ruled}, {routeB, ruled}, {routeX, other}} {
 		exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'http','managed',$1,'/',100,'http','127.0.0.1:3100','active',1,$3,$3,$4,$4)`, route.id, route.tunnel, owner, now)
@@ -129,6 +134,11 @@ func TestOwnerIPRulesFollowTheirResource(t *testing.T) {
 	got := map[string]wire.IngressIPRule{}
 	for _, r := range rules {
 		got[r.Hostname] = r
+	}
+	// Free-owned publications are marked for the edge's request rates; the tunnel of a paid personal plan is not (and, with no
+	// lists, is not listed at all).
+	if !got["a.example.test"].FreeRequests || !got["b.example.test"].FreeRequests || got["p.example.test"].FreeRequests {
+		t.Fatalf("free marks = %+v", rules)
 	}
 	if len(got) != 3 || len(got["a.example.test"].Allow) != 1 || len(got["b.example.test"].Allow) != 1 || len(got["p.example.test"].Deny) != 1 || got["p.example.test"].Deny[0] != "203.0.113.0/24" {
 		t.Fatalf("rules = %+v", rules)
@@ -242,5 +252,84 @@ func TestCapBlockedKeepsTheEdgesBound(t *testing.T) {
 	}
 	if short := capBlocked(long[:10]); len(short) != 10 {
 		t.Fatalf("a short list was cut to %d", len(short))
+	}
+}
+
+// The Free request rates, the browser-terminal cap and the fair-use file throttles are Paperboat's limits on hosted traffic: a
+// Paperboat-run edge (a plain node, or a global installation) is sent them, a customer-owned edge (account or team
+// installation) never is, so the same Free publication is limited on the one and unlimited on the other.
+func TestHostedLimitsReachPaperboatEdgesAndNeverCustomerOwnedOnesPostgres(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := t.Context()
+	x := fmt.Sprint(time.Now().UnixNano())
+	user := "hl_user_" + x
+	nodes := map[string]string{"plain": "hl_plain_" + x, "global": "hl_global_" + x, "account": "hl_account_" + x, "team": "hl_team_" + x}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM native_usage_authorities WHERE workspace_id='personal:'||$1`, user)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM control_routes WHERE applied_node_id = ANY($1)`, []string{nodes["plain"], nodes["global"], nodes["account"], nodes["team"]})
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM control_environments WHERE id LIKE 'hl_env_%'||$1`, x)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM user_machines WHERE user_id=$1`, user)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM billing_workspace_usage_periods WHERE workspace_id='personal:'||$1`, user)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM billing_workspaces WHERE id='personal:'||$1`, user)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM users WHERE id=$1`, user)
+		for _, n := range nodes {
+			_, _ = store.SQL().ExecContext(bg, `DELETE FROM selfhost_installations WHERE node_id=$1`, n)
+			_, _ = store.SQL().ExecContext(bg, `DELETE FROM control_tunnel_nodes WHERE id=$1`, n)
+		}
+	})
+	exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	exec(`INSERT INTO billing_workspaces(id,user_id,state) VALUES('personal:'||$1,$1,'free')`, user)
+	now := time.Now().UTC()
+	// The workspace is past its included traffic, so its terminal file transfers are throttled on a hosted edge.
+	exec(`INSERT INTO billing_workspace_usage_periods(workspace_id,period_start,period_end,included_bytes,consumed_bytes,paid,budget_start) VALUES('personal:'||$1,$2,$3,100,100,false,$2)`, user, now.Add(-time.Hour), now.AddDate(0, 1, 0))
+	scopes := map[string][2]string{"global": {"global", "operator"}, "account": {"account", user}, "team": {"team", "hl_team_" + x}}
+	for kind, node := range nodes {
+		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$1)`, node)
+		if scope, ok := scopes[kind]; ok {
+			exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete)
+ VALUES($1,$1,$2,$2,'fixture','hosted limits fixture','tunnel',$3,$4,$1,true)`, node, []byte(strings.Repeat("k", 32)), scope[0], scope[1])
+		}
+		machine, env := "hl_m_"+kind+x, "hl_env_"+kind+x
+		exec(`INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$3,'hl'||$4,'linux','amd64','/w','online','occupied',true)`, machine, user, env, kind)
+		exec(`INSERT INTO control_environments(id,workspace_id) VALUES($1,$2)`, env, "ws_"+kind+x)
+		exec(`INSERT INTO control_routes(id,environment_id,kind,public_host,target_host,target_port,applied_node_id) VALUES($1,$2,'runtime_https_wss',$3,'127.0.0.1',8443,$4)`, "hl_r_"+kind+x, env, "hl-"+kind+x+".runtime.example.test", node)
+		exec(`INSERT INTO native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id,attached_until)
+ VALUES($1,$2,1,'personal:'||$3,'terminal','term','t','hl',ARRAY['terminal'],now(),now()+interval '5 minutes',now()+interval '7 days',$4,now()+interval '1 minute')`, "hl_att_"+kind+x, machine, user, node)
+	}
+	service := NewEdgeService(store, "hosted-limits-test-credential-0123456789")
+	gate := bandwidthgate.New(store)
+	gate.SetLookupTimeout(5 * time.Second) // this test database is slower than production
+	service.workspaceGate = gate
+	for kind, node := range nodes {
+		customerOwned := kind == "account" || kind == "team"
+		limits := service.ingressLimitsFor(ctx, node)
+		if limits.Validate() != nil || (limits.FreeRequests == edgelimits.FreeRequests{}) != customerOwned {
+			t.Errorf("%s edge: free request rates = %+v, want sent only to Paperboat's own", kind, limits.FreeRequests)
+		}
+		if customerOwned && limits.FreeRequests != (edgelimits.FreeRequests{}) {
+			t.Errorf("%s edge was sent request limits", kind)
+		}
+		_, throttled, _, _, _, err := service.ingressProjection(ctx, node, "epoch", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		terminal, files := 0, 0
+		for _, entry := range throttled {
+			if entry.Terminal {
+				terminal++
+			} else if strings.HasPrefix(entry.Hostname, "files:") {
+				files++
+			}
+		}
+		if want := map[bool]int{true: 0, false: 1}[customerOwned]; terminal != want || files != want {
+			t.Errorf("%s edge: %d terminal caps and %d file throttles listed, want %d of each", kind, terminal, files, want)
+		}
 	}
 }

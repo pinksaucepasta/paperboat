@@ -76,7 +76,7 @@ TCP/UDP 443 and the public TCP range; IPv6 sources count per /64. Only traffic
 arriving on an interface with a default route counts; loopback, container and VM
 bridges and VPN interfaces are never limited. A host without `nft` installs
 without it and `pbh doctor` names it. The edge process adds
-per-address limits of its own (20 TLS handshakes/s, 100 requests/s burst 1000,
+per-address limits of its own (20 TLS handshakes/s, 100 requests/s burst 3000,
 256 in flight, 20 new WebSockets/s) and caps one name at a quarter of its TLS
 slots. Volumetric attacks are your hosting provider's to absorb; if your host
 is a target, put the fallback edge of the pair at a different provider.

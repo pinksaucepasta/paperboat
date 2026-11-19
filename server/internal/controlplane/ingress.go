@@ -90,15 +90,24 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	attached, err := s.attachedTerminals(ctx, nodeID)
+	// A customer-owned edge carries no Paperboat fair-use slowdown and no browser-terminal cap.
+	customerOwned, err := s.customerOwnedNode(ctx, nodeID)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	throttled = s.addFileThrottles(ctx, attached, throttled)
-	if err = s.assignThrottleRates(ctx, throttled); err != nil {
-		return nil, nil, nil, nil, nil, err
+	if customerOwned {
+		throttled = nil
+	} else {
+		attached, err := s.attachedTerminals(ctx, nodeID)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		throttled = s.addFileThrottles(ctx, attached, throttled)
+		if err = s.assignThrottleRates(ctx, throttled); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		throttled = s.addTerminalCaps(attached, throttled)
 	}
-	throttled = s.addTerminalCaps(attached, throttled)
 	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -465,6 +474,10 @@ WHERE r.id = ANY($2::text[])`, previews, routes)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	free, err := freeOwnedResources(ctx, store, previews, routes)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
 	for _, d := range decisions {
 		key := [2]string{"route", d.Binding.RouteID}
@@ -472,11 +485,37 @@ WHERE r.id = ANY($2::text[])`, previews, routes)
 			key = [2]string{"preview", d.Binding.PublicationID}
 		}
 		l, ok := byResource[key]
-		if !ok || seen[d.Binding.Hostname] {
+		if (!ok && !free[key]) || seen[d.Binding.Hostname] {
 			continue
 		}
 		seen[d.Binding.Hostname] = true
-		rules = append(rules, wire.IngressIPRule{Hostname: d.Binding.Hostname, Allow: l.allow, Deny: l.deny})
+		rules = append(rules, wire.IngressIPRule{Hostname: d.Binding.Hostname, Allow: l.allow, Deny: l.deny, FreeRequests: free[key]})
 	}
 	return rules, nil
+}
+
+// freeOwnedResources picks, from the previews (lease ids) and tunnel routes (route ids) of an edge's decisions, those a
+// Free account owns: not owned by a team, and the owner has no paid personal plan (the plan test of planlimits.planTx).
+// The edge applies the Free request rates to exactly these (edgelimits.FreeRequests).
+func freeOwnedResources(ctx context.Context, store *db.DB, previews, routes []string) (map[[2]string]bool, error) {
+	const personalProduct = `coalesce((SELECT w.product_code FROM billing_workspaces w
+ WHERE w.user_id=%s AND w.team_id IS NULL AND billing_workspace_paid_until(w)>now()),'') NOT LIKE 'pro-%%'`
+	rows, err := store.Pool().Query(ctx, `SELECT 'preview', p.id FROM preview_leases p
+WHERE p.id = ANY($1::text[]) AND p.owner_team_id IS NULL AND `+fmt.Sprintf(personalProduct, "p.account_id")+`
+UNION ALL
+SELECT 'route', r.id FROM tunnel_routes r JOIN tunnels t ON t.id=r.tunnel_id
+WHERE r.id = ANY($2::text[]) AND t.owner_team_id IS NULL AND `+fmt.Sprintf(personalProduct, "t.account_id"), previews, routes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	free := map[[2]string]bool{}
+	for rows.Next() {
+		var kind, id string
+		if err := rows.Scan(&kind, &id); err != nil {
+			return nil, err
+		}
+		free[[2]string{kind, id}] = true
+	}
+	return free, rows.Err()
 }

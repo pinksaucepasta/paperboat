@@ -486,6 +486,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	// deadline (it gets the host's GOAWAY then), for the host to re-attach here.
 	routeGrace := func() time.Duration { return handover.RemainingAfterTakeover(cfg.ShutdownTimeout / 2) }
 	ingressAuthority = &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Grace: routeGrace}
+	freeRequests := edgehttp.NewFreeRequestLimits()
 	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve, PublicTCPIdleTimeout: deployment.PublicTCPIdle(), AddressAllowed: ingressAuthority.AddressAllowed})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)
@@ -561,6 +562,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		if answer.IngressLimits == nil {
 			return nil
 		}
+		freeRequests.Set(answer.IngressLimits.FreeRequests)
 		return durableRoutes.SetIngressLimits(*answer.IngressLimits)
 	}}
 	routeWorker := &edgeruntime.RouteWorker{Quiet: client.Silent, NodeReady: nodeReady, Unavailable: unavailableRoutes, Reporter: reporter, Certificates: certificateRegistry, Registry: canonicalRoutes, LegacyRegistry: routes, Source: client, Observer: client, InvalidateIngressAuthority: ingressAuthority.Invalidate, State: state, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Carrier: durableRoutes, Wake: durableRoutes.Connected(), TunnelWake: tunnelWake, PublicTCP: publicTCP, DurableAdmissions: durableAdmissions, AccessorSource: client, AccessorAdmissions: accessorAdmissions, Interval: deployment.ControlInterval, DrainTimeout: deployment.ControlTimeout}
@@ -703,7 +705,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: routeGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, Throttles: durableRoutes.Throttles(), RuntimeUsage: meter, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, BodyIdleTimeout: deployment.RequestBodyIdle(), Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
 		now := time.Now()
 		return runtimeExpected.Expects(host, now)
-	}, PreviewAdmitted: ingressAuthority.AdmitsPreview, PreviewOwnerOffline: ingressAuthority.OwnerOffline, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval, AddressAllowed: ingressAuthority.AddressAllowed}, "", previewForwarder, durableForwarder)
+	}, PreviewAdmitted: ingressAuthority.AdmitsPreview, PreviewOwnerOffline: ingressAuthority.OwnerOffline, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval, AddressAllowed: ingressAuthority.AddressAllowed, RequestLimited: ingressAuthority.RequestLimited, FreeRequests: freeRequests}, "", previewForwarder, durableForwarder)
 	if err != nil {
 		return nil, fmt.Errorf("create edge gateway: %w", err)
 	}

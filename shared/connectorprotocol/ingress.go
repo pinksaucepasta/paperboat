@@ -115,13 +115,15 @@ type IngressOffline struct {
 	Hostname string `json:"hostname"`
 }
 
-// IngressIPRule is the owner's IP allow and deny lists (CIDRs) for one hostname. The edge refuses a
-// client address a deny entry matches, or that no allow entry matches when allow is not empty, before
-// opening the origin. It grants no authority.
+// IngressIPRule is the owner's access policy for one hostname. The edge refuses a client address a deny
+// entry matches, or that no allow entry matches when allow is not empty, before opening the origin.
+// FreeRequests marks a publication a Free account owns: its requests meet the Free request rates
+// (edgelimits.FreeRequests). An entry may carry only that mark. It grants no authority.
 type IngressIPRule struct {
-	Hostname string   `json:"hostname"`
-	Allow    []string `json:"allow,omitempty"`
-	Deny     []string `json:"deny,omitempty"`
+	Hostname     string   `json:"hostname"`
+	Allow        []string `json:"allow,omitempty"`
+	Deny         []string `json:"deny,omitempty"`
+	FreeRequests bool     `json:"free_requests,omitempty"`
 }
 
 // ErrPublicationBlocked is the typed reason an edge refuses a taken-down hostname.

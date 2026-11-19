@@ -589,7 +589,11 @@ func New(opts Options) (*App, error) {
 	if edgeControlService != nil {
 		edgeControlService.SetUpdateFloors(map[string]controlplane.NodeUpdateFloor{"edge": nodeFloors["edge"], "relay": nodeFloors["relay"]})
 		edgeControlService.SetRelayMetrics(telemetryMetrics)
-		edgeControlService.SetIngressLimits(opts.Config.EdgeIngressLimits)
+		limits := opts.Config.EdgeIngressLimits
+		if site := strings.TrimRight(opts.Config.Mail.SiteURL, "/"); site != "" {
+			limits.FreeRequests.PricingURL = site + "/pricing"
+		}
+		edgeControlService.SetIngressLimits(limits)
 		edgeControlService.SetFairUse(opts.Config.Billing.FairUse)
 		edgeControlService.SetRelayPoolGate(bandwidthgate.NewRelayPool(store))
 	}

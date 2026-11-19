@@ -237,8 +237,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 // one limit among several servers by giving each its share of the limit is the usual static partition (Envoy's local rate limit is
 // configured per replica the same way); a central bucket would put the control plane on every packet's path.
 func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relaySubjectSet, now time.Time, out *relayNodeLeaseDocument) error {
-	var customerOwned bool
-	if err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, nodeID).Scan(&customerOwned); err != nil || customerOwned {
+	if customerOwned, err := s.customerOwnedNode(ctx, nodeID); err != nil || customerOwned {
 		return err
 	}
 	out.AccountMbit = s.fairUse.RelayMbit
@@ -491,4 +490,13 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 // registered capacity is within the ceiling the relay itself enforces (shared/relaylimits).
 func relayNodeMayStart(state string, capacity int64) bool {
 	return state != "retired" && state != "draining" && capacity > 0 && capacity <= relaylimits.MaxConnectionsPerNode
+}
+
+// customerOwnedNode says the node is a customer's own self-hosted edge or relay (an account or team installation). Paperboat's
+// own (global) installations are hosted nodes. Every limit Paperboat sets for hosted traffic (fair-use speeds, terminal caps, the
+// Free request rates) is withheld from a customer-owned node: it enforces only what the server tells it.
+func (s *EdgeService) customerOwnedNode(ctx context.Context, nodeID string) (bool, error) {
+	var owned bool
+	err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, nodeID).Scan(&owned)
+	return owned, err
 }
