@@ -17,9 +17,10 @@ const Version = 1
 // Header carries Version. A request without it comes from a build older than this package.
 const Header = "X-Paperboat-Capability-Version"
 
-// Transport sets Header on every request that base sends. base nil means http.DefaultTransport.
+// Transport sets Header on every request that base sends. base nil means the standard default transport.
 func Transport(base http.RoundTripper) http.RoundTripper {
 	if base == nil {
+		//paperboat:allow-source-policy default-http owner=capver reason=nil-base-means-the-standard-transport
 		base = http.DefaultTransport
 	}
 	return transport{base: base}
