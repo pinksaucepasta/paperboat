@@ -27,6 +27,24 @@ func shellPath(t *testing.T) string {
 	t.Fatal("no test shell")
 	return ""
 }
+
+// waitFor returns the moment condition holds; the bound only ends a test that would never succeed.
+func waitFor(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	waitFor(t, path, func() bool { _, err := os.Stat(path); return err == nil })
+}
+
 func startShell(t *testing.T, script string) (*Process, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -266,14 +284,23 @@ func TestTerminateRetainsOwnedCleanupFailureAndRecovers(t *testing.T) {
 func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	// The shell survives SIGINT (a handler, so sleep keeps the default) and then reads what is left in the queue.
 	// stty min 0 time 1 makes dd return what is queued within 0.1 s (BSD dd has no iflag=nonblock).
-	process, root := startShell(t, `trap : INT; sleep 30; stty -icanon min 0 time 1; dd bs=4096 count=1 of=got 2>/dev/null; echo done > ran`)
+	// The child touches ready and then execs sleep: an interrupt in between still kills it, so ready means the trap is set.
+	process, root := startShell(t, `trap : INT; sh -c 'touch ready; exec sleep 30'; stty -icanon min 0 time 1; dd bs=4096 count=1 of=got 2>/dev/null; echo done > ran`)
 	// The session always reads output; unread echo makes the exiting shell wait in close on darwin (ttywflush).
 	go io.Copy(io.Discard, process)
 	paste := bytes.Repeat([]byte("echo pasted > pasted\n"), 256<<10/21)
 	written := make(chan error, 1)
 	go func() { _, err := process.Write(paste); written <- err }()
-	time.Sleep(300 * time.Millisecond)
-	start := time.Now()
+	waitForFile(t, filepath.Join(root, "ready"))
+	// The write holds writeMu from its start; an interrupt before that would find nothing to cut, and the paste
+	// is far larger than the tty queue, so it cannot finish while sleep does not read.
+	waitFor(t, "the paste write to start", func() bool {
+		if process.writeMu.TryLock() {
+			process.writeMu.Unlock()
+			return false
+		}
+		return true
+	})
 	handled, err := process.Interrupt(0x03, nil)
 	if err != nil || !handled {
 		t.Fatalf("interrupt: handled=%v err=%v", handled, err)
@@ -283,13 +310,14 @@ func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 		if !errors.Is(err, ErrInterrupted) {
 			t.Fatalf("paste write: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("paste write still blocked after the interrupt")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// sleep runs 30 s: stopping inside this bound means the interrupt reached it.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	result, err := process.Wait(ctx)
-	if err != nil || time.Since(start) > 2*time.Second {
+	if err != nil {
 		t.Fatalf("shell did not stop after interrupt: %+v %v", result, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "ran")); err != nil {
@@ -302,9 +330,9 @@ func TestInterruptOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 
 // In raw mode the interrupt key is ordinary data for the program; Interrupt must leave it alone.
 func TestInterruptLeavesRawModeInputAlone(t *testing.T) {
-	process, _ := startShell(t, `stty raw -isig; sleep 30`)
+	process, root := startShell(t, `stty raw -isig; touch ready; sleep 30`)
 	defer process.Terminate(context.Background(), time.Second)
-	time.Sleep(300 * time.Millisecond)
+	waitForFile(t, filepath.Join(root, "ready"))
 	if handled, err := process.Interrupt(0x03, nil); handled || err != nil {
 		t.Fatalf("raw mode interrupt: handled=%v err=%v", handled, err)
 	}
