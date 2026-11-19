@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
 /**
- * Public traffic through Paperboat's edges: what is included, what is used of it and, past it, the reduced speed and when full
+ * Traffic through Paperboat's edges and relays (one pool): what is included, what is used of it and, past it, the reduced speed and when full
  * speed returns. Never an error: nothing is cut off. Adding bandwidth or changing plan lifts it at once. A workspace on its own
  * edges is told it has no limits.
  */
@@ -31,14 +31,14 @@ export function FairUse() {
       data-fair-use
       data-throttled={fair.throttled}
       data-own-edges={fair.ownEdges}
-      aria-label="Public traffic"
+      aria-label="Traffic"
       className="flex flex-col gap-3 rounded-lg border border-divider bg-surface p-4"
     >
       {fair.ownEdges ? (
         <>
           <span className="text-2xl font-medium tracking-tight">Unlimited (your own edges)</span>
           <p className="text-sm text-muted-foreground">
-            Public traffic through your own edges and relays is never counted or limited by Paperboat. Previews and tunnels on them have no plan
+            Traffic through your own edges and relays is never counted or limited by Paperboat. Previews and tunnels on them have no plan
             limits.
           </p>
         </>
@@ -54,7 +54,7 @@ export function FairUse() {
           </div>
           <div
             role="meter"
-            aria-label="Included public traffic used"
+            aria-label="Included traffic used"
             aria-valuemin={0}
             aria-valuemax={fair.amount}
             aria-valuenow={Math.min(fair.used, fair.amount)}
@@ -63,16 +63,15 @@ export function FairUse() {
             <div className={cn(fair.throttled ? "bg-muted-foreground" : "bg-primary")} style={{ width: `${fair.share * 100}%` }} />
           </div>
           <p className="text-sm text-muted-foreground">
-            {formatBytes(fair.amount)} a month of public traffic included
+            {formatBytes(fair.amount)} a month of traffic included
             {fair.seats ? ` (${formatBytes(fair.seats.perSeat)} × ${fair.seats.count} seat${fair.seats.count === 1 ? "" : "s"}, shared by the team)` : ""}
-            {until && !fair.throttled ? `, resets ${until}` : ""}. Previews, tunnels and
+            {until && !fair.throttled ? `, resets ${until}` : ""}. Edges and relays share it: previews, tunnels, relayed connections and
             console terminals count. After that, speed is
             reduced to {formatSpeed(fair.mbit)} until your next billing date. Never cut off, never billed extra.
           </p>
           <p className="text-xs text-muted-foreground">
-            Relays never count against this and are never cut off: {formatSpeed(fair.relay.mbit)} for the first {formatBytes(fair.relay.included)}{" "}
-            a month{fair.seats ? " (also per seat, shared by the team)" : ""}, then {formatSpeed(fair.relay.slowMbit)}. Direct connections are not counted. Run your own edge or relay (free, open source): no
-            limits.
+            Until then relayed connections run at up to {formatSpeed(fair.relay.mbit)} and edges at full speed. Direct connections are not
+            counted. Run your own edge or relay (free, open source): no limits.
           </p>
         </>
       )}

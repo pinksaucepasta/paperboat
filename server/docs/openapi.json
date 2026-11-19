@@ -9892,9 +9892,7 @@
           "throttled",
           "throttle_lifted",
           "throttle_mbit",
-          "relay_mbit",
-          "relay_included_bytes",
-          "relay_slow_mbit"
+          "relay_mbit"
         ],
         "properties": {
           "limits": {
@@ -10190,7 +10188,7 @@
           },
           "throttled": {
             "type": "boolean",
-            "description": "The fair-use amount is used up: edge traffic runs at the throttled rate until allowance_period_end. Nothing is stopped."
+            "description": "The fair-use amount (edge and relay traffic together) is used up: edge and relay traffic run at the throttled rate until allowance_period_end. Nothing is stopped."
           },
           "throttle_lifted": {
             "type": "boolean",
@@ -10198,7 +10196,7 @@
           },
           "throttle_mbit": {
             "type": "number",
-            "description": "The speed in Mbit/s a throttled workspace's edge traffic runs at."
+            "description": "The speed in Mbit/s a throttled workspace's edge and relay traffic runs at."
           },
           "allowance_seats": {
             "type": "integer",
@@ -10211,16 +10209,7 @@
           },
           "relay_mbit": {
             "type": "number",
-            "description": "The speed in Mbit/s of one account on a Paperboat relay. Relays are never cut off and do not count against the edge allowance."
-          },
-          "relay_included_bytes": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Relayed bytes an account carries a month at relay_mbit before relay_slow_mbit applies (the plan's tier)."
-          },
-          "relay_slow_mbit": {
-            "type": "number",
-            "description": "The speed in Mbit/s of an account on a Paperboat relay after relay_included_bytes in the month."
+            "description": "The speed in Mbit/s of one account on a Paperboat relay until the workspace pool (edge and relay traffic together) is used up; after that relays run at throttle_mbit like edges. Relays are never cut off."
           },
           "seats_granted": {
             "type": "integer",

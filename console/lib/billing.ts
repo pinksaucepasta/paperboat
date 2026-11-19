@@ -28,14 +28,14 @@ export const formatAllowance = (billing: BillingWorkspace) =>
 export const formatSpeed = (mbit: number) => (mbit < 1 ? `${Math.round(mbit * 1000)} kbit/s` : `${mbit} Mbit/s`)
 
 /**
- * Public traffic through Paperboat's edges (previews, tunnels, browser terminals) is included up to an amount a month; past
- * it speed is reduced to `mbit` Mbit/s until the period ends, never cut off or billed extra. The amount is the plan's plus
+ * Traffic through Paperboat's edges and relays (previews, tunnels, browser terminals, relayed connections) is ONE pool, included up
+ * to an amount a month; past it speed (edges and relays alike) is reduced to `mbit` Mbit/s until the period ends, never cut off or billed extra. The amount is the plan's plus
  * what support granted and what was topped up. `ownEdges`: the workspace runs its own edges, so nothing is counted or limited.
  * Undefined when the workspace has no included amount.
  */
 export function fairUse(billing: BillingWorkspace) {
   const ownEdges = Boolean(billing.limits?.publications.self_hosted)
-  const relay = { mbit: billing.relay_mbit, included: billing.relay_included_bytes, slowMbit: billing.relay_slow_mbit }
+  const relay = { mbit: billing.relay_mbit }
   // A paid team's amounts are per seat, pooled in the team: "100 GB × 4 seats".
   const seats = billing.allowance_seats ? { count: billing.allowance_seats, perSeat: billing.allowance_per_seat_bytes ?? 0 } : undefined
   if (ownEdges) return { ownEdges, relay, seats, amount: 0, used: billing.usage_bytes, share: 0, throttled: false, mbit: 0, ends: undefined }

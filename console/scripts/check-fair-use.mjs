@@ -20,7 +20,7 @@ const billing = () => {
     id: "personal:usr_1", state: "active", seats_bought: 1, members: 1, can_manage: true, cancel_at_period_end: false, seats_used: 1,
     usage_bytes: used, allowance_bytes: state === "team" ? 400 * GB : 100 * GB,
     ...(state === "team" ? { allowance_seats: 4, allowance_per_seat_bytes: 100 * GB } : {}), allowance_period_start: new Date(Date.now() - 21 * 86400_000).toISOString(), allowance_period_end: ends,
-    relay_mbit: 10, relay_included_bytes: state === "team" ? 400 * GB : 100 * GB, relay_slow_mbit: 1,
+    relay_mbit: 10,
     topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], granted: false, throttled: state === "throttled", throttle_lifted: false, throttle_mbit: 1,
     limits: state === "own"
       ? { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: null, self_hosted: true }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: null, self_hosted: true } }
@@ -75,14 +75,14 @@ try {
       const text0 = text
       check(`${name}/${s}: no asterisks`, !/\*/.test(text0))
       if (s === "team") {
-        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of public traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB included/.test(text) && /first 400 GB a month \(also per seat, shared by the team\)/.test(text), text.slice(0, 160))
+        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB included/.test(text), text.slice(0, 160))
       } else if (s === "own") {
         check(`${name}/${s}: it says Unlimited (your own edges) and that nothing is counted`, /Unlimited \(your own edges\)/.test(text) && /never counted or limited by Paperboat/.test(text), text.slice(0, 90))
         check(`${name}/${s}: no upsell, no banner`, (await panel.$$eval("a", (a) => a.length)) === 0 && !(await page.$("[data-quota-banner]")))
       } else {
         const used = { under: "40", nearly: "85", throttled: "104" }[s]
         check(`${name}/${s}: it shows what is used of the included amount`, new RegExp(`${used}\\.?\\d* GB of 100 GB included`).test(text), text.slice(0, 90))
-        check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of public traffic included/.test(text) && /Previews, tunnels and console terminals count/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Relays never count against this and are never cut off: 10 Mbit\/s for the first 100 GB a month, then 1 Mbit\/s\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
+        check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of traffic included/.test(text) && /Edges and relays share it: previews, tunnels, relayed connections and console terminals count/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Until then relayed connections run at up to 10 Mbit\/s and edges at full speed\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
         if (s === "throttled") {
           check(`${name}/${s}: it says reduced to 1 Mbit/s until the reset date`, /Reduced to 1 Mbit\/s until/.test(text), text.slice(0, 90))
           const links = (await panel.$$eval("a", (a) => a.map((e) => `${e.textContent.trim()}:${e.getAttribute("href")}`))).join(" ")
