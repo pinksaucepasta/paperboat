@@ -354,38 +354,58 @@ class WindowsChecksRunner(unittest.TestCase):
             device.cut_network(5, addresses=['203.0.113.7'], inbound=False)
         self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])  # no timer: the rule goes again
 
-    def test_a_cut_that_keeps_the_processes_routes_the_flows_away_and_lifts_the_routes(self):
-        calls = []
+    def test_the_peer_udp_cut_blocks_udp_both_ways_without_a_program_and_lifts_everything(self):
+        calls, timers = [], []
         device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
-        device.ps = lambda step, script, **kw: calls.append((kw.get('action'), kw.get('addr'), kw.get('keep'))) or (0, '')
-        timers = []
+        device.ps = lambda step, script, **kw: calls.append((script, kw)) or (0, '')
         device.start = lambda argv, directory: timers.append(winhost.base64.b64decode(argv[-1]).decode('utf-16-le')) or 1
         device.temp_dir = lambda prefix: __import__('contextlib').nullcontext('dir')
-        with self.assertRaises(ValueError):  # a route to every address would cut the controller's SSH too
-            device.cut_network(30, keep_processes=True)
-        cut = device.cut_network(30, addresses=['203.0.113.7', '2001:db8::1'], keep_processes=True)
-        self.assertEqual(('add', ['203.0.113.7', '2001:db8::1'], True), calls[0])
-        self.assertIn("if($req.keep){foreach", winhost.NET_CUT)  # the add branch routes and leaves before the Stop-Process step
-        self.assertLess(winhost.NET_CUT.index('route.exe add'), winhost.NET_CUT.index('Stop-Process -Force'))
-        self.assertIn('route.exe delete', winhost.NET_CUT)  # and the remove branch lifts the routes
-        self.assertIn("route.exe delete '203.0.113.7'", timers[0])  # the device's own timer lifts them if this controller is gone
-        self.assertNotIn('2001:db8', timers[0].split('Start-Sleep', 1)[1].split('route.exe', 1)[1])  # IPv4 only
-        cut.release()
-        self.assertEqual(('remove', ['203.0.113.7', '2001:db8::1'], True), calls[-1])
+        with self.assertRaises(ValueError):  # no addresses would be a cut of nothing
+            device.cut_peer_udp(30, [])
+        cut = device.cut_peer_udp(30, ['203.0.113.7', '2001:db8::1'])
+        script, request = calls[0]
+        self.assertEqual((winhost.PEER_UDP_CUT, 'add', ['203.0.113.7', '2001:db8::1']), (script, request['action'], request['addr']))
+        rule = winhost.PEER_UDP_CUT
+        self.assertIn("foreach($d in 'Outbound','Inbound')", rule)  # both directions
+        self.assertIn('-Action Block -Protocol UDP -RemoteAddress @($req.addr)', rule)
+        self.assertNotIn('Program', rule)  # whichever pb.exe sends, wherever it runs from
+        self.assertNotIn('Stop-Process', rule)  # nothing is restarted
+        self.assertLess(rule.index('New-NetFirewallRule'), rule.index('route.exe add'))  # the route ends flows the rule did not judge
+        self.assertIn('route.exe delete', rule)
+        self.assertLess(rule.index("Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*'"), rule.index('New-NetFirewallRule'))  # stale rules go first
+        timer = timers[0].split('Start-Sleep', 1)[1]  # the device's own timer lifts rule and routes if this controller is gone
+        self.assertIn("Remove-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-", timer)
+        self.assertIn("route.exe delete '203.0.113.7'", timer)
+        self.assertNotIn('2001:db8', timer.split('route.exe', 1)[1])  # IPv4 only
+        cut.release(), cut.release()
+        removes = [c for c in calls if c[1].get('action') == 'remove']
+        self.assertEqual(1, len(removes))  # released once
+        self.assertEqual((winhost.PEER_UDP_CUT, cut.name, ['203.0.113.7', '2001:db8::1']), (removes[0][0], removes[0][1]['name'], removes[0][1]['addr']))
 
     def test_a_cut_whose_add_fails_lifts_what_it_added(self):
+        for cut in ('cut_network', 'cut_peer_udp'):
+            calls = []
+            device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+
+            def ps(step, script, **kw):
+                calls.append(kw.get('action'))
+                if kw.get('action') == 'add':
+                    raise winhost.DeviceError('route to 203.0.113.7 failed')
+                return 0, ''
+            device.ps = ps
+            with self.assertRaises(winhost.DeviceError):
+                getattr(device, cut)(30, addresses=['203.0.113.7']) if cut == 'cut_network' else device.cut_peer_udp(30, ['203.0.113.7'])
+            self.assertEqual(['add', 'remove'], calls)  # the firewall rule made before the route failed does not stay
+
+    def test_a_peer_udp_cut_whose_timer_fails_is_lifted(self):
         calls = []
         device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
-
-        def ps(step, script, **kw):
-            calls.append(kw.get('action'))
-            if kw.get('action') == 'add':
-                raise winhost.DeviceError('route to 203.0.113.7 failed')
-            return 0, ''
-        device.ps = ps
+        device.ps = lambda step, script, **kw: calls.append(kw.get('action')) or (0, '')
+        device.start = lambda argv, directory: (_ for _ in ()).throw(winhost.DeviceError('no timer'))
+        device.temp_dir = lambda prefix: __import__('contextlib').nullcontext('dir')
         with self.assertRaises(winhost.DeviceError):
-            device.cut_network(30, addresses=['203.0.113.7'], keep_processes=True)
-        self.assertEqual(['add', 'remove'], calls)  # the firewall rule made before the route failed does not stay
+            device.cut_peer_udp(30, ['203.0.113.7'])
+        self.assertEqual(['add', 'remove'], calls)
 
     def test_udp_block_drops_every_port_except_the_allowed_ones(self):
         calls = []

@@ -141,8 +141,7 @@ UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $
 # Blocks pb.exe's own traffic (every pb.exe under Program Files\\Paperboat: the daemon, the host runtime, the client) to
 # $req.addr and, with $req.inbound, from them; the program scope keeps the controller's SSH (sshd, the runner's tunnel
 # ssh.exe) alive, which a machine-wide cut would sever. The firewall drops silently: no reset, no link-down.
-NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue\n"
-           "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe delete $a mask 255.255.255.255 0.0.0.0 if 1 *>$null}}};exit 0}\n"
+NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
            "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
            # Rules a killed or failed earlier cut left behind (6 on 2026-11-19) go first: a cut is made by one session at a time.
            "Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*' -ErrorAction SilentlyContinue|Remove-NetFirewallRule\n"
@@ -155,15 +154,23 @@ NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $re
            # Windows Firewall judges a flow once, when its socket first uses it: a pb.exe that already talks to the addresses keeps
            # sending and receiving through a new Block rule (2026-11-17: 193 of 442 packets per 30 s still left the machine). Stopping
            # the pb.exe that own such sockets (their services restart them) makes every flow new, so the rule decides it.
-           # keep: the cut must not replace any pb.exe, so the flows that already exist are dropped by a route instead: each IPv4 address
-           # routes to the loopback interface, which discards what is not its own, silently like the Unix checks' DROP. Needs explicit addresses.
-           "if($req.keep){foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe add $a mask 255.255.255.255 0.0.0.0 if 1 metric 1 *>$null;if($LASTEXITCODE){throw \"route to $a failed\"}}};exit 0}\n"
            "$k=@{}\n"
            "if(-not $req.ports -or $req.protos -contains 'UDP'){Get-NetUDPEndpoint|ForEach-Object{$k[[int]$_.OwningProcess]=1}}\n"
            "if(-not $req.ports -or $req.protos -contains 'TCP'){Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue|"
            "Where-Object{$_.RemoteAddress -notin '127.0.0.1','::1' -and (-not $req.ports -or $req.ports -contains $_.RemotePort)}|"
            "ForEach-Object{$k[[int]$_.OwningProcess]=1}}\n"
            "Get-Process pb -ErrorAction SilentlyContinue|Where-Object{$k.ContainsKey([int]$_.Id) -and $p -contains $_.Path}|Stop-Process -Force")
+# The direct-path cut (direct_path_cut.py): drops UDP between this device and the peer's $req.addr, both directions, for every program, and
+# restarts nothing. NET_CUT's rules were scoped to the pb.exe files under Program Files\\Paperboat and judged by the firewall once per flow,
+# so a pb.exe that already talked to the peer kept its direct path and the check never saw it drop (2026-11-19). Here the rule does not
+# name a program (any pb.exe, wherever it runs from, is cut), covers UDP only (the controller's SSH is TCP) and the IPv4 addresses are also
+# routed to the loopback interface, which drops the packets of a flow the firewall already admitted.
+PEER_UDP_CUT = ("if($req.action -eq 'remove'){Get-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue|Remove-NetFirewallRule -ErrorAction SilentlyContinue\n"
+                "foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe delete $a mask 255.255.255.255 0.0.0.0 if 1 *>$null}};exit 0}\n"
+                "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
+                "Get-NetFirewallRule -DisplayName 'PaperboatSmoke-cut-*' -ErrorAction SilentlyContinue|Remove-NetFirewallRule\n"
+                "foreach($d in 'Outbound','Inbound'){[void](New-NetFirewallRule -DisplayName $req.name -Direction $d -Action Block -Protocol UDP -RemoteAddress @($req.addr))}\n"
+                "foreach($a in @($req.addr)){if($a -notmatch ':'){& route.exe add $a mask 255.255.255.255 0.0.0.0 if 1 metric 1 *>$null;if($LASTEXITCODE){throw \"route to $a failed\"}}}")
 # Every non-loopback IPv4 and global/link-local/unique-local IPv6 address.
 # SMOKE_PEER_CUT: a command that cuts the PEER instead of the Windows device (`<cmd> add all`, `<cmd> add server IP...`,
 # `<cmd> add addresses IP...`, `<cmd> remove`; container_cut.sh HOST CONTAINER). NET_CUT has to stop pb.exe for its rule
@@ -640,32 +647,36 @@ class WindowsDevice:
             finally:
                 self.stop(pid)
 
-    def cut_network(self, seconds, addresses=None, inbound=True, ports=None, protocols=('TCP',), keep_processes=False):
+    def cut_network(self, seconds, addresses=None, inbound=True, ports=None, protocols=('TCP',)):
         """Drop pb.exe's traffic to `addresses` (default: everything but loopback), only those `ports` (of `protocols`, TCP unless told) when given, until release(), or after `seconds`
-        when a detached timer on the device removes the rule whatever happens to this controller.
+        when a detached timer on the device removes the rule whatever happens to this controller."""
+        return self._cut(seconds, NET_CUT, addresses, '', dict(addr=list(addresses or NON_LOOPBACK), inbound=inbound, ports=ports, protos=list(protocols)))
 
-        keep_processes (explicit `addresses` only): no pb.exe is stopped; a route to each address ends the flows that already exist, so the
-        cut measures a path cut, not a restart (direct_path_cut.py)."""
-        if keep_processes and not addresses:
-            raise ValueError('keep_processes needs explicit addresses')
+    def cut_peer_udp(self, seconds, addresses):
+        """Drop UDP between the device and `addresses` (the peer's: PEER_UDP_CUT) without restarting any pb.exe; same release rules as cut_network."""
+        if not addresses:
+            raise ValueError('cut_peer_udp needs the peer addresses')
+        timer = ''.join('; & route.exe delete %s mask 255.255.255.255 0.0.0.0 if 1' % ps_quote(a) for a in addresses if ':' not in a)
+        return self._cut(seconds, PEER_UDP_CUT, addresses, timer, dict(addr=list(addresses)))
+
+    def _cut(self, seconds, script, addresses, timer_extra, request):
         name = 'PaperboatSmoke-cut-' + uuid.uuid4().hex[:12]
+        undo = dict(action='remove', name=name, addr=list(addresses or []))
         try:
-            self.ps('cut the network', NET_CUT, action='add', name=name, addr=list(addresses or NON_LOOPBACK), inbound=inbound, ports=ports, protos=list(protocols), keep=keep_processes)
-        except BaseException:  # a route that failed to add (2026-11-19) left the rules behind
-            self.ps('restore the network', NET_CUT, action='remove', name=name, addr=list(addresses or []), keep=keep_processes)
+            self.ps('cut the network', script, action='add', name=name, **request)
+        except BaseException:  # a rule made before a later step failed (2026-11-19: the route) must not stay
+            self.ps('restore the network', script, **undo)
             raise
         scratch = self.temp_dir('pb-cut')
         try:
-            timer = "Start-Sleep %d; Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue" % (seconds, name)
-            if keep_processes:
-                timer += ''.join('; & route.exe delete %s mask 255.255.255.255 0.0.0.0 if 1' % ps_quote(a) for a in addresses if ':' not in a)
+            timer = "Start-Sleep %d; Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue" % (seconds, name) + timer_extra
             self.start(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
                         _b64(timer.encode('utf-16-le'))], scratch.__enter__())
         except BaseException:
-            self.ps('restore the network', NET_CUT, action='remove', name=name, addr=list(addresses or []), keep=keep_processes)
+            self.ps('restore the network', script, **undo)
             scratch.__exit__(None, None, None)
             raise
-        return NetCut(self, name, scratch, addresses, keep_processes)
+        return NetCut(self, script, undo, scratch)
 
     @contextlib.contextmanager
     def udp_blocked(self, allow=(53,)):
@@ -730,17 +741,18 @@ class WindowsDevice:
 
 
 class NetCut:
-    """A firewall cut made by WindowsDevice.cut_network; release() lifts it (also when called twice)."""
+    """A firewall cut made by WindowsDevice.cut_network or cut_peer_udp; release() lifts it (also when called twice)."""
 
-    def __init__(self, device, name, scratch, addresses=None, keep=False):
-        self.device, self.name, self.scratch, self.addresses, self.keep = device, name, scratch, list(addresses or []), keep
+    def __init__(self, device, script, undo, scratch):
+        self.device, self.script, self.undo, self.scratch = device, script, undo, scratch
+        self.name = undo['name']
 
     def release(self):
         if self.scratch is None:
             return
         scratch, self.scratch = self.scratch, None
         try:
-            self.device.ps('restore the network', NET_CUT, action='remove', name=self.name, addr=self.addresses, keep=self.keep)
+            self.device.ps('restore the network', self.script, **self.undo)
         finally:
             scratch.__exit__(None, None, None)  # also removes the timer's directory; the timer is idempotent
 

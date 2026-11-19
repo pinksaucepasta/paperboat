@@ -4,7 +4,7 @@
 The Windows device (SMOKE_WINDOWS_SSH, PB_SMOKE_WINDOWS_PB, VICTUS_PASS for a password login) runs one long
 `pb exec PEER -- sh -c 'while true; do echo; sleep 0.5; done'` and timestamps every line as it arrives on the device. The
 direct path to PEER (a Unix machine of the account on the same LAN) is then dropped with a firewall block of pb.exe's
-traffic to --peer-address (winhost.cut_network: pb.exe only, so the SSH that drives the device keeps working, with a
+UDP to --peer-address (winhost.cut_peer_udp: UDP only, so the SSH that drives the device keeps working, with a
 timer on the device that lifts the rule whatever happens here; no pb.exe is restarted, a route ends the flows that exist). The stream must go on within --budget seconds (the
 relay path takes over); the longest gap between lines is the result. Prints one JSON receipt.
 """
@@ -25,7 +25,8 @@ STREAM = ("$i=New-Object Diagnostics.ProcessStartInfo;$i.FileName=$req.pb;$i.Arg
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('peer', help='machine name of the Unix peer')
-    parser.add_argument('--peer-address', required=True, help='the peer host address the direct path runs to (blocked)')
+    parser.add_argument('--peer-address', action='append', required=True,
+                        help='an address the direct path to the peer can run to (blocked; repeat for each: LAN, public, IPv6, a second NIC)')
     parser.add_argument('--device-address', action='append', default=[],
                         help='with SMOKE_PEER_CUT: an address the peer sees this device at (dropped on the peer; repeat)')
     parser.add_argument('--budget', type=float, default=15.0, help='seconds the stream may stall after the cut')
@@ -69,7 +70,7 @@ def main():
                     time.sleep(args.cut_seconds)
                 step('the cut held (capture on the peer)', capture[0].startswith('capture') and ' sent=0 ' in capture[0], capture[0])
             else:
-                cut = device.cut_network(args.cut_seconds + 60, addresses=[args.peer_address], keep_processes=True)
+                cut = device.cut_peer_udp(args.cut_seconds + 60, args.peer_address)
                 time.sleep(args.cut_seconds)
                 status = pb.run_remote(['status'], timeout=60).stdout
                 block = status.split(args.peer, 1)[-1][:400] if args.peer in status else ''
