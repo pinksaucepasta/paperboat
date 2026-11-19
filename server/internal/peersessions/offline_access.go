@@ -72,13 +72,17 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
   GROUP BY c.id,c.user_id,c.last_used_at) ranked
  -- Every account's newest endpoint first, then every account's second: a fair share of the bound.
  ORDER BY share,last_used_at DESC NULLS LAST,id LIMIT $3
+), bound AS MATERIALIZED (
+ -- The binding check of an (account, team) pair does not depend on the capability: once, not once per capability.
+ SELECT u.user_id,ht.team_id FROM (SELECT DISTINCT user_id FROM endpoints) u CROSS JOIN host h CROSS JOIN host_teams ht
+ WHERE paperboat.team_machine_bound_for(u.user_id,ht.team_id,h.id)
 ), allowed AS MATERIALIZED (
  -- A capability is decided per account, not per endpoint: the policy functions run once per (account, capability)
  -- instead of once per CLI endpoint (a team-shared host took 1.5 s of CPU per document with 66 endpoints).
  SELECT u.user_id,cap.network FROM (SELECT DISTINCT user_id FROM endpoints) u CROSS JOIN host h
  CROSS JOIN unnest($4::text[],$5::text[]) AS cap(policy,network)
  WHERE (u.user_id=h.user_id AND paperboat.machine_capability_allowed(u.user_id,h.id,cap.policy))
-  OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM host_teams ht WHERE paperboat.team_machine_capability_allowed(u.user_id,ht.team_id,h.id,cap.policy)))
+  OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM bound b WHERE b.user_id=u.user_id AND NOT isempty(paperboat.workspace_policy_ports(u.user_id,b.team_id,h.id,cap.policy))))
 )
 SELECT e.id,e.user_id,array_to_json(array_agg(a.network ORDER BY a.network)),e.generation
 FROM endpoints e JOIN allowed a ON a.user_id=e.user_id
@@ -125,8 +129,11 @@ JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
 JOIN paperboat.control_environments environment ON environment.id=m.environment_id AND environment.desired_state='active' AND environment.revoked_at IS NULL
 JOIN paperboat.peer_network_identities n ON n.machine_id=m.id AND n.user_id=m.user_id AND n.role='machine' AND n.revoked_at IS NULL
 LEFT JOIN paperboat.workspace_policies policy ON policy.team_id=member.team_id
+-- The binding check does not depend on the capability: once per (member, host), not once per capability (OFFSET 0
+-- keeps the planner from flattening it into the capability rows).
+CROSS JOIN LATERAL (SELECT paperboat.team_machine_bound_for(member.account_id,member.team_id,m.id) AS bound OFFSET 0) gate
 CROSS JOIN unnest($2::text[],$3::text[]) AS cap(policy,network)
-CROSS JOIN LATERAL (SELECT paperboat.team_machine_capability_allowed(member.account_id,member.team_id,m.id,cap.policy) AS allowed) decision
+CROSS JOIN LATERAL (SELECT gate.bound AND NOT isempty(paperboat.workspace_policy_ports(member.account_id,member.team_id,m.id,cap.policy)) AS allowed) decision
 WHERE member.account_id=$1 AND member.active AND NOT cap.network=ANY($4::text[])
 GROUP BY n.endpoint_id,m.user_id HAVING bool_or(allowed) ORDER BY n.endpoint_id LIMIT $5`, self.AccountID, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
 	if err != nil {
