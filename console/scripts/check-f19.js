@@ -2,7 +2,8 @@
 // Paste into a signed-in tab of the console whose account owns the team in window.__team (default
 // paperboat-smoke-paid). It switches the workspace cookie to the team (and back to what it was),
 // reads Team and Activity, opens menus without choosing anything, and downloads one audit
-// export (which the server records as team.activity_exported). Changes nothing else. Prints steps.
+// export (which the server records as team.activity_exported; the audit log is append-only, so the check
+// counts those events relative to its own start and expects exactly one more). Changes nothing else. Prints steps.
 ;(async () => {
   const steps = []
   const pass = (step, ok, detail = "") => steps.push({ step, ok, detail })
@@ -89,7 +90,25 @@
       return realFetch(input, init)
     }
     try {
-      await open("/activity", () => /Any time/.test(text()))
+      // The filters show at once, but the page resets them while the workspace and its role load: wait for Export (owner only)
+      // and for the first list, then choose.
+      await open(
+        "/activity",
+        () =>
+          /Any time/.test(text()) &&
+          [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Export") &&
+          !main().querySelector('[data-slot="skeleton"]'),
+      )
+      // The page remounts (and resets its filters) a second or two after it first shows, while the workspace
+      // loads: choose only once the same filter button has stayed in the DOM for 4 s.
+      const anchor = () => [...main().querySelectorAll("button")].find((b) => b.textContent.trim() === "Any time")
+      let steady = anchor()
+      let since = Date.now()
+      await until(() => {
+        const now = anchor()
+        if (now !== steady) [steady, since] = [now, Date.now()]
+        return steady && Date.now() - since > 4000
+      }, 30000)
       const choose = async (current, wanted) => {
         const trigger = [...main().querySelectorAll("button")].find((b) => b.textContent.trim() === current)
         if (!trigger) return false
@@ -101,8 +120,8 @@
         )
         if (!item) return false
         click(item)
-        await sleep(1500)
-        return true
+        // The trigger shows the choice once the page took it.
+        return Boolean(await until(() => [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === wanted), 5000))
       }
       pass("Last 7 days can be chosen", await choose("Any time", "Last 7 days"))
       pass("the list asks the server for the period", seen.some((url) => /[?&]since=/.test(url)), seen.at(-1) ?? "")
@@ -111,14 +130,27 @@
       const exportButton = [...main().querySelectorAll("button")].find((b) => b.textContent.trim() === "Export")
       pass("Export is offered to the team owner", Boolean(exportButton))
       if (exportButton) {
-        exportButton.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }))
-        click(exportButton)
-        const csv = await until(() => [...document.querySelectorAll("a[download]")].find((a) => /format=csv/.test(a.href)), 5000)
+        // Ids, not a count: the list is capped at one page, so a count stops growing on a busy team.
+        const exported = async () =>
+          (await get(`activity?workspace=${teamId}&action=team.activity_exported&limit=200`)).data?.items?.map((e) => e.id) ?? []
+        const exportedBefore = await exported()
+        // The menu opens on a click; open it again if it did not (a click that lands while the page re-renders is lost).
+        let csv = null
+        for (let attempt = 0; attempt < 3 && !csv; attempt++) {
+          if (!document.querySelector("[role=menu]")) {
+            exportButton.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }))
+            click(exportButton)
+          }
+          csv = await until(() => [...document.querySelectorAll("a[download]")].find((a) => /format=csv/.test(a.href)), 4000)
+        }
         pass("Export offers CSV with the same filters", Boolean(csv) && /result=denied/.test(csv?.href ?? "") && /since=/.test(csv?.href ?? ""))
         if (csv) {
           const response = await realFetch(csv.href)
           const head = (await response.text()).split("\n")[0]
           pass("the CSV downloads with the documented columns", response.ok && head.startsWith("id,occurred_at,workspace,action,result"), `${response.status} ${head.slice(0, 60)}`)
+          const added = async () => (await exported()).filter((id) => !exportedBefore.includes(id))
+          const recorded = await until(async () => (await added()).length >= 1, 8000)
+          pass("the export is recorded once as team.activity_exported", Boolean(recorded) && (await added()).length === 1, `${(await added()).length} new`)
         }
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
       }

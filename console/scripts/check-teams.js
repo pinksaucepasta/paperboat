@@ -83,9 +83,9 @@
       if (!row) return steps
       row.click()
 
-      const header = await until(() => (main()?.innerText.includes("Danger zone") ? main().innerText : null))
-      pass("team page opens", Boolean(header))
-      if (!header) return steps
+      const opened = await until(() => main()?.innerText.includes("Danger zone"))
+      pass("team page opens", Boolean(opened))
+      if (!opened) return steps
       const team = await get(`teams/${encodeURIComponent(teamId)}`)
       team.members = (await get(`teams/${encodeURIComponent(teamId)}/members?limit=200`)).items
       Object.assign(saved, {
@@ -95,7 +95,17 @@
         privateAccess: Boolean(team.allow_private_access),
       })
       const active = team.members.filter((member) => member.active)
-      pass("member count matches the server", header.includes(`${active.length} members`), `${active.length} active`)
+      const billing = await get(`billing/workspaces/teams/${encodeURIComponent(teamId)}`)
+      // The page counts "1 member" / "2 members"; the seat line arrives with the billing query, after the
+      // rest of the page. Read the header once it shows what the server says, not when "Danger zone" appears.
+      const count = `${active.length} ${active.length === 1 ? "member" : "members"}`
+      const seatLine = billing?.seats_bought ? `${billing.seats_used} of ${billing.seats_bought} seats used` : null
+      const header =
+        (await until(() => {
+          const text = main().innerText
+          return text.includes(count) && (!seatLine || text.includes(seatLine)) ? text : null
+        })) ?? main().innerText
+      pass("member count matches the server", header.includes(count), `${count} expected`)
       const names = active.map((member) => member.email)
       pass(
         "every active member listed with an email",
@@ -103,9 +113,9 @@
       )
       const owners = active.filter((member) => member.role === "owner")
       pass("owner shown as You with the Owner role", owners.length === 1 && /You[\s\S]*Owner/.test(header))
-      const billing = await get(`billing/workspaces/${encodeURIComponent(teamId)}`).catch(() => null)
+      pass("the team's billing answers", Boolean(billing?.seats_bought), `seats_bought=${billing?.seats_bought}`)
       const seats = header.match(/(\d+) of (\d+) seats used/)
-      pass("seats used and bought shown", Boolean(seats), seats?.[0] ?? "")
+      pass("seats used and bought shown", Boolean(seats) === Boolean(seatLine), seats?.[0] ?? "no seat line")
       if (billing && seats) {
         pass(
           "seats match billing",
@@ -238,11 +248,14 @@
         `${requests.length} requests`,
       )
 
-      // Member menu opens (no action taken).
+      // Member menu opens (no action taken). The owner has no actions on themselves, so a team of one
+      // owner has no member menu; the menu is exercised when another member exists.
       const actions = [...main().querySelectorAll("button")].find((b) =>
         b.getAttribute("aria-label")?.startsWith("Actions for"),
       )
-      if (actions) {
+      if (active.length === 1) {
+        pass("a team of one owner has no member menu", !actions)
+      } else if (actions) {
         actions.click()
         const menu = await until(() => document.querySelector("[role=menu]"))
         pass(

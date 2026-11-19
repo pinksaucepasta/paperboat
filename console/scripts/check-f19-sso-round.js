@@ -1,7 +1,11 @@
-// Browser check for F19-13's Require SSO round on a team with SSO set up (default lanes-sso), as an
-// owner/admin: exempts the signed-in account, requires SSO (the review lists who loses access),
-// checks Activity for the change, the exemption and the bypass, then turns SSO off and removes the
-// exemption again. Set window.__team and window.__me (the signed-in account id). Prints the steps.
+// Browser check for F19-13's Require SSO round as an owner/admin (team in window.__team, default lanes-sso;
+// window.__me is the signed-in account id). It reads the team's identity first and runs the path that team
+// can take: exempts the signed-in account and removes the exemption again (always), and
+//  - with an active identity-provider connection: requires SSO (the review lists who loses access), checks
+//    Activity for the change, the exemption and the bypass, then turns SSO off again;
+//  - without one (a throwaway team: a connection exists only after the WorkOS Admin Portal, with a real
+//    identity provider): asserts that Require SSO is disabled and the server refuses it (sso_not_ready).
+// Prints the steps.
 ;(async () => {
   const steps = []
   const pass = (s, o, d = "") => steps.push({ step: s, ok: o, detail: d })
@@ -20,6 +24,7 @@
   const team = window.__team ?? "lanes-sso"
   delete window.__me
   delete window.__team
+  const mine = async () => (await (await fetch("/api/v1/me")).json()).data
   const identity = async () => (await (await fetch(`/api/v1/teams/${team}/identity`)).json()).data
   const main = () => document.querySelector("main main") ?? document.querySelector("main")
   const text = () => main()?.innerText.replace(/\s+/g, " ") ?? ""
@@ -30,7 +35,10 @@
   }
   document.cookie = `pb-workspace=${team}; Path=/`
   window.next.router.push(`/team?team=${team}&tab=security`)
-  await until(() => sw("Require SSO"))
+  // The tab shows skeletons until the identity has loaded.
+  const settled = () => sw("Require SSO") && !main().querySelector('[data-slot="skeleton"]')
+  await until(settled)
+  const connected = (await identity()).sso.connections.some((c) => c.state === "active")
   try {
     setSelect(document.querySelector('[aria-label="Exempt a member"]'), me)
     const ex = await until(async () => (await identity()).sso.exempt.includes(me))
@@ -39,12 +47,33 @@
       "the exemption is listed with Remove",
       Boolean(await until(() => [...main().querySelectorAll("button")].some((b) => b.textContent.trim() === "Remove"))),
     )
+    if (!connected) {
+      const off = sw("Require SSO")
+      pass(
+        "without a connection Require SSO is off and disabled",
+        off.getAttribute("aria-checked") === "false" && off.hasAttribute("data-disabled"),
+      )
+      const refused = await fetch(`/api/v1/teams/${team}/identity/sso`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ required: true }),
+      })
+      const body = await refused.json().catch(() => null)
+      pass(
+        "the server refuses Require SSO without a connection",
+        refused.status === 409 && body?.error?.code === "sso_not_ready",
+        `${refused.status} ${body?.error?.code}`,
+      )
+      pass("Require SSO is still off on the server", !(await identity()).sso.required)
+      return steps
+    }
+    const email = (await mine()).email
     sw("Require SSO").click()
     const dlg = await until(() => document.querySelector("[role=alertdialog]"))
     const listed = dlg ? [...dlg.querySelectorAll("li")].map((l) => l.textContent.trim()) : []
     pass(
       "Require SSO first shows who would lose access",
-      Boolean(dlg) && listed.length > 0 && !listed.some((e) => e.startsWith("fesevoy")),
+      Boolean(dlg) && listed.length > 0 && !listed.some((e) => e.startsWith(email)),
       listed.join(", "),
     )
     ;[...(dlg?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim() === "Require SSO")?.click()
@@ -74,7 +103,7 @@
     )
     pass("Activity names the bypass, the SSO change and the exemption", Boolean(shown))
     window.next.router.push(`/team?team=${team}&tab=security`)
-    await until(() => sw("Require SSO"))
+    await until(settled)
   } finally {
     if (sw("Require SSO")?.getAttribute("aria-checked") === "true") {
       sw("Require SSO").click()
