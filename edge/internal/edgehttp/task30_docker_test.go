@@ -32,13 +32,13 @@ import (
 )
 
 type task30ClientFixture struct {
-	CA, ResultPath, Prefix                          string
-	HTTPHostname, TCPHostname, HTTPPort, DNSAddress string
-	DNSOnly                                         bool
-	Hold                                            bool
-	HeldPath                                        string
-	ExpectedIPs                                     []string
-	DirectIPs                                       []string
+	CA, ResultPath, Prefix                                   string
+	HTTPHostname, TCPHostname, HTTPPort, TCPPort, DNSAddress string
+	DNSOnly                                                  bool
+	Hold                                                     bool
+	HeldPath                                                 string
+	ExpectedIPs                                              []string
+	DirectIPs                                                []string
 }
 type task30ClientResult struct {
 	Edge, TCPAddress, Certificate string
@@ -64,6 +64,9 @@ func TestTask30DockerClient(t *testing.T) {
 	}
 	if f.HTTPPort == "" {
 		f.HTTPPort = "443"
+	}
+	if f.TCPPort == "" {
+		f.TCPPort = "25001"
 	}
 	if f.DNSAddress == "" {
 		f.DNSAddress = "127.0.0.11:53"
@@ -192,7 +195,7 @@ func TestTask30DockerClient(t *testing.T) {
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	request(&http.Client{Transport: transport, Timeout: 5 * time.Second}, f.Prefix+"-normal-http")
-	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(f.TCPHostname, "25001"))
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(f.TCPHostname, f.TCPPort))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,6 +221,20 @@ type task30LiveFixture struct {
 	HTTPHostname, TCPHostname, DNSAddress, Publisher string
 	PublicIPs                                        []string
 	BrowserOnly                                      bool
+	// HTTPPort and TCPPort are the host ports published on both public addresses and named in DNS clients dial;
+	// the run's operator picks them per run (the two addresses must share them), 28443 and 25001 when omitted.
+	HTTPPort, TCPPort string
+}
+
+func (l task30LiveFixture) ports() (httpPort, tcpPort string) {
+	httpPort, tcpPort = l.HTTPPort, l.TCPPort
+	if httpPort == "" {
+		httpPort = "28443"
+	}
+	if tcpPort == "" {
+		tcpPort = "25001"
+	}
+	return httpPort, tcpPort
 }
 
 type task30BrowserResult struct {
@@ -246,9 +263,10 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 			t.Fatal("two public test addresses required")
 		}
 	}
-	httpHost, tcpHost, httpPort := "app.customer.test", "tcp.customer.test", "443"
+	httpHost, tcpHost, httpPort, tcpPort := "app.customer.test", "tcp.customer.test", "443", "25001"
 	if live != nil {
-		httpHost, tcpHost, httpPort = live.HTTPHostname, live.TCPHostname, "28443"
+		httpHost, tcpHost = live.HTTPHostname, live.TCPHostname
+		httpPort, tcpPort = live.ports()
 	}
 	daemonBinary := filepath.Join(directory, "daemon.test")
 	self, err := os.Executable()
@@ -321,7 +339,7 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 				index = 1
 			}
 			address := live.PublicIPs[index]
-			args = append(args, "-p", net.JoinHostPort(address, "28443")+":443", "-p", net.JoinHostPort(address, "25001")+":25001")
+			args = append(args, "-p", net.JoinHostPort(address, httpPort)+":443", "-p", net.JoinHostPort(address, tcpPort)+":25001")
 		}
 		if live != nil && test == "TestTask30DockerClient" {
 			for i := range args {
@@ -400,7 +418,7 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 	client := func(phase string, expected, direct []string) task30ClientResult {
 		t.Helper()
 		path := filepath.Join(directory, phase+"-client")
-		f := task30ClientFixture{CA: string(ca), Prefix: phase, ExpectedIPs: expected, DirectIPs: direct, ResultPath: path + "-result", HTTPHostname: httpHost, TCPHostname: tcpHost, HTTPPort: httpPort}
+		f := task30ClientFixture{CA: string(ca), Prefix: phase, ExpectedIPs: expected, DirectIPs: direct, ResultPath: path + "-result", HTTPHostname: httpHost, TCPHostname: tcpHost, HTTPPort: httpPort, TCPPort: tcpPort}
 		if live != nil {
 			f.DNSAddress = live.DNSAddress
 			f.DNSOnly = phase == "unavailable"
@@ -447,7 +465,7 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 				t.Fatalf("public TLS endpoint not ready before DNS publication: %v", err)
 			}
 			conn.Close()
-			tcp, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "25001"), 3*time.Second)
+			tcp, err := net.DialTimeout("tcp", net.JoinHostPort(ip, tcpPort), 3*time.Second)
 			if err != nil {
 				t.Fatalf("public TCP endpoint not ready before DNS publication: %v", err)
 			}
@@ -605,7 +623,7 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 	heldContainer := ""
 	{
 		path := filepath.Join(directory, "interrupted-client")
-		f := task30ClientFixture{CA: string(ca), Prefix: "held", ExpectedIPs: ips, ResultPath: path + "-result", HTTPHostname: httpHost, TCPHostname: tcpHost, HTTPPort: httpPort, Hold: true, HeldPath: path + "-held"}
+		f := task30ClientFixture{CA: string(ca), Prefix: "held", ExpectedIPs: ips, ResultPath: path + "-result", HTTPHostname: httpHost, TCPHostname: tcpHost, HTTPPort: httpPort, TCPPort: tcpPort, Hold: true, HeldPath: path + "-held"}
 		if live != nil {
 			f.DNSAddress = live.DNSAddress
 		}
