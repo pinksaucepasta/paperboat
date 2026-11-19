@@ -12,13 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrUpdateRunning: the node is already updating; one request at a time.
+// ErrUpdateRunning means the node is already updating; one request at a time.
 var ErrUpdateRunning = errors.New("this server is already updating; wait for it to finish")
 
-// ErrUpdateNotRunning: a report for a request that is finished, replaced or another node's.
+// ErrUpdateNotRunning means a report for a request that is finished, replaced or another node's.
 var ErrUpdateNotRunning = errors.New("this update is not running on this node")
 
-// ErrUpdateUnavailable: no published self-host release to update to.
+// ErrUpdateUnavailable means no published self-host release to update to.
 var ErrUpdateUnavailable = errors.New("no published self-host release")
 
 // UpdateStatus is a node's latest update request as console and admin show it.
