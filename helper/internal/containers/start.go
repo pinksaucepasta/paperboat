@@ -32,6 +32,11 @@ func containerName(owner, capability string) string {
 	return "paperboat-pbh-" + owner + "-" + capability
 }
 
+// ContainerName is the Docker container that runs one capability of the installation in dir.
+func ContainerName(dir, capability string) string {
+	return containerName(installationOwner(dir), capability)
+}
+
 func (l *Launcher) startContainer(ctx context.Context, capability, image string) error {
 	return l.startContainerNamed(ctx, capability, image, containerName(installationOwner(l.StateDir), capability))
 }

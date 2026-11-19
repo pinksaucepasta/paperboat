@@ -15,6 +15,10 @@ Commands:
   install         install or upgrade the node and its systemd service
   selfhost code   print a fresh single-use code to claim this node in the dashboard
   status          show the paperboat-selfhost service state
+  logs            show the relay and edge logs (--follow, --since, --lines)
+  restart         restart the service, or only the relay or the edge
+  update          update pbh and the relay and edge to the latest signed release
+  update-apply    run an update the dashboard requested (its Update button starts this)
   doctor          check that this host can serve public tunnel ports
   configure-tls   set or rotate the browser HTTPS certificate
   uninstall       remove the service and containers
@@ -35,6 +39,25 @@ same command upgrades in place and keeps data. Needs root (it re-runs itself wit
 Examples:
   pbh install --both --endpoint-host edge.example.com
   pbh install --edge --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
+	"logs": `Show the logs of this installation's relay and edge containers. Name relay or edge for one; without a
+name both are shown, each line marked with its component. --lines (default 200, at most 10000) and --since
+(for example 10m) bound what is read; --follow keeps streaming until interrupted. Needs root (it re-runs
+itself with sudo).
+Examples:
+  pbh logs --since 1h edge
+  pbh logs --follow relay`,
+	"restart": `Restart the paperboat-selfhost service (relay and edge), or only the relay or the edge when named. A named
+component is stopped and the service starts it again; restart waits until it runs. Needs root (it re-runs
+itself with sudo).
+Examples:
+  pbh restart
+  pbh restart edge`,
+	"update": `Update this host to the newest signed release, the same way the dashboard's Update button does: the
+release is downloaded and verified against the signed release metadata before anything changes, and the
+previous version is restored (with the exact error shown) when the new one fails its health check. Shows
+current → latest and asks to confirm on a terminal; --yes skips the question. Needs root (it re-runs itself with sudo).`,
+	"update-apply": `Run the update the dashboard requested for this node, reporting each step to it. The service starts this in
+its own systemd unit; run pbh update to update by hand.`,
 	"selfhost code": `Print this installation's claim address and a fresh single-use code (valid for 15 minutes) for
 Dashboard → Network → Add self-hosted node. The code carries no account identity.`,
 	"status": `Show the paperboat-selfhost service state (systemctl status). A running service is not

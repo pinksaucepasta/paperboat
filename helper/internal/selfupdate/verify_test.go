@@ -120,3 +120,21 @@ func TestVerifyAcceptsOnlyTheSignedBundle(t *testing.T) {
 		t.Fatalf("metadata under another root: %v", err)
 	}
 }
+
+func TestLatestIsTheNewestSignedVersionForThisArchitecture(t *testing.T) {
+	root, server := signedRepository(t, map[string][]byte{
+		TargetName("2026.11.19.2", "amd64"):  []byte("a"),
+		TargetName("2026.11.19.10", "amd64"): []byte("b"),
+		TargetName("2026.12.01.1", "arm64"):  []byte("c"),
+	})
+	got, err := Latest(context.Background(), server.URL, root, t.TempDir(), "amd64", server.Client())
+	if err != nil || got != "2026.11.19.10" {
+		t.Fatalf("Latest = %q, %v", got, err)
+	}
+	if _, err := Latest(context.Background(), server.URL, root, t.TempDir(), "riscv64", server.Client()); !errors.Is(err, ErrSignature) {
+		t.Fatalf("no bundle for the architecture: %v", err)
+	}
+	if !Newer("2026.11.19.10", "2026.11.19.9") || Newer("2026.11.19.1", "2026.11.19.1") || Newer("development", "2026.11.19.1") {
+		t.Fatal("Newer compares release versions numerically")
+	}
+}

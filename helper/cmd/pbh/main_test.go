@@ -65,12 +65,18 @@ func TestHelpDescribesEveryCommand(t *testing.T) {
 	if err := run(context.Background(), []string{"help"}, &top); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"install", "selfhost code", "status", "doctor", "configure-tls", "uninstall", "serve", "check-host", "version"} {
+	for _, command := range []string{"install", "selfhost code", "status", "doctor", "configure-tls", "uninstall", "serve", "check-host", "version", "logs", "restart", "update", "update-apply"} {
 		if !strings.Contains(top.String(), command) {
 			t.Fatalf("pbh help does not list %q", command)
 		}
 	}
-	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"configure-tls", "--help"}, {"uninstall", "--help"}, {"serve", "--help"}} {
+	// One short line per command: the list stays scannable.
+	for _, line := range strings.Split(top.String(), "\n") {
+		if strings.HasPrefix(line, "  ") && len(line) > 100 {
+			t.Fatalf("pbh help line is longer than 100 characters: %q", line)
+		}
+	}
+	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"configure-tls", "--help"}, {"uninstall", "--help"}, {"serve", "--help"}, {"logs", "--help"}, {"restart", "--help"}, {"update", "--help"}, {"update-apply", "--help"}} {
 		var out bytes.Buffer
 		if err := run(context.Background(), args, &out); err != nil {
 			t.Fatalf("%v: %v", args, err)
