@@ -45,3 +45,13 @@ func TestMachineProofCarriesAFreshNonce(t *testing.T) {
 		t.Fatalf("nonces %q and %q: want two distinct values of at least 16 characters", a, b)
 	}
 }
+
+// pb tunnel rename and pb tunnel address PATCH the tunnel this machine created with the machine proof; a PATCH
+// refused here surfaced as local_io in the official 2026.11.19.0 build.
+func TestMachineProofSignsAPatch(t *testing.T) {
+	store, root, now := newControlCauseStore(t)
+	saveControlCauseRegistration(t, store, root, now)
+	if _, err := store.MachineProof("operation-patch-one", "PATCH", "/v1/tunnels/tun_1", []byte(`{"name":"x"}`), now); err != nil {
+		t.Fatalf("PATCH machine proof: %v", err)
+	}
+}

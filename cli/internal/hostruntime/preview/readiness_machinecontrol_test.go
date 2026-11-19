@@ -61,7 +61,7 @@ func TestReadinessPublicationUsesProductionMachineControlProofs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, method := range []string{http.MethodHead, http.MethodPatch} {
+	for _, method := range []string{http.MethodHead, http.MethodOptions} {
 		if _, err := source.Proof(t.Context(), "operation_dispatch_1", method, "/v1/previews/prv_dispatch_1/readiness", nil); !errors.Is(err, machinecontrol.ErrInvalid) {
 			t.Fatalf("unsupported method %s was accepted", method)
 		}

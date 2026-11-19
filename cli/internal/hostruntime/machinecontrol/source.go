@@ -491,7 +491,7 @@ func (s *Source) mintOnceLocked(ctx context.Context, store *identity.Store, reco
 
 func (s *Source) Proof(_ context.Context, operationID, method, path string, body []byte) ([]byte, error) {
 	method = strings.ToUpper(method)
-	if s == nil || len(operationID) < 8 || len(operationID) > 128 || method != http.MethodGet && method != http.MethodPost && method != http.MethodPut && method != http.MethodDelete || !strings.HasPrefix(path, "/v1/") || len(body) > 1<<20 {
+	if s == nil || len(operationID) < 8 || len(operationID) > 128 || method != http.MethodGet && method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch && method != http.MethodDelete || !strings.HasPrefix(path, "/v1/") || len(body) > 1<<20 {
 		return nil, ErrInvalid
 	}
 	store, err := identity.Open(identity.Config{StateRoot: s.config.StateRoot})
