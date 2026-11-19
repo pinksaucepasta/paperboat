@@ -11,8 +11,14 @@
      BackToTheRelayInSeconds measures 6.5 s, bound 12 s), the stream goes on to the end with every number in order,
      and while the block lasts `pb status` names a relay path (wss or relay), not direct.
 Prints one JSON line {"check": "dead-path-stream", ...}; exit 1 on failure.
+Every run, pass or fail, saves what makes a slow cut provable (cut-16s.md, a 16.1 s gap with nothing but the gap saved):
+`arrivals.csv` (t_ms from the block, line), `status.csv` (a 1 s sampler of selected path, relay region and home relay), and
+the receipt names their directory (--trace-dir, default results/dead-path-<UTC>).
 """
+import csv
+import datetime
 import json
+import pathlib
 import subprocess
 import sys
 import threading
@@ -27,8 +33,52 @@ def selected(peer):
     return pd.machine_status(peer)['selected_path']
 
 
+def status_sample(peer):
+    """One `pb status` reading of the path to PEER and of this machine's home relay."""
+    data = json.loads(pd.pb('status', '--json')[1])
+    data = data.get('data', data)
+    machine = next(m for m in data['machines'] if peer in (m['alias'], m['id']))
+    home = data.get('home_relay') or {}
+    return {'selected_path': machine.get('selected_path', ''), 'standby_path': machine.get('standby_path', ''),
+            'relay_region': machine.get('relay_region', ''), 'home_relay': home.get('node_id', ''), 'home_region': home.get('region', '')}
+
+
+def sample_status(peer, stop, samples, interval=1.0, sample=status_sample):
+    """Append (time, reading) every INTERVAL seconds until STOP is set; a failed reading is kept as an error row."""
+    while not stop.is_set():
+        started = time.time()
+        try:
+            samples.append((started, sample(peer)))
+        except Exception as err:  # noqa: BLE001
+            samples.append((started, {'error': str(err)[:120]}))
+        stop.wait(max(0.0, interval - (time.time() - started)))
+
+
+def write_trace(directory, blocked_at, arrivals, samples):
+    """Save the per-line arrivals and the status samples (t_ms from the block) and return what they show."""
+    directory = pathlib.Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    ms = lambda t: round((t - blocked_at) * 1000)
+    with open(directory / 'arrivals.csv', 'w', newline='') as out:
+        writer = csv.writer(out)
+        writer.writerow(['t_ms', 'line'])
+        writer.writerows([ms(t), line.decode(errors='replace') if isinstance(line, bytes) else line] for t, line in arrivals)
+    columns = ['selected_path', 'standby_path', 'relay_region', 'home_relay', 'home_region', 'error']
+    with open(directory / 'status.csv', 'w', newline='') as out:
+        writer = csv.writer(out)
+        writer.writerow(['t_ms'] + columns)
+        writer.writerows([ms(t)] + [reading.get(column, '') for column in columns] for t, reading in samples)
+    after = [ms(t) for t, _ in arrivals if t >= blocked_at]
+    off_direct = [ms(t) for t, reading in samples if t >= blocked_at and reading.get('selected_path') not in ('direct', '', None)]
+    homes = {reading['home_relay'] for _, reading in samples if reading.get('home_relay')}
+    return {'dir': str(directory), 'first_line_after_ms': after[0] if after else None, 'first_non_direct_ms': off_direct[0] if off_direct else None,
+            'home_relay_changed': len(homes) > 1, 'status_errors': sum(1 for _, reading in samples if 'error' in reading)}
+
+
 def main():
     peer = sys.argv[1]
+    trace_dir = sys.argv[sys.argv.index('--trace-dir') + 1] if '--trace-dir' in sys.argv else str(
+        pathlib.Path(__file__).parent / 'results' / ('dead-path-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
     bound = float(sys.argv[sys.argv.index('--bound') + 1]) if '--bound' in sys.argv else 12.0
     address = sys.argv[sys.argv.index('--peer-address') + 1] if '--peer-address' in sys.argv else None
     for _ in range(45):  # a path takes seconds to settle after a start
@@ -42,7 +92,8 @@ def main():
     script = 'i=0; while [ $i -lt %d ]; do echo $i; i=$((i+1)); sleep 0.1; done' % total
     stream = subprocess.Popen([str(pd.PB), 'exec', peer, '--', 'sh', '-c', script], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               stdin=subprocess.DEVNULL, bufsize=0)
-    arrivals = []
+    arrivals, samples, stop_sampling = [], [], threading.Event()
+    threading.Thread(target=sample_status, args=(peer, stop_sampling, samples), daemon=True).start()
 
     def read():
         for line in iter(stream.stdout.readline, b''):
@@ -64,22 +115,24 @@ def main():
                 break  # the stream is flowing again; give it a moment of steady flow, then release
         time.sleep(5)
         during = selected(peer)
+    stop_sampling.set()
+    trace = write_trace(trace_dir, blocked_at, arrivals, samples)
     after = [t for t, _ in arrivals if t >= blocked_at]
     if len(after) < 20:
-        raise RuntimeError('the stream did not recover after the direct path to the peer was dropped: %d lines after the block' % len(after))
+        raise RuntimeError('the stream did not recover after the direct path to the peer was dropped: %d lines after the block (trace %s)' % (len(after), trace))
     gaps = [b - a for a, b in zip([blocked_at] + after, after)]
     longest = max(gaps)
     stream.terminate()
     numbers = [int(v) for _, v in arrivals if v.isdigit()]
     if numbers != list(range(len(numbers))):
-        raise RuntimeError('the stream lost or repeated lines around the path change')
+        raise RuntimeError('the stream lost or repeated lines around the path change (trace %s)' % trace)
     if during == 'direct':
-        raise RuntimeError('the stream flowed again but the path is still direct while the block lasts')
+        raise RuntimeError('the stream flowed again but the path is still direct while the block lasts (trace %s)' % trace)
     if longest > bound:
-        raise RuntimeError('the longest silence after the block was %.1f s (bound %.0f s)' % (longest, bound))
+        raise RuntimeError('the longest silence after the block was %.1f s (bound %.0f s; trace %s)' % (longest, bound, trace))
     print(json.dumps({'check': 'dead-path-stream', 'status': 'PASS', 'longest_gap_s': round(longest, 1), 'bound_s': bound,
                       'lines_before': len([t for t, _ in arrivals if t < blocked_at]), 'lines_after': len(after),
-                      'path_while_blocked': during, 'in_order': True}))
+                      'path_while_blocked': during, 'in_order': True, 'trace': trace}))
 
 
 if __name__ == '__main__':
