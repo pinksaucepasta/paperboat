@@ -21,7 +21,7 @@ echo "goose before: $($P -At -c "select max(version_id) from paperboat.goose_db_
 $P -f /tmp/counts.sql > /tmp/counts-before.txt
 docker network connect --alias pb-scratch paperboat_default "$name"
 s=$(date +%s)
-PAPERBOAT_SERVER_IMAGE=paperboat-server:$V docker compose run --rm --no-deps -e "PAPERBOAT_DATABASE_DSN=postgres://postgres:scratch@pb-scratch:5432/paperboat?sslmode=disable" migrate 2>&1 | tail -n 8 | cut -c1-250
+PAPERBOAT_SERVER_IMAGE=paperboat-server:$V docker compose run --rm --no-deps -e "PAPERBOAT_DATABASE_DSN=postgres://postgres:scratch@pb-scratch:5432/paperboat?sslmode=disable" migrate 2>&1 | tail -n 60 | cut -c1-250
 echo "migrate seconds: $(( $(date +%s) - s ))"
 echo "goose after: $($P -At -c "select max(version_id) from paperboat.goose_db_version")"
 echo "not-valid constraints left: $($P -At -c "select count(*) from pg_constraint where not convalidated")"
