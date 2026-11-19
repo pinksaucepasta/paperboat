@@ -49,15 +49,15 @@ func TestRevokeMachineWithManyAccessSessionsOnPostgres(t *testing.T) {
 		}
 	})
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
-	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) SELECT 'many_env_'||g||'_'||$2,'many_env_'||g||'_'||$2,$1 FROM generate_series(0,99) g`, user, x)
+	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) SELECT 'many_env_'||g||'_'||$2,'many_env_'||g||'_'||$2,$1 FROM generate_series(0,87) g`, user, x)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation)
-SELECT 'many_m_'||g||'_'||$2,$1,'many_env_'||g||'_'||$2,'m'||g,'linux','amd64','/w','online','occupied',true,1 FROM generate_series(0,99) g`, user, x)
+SELECT 'many_m_'||g||'_'||$2,$1,'many_env_'||g||'_'||$2,'m'||g,'linux','amd64','/w','online','occupied',true,1 FROM generate_series(0,87) g`, user, x)
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,'client','many','desktop','test',ARRAY['machines:connect'],'active',now(),now())`, cli, user)
 	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
 SELECT sha256(convert_to('q'||e.id,'UTF8')),$1,e.id,e.role,1,1,decode(repeat('00',200),'hex'),sha256(convert_to('k'||e.id,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',sha256(convert_to('k'||e.id,'UTF8'))
-FROM (SELECT 'many_m_'||g||'_'||$2 AS id,'machine' AS role FROM generate_series(0,99) g UNION ALL SELECT $3,'cli') e`, user, x, cli)
+FROM (SELECT 'many_m_'||g||'_'||$2 AS id,'machine' AS role FROM generate_series(0,87) g UNION ALL SELECT $3,'cli') e`, user, x, cli)
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-SELECT $1,'many_m_'||g||'_'||$2,'machine','many_m_'||g||'_'||$2,1,1,1,sha256(convert_to('wg'||g||$2,'UTF8')),sha256(convert_to('q'||'many_m_'||g||'_'||$2,'UTF8')),('100.71.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series(0,99) g
+SELECT $1,'many_m_'||g||'_'||$2,'machine','many_m_'||g||'_'||$2,1,1,1,sha256(convert_to('wg'||g||$2,'UTF8')),sha256(convert_to('q'||'many_m_'||g||'_'||$2,'UTF8')),('100.71.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series(0,87) g
 UNION ALL SELECT $1,$3,'cli',NULL,1,0,1,sha256(convert_to('wgcli'||$2,'UTF8')),sha256(convert_to('q'||$3,'UTF8')),'100.71.9.1'::inet,now(),now()`, user, x, cli)
 	// Inserted through the normal triggers (each gets its usage authority). Machine 0: 19,900 expired + 100 live.
 	sessions := func(m string, from, to int, expires string) {
@@ -65,8 +65,8 @@ UNION ALL SELECT $1,$3,'cli',NULL,1,0,1,sha256(convert_to('wgcli'||$2,'UTF8')),s
 SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6::interval,'active','h_'||$1||'_'||g,ARRAY['exec'],'op' FROM generate_series($4::int,$5::int) g, paperboat.user_machines u WHERE u.id=$1`,
 			m, user, cli, from, to, expires)
 	}
-	sessions(machine(0), 1, 19900, "-1 hour")
-	sessions(machine(0), 19901, 20000, "1 hour")
+	sessions(machine(0), 1, 17700, "-1 hour")
+	sessions(machine(0), 17701, 20000, "1 hour")
 	sessions(machine(1), 1, 10, "1 hour")
 	var cliGeneration int64
 	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, user, cli).Scan(&cliGeneration); err != nil {
@@ -91,7 +91,7 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 		load.Go(func() {
 			for i := 0; loadCtx.Err() == nil; i++ {
 				timed(func() error {
-					_, err := store.SQL().ExecContext(loadCtx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, user, machine(2+(w*31+i)%98))
+					_, err := store.SQL().ExecContext(loadCtx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, user, machine(2+(w*31+i)%86))
 					return err
 				})
 			}
@@ -101,7 +101,7 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 		for i := 0; loadCtx.Err() == nil; i++ {
 			timed(func() error {
 				return store.InTx(loadCtx, func(ctx context.Context, tx *db.Tx) error {
-					_, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: machine(2 + i%98), UserID: user, MachineGeneration: 1})
+					_, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: machine(2 + i%86), UserID: user, MachineGeneration: 1})
 					return err
 				})
 			})
@@ -172,5 +172,18 @@ WHERE s.user_machine_id=$1 AND a.expires_at IS DISTINCT FROM least(s.expires_at,
 	if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.user_machines WHERE id=$1`, machine(0)).Scan(&state); err != nil || state.String != "disconnected" {
 		t.Fatalf("machine state %q (%v)", state.String, err)
 	}
-	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes, slowest %v", took, writes.Load(), time.Duration(slowest.Load()))
+	// The final hard delete removes the machine's 20,000 sessions in bounded transactions, then the machine row
+	// (one statement over all of them ran prod out of predicate locks), within one worker tick.
+	start = time.Now()
+	if err := service.RetryPendingRevocations(ctx); err != nil {
+		t.Fatalf("final delete: %v", err)
+	}
+	finalTook := time.Since(start)
+	if n := count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1`, machine(0)); n != 0 {
+		t.Fatal("the revoked machine was not hard-deleted in one worker tick")
+	}
+	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine(1)); n != 10 {
+		t.Fatalf("final delete of one machine touched another's sessions: %d of 10 left", n)
+	}
+	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes, slowest %v; final delete %v", took, writes.Load(), time.Duration(slowest.Load()), finalTook)
 }

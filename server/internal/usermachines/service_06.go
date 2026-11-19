@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -119,7 +120,7 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 	skipped := []string{}
 	for range finalDeleteBatch {
 		var id string
-		found := false
+		found, more := false, false
 		err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			machines, err := tx.Queries().LockUserMachinesForFinalDeletion(ctx, skipped)
 			if err != nil || len(machines) == 0 {
@@ -127,8 +128,12 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 				return err
 			}
 			found, id = true, machines[0].ID
-			return finalDeleteMachine(ctx, tx, s.audit, machines[0])
+			more, err = finalDeleteMachine(ctx, tx, s.audit, machines[0])
+			return err
 		})
+		if more && err == nil {
+			continue // a batch of child rows went; the machine stays a candidate for the next iteration
+		}
 		if !found {
 			if err != nil {
 				errs = append(errs, fmt.Errorf("final delete removed machines: %w", err))
@@ -149,16 +154,41 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 // finalDeleteBatch bounds the machines one RetryPendingRevocations tick deletes.
 const finalDeleteBatch = 100
 
-func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, machine dbsqlc.LockUserMachinesForFinalDeletionRow) error {
+// finalDeleteChildren are the tables whose rows a machine can gather by the thousand (one access session per exec or
+// terminal); each final-delete transaction removes at most finalDeleteChildBatch of them, and the machine row only when
+// none is left. Deleting an 18k-session machine in one SERIALIZABLE statement ran Postgres out of predicate locks
+// (prod 2026-11-19, "out of shared memory" on DELETE FROM user_machines). Other children cascade with the machine row.
+var finalDeleteChildren = []struct{ table, column string }{
+	{"user_machine_access_sessions", "user_machine_id"},
+	{"user_machine_terminal_session_operations", "user_machine_id"},
+	{"user_machine_terminal_sessions", "user_machine_id"},
+	{"preview_leases", "owner_machine_id"},
+	{"inspector_credentials", "native_machine_id"},
+	{"machine_control_renewals", "machine_id"},
+}
+
+const finalDeleteChildBatch = 1000
+
+// finalDeleteMachine reports more when it removed a full batch of child rows and left the machine row for later.
+func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, machine dbsqlc.LockUserMachinesForFinalDeletionRow) (more bool, err error) {
+	for _, child := range finalDeleteChildren {
+		tag, err := tx.Exec(ctx, `DELETE FROM `+child.table+` WHERE ctid IN (SELECT ctid FROM `+child.table+` WHERE `+child.column+`=$1 LIMIT `+strconv.Itoa(finalDeleteChildBatch)+`)`, machine.ID)
+		if err != nil {
+			return false, fmt.Errorf("final delete removed machine's %s: %w", child.table, err)
+		}
+		if tag.RowsAffected() == finalDeleteChildBatch {
+			return true, nil
+		}
+	}
 	if err := writer.WriteTx(ctx, tx, audit.Event{ActorUserID: machine.UserID, ActorType: audit.ActorSystem,
 		EventType: "user_machine.final_deleted", ResourceType: "user_machine", ResourceID: machine.ID,
 		IdempotencyKey: "user_machine.final_deleted:" + machine.ID, Metadata: map[string]any{"alias": machine.Alias}}); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_machines WHERE id=$1`, machine.ID); err != nil {
-		return fmt.Errorf("final delete removed machine: %w", err)
+		return false, fmt.Errorf("final delete removed machine: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 // revokeSessionCredentials ends each session at its helper, then marks the ones that ended, many ids per statement:
