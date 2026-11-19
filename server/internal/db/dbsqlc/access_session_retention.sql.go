@@ -10,6 +10,27 @@ import (
 	"time"
 )
 
+const retireAccessSessionsOfEndedMachines = `-- name: RetireAccessSessionsOfEndedMachines :execrows
+UPDATE user_machine_access_sessions
+SET state = 'revoked', revoked_at = now(), revocation_reason = 'machine_ended',
+    helper_revoked_at = coalesce(helper_revoked_at, now()), updated_at = now()
+WHERE id IN (
+  SELECT due.id FROM user_machine_access_sessions AS due
+  JOIN user_machines AS machine ON machine.id = due.user_machine_id
+  WHERE due.state = 'active' AND due.expires_at <= now() AND due.credential_kind = 'control_plane_signed'
+    AND (machine.revoked_at IS NOT NULL OR machine.deleted_at IS NOT NULL OR machine.state IN ('revoked', 'disconnected', 'deleted'))
+  LIMIT $1::int FOR UPDATE OF due SKIP LOCKED)
+`
+
+// The expired signed sessions a machine revoke leaves active (migration 443; they need no helper call), one bounded batch per statement.
+func (q *Queries) RetireAccessSessionsOfEndedMachines(ctx context.Context, batchSize int32) (int64, error) {
+	result, err := q.db.Exec(ctx, retireAccessSessionsOfEndedMachines, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const retireExpiredMachineAccessSessions = `-- name: RetireExpiredMachineAccessSessions :execrows
 UPDATE user_machine_access_sessions
 SET state = 'revoked', revoked_at = now(), revocation_reason = 'expired',

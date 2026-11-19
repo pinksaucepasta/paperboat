@@ -62,21 +62,28 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 -- +goose StatementBegin
+-- An ended machine's expired signed sessions carry no authority (every reader requires an unexpired session or a live
+-- machine, and the token no longer verifies) and need no helper call: the revoke leaves them to the usermachines worker, which retires them in bounded batches right after, so a machine
+-- with 20,000 expired sessions is revoked by one short statement. A live machine's expired sessions are still revoked
+-- here: admitted streams outlive the credential until explicit revocation (peersessions network.go). An external
+-- issuer's session is always revoked here: its helper still holds the session until it is told.
 -- A signed credential needs no helper call (the environment's revocation fences it, usermachines revokeCredentialSessions):
 -- it is done at revocation, so revoking a machine leaves no row per session for the revocation worker to mark.
 CREATE OR REPLACE FUNCTION paperboat.revoke_invalid_team_machine_access() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
-DECLARE affected_machine text; affected_team text;
+DECLARE affected_machine text; affected_team text; machine_ended boolean := false;
 BEGIN
  IF TG_TABLE_NAME='user_machines' THEN
   affected_machine := NEW.id;
+  machine_ended := NEW.state IN ('revoked','disconnected','deleted') OR NEW.revoked_at IS NOT NULL OR NEW.deleted_at IS NOT NULL;
  ELSE
   IF TG_OP='DELETE' THEN affected_team := OLD.team_id; ELSE affected_team := NEW.team_id; END IF;
  END IF;
  UPDATE user_machine_access_sessions a SET state='revoked',revoked_at=now(),updated_at=now(),revocation_reason='machine_permission_revoked',
   helper_revoked_at=CASE WHEN a.credential_kind='control_plane_signed' THEN now() ELSE a.helper_revoked_at END
- WHERE a.state='active' AND ((affected_machine IS NOT NULL AND a.user_machine_id=affected_machine) OR (affected_team IS NOT NULL AND a.team_id=affected_team)) AND (EXISTS(
+ WHERE a.state='active' AND ((affected_machine IS NOT NULL AND a.user_machine_id=affected_machine) OR (affected_team IS NOT NULL AND a.team_id=affected_team))
+  AND NOT (machine_ended AND a.expires_at <= now() AND a.credential_kind = 'control_plane_signed') AND (EXISTS(
   SELECT 1 FROM unnest(a.capabilities) capability
   WHERE CASE WHEN a.machine_service_port IS NOT NULL THEN NOT machine_service_session_allowed(a.id) WHEN a.team_id IS NOT NULL THEN NOT team_machine_capability_allowed(a.user_id,a.team_id,a.user_machine_id,capability)
    ELSE NOT EXISTS(SELECT 1 FROM user_machines m WHERE m.id=a.user_machine_id AND m.user_id=a.user_id AND m.owner_team_id IS NULL AND m.revoked_at IS NULL AND m.deleted_at IS NULL) END)
