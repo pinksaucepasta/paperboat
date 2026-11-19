@@ -174,7 +174,7 @@ func (e *e2eCore) assertTeam(phase string) {
 			return err
 		}
 		started := time.Now()
-		out, err := e.run(3*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", c,
+		out, err := e.run(3*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", e.ctr(c),
 			".local/bin/pb", "preview", "8080", "--workspace", e2eTeam, "--team", "--background", "--ttl", "30m", "--json")
 		e.t.Logf("%s: team preview answered after %s", phase, time.Since(started).Round(time.Millisecond))
 		if err != nil {
@@ -189,7 +189,7 @@ func (e *e2eCore) assertTeam(phase string) {
 			return err
 		}
 		name := "e2e-team-" + strings.ReplaceAll(phase, " ", "-")
-		out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", c,
+		out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", e.ctr(c),
 			".local/bin/pb", "--workspace", e2eTeam, "tunnel", "create", name, "--port", "8081", "--team", "--json")
 		if err != nil {
 			return err
@@ -252,7 +252,7 @@ func (e *e2eCore) teamGeneration(machine string) (int64, error) {
 func (e *e2eCore) pbStdin(machine, input string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	base := []string{"exec", "-i", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", machine}
+	base := []string{"exec", "-i", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", e.ctr(machine)}
 	cmd := exec.CommandContext(ctx, "docker", append(base, args...)...)
 	cmd.Stdin = strings.NewReader(input)
 	out, err := cmd.CombinedOutput()
@@ -268,7 +268,7 @@ func (e *e2eCore) connect(from, to string) error {
 	marker := "connect-ok-" + from
 	script := fmt.Sprintf(`(sleep 10; printf 'echo %[1]s-$((6*7))\n'; sleep 4; printf 'exit\n'; sleep 3) | timeout 60 script -qec '.local/bin/pb --workspace %[2]s connect %[3]s' /dev/null 2>&1 | tr -d '\r'`, marker, e2eTeam, to)
 	return waitFor(3*time.Minute, func() error {
-		out, err := e.run(80*time.Second, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-e", "TERM=xterm", "-w", "/home/pbt", from, "bash", "-c", script)
+		out, err := e.run(80*time.Second, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-e", "TERM=xterm", "-w", "/home/pbt", e.ctr(from), "bash", "-c", script)
 		if !strings.Contains(out, marker+"-42") {
 			return fmt.Errorf("pb connect %s printed no %s-42 (%v): %s", to, marker, err, lastBytes(out, 300))
 		}

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -40,7 +41,8 @@ import (
 // TestEnv runs control; TestNode.StartDaemon and AwaitRunning drive real daemons; tstest.WaitFor bounds every
 // wait) and headscale integration/tsic/tsic.go + dockertestutil/execute.go (real clients in docker containers,
 // commands run with docker exec under a bound). Its server and edge children stop with it (Pdeathsig); after a
-// killed run, `docker rm -f e2e-a e2e-b e2e-t e2e-d e2e-pebble` removes what it started.
+// killed run, `docker rm -f $(docker ps -aq --filter name=^e2e-)` removes what it started (container names carry a
+// per-run id, so two runs on one host never share or remove each other's containers).
 func TestE2ECore(t *testing.T) {
 	if os.Getenv("PAPERBOAT_E2E_CORE") == "" {
 		t.Skip("core end-to-end only: e2e.yml End-to-end core (PAPERBOAT_E2E_CORE=1, docker, PostgreSQL)")
@@ -60,7 +62,11 @@ func TestE2ECore(t *testing.T) {
 	for internal == port {
 		internal = freePort(t, "127.0.0.1")
 	}
-	e := &e2eCore{t: t, root: root, work: t.TempDir(), host: "e2e-server.example.test", port: port,
+	id := make([]byte, 4)
+	if _, err := rand.Read(id); err != nil {
+		t.Fatal(err)
+	}
+	e := &e2eCore{t: t, id: hex.EncodeToString(id), root: root, work: t.TempDir(), host: "e2e-server.example.test", port: port,
 		internal: "127.0.0.1:" + internal, mintKey: "e2e:" + base64.RawURLEncoding.EncodeToString(seed), machines: []string{"e2e-a", "e2e-b"},
 		previous: os.Getenv("PAPERBOAT_E2E_PREVIOUS")}
 	if os.Getenv("PAPERBOAT_E2E_THROUGHPUT") == "" { // e2e-t: the owner's, transferred to the team; e2e-d: the member's
@@ -163,13 +169,13 @@ func (e *e2eCore) updateToHead() {
 	})
 	for _, name := range e.machines {
 		e.step("update to HEAD: pb on "+name, func() error {
-			if _, err := e.run(2*time.Minute, "docker", "cp", filepath.Join(e.work, "head", "pb"), name+":/home/pbt/pb"); err != nil {
+			if _, err := e.run(2*time.Minute, "docker", "cp", filepath.Join(e.work, "head", "pb"), e.ctr(name)+":/home/pbt/pb"); err != nil {
 				return err
 			}
-			if _, err := e.run(time.Minute, "docker", "exec", name, "bash", "-c", "chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb"); err != nil {
+			if _, err := e.run(time.Minute, "docker", "exec", e.ctr(name), "bash", "-c", "chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb"); err != nil {
 				return err
 			}
-			if out, err := e.run(3*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", name, "./pb", "--server", e.serverURL(), "install"); err != nil {
+			if out, err := e.run(3*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", e.ctr(name), "./pb", "--server", e.serverURL(), "install"); err != nil {
 				return fmt.Errorf("pb install of HEAD: %w (%s)", err, lastBytes(out, 400))
 			}
 			return nil
@@ -214,6 +220,7 @@ func (e *e2eCore) checkHost() error {
 
 type e2eCore struct {
 	t          *testing.T
+	id         string // per run: container names carry it
 	root, work string
 	host, port string
 	internal   string // the server's plain HTTP address behind the TLS front
@@ -304,15 +311,27 @@ func (e *e2eCore) run(bound time.Duration, name string, args ...string) (string,
 	return stdout.String(), nil
 }
 
+// ctr is the docker container of a machine (the machine keeps its own name as hostname and in pb); pebble is
+// Pebble's. The run id makes both unique, so concurrent runs on one host cannot collide.
+func (e *e2eCore) ctr(name string) string { return name + "-" + e.id }
+func (e *e2eCore) pebble() string         { return "e2e-pebble-" + e.id }
+func (e *e2eCore) ctrs() []string {
+	out := make([]string, len(e.machines))
+	for i, name := range e.machines {
+		out[i] = e.ctr(name)
+	}
+	return out
+}
+
 // docker and pb run one command in a machine. Their 45 s bound keeps a hung command from outlasting the
 // waitFor around it; one-shot steps that need longer (install, pair) call run with their own bound.
 func (e *e2eCore) docker(machine string, args ...string) (string, error) {
-	return e.run(45*time.Second, "docker", append([]string{"exec", machine}, args...)...)
+	return e.run(45*time.Second, "docker", append([]string{"exec", e.ctr(machine)}, args...)...)
 }
 
 // pb runs the installed pb in a machine as its user pbt.
 func (e *e2eCore) pb(machine string, args ...string) (string, error) {
-	base := []string{"exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", machine, ".local/bin/pb"}
+	base := []string{"exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", e.ctr(machine), ".local/bin/pb"}
 	return e.run(45*time.Second, "docker", append(base, args...)...)
 }
 
@@ -459,8 +478,7 @@ func (e *e2eCore) stopServer() error {
 
 // startMachine starts a systemd container, trusts the test CA and copies pb into it.
 func (e *e2eCore) startMachine(name string) error {
-	_, _ = e.run(time.Minute, "docker", "rm", "-f", name)
-	if _, err := e.run(2*time.Minute, "docker", "run", "-d", "--name", name, "--hostname", name, "--privileged", "--cgroupns=host",
+	if _, err := e.run(2*time.Minute, "docker", "run", "-d", "--name", e.ctr(name), "--hostname", name, "--privileged", "--cgroupns=host",
 		"-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw", "--tmpfs", "/run", "--tmpfs", "/run/lock",
 		"--add-host", e.host+":"+e.gateway, "paperboat-e2e-machine"); err != nil {
 		return err
@@ -475,15 +493,15 @@ func (e *e2eCore) startMachine(name string) error {
 		return err
 	}
 	for _, args := range [][]string{
-		{"cp", filepath.Join(e.work, "ca.pem"), name + ":/usr/local/share/ca-certificates/e2e-ca.crt"},
-		{"exec", name, "update-ca-certificates"},
+		{"cp", filepath.Join(e.work, "ca.pem"), e.ctr(name) + ":/usr/local/share/ca-certificates/e2e-ca.crt"},
+		{"exec", e.ctr(name), "update-ca-certificates"},
 		// Own SSH host keys: the image's would be identical on both machines (pb ssh refuses clones).
-		{"exec", name, "bash", "-c", "rm -f /etc/ssh/ssh_host_* && ssh-keygen -A && systemctl restart ssh"},
-		{"exec", name, "bash", "-c", "loginctl enable-linger pbt && systemctl start user@1000.service"},
-		{"cp", filepath.Join(e.work, "pb"), name + ":/home/pbt/pb"},
-		{"exec", name, "bash", "-c", "chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb"},
+		{"exec", e.ctr(name), "bash", "-c", "rm -f /etc/ssh/ssh_host_* && ssh-keygen -A && systemctl restart ssh"},
+		{"exec", e.ctr(name), "bash", "-c", "loginctl enable-linger pbt && systemctl start user@1000.service"},
+		{"cp", filepath.Join(e.work, "pb"), e.ctr(name) + ":/home/pbt/pb"},
+		{"exec", e.ctr(name), "bash", "-c", "chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb"},
 		// A released pb has the production server built in; the skew check points it at this server.
-		{"exec", "-u", "pbt", name, "bash", "-c", "umask 077 && mkdir -p /home/pbt/.config/paperboat && " +
+		{"exec", "-u", "pbt", e.ctr(name), "bash", "-c", "umask 077 && mkdir -p /home/pbt/.config/paperboat && " +
 			"printf '{\"server_url\":\"" + e.serverURL() + "\"}' > /home/pbt/.config/paperboat/config.json"},
 	} {
 		if _, err := e.run(2*time.Minute, "docker", args...); err != nil {
@@ -503,21 +521,21 @@ func (e *e2eCore) pair(name string) error {
 	if err := json.Unmarshal(raw, &tokens); err != nil {
 		return err
 	}
-	if out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", name, "./pb", "--server", e.serverURL(), "install"); err != nil {
+	if out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt", e.ctr(name), "./pb", "--server", e.serverURL(), "install"); err != nil {
 		return fmt.Errorf("pb install: %w (%s)", err, lastBytes(out, 400))
 	}
 	tokenFile := filepath.Join(e.work, "token-"+name)
 	if err := os.WriteFile(tokenFile, []byte(tokens[name]), 0o600); err != nil {
 		return err
 	}
-	if _, err := e.run(time.Minute, "docker", "cp", tokenFile, name+":/home/pbt/token"); err != nil {
+	if _, err := e.run(time.Minute, "docker", "cp", tokenFile, e.ctr(name)+":/home/pbt/token"); err != nil {
 		return err
 	}
 	if _, err := e.docker(name, "bash", "-c", "chown pbt:pbt /home/pbt/token && chmod 600 /home/pbt/token"); err != nil {
 		return err
 	}
 	out, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", "-e", "HOME=/home/pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", "-w", "/home/pbt",
-		name, ".local/bin/pb", "--server", e.serverURL(), "pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json")
+		e.ctr(name), ".local/bin/pb", "--server", e.serverURL(), "pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json")
 	if err != nil {
 		return err
 	}
@@ -537,9 +555,9 @@ func (e *e2eCore) diagnose() {
 		}
 	}
 	for _, name := range e.machines {
-		out, _ := e.run(20*time.Second, "docker", "exec", "-u", "pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", name, "journalctl", "--user", "--no-pager", "-n", "60")
+		out, _ := e.run(20*time.Second, "docker", "exec", "-u", "pbt", "-e", "XDG_RUNTIME_DIR=/run/user/1000", e.ctr(name), "journalctl", "--user", "--no-pager", "-n", "60")
 		e.t.Logf("--- %s user journal\n%s", name, out)
-		out, _ = e.run(20*time.Second, "docker", "exec", name, "journalctl", "--no-pager", "-n", "60", "-u", "paperboat*")
+		out, _ = e.run(20*time.Second, "docker", "exec", e.ctr(name), "journalctl", "--no-pager", "-n", "60", "-u", "paperboat*")
 		e.t.Logf("--- %s system journal (paperboat units)\n%s", name, out)
 	}
 }
@@ -548,7 +566,7 @@ func (e *e2eCore) cleanup() {
 	_ = os.WriteFile(filepath.Join(e.work, "stop"), nil, 0o600)
 	_ = e.stopEdge()
 	_ = e.stopServer()
-	for _, name := range append([]string{"e2e-pebble"}, e.machines...) {
+	for _, name := range append([]string{e.pebble()}, e.ctrs()...) {
 		_, _ = e.run(time.Minute, "docker", "rm", "-f", name)
 	}
 }

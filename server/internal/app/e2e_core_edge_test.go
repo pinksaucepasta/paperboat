@@ -79,12 +79,11 @@ func (e *e2eCore) buildEdge() error {
 
 // startPebble runs Pebble with validation off and keeps its TLS root for the server's ACME client.
 func (e *e2eCore) startPebble() error {
-	_, _ = e.run(time.Minute, "docker", "rm", "-f", "e2e-pebble")
-	if _, err := e.run(5*time.Minute, "docker", "run", "-d", "--name", "e2e-pebble", "-p", "127.0.0.1:"+e.ports.acme+":14000", "-p", "127.0.0.1:"+e.ports.pebbleManagement+":15000",
+	if _, err := e.run(5*time.Minute, "docker", "run", "-d", "--name", e.pebble(), "-p", "127.0.0.1:"+e.ports.acme+":14000", "-p", "127.0.0.1:"+e.ports.pebbleManagement+":15000",
 		"-e", "PEBBLE_VA_ALWAYS_VALID=1", "-e", "PEBBLE_VA_NOSLEEP=1", e2ePebbleImage); err != nil {
 		return err
 	}
-	if _, err := e.run(time.Minute, "docker", "cp", "e2e-pebble:/test/certs/pebble.minica.pem", filepath.Join(e.work, "pebble.pem")); err != nil {
+	if _, err := e.run(time.Minute, "docker", "cp", e.pebble()+":/test/certs/pebble.minica.pem", filepath.Join(e.work, "pebble.pem")); err != nil {
 		return err
 	}
 	client, err := e.clientTrusting(filepath.Join(e.work, "pebble.pem"), nil)
@@ -350,7 +349,7 @@ func (e *e2eCore) publish(phase, machine, kind, port string, gated bool, args ..
 // (another machine's preview of that port), and a wildcard bind then fails with EADDRINUSE in the background.
 func (e *e2eCore) serveMarker(machine, port, marker string) error {
 	serve := fmt.Sprintf("mkdir -p /tmp/%[1]s && printf %%s %[2]q >/tmp/%[1]s/index.html && cd /tmp/%[1]s && (setsid python3 -m http.server %[1]s --bind 127.0.0.1 >/dev/null 2>&1 &)", port, marker)
-	_, err := e.run(time.Minute, "docker", "exec", "-u", "pbt", machine, "bash", "-c", serve)
+	_, err := e.run(time.Minute, "docker", "exec", "-u", "pbt", e.ctr(machine), "bash", "-c", serve)
 	return err
 }
 
@@ -439,7 +438,7 @@ func (e *e2eCore) unblockDirect() error { return e.directRules("-D") }
 func (e *e2eCore) directRules(action string) error {
 	addresses := map[string]string{}
 	for _, name := range e.machines {
-		out, err := e.run(time.Minute, "docker", "inspect", "-f", "{{.NetworkSettings.Networks.bridge.IPAddress}}", name) // Docker 29 dropped the top-level field
+		out, err := e.run(time.Minute, "docker", "inspect", "-f", "{{.NetworkSettings.Networks.bridge.IPAddress}}", e.ctr(name)) // Docker 29 dropped the top-level field
 		if err != nil {
 			return err
 		}

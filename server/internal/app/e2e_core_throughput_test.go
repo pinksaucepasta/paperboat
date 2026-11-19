@@ -23,7 +23,7 @@ func (e *e2eCore) assertTunnelThroughput() {
 	origin := e.machines[1]
 	var hostname string
 	e.step("throughput: origin serves a file", func() error {
-		_, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", origin, "bash", "-c", fmt.Sprintf(
+		_, err := e.run(2*time.Minute, "docker", "exec", "-u", "pbt", e.ctr(origin), "bash", "-c", fmt.Sprintf(
 			"mkdir -p /tmp/8082 && head -c %d /dev/urandom >/tmp/8082/big && cd /tmp/8082 && (setsid python3 -m http.server 8082 >/dev/null 2>&1 &)", throughputMiB<<20))
 		return err
 	})
