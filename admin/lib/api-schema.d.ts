@@ -9153,6 +9153,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/node-notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** System notices about our global nodes for the admin bell */
+        get: operations["admin_get_node_notices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/notices": {
         parameters: {
             query?: never;
@@ -9366,23 +9383,6 @@ export interface paths {
         put?: never;
         /** pbh reports one step of its running update */
         post: operations["selfhost_update_report"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/notices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** System notices about our global nodes for the admin bell */
-        get: operations["admin_get_notices"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -37234,6 +37234,40 @@ export interface operations {
             429: components["responses"]["Error"];
         };
     };
+    admin_get_node_notices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notices, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            notices: {
+                                id: string;
+                                title: string;
+                                body: string;
+                                link_url?: string;
+                                /** Format: date-time */
+                                sent_at: string;
+                                read: boolean;
+                            }[];
+                        };
+                    };
+                };
+            };
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     get_v1_admin_notices: {
         parameters: {
             query?: {
@@ -37899,40 +37933,6 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    admin_get_notices: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Notices, newest first. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: {
-                            notices: {
-                                id: string;
-                                title: string;
-                                body: string;
-                                link_url?: string;
-                                /** Format: date-time */
-                                sent_at: string;
-                                read: boolean;
-                            }[];
-                        };
-                    };
-                };
-            };
-            403: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };

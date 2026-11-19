@@ -7,7 +7,7 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui
 import { Time } from "@/components/time"
 import { useApiQuery, type Data } from "@/lib/api"
 
-type Notice = Data<"/v1/admin/notices">["notices"][number]
+type Notice = Data<"/v1/admin/node-notices">["notices"][number]
 const seenKey = "pb-admin-notices-seen"
 
 /**
@@ -15,7 +15,7 @@ const seenKey = "pb-admin-notices-seen"
  * or failed). Operators have no read receipts, so this browser remembers the newest notice it showed.
  */
 export function NoticesBell() {
-  const notices = useApiQuery<Data<"/v1/admin/notices">>(["admin-notices"], "/v1/admin/notices", 60_000).data?.notices ?? []
+  const notices = useApiQuery<Data<"/v1/admin/node-notices">>(["admin-notices"], "/v1/admin/node-notices", 60_000).data?.notices ?? []
   const [seen, setSeen] = useState(() => (typeof window === "undefined" ? "" : (localStorage.getItem(seenKey) ?? "")))
   const unread = notices.filter((notice) => notice.sent_at > seen).length
   const open = (next: boolean) => {

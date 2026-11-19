@@ -64180,6 +64180,83 @@
         ]
       }
     },
+    "/v1/admin/node-notices": {
+      "get": {
+        "operationId": "admin_get_node_notices",
+        "summary": "System notices about our global nodes for the admin bell",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notices, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "notices"
+                      ],
+                      "properties": {
+                        "notices": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "title",
+                              "body",
+                              "sent_at",
+                              "read"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "body": {
+                                "type": "string"
+                              },
+                              "link_url": {
+                                "type": "string"
+                              },
+                              "sent_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "read": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-operator-capability": "operations"
+      }
+    },
     "/v1/admin/notices": {
       "get": {
         "operationId": "get_v1_admin_notices",
@@ -65302,83 +65379,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/v1/admin/notices": {
-      "get": {
-        "operationId": "admin_get_notices",
-        "summary": "System notices about our global nodes for the admin bell",
-        "security": [
-          {
-            "operatorCookie": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Notices, newest first.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "notices"
-                      ],
-                      "properties": {
-                        "notices": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "required": [
-                              "id",
-                              "title",
-                              "body",
-                              "sent_at",
-                              "read"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "title": {
-                                "type": "string"
-                              },
-                              "body": {
-                                "type": "string"
-                              },
-                              "link_url": {
-                                "type": "string"
-                              },
-                              "sent_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "read": {
-                                "type": "boolean"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-operator-capability": "operations"
       }
     }
   }
