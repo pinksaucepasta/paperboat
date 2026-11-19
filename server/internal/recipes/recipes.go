@@ -101,7 +101,6 @@ type Recipe struct {
 	Name        string
 	Revision    int
 	Source      string
-	Format      string
 	Recipe      recipe.Recipe
 	CreatedBy   string
 	CreatedAt   time.Time
@@ -120,7 +119,6 @@ type Recipe struct {
 type Input struct {
 	Name   string
 	Source string
-	Format string // toml or json
 	// TokenID and Auth come from shared/recipe.Token on the creator's computer.
 	TokenID   string
 	Auth      []byte
@@ -145,10 +143,10 @@ func New(store *db.DB, writer *audit.Writer, remove MachineRemover) *Service {
 
 // parse validates the file with shared/recipe; the name comes from the request.
 func parse(in Input) (recipe.Recipe, error) {
-	if !recipe.ValidName(in.Name) || (in.Format != "toml" && in.Format != "json") {
+	if !recipe.ValidName(in.Name) {
 		return recipe.Recipe{}, ErrInvalidInput
 	}
-	r, err := recipe.Parse(in.Name+"."+in.Format, []byte(in.Source))
+	r, err := recipe.Parse(in.Name+recipe.Extension, []byte(in.Source))
 	var errs recipe.Errors
 	if errors.As(err, &errs) {
 		return recipe.Recipe{}, &FileError{Errors: errs}

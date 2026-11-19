@@ -18,14 +18,14 @@ func TestWindowsSourceAndExplicitDestinationAcceptStoredCaseSpelling(t *testing.
 	if err := os.Mkdir(stored, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(stored, "config-sync.toml"), []byte("# machine exceptions\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stored, "config-sync.jsonc"), []byte("// machine exceptions\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadSourceConfig(filepath.Join(root, "Paperboat", "config-sync.toml"), DefaultSourceConfigLimits()); err != nil {
+	if _, err := LoadSourceConfig(filepath.Join(root, "Paperboat", "config-sync.jsonc"), DefaultSourceConfigLimits()); err != nil {
 		t.Fatalf("native case alias rejected safe source: %v", err)
 	}
 	t.Setenv("APPDATA", root)
-	source, err := ParseSourceConfig([]byte("[paths.myapp]\nkind = 'directory'\ninclude = ['settings.json', 'keybindings.json']\nexclude = ['**/*.tmp']\n[os.windows.paths.myapp]\nlocal_path = '%APPDATA%/Paperboat/mapped'\n"), DefaultSourceConfigLimits())
+	source, err := ParseSourceConfig([]byte(`{"paths": {"myapp": {"kind": "directory", "include": ["settings.json", "keybindings.json"], "exclude": ["**/*.tmp"]}}, "os": {"windows": {"paths": {"myapp": {"local_path": "%APPDATA%/Paperboat/mapped"}}}}}`), DefaultSourceConfigLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestWindowsRuntimeConstructorsAcceptStoredCaseSpelling(t *testing.T) {
 
 func TestWindowsNewSourceHasStableUserAccessAndNeverOverwrites(t *testing.T) {
 	root := resolvedTempDir(t)
-	path := filepath.Join(root, "config-sync.toml")
+	path := filepath.Join(root, "config-sync.jsonc")
 	file, err := CreateSourceFile(path)
 	if err != nil {
 		t.Fatal(err)

@@ -19,7 +19,6 @@ type Recipe struct {
 	Revision    int64           `json:"revision"`
 	Token       string          `json:"token"`
 	Source      string          `json:"source"`
-	Format      string          `json:"format"`
 	Recipe      json.RawMessage `json:"recipe"`
 	CreatedBy   string          `json:"created_by"`
 	CreatedAt   time.Time       `json:"created_at"`
@@ -61,7 +60,6 @@ type RecipeVaultWrap struct {
 type RecipeCreate struct {
 	Name       string            `json:"name"`
 	Source     string            `json:"source"`
-	Format     string            `json:"format"`
 	TokenID    string            `json:"token_id"`
 	Auth       []byte            `json:"auth"`
 	PublicKey  []byte            `json:"public_key"`
@@ -70,7 +68,6 @@ type RecipeCreate struct {
 
 type RecipeUpdate struct {
 	Source     string            `json:"source"`
-	Format     string            `json:"format"`
 	VaultWraps []RecipeVaultWrap `json:"vault_wraps,omitempty"`
 }
 

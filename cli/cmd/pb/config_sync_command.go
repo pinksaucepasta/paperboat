@@ -47,7 +47,13 @@ func configSyncCobraCommand() *cobra.Command {
 	}}
 	path.Flags().Bool("json", false, "print the authoritative path as JSON")
 	init.Flags().Bool("json", false, "print the initialized path as JSON")
-	group.AddCommand(path, init)
+	schema := &cobra.Command{Use: "schema", Short: "Print the config sync file JSON Schema", Long: `Print the JSON Schema of config-sync.jsonc, the shared file in a repository and a
+machine's own file, for editors and AI agents that write it. The schema is built into pb,
+so this command works offline and needs no sign-in. Point a file at it with a "$schema" key.`, Example: "  pb config sync schema > config-sync.schema.json", Args: commandArgs(cobra.NoArgs), RunE: func(cmd *cobra.Command, _ []string) error {
+		_, err := cmd.OutOrStdout().Write(configsync.Schema)
+		return err
+	}}
+	group.AddCommand(path, init, schema)
 	for _, operation := range []string{"validate", "apply"} {
 		short := "Review the effective file configuration on this machine"
 		if operation == "apply" {
@@ -81,7 +87,7 @@ func initMachineConfigSource(path string) error {
 	if err != nil {
 		return configSourceInitializationFailure{cause: err}
 	}
-	if _, err = file.WriteString("# Paperboat config sync\n"); err != nil {
+	if _, err = file.WriteString("// Paperboat config sync\n"); err != nil {
 		return failConfigSourceInitialization(file, path, err)
 	}
 	if err = file.Sync(); err != nil {

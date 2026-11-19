@@ -6,7 +6,7 @@ Check and connect an HTTPS, SSH, or local Git repository
 
 Check and connect an HTTPS, SSH, or local Git repository
 
-Check, then register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. The repository is read first: it must have the branch with a commit, and a .paperboat/config-sync.toml on it, if present, must be valid. HTTP(S) and local repositories are read anonymously unless --credentials-file gives a profile (required for SSH); that profile is then saved on this machine. Use --name and --branch to select its display name and branch.
+Check, then register an HTTPS, HTTP, SSH URL or absolute local Git path without embedded credentials. The repository is read first: it must have the branch with a commit, and a .paperboat/config-sync.jsonc on it, if present, must be valid. HTTP(S) and local repositories are read anonymously unless --credentials-file gives a profile (required for SSH); that profile is then saved on this machine. Use --name and --branch to select its display name and branch.
 
 Configuration commands distinguish local CLI settings from synchronized repository content. Inspect current state before changing it; synchronization reports conflicts instead of silently overwriting one side. The --json option provides structured output for scripts where supported.
 

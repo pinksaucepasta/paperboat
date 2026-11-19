@@ -4,6 +4,14 @@
 JSON) and the token format, for the CLI, the server and, through the server's errors, the
 console. The server parses the source it is sent with this same package.
 
+## Schema
+
+`schema.json` is the recipe file's JSON Schema, generated from the Go types in `recipe.go` (struct tags
+hold each field's description, examples and limits; `schema_gen.go` holds what tags cannot say). Print it
+with `pb recipe schema`; the marketing site serves it at `/schemas/recipe.json`. Give it to an agent that
+writes recipe files, or point a file at it with `"$schema"`. After changing a type, regenerate it:
+`go test ./shared/recipe -run TestSchemaIsGenerated -update`; the same test fails when the file is stale.
+
 ## Token
 
 `pbr_<id>_<secret>`: `id` 10 and `secret` 52 lowercase base32 characters (32 random bytes), 67
@@ -20,10 +28,10 @@ or the team id. Errors use the server envelope `{"error": {"code", "message", "d
 
 | Method and path | Who | Request | Response |
 |---|---|---|---|
-| `POST /v1/workspaces/{ws}/recipes` | personal: owner; team: owners, admins | `{name, source, format: "toml"\|"json", token_id, auth, public_key, vault_wraps?: [{vault, wrapped}]}` | 201 `{recipe}`; same `token_id`+`auth` again returns the same recipe |
+| `POST /v1/workspaces/{ws}/recipes` | personal: owner; team: owners, admins | `{name, source, token_id, auth, public_key, vault_wraps?: [{vault, wrapped}]}` | 201 `{recipe}`; same `token_id`+`auth` again returns the same recipe |
 | `GET /v1/workspaces/{ws}/recipes` | members | — | `{recipes: [Recipe]}` |
 | `GET /v1/workspaces/{ws}/recipes/{name}` | members | — | `{recipe, machines: [Machine]}` |
-| `PUT /v1/workspaces/{ws}/recipes/{name}` | as create | `{source, format, vault_wraps?}` | `{recipe, previous, online_machines}` |
+| `PUT /v1/workspaces/{ws}/recipes/{name}` | as create | `{source, vault_wraps?}` | `{recipe, previous, online_machines}` |
 | `POST /v1/workspaces/{ws}/recipes/{name}/rotate` | as create | `{auth, public_key, confirm, vault_wraps (one per vault it reads, to the new key), machine_keys?: [{machine_id, sealed}]}` | `{recipe}`; no vault gets a new key |
 | `POST /v1/workspaces/{ws}/recipes/{name}/revoke` | as create | `{confirm}` | `{recipe, impact}` |
 | `GET /v1/workspaces/{ws}/env-vaults` | members | — | `{vaults: [Vault]}` (no envelope) |
@@ -37,7 +45,7 @@ or the team id. Errors use the server envelope `{"error": {"code", "message", "d
 | `PUT /v1/recipe-machine/apply` | a paired recipe session | `{revision, sections: {env\|config\|preview\|tunnel: any}, public_key?}` (the machine's own X25519 key; rotate seals the new recipe key to it) | 204 |
 
 ```text
-Recipe  {id, name, workspace, revision, token ("pbr_<id>_…"), source, format, recipe (canonical),
+Recipe  {id, name, workspace, revision, token ("pbr_<id>_…"), source, recipe (canonical),
          created_by ("user:<email>"), created_at, updated_at, expires_at, last_used_at, rotated_at,
          machines, max_machines?, public_key (Token.PublicKey: pb recipe update and the console wrap
          a newly read vault's key to it without the token)}
@@ -48,7 +56,7 @@ impact  {machines: [{id, name, online}], vaults: [name]}
 
 A recipe machine waits on the machine-event topic `recipe` (POST /v1/machines/{id}/events/wait) and
 refetches `GET /v1/recipe-machine` when it moves: on update, rotate, and a value change or new key
-of a vault the recipe reads. A `[[reach]]` tag no machine carries yet is accepted and matches once
+of a vault the recipe reads. A `reach` tag no machine carries yet is accepted and matches once
 a machine has it.
 
 Pairing from a recipe: `POST /v1/auth/recipe-sessions`, then `POST /v1/machines/setup` with that
@@ -61,14 +69,14 @@ A recipe session acts as the creator in the recipe's workspace only (another `wo
 Its writes are limited to its own machine (`/v1/machines/<own>/…`, `/v1/environment/hosts/<own>/…`),
 setup, `/v1/recipe-machine…`, and machine actions whose authorization checks the reach (exec,
 terminal, files, private access descriptors); anything else is 403 `outside_recipe_reach`. A
-machine action outside `[[reach]]` is 403 `outside_recipe_reach`.
+machine action outside `reach` is 403 `outside_recipe_reach`.
 
 Errors:
 
 | Code | Status | When; details |
 |---|---|---|
 | `invalid_recipe` | 422 | the file; `errors: [{line, column, path, message, text}]` (`text` is `file:line:col: message`) |
-| `invalid_recipe_reach` | 422 | a `[[reach]]` name the workspace policy does not have; `errors` (policy errors) |
+| `invalid_recipe_reach` | 422 | a `reach` name the workspace policy does not have; `errors` (policy errors) |
 | `unknown_vault`, `unknown_repository` | 422 | `{kind, name, known, suggestion}` |
 | `vault_key_missing` | 422 | the recipe newly reads a vault and no `vault_wraps` entry carries its key; `{vault}` |
 | `recipe_name_taken` | 409 | another live recipe has the name |

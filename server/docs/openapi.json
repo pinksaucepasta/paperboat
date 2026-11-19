@@ -18360,13 +18360,6 @@
           "source": {
             "type": "string"
           },
-          "format": {
-            "type": "string",
-            "enum": [
-              "toml",
-              "json"
-            ]
-          },
           "recipe": {
             "$ref": "#/components/schemas/RecipeBody"
           },
@@ -18418,7 +18411,6 @@
           "revision",
           "token",
           "source",
-          "format",
           "recipe",
           "created_by",
           "created_at",
@@ -61047,7 +61039,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "{name, source, format (toml|json), token_id, auth, vault_wraps?: [{vault, wrapped}]}"
+                "description": "{name, source, token_id, auth, vault_wraps?: [{vault, wrapped}]}"
               }
             }
           }

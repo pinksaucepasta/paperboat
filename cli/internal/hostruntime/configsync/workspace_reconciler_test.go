@@ -333,7 +333,7 @@ func newTestFileReconciler(t *testing.T, config WorkspaceReconcilerConfig) (*Pla
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(resolvedTempDir(t), "config-sync.toml")
+	path := filepath.Join(resolvedTempDir(t), "config-sync.jsonc")
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -81,7 +81,6 @@ type recipeJSON struct {
 	Revision    int           `json:"revision"`
 	Token       string        `json:"token"`
 	Source      string        `json:"source"`
-	Format      string        `json:"format"`
 	Recipe      recipe.Recipe `json:"recipe"`
 	CreatedBy   string        `json:"created_by"`
 	CreatedAt   time.Time     `json:"created_at"`
@@ -96,7 +95,7 @@ type recipeJSON struct {
 
 func recipeView(r recipes.Recipe) recipeJSON {
 	return recipeJSON{ID: r.ID, Name: r.Name, Workspace: r.Workspace.ID, Revision: r.Revision, Token: recipe.MaskedID(r.TokenID), Source: r.Source,
-		Format: r.Format, Recipe: r.Recipe, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, ExpiresAt: r.ExpiresAt,
+		Recipe: r.Recipe, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, ExpiresAt: r.ExpiresAt,
 		LastUsedAt: r.LastUsedAt, RotatedAt: r.RotatedAt, Machines: r.Machines, MaxMachines: r.MaxMachines, PublicKey: r.PublicKey}
 }
 
@@ -124,7 +123,6 @@ func recipeRequest(w http.ResponseWriter, r *http.Request) (string, workspace.Sc
 type recipeFileBody struct {
 	Name      string              `json:"name"`
 	Source    string              `json:"source"`
-	Format    string              `json:"format"`
 	TokenID   string              `json:"token_id"`
 	Auth      []byte              `json:"auth"`
 	PublicKey []byte              `json:"public_key"`
@@ -142,7 +140,7 @@ func recipeCreate(service *recipes.Service) http.HandlerFunc {
 		if !decodeStrictJSON(w, r, &in) {
 			return
 		}
-		out, err := service.Create(r.Context(), account, ws, recipes.Input{Name: in.Name, Source: in.Source, Format: in.Format, TokenID: in.TokenID, Auth: in.Auth, PublicKey: in.PublicKey, Wraps: in.Wraps})
+		out, err := service.Create(r.Context(), account, ws, recipes.Input{Name: in.Name, Source: in.Source, TokenID: in.TokenID, Auth: in.Auth, PublicKey: in.PublicKey, Wraps: in.Wraps})
 		if err != nil {
 			writeRecipeError(w, r, err)
 			return
@@ -160,13 +158,12 @@ func recipeUpdate(service *recipes.Service) http.HandlerFunc {
 		limitEnvironmentJSON(w, r, 256<<10)
 		var in struct {
 			Source string              `json:"source"`
-			Format string              `json:"format"`
 			Wraps  []recipes.VaultWrap `json:"vault_wraps"`
 		}
 		if !decodeStrictJSON(w, r, &in) {
 			return
 		}
-		before, after, err := service.Update(r.Context(), account, ws, recipes.Input{Name: r.PathValue("name"), Source: in.Source, Format: in.Format, Wraps: in.Wraps})
+		before, after, err := service.Update(r.Context(), account, ws, recipes.Input{Name: r.PathValue("name"), Source: in.Source, Wraps: in.Wraps})
 		if err != nil {
 			writeRecipeError(w, r, err)
 			return
@@ -310,7 +307,7 @@ func writeRecipeError(w http.ResponseWriter, r *http.Request, err error) {
 	case expectedHTTPErrorOnly(err, recipes.ErrForbidden):
 		writeError(w, r, http.StatusForbidden, "forbidden", "Recipes in a team are created by owners and admins (a recipe tags machines, which edits the access policy).")
 	case expectedHTTPErrorOnly(err, recipes.ErrInvalidInput):
-		writeError(w, r, http.StatusBadRequest, "validation_failed", "The request is not valid: name (lowercase letters, digits, -), format toml or json, token_id and a 32-byte auth.")
+		writeError(w, r, http.StatusBadRequest, "validation_failed", "The request is not valid: name (lowercase letters, digits, -), token_id and a 32-byte auth.")
 	case expectedHTTPErrorOnly(err, recipes.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "No such recipe in this workspace.")
 	case expectedHTTPErrorOnly(err, recipes.ErrVaultNotFound):

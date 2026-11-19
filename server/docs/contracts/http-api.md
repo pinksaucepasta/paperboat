@@ -191,7 +191,7 @@ guide.
 
 ### Configuration Sync
 
-User-edited configuration sources are TOML: shared `.paperboat/config-sync.toml`
+User-edited configuration sources are HuJSON (`.jsonc`): shared `.paperboat/config-sync.jsonc`
 and the machine file reported by `pb config sync path`. Empty or comment-only machine
 files inherit shared defaults. These source files are not HTTP payloads; config
 assignment, approval, and runtime API bodies remain JSON.

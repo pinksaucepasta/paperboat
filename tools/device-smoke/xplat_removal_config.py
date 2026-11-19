@@ -98,7 +98,7 @@ def check(kind, ident, action):
 def fresh_context(devices):
     ctx = x.Context(devices)
     try:
-        ctx.start({'.paperboat/config-sync.toml': x.SHARED.encode(), 'cfg/settings.json': b'{}\n'})
+        ctx.start({'.paperboat/config-sync.jsonc': x.SHARED.encode(), 'cfg/settings.json': b'{}\n'})
         for key in devices:
             ctx.assign(key)
     except BaseException:

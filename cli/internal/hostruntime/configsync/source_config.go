@@ -1,45 +1,48 @@
 package configsync
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/BurntSushi/toml"
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/tailscale/hujson"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
 )
 
-const SharedSourceConfigPath = ".paperboat/config-sync.toml"
+const SharedSourceConfigPath = ".paperboat/config-sync.jsonc"
 
 var ErrSourceConfigInvalid = errors.New("invalid config sync source configuration")
 var ErrMachineNameUnavailable = errors.New("config sync shared file has [machine.<name>] sections but this machine's Paperboat name is not known yet; update pb on every machine and run pb config sync apply again")
 var ErrConfigurationChanged = errors.New("config sync configuration changed; run pb config sync apply to approve the current files")
 
 type RepositoryTarget struct {
-	RepositoryID string `json:"repository_id" toml:"repository_id"`
-	URL          string `json:"url,omitempty" toml:"url"`
-	Branch       string `json:"branch,omitempty" toml:"branch"`
+	RepositoryID string `json:"repository_id" required:"true" minLength:"1" maxLength:"1024" doc:"The registered config sync repository to use: its id or name (pb config repository list)." examples:"[\"dotfiles\"]"`
+	URL          string `json:"url,omitempty" maxLength:"4096" doc:"The repository's Git URL. Normally left out: the registered repository's own URL is used." examples:"[\"https://git.example.test/me/dotfiles.git\"]"`
+	Branch       string `json:"branch,omitempty" maxLength:"1024" doc:"The Git branch to sync. Default: the repository's branch." examples:"[\"main\"]"`
 }
 type SourceConfig struct {
-	OS               map[string]SourceConfig `json:"os,omitempty" toml:"os"`
-	Machine          map[string]SourceConfig `json:"machine,omitempty" toml:"machine"`
-	Enabled          *bool                   `json:"enabled,omitempty" toml:"enabled"`
-	Pull             *RepositoryTarget       `json:"pull,omitempty" toml:"pull"`
-	Push             *RepositoryTarget       `json:"push,omitempty" toml:"push"`
-	Version          *int                    `json:"version,omitempty" toml:"version"`
-	Mode             *AssignmentMode         `json:"mode,omitempty" toml:"mode"`
-	AutomaticUpdates *bool                   `json:"automatic_updates,omitempty" toml:"automatic_updates"`
-	Paths            map[string]RuleConfig   `json:"paths,omitempty" toml:"paths"`
+	Schema           string                  `json:"$schema,omitempty" doc:"The JSON Schema of this file, so editors check and complete it. Ignored by Paperboat." examples:"[\"https://example.test/schemas/config-sync.json\"]"`
+	OS               map[string]SourceConfig `json:"os,omitempty" keys:"^(linux|darwin|windows)$" doc:"Settings for one operating system, keyed linux, darwin or windows. They override the file's top-level settings on that system. A section holds the same keys, except os and machine." examples:"[{\"windows\": {\"paths\": {\"editor/settings.json\": {\"local_path\": \"%APPDATA%/editor/settings.json\"}}}}]"`
+	Machine          map[string]SourceConfig `json:"machine,omitempty" keys:"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$" doc:"Settings for one machine, keyed by its Paperboat name. They override the os section. Only in the shared file in the repository, never in a machine's own file. A section holds the same keys, except os and machine." examples:"[{\"laptop\": {\"mode\": \"pull_only\"}}]"`
+	Enabled          *bool                   `json:"enabled,omitempty" default:"true" doc:"Whether config sync runs on this machine." examples:"[false]"`
+	Pull             *RepositoryTarget       `json:"pull,omitempty" doc:"The repository this machine pulls from." examples:"[{\"repository_id\": \"dotfiles\"}]"`
+	Push             *RepositoryTarget       `json:"push,omitempty" doc:"The repository this machine pushes to. Default: the pull repository." examples:"[{\"repository_id\": \"dotfiles\", \"branch\": \"laptop\"}]"`
+	Version          *int                    `json:"version,omitempty" minimum:"1" maximum:"1" doc:"The file format version. Only 1 exists." default:"1" examples:"[1]"`
+	Mode             *AssignmentMode         `json:"mode,omitempty" ref:"mode" doc:"Which way files move: pull_only, push_only or bidirectional." default:"\"bidirectional\"" examples:"[\"pull_only\"]"`
+	AutomaticUpdates *bool                   `json:"automatic_updates,omitempty" default:"false" doc:"Whether changes found in the repository are applied without asking." examples:"[true]"`
+	Paths            map[string]RuleConfig   `json:"paths,omitempty" keys:"^[^\\\\\\x00]+$" doc:"The files and directories that sync, keyed by their path inside the repository, like editor/settings.json: a relative path with / separators, no .. and no Windows reserved names. Two paths may not contain one another." examples:"[{\"shell/zshrc\": {\"local_path\": \"~/.zshrc\", \"kind\": \"file\"}}]"`
 }
 type RuleConfig struct {
-	LocalPath *string   `json:"local_path,omitempty" toml:"local_path"`
-	Kind      *string   `json:"kind,omitempty" toml:"kind"`
-	Include   *[]string `json:"include,omitempty" toml:"include"`
-	Exclude   *[]string `json:"exclude,omitempty" toml:"exclude"`
+	LocalPath *string   `json:"local_path,omitempty" minLength:"1" maxLength:"4096" doc:"Where the path lives on this machine: absolute, or starting with ~ or %APPDATA%. Destinations are never inferred." examples:"[\"~/.config/editor\", \"%APPDATA%/editor/settings.json\"]"`
+	Kind      *string   `json:"kind,omitempty" ref:"kind" doc:"file or directory." examples:"[\"directory\"]"`
+	Include   *[]string `json:"include,omitempty" maxItems:"64" minLength:"1" maxLength:"1024" doc:"For a directory: only files matching one of these patterns sync (** matches across directories). Patterns are relative, use /, and contain no .." examples:"[[\"*.json\", \"snippets/**\"]]"`
+	Exclude   *[]string `json:"exclude,omitempty" maxItems:"64" minLength:"1" maxLength:"1024" doc:"Files matching one of these patterns never sync. Same pattern rules as include." examples:"[[\"**/*.tmp\", \"private/**\"]]"`
 }
 type SourceConfigLimits struct{ MaxBytes, MaxPaths, MaxPatterns, MaxPatternBytes int }
 
@@ -80,56 +83,67 @@ func ParseSourceConfig(data []byte, limits SourceConfigLimits) (SourceConfig, er
 	if limits.MaxBytes < 1 || limits.MaxPaths < 1 || limits.MaxPatterns < 1 || limits.MaxPatternBytes < 1 || len(data) > limits.MaxBytes {
 		return SourceConfig{}, ErrSourceConfigInvalid
 	}
-	var config SourceConfig
-	metadata, err := toml.Decode(string(data), &config)
+	standard, err := hujson.Standardize(bytes.Clone(data)) // Standardize blanks comments in the buffer it is given
 	if err != nil {
+		if _, emptyErr := hujson.Standardize(append(data[:len(data):len(data)], "\n{}"...)); emptyErr == nil {
+			return SourceConfig{}, nil // only comments: nothing is configured
+		}
 		return SourceConfig{}, fmt.Errorf("%w: %v", ErrSourceConfigInvalid, err)
 	}
-	if undecoded := metadata.Undecoded(); len(undecoded) != 0 {
-		return SourceConfig{}, fmt.Errorf("%w: unknown key %q", ErrSourceConfigInvalid, undecoded[0].String())
+	var raw any
+	if err := json.Unmarshal(standard, &raw); err != nil {
+		return SourceConfig{}, fmt.Errorf("%w: %v", ErrSourceConfigInvalid, err)
 	}
-	for _, key := range metadata.Keys() {
-		parts := []string(key)
-		if (parts[0] == "os" || parts[0] == "machine") && len(parts) >= 3 {
-			parts = parts[2:]
-		}
-		expected := "Hash"
-		switch parts[0] {
-		case "version":
-			expected = "Integer"
-		case "enabled", "automatic_updates":
-			expected = "Bool"
-		case "mode":
-			expected = "String"
-		case "pull", "push":
-			if len(parts) > 1 {
-				if len(parts) != 2 || (parts[1] != "repository_id" && parts[1] != "url" && parts[1] != "branch") {
-					return SourceConfig{}, ErrSourceConfigInvalid
-				}
-				expected = "String"
-			}
-		case "paths":
-			if len(parts) > 2 {
-				if len(parts) != 3 || (parts[2] != "local_path" && parts[2] != "kind" && parts[2] != "include" && parts[2] != "exclude") {
-					return SourceConfig{}, ErrSourceConfigInvalid
-				}
-				expected = "String"
-				if parts[2] == "include" || parts[2] == "exclude" {
-					expected = "Array"
-				}
-			}
-		case "os", "machine":
-		default:
-			return SourceConfig{}, ErrSourceConfigInvalid
-		}
-		if metadata.Type(key...) != expected {
-			return SourceConfig{}, ErrSourceConfigInvalid
-		}
+	var config SourceConfig
+	// encoding/json matches keys without regard to case; the file's keys are exact.
+	if err := exactKeys(raw, reflect.TypeOf(config), ""); err != nil {
+		return SourceConfig{}, fmt.Errorf("%w: %v", ErrSourceConfigInvalid, err)
+	}
+	if err := json.Unmarshal(standard, &config); err != nil {
+		return SourceConfig{}, fmt.Errorf("%w: %v", ErrSourceConfigInvalid, err)
 	}
 	if err := validateSourceConfig(config, limits); err != nil {
 		return SourceConfig{}, err
 	}
 	return config, nil
+}
+
+// exactKeys rejects an object key that is not a field of t, spelled exactly as its json tag.
+func exactKeys(value any, t reflect.Type, path string) error {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if value == nil {
+		return fmt.Errorf("%s is null; leave the key out instead", path)
+	}
+	object, isObject := value.(map[string]any)
+	if !isObject {
+		return nil // the decoder reports a value of the wrong type
+	}
+	switch t.Kind() {
+	case reflect.Map:
+		for key, child := range object {
+			if err := exactKeys(child, t.Elem(), path+"/"+key); err != nil {
+				return err
+			}
+		}
+	case reflect.Struct:
+		fields := map[string]reflect.Type{}
+		for i := 0; i < t.NumField(); i++ {
+			name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			fields[name] = t.Field(i).Type
+		}
+		for key, child := range object {
+			field, known := fields[key]
+			if !known {
+				return fmt.Errorf("unknown key %q at %s", key, path+"/"+key)
+			}
+			if err := exactKeys(child, field, path+"/"+key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 func validateSourceConfig(config SourceConfig, limits SourceConfigLimits) error {
 	if config.Version != nil && *config.Version != 1 || config.Mode != nil && !config.Mode.Valid() || len(config.Paths) > limits.MaxPaths {

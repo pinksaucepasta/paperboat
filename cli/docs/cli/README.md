@@ -67,6 +67,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb config sync apply](pb_config_sync_apply.md) | Apply the reviewed file configuration to this machine |
 | [pb config sync init](pb_config_sync_init.md) | Create an empty machine configuration without overwriting existing files |
 | [pb config sync path](pb_config_sync_path.md) | Show the authoritative machine configuration path |
+| [pb config sync schema](pb_config_sync_schema.md) | Print the config sync file JSON Schema |
 | [pb config sync validate](pb_config_sync_validate.md) | Review the effective file configuration on this machine |
 | [pb config team-default-adopt](pb_config_team-default-adopt.md) | Adopt a team default using your provider access |
 | [pb config team-default-set](pb_config_team-default-set.md) | Set a team's default pull repository |
@@ -174,6 +175,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb recipe list](pb_recipe_list.md) | List the workspace's recipes |
 | [pb recipe revoke](pb_recipe_revoke.md) | Revoke a recipe and remove its machines |
 | [pb recipe rotate](pb_recipe_rotate.md) | Give a recipe a new token; its machines keep working |
+| [pb recipe schema](pb_recipe_schema.md) | Print the recipe file JSON Schema |
 | [pb recipe show](pb_recipe_show.md) | Show a recipe, its file and its machines |
 | [pb recipe update](pb_recipe_update.md) | Change a recipe from its file |
 | [pb recordings](pb_recordings.md) | List and replay terminal recordings |

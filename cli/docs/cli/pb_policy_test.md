@@ -19,7 +19,7 @@ pb policy test [file] [flags]
 
 ```
   pb policy test
-  pb policy test policy.hujson
+  pb policy test policy.jsonc
 ```
 
 ### Options

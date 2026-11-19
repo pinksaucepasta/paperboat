@@ -1,91 +1,543 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Paperboat workspace policy",
-  "description": "Who may use what on which machines of one workspace. Rules allow or deny; a deny wins over an allow; anything no rule allows is denied. The owner of a personal machine always keeps access to it. Reference: shared/policy/README.md.",
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "$schema": {"type": "string", "description": "Optional; editors use it for completion."},
-    "allow_private_access": {"type": "boolean", "description": "Team workspaces only. When false (the default), no rule gives private_access."},
-    "groups": {
-      "type": "object",
-      "description": "Named sets of members, used in src.",
-      "propertyNames": {"pattern": "^group:[a-z0-9][a-z0-9._-]{0,62}$"},
-      "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/user"}}
-    },
-    "tags": {
-      "type": "object",
-      "description": "Machine tags, used in dst.",
-      "propertyNames": {"pattern": "^tag:[a-z0-9][a-z0-9._-]{0,62}$"},
-      "additionalProperties": {"type": "array", "items": {"type": "string", "pattern": "^machine:[^*]+$"}}
-    },
-    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
-    "tests": {"type": "array", "items": {"$ref": "#/$defs/test"}},
-    "config_sync": {
-      "type": "array",
-      "description": "Which config sync repository machines use, by tag. The first matching rule wins; an explicit per-machine choice comes first, and the machine owner still applies it.",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["dst", "repository"],
-        "properties": {
-          "dst": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^(machine:\\*|tag:[a-z0-9][a-z0-9._-]{0,62})$"}},
-          "repository": {"type": "string", "description": "Git URL (https://, ssh://, user@host:path) or absolute path of the repository."},
-          "branch": {"type": "string", "description": "Branch; default main."},
-          "note": {"type": "string"}
-        }
-      }
-    }
-  },
   "$defs": {
-    "user": {"type": "string", "pattern": "^user:.+@.+$"},
-    "subject": {
-      "type": "string",
-      "description": "user:<email>, group:<name>, role:owner, role:admin (owners and admins), role:billing, role:auditor (exact role), role:member (everyone) or * (every member).",
-      "pattern": "^(\\*|user:.+@.+|group:[a-z0-9][a-z0-9._-]{0,62}|role:(owner|admin|billing|auditor|member))$"
-    },
-    "target": {
-      "type": "string",
-      "description": "machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team. One rule's dst is all machines/tags, all previews/tunnels, or env:team.",
-      "pattern": "^(machine:.+|tag:[a-z0-9][a-z0-9._-]{0,62}|preview:.+|tunnel:.+|env:team)$"
-    },
     "action": {
-      "type": "string",
-      "description": "Machine actions (machine:, tag:): terminal, exec, managed_ssh, files, preview_manage, tunnel_manage, private_access, inspect, replay, or * for all of these. Team recordings (machine:, tag:; never part of * in allow or deny): record, recording_view. Preview/tunnel actions: inspect, replay. ENV actions (env:team): env_read, env_write.",
-      "enum": ["*", "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access", "inspect", "replay", "record", "recording_view", "env_read", "env_write"]
+      "description": "Machine actions (machine:, tag:): terminal, exec, managed_ssh, files, preview_manage, tunnel_manage, private_access, inspect, replay, or * for all of these. Team recordings (machine:, tag:; never part of *): record, recording_view. Preview and tunnel actions: inspect, replay. ENV actions (env:team): env_read, env_write.",
+      "enum": [
+        "*",
+        "terminal",
+        "exec",
+        "managed_ssh",
+        "files",
+        "preview_manage",
+        "tunnel_manage",
+        "private_access",
+        "inspect",
+        "replay",
+        "record",
+        "recording_view",
+        "env_read",
+        "env_write"
+      ],
+      "examples": [
+        "terminal",
+        "exec",
+        "private_access"
+      ],
+      "type": "string"
+    },
+    "configSyncRule": {
+      "additionalProperties": false,
+      "description": "Chooses the config sync repository for the machines in dst.",
+      "properties": {
+        "branch": {
+          "default": "main",
+          "description": "The Git branch to sync. Default: main.",
+          "examples": [
+            "main",
+            "machines"
+          ],
+          "type": "string"
+        },
+        "dst": {
+          "description": "The machines this rule covers: machine:* or tag:<name> (a tag defined in tags).",
+          "examples": [
+            [
+              "tag:ci"
+            ],
+            [
+              "machine:*"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/configSyncTarget"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "note": {
+          "description": "A reminder for people reading the file; not used.",
+          "examples": [
+            "CI machines share one config repository"
+          ],
+          "type": "string"
+        },
+        "repository": {
+          "description": "The config sync repository: a Git URL (https://, ssh:// or user@host:path) or an absolute path.",
+          "examples": [
+            "https://git.example.test/team/config.git",
+            "git@git.example.test:team/config.git"
+          ],
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "dst",
+        "repository"
+      ],
+      "type": "object"
+    },
+    "configSyncTarget": {
+      "description": "machine:* or a tag defined in tags.",
+      "examples": [
+        "machine:*",
+        "tag:ci"
+      ],
+      "pattern": "^(machine:\\*|tag:[a-z0-9][a-z0-9._-]{0,62})$",
+      "type": "string"
     },
     "port": {
-      "description": "A port (5432) or an inclusive range (\"8000-8100\").",
+      "description": "A port (5432) or an inclusive range (\"8000-8100\"), from 1 to 65535.",
+      "examples": [
+        5432,
+        "8000-8100"
+      ],
       "oneOf": [
-        {"type": "integer", "minimum": 1, "maximum": 65535},
-        {"type": "string", "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$"}
+        {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+          "type": "string"
+        }
       ]
     },
     "rule": {
-      "type": "object",
       "additionalProperties": false,
-      "required": ["src", "dst"],
-      "oneOf": [{"required": ["allow"]}, {"required": ["deny"]}],
+      "description": "One rule: who (src) may or may not (allow or deny) do what (actions) on which targets (dst).",
+      "examples": [
+        {
+          "allow": [
+            "terminal",
+            "exec"
+          ],
+          "dst": [
+            "tag:ci"
+          ],
+          "src": [
+            "group:platform"
+          ]
+        },
+        {
+          "allow": [
+            "private_access"
+          ],
+          "dst": [
+            "machine:db"
+          ],
+          "ports": [
+            5432
+          ],
+          "src": [
+            "role:member"
+          ]
+        }
+      ],
+      "if": {
+        "required": [
+          "ports"
+        ]
+      },
+      "oneOf": [
+        {
+          "required": [
+            "allow"
+          ]
+        },
+        {
+          "required": [
+            "deny"
+          ]
+        }
+      ],
       "properties": {
-        "src": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/subject"}},
-        "dst": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/target"}},
-        "allow": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/action"}},
-        "deny": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/action"}},
-        "ports": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/port"}, "description": "Only with allow or deny exactly [\"private_access\"]. Default: an allow covers 80, 443 and 1024-65535, a deny every port."},
-        "note": {"type": "string"}
-      }
+        "allow": {
+          "description": "The actions this rule gives. Exactly one of allow and deny is set. * means every machine action (not record or recording_view).",
+          "examples": [
+            [
+              "terminal",
+              "exec"
+            ],
+            [
+              "*"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "deny": {
+          "description": "The actions this rule takes away. A deny wins over every allow. Exactly one of allow and deny is set.",
+          "examples": [
+            [
+              "private_access"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "dst": {
+          "description": "What: machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team. One rule's dst is all machines and tags, all previews and tunnels, or env:team.",
+          "examples": [
+            [
+              "tag:ci"
+            ],
+            [
+              "machine:web",
+              "machine:db"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/target"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "note": {
+          "description": "A reminder for people reading the file; not used.",
+          "examples": [
+            "Platform team runs CI"
+          ],
+          "type": "string"
+        },
+        "ports": {
+          "description": "Only when allow or deny is exactly [\"private_access\"]: the ports it covers. Default: an allow covers 80, 443 and 1024-65535, a deny every port.",
+          "examples": [
+            [
+              5432,
+              "8000-8100"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/port"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "src": {
+          "description": "Who: user:<email>, group:<name>, role:owner, role:admin, role:billing, role:auditor, role:member or * (every member).",
+          "examples": [
+            [
+              "group:platform"
+            ],
+            [
+              "user:ana@example.test",
+              "role:admin"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/subject"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "src",
+        "dst"
+      ],
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "allow": {
+                "const": [
+                  "private_access"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "properties": {
+              "deny": {
+                "const": [
+                  "private_access"
+                ]
+              }
+            },
+            "required": [
+              "deny"
+            ]
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "subject": {
+      "description": "Who a rule covers: user:<email>, group:<name>, role:owner, role:admin (owners and admins), role:billing, role:auditor (exact role), role:member (everyone) or * (every member).",
+      "examples": [
+        "user:ana@example.test",
+        "group:platform",
+        "role:admin",
+        "*"
+      ],
+      "pattern": "^(\\*|user:.+@.+|group:[a-z0-9][a-z0-9._-]{0,62}|role:(owner|admin|billing|auditor|member))$",
+      "type": "string"
+    },
+    "target": {
+      "description": "What a rule covers: machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team.",
+      "examples": [
+        "machine:web",
+        "machine:*",
+        "tag:ci",
+        "preview:demo",
+        "tunnel:db",
+        "env:team"
+      ],
+      "pattern": "^(machine:.+|tag:[a-z0-9][a-z0-9._-]{0,62}|preview:.+|tunnel:.+|env:team)$",
+      "type": "string"
     },
     "test": {
-      "type": "object",
       "additionalProperties": false,
-      "required": ["src", "dst"],
-      "anyOf": [{"required": ["allow"]}, {"required": ["deny"]}],
+      "anyOf": [
+        {
+          "required": [
+            "allow"
+          ]
+        },
+        {
+          "required": [
+            "deny"
+          ]
+        }
+      ],
+      "description": "An expectation checked on every save: this member can (allow) or cannot (deny) do these actions on this target.",
+      "examples": [
+        {
+          "deny": [
+            "files"
+          ],
+          "dst": "machine:ci-1",
+          "src": "user:ana@example.test"
+        }
+      ],
       "properties": {
-        "src": {"$ref": "#/$defs/user"},
-        "dst": {"type": "string", "pattern": "^(machine:[^*]+|preview:.+|tunnel:.+|env:team)$"},
-        "allow": {"type": "array", "items": {"type": "string", "description": "An action, or private_access:<port>."}},
-        "deny": {"type": "array", "items": {"type": "string", "description": "An action, or private_access:<port>."}}
-      }
+        "allow": {
+          "description": "Actions that must be allowed: an action name, or private_access:<port>. A test has allow, deny or both.",
+          "examples": [
+            [
+              "exec",
+              "private_access:5432"
+            ]
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "description": "Actions that must be denied: an action name, or private_access:<port>.",
+          "examples": [
+            [
+              "files"
+            ]
+          ],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dst": {
+          "description": "One target: machine:<alias>, preview:<name>, tunnel:<name> or env:team.",
+          "examples": [
+            "machine:ci-1"
+          ],
+          "pattern": "^(machine:[^*]+|preview:.+|tunnel:.+|env:team)$",
+          "type": "string"
+        },
+        "src": {
+          "$ref": "#/$defs/user",
+          "description": "The member to test, as user:<email>.",
+          "examples": [
+            "user:ana@example.test"
+          ]
+        }
+      },
+      "required": [
+        "src",
+        "dst"
+      ],
+      "type": "object"
+    },
+    "user": {
+      "description": "A workspace member: user:<email>.",
+      "examples": [
+        "user:ana@example.test"
+      ],
+      "pattern": "^user:.+@.+$",
+      "type": "string"
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Who may use what on which machines of one workspace. Rules allow or deny; a deny wins over an allow; anything no rule allows is denied. The owner of a personal machine always keeps access to it. Read and written with pb policy get and pb policy set; the file may hold // comments and trailing commas (HuJSON).",
+  "examples": [
+    {
+      "groups": {
+        "group:platform": [
+          "user:ana@example.test"
+        ]
+      },
+      "tags": {
+        "tag:ci": [
+          "machine:ci-1"
+        ]
+      },
+      "rules": [
+        {
+          "src": [
+            "group:platform"
+          ],
+          "dst": [
+            "tag:ci"
+          ],
+          "allow": [
+            "terminal",
+            "exec",
+            "files"
+          ]
+        }
+      ],
+      "tests": [
+        {
+          "src": "user:ana@example.test",
+          "dst": "machine:ci-1",
+          "allow": [
+            "exec"
+          ]
+        }
+      ]
+    }
+  ],
+  "properties": {
+    "$schema": {
+      "description": "The JSON Schema of this file, so editors check and complete it. Ignored by Paperboat.",
+      "examples": [
+        "https://example.test/schemas/policy.json"
+      ],
+      "type": "string"
+    },
+    "allow_private_access": {
+      "default": false,
+      "description": "Team workspaces only. When false (the default), no rule gives private_access. In a personal workspace private access is always on and this key is an error.",
+      "examples": [
+        true
+      ],
+      "type": "boolean"
+    },
+    "config_sync": {
+      "description": "Which config sync repository machines use, chosen by tag. The first matching rule wins; an explicit per-machine choice comes first, and the machine owner still applies it.",
+      "examples": [
+        [
+          {
+            "branch": "main",
+            "dst": [
+              "tag:ci"
+            ],
+            "repository": "https://git.example.test/team/ci-config.git"
+          }
+        ]
+      ],
+      "items": {
+        "$ref": "#/$defs/configSyncRule"
+      },
+      "type": "array"
+    },
+    "groups": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/user"
+        },
+        "type": "array"
+      },
+      "description": "Named sets of workspace members, used in a rule's src as group:<name>. Each group lists members as user:<email>.",
+      "examples": [
+        {
+          "group:platform": [
+            "user:ana@example.test",
+            "user:bo@example.test"
+          ]
+        }
+      ],
+      "propertyNames": {
+        "pattern": "^group:[a-z0-9][a-z0-9._-]{0,62}$"
+      },
+      "type": "object"
+    },
+    "rules": {
+      "description": "Who may do what on which targets. A deny always wins over an allow, and what no rule allows is denied; the order of rules carries no meaning.",
+      "examples": [
+        [
+          {
+            "allow": [
+              "terminal",
+              "exec"
+            ],
+            "dst": [
+              "tag:ci"
+            ],
+            "src": [
+              "group:platform"
+            ]
+          }
+        ]
+      ],
+      "items": {
+        "$ref": "#/$defs/rule"
+      },
+      "type": "array"
+    },
+    "tags": {
+      "additionalProperties": {
+        "items": {
+          "pattern": "^machine:[^*]+$",
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "description": "Machine tags, used in a rule's dst as tag:<name>. Each tag lists machines as machine:<alias>.",
+      "examples": [
+        {
+          "tag:ci": [
+            "machine:ci-1",
+            "machine:ci-2"
+          ]
+        }
+      ],
+      "propertyNames": {
+        "pattern": "^tag:[a-z0-9][a-z0-9._-]{0,62}$"
+      },
+      "type": "object"
+    },
+    "tests": {
+      "description": "Expectations checked every time the policy is saved; a failing test refuses the save.",
+      "examples": [
+        [
+          {
+            "allow": [
+              "exec"
+            ],
+            "dst": "machine:ci-1",
+            "src": "user:ana@example.test"
+          }
+        ]
+      ],
+      "items": {
+        "$ref": "#/$defs/test"
+      },
+      "type": "array"
+    }
+  },
+  "title": "Paperboat workspace policy",
+  "type": "object"
 }

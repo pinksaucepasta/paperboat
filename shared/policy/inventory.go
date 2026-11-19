@@ -66,9 +66,9 @@ type Recipe struct {
 // ScopeEntry is one part of an API token's scope or one [[reach]] entry of a recipe, in the policy file's names:
 // {"dst": ["tag:ci"], "allow": ["exec"]}. Ports narrow private_access as in a rule.
 type ScopeEntry struct {
-	Dst   []string    `json:"dst"`
-	Allow []string    `json:"allow"`
-	Ports []PortRange `json:"ports,omitempty"`
+	Dst   []string    `json:"dst" required:"true" ref:"target" minItems:"1" doc:"The targets this entry covers: machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team." examples:"[[\"tag:ci\"], [\"machine:*\"]]"`
+	Allow []string    `json:"allow" required:"true" ref:"scopeAction" minItems:"1" doc:"The actions allowed on those targets; * means every machine action." examples:"[[\"exec\", \"files\"], [\"*\"]]"`
+	Ports []PortRange `json:"ports,omitempty" minItems:"1" doc:"Only when allow is exactly [\"private_access\"]: the ports it covers." examples:"[[5432, \"8000-8100\"]]"`
 }
 
 // Limits bound a policy. The values come from the server configuration (one place, the same

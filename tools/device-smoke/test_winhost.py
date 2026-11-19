@@ -1345,9 +1345,10 @@ class FreePlanAndTagsOnTheDevice(unittest.TestCase):
 class ConfigSyncPairOnTheDevice(unittest.TestCase):
     def test_the_windows_side_gets_its_own_repository_endpoint_in_the_machine_file(self):
         import config_sync_pair
-        self.assertIn('[pull]\nrepository_id = "r1"\nurl = "http://127.0.0.1:9/p.git"\n[push]\nrepository_id = "r1"\nurl = "http://127.0.0.1:9/p.git"\n',
-                      config_sync_pair.machine_file('r1', url='http://127.0.0.1:9/p.git'))
-        self.assertNotIn('url =', config_sync_pair.machine_file('r1'))
+        endpoint = {'repository_id': 'r1', 'url': 'http://127.0.0.1:9/p.git'}
+        parsed = json.loads(config_sync_pair.machine_file('r1', url='http://127.0.0.1:9/p.git'))
+        self.assertEqual((endpoint, endpoint), (parsed['pull'], parsed['push']))
+        self.assertNotIn('url', json.loads(config_sync_pair.machine_file('r1'))['pull'])
 
     def test_the_side_windows_is_the_device_and_anything_else_a_shell(self):
         import config_sync_pair
@@ -2621,7 +2622,6 @@ class ConfigSyncPlumbing(unittest.TestCase):
             self.assertEqual(('edited again\n', 'kept\n'), (device_value(), device_value('other.txt')))
 
     def test_windows_steps_replace_chmod_systemctl_and_the_mode_check(self):
-        import tomllib
         sync, calls = self.sync, []
         services = [{'Name': 'PaperboatRuntimeConfig-ab12', 'Status': 'Running', 'StartType': 'Automatic'}]
         device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, mkdir=lambda path: None,
@@ -2630,7 +2630,7 @@ class ConfigSyncPlumbing(unittest.TestCase):
                                  service=lambda action, pattern: calls.append((action, pattern)),
                                  services=lambda pattern: services, files=lambda directory: ['repository-1.json'],
                                  other_access=lambda path: calls.append(('acl', str(path))) or [])
-        machine_file = winhost.RemotePath(device, r'C:\Users\u\AppData\Roaming\Paperboat\config-sync.toml')
+        machine_file = winhost.RemotePath(device, r'C:\Users\u\AppData\Roaming\Paperboat\config-sync.jsonc')
         runtime = winhost.RemotePath(device, r'C:\Users\u\AppData\Local\Paperboat\runtime')
         managed = r'C:\Users\u\.cache\pb-cfg-lifecycle\managed.txt'
         with patch.object(sync, 'DEVICE', device), patch.object(sync, 'MACHINE_FILE', machine_file), \
@@ -2649,7 +2649,7 @@ class ConfigSyncPlumbing(unittest.TestCase):
             device.files = lambda directory: []
             self.assertFalse(sync.credentials_private())
         self.assertEqual(('write', str(machine_file)), calls[0][:2])
-        parsed = tomllib.loads(calls[0][2].decode())
+        parsed = json.loads(calls[0][2].decode())
         self.assertEqual((managed, 'repo1'), (parsed['paths']['cfg/value.txt']['local_path'], parsed['pull']['repository_id']))
         self.assertEqual((winhost.PRIVATE, {'path': str(machine_file)}), calls[1])
         self.assertEqual([('stop', 'PaperboatRuntimeConfig*'), ('start', 'PaperboatRuntimeConfig*')], calls[2:4])
@@ -2664,12 +2664,12 @@ class ConfigSyncPlumbing(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, 'active\n', '')
         self.assertIsNone(sync.DEVICE)
         with tempfile.TemporaryDirectory() as directory, patch('subprocess.run', run), \
-                patch.object(sync, 'MACHINE_FILE', pathlib.Path(directory) / 'config-sync.toml'):
+                patch.object(sync, 'MACHINE_FILE', pathlib.Path(directory) / 'config-sync.jsonc'):
             sync.pb('config', 'status', '--json', stdin='x')
             sync.systemctl('stop', sync.UNIT)
             sync.write_machine_file('repo1', pathlib.Path('/home/u/.cache/pb-cfg-lifecycle/managed.txt'))
             self.assertEqual(0o600, sync.MACHINE_FILE.stat().st_mode & 0o777)
-            self.assertIn('local_path = "/home/u/.cache/pb-cfg-lifecycle/managed.txt"', sync.MACHINE_FILE.read_text())
+            self.assertEqual('/home/u/.cache/pb-cfg-lifecycle/managed.txt', json.loads(sync.MACHINE_FILE.read_text())['paths']['cfg/value.txt']['local_path'])
             self.assertEqual(8022, sync.Fixture().reach(8022))
         self.assertEqual(['pb', 'config', 'status', '--json'], ran[0][0])
         self.assertEqual({'input': 'x', 'stdin': None, 'capture_output': True, 'text': True, 'timeout': 180, 'env': None}, ran[0][1])

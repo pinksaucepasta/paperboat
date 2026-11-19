@@ -33,7 +33,7 @@ NAME = os.environ.get('XPLAT_REPO_NAME', 'xplat-config-fixture')
 SYNC_WAIT = 240
 GIT_ENV = 'GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@example.test GIT_COMMITTER_NAME=x GIT_COMMITTER_EMAIL=x@example.test'
 
-# Where an app's files live on each OS, as written in the TOML and as the filesystem sees them (below the home directory).
+# Where an app's files live on each OS, as written in the config and as the filesystem sees them (below the home directory).
 APP_DIR = os.environ.get('XPLAT_APP_DIR', 'xplat')  # one per lane: a run starts by deleting this directory on every device
 RULE_ROOT = {'linux': '~/.config/' + APP_DIR, 'darwin': '~/Library/Application Support/' + APP_DIR, 'windows': '%APPDATA%/' + APP_DIR}
 REAL_ROOT = {'linux': '.config/' + APP_DIR, 'darwin': 'Library/Application Support/' + APP_DIR, 'windows': 'AppData/Roaming/' + APP_DIR}
@@ -123,9 +123,11 @@ def wait(what, check, seconds=SYNC_WAIT, every=4):
     raise AssertionError('timed out waiting for ' + what)
 
 
-def machine_file(repository_id, extra='', url=None, mode='bidirectional'):
-    target = 'repository_id = "%s"\n' % repository_id + ('url = "%s"\n' % url if url else '')
-    return ('version = 1\nenabled = true\nautomatic_updates = true\nmode = "%s"\n[pull]\n%s[push]\n%s%s' % (mode, target, target, extra))
+def machine_file(repository_id, extra=None, url=None, mode='bidirectional', automatic=True):
+    """A machine file as JSON; `extra` is a dict of more top-level keys (paths, os, machine)."""
+    target = {'repository_id': repository_id, **({'url': url} if url else {})}
+    return json.dumps({'version': 1, 'enabled': True, 'automatic_updates': automatic, 'mode': mode,
+                       'pull': target, 'push': target, **(extra or {})})
 
 
 class Context:
@@ -174,10 +176,9 @@ class Context:
             assert saved['state'] == 'saved', saved
             assert self.password not in outputs(dev)
 
-    def assign(self, key, extra='', mode='bidirectional', automatic=True):
+    def assign(self, key, extra=None, mode='bidirectional', automatic=True):
         dev = self.devices[key]
-        text = machine_file(self.repository_id, extra, self.urls[key], mode)
-        self.write_sync_file(dev, text if automatic else text.replace('automatic_updates = true', 'automatic_updates = false'))
+        self.write_sync_file(dev, machine_file(self.repository_id, extra, self.urls[key], mode, automatic))
         projection = pbj(dev, 'config', 'sync', 'validate')
         apply(dev)
         return projection
@@ -262,17 +263,21 @@ def check(row, pair, action, label=''):
         return name
 
 
-SHARED = (
-    'version = 1\n'
-    '[paths."cfg/settings.json"]\nkind = "file"\nlocal_path = "~/xplat-default/settings.json"\n'
-    '[os.linux.paths."cfg/settings.json"]\nlocal_path = "{linux}/settings.json"\n'
-    '[os.darwin.paths."cfg/settings.json"]\nlocal_path = "{darwin}/settings.json"\n'
-    '[os.windows.paths."cfg/settings.json"]\nlocal_path = "{windows}/settings.json"\n'
-    '[paths."cfg/app"]\nkind = "directory"\ninclude = ["**/*.json", "**/*.txt"]\nexclude = ["**/*.tmp"]\nlocal_path = "~/xplat-default/app"\n'
-    '[os.linux.paths."cfg/app"]\nlocal_path = "{linux}/app"\n'
-    '[os.darwin.paths."cfg/app"]\nlocal_path = "{darwin}/app"\n'
-    '[os.windows.paths."cfg/app"]\nlocal_path = "{windows}/app"\n'
-).format(**RULE_ROOT)
+SHARED_CONFIG = {
+    'version': 1,
+    'paths': {'cfg/settings.json': {'kind': 'file', 'local_path': '~/xplat-default/settings.json'},
+              'cfg/app': {'kind': 'directory', 'include': ['**/*.json', '**/*.txt'], 'exclude': ['**/*.tmp'],
+                          'local_path': '~/xplat-default/app'}},
+    'os': {os_name: {'paths': {'cfg/settings.json': {'local_path': root + '/settings.json'},
+                               'cfg/app': {'local_path': root + '/app'}}} for os_name, root in RULE_ROOT.items()},
+}
+SHARED = json.dumps(SHARED_CONFIG)
+
+
+def shared_with_machine(name, local_path):
+    """The shared file plus a machine.<name> entry that moves cfg/settings.json."""
+    entry = {name: {'paths': {'cfg/settings.json': {'local_path': local_path}}}}
+    return json.dumps({**SHARED_CONFIG, 'machine': entry})
 
 
 def rules(dev, projection):
@@ -314,13 +319,12 @@ def x01_variables(ctx, a, b, direction):
     """X-01: a variable that does not exist on this OS fails with unsupported_destination, no substitute path."""
     for dev in (a, b):
         bad = '%APPDATA%/xplat/x.txt' if dev.os != 'windows' else '$XDG_CONFIG_HOME/xplat/x.txt'
-        extra = '[paths."cfg/novar.txt"]\nkind = "file"\nlocal_path = "%s"\n' % bad
-        ctx.write_sync_file(dev, machine_file(ctx.repository_id, extra, ctx.urls[dev.key]))
+        ctx.write_sync_file(dev, machine_file(ctx.repository_id, rule('cfg/novar.txt', bad), ctx.urls[dev.key]))
         done = dev.pb('config', 'sync', 'validate', '--json')
         # the documented rule is "missing variables fail rather than choosing substitutes" (docs/config-sync.md)
         assert done.rc != 0 and '"ok":false' in done.text.replace(' ', ''), (dev.name, done.text[-300:])
         assert not dev.exists(real(dev, 'x.txt')), 'a substitute path was created'
-        ctx.write_sync_file(dev, machine_file(ctx.repository_id, '', ctx.urls[dev.key]))
+        ctx.write_sync_file(dev, machine_file(ctx.repository_id, None, ctx.urls[dev.key]))
     return 'refused on every device, no substitute path'
 
 
@@ -389,22 +393,22 @@ def refuses(dev, ctx, extra, what):
     """Write a machine file with these extra rules; `validate` must fail, and the file is put back to its plain form."""
     ctx.write_sync_file(dev, machine_file(ctx.repository_id, extra, ctx.urls[dev.key]))
     done = dev.pb('config', 'sync', 'validate', '--json')
-    ctx.write_sync_file(dev, machine_file(ctx.repository_id, '', ctx.urls[dev.key]))
+    ctx.write_sync_file(dev, machine_file(ctx.repository_id, None, ctx.urls[dev.key]))
     assert done.rc != 0 and '"ok":false' in done.text.replace(' ', ''), '%s: %s was accepted: %s' % (dev.name, what, done.text[-200:])
     return done.text
 
 
 def accepted(dev, ctx, extra, what, mode='bidirectional', automatic=True):
-    text = machine_file(ctx.repository_id, extra, ctx.urls[dev.key], mode)
-    ctx.write_sync_file(dev, text if automatic else text.replace('automatic_updates = true', 'automatic_updates = false'))
+    ctx.write_sync_file(dev, machine_file(ctx.repository_id, extra, ctx.urls[dev.key], mode, automatic))
     done = dev.pb('config', 'sync', 'validate', '--json')
-    ctx.write_sync_file(dev, machine_file(ctx.repository_id, '', ctx.urls[dev.key]))
+    ctx.write_sync_file(dev, machine_file(ctx.repository_id, None, ctx.urls[dev.key]))
     assert done.rc == 0, '%s: %s was refused: %s' % (dev.name, what, done.text[-200:])
     return json.loads(done.text).get('data', json.loads(done.text))
 
 
-def rule(repository_path, local_path):
-    return '[paths."%s"]\nkind = "file"\nlocal_path = "%s"\n' % (repository_path, local_path)
+def rule(*pairs):
+    """File rules as machine file keys; pairs are repository_path, local_path, repository_path, local_path, ..."""
+    return {'paths': {pairs[i]: {'kind': 'file', 'local_path': pairs[i + 1]} for i in range(0, len(pairs), 2)}}
 
 
 def x06(ctx, a, b, direction):
@@ -412,9 +416,9 @@ def x06(ctx, a, b, direction):
     for dev in (a, b):
         root = RULE_ROOT[dev.os] + '/x06'
         accepted(dev, ctx, rule('cfg/x06-ok.txt', root + '/ok.txt'), 'a plain rule (control)')
-        refuses(dev, ctx, rule('cfg/Case.txt', root + '/c1.txt') + rule('cfg/case.txt', root + '/c2.txt'),
+        refuses(dev, ctx, rule('cfg/Case.txt', root + '/c1.txt', 'cfg/case.txt', root + '/c2.txt'),
                 'two rules whose repository paths differ only by case')
-        refuses(dev, ctx, rule('cfg/p.txt', root + '/App.json') + rule('cfg/q.txt', root + '/app.json'),
+        refuses(dev, ctx, rule('cfg/p.txt', root + '/App.json', 'cfg/q.txt', root + '/app.json'),
                 'two rules whose destinations differ only by case')
         for bad in ('cfg/CON.txt', 'cfg/prn', 'cfg/Aux.log', 'cfg/NUL', 'cfg/com1.txt', 'cfg/LPT9', 'cfg/a:b.txt',
                     'cfg/trail.', 'cfg/trail ', 'cfg/dir./f.txt'):
@@ -426,8 +430,8 @@ def x07_paths(ctx, a, b, direction):
     """X-07: drive-letter and backslash local_path forms are accepted on Windows only; elsewhere validate refuses with a clear message."""
     for dev in (a, b):
         win = (dev.home if dev.os == 'windows' else 'C:\\Users\\someone') + '\\xplat\\x07\\drive.txt'
-        back = '~\\\\xplat\\\\x07\\\\back.txt'
-        for name, local in (('x07-drive.txt', win.replace('\\', '\\\\')), ('x07-back.txt', back)):
+        back = '~\\xplat\\x07\\back.txt'
+        for name, local in (('x07-drive.txt', win), ('x07-back.txt', back)):
             extra = rule('cfg/' + name, local)
             if dev.os == 'windows':
                 accepted(dev, ctx, extra, 'a Windows-form path on Windows')
@@ -440,59 +444,59 @@ def x07_paths(ctx, a, b, direction):
 
 
 def x02(ctx, a, b, direction):
-    """X-02: machine file over [machine.<name>] over [os.<os>] over shared; one device overrides one field, the other does not."""
+    """X-02: machine file over machine.<name> over os.<os> over shared; one device overrides one field, the other does not."""
     root_a = RULE_ROOT[a.os]
-    own = '[paths."cfg/settings.json"]\nlocal_path = "%s/settings-own.json"\n' % root_a
+    own = {'paths': {'cfg/settings.json': {'local_path': root_a + '/settings-own.json'}}}
     rule_a = rules(a, accepted(a, ctx, own, 'a path override'))['cfg/settings.json']
     assert (rule_a['local_path'], rule_a['source']) == (root_a + '/settings-own.json', 'machine'), rule_a
     rule_b = rules(b, pbj(b, 'config', 'sync', 'validate'))['cfg/settings.json']
     assert (rule_b['local_path'], rule_b['source']) == (RULE_ROOT[b.os] + '/settings.json', 'os'), 'the override leaked: %s' % rule_b
-    pushed = accepted(a, ctx, '', 'mode push_only', mode='push_only')
+    pushed = accepted(a, ctx, None, 'mode push_only', mode='push_only')
     assert pushed['mode'] == 'push_only' and pbj(b, 'config', 'sync', 'validate')['mode'] == 'bidirectional', pushed['mode']
-    manual = accepted(a, ctx, '', 'automatic_updates off', automatic=False)
+    manual = accepted(a, ctx, None, 'automatic_updates off', automatic=False)
     assert manual['automatic_updates'] is False and pbj(b, 'config', 'sync', 'validate')['automatic_updates'] is True
     plain = pbj(a, 'config', 'sync', 'validate')
     assert {r['source'] for r in plain['path_rules']} <= {'os', 'shared'} and plain['mode'] == 'bidirectional', 'an empty machine file does not inherit'
-    refuses(a, ctx, '[os.linux.paths."cfg/zz.txt"]\nkind = "file"\nlocal_path = "~/zz"\n', 'an [os.*] section in a machine file')
-    refuses(a, ctx, '[machine.somebody.paths."cfg/zz.txt"]\nkind = "file"\nlocal_path = "~/zz"\n', 'a [machine.*] section in a machine file')
-    section = SHARED + '[machine.%s.paths."cfg/settings.json"]\nlocal_path = "%s/settings-section.json"\n' % (a.name, root_a)
-    ctx.repo.commit({'.paperboat/config-sync.toml': section.encode()})
+    refuses(a, ctx, {'os': {'linux': rule('cfg/zz.txt', '~/zz')}}, 'an os entry in a machine file')
+    refuses(a, ctx, {'machine': {'somebody': rule('cfg/zz.txt', '~/zz')}}, 'a machine entry in a machine file')
+    section = shared_with_machine(a.name, root_a + '/settings-section.json')
+    ctx.repo.commit({'.paperboat/config-sync.jsonc': section.encode()})
     try:
         def seen():
             return rules(a, pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']['source'] == 'machine_section'
-        wait('the [machine.%s] section reaches %s' % (a.name, a.name), seen, seconds=180, every=8)
+        wait('the machine.%s entry reaches %s' % (a.name, a.name), seen, seconds=180, every=8)
         sec = rules(a, pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']
         assert sec['local_path'] == root_a + '/settings-section.json', sec
         other = rules(b, pbj(b, 'config', 'sync', 'validate'))['cfg/settings.json']
         assert other['source'] == 'os' and other['local_path'] == RULE_ROOT[b.os] + '/settings.json', 'the machine section leaked: %s' % other
-        typo = SHARED + '[machine.%s-typo.paths."cfg/settings.json"]\nlocal_path = "%s/x.json"\n' % (a.name, root_a)
-        ctx.repo.commit({'.paperboat/config-sync.toml': typo.encode()})
+        typo = shared_with_machine(a.name + '-typo', root_a + '/x.json')
+        ctx.repo.commit({'.paperboat/config-sync.jsonc': typo.encode()})
         wait('the misspelled name is a warning', lambda: bool(pbj(a, 'config', 'sync', 'validate').get('warnings')), seconds=180, every=8)
     finally:
-        ctx.repo.commit({'.paperboat/config-sync.toml': SHARED.encode()})
-    return 'machine file > [machine.%s] > [os.%s] > shared; override only on %s; [os.*]/[machine.*] refused in a machine file; typo warns' % (a.name, a.os, a.name)
+        ctx.repo.commit({'.paperboat/config-sync.jsonc': SHARED.encode()})
+    return 'machine file > machine.%s > os.%s > shared; override only on %s; os/machine entries refused in a machine file; typo warns' % (a.name, a.os, a.name)
 
 
 def put(ctx, text):
     """The shared file is `text` on main: a commit only when it differs (a failed earlier check can leave the repository as it is)."""
-    if ctx.repo.show('.paperboat/config-sync.toml') != text.encode():
-        ctx.repo.commit({'.paperboat/config-sync.toml': text.encode()})
+    if ctx.repo.show('.paperboat/config-sync.jsonc') != text.encode():
+        ctx.repo.commit({'.paperboat/config-sync.jsonc': text.encode()})
 
 
 def x40_rename(ctx, a, b, direction):
-    """X-40: a [machine.<name>] section follows the machine's NAME: after another OS renames the machine the section stops applying
+    """X-40: a machine.<name> entry follows the machine's NAME: after another OS renames the machine the entry stops applying
     (a warning names the unknown machine), and it applies again when the machine has its name back."""
     root_a = RULE_ROOT[a.os]
-    section = SHARED + '[machine.%s.paths."cfg/settings.json"]\nlocal_path = "%s/settings-section.json"\n' % (a.name, root_a)
+    section = shared_with_machine(a.name, root_a + '/settings-section.json')
     put(ctx, section)
     machine_id = fleet.machines()[a.name]['id']
 
     def source():
         return rules(a, pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']['source']
     try:
-        wait('the [machine.%s] section reaches %s' % (a.name, a.name), lambda: source() == 'machine_section', seconds=180, every=8)
+        wait('the machine.%s entry reaches %s' % (a.name, a.name), lambda: source() == 'machine_section', seconds=180, every=8)
         assert b.pb('machine', 'rename', machine_id, a.name + '-r', '--json').rc == 0, 'rename refused'
-        wait('the section stops applying after the rename', lambda: source() != 'machine_section', seconds=180, every=8)
+        wait('the entry stops applying after the rename', lambda: source() != 'machine_section', seconds=180, every=8)
         warnings = pbj(a, 'config', 'sync', 'validate').get('warnings')
         assert warnings and a.name in json.dumps(warnings), 'no warning names the unmatched section: %s' % warnings
     finally:
@@ -502,7 +506,7 @@ def x40_rename(ctx, a, b, direction):
         wait('the section applies again under the old name', lambda: source() == 'machine_section', seconds=180, every=8)
     finally:
         put(ctx, SHARED)
-    return 'the [machine.%s] section stopped applying after the rename (warning names it) and applied again under the old name' % a.name
+    return 'the machine.%s entry stopped applying after the rename (warning names it) and applied again under the old name' % a.name
 
 
 CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-03', x03_eol_edit), ('X-06', x06), ('X-07', x07_paths), ('X-40', x40_rename)]
@@ -536,7 +540,7 @@ def main():
     def fresh():
         ctx = Context(devices)
         try:
-            ctx.start({'.paperboat/config-sync.toml': SHARED.encode(), 'cfg/settings.json': b'{}\n'})
+            ctx.start({'.paperboat/config-sync.jsonc': SHARED.encode(), 'cfg/settings.json': b'{}\n'})
             for key in devices:
                 ctx.assign(key)
         except BaseException:

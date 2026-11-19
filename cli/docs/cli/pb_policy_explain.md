@@ -22,7 +22,7 @@ pb policy explain [flags]
 ```
   pb policy explain --src user:ana@example.test --dst machine:db --action private_access --port 5432
   pb policy explain --dst machine:db --action exec
-  pb policy explain --src user:ana@example.test --file draft.hujson
+  pb policy explain --src user:ana@example.test --file draft.jsonc
 ```
 
 ### Options

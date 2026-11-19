@@ -15,11 +15,11 @@ import (
 const (
 	recipeBase       = "/v1/workspaces/acme/recipes"
 	recipeClientConf = `{"version":"1","machines_url":"https://console.example.test/machines","installer_base_url":"https://get.example.test"}`
-	ciRecipeTOML     = "# CI runner\ntags = [\"ci\"]\nmax_machines = 20\nremove_after_offline = \"30m\"\n\n[[preview]]\nport = 3000\nttl = \"2h\"\n"
+	ciRecipeSource   = "// CI runner\n{\"tags\": [\"ci\"], \"max_machines\": 20, \"remove_after_offline\": \"30m\", \"preview\": [{\"port\": 3000, \"ttl\": \"2h\"}]}\n"
 )
 
 func recipeJSON(revision int, canonical string) string {
-	return `{"id":"rcp_1","name":"ci","workspace":"acme","revision":` + itoa(revision) + `,"token":"pbr_k7f3q5xa2m_…","source":"# CI runner\n","format":"toml","recipe":` + canonical +
+	return `{"id":"rcp_1","name":"ci","workspace":"acme","revision":` + itoa(revision) + `,"token":"pbr_k7f3q5xa2m_…","source":"// CI runner\n","recipe":` + canonical +
 		`,"created_by":"user:ana@example.test","created_at":"2026-11-16T10:00:00Z","updated_at":"2026-11-16T10:00:00Z","expires_at":"2027-02-14T10:00:00Z","machines":3,"max_machines":20,"future":1}`
 }
 
@@ -40,7 +40,7 @@ func TestRecipeCreateSendsIDAndAuthAndPrintsTheTokenOnce(t *testing.T) {
 	fake, url := newPolicyFake(t)
 	fake.on("POST "+recipeBase, 201, data(`{"recipe":`+recipeJSON(1, `{"tags":["ci"],"expires":"90d","max_machines":20,"remove_after_offline":"30m","preview":[{"port":3000,"ttl":"2h"}]}`)+`}`))
 	fake.on("GET /v1/client-configuration", 200, data(recipeClientConf))
-	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.toml", ciRecipeTOML))
+	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.jsonc", ciRecipeSource))
 	if code != 0 {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
@@ -55,7 +55,7 @@ func TestRecipeCreateSendsIDAndAuthAndPrintsTheTokenOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printed token: %v", err)
 	}
-	if sent["name"] != "ci" || sent["format"] != "toml" || sent["source"] != ciRecipeTOML || sent["token_id"] != token.ID || sent["auth"] != base64.StdEncoding.EncodeToString(token.Auth()) {
+	if sent["name"] != "ci" || sent["source"] != ciRecipeSource || sent["token_id"] != token.ID || sent["auth"] != base64.StdEncoding.EncodeToString(token.Auth()) {
 		t.Fatalf("create body = %v", sent)
 	}
 	if body, _ := json.Marshal(sent); bytes.Contains(body, []byte(strings.Fields(tokenLine)[0][16:])) {
@@ -66,11 +66,11 @@ func TestRecipeCreateSendsIDAndAuthAndPrintsTheTokenOnce(t *testing.T) {
 // A bad file is refused on this computer with file:line:col, before any request.
 func TestRecipeCreateRefusesABadFileLocally(t *testing.T) {
 	_, url := newPolicyFake(t)
-	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.toml", "tag = [\"ci\"]\n"))
-	if code == 0 || !strings.Contains(out+errOut, `ci.toml:1:1: unknown key "tag". Did you mean "tags"?`) || strings.Contains(out+errOut, "Usage:") {
+	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.jsonc", "{\"tag\": [\"ci\"]}\n"))
+	if code == 0 || !strings.Contains(out+errOut, `ci.jsonc:1:2: unknown key "tag". Did you mean "tags"?`) || strings.Contains(out+errOut, "Usage:") {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
-	code, out, errOut = runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "Bad Name.toml", "tags = []\n"))
+	code, out, errOut = runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "Bad Name.jsonc", "{\"tags\": []}\n"))
 	if code == 0 || !strings.Contains(out+errOut, "recipe name comes from the file name") {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
@@ -81,7 +81,7 @@ func TestRecipeCreatePrintsServerRefusalsWithDetails(t *testing.T) {
 	fake, url := newPolicyFake(t)
 	fake.on("GET "+recipeBase[:len(recipeBase)-len("recipes")]+"env-vaults/canary", 404, apiFailure("not_found", `{}`))
 	fake.on("POST "+recipeBase, 422, apiFailure("unknown_vault", `{"kind":"vault","name":"canary","known":["canary-env","prod-env"],"suggestion":"canary-env"}`))
-	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.toml", "[env]\nvaults = [\"canary\"]\n"))
+	code, out, errOut := runPolicyCLI(t, url, "recipe", "create", "-f", writeRecipeFile(t, "ci.jsonc", "{\"env\": {\"vaults\": [\"canary\"]}}\n"))
 	if code == 0 || !strings.Contains(out+errOut, `vault "canary" does not exist in this workspace. Known: canary-env, prod-env. Did you mean "canary-env"?`) {
 		t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 	}
@@ -96,11 +96,11 @@ func TestRecipeListShowAndUpdate(t *testing.T) {
 	}
 	fake.on("GET "+recipeBase+"/ci", 200, data(`{"recipe":`+recipeJSON(2, `{}`)+`,"machines":[{"id":"m1","name":"fv-1","online":true,"applied_revision":2},{"id":"m2","name":"fv-2","online":true,"applied_revision":2,"apply_state":{"preview":{"error":"preview limit reached"}}}]}`))
 	code, out, errOut = runPolicyCLI(t, url, "recipe", "show", "ci")
-	if code != 0 || !strings.Contains(out, "Recipe ci, revision 2, token pbr_k7f3q5xa2m_…") || !strings.Contains(out, "# CI runner") || !strings.Contains(out, "Machines (2 of 20)") || !strings.Contains(out, "preview failed: preview limit reached") {
+	if code != 0 || !strings.Contains(out, "Recipe ci, revision 2, token pbr_k7f3q5xa2m_…") || !strings.Contains(out, "// CI runner") || !strings.Contains(out, "Machines (2 of 20)") || !strings.Contains(out, "preview failed: preview limit reached") {
 		t.Fatalf("show code=%d out=%s err=%s", code, out, errOut)
 	}
 	fake.on("PUT "+recipeBase+"/ci", 200, data(`{"recipe":`+recipeJSON(3, `{"preview":[{"port":3000,"ttl":"4h"}]}`)+`,"previous":`+recipeJSON(2, `{"preview":[{"port":3000,"ttl":"2h"}]}`)+`,"online_machines":2}`))
-	code, out, errOut = runPolicyCLI(t, url, "recipe", "update", "-f", writeRecipeFile(t, "ci.toml", ciRecipeTOML))
+	code, out, errOut = runPolicyCLI(t, url, "recipe", "update", "-f", writeRecipeFile(t, "ci.jsonc", ciRecipeSource))
 	if code != 0 || !strings.Contains(out, "Recipe ci updated to revision 3: preview changed. 2 online machines will apply it now.") {
 		t.Fatalf("update code=%d out=%s err=%s", code, out, errOut)
 	}

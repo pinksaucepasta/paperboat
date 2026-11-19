@@ -1,0 +1,567 @@
+{
+  "$defs": {
+    "config": {
+      "additionalProperties": false,
+      "description": "The config sync repository a recipe pulls.",
+      "properties": {
+        "repository": {
+          "description": "The name of a config sync repository of this workspace.",
+          "examples": [
+            "dotfiles"
+          ],
+          "maxLength": 253,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
+    "durationExpires": {
+      "description": "How long a recipe lasts: a whole number and m, h or d (minutes, hours, days), from 1m to 365d.",
+      "examples": [
+        "30d",
+        "365d"
+      ],
+      "pattern": "^(?:(?:[1-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-9][0-9]{3}|[1-9][0-9]{4}|[1-4][0-9]{5}|5(?:[0-1][0-9]{4}|2(?:[0-4][0-9]{3}|5(?:[0-5][0-9]{2}|6(?:00)))))m|(?:[1-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-7][0-9]{3}|8(?:[0-6][0-9]{2}|7(?:[0-5][0-9]{1}|6(?:0))))h|(?:[1-9]|[1-9][0-9]{1}|[1-2][0-9]{2}|3(?:[0-5][0-9]{1}|6(?:[0-5])))d)$",
+      "type": "string"
+    },
+    "durationLifetime": {
+      "description": "How long a machine may live: a whole number and m, h or d (minutes, hours, days), from 5m to 365d.",
+      "examples": [
+        "8h",
+        "7d"
+      ],
+      "pattern": "^(?:(?:[5-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-9][0-9]{3}|[1-9][0-9]{4}|[1-4][0-9]{5}|5(?:[0-1][0-9]{4}|2(?:[0-4][0-9]{3}|5(?:[0-5][0-9]{2}|6(?:00)))))m|(?:[1-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-7][0-9]{3}|8(?:[0-6][0-9]{2}|7(?:[0-5][0-9]{1}|6(?:0))))h|(?:[1-9]|[1-9][0-9]{1}|[1-2][0-9]{2}|3(?:[0-5][0-9]{1}|6(?:[0-5])))d)$",
+      "type": "string"
+    },
+    "durationOffline": {
+      "description": "How long a machine may be offline: a whole number and m, h or d (minutes, hours, days), from 5m to 30d.",
+      "examples": [
+        "30m",
+        "7d"
+      ],
+      "pattern": "^(?:(?:[5-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-9][0-9]{3}|[1-3][0-9]{4}|4(?:[0-2][0-9]{3}|3(?:[0-1][0-9]{2}|2(?:00))))m|(?:[1-9]|[1-9][0-9]{1}|[1-6][0-9]{2}|7(?:[0-1][0-9]{1}|2(?:0)))h|(?:[1-9]|[1-2][0-9]{1}|3(?:0))d)$",
+      "type": "string"
+    },
+    "durationTTL": {
+      "description": "How long a preview stays open: a whole number and m, h or d (minutes, hours, days), from 1m to 1d.",
+      "examples": [
+        "30m",
+        "2h"
+      ],
+      "pattern": "^(?:(?:[1-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|1(?:[0-3][0-9]{2}|4(?:[0-3][0-9]{1}|4(?:0))))m|(?:[1-9]|[1-1][0-9]{1}|2(?:[0-4]))h|(?:1)d)$",
+      "type": "string"
+    },
+    "durationTunnel": {
+      "description": "How long a tunnel stays open: a whole number and m, h or d (minutes, hours, days), from 1m to 365d.",
+      "examples": [
+        "2h",
+        "7d"
+      ],
+      "pattern": "^(?:(?:[1-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-9][0-9]{3}|[1-9][0-9]{4}|[1-4][0-9]{5}|5(?:[0-1][0-9]{4}|2(?:[0-4][0-9]{3}|5(?:[0-5][0-9]{2}|6(?:00)))))m|(?:[1-9]|[1-9][0-9]{1}|[1-9][0-9]{2}|[1-7][0-9]{3}|8(?:[0-6][0-9]{2}|7(?:[0-5][0-9]{1}|6(?:0))))h|(?:[1-9]|[1-9][0-9]{1}|[1-2][0-9]{2}|3(?:[0-5][0-9]{1}|6(?:[0-5])))d)$",
+      "type": "string"
+    },
+    "env": {
+      "additionalProperties": false,
+      "description": "The ENV vaults a recipe reads.",
+      "properties": {
+        "shell": {
+          "default": true,
+          "description": "Whether the vault values are also set in terminals and commands on the machine.",
+          "examples": [
+            false
+          ],
+          "type": "boolean"
+        },
+        "vaults": {
+          "description": "Names of ENV vaults of this workspace. The recipe can read them; the vault keys are wrapped to the recipe's token on your computer.",
+          "examples": [
+            [
+              "canary-env"
+            ],
+            [
+              "ci",
+              "staging"
+            ]
+          ],
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "type": "array"
+        }
+      },
+      "required": [
+        "vaults"
+      ],
+      "type": "object"
+    },
+    "port": {
+      "description": "A port (5432) or an inclusive range (\"8000-8100\"), from 1 to 65535.",
+      "examples": [
+        5432,
+        "8000-8100"
+      ],
+      "oneOf": [
+        {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+          "type": "string"
+        }
+      ]
+    },
+    "preview": {
+      "additionalProperties": false,
+      "description": "One preview opened on each machine.",
+      "properties": {
+        "domain": {
+          "description": "A custom domain of this workspace to serve the preview on.",
+          "examples": [
+            "preview.example.test"
+          ],
+          "maxLength": 253,
+          "minLength": 1,
+          "type": "string"
+        },
+        "host_header": {
+          "description": "The Host header sent to the local server, for servers that check it.",
+          "examples": [
+            "localhost:3000"
+          ],
+          "maxLength": 253,
+          "minLength": 1,
+          "type": "string"
+        },
+        "port": {
+          "description": "The local port to open a preview for.",
+          "examples": [
+            3000,
+            8080
+          ],
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "private": {
+          "description": "Only members signed in to Paperboat can open the preview.",
+          "examples": [
+            true
+          ],
+          "type": "boolean"
+        },
+        "team": {
+          "description": "Only members of the workspace's team can open the preview.",
+          "examples": [
+            true
+          ],
+          "type": "boolean"
+        },
+        "ttl": {
+          "$ref": "#/$defs/durationTTL",
+          "default": "1h",
+          "description": "How long the preview stays open.",
+          "examples": [
+            "30m",
+            "2h"
+          ]
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object"
+    },
+    "scopeAction": {
+      "description": "An action a token or recipe may be given: terminal, exec, managed_ssh, files, preview_manage, tunnel_manage, private_access, inspect, replay, env_read, env_write, or * for every machine action.",
+      "enum": [
+        "*",
+        "terminal",
+        "exec",
+        "managed_ssh",
+        "files",
+        "preview_manage",
+        "tunnel_manage",
+        "private_access",
+        "inspect",
+        "replay",
+        "env_read",
+        "env_write"
+      ],
+      "examples": [
+        "exec",
+        "files"
+      ],
+      "type": "string"
+    },
+    "scopeEntry": {
+      "additionalProperties": false,
+      "description": "One part of a token's or recipe's reach: these actions on these targets.",
+      "examples": [
+        {
+          "allow": [
+            "exec",
+            "files"
+          ],
+          "dst": [
+            "tag:ci"
+          ]
+        }
+      ],
+      "if": {
+        "required": [
+          "ports"
+        ]
+      },
+      "properties": {
+        "allow": {
+          "description": "The actions allowed on those targets; * means every machine action.",
+          "examples": [
+            [
+              "exec",
+              "files"
+            ],
+            [
+              "*"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/scopeAction"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "dst": {
+          "description": "The targets this entry covers: machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team.",
+          "examples": [
+            [
+              "tag:ci"
+            ],
+            [
+              "machine:*"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/target"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "ports": {
+          "description": "Only when allow is exactly [\"private_access\"]: the ports it covers.",
+          "examples": [
+            [
+              5432,
+              "8000-8100"
+            ]
+          ],
+          "items": {
+            "$ref": "#/$defs/port"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "dst",
+        "allow"
+      ],
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "allow": {
+                "const": [
+                  "private_access"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "target": {
+      "description": "What a rule covers: machine:<alias>, machine:*, tag:<name>, preview:<name>, tunnel:<name> or env:team.",
+      "examples": [
+        "machine:web",
+        "machine:*",
+        "tag:ci",
+        "preview:demo",
+        "tunnel:db",
+        "env:team"
+      ],
+      "pattern": "^(machine:.+|tag:[a-z0-9][a-z0-9._-]{0,62}|preview:.+|tunnel:.+|env:team)$",
+      "type": "string"
+    },
+    "tunnel": {
+      "additionalProperties": false,
+      "description": "One tunnel opened on each machine: it has port or from, not both.",
+      "oneOf": [
+        {
+          "required": [
+            "port"
+          ]
+        },
+        {
+          "required": [
+            "from"
+          ]
+        }
+      ],
+      "properties": {
+        "domain": {
+          "description": "A custom domain of this workspace to serve the tunnel on.",
+          "examples": [
+            "tunnel.example.test"
+          ],
+          "maxLength": 253,
+          "minLength": 1,
+          "type": "string"
+        },
+        "duration": {
+          "$ref": "#/$defs/durationTunnel",
+          "description": "How long the tunnel stays open. Default: until the machine is removed.",
+          "examples": [
+            "2h",
+            "7d"
+          ]
+        },
+        "from": {
+          "description": "A local address to open a tunnel to, instead of a port, like http://localhost:8123. A tunnel has port or from, not both.",
+          "examples": [
+            "http://localhost:8123"
+          ],
+          "maxLength": 253,
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "description": "The tunnel's name: lowercase letters, digits and -, up to 63 characters.",
+          "examples": [
+            "dashboard"
+          ],
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "type": "string"
+        },
+        "port": {
+          "description": "The local port to open a tunnel to. A tunnel has port or from, not both.",
+          "examples": [
+            8123
+          ],
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "private": {
+          "description": "Only members signed in to Paperboat can reach the tunnel.",
+          "examples": [
+            true
+          ],
+          "type": "boolean"
+        },
+        "team": {
+          "description": "Only members of the workspace's team can reach the tunnel.",
+          "examples": [
+            true
+          ],
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What happens on a machine when it pairs with this recipe's token: its tags, what it may reach, which ENV vaults it reads, which repository it pulls config from, which previews and tunnels it opens, and when it is removed. The file is named <recipe name>.jsonc (lowercase letters, digits and -, up to 63) and may hold // comments and trailing commas (HuJSON). Create it with pb recipe create -f <file>.",
+  "examples": [
+    {
+      "tags": [
+        "ci"
+      ],
+      "max_machines": 20,
+      "remove_after_offline": "30m",
+      "env": {
+        "vaults": [
+          "canary-env"
+        ]
+      },
+      "preview": [
+        {
+          "port": 3000,
+          "ttl": "2h"
+        }
+      ]
+    },
+    {
+      "max_machines": 1,
+      "remove_after_offline": "10m",
+      "machine_lifetime": "8h",
+      "reach": [
+        {
+          "dst": [
+            "tag:ci"
+          ],
+          "allow": [
+            "exec",
+            "managed_ssh",
+            "files"
+          ]
+        }
+      ],
+      "tunnel": [
+        {
+          "port": 8123,
+          "private": true
+        }
+      ]
+    }
+  ],
+  "properties": {
+    "$schema": {
+      "description": "The JSON Schema of this file, so editors check and complete it. Ignored by Paperboat.",
+      "examples": [
+        "https://example.test/schemas/recipe.json"
+      ],
+      "type": "string"
+    },
+    "config": {
+      "$ref": "#/$defs/config",
+      "description": "The config sync repository these machines pull. A machine with this section only pulls, never pushes.",
+      "examples": [
+        {
+          "repository": "dotfiles"
+        }
+      ]
+    },
+    "env": {
+      "$ref": "#/$defs/env",
+      "description": "The ENV vaults machines paired from this recipe read.",
+      "examples": [
+        {
+          "vaults": [
+            "canary-env"
+          ]
+        }
+      ]
+    },
+    "expires": {
+      "$ref": "#/$defs/durationExpires",
+      "default": "90d",
+      "description": "How long the recipe's token pairs new machines, from creation (or from a change of this value). Rotate the recipe to extend it.",
+      "examples": [
+        "30d",
+        "365d"
+      ]
+    },
+    "machine_lifetime": {
+      "$ref": "#/$defs/durationLifetime",
+      "description": "Remove a machine this long after it paired, whether or not it is online. Default: never.",
+      "examples": [
+        "8h",
+        "7d"
+      ]
+    },
+    "max_machines": {
+      "description": "The most machines that may be paired from this recipe at once. A machine leaves the count when it is removed. Default: no limit beyond the plan.",
+      "examples": [
+        1,
+        20
+      ],
+      "maximum": 2147483647,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "preview": {
+      "description": "Previews opened on each machine when it pairs.",
+      "examples": [
+        [
+          {
+            "port": 3000,
+            "ttl": "2h"
+          }
+        ]
+      ],
+      "items": {
+        "$ref": "#/$defs/preview"
+      },
+      "maxItems": 16,
+      "type": "array"
+    },
+    "reach": {
+      "description": "What a machine paired from this recipe may reach with its own pb, besides itself. A tag no machine carries yet is accepted and matches once one does.",
+      "examples": [
+        [
+          {
+            "allow": [
+              "exec",
+              "files"
+            ],
+            "dst": [
+              "tag:ci"
+            ]
+          }
+        ]
+      ],
+      "items": {
+        "$ref": "#/$defs/scopeEntry"
+      },
+      "maxItems": 64,
+      "type": "array"
+    },
+    "remove_after_offline": {
+      "$ref": "#/$defs/durationOffline",
+      "description": "Remove a machine paired from this recipe once it has been offline this long. Default: never.",
+      "examples": [
+        "30m",
+        "7d"
+      ]
+    },
+    "tags": {
+      "description": "Tags every machine paired from this recipe gets. A [[reach]] or policy rule can name them as tag:<name>.",
+      "examples": [
+        [
+          "ci"
+        ],
+        [
+          "homelab",
+          "vm"
+        ]
+      ],
+      "items": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "type": "array"
+    },
+    "tunnel": {
+      "description": "Tunnels opened on each machine when it pairs.",
+      "examples": [
+        [
+          {
+            "port": 8123,
+            "private": true
+          }
+        ]
+      ],
+      "items": {
+        "$ref": "#/$defs/tunnel"
+      },
+      "maxItems": 16,
+      "type": "array"
+    }
+  },
+  "title": "Paperboat recipe",
+  "type": "object"
+}

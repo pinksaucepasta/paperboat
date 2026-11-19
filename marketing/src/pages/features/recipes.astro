@@ -5,18 +5,19 @@ import Term from "../../components/Term.astro"
 import { installerBase } from "../../site"
 
 const recipeFile = [
-  'tags = ["sandbox"]',
-  'remove_after_offline = "30m"',
-  "",
-  "[env]",
-  'vaults = ["sandbox-env"]',
-  "",
-  "[[preview]]",
-  "port = 3000",
-  'ttl = "2h"',
+  "{",
+  '  "tags": ["sandbox"],',
+  '  "remove_after_offline": "30m",',
+  '  "env": {"vaults": ["sandbox-env"]},',
+  '  "preview": [{"port": 3000, "ttl": "2h"}],',
+  "}",
 ]
 
 const faq = [
+  {
+    q: "Can an AI agent write the recipe file?",
+    a: 'Yes. Give your agent the <a href="/schemas/recipe.json">recipe schema</a>, or have it run <code>pb recipe schema</code>: every key, limit and example, exact.',
+  },
   {
     q: "What can a recipe set up?",
     a: "A machine's tags and what it may reach, the ENV vaults it reads, the repository it takes its config from, the previews and tunnels it opens, and when it is removed.",
@@ -57,11 +58,11 @@ const faq = [
     Spin up a sandbox for development, an agent, a pull request review or a test run, or a hundred of them. Each one joins your account set up
     the way you want, and you can reach it from the first second.
   </p>
-  <Term slot="aside" title="sandbox.toml" lines={recipeFile} />
+  <Term slot="aside" title="sandbox.jsonc" lines={recipeFile} />
 
   <Beat id="create-title" title="Write it once">
     <p>Say what every machine of a kind needs: its tags, who can reach it, its secrets, its config, a preview. Then turn it into a recipe.</p>
-    <Term slot="visual" lines={["$ pb recipe create -f sandbox.toml", "Recipe sandbox created in workspace acme.", "Token (shown once; save it as PB_RECIPE)"]} />
+    <Term slot="visual" lines={["$ pb recipe create -f sandbox.jsonc", "Recipe sandbox created in workspace acme.", "Token (shown once; save it as PB_RECIPE)"]} />
   </Beat>
 
   <Beat id="many-title" title="One line, any number of machines" flip>

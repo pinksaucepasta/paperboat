@@ -75,7 +75,7 @@ func readConfigCredentialProfile(cmd *cobra.Command, input string) (configsync.R
 
 // checkConfigRepository reads the repository the way a machine will before it is connected: it
 // must be reachable with these credentials, have the branch with a commit, and any
-// .paperboat/config-sync.toml on it must be a valid config sync file. HTTP(S) and local
+// .paperboat/config-sync.jsonc on it must be a valid config sync file. HTTP(S) and local
 // repositories can be checked anonymously; SSH needs a credential profile.
 func checkConfigRepository(ctx context.Context, stateDir, endpoint, transport, branch string, profile *configsync.RepositoryCredentialProfile) error {
 	if profile == nil && transport == "ssh" {

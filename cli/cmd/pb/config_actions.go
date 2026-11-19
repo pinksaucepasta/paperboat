@@ -361,7 +361,7 @@ func configStatus(c *command.Context) error {
 		case "configuration_changed":
 			fmt.Fprintln(c.Writer, "  Configuration changed; run pb config sync apply on this machine to approve it.")
 		case "configuration_invalid":
-			fmt.Fprintln(c.Writer, "  Fix this machine's TOML file, then run pb config sync validate and pb config sync apply.")
+			fmt.Fprintln(c.Writer, "  Fix this machine's config-sync.jsonc file, then run pb config sync validate and pb config sync apply.")
 		}
 	}
 	return nil

@@ -108,7 +108,7 @@ export const features: Feature[] = [
     icon: "list-checks",
     name: "Recipes",
     line: "Set up one machine or hundreds with one command, ready from the start.",
-    command: "pb recipe create -f ci.toml",
+    command: "pb recipe create -f ci.jsonc",
     group: "Set up and share",
   },
   {

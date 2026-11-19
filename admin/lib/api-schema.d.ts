@@ -14191,8 +14191,6 @@ export interface components {
             revision: number;
             token: string;
             source: string;
-            /** @enum {string} */
-            format: "toml" | "json";
             recipe: components["schemas"]["RecipeBody"];
             created_by: string;
             /** Format: date-time */

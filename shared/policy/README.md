@@ -1,9 +1,10 @@
 # Workspace policy reference
 
 One policy per workspace (personal or team) says who may use what on which machines. It is a
-JSON file; comments (`//`, `/* */`) and trailing commas are allowed (HuJSON). The JSON Schema is
-[`schema.json`](schema.json), served at `GET /v1/policy/schema` and printed by
-`pb policy schema`. Design: PLAN.md F18.
+JSON file (`.jsonc`); comments (`//`, `/* */`) and trailing commas are allowed (HuJSON). The JSON Schema is
+[`schema.json`](schema.json), generated from the Go types (`go test ./shared/policy -run TestSchemaIsGenerated -update`; the
+same test fails when it is stale), served at `GET /v1/policy/schema` and on the marketing site at `/schemas/policy.json`, and printed by
+`pb policy schema`. Give it to an agent that writes the file, or add `"$schema"` to the file. Design: PLAN.md F18.
 
 ```jsonc
 {

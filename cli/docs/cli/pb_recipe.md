@@ -4,10 +4,10 @@ Create and manage recipes that pair and set up machines
 
 ### Synopsis
 
-A recipe is a small TOML or JSON file that says what happens on a machine when it
+A recipe is a small JSON file (with comments, .jsonc) that says what happens on a machine when it
 joins: its tags, what it may reach, which ENV vaults it reads, which repository it
 pulls config from, which preview or tunnel it opens, and when it is removed. Create
-one with pb recipe create -f ci.toml; the printed token, set as PB_RECIPE, pairs and
+one with pb recipe create -f ci.jsonc; the printed token, set as PB_RECIPE, pairs and
 sets up a machine with one command and no prompt.
 
 With --json, this command group lists its available commands.
@@ -39,6 +39,7 @@ pb recipe [flags]
 * [pb recipe list](pb_recipe_list.md)	 - List the workspace's recipes
 * [pb recipe revoke](pb_recipe_revoke.md)	 - Revoke a recipe and remove its machines
 * [pb recipe rotate](pb_recipe_rotate.md)	 - Give a recipe a new token; its machines keep working
+* [pb recipe schema](pb_recipe_schema.md)	 - Print the recipe file JSON Schema
 * [pb recipe show](pb_recipe_show.md)	 - Show a recipe, its file and its machines
 * [pb recipe update](pb_recipe_update.md)	 - Change a recipe from its file
 

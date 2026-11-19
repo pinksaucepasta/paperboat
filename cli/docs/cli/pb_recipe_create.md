@@ -4,7 +4,7 @@ Create a recipe from a file and print its token once
 
 ### Synopsis
 
-Create a recipe from a TOML or JSON file; its name is the file's base name (ci.toml
+Create a recipe from a .jsonc file (JSON with comments); its name is the file's base name (ci.jsonc
 makes ci). The file is checked on this computer first, with file:line:col errors.
 The token is made here and printed once: save it as the secret PB_RECIPE. Paperboat
 stores only a hash of it and can never read the ENV vaults the recipe reads.
@@ -18,14 +18,14 @@ pb recipe create -f <file> [flags]
 ### Examples
 
 ```
-  pb recipe create -f ci.toml
-  pb recipe create -f ci.toml --workspace acme
+  pb recipe create -f ci.jsonc
+  pb recipe create -f ci.jsonc --workspace acme
 ```
 
 ### Options
 
 ```
-  -f, --file string   the recipe file (.toml or .json)
+  -f, --file string   the recipe file (.jsonc)
   -h, --help          help for create
       --json          print JSON (the token included, once)
 ```

@@ -1,73 +1,71 @@
 package recipe
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
+
+	"github.com/tailscale/hujson"
 )
 
-// tomlLocator maps a path (["preview", "0", "port"]) to its line and columns by scanning the
-// source line by line, since the TOML decoder does not export key positions.
-// shortcut: keys inside multi-line strings or inline tables are not indexed; such errors fall
-// back to the section header or line 1, upgrade if recipes grow nested values.
-type tomlLocator struct {
-	keys    map[string][3]int // "table\x00key" → line, key col, value col
-	headers map[string]int    // "preview#0" or "env" → line
+// locator maps a path (["preview", "0", "port"]) to its line and columns in the source.
+type locator struct {
+	src       []byte
+	positions map[string][2]int // path → offset of the key (or list item), offset of its value
+	duplicate []duplicate       // keys that appear more than once
 }
 
-func newTOMLLocator(src []byte) *tomlLocator {
-	l := &tomlLocator{keys: map[string][3]int{}, headers: map[string]int{}}
-	counts := map[string]int{}
-	table := ""
-	for i, line := range strings.Split(string(src), "\n") {
-		n := i + 1
-		trimmed := strings.TrimSpace(line)
-		indent := len(line) - len(strings.TrimLeft(line, " \t"))
-		switch {
-		case strings.HasPrefix(trimmed, "[["):
-			name := strings.TrimSpace(strings.Trim(strings.SplitN(trimmed, "]]", 2)[0], "[ "))
-			table = name + "#" + strconv.Itoa(counts[name])
-			counts[name]++
-			l.headers[table] = n
-		case strings.HasPrefix(trimmed, "["):
-			table = strings.TrimSpace(strings.Trim(strings.SplitN(trimmed, "]", 2)[0], "[ "))
-			l.headers[table] = n
-		case strings.Contains(trimmed, "=") && !strings.HasPrefix(trimmed, "#"):
-			eq := strings.Index(line, "=")
-			key := strings.Trim(strings.TrimSpace(line[:eq]), `"'`)
-			value := eq + 1 + len(line[eq+1:]) - len(strings.TrimLeft(line[eq+1:], " \t"))
-			id := table + "\x00" + key
-			if _, seen := l.keys[id]; !seen {
-				l.keys[id] = [3]int{n, indent + 1, value + 1}
-			}
-		}
-	}
+type duplicate struct {
+	path   []string
+	offset int
+}
+
+func newLocator(src []byte, v hujson.Value) *locator {
+	v.UpdateOffsets()
+	l := &locator{src: src, positions: map[string][2]int{}}
+	l.walk(nil, v, v.StartOffset)
 	return l
 }
 
-func (l *tomlLocator) key(path []string) (int, int, int) {
-	table, rest := "", path
-	if len(path) >= 2 {
-		if _, err := strconv.Atoi(path[1]); err == nil {
-			table, rest = path[0]+"#"+path[1], path[2:]
-		} else if _, ok := l.headers[path[0]]; ok {
-			table, rest = path[0], path[1:]
+func (l *locator) walk(path []string, v hujson.Value, keyAt int) {
+	l.positions[strings.Join(path, "\x00")] = [2]int{keyAt, v.StartOffset}
+	switch c := v.Value.(type) {
+	case *hujson.Object:
+		seen := map[string]bool{}
+		for _, m := range c.Members {
+			name := m.Name.Value.(hujson.Literal).String()
+			child := append(append([]string(nil), path...), name)
+			if seen[name] {
+				l.duplicate = append(l.duplicate, duplicate{child, m.Name.StartOffset})
+				continue
+			}
+			seen[name] = true
+			l.walk(child, m.Value, m.Name.StartOffset)
 		}
-	} else if len(path) == 1 {
-		if line, ok := l.headers[path[0]]; ok {
-			return line, 1, 0
-		}
-		if line, ok := l.headers[path[0]+"#0"]; ok {
-			return line, 1, 0
+	case *hujson.Array:
+		for i, e := range c.Elements {
+			l.walk(append(append([]string(nil), path...), strconv.Itoa(i)), e, e.StartOffset)
 		}
 	}
-	if len(rest) == 0 {
-		return l.headers[table], 1, 0
+}
+
+// lineCol turns a byte offset into a 1-based line and column.
+func (l *locator) lineCol(offset int) (int, int) {
+	offset = min(offset, len(l.src))
+	line := 1 + bytes.Count(l.src[:offset], []byte("\n"))
+	return line, 1 + offset - (bytes.LastIndexByte(l.src[:offset], '\n') + 1)
+}
+
+// key returns the line, the column of the key and the column of its value (0 when it is on another line).
+func (l *locator) key(path []string) (line, keyCol, valueCol int) {
+	p, ok := l.positions[strings.Join(path, "\x00")]
+	if !ok {
+		return 1, 1, 0
 	}
-	if p, ok := l.keys[table+"\x00"+rest[0]]; ok {
-		return p[0], p[1], p[2]
+	line, keyCol = l.lineCol(p[0])
+	valueLine, valueCol := l.lineCol(p[1])
+	if valueLine != line {
+		valueCol = 0
 	}
-	if line, ok := l.headers[table]; ok {
-		return line, 1, 0
-	}
-	return 1, 1, 0
+	return line, keyCol, valueCol
 }

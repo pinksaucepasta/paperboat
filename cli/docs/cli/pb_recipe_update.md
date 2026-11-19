@@ -18,13 +18,13 @@ pb recipe update -f <file> [flags]
 ### Examples
 
 ```
-  pb recipe update -f ci.toml
+  pb recipe update -f ci.jsonc
 ```
 
 ### Options
 
 ```
-  -f, --file string   the recipe file (.toml or .json)
+  -f, --file string   the recipe file (.jsonc)
   -h, --help          help for update
       --json          print JSON
 ```
