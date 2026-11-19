@@ -344,6 +344,10 @@ type BillingWorkspace struct {
 	ScheduledQuantity      sql.NullInt32
 	ScheduledQuantityAt    sql.NullTime
 	GrantUntil             sql.NullTime
+	Addon                  sql.NullString
+	AddonItemID            sql.NullString
+	AddonPriceID           sql.NullString
+	AddonUntil             sql.NullTime
 }
 
 type BillingWorkspaceGrant struct {
