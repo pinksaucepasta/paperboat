@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"net/http"
@@ -419,9 +420,16 @@ func (s *Service) retireExpiredAccessSessions(ctx context.Context) error {
 	if s.policy.ExpiredAccessSessionRetention <= 0 {
 		return nil
 	}
-	before := s.now().UTC().Add(-s.policy.ExpiredAccessSessionRetention)
+	now := s.now().UTC()
+	before := now.Add(-s.policy.ExpiredAccessSessionRetention)
+	// A client names its open streams' sessions at least once per peer document, which lives at most
+	// MaxGrantLifetime; an hour more covers a renewal that is late.
+	idle := now.Add(-relaylimits.MaxGrantLifetime - time.Hour)
+	if idle.Before(before) {
+		idle = before
+	}
 	for range retireBatches {
-		n, err := s.db.Queries().RetireExpiredMachineAccessSessions(ctx, dbsqlc.RetireExpiredMachineAccessSessionsParams{ExpiredBefore: before, BatchSize: retireBatchSize})
+		n, err := s.db.Queries().RetireExpiredMachineAccessSessions(ctx, dbsqlc.RetireExpiredMachineAccessSessionsParams{IdleBefore: idle, ExpiredBefore: before, BatchSize: retireBatchSize})
 		if err != nil || n < retireBatchSize {
 			return err
 		}

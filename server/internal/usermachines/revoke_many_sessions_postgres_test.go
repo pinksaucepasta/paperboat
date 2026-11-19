@@ -68,6 +68,10 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 	sessions(machine(0), 1, 17700, "-1 hour")
 	sessions(machine(0), 17701, 20000, "1 hour")
 	sessions(machine(1), 1, 10, "1 hour")
+	// A second big machine, revoked while the worker hard-deletes the first (prod: canary-b-old's revoke took 9.9 s
+	// behind canary-a-old's final delete and deadlocked with it).
+	sessions(machine(87), 1, 8600, "-1 hour")
+	sessions(machine(87), 8601, 8700, "1 hour")
 	var cliGeneration int64
 	if err := store.SQL().QueryRowContext(ctx, `SELECT config_generation FROM paperboat.peer_network_identities WHERE user_id=$1 AND endpoint_id=$2`, user, cli).Scan(&cliGeneration); err != nil {
 		t.Fatal(err)
@@ -91,7 +95,7 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 		load.Go(func() {
 			for i := 0; loadCtx.Err() == nil; i++ {
 				timed(func() error {
-					_, err := store.SQL().ExecContext(loadCtx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, user, machine(2+(w*31+i)%86))
+					_, err := store.SQL().ExecContext(loadCtx, `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=now() WHERE user_id=$1 AND endpoint_id=$2`, user, machine(2+(w*31+i)%85))
 					return err
 				})
 			}
@@ -101,7 +105,7 @@ SELECT 'control_plane_signed',$1||'_s_'||g,$1,$2,u.environment_id,$3,'',now()+$6
 		for i := 0; loadCtx.Err() == nil; i++ {
 			timed(func() error {
 				return store.InTx(loadCtx, func(ctx context.Context, tx *db.Tx) error {
-					_, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: machine(2 + i%86), UserID: user, MachineGeneration: 1})
+					_, err := tx.Queries().ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: machine(2 + i%85), UserID: user, MachineGeneration: 1})
 					return err
 				})
 			})
@@ -175,15 +179,28 @@ WHERE s.user_machine_id=$1 AND a.expires_at IS DISTINCT FROM least(s.expires_at,
 	// The final hard delete removes the machine's 20,000 sessions in bounded transactions, then the machine row
 	// (one statement over all of them ran prod out of predicate locks), within one worker tick.
 	start = time.Now()
-	if err := service.RetryPendingRevocations(ctx); err != nil {
+	finalErr := make(chan error, 1)
+	go func() { finalErr <- service.RetryPendingRevocations(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+	second := time.Now()
+	secondCtx, cancelSecond := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelSecond()
+	if err := service.Disconnect(secondCtx, user, machine(87)); err != nil {
+		t.Fatalf("revoke of a second machine during the final delete failed after %v: %v", time.Since(second), err)
+	}
+	secondTook := time.Since(second)
+	if err := <-finalErr; err != nil {
 		t.Fatalf("final delete: %v", err)
 	}
 	finalTook := time.Since(start)
+	if secondTook > 2*time.Second {
+		t.Fatalf("revoke of a second machine during the first's final delete took %v, want under 2 s", secondTook)
+	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machines WHERE id=$1`, machine(0)); n != 0 {
 		t.Fatal("the revoked machine was not hard-deleted in one worker tick")
 	}
 	if n := count(`SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine(1)); n != 10 {
 		t.Fatalf("final delete of one machine touched another's sessions: %d of 10 left", n)
 	}
-	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes, slowest %v; final delete %v", took, writes.Load(), time.Duration(slowest.Load()), finalTook)
+	t.Logf("revoke of a machine with 20,000 sessions took %v; %d concurrent writes, slowest %v; final delete %v; second revoke during it %v", took, writes.Load(), time.Duration(slowest.Load()), finalTook, secondTook)
 }
