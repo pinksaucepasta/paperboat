@@ -342,3 +342,9 @@ customer resets it to Free, so only the running grant is affected.
 Decided for plan grants (2026-11-18): a grant keeps the workspace's `bandwidth_anchor`, as any cancelled-and-repurchased Stripe
 workspace does; seats are capped at the team member maximum (128) with no floor against current members; a revoke that races a
 succeeded checkout whose webhook has not arrived loses to the payment.
+
+## DMCA designated agent — after launch (user 2026-11-19)
+
+- Register the agent at dmca.copyright.gov ($6, 3 years), using the address already on the legal pages and abuse@mail.paperboat.cloud.
+- The form needs a phone number: use a forwarding number (e.g. Google Voice), never a personal mobile. The site shows none.
+- Amend the designation when the company is incorporated.
