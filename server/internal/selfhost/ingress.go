@@ -318,6 +318,7 @@ func (s *Service) observeIngressIteration(ctx context.Context, err error) {
 		supportreport.CaptureFromContext(faultCtx, component, operation, "worker_recovery", "worker_recovered", nil)
 	}
 }
+
 // pinnedIngressTransport dials ip:443 and accepts only the node's enrolled certificate (PinnedTransport).
 func pinnedIngressTransport(pin []byte, ip netip.Addr) *http.Transport {
 	transport := PinnedTransport(pin, net.JoinHostPort(ip.String(), "443"))

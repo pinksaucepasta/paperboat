@@ -70,7 +70,14 @@ func TestHelpDescribesEveryCommand(t *testing.T) {
 			t.Fatalf("pbh help does not list %q", command)
 		}
 	}
-	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"uninstall", "--help"}, {"serve", "--help"}} {
+	if strings.Contains(top.String(), "configure-tls") {
+		t.Fatal("customer help lists the operator-only configure-tls")
+	}
+	var install bytes.Buffer
+	if err := run(context.Background(), []string{"install", "--help"}, &install); err != nil || strings.Contains(install.String(), "https-cert") || strings.Contains(install.String(), "https-key") {
+		t.Fatalf("customer install help shows operator certificate flags: %v", err)
+	}
+	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"configure-tls", "--help"}, {"uninstall", "--help"}, {"serve", "--help"}} {
 		var out bytes.Buffer
 		if err := run(context.Background(), args, &out); err != nil {
 			t.Fatalf("%v: %v", args, err)

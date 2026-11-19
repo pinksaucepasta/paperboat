@@ -49,30 +49,9 @@ rejects a live mode change.
 Configure customer DNS and certificates before restarting or recreating those
 publications.
 
-For public browser HTTPS on the enrolled endpoint hostname, provide a valid
-browser-trusted certificate and owner-only private key during tunnel installation:
-
-```sh
-pbh install --enable tunnel --endpoint-host edge.customer.example \
-  --https-cert /etc/paperboat/edge-fullchain.pem \
-  --https-key /etc/paperboat/edge-key.pem
-```
-
-These files configure public browser HTTPS and are independent of the infrastructure
-TLS identity pinned by the claim code for the native carrier. On an existing tunnel
-installation, update the paths and restart the service with:
-
-```sh
-pbh configure-tls --https-cert /etc/paperboat/edge-fullchain.pem \
-  --https-key /etc/paperboat/edge-key.pem
-```
-
-`configure-tls` validates and atomically saves the new paths before restarting the
-service. If the restart fails, it restores the previous configuration and attempts
-service recovery. Separately managed `pbh` processes can save the paths with
-`--no-service` and `--state-dir /absolute/state`; restart that process to apply
-them. Renew the certificate files and rerun `configure-tls` to reload them.
-Updating public browser HTTPS does not change the carrier identity or enrollment.
+A self-hosted node needs no certificate: browser terminals are served by Paperboat's managed edges, and the
+control plane verifies your node's endpoint hostname against the identity it enrolled with. Just point the
+hostname at the server and keep ports 80 and 443 open (`pbh doctor` checks the host).
 
 Default inbound ports:
 

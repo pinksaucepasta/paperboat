@@ -401,6 +401,9 @@ def edge(image, second=False):
             "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
             "revocations_file": "/state/revocations.json", "usage_signing_key_file": "/state/usage.key",
             "infrastructure_tls_cert_file": "/state/tls.crt", "infrastructure_tls_key_file": "/state/tls.key",
+            # The infrastructure hostname uses this fixture certificate; publication SNI names
+            # use the platform wildcard distributed by the control plane (infrastructureTLS).
+            "public_https_cert_file": "/state/pub.crt", "public_https_key_file": "/state/pub.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:443",
             "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": f"0.0.0.0:{http_port}",

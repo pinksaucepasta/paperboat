@@ -28,8 +28,10 @@ type Config struct {
 	BrowserAccess bool        `json:"browser_access,omitempty"`
 	// BrowserLoginOrigin is how 2026.11.16.2 recorded browser access. It is kept and passed through to the edge's
 	// deployment, so that release's edge image still reads its own deployment after a failed upgrade rolls back to it.
-	BrowserLoginOrigin string `json:"browser_login_origin,omitempty"`
-	ControlCA          string `json:"control_ca,omitempty"`
+	BrowserLoginOrigin  string `json:"browser_login_origin,omitempty"`
+	ControlCA           string `json:"control_ca,omitempty"`
+	PublicHTTPSCertFile string `json:"public_https_cert_file,omitempty"`
+	PublicHTTPSKeyFile  string `json:"public_https_key_file,omitempty"`
 }
 type state struct {
 	Version         int           `json:"version"`
@@ -45,6 +47,9 @@ type state struct {
 }
 
 func validateConfig(c Config) error {
+	if err := validatePublicHTTPS(c.EndpointHost, c.PublicHTTPSCertFile, c.PublicHTTPSKeyFile, time.Now()); err != nil {
+		return err
+	}
 	if strings.TrimSpace(c.Name) == "" || c.Name != strings.TrimSpace(c.Name) || len(c.Name) > 80 || strings.ContainsAny(c.Name, "\r\n\x00") {
 		return errors.New("installation name must contain 1 to 80 characters")
 	}
@@ -80,6 +85,9 @@ func validateConfig(c Config) error {
 		if v.Capability == "tunnel" && (v.TCPPort == 80 || v.TCPPort == 443 || v.QUICPort == 80 || v.QUICPort == 443) {
 			return errors.New("tunnel carrier ports must not use public HTTP/HTTPS ports")
 		}
+	}
+	if c.PublicHTTPSCertFile != "" && !seen["tunnel"] {
+		return errors.New("browser HTTPS configuration requires the tunnel component")
 	}
 	return nil
 }

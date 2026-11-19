@@ -8,6 +8,8 @@
   "usage_signing_key_file": "/var/lib/paperboat-selfhost/tunnel/usage.key",
   "infrastructure_tls_cert_file": "/var/lib/paperboat-selfhost/tls.crt",
   "infrastructure_tls_key_file": "/var/lib/paperboat-selfhost/tls.key",
+  "public_https_cert_file": "/run/paperboat-edge/tls.crt",
+  "public_https_key_file": "/run/paperboat-edge/tls.key",
   "connector_advertise_host": "edge.example.test",
   "carrier_tcp_listen_address": "0.0.0.0:27443",
   "carrier_quic_listen_address": "0.0.0.0:27444",
