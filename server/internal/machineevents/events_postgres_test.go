@@ -2,6 +2,7 @@ package machineevents
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"strings"
@@ -294,12 +295,12 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 
 	// peer_network: new keys or a revocation reach the account's machines.
 	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
- VALUES(decode(repeat('02',32),'hex'),$1,$2,'machine',1,1,decode(repeat('aa',200),'hex'),decode(repeat('bb',32),'hex'),now(),now()+interval '1 day','key_01',decode(repeat('cc',32),'hex'))`, account, server)
+ VALUES(sha256(convert_to($2||'_fp','UTF8')),$1,$2,'machine',1,1,decode(repeat('aa',200),'hex'),decode(repeat('bb',32),'hex'),now(),now()+interval '1 day','key_01',decode(repeat('cc',32),'hex'))`, account, server)
 	expect("peer identity", moved(TopicPeerNetwork, all, func() {
-		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,'machine',$2,1,1,1,decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, account, server)
+		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at) VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to($2||'_wg1','UTF8')),sha256(convert_to($2||'_fp','UTF8')),('fd7a:115c:a1e0::'::inet+nextval('paperboat.peer_network_virtual_address_seq')),now(),now())`, account, server)
 	}), map[string]bool{laptop: true, server: true, outsider: false})
 	expect("peer key rotation", moved(TopicPeerNetwork, all, func() {
-		exec(`UPDATE paperboat.peer_network_identities SET wireguard_public_key=decode(repeat('03',32),'hex'),key_generation=2 WHERE endpoint_id=$1`, server)
+		exec(`UPDATE paperboat.peer_network_identities SET wireguard_public_key=sha256(convert_to($1||'_wg3','UTF8')),key_generation=2 WHERE endpoint_id=$1`, server)
 	}), map[string]bool{laptop: true, outsider: false})
 
 	// config: only the machine whose assignment changed.
@@ -333,11 +334,10 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	// machine_access: a managed SSH client key wakes every machine of its account (PR-03).
 	session := "topics_cli_" + stamp
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,last_used_at) VALUES($1,$2,'paperboat','topics','desktop','linux',ARRAY['machines:connect'],'active',now()-interval '3 days',now(),now()-interval '3 days')`, session, account)
-	fingerprint := make([]byte, 32)
-	fingerprint[0] = 1
-	publicKey := "ssh-ed25519 " + strings.Repeat("A", 68) + " topics"
+	fingerprint := sha256.Sum256([]byte(session))
+	publicKey := "ssh-ed25519 " + strings.Repeat("A", 68-len(stamp)) + stamp + " topics" // public_key is unique
 	expect("ssh key added", moved(TopicMachineAccess, all, func() {
-		exec(`INSERT INTO paperboat.managed_ssh_client_keys(fingerprint,user_id,cli_client_session_id,algorithm,public_key) VALUES($1,$2,$3,'ssh-ed25519',$4)`, fingerprint, account, session, publicKey)
+		exec(`INSERT INTO paperboat.managed_ssh_client_keys(fingerprint,user_id,cli_client_session_id,algorithm,public_key) VALUES($1,$2,$3,'ssh-ed25519',$4)`, fingerprint[:], account, session, publicKey)
 	}), map[string]bool{laptop: true, server: true, outsider: false})
 	expect("idle session used again", moved(TopicMachineAccess, all, func() {
 		exec(`UPDATE paperboat.cli_client_sessions SET last_used_at=now() WHERE id=$1`, session)
