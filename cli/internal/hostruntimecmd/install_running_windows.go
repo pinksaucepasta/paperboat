@@ -86,17 +86,7 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 	action := elevation.ActionInstall
 	if existing, loadErr := hostinstall.LoadWindowsRuntimeConfigForInstance(instance); loadErr == nil {
 		if !existing.EnrollmentPending {
-			request.Artifact = existing.Artifact
-			request.Artifact.Version = source.Version
-			request.Home = home
-			request.Path = os.Getenv("PATH")
-			request.StateRoot = existing.StateRoot
-			request.WorkspaceRoot = existing.Workspace
-			request.ControlURL = firstNonEmpty(controlURL, existing.ControlURL)
-			request.UserMachineID = existing.MachineID
-			request.Shell = filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-			request.HelperListenAddress = existing.ListenAddress
-			request.EnrollmentPending = existing.EnrollmentPending
+			request = requestOverInstalled(request, existing, source, home, controlURL)
 			action = elevation.ActionInstallCommit
 		}
 	} else if !runtimeCausesOnly(loadErr, os.ErrNotExist, hostinstall.ErrNotInstalled) {
@@ -229,4 +219,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// requestOverInstalled is an install over an enrolled installation: it keeps the installed state and settings. The update
+// target describes the supplied build, not the installed one: a dev (Custom) install stored none, and an Official build
+// installed over it failed "artifact descriptor: pb TUF target descriptor is invalid".
+func requestOverInstalled(request hostinstall.Request, existing hostinstall.WindowsRuntimeConfig, source installsource.Source, home, controlURL string) hostinstall.Request {
+	request.Artifact = hostinstall.InstallationTarget(source)
+	request.Home = home
+	request.Path = os.Getenv("PATH")
+	request.StateRoot = existing.StateRoot
+	request.WorkspaceRoot = existing.Workspace
+	request.ControlURL = firstNonEmpty(controlURL, existing.ControlURL)
+	request.UserMachineID = existing.MachineID
+	request.Shell = filepath.Join(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	request.HelperListenAddress = existing.ListenAddress
+	request.EnrollmentPending = existing.EnrollmentPending
+	return request
 }
