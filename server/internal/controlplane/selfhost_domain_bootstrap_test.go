@@ -46,7 +46,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// route whose verified domain names this ingress address (064 publication).
 	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.accountID, installation)
-	f.setCarrierHost(t, database, true)
+	f.setCarrierHost(t, database, false)
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("scoped route without owned domain was admitted: %+v", rows)
 	}
@@ -81,7 +81,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 		t.Fatalf("global edge lost managed hostname: %+v", rows)
 	}
 	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='self-hosted-only',installation_ids=ARRAY[$2] WHERE scope_kind='account' AND scope_id=$1`, f.accountID, installation)
-	f.setCarrierHost(t, database, true)
+	f.setCarrierHost(t, database, false)
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='account' WHERE id=$1`, installation)
 	exec(`UPDATE paperboat.tunnel_domains SET hostname=$2,match_type='one_label_wildcard',certificate_state='pending' WHERE id=$1`, domain, "*.apps-"+f.suffix+".example.test")
 	view = tunnelEdgeRouteJSON(read()[0])

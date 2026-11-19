@@ -177,8 +177,9 @@ func (f tunnelEdgeAcceptanceFixture) observation(node, epoch, session, state str
 		ConfigContentHash: fmt.Sprintf("sha256:%x", f.configHash), AccessMode: "private", ViewerPolicyGeneration: 1, State: state}
 }
 
-// setCarrierHost points the fixture's runtime carrier at a Paperboat-managed host or, for a self-hosted
-// pool, at one of the account's own: the carrier is valid only on the host its pool mode names.
+// setCarrierHost points the fixture's runtime carrier at a Paperboat-managed host or at one of the account's own
+// (selfHosted). Since migration 422 a carrier is valid only on the managed host, whatever the pool mode: the
+// selfHosted form is for tests of the refusal.
 func (f tunnelEdgeAcceptanceFixture) setCarrierHost(t *testing.T, database *db.DB, selfHosted bool) {
 	t.Helper()
 	host := "managed_public_host"
