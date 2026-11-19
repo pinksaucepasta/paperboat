@@ -31,7 +31,7 @@ func (g *gatedInventory) compute(context.Context) ([]UserMachine, int, error) {
 
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second) // returns the moment ok holds; the bound only ends a hung test
 	for !ok() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
@@ -41,11 +41,24 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 }
 
 type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu    sync.Mutex
+	now   time.Time
+	reads int // do() reads the clock under its lock after choosing the flight it joins: reads count arrived callers
 }
 
-func (c *fakeClock) get() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
+func (c *fakeClock) get() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reads++
+	return c.now
+}
+
+// waitReads blocks until the flights have read the clock n times in all, that is until the callers that read it have
+// chosen their flight; a sleep guessed this and joined nobody when a goroutine started late.
+func (c *fakeClock) waitReads(t *testing.T, n int) {
+	t.Helper()
+	waitFor(t, "callers to reach the flights", func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.reads >= n })
+}
 func (c *fakeClock) add(d time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(d)
@@ -74,7 +87,7 @@ func TestIdenticalInventoryRequestsShareComputations(t *testing.T) {
 		}()
 	}
 	waitFor(t, "the computation", func() bool { return g.calls.Load() == 1 })
-	time.Sleep(20 * time.Millisecond)
+	clock.waitReads(t, 50) // one read per caller: the first starts the flight, the other 49 join it
 	close(g.gates[0])
 	wg.Wait()
 	close(errs)
@@ -100,7 +113,7 @@ func TestLaterInventoryRequestDoesNotQueueBehindARunningComputation(t *testing.T
 	waitFor(t, "the first computation", func() bool { return g.calls.Load() == 1 })
 	clock.add(inventoryShareWindow / 2)
 	go func() { _, n, _ := flights.do(context.Background(), flightKey, g.compute); joined <- n }()
-	time.Sleep(20 * time.Millisecond) // it joins inside the window
+	clock.waitReads(t, 2) // it joins inside the window: one read for the first caller, one for it
 	clock.add(inventoryShareWindow)
 	go func() { _, n, _ := flights.do(context.Background(), flightKey, g.compute); later <- n }()
 	waitFor(t, "the second computation", func() bool { return g.calls.Load() == 2 })
@@ -110,7 +123,7 @@ func TestLaterInventoryRequestDoesNotQueueBehindARunningComputation(t *testing.T
 		if n != 2 {
 			t.Fatalf("later request got computation %d, want its own (2)", n)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("a later request waited behind a running computation")
 	}
 	close(g.gates[0])
@@ -126,7 +139,8 @@ func TestLaterInventoryRequestDoesNotQueueBehindARunningComputation(t *testing.T
 
 // A caller that gives up gets its own error at once; the computation still answers the others and is forgotten.
 func TestInventoryCallerCancellationDoesNotStopTheSharedComputation(t *testing.T) {
-	var flights inventoryFlights
+	clock := &fakeClock{now: time.Unix(1_700_000_000, 0)}
+	flights := inventoryFlights{now: clock.get}
 	g := newGatedInventory()
 	ctx, cancel := context.WithCancel(context.Background())
 	gaveUp := make(chan error, 1)
@@ -134,7 +148,7 @@ func TestInventoryCallerCancellationDoesNotStopTheSharedComputation(t *testing.T
 	waitFor(t, "the computation", func() bool { return g.calls.Load() == 1 })
 	stayed := make(chan int, 1)
 	go func() { _, n, _ := flights.do(context.Background(), flightKey, g.compute); stayed <- n }()
-	time.Sleep(20 * time.Millisecond)
+	clock.waitReads(t, 2) // the second caller has joined the running computation
 	cancel()
 	if err := <-gaveUp; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled caller got %v", err)
@@ -158,9 +172,12 @@ func TestOneKeyRunsAtMostABoundedNumberOfComputations(t *testing.T) {
 	flights := inventoryFlights{now: clock.get}
 	g := newGatedInventory()
 	results := make(chan int, 6)
+	// Clock reads of one request: 1 when it starts the flight with none running or joins one at the cap, 2 when it
+	// finds one past the window and starts another.
+	reads := []int{1, 3, 4, 5, 6, 7} // cumulative
 	for i := 0; i < 6; i++ {
 		go func() { _, n, _ := flights.do(context.Background(), flightKey, g.compute); results <- n }()
-		time.Sleep(20 * time.Millisecond)
+		clock.waitReads(t, reads[i])
 		clock.add(inventoryShareWindow + inventoryShareWindow/2) // every request arrives past the share window
 	}
 	if n := g.calls.Load(); n != inventoryMaxRunning {
