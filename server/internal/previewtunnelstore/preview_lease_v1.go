@@ -335,7 +335,9 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 	}
 	now := input.Now.UTC()
 	var result CreatePreviewLeaseV1Result
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// The owner machine's write lock (endpoints.MachineWriteLockSeed), before the snapshot: this transaction writes the
+	// machine's route assignments, which its runtime attach writes too.
+	err := s.db.InTxUnderSessionLock(ctx, input.OwnerMachineID, endpoints.MachineWriteLockSeed, func(ctx context.Context, tx *db.Tx) error {
 		ws, selected := workspace.FromContext(ctx)
 		if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 			return err

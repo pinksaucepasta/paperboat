@@ -80,9 +80,15 @@ func ReconcileEndpointTx(ctx context.Context, tx *db.Tx, machineID, endpointID s
 	return reconcileTx(ctx, tx, machineID, endpointID)
 }
 
+// MachineWriteLockSeed keys the per-machine lock (db.InTxUnderSessionLock(machineID, MachineWriteLockSeed)) that
+// transactions writing a machine's carrier and route rows take before their serializable snapshot, so they queue
+// instead of failing at commit. Prior art: NetBird locks the rows it writes (store.LockingStrengthUpdate,
+// management/server/store/sql_store.go); Headscale funnels node writes through one writer (hscontrol/state/node_store.go).
+const MachineWriteLockSeed = 1120
+
 func reconcileTx(ctx context.Context, tx *db.Tx, machineID, endpointID string) error {
-	// Two writers of one machine's route rows (its carrier report and a reconcile) can race here; the loser's 40001 is
-	// retried by InTx, which is the right outcome for a per-machine race (prod 2026-11-20: 18 retries in 30 min, no failure).
+	// Callers that write a machine's routes hold its MachineWriteLock (runtime attach, preview create), so its carrier
+	// report and a reconcile queue instead of aborting each other with 40001 (prod 2026-11-20: 18 in 30 min).
 	_, err := tx.Exec(ctx, `WITH desired AS (
 SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_node_id,a.edge_process_epoch,a.session_id
 FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
