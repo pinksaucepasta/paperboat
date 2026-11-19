@@ -176,7 +176,8 @@ func (c *Client) tunnelMutation(ctx context.Context, method, id, action, etag, k
 	if e == nil && out.Operation.Schema != "" {
 		e = validateOperation(&out.Operation, "tunnel", id)
 	}
-	if e == nil && out.Tunnel.Schema == "" && out.Operation.Schema != "" {
+	// A deleted tunnel is gone for readers the delete's own authorization does not cover: its operation answers alone.
+	if e == nil && out.Tunnel.Schema == "" && out.Operation.Schema != "" && action != "delete" {
 		out.Tunnel, e = c.GetTunnelV1(ctx, id)
 	}
 	if e == nil && out.Tunnel.Schema == "" && out.Operation.Schema == "" {
