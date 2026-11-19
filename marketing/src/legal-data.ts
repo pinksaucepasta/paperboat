@@ -26,7 +26,7 @@ export const company = {
   /** EU consumer law (Directive 2011/83/EU art. 6(1)(b)-(c)) needs the trader's legal name and postal address. */
   operators: "Pujan Modha and Anvit Dadape",
   /** Postal address for legal notices and the DMCA agent (user, 2026-11-19). */
-  address: "3869 Miramar Street #4208, La Jolla, CA 92037, USA",
+  address: "3869 Miramar Street #4208, La Jolla, CA 92092, USA",
   law: "the State of California, United States, without regard to its conflict-of-law rules",
   courts: "the state and federal courts located in California",
   legalEmail: "legal@mail.paperboat.cloud",
