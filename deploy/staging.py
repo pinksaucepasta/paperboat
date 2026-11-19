@@ -13,7 +13,8 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   edge <image>         register and run the managed staging edge (carrier on TCP 18445)
   edge-b <image>       the same for a second managed edge (carrier on TCP 18455, HTTPS probe port 18456)
   relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside anvit) for the staging account
-  reset                new empty database; the regional certificate is kept (Let's Encrypt limits duplicates)
+  reset                new empty database from main's migrations (refuses an image not on origin/main); the regional certificate is kept
+  check                applied migrations must equal main's set at the running image's commit (also run by up and reset)
   status | down | logs
 The API is https://<region>.<regional domain>:<port>, served by the server itself (regional TLS with a Let's
 Encrypt wildcard, DNS-01 on the dev zone), the same way a production regional node serves its name.
@@ -258,11 +259,35 @@ def build(commit, target="server"):
     print(image)
 
 
-def up(image):
+def image_revision(image):
+    """The commit the image was built from, refused unless it is on origin/main (every migrate runs from an image)."""
     revision = ssh(HOST, f"docker image inspect {image} --format '{{{{index .Config.Labels \"org.opencontainers.image.revision\"}}}}'").strip()
     require_main(revision or "0" * 40, f"the image {image} (revision {revision or 'unknown'})")
+    return revision
+
+
+def main_migrations(revision):
+    """Migration versions that main holds at `revision` (file names NNN_name.sql in server/internal/db/migrations)."""
+    names = subprocess.run(["git", "ls-tree", "--name-only", revision, "server/internal/db/migrations/"], capture_output=True, text=True, check=True, cwd=REPO).stdout.split()
+    return {int(n.rsplit("/", 1)[1].split("_", 1)[0]) for n in names if n.endswith(".sql")}
+
+
+def require_main_migrations(revision):
+    """Staging's applied goose versions equal main's set at the running revision: an unknown version came from a branch, a missing one means
+    a skipped migration. Either way the database is rebuilt with `reset` (never patched: goose compares only numbers)."""
+    applied = {int(v) for v in sql("SELECT version_id FROM paperboat.goose_db_version WHERE is_applied AND version_id > 0").split()}
+    expected = main_migrations(revision)
+    unknown, missing = sorted(applied - expected), sorted(expected - applied)
+    if unknown or missing:
+        raise SystemExit(f"staging: applied migrations differ from main at {revision[:9]}: not on main {unknown}, missing {missing}. "
+                         "Run `staging.py reset` to rebuild the database from main's migrations.")
+
+
+def up(image):
+    revision = image_revision(image)
     remote(f"sed -i 's|^PAPERBOAT_SERVER_IMAGE=.*|PAPERBOAT_SERVER_IMAGE={image}|' .env && docker compose up -d --remove-orphans")
     wait_ready()
+    require_main_migrations(revision)
     print(json.dumps(status()))
 
 
@@ -530,6 +555,7 @@ def relay(image):
 
 
 def reset():
+    revision = image_revision(existing_image())
     remote("docker compose stop server")
     keep = "/tmp/pb-staging-acme-cache.sql"
     remote(f"docker compose exec -T postgres pg_dump -U postgres -d paperboat_staging --data-only -t paperboat.control_server_node_acme_cache > {keep}", check=False)
@@ -538,10 +564,11 @@ def reset():
     remote(f"test -s {keep} && docker compose exec -T postgres psql -U postgres -d paperboat_staging -v ON_ERROR_STOP=1 < {keep}; rm -f {keep}", check=False)
     remote("docker compose up -d server")
     wait_ready()
+    require_main_migrations(revision)
     seed()
 
 
-COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "build-edge": (lambda commit: build(commit, "edge"), 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
+COMMANDS = {"dns": (dns, 0), "grant": (grant, 0), "init": (init, 0), "build": (build, 1), "build-edge": (lambda commit: build(commit, "edge"), 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0), "check": (lambda: require_main_migrations(image_revision(existing_image())), 0),
             "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "edge-b": (lambda image: print(json.dumps(edge(image, True))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 

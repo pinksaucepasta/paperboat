@@ -78,6 +78,44 @@ class MainOnlyTest(unittest.TestCase):
             staging.ssh, staging.subprocess.run = original
 
 
+class MigrationSetTest(unittest.TestCase):
+    def check(self, applied):
+        original = staging.sql, staging.main_migrations
+        staging.sql = lambda statement: applied
+        staging.main_migrations = lambda revision: {1, 2, 4}
+        try:
+            staging.require_main_migrations('abcdef0123456789abcdef0123456789abcdef01')
+        finally:
+            staging.sql, staging.main_migrations = original
+
+    def test_the_applied_set_must_equal_mains_set_exactly(self):
+        self.check('1\n2\n4\n')
+        with self.assertRaisesRegex(SystemExit, r'not on main \[3\], missing \[\]'):
+            self.check('1\n2\n3\n4\n')
+        with self.assertRaisesRegex(SystemExit, r'not on main \[\], missing \[4\]'):
+            self.check('1\n2\n')
+
+    def test_main_migrations_reads_the_versions_main_holds_at_a_commit(self):
+        versions = staging.main_migrations('origin/main')
+        self.assertIn(1, versions)
+        self.assertEqual(len(versions), len(set(versions)))
+        self.assertGreaterEqual(max(versions), 453)
+
+    def test_reset_refuses_an_image_that_is_not_on_main_before_touching_the_database(self):
+        original = staging.ssh, staging.subprocess.run, staging.remote, staging.existing_image
+        calls = []
+        staging.existing_image = lambda: 'paperboat-server:stg-x'
+        staging.ssh = lambda host, script, **k: 'abcdef0123456789abcdef0123456789abcdef01'
+        staging.remote = lambda script, **k: calls.append(script) or ''
+        staging.subprocess.run = lambda command, **k: type('Done', (), {'returncode': 1 if 'merge-base' in command else 0})()
+        try:
+            with self.assertRaisesRegex(SystemExit, 'not on origin/main'):
+                staging.reset()
+        finally:
+            staging.ssh, staging.subprocess.run, staging.remote, staging.existing_image = original
+        self.assertFalse([c for c in calls if 'DROP DATABASE' in c or 'migrate' in c])
+
+
 class SeedAuthorityTest(unittest.TestCase):
     def test_session_is_private_random_persistent_and_only_hashes_reach_database(self):
         original = staging.remote, staging.sql
