@@ -21,6 +21,7 @@ type linuxPurgeFixture struct {
 	runErrs      map[string]error
 	calls        []string
 	uninstalls   int
+	purgeRun     func(context.Context, string, ...string) error
 }
 
 func newLinuxPurgeFixture(t *testing.T) *linuxPurgeFixture {
@@ -46,17 +47,22 @@ func newLinuxPurgeFixture(t *testing.T) *linuxPurgeFixture {
 	return fixture
 }
 
+func (f *linuxPurgeFixture) run(_ context.Context, name string, args ...string) error {
+	command := strings.Join(append([]string{name}, args...), " ")
+	f.calls = append(f.calls, command)
+	if name == "nft" && slices.Equal(args, []string{"list", "table", "inet", guardTable}) && !f.tableExists {
+		return errors.New("no such table")
+	}
+	return f.runErrs[command]
+}
+
 func (f *linuxPurgeFixture) purge(ctx context.Context) error {
+	if f.purgeRun == nil {
+		f.purgeRun = f.run
+	}
 	return purgeLinux(ctx, linuxPurge{
 		Paths: f.paths,
-		Run: func(_ context.Context, name string, args ...string) error {
-			command := strings.Join(append([]string{name}, args...), " ")
-			f.calls = append(f.calls, command)
-			if name == "nft" && slices.Equal(args, []string{"list", "table", "inet", guardTable}) && !f.tableExists {
-				return errors.New("no such table")
-			}
-			return f.runErrs[command]
-		},
+		Run:   f.purgeRun,
 		Uninstall: func(context.Context) error {
 			f.uninstalls++
 			return f.uninstallErr
@@ -156,6 +162,43 @@ func TestPurgeLinuxRemovesEveryGuardArtifact(t *testing.T) {
 	}
 	if f.count("systemctl disable --now paperboat-machineguard.service") != 1 {
 		t.Fatalf("service was not stopped; calls=%v", f.calls)
+	}
+}
+
+// systemd 255.4 aborts PID 1 in a daemon-reload that finds a unit with stored descriptors and no unit file
+// (systemd #35288), so the guard's descriptor store is cleaned after the stop and before the unit file goes.
+func TestPurgeLinuxReleasesTheGuardFDStoreBeforeRemovingItsUnit(t *testing.T) {
+	f := newLinuxPurgeFixture(t)
+	service := filepath.Join(f.paths.UnitDir, "paperboat-machineguard.service")
+	writeLinuxFile(t, service, guardUnitMarker+"[Service]\n")
+	unitPresentAtClean := false
+	run := f.run
+	f.purgeRun = func(ctx context.Context, name string, args ...string) error {
+		if len(args) > 0 && args[0] == "clean" {
+			_, err := os.Lstat(service)
+			unitPresentAtClean = err == nil
+		}
+		return run(ctx, name, args...)
+	}
+	if err := f.purge(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	disable := slices.Index(f.calls, "systemctl disable --now paperboat-machineguard.service")
+	clean := slices.Index(f.calls, "systemctl clean --what=fdstore paperboat-machineguard.service")
+	reload := slices.Index(f.calls, "systemctl daemon-reload")
+	if !(disable >= 0 && disable < clean && clean < reload) || !unitPresentAtClean {
+		t.Fatalf("want disable < clean < daemon-reload with the unit file still present; calls=%v present=%v", f.calls, unitPresentAtClean)
+	}
+}
+
+func TestReleaseGuardFDStoreIgnoresARefusedClean(t *testing.T) {
+	var got string
+	releaseGuardFDStore(t.Context(), func(_ context.Context, name string, args ...string) ([]byte, error) {
+		got = name + " " + strings.Join(args, " ")
+		return []byte("Failed to clean unit: No matching resources found."), errors.New("exit status 1")
+	}, "paperboat-machineguard.service")
+	if got != "systemctl clean --what=fdstore paperboat-machineguard.service" {
+		t.Fatalf("command=%q", got)
 	}
 }
 

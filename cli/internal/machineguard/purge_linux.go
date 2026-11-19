@@ -76,6 +76,10 @@ func purgeLinux(ctx context.Context, p linuxPurge) error {
 		if err := p.Run(ctx, "systemctl", "disable", "--now", unit); err != nil && statErr == nil {
 			result = errors.Join(result, fmt.Errorf("stop %s: %w", unit, err))
 		}
+		if unit == "paperboat-machineguard.service" {
+			// before the unit file is removed below: see releaseGuardFDStore
+			_ = p.Run(ctx, "systemctl", "clean", "--what=fdstore", unit)
+		}
 	}
 	unitFiles, _ := filepath.Glob(filepath.Join(paths.UnitDir, "paperboat-machineguard*"))
 	for _, path := range unitFiles {

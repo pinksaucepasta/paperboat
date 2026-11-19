@@ -59,11 +59,16 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 	}
 	wasRunning := false
 	candidateStarted := false
+	unitExisted := false
 	defer finishGuardInstall(ctx, rollback, &resultErr, undo, func(c context.Context) error {
 		if !candidateStarted {
 			return nil
 		}
-		return exec.CommandContext(c, "systemctl", "stop", "paperboat-machineguard.service").Run()
+		err := exec.CommandContext(c, "systemctl", "stop", "paperboat-machineguard.service").Run()
+		if !unitExisted { // the rollback deletes the unit file, so its descriptor store must go first
+			releaseGuardFDStore(c, execGuardCommand, "paperboat-machineguard.service")
+		}
+		return err
 	}, func(c context.Context) error {
 		if err := exec.CommandContext(c, "systemctl", "daemon-reload").Run(); err != nil {
 			return err
@@ -74,6 +79,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 		return nil
 	})
 	if _, err := os.Lstat("/etc/systemd/system/paperboat-machineguard.service"); err == nil {
+		unitExisted = true
 		wasRunning = exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "paperboat-machineguard.service").Run() == nil
 		if output, err := exec.CommandContext(ctx, "systemctl", "stop", "paperboat-machineguard.service").CombinedOutput(); err != nil {
 			return fmt.Errorf("stop owned guard before local CA maintenance: %w: %s", err, output)
@@ -146,6 +152,19 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 		}
 	}
 	return trustErr
+}
+
+func execGuardCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// releaseGuardFDStore empties the stopped guard's descriptor store. Call it before the guard's unit file is
+// deleted: FileDescriptorStorePreserve=yes keeps the store through a stop, and systemd 255.4 (Ubuntu 24.04) aborts
+// PID 1 in the next daemon-reload when a unit with stored descriptors has no unit file (systemd issue #35288,
+// fixed by #35292 in v257; 2026-11-19 the account probe's pair host died this way). clean refuses a running unit
+// and reports an empty store or an unknown unit as an error, so the result is ignored.
+func releaseGuardFDStore(ctx context.Context, run func(context.Context, string, ...string) ([]byte, error), service string) {
+	_, _ = run(ctx, "systemctl", "clean", "--what=fdstore", service)
 }
 
 // guardInstallCommands never disables the guard unit: that empties systemd's descriptor store, and with it the

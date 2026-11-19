@@ -25,9 +25,7 @@ func Uninstall(ctx context.Context) (UninstallResult, error) {
 		return UninstallResult{}, lockErr
 	}
 	defer lifecycle.Close()
-	return uninstallLinux(ctx, "/etc/systemd/system", DefaultStateDir, "/usr/local/share/ca-certificates", func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
-	}, RestoreDeny)
+	return uninstallLinux(ctx, "/etc/systemd/system", DefaultStateDir, "/usr/local/share/ca-certificates", execGuardCommand, RestoreDeny)
 }
 
 type linuxUninstallConfig struct{ UnitDir, StateDir, TrustDir, ServiceName, DenyName, DenyUnit string }
@@ -85,6 +83,7 @@ func uninstallLinuxUnits(ctx context.Context, cfg linuxUninstallConfig, run func
 		if err = command("systemctl", "disable", "--now", cfg.ServiceName); err != nil {
 			return result, err
 		}
+		releaseGuardFDStore(ctx, run, cfg.ServiceName)
 	}
 	lock, err := lockState(filepath.Join(state, "lock"))
 	if err != nil {

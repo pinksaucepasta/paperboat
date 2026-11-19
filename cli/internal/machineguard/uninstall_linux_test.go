@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,11 @@ func TestUninstallLinuxRetainsDenyAndRetriesTrustRemoval(t *testing.T) {
 		if strings.Contains(action, "disable") && strings.Contains(action, "deny") {
 			t.Fatal("disabled safety unit")
 		}
+	}
+	// the descriptor store is cleaned after the guard stops and before its unit file is removed (systemd #35288)
+	disable := slices.Index(actions, "systemctl disable --now paperboat-machineguard.service")
+	if clean := slices.Index(actions, "systemctl clean --what=fdstore paperboat-machineguard.service"); disable < 0 || clean < disable {
+		t.Fatalf("clean must follow disable --now; actions=%v", actions)
 	}
 }
 func TestUninstallLinuxRefusesForeignUnitBeforeMutation(t *testing.T) {
