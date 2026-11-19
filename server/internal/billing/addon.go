@@ -13,8 +13,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// A team's SSO and SCIM add-ons are a second item on its Stripe subscription. Their prices are billing_products of catalog
-// type AddonCatalog with the code AddonProductCode; PutProduct accepts one only at the price in config.Business.
+// AddonCatalog is the catalog type of a team's SSO and SCIM add-ons, a second item on its Stripe subscription. Their prices
+// are billing_products of this type with the code AddonProductCode; PutProduct accepts one only at the price in config.Business.
 const AddonCatalog = "team_addon"
 
 // Addons are the add-ons a team can have; the empty string is none.
