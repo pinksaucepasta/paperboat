@@ -24,7 +24,7 @@ async function Machine({ params, children }: Pick<LayoutProps<"/machines/[machin
   ]
   return (
     <WithSession reads={reads}>
-      <MachineShell machineId={machineId}>{children}</MachineShell>
+      <MachineShell key={machineId} machineId={machineId}>{children}</MachineShell>
     </WithSession>
   )
 }

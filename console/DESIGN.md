@@ -130,6 +130,12 @@ Model every dialog on **Add machine** (`components/add-machine-dialog.tsx`):
 - Footer buttons (`DialogFooter`, Cancel + primary, `size="lg"`) only for forms that commit on
   submit. Destructive confirmations use `AlertDialog` with a `destructive` action.
 - Mount dialog bodies only while open, so each opening starts from current data.
+- **Leaving a page ends its flows.** Next keeps visited pages mounted but hidden, so a dialog's
+  `open`, a wizard's step and a draft would return with the page. Every route directory with two or
+  more child routes (its page counts) has a `template.tsx` that re-exports `ResetWhenHidden`
+  (`components/reset-when-hidden.tsx`): hiding the page remounts it fresh. A flow that must survive
+  a reload lives in the URL (`?create=1`) and is removed with `router.replace` once handled.
+  `scripts/check-flow-state.mjs` enforces the templates and drives every flow.
 
 An object's own fields are edited **in place** on its page: hovering the title shows a pencil;
 the title and description become inputs with the same type and position, only a faint dashed
