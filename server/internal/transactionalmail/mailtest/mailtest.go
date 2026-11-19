@@ -19,14 +19,13 @@ var Policy = config.TransactionalMail{From: "Paperboat <notify@mail.example.test
 // With PB_EMAIL_PREVIEW_DIR set it writes <name>.html and <name>.txt there.
 func Check(t *testing.T, name string, m transactionalmail.Message, button string) {
 	t.Helper()
-	logo := Policy.SiteURL + "/apple-touch-icon.png"
-	for _, want := range []string{"<!DOCTYPE html>", ">paperboat</a>", logo, "Paperboat · site.example.test", "prefers-color-scheme: dark", "max-width:560px"} {
+	for _, want := range []string{"<!DOCTYPE html>", ">paperboat</a>", `class="mk"`, "Paperboat · site.example.test", "prefers-color-scheme: dark", "max-width:560px"} {
 		if !strings.Contains(m.HTML, want) {
 			t.Errorf("%s: HTML lacks %q", name, want)
 		}
 	}
-	if strings.Contains(m.HTML, "<script") || !strings.Contains(m.HTML, `<img src="`+logo+`" width="28" height="28" alt="Paperboat"`) {
-		t.Errorf("%s: HTML has a script or no logo image", name)
+	if strings.Contains(m.HTML, "<script") || strings.Contains(m.HTML, "<img") {
+		t.Errorf("%s: HTML has a script or an image (the mark is table cells)", name)
 	}
 	if !strings.Contains(m.Text, "Paperboat · site.example.test") || strings.Contains(m.Text, "<p ") || strings.Contains(m.Text, "<a ") {
 		t.Errorf("%s: text alternative lacks the footer or holds markup:\n%s", name, m.Text)
