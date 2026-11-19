@@ -104,19 +104,13 @@ func (s *Service) RetryPendingRevocations(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	sessions := make([]dbsqlc.RevokeUserMachineAccessSessionsRow, len(rows))
+	for i, row := range rows {
+		sessions[i] = dbsqlc.RevokeUserMachineAccessSessionsRow(row)
+	}
 	var errs []error
-	for _, row := range rows {
-		reason := "revoked"
-		if row.RevocationReason.Valid && strings.TrimSpace(row.RevocationReason.String) != "" {
-			reason = row.RevocationReason.String
-		}
-		if err := s.revokeCredentialSessions(ctx, machineAccessSession{ID: row.ID, UserID: row.UserID, UserMachineID: row.UserMachineID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: row.CLIClientSessionID, HTTPBaseURL: row.HttpBaseUrl, TerminalSessionID: row.HelperTerminalSessionID, FileSessionID: row.HelperFileSessionID}, reason); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if _, err := s.db.Queries().MarkUserMachineAccessSessionRevoked(ctx, row.ID); err != nil {
-			errs = append(errs, err)
-		}
+	if err := s.revokeSessionCredentials(ctx, sessions, ""); err != nil {
+		errs = append(errs, err)
 	}
 	// One machine per transaction, like headscale's per-node DeleteNode (hscontrol/db/node.go): a serialization
 	// failure dooms the whole transaction, so a shared batch transaction failed every later machine's statements
@@ -165,6 +159,34 @@ func finalDeleteMachine(ctx context.Context, tx *db.Tx, writer *audit.Writer, ma
 		return fmt.Errorf("final delete removed machine: %w", err)
 	}
 	return nil
+}
+
+// revokeSessionCredentials ends each session at its helper, then marks the ones that ended, many ids per statement:
+// a statement per session made the revoke of a machine with 20,000 sessions take 90 s. An empty reason uses the
+// session's own revocation reason.
+func (s *Service) revokeSessionCredentials(ctx context.Context, rows []dbsqlc.RevokeUserMachineAccessSessionsRow, reason string) error {
+	var errs []error
+	ended := make([]string, 0, len(rows))
+	for _, row := range rows {
+		why := reason
+		if why == "" {
+			why = "revoked"
+			if row.RevocationReason.Valid && strings.TrimSpace(row.RevocationReason.String) != "" {
+				why = row.RevocationReason.String
+			}
+		}
+		if err := s.revokeCredentialSessions(ctx, machineAccessSession{ID: row.ID, UserID: row.UserID, UserMachineID: row.UserMachineID, EnvironmentID: row.EnvironmentID, CLIClientSessionID: row.CLIClientSessionID, HTTPBaseURL: row.HttpBaseUrl, TerminalSessionID: row.HelperTerminalSessionID, FileSessionID: row.HelperFileSessionID, CredentialKind: machineCredentialKind(row.CredentialKind)}, why); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		ended = append(ended, row.ID)
+	}
+	for ids := range slices.Chunk(ended, 1000) {
+		if _, err := s.db.Queries().MarkUserMachineAccessSessionsRevoked(ctx, ids); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 type machineAccessSession struct {

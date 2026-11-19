@@ -408,9 +408,18 @@ func (s *Service) retireExpiredAccessSessions(ctx context.Context) error {
 	if s.policy.ExpiredAccessSessionRetention <= 0 {
 		return nil
 	}
-	_, err := s.db.Queries().RetireExpiredMachineAccessSessions(ctx, s.now().UTC().Add(-s.policy.ExpiredAccessSessionRetention))
-	return err
+	before := s.now().UTC().Add(-s.policy.ExpiredAccessSessionRetention)
+	// Bounded batches (each its own short statement), at most retireBatches per tick; the next tick continues.
+	for range retireBatches {
+		n, err := s.db.Queries().RetireExpiredMachineAccessSessions(ctx, dbsqlc.RetireExpiredMachineAccessSessionsParams{ExpiredBefore: before, BatchSize: retireBatchSize})
+		if err != nil || n < retireBatchSize {
+			return err
+		}
+	}
+	return nil
 }
+
+const retireBatchSize, retireBatches = 1000, 20
 
 func (s *Service) ConfigureInstallationEncryption(encryptionKey string) {
 	s.encryptionKey = encryptionKey

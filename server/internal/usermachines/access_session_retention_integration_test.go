@@ -44,6 +44,10 @@ func TestExpiredAccessSessionsAreRetiredAfterTheRetentionPeriod(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// More than one batch (retireBatchSize) of old ones: all are retired in one tick, batch by batch.
+	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,state,helper_terminal_session_id,capabilities,operation_id)
+SELECT 'control_plane_signed','retire_bulk_'||$1||'_'||g,$2,$3,$4,$5,'',$6,'active','helper_bulk_'||$1||'_'||g,ARRAY['exec'],'operation_bulk' FROM generate_series(1,2500) g`,
+		suffix, machine, user, "env_"+machine, cli, now.Add(-30*24*time.Hour))
 	service := New(store, audit.NewWriter(store), Policy{ExpiredAccessSessionRetention: 7 * 24 * time.Hour}, nil)
 	service.now = func() time.Time { return now }
 	if err := service.retireExpiredAccessSessions(ctx); err != nil {
@@ -58,5 +62,9 @@ func TestExpiredAccessSessionsAreRetiredAfterTheRetentionPeriod(t *testing.T) {
 	}
 	if state("retire_live_"+suffix) != "active" || state("retire_recent_"+suffix) != "active" || state("retire_old_"+suffix) != "revoked" {
 		t.Fatalf("states live=%s recent=%s old=%s", state("retire_live_"+suffix), state("retire_recent_"+suffix), state("retire_old_"+suffix))
+	}
+	var left int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND id LIKE 'retire_bulk_%' AND state='active'`, user).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d of 2500 old sessions still active after one tick (%v)", left, err)
 	}
 }

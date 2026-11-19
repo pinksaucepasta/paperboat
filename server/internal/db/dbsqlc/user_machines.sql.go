@@ -3969,10 +3969,11 @@ func (q *Queries) ListDueUserMachineTerminalSessionOperations(ctx context.Contex
 const listPendingUserMachineAccessSessionRevocations = `-- name: ListPendingUserMachineAccessSessionRevocations :many
 SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
-  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind
 FROM user_machine_access_sessions
 WHERE state = 'revoked' AND helper_revoked_at IS NULL
 ORDER BY created_at, id
+LIMIT 5000
 `
 
 type ListPendingUserMachineAccessSessionRevocationsRow struct {
@@ -3985,6 +3986,7 @@ type ListPendingUserMachineAccessSessionRevocationsRow struct {
 	HelperTerminalSessionID string
 	HelperFileSessionID     string
 	RevocationReason        sql.NullString
+	CredentialKind          string
 }
 
 func (q *Queries) ListPendingUserMachineAccessSessionRevocations(ctx context.Context) ([]ListPendingUserMachineAccessSessionRevocationsRow, error) {
@@ -4006,6 +4008,7 @@ func (q *Queries) ListPendingUserMachineAccessSessionRevocations(ctx context.Con
 			&i.HelperTerminalSessionID,
 			&i.HelperFileSessionID,
 			&i.RevocationReason,
+			&i.CredentialKind,
 		); err != nil {
 			return nil, err
 		}
@@ -4802,14 +4805,14 @@ func (q *Queries) MarkStaleUserMachinesOffline(ctx context.Context, cutoff sql.N
 	return result.RowsAffected(), nil
 }
 
-const markUserMachineAccessSessionRevoked = `-- name: MarkUserMachineAccessSessionRevoked :execrows
+const markUserMachineAccessSessionsRevoked = `-- name: MarkUserMachineAccessSessionsRevoked :execrows
 UPDATE user_machine_access_sessions
 SET helper_revoked_at = now(), updated_at = now()
-WHERE id = $1 AND state = 'revoked' AND helper_revoked_at IS NULL
+WHERE id = ANY($1::text[]) AND state = 'revoked' AND helper_revoked_at IS NULL
 `
 
-func (q *Queries) MarkUserMachineAccessSessionRevoked(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.Exec(ctx, markUserMachineAccessSessionRevoked, id)
+func (q *Queries) MarkUserMachineAccessSessionsRevoked(ctx context.Context, ids []string) (int64, error) {
+	result, err := q.db.Exec(ctx, markUserMachineAccessSessionsRevoked, ids)
 	if err != nil {
 		return 0, err
 	}
@@ -5459,13 +5462,22 @@ func (q *Queries) RevokeUserMachine(ctx context.Context, arg RevokeUserMachinePa
 }
 
 const revokeUserMachineAccessSessions = `-- name: RevokeUserMachineAccessSessions :many
-UPDATE user_machine_access_sessions
-SET state = 'revoked', revoked_at = coalesce(revoked_at, now()), revocation_reason = $1, updated_at = now()
-WHERE user_machine_id = $2
-  AND (state = 'active' OR (state = 'revoked' AND helper_revoked_at IS NULL))
-RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
+WITH revoked AS (
+  UPDATE user_machine_access_sessions AS active
+  SET state = 'revoked', revoked_at = coalesce(active.revoked_at, now()), revocation_reason = $1, updated_at = now(),
+    helper_revoked_at = CASE WHEN active.credential_kind = 'control_plane_signed' THEN now() END
+  WHERE active.user_machine_id = $2 AND active.state = 'active'
+  RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
-  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind, helper_revoked_at
+)
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, helper_terminal_session_id, helper_file_session_id, revocation_reason, credential_kind FROM revoked WHERE helper_revoked_at IS NULL
+UNION ALL
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind FROM user_machine_access_sessions AS pending
+WHERE pending.user_machine_id = $2 AND pending.state = 'revoked' AND helper_revoked_at IS NULL
 `
 
 type RevokeUserMachineAccessSessionsParams struct {
@@ -5483,8 +5495,11 @@ type RevokeUserMachineAccessSessionsRow struct {
 	HelperTerminalSessionID string
 	HelperFileSessionID     string
 	RevocationReason        sql.NullString
+	CredentialKind          string
 }
 
+// Revokes the active sessions (a signed credential is done at once: it needs no helper call) and returns every
+// session that still needs its helper told, without rewriting those already revoked.
 func (q *Queries) RevokeUserMachineAccessSessions(ctx context.Context, arg RevokeUserMachineAccessSessionsParams) ([]RevokeUserMachineAccessSessionsRow, error) {
 	rows, err := q.db.Query(ctx, revokeUserMachineAccessSessions, arg.Reason, arg.UserMachineID)
 	if err != nil {
@@ -5504,6 +5519,7 @@ func (q *Queries) RevokeUserMachineAccessSessions(ctx context.Context, arg Revok
 			&i.HelperTerminalSessionID,
 			&i.HelperFileSessionID,
 			&i.RevocationReason,
+			&i.CredentialKind,
 		); err != nil {
 			return nil, err
 		}
@@ -5516,13 +5532,22 @@ func (q *Queries) RevokeUserMachineAccessSessions(ctx context.Context, arg Revok
 }
 
 const revokeUserMachineAccessSessionsForUser = `-- name: RevokeUserMachineAccessSessionsForUser :many
-UPDATE user_machine_access_sessions
-SET state = 'revoked', revoked_at = coalesce(revoked_at, now()), revocation_reason = $1, updated_at = now()
-WHERE user_id = $2
-  AND (state = 'active' OR (state = 'revoked' AND helper_revoked_at IS NULL))
-RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
+WITH revoked AS (
+  UPDATE user_machine_access_sessions AS active
+  SET state = 'revoked', revoked_at = coalesce(active.revoked_at, now()), revocation_reason = $1, updated_at = now(),
+    helper_revoked_at = CASE WHEN active.credential_kind = 'control_plane_signed' THEN now() END
+  WHERE active.user_id = $2 AND active.state = 'active'
+  RETURNING id, user_id, user_machine_id, environment_id, cli_client_session_id,
   http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
-  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind, helper_revoked_at
+)
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, helper_terminal_session_id, helper_file_session_id, revocation_reason, credential_kind FROM revoked WHERE helper_revoked_at IS NULL
+UNION ALL
+SELECT id, user_id, user_machine_id, environment_id, cli_client_session_id,
+  http_base_url, coalesce(helper_terminal_session_id, '') AS helper_terminal_session_id,
+  coalesce(helper_file_session_id, '') AS helper_file_session_id, revocation_reason, credential_kind FROM user_machine_access_sessions AS pending
+WHERE pending.user_id = $2 AND pending.state = 'revoked' AND helper_revoked_at IS NULL
 `
 
 type RevokeUserMachineAccessSessionsForUserParams struct {
@@ -5540,8 +5565,11 @@ type RevokeUserMachineAccessSessionsForUserRow struct {
 	HelperTerminalSessionID string
 	HelperFileSessionID     string
 	RevocationReason        sql.NullString
+	CredentialKind          string
 }
 
+// Revokes the active sessions (a signed credential is done at once: it needs no helper call) and returns every
+// session that still needs its helper told, without rewriting those already revoked.
 func (q *Queries) RevokeUserMachineAccessSessionsForUser(ctx context.Context, arg RevokeUserMachineAccessSessionsForUserParams) ([]RevokeUserMachineAccessSessionsForUserRow, error) {
 	rows, err := q.db.Query(ctx, revokeUserMachineAccessSessionsForUser, arg.Reason, arg.UserID)
 	if err != nil {
@@ -5561,6 +5589,7 @@ func (q *Queries) RevokeUserMachineAccessSessionsForUser(ctx context.Context, ar
 			&i.HelperTerminalSessionID,
 			&i.HelperFileSessionID,
 			&i.RevocationReason,
+			&i.CredentialKind,
 		); err != nil {
 			return nil, err
 		}
