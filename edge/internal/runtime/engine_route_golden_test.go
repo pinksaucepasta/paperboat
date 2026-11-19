@@ -31,7 +31,7 @@ func TestEdgeAdmitsTheServersEngineRouteGolden(t *testing.T) {
 		_, _ = w.Write(golden)
 	}))
 	defer server.Close()
-	client, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	client, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

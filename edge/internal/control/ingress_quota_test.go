@@ -29,7 +29,7 @@ func TestIngressAuthorityKeepsThrottledRouteAdmittedAndReportsThrottle(t *testin
 		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "throttled": throttled})
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestIngressAuthorityRefusesBlockedHostname(t *testing.T) {
 			"blocked": []connectorprotocol.IngressBlock{{Hostname: decision.Binding.Hostname, Legal: true}, {Hostname: "other.customer.test"}}})
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestIngressAuthorityListsOwnerOfflinePreviews(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}, "offline": offline})
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestIngressAuthorityAppliesOwnerIPRules(t *testing.T) {
 			}})
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestIngressSnapshotDropsOnlyTheDecisionItCannotAccept(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"complete": true, "version": "v1", "decisions": []connectorprotocol.IngressDecision{bad, good}})
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

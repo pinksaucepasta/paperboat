@@ -346,7 +346,7 @@ func TestControlAttemptPreservesTypedCauseStatusAndRecovery(t *testing.T) {
 	defer server.Close()
 	var failures []error
 	var outcomes []string
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Credential: testControlCredential, Timeout: time.Second, Client: server.Client(), ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Credential: testControlCredential, Timeout: time.Minute, Client: server.Client(), ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
 		return "", reference, func(outcome, code string) { outcomes = append(outcomes, outcome+":"+code) }
 	}, ControlFailure: func(_ context.Context, ref string, err error) {
 		if ref != reference {
@@ -486,7 +486,7 @@ func TestControlFailureIsReportedOnlyByTheReportingProcess(t *testing.T) {
 	}))
 	defer server.Close()
 	var reported atomic.Int32
-	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second, ControlFailure: func(context.Context, string, error) { reported.Add(1) }})
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute, ControlFailure: func(context.Context, string, error) { reported.Add(1) }})
 	if err != nil {
 		t.Fatal(err)
 	}

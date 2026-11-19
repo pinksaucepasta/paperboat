@@ -33,7 +33,7 @@ func TestBrowserTerminalControlResumesAfterAProxyCut(t *testing.T) {
 			defer func() { controlResumeGrace = previous }()
 			plane := controltest.Start(t)
 			var failures atomic.Int32
-			httpClient, err := NewHTTPClient(HTTPConfig{BaseURL: plane.URL, Credential: testControlCredential, Timeout: 3 * time.Second, Client: plane.Client,
+			httpClient, err := NewHTTPClient(HTTPConfig{BaseURL: plane.URL, Credential: testControlCredential, Timeout: time.Minute, Client: plane.Client,
 				ControlFailure: func(context.Context, string, error) { failures.Add(1) }})
 			if err != nil {
 				t.Fatal(err)

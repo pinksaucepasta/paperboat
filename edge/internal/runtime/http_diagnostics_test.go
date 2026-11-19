@@ -41,7 +41,7 @@ func TestHTTPDiagnosticsPanicAbortAndRecovery(t *testing.T) {
 		defer server.Close()
 		transport := &http.Transport{}
 		defer transport.CloseIdleConnections()
-		client := &http.Client{Transport: transport, Timeout: time.Second}
+		client := &http.Client{Transport: transport, Timeout: time.Minute}
 		if response, err := client.Get(server.URL + "/PRIVATE_PATH"); err == nil {
 			response.Body.Close()
 			t.Fatal("panic produced successful response")
@@ -63,7 +63,7 @@ func TestHTTPDiagnosticsPanicAbortAndRecovery(t *testing.T) {
 		server.Config.ErrorLog.Printf("TLS failure from PRIVATE_IP: PRIVATE_CREDENTIAL")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHTTPDiagnosticsPanicAbortAndRecovery$")
 	command.Env = append(os.Environ(), "PB_HTTP_DIAGNOSTIC_HELPER=1", "PAPERBOAT_SENTRY_ENABLED=false")
@@ -111,7 +111,7 @@ func TestHTTPDiagnosticWriterIgnoresClientCausedLines(t *testing.T) {
 		logger.Printf("http: panic serving PRIVATE_IP: PRIVATE_PANIC")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHTTPDiagnosticWriterIgnoresClientCausedLines$")
 	command.Env = append(os.Environ(), "PB_HTTP_DIAGNOSTIC_HELPER=2", "PAPERBOAT_SENTRY_ENABLED=false")

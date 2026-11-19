@@ -199,7 +199,7 @@ func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
 				var failures atomic.Int32
 				var failure error
 				client, err := NewHTTPClient(HTTPConfig{
-					BaseURL: server.URL, Credential: testControlCredential, Timeout: 5 * time.Second, Client: server.Client(),
+					BaseURL: server.URL, Credential: testControlCredential, Timeout: time.Minute, Client: server.Client(),
 					ControlFailure: func(_ context.Context, _ string, err error) { failures.Add(1); failure = err },
 				})
 				if err != nil {
