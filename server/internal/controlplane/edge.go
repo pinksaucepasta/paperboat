@@ -61,7 +61,6 @@ type EdgeService struct {
 	ingressLimits           edgelimits.IngressLimits
 	fairUse                 config.FairUse
 	relayPool               *bandwidthgate.Gate
-	workspaceGate           *bandwidthgate.Gate // whether a workspace used its included traffic (terminals)
 	relayCountsMu           sync.Mutex
 	relayCounts             map[string]int // relays carrying each account on more than one (relaysPerAccount)
 	relayCountsAt           time.Time
@@ -367,7 +366,7 @@ func reserveUsageKeyOperation(ctx context.Context, tx *db.Tx, operationKey, acti
 }
 
 func NewEdgeService(store *db.DB, credential string) *EdgeService {
-	return &EdgeService{store: store, credential: credential, ingressLimits: edgelimits.Default(), workspaceGate: bandwidthgate.New(store), fairUse: config.Default().Billing.FairUse, audit: audit.NewWriter(store), clock: func() time.Time { return time.Now().UTC() }}
+	return &EdgeService{store: store, credential: credential, ingressLimits: edgelimits.Default(), fairUse: config.Default().Billing.FairUse, audit: audit.NewWriter(store), clock: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *EdgeService) SetClock(clock func() time.Time) {

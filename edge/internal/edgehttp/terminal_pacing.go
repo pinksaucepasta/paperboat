@@ -11,12 +11,13 @@ import (
 const terminalReadAheadBytes = 256 << 10
 
 // terminalInteractiveBytes is the size up to which a terminal frame is interactive (a keystroke, its echo, a resize, a prompt): it is
-// never delayed by the workspace's throttle. Bulk output and uploads are larger.
+// never delayed by the workspace's terminal cap. Bulk output and uploads are larger.
 const terminalInteractiveBytes = 1024
 
-// terminalPacing paces the frames of one browser terminal with its workspace's throttle (Throttles; the terminal's runtime host
-// names the workspace). The throttle applies to terminals like any public traffic (a terminal at a few kbit/s never notices it, and
-// it stops bulk data going through a terminal for free), but a throttled terminal must stay responsive: the inner TLS stream cannot
+// terminalPacing paces the frames of one browser terminal with its workspace's terminal cap (Throttles, the Terminal entries; the
+// terminal's runtime host names the workspace): all the workspace's terminals share ONE bucket, so more tabs do not multiply the cap.
+// It is an anti-abuse cap only (a terminal at a few kbit/s never notices it; it stops bulk data going through a terminal at wire
+// speed); the allowance neither counts nor slows terminals. A capped terminal must stay responsive: the inner TLS stream cannot
 // be reordered, so a small frame behind a bulk frame that is waiting for tokens would wait with it. The pacer therefore reads ahead
 // (up to terminalReadAheadBytes) while a bulk frame waits, and an interactive frame it finds releases all the bulk ahead of it at once;
 // their tokens stay taken, so the workspace is in debt and the next bulk frame waits for that debt. The average rate holds, and input

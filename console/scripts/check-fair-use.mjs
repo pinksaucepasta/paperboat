@@ -82,7 +82,7 @@ try {
       } else {
         const used = { under: "40", nearly: "85", throttled: "104" }[s]
         check(`${name}/${s}: it shows what is used of the included amount`, new RegExp(`${used}\\.?\\d* GB of 100 GB included`).test(text), text.slice(0, 90))
-        check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of traffic included/.test(text) && /Edges and relays share it: previews, tunnels, relayed connections and console terminals count/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Until then relayed connections run at up to 10 Mbit\/s and edges at full speed\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
+        check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of traffic included/.test(text) && /Edges and relays share it: previews, tunnels and relayed connections count\. Console terminals are not counted and are never slowed by it/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Until then relayed connections run at up to 10 Mbit\/s and edges at full speed\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
         if (s === "throttled") {
           check(`${name}/${s}: it says reduced to 1 Mbit/s until the reset date`, /Reduced to 1 Mbit\/s until/.test(text), text.slice(0, 90))
           const links = (await panel.$$eval("a", (a) => a.map((e) => `${e.textContent.trim()}:${e.getAttribute("href")}`))).join(" ")

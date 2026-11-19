@@ -273,10 +273,13 @@ type FairUse struct {
 	// RelayMbit is one account's speed through Paperboat's relays while its workspace pool is not used up (shared across the relays it
 	// is on).
 	RelayMbit float64 `json:"relay_mbit"`
+	// TerminalMbit is the anti-abuse cap on all browser-terminal traffic of one workspace together (one shared bucket, however many
+	// sessions are open). Browser terminals never count toward the pool and are never slowed by it; the edges each get a share.
+	TerminalMbit float64 `json:"terminal_mbit"`
 }
 
 func (f FairUse) valid() bool {
-	return f.EdgeFreeBytesPerSecond >= 1024 && f.EdgeBytesPerSecond >= f.EdgeFreeBytesPerSecond && f.TeamPerSeatBytes > 0 && f.RelayMbit*125_000 >= float64(f.EdgeBytesPerSecond)
+	return f.EdgeFreeBytesPerSecond >= 1024 && f.EdgeBytesPerSecond >= f.EdgeFreeBytesPerSecond && f.TeamPerSeatBytes > 0 && f.RelayMbit*125_000 >= float64(f.EdgeBytesPerSecond) && f.TerminalMbit > 0
 }
 
 // PlanLimit is one count limit per plan. Free and Pro apply to a personal workspace. Teams are
@@ -636,7 +639,7 @@ func Default() Config {
 		},
 		RateLimits:        RateLimits{SDKSessionPerMinute: 30, SDKSessionBurst: 10, SDKDescriptorPerMinute: 120, SDKDescriptorBurst: 32, SignInPerMinute: 30, SignInBurst: 10, TokenFailuresPerMinute: 20, TokenFailuresBurst: 10, MachinePeerNetworkConfigPerMinute: 30, MachinePeerNetworkConfigBurst: 20, AbuseReportsPerMinute: 5, AbuseReportsBurst: 10, BrowserBeginPerMinute: 60, BrowserBeginBurst: 20, BrowserBeginGlobalPerMinute: 3000, BrowserBeginGlobalBurst: 500, BrowserBeginMaxLive: 20000, TunnelAddressPerMinute: 6, TunnelAddressBurst: 10, MaxClients: 100000},
 		APITokens:         APITokens{MaxLifetimeDays: 365, DefaultLifetimeDays: 90, MaxPerMember: 100, RetrySeconds: 600},
-		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, TeamPerSeatBytes: 100_000_000_000, RelayMbit: 10}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
+		Billing:           Billing{FairUse: FairUse{EdgeFreeBytesPerSecond: 64_000, EdgeBytesPerSecond: 125_000, TeamPerSeatBytes: 100_000_000_000, RelayMbit: 10, TerminalMbit: 10}, TopupMaxQuantity: 100, TeamTrialDays: 14, PersonalAllowanceBytes: new(int64(5_000_000_000)), Limits: PlanLimits{SDK: SDKLimits{SessionsPerToken: 10, SessionsPerAccount: 100, OperationsPerToken: 32, OperationsPerAccount: 128}, Machines: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, Publications: PlanLimit{Free: 100, Pro: 1000, TeamCeiling: 10000}, BrowserTerminals: PlanLimit{Free: 10, Pro: 100, TeamCeiling: 1000}, ViewersPerSharedTerminal: 50, SelfHostedCeiling: 10000, PublicTCP: PublicTCPLimit{Free: 1, Pro: 10, TeamPerSeat: 10}}},
 		Business:          defaultBusiness(),
 		WorkspacePolicy:   defaultWorkspacePolicy(),
 		RuntimeBaseDomain: "localhost",
