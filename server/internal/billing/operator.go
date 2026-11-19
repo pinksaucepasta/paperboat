@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
@@ -123,13 +124,19 @@ type OperatorPolicy struct {
 }
 
 type OperatorService struct {
-	store  *db.DB
-	prices PriceReader
-	audit  *audit.Writer
+	store    *db.DB
+	prices   PriceReader
+	audit    *audit.Writer
+	business config.Business
 }
 
-func NewOperatorService(store *db.DB, prices PriceReader) *OperatorService {
-	return &OperatorService{store: store, prices: prices, audit: audit.NewWriter(store)}
+// NewOperatorService takes the loaded business configuration (the add-on prices) when it is not the default.
+func NewOperatorService(store *db.DB, prices PriceReader, business ...config.Business) *OperatorService {
+	s := &OperatorService{store: store, prices: prices, audit: audit.NewWriter(store), business: config.Default().Business}
+	for _, b := range business {
+		s.business = b
+	}
+	return s
 }
 
 func (s *OperatorService) ListProducts(ctx context.Context, actorID, after string, limit int) (ProductPage, error) {
@@ -214,6 +221,9 @@ func (s *OperatorService) PutProduct(ctx context.Context, actorID, key, code, re
 		return out, fmt.Errorf("verify Stripe price: %w", err)
 	}
 	recurring := input.CatalogType != "top_up"
+	if input.CatalogType == AddonCatalog && !s.addonPriceMatches(code, price) {
+		return out, ErrOperatorBillingInvalid
+	}
 	if !validStripePriceStructure(price) || price.Recurring != recurring || price.ID != input.ProviderPriceID || (input.Active && !price.Active) {
 		return out, ErrOperatorBillingInvalid
 	}
@@ -336,7 +346,7 @@ func validateProductInput(in ProductInput) error {
 	} else if in.BytesAmount != nil {
 		return ErrOperatorBillingInvalid
 	}
-	if in.Version < 0 || strings.TrimSpace(in.DisplayName) == "" || len(in.DisplayName) > 120 || strings.TrimSpace(in.ProviderPriceID) == "" || (in.CatalogType != "personal_subscription" && in.CatalogType != "team_subscription" && in.CatalogType != "top_up") || (in.AllowanceBytes != nil && *in.AllowanceBytes < 0) {
+	if in.Version < 0 || strings.TrimSpace(in.DisplayName) == "" || len(in.DisplayName) > 120 || strings.TrimSpace(in.ProviderPriceID) == "" || (in.CatalogType != "personal_subscription" && in.CatalogType != "team_subscription" && in.CatalogType != "top_up" && in.CatalogType != AddonCatalog) || (in.AllowanceBytes != nil && *in.AllowanceBytes < 0) {
 		return ErrOperatorBillingInvalid
 	}
 	return nil

@@ -97,6 +97,16 @@ func (s *WorkspaceService) Overview(ctx context.Context, account, team string) (
 			} else if overridden {
 				out.SeatsGranted = &seats
 			}
+			var until sql.NullTime
+			if err = tx.QueryRow(ctx, `SELECT coalesce(addon,''),addon_until FROM billing_workspaces WHERE id=$1`, out.ID).Scan(&out.Addon, &until); err != nil {
+				return err
+			}
+			if until.Valid {
+				out.AddonUntil = &until.Time
+			}
+			if out.SSOAddon, out.SCIMAddon, err = planlimits.AddonsTx(ctx, tx, team); err != nil {
+				return err
+			}
 		}
 		return s.usageOverviewTx(ctx, tx, &out)
 	})
@@ -144,14 +154,14 @@ func (s *WorkspaceService) Products(ctx context.Context, account, team string, l
 		if err != nil {
 			return err
 		}
-		catalog := "personal_subscription"
+		catalog, addons := "personal_subscription", ""
 		if w.TeamID != "" {
-			catalog = "team_subscription"
+			catalog, addons = "team_subscription", AddonCatalog
 		}
-		if err = tx.QueryRow(ctx, `SELECT count(*) FROM billing_products WHERE provider='stripe' AND active AND (catalog_type=$1 OR catalog_type='top_up')`, catalog).Scan(&out.Total); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM billing_products WHERE provider='stripe' AND active AND (catalog_type=$1 OR catalog_type='top_up' OR catalog_type=$2)`, catalog, addons).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT code,catalog_ref,verified_unit_amount,verified_currency,verified_interval,version,catalog_type FROM billing_products WHERE provider='stripe' AND active AND (catalog_type=$1 OR catalog_type='top_up') ORDER BY code LIMIT $2 OFFSET $3`, catalog, limit, offset)
+		rows, err := tx.Query(ctx, `SELECT code,catalog_ref,verified_unit_amount,verified_currency,verified_interval,version,catalog_type FROM billing_products WHERE provider='stripe' AND active AND (catalog_type=$1 OR catalog_type='top_up' OR catalog_type=$4) ORDER BY code LIMIT $2 OFFSET $3`, catalog, limit, offset, addons)
 		if err != nil {
 			return err
 		}
@@ -642,6 +652,11 @@ func (s *WorkspaceService) reconcileSubscription(ctx context.Context, subscripti
 		if productCode != previousProduct || current.Status != previousState {
 			if err = audit.NewWriter(nil).WriteTx(ctx, tx, audit.Event{ActorType: audit.ActorSystem, EventType: "billing.plan_changed", ResourceType: "billing_workspace", ResourceID: workspaceID,
 				Metadata: map[string]any{"product_code": productCode, "state": current.Status, "previous_product_code": previousProduct, "previous_state": previousState}}); err != nil {
+				return err
+			}
+		}
+		if team.Valid {
+			if err = syncAddonTx(ctx, tx, workspaceID, current, newSubscription); err != nil {
 				return err
 			}
 		}
