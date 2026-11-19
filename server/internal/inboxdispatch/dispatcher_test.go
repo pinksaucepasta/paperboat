@@ -166,12 +166,12 @@ func TestOpenRefusesTooLargeShortAndSizelessAnswers(t *testing.T) {
 }
 
 func TestMachineThatAnswersTooSlowlyIsUnreachableAndRedirectsAreNotFollowed(t *testing.T) {
-	slow := &fakeMachine{handler: func(w http.ResponseWriter, _ *http.Request, _ mint.CredentialClaims) {
-		time.Sleep(900 * time.Millisecond)
+	slow := &fakeMachine{handler: func(w http.ResponseWriter, r *http.Request, _ mint.CredentialClaims) {
+		<-r.Context().Done() // never answers: the dispatcher's header timeout ends the request, then the client's close ends this
 		w.Header().Set("Content-Length", "0")
 	}}
 	dispatcher, _ := dispatcherFor(t, slow)
-	dispatcher.headerTimeout = 300 * time.Millisecond // the machine answers after 900 ms
+	dispatcher.headerTimeout = 300 * time.Millisecond // the machine never answers
 	if _, err := dispatcher.Open(t.Context(), request()); !errors.Is(err, ErrMachineUnreachable) {
 		t.Fatalf("slow machine: %v", err)
 	}
