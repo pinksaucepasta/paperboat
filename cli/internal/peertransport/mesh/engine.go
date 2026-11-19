@@ -205,7 +205,9 @@ func (s *Server) Start() error {
 				// "meowed" is the ack that tells the client it can
 				// start dialing. Disallowed clients get no reply.
 				if lb.onMeow(src, discoPub) {
-					s.recordPeerStart(src, start)
+					if s.recordPeerStart(src, start) {
+						lb.forgetPeerPath(src)
+					}
 					// The peer reached us through regionID, so it is a rendezvous both ends hold: answer it there
 					// rather than on the peer's default region, which may be a relay this engine cannot reach
 					// (a test Mac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
@@ -401,14 +403,14 @@ func (s *Server) notePeerStartLocked(peer key.NodePublic, start [meowNonceLen]by
 
 // recordPeerStart notes the start id a peer's ping carries, so our own later dial to a peer that only ever dialed us
 // can tell it restarted. It never resets: the peer that pings is about to handshake with us, and dropping our end of
-// that fresh session would strand it.
-func (s *Server) recordPeerStart(peer key.NodePublic, start [meowNonceLen]byte) {
+// that fresh session would strand it. It reports whether the peer restarted since we last heard its start id.
+func (s *Server) recordPeerStart(peer key.NodePublic, start [meowNonceLen]byte) bool {
 	if start == ([meowNonceLen]byte{}) {
-		return
+		return false
 	}
 	s.peerReadyMu.Lock()
-	mak.Set(&s.peerStarts, peer, start)
-	s.peerReadyMu.Unlock()
+	defer s.peerReadyMu.Unlock()
+	return s.notePeerStartLocked(peer, start)
 }
 
 // resetRestartedPeer drops the WireGuard session held with a peer that restarted with the same keys and port: the
