@@ -315,7 +315,7 @@ func TestPostgresAddonGatesSSOAndDirectorySync(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status,email_verified) VALUES($1,$1,'owner@addon.test','active',true)`, owner)
-	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation,display_name) VALUES($1,$2,1,'Addon team')`, team, owner)
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation,display_name,workos_organization_id) VALUES($1,$2,1,'Addon team','org_'||$1)`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active',50,now()-interval '1 day',now()+interval '30 days')`, team)
 	s := New(store, &fakeWorkOS{}, config.Default().Business, config.Default().Mail.InvitationLifetimeSeconds, "https://console.example.test/team", &fakeSeats{})
