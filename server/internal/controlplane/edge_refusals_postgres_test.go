@@ -318,7 +318,7 @@ func TestHostedLimitsReachPaperboatEdgesAndNeverCustomerOwnedOnesPostgres(t *tes
 		if customerOwned && limits.FreeRequests != (edgelimits.FreeRequests{}) {
 			t.Errorf("%s edge was sent request limits", kind)
 		}
-		_, throttled, _, _, _, err := service.ingressProjection(ctx, node, "epoch", true)
+		_, throttled, _, _, _, err := service.ingressProjection(ctx, node, "epoch_"+x+"_hostedlimits", true)
 		if err != nil {
 			t.Fatal(err)
 		}
