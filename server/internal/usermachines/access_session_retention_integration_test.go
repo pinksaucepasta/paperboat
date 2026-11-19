@@ -34,7 +34,10 @@ func TestExpiredAccessSessionsAreRetiredAfterTheRetentionPeriod(t *testing.T) {
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/w','online','occupied',true,1)`, machine, user, "env_"+machine)
 	exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,'client','retire','desktop','test',ARRAY['machines:connect'],'active',now(),now())`, cli, user)
 	now := time.Now().UTC()
-	sessions := map[string]time.Duration{"retire_live_" + suffix: time.Minute, "retire_recent_" + suffix: -time.Hour, "retire_old_" + suffix: -30 * 24 * time.Hour}
+	// recent: expired an hour ago (a client may still renew with it); idle: expired a day ago and named by nobody since;
+	// named: expired a day ago, still named as admitted 5 minutes ago (an open stream); old: past the retention.
+	sessions := map[string]time.Duration{"retire_live_" + suffix: time.Minute, "retire_recent_" + suffix: -time.Hour, "retire_old_" + suffix: -30 * 24 * time.Hour,
+		"retire_idle_" + suffix: -24 * time.Hour, "retire_named_" + suffix: -24 * time.Hour}
 	for id, expiresIn := range sessions {
 		if err := store.Queries().CreateUserMachineAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
 			CredentialKind: "control_plane_signed", ID: id, UserMachineID: machine, UserID: user, EnvironmentID: "env_" + machine,
@@ -44,6 +47,7 @@ func TestExpiredAccessSessionsAreRetiredAfterTheRetentionPeriod(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	exec(`UPDATE paperboat.user_machine_access_sessions SET admitted_seen_at=now()-interval '5 minutes' WHERE id=$1`, "retire_named_"+suffix)
 	// More than one batch (retireBatchSize) of old ones: all are retired in one tick, batch by batch.
 	exec(`INSERT INTO paperboat.user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,expires_at,state,helper_terminal_session_id,capabilities,operation_id)
 SELECT 'control_plane_signed','retire_bulk_'||$1||'_'||g,$2,$3,$4,$5,'',$6,'active','helper_bulk_'||$1||'_'||g,ARRAY['exec'],'operation_bulk' FROM generate_series(1,2500) g`,
@@ -60,8 +64,10 @@ SELECT 'control_plane_signed','retire_bulk_'||$1||'_'||g,$2,$3,$4,$5,'',$6,'acti
 		}
 		return value
 	}
-	if state("retire_live_"+suffix) != "active" || state("retire_recent_"+suffix) != "active" || state("retire_old_"+suffix) != "revoked" {
-		t.Fatalf("states live=%s recent=%s old=%s", state("retire_live_"+suffix), state("retire_recent_"+suffix), state("retire_old_"+suffix))
+	for id, want := range map[string]string{"live": "active", "recent": "active", "named": "active", "idle": "revoked", "old": "revoked"} {
+		if got := state("retire_" + id + "_" + suffix); got != want {
+			t.Errorf("%s session is %s, want %s", id, got, want)
+		}
 	}
 	var left int
 	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_id=$1 AND id LIKE 'retire_bulk_%' AND state='active'`, user).Scan(&left); err != nil || left != 0 {

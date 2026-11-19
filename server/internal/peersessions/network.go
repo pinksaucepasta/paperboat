@@ -323,6 +323,9 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if in.HomeRelay != "" {
 		homeRelay = in.HomeRelay
 	}
+	if err := s.markAdmittedSessions(ctx, in, live["machine_access"], now); err != nil {
+		return NetworkConfigResult{}, err
+	}
 	start, cacheable := s.cache.begin()
 	step := time.Now()
 	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds(), homeRelay).
@@ -1035,4 +1038,20 @@ func validWireGuardPublicKey(key []byte) bool {
 	}
 	_, err := curve25519.X25519(scalar[:], key)
 	return err == nil
+}
+
+// admittedSeenEvery bounds the writes markAdmittedSessions makes: one per expired admitted session per interval.
+const admittedSeenEvery = 10 * time.Minute
+
+// markAdmittedSessions records that this endpoint still names its expired access sessions as admitted (an open stream
+// outlives the credential), so the usermachines sweeper keeps them; one that nobody names is retired once a whole
+// document lifetime has passed without it. Only the endpoint's own sessions, and only expired ones, are written.
+func (s *NetworkService) markAdmittedSessions(ctx context.Context, in NetworkConfigRequest, ids []string, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := s.store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET admitted_seen_at=$1
+ WHERE id=ANY($2::text[]) AND state='active' AND expires_at<$1 AND (admitted_seen_at IS NULL OR admitted_seen_at<$1::timestamptz-make_interval(secs=>$5))
+ AND ((cli_client_session_id=$3 AND user_id=$4) OR user_machine_id=$3)`, now, ids, in.EndpointID, in.UserID, admittedSeenEvery.Seconds())
+	return err
 }

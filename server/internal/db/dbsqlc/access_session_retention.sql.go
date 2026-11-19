@@ -38,19 +38,24 @@ SET state = 'revoked', revoked_at = now(), revocation_reason = 'expired',
 WHERE id IN (
   SELECT due.id FROM user_machine_access_sessions AS due
   WHERE due.state = 'active' AND due.expires_at < $1
-  ORDER BY due.expires_at LIMIT $2::int FOR UPDATE SKIP LOCKED)
+    AND (due.expires_at < $2 OR (due.credential_kind = 'control_plane_signed'
+      AND (due.admitted_seen_at IS NULL OR due.admitted_seen_at < $1)))
+  ORDER BY due.expires_at LIMIT $3::int FOR UPDATE SKIP LOCKED)
 `
 
 type RetireExpiredMachineAccessSessionsParams struct {
+	IdleBefore    time.Time
 	ExpiredBefore time.Time
 	BatchSize     int32
 }
 
-// Admitted streams keep their authority beyond the credential TTL until explicit revocation, so an
-// expired session is only retired after a retention period; the helper side expired it long before.
+// Admitted streams keep their authority beyond the credential TTL until explicit revocation, so an expired session
+// stays while a client still names it (admitted_seen_at, peersessions markAdmittedSessions). A signed one that nobody
+// named since idle_before (a whole peer document lifetime) has no open stream left and is retired; any session is
+// retired after the retention period (expired_before); the helper side expired it long before.
 // One bounded batch per statement: one statement over every expired row of a busy machine held its locks for seconds.
 func (q *Queries) RetireExpiredMachineAccessSessions(ctx context.Context, arg RetireExpiredMachineAccessSessionsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, retireExpiredMachineAccessSessions, arg.ExpiredBefore, arg.BatchSize)
+	result, err := q.db.Exec(ctx, retireExpiredMachineAccessSessions, arg.IdleBefore, arg.ExpiredBefore, arg.BatchSize)
 	if err != nil {
 		return 0, err
 	}
