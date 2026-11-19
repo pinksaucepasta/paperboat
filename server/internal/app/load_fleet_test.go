@@ -30,7 +30,6 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -86,6 +85,7 @@ func TestFleetServe(t *testing.T) {
 		t.Skip("set PAPERBOAT_FLEET_LISTEN")
 	}
 	cfg := fleetConfig(t, fleetDSN(t))
+	cfg.HTTP.Address = listen
 	store, err := db.Open(cfg.Database)
 	if err != nil {
 		t.Fatal(err)
@@ -98,12 +98,12 @@ func TestFleetServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("tcp", listen)
-	if err != nil {
+	// Run is the whole server: the HTTP listener plus the background workers and the LISTEN loops, the way
+	// production runs it; serving only the handler left out the workers' cost and the event wake-ups.
+	t.Logf("fleet server on %s", listen)
+	if err := application.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("fleet server on %s", listener.Addr())
-	_ = (&http.Server{Handler: application.server.Handler}).Serve(listener)
 }
 
 type fleetMachine struct {
