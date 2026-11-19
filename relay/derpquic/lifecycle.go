@@ -13,10 +13,11 @@ func (s *Server) AuthoritySubjects() []AuthoritySubject {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]AuthoritySubject, 0, len(s.fences))
+	live := s.liveGrantsLocked()
+	now := time.Now().Unix()
 	for _, f := range s.fences {
 		g := f.Grant
-		live := s.liveGrantLocked(g)
-		if g.AccountID != "" && (g.ExpiresAt > time.Now().Unix() || live != nil && grantID(live.grant) == grantID(g)) {
+		if g.AccountID != "" && (g.ExpiresAt > now || liveIn(live, g)) {
 			out = append(out, AuthoritySubject{g.AccountID, g.EndpointID})
 		}
 	}

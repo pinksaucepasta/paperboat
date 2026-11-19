@@ -64,6 +64,7 @@ type Server struct {
 	mu                                                   sync.Mutex
 	peers                                                map[key.NodePublic]*peerConn
 	fences                                               map[string]*grantFence
+	fenceSweptAt                                         time.Time
 	handover                                             map[string]time.Time
 	handoverTimer                                        *time.Timer
 	accounts                                             map[string]*budget
@@ -370,6 +371,10 @@ func (s *Server) reject(p *peerConn, err error) {
 	}
 	p.close(e.Code, e.Message)
 }
+
+// fenceSweepEvery is how often an admission sweeps the expired grant fences.
+const fenceSweepEvery = time.Second
+
 func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	var err error
 	k, _ := ParseKey(g.WireGuardPublicKey)
@@ -386,9 +391,20 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		return ErrOverload
 	}
 	id := g.AccountID + "\x00" + g.EndpointID
-	for id, old := range s.fences {
-		if old.retainUntil <= now.Unix() && s.liveGrantLocked(old.Grant) == nil {
-			delete(s.fences, id)
+	// A fence outlives its grant by an hour, so the sweep need not run on every admission (it walked every fence each time).
+	if now.Sub(s.fenceSweptAt) >= fenceSweepEvery {
+		s.fenceSweptAt = now
+		var live map[liveGrantKey]struct{}
+		for id, old := range s.fences {
+			if old.retainUntil > now.Unix() {
+				continue
+			}
+			if live == nil {
+				live = s.liveGrantsLocked()
+			}
+			if !liveIn(live, old.Grant) {
+				delete(s.fences, id)
+			}
 		}
 	}
 	// An admitted grant's fence refuses older grants and a conflicting grant of its generation; a

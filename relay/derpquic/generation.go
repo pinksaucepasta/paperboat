@@ -69,6 +69,32 @@ func (s *Server) authenticate(p *peerConn, kind byte, body []byte) error {
 	return s.admitAuthParts(p, body, count, time.Now())
 }
 
+// liveGrantKey names a connected peer by its key and endpoint identity, the pair liveGrantLocked matches on.
+type liveGrantKey struct {
+	key key.NodePublic
+	id  string
+}
+
+// liveGrantsLocked indexes every connected peer once. A pass over all fences (AuthoritySubjects every 3 s, the fence sweep) asked
+// liveGrantLocked per fence, which walks every peer: N fences x N peers under the server lock, which stalled accepts from ~6,000
+// connections (QUIC CONNECTION_REFUSED while the relay used 35% CPU).
+func (s *Server) liveGrantsLocked() map[liveGrantKey]struct{} {
+	live := make(map[liveGrantKey]struct{}, len(s.peers))
+	for _, peer := range s.peers {
+		live[liveGrantKey{peer.key, grantID(peer.grant)}] = struct{}{}
+	}
+	return live
+}
+
+func liveIn(live map[liveGrantKey]struct{}, g Grant) bool {
+	k, err := ParseKey(g.WireGuardPublicKey)
+	if err != nil {
+		return false
+	}
+	_, ok := live[liveGrantKey{k, grantID(g)}]
+	return ok
+}
+
 func (s *Server) liveGrantLocked(g Grant) *peerConn {
 	k, err := ParseKey(g.WireGuardPublicKey)
 	if err != nil {
