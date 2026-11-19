@@ -353,6 +353,25 @@ class WindowsChecksRunner(unittest.TestCase):
             device.cut_network(5, addresses=['203.0.113.7'], inbound=False)
         self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])  # no timer: the rule goes again
 
+    def test_a_cut_that_keeps_the_processes_routes_the_flows_away_and_lifts_the_routes(self):
+        calls = []
+        device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+        device.ps = lambda step, script, **kw: calls.append((kw.get('action'), kw.get('addr'), kw.get('keep'))) or (0, '')
+        timers = []
+        device.start = lambda argv, directory: timers.append(winhost.base64.b64decode(argv[-1]).decode('utf-16-le')) or 1
+        device.temp_dir = lambda prefix: __import__('contextlib').nullcontext('dir')
+        with self.assertRaises(ValueError):  # a route to every address would cut the controller's SSH too
+            device.cut_network(30, keep_processes=True)
+        cut = device.cut_network(30, addresses=['203.0.113.7', '2001:db8::1'], keep_processes=True)
+        self.assertEqual(('add', ['203.0.113.7', '2001:db8::1'], True), calls[0])
+        self.assertIn("if($req.keep){foreach", winhost.NET_CUT)  # the add branch routes and leaves before the Stop-Process step
+        self.assertLess(winhost.NET_CUT.index('route.exe add'), winhost.NET_CUT.index('Stop-Process -Force'))
+        self.assertIn('route.exe delete', winhost.NET_CUT)  # and the remove branch lifts the routes
+        self.assertIn("route.exe delete '203.0.113.7'", timers[0])  # the device's own timer lifts them if this controller is gone
+        self.assertNotIn('2001:db8', timers[0].split('Start-Sleep', 1)[1].split('route.exe', 1)[1])  # IPv4 only
+        cut.release()
+        self.assertEqual(('remove', ['203.0.113.7', '2001:db8::1'], True), calls[-1])
+
     def test_udp_block_drops_every_port_except_the_allowed_ones(self):
         calls = []
         device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
