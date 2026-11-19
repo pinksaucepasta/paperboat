@@ -121,11 +121,11 @@ func (b *locoBackend) derpRegionIDLocked() tailcfg.DERPRegionID {
 	if b.dm == nil {
 		panic("no derp map")
 	}
-	if b.homeDERP != 0 && b.dm.Regions[b.homeDERP].HasDERP() {
+	if b.homeDERP != 0 && b.dm.Regions[b.homeDERP].CanServeDERP() {
 		return b.homeDERP
 	}
 	for _, r := range b.dm.Regions {
-		if r.HasDERP() {
+		if r.CanServeDERP() {
 			return r.RegionID
 		}
 	}
@@ -137,7 +137,7 @@ func (b *locoBackend) peerDERPRegion(peer key.NodePublic) tailcfg.DERPRegionID {
 	defer b.mu.Unlock()
 	if b.nm != nil {
 		for _, n := range b.nm.Peers {
-			if n.Key() == peer && n.HomeDERP() != 0 && b.dm.Regions[n.HomeDERP()].HasDERP() { // a withdrawn relay's region has no carrier
+			if n.Key() == peer && n.HomeDERP() != 0 && b.dm.Regions[n.HomeDERP()].CanServeDERP() { // a withdrawn relay's region has no carrier
 				return n.HomeDERP()
 			}
 		}

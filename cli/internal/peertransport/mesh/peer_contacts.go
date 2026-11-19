@@ -266,13 +266,13 @@ func (b *locoBackend) routeTTLValue() time.Duration {
 // engine's own home. b.mu must be held.
 func (b *locoBackend) peerRegionLocked(peer key.NodePublic) tailcfg.DERPRegionID {
 	route := b.replyRoutes[peer]
-	if route != nil && !b.dm.Regions[route.region].HasDERP() {
+	if route != nil && !b.dm.Regions[route.region].CanServeDERP() {
 		route = nil
 	}
 	if route != nil && time.Since(route.at) < b.routeTTLValue() {
 		return route.region
 	}
-	if home := b.contacts[peer].Home; b.dm.Regions[home].HasDERP() {
+	if home := b.contacts[peer].Home; b.dm.Regions[home].CanServeDERP() {
 		return home
 	}
 	if route != nil {
@@ -307,7 +307,7 @@ func (b *locoBackend) heardOn(peer key.NodePublic, region tailcfg.DERPRegionID) 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	route := b.replyRoutes[peer]
-	if route == nil || route.region != region || !b.dm.Regions[region].HasDERP() {
+	if route == nil || route.region != region || !b.dm.Regions[region].CanServeDERP() {
 		return
 	}
 	ttl, age := b.routeTTLValue(), time.Since(route.at)

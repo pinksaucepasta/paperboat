@@ -6,12 +6,12 @@ and `upstream/licenses/tailcat-LICENSE.txt` are retained. The original compatibl
 source/module/toolchain facts remain in `foundations.tsv`; Tailcat is no longer
 a consumed module. `references/tailcat` remains read-only provenance.
 
-The consumed fork revision is `ac1095ce526449dc809a8a5bb5749159135ebc65`
-on `paperboat-no-cloud-probe`, based on upstream Tailscale
-`610b05c58e8dff3c5ff12ffb35d68e4697216ed6`. Both Paperboat and the relay
-pin its immutable Go module version. Its LICENSE, PATENTS and other notices
-remain intact. `foundations.tsv` retains the original Tailcat-compatible
-reference pair as provenance; no upstream application is built for this update.
+The consumed fork revision is `be55aaa472c8` on `paperboat-1.104` in
+`github.com/pinksaucepasta/tailscale`, based on upstream Tailscale **v1.104.7**
+(`cbc74fe48`). Both Paperboat and the relay pin its immutable Go module version.
+Its LICENSE, PATENTS and other notices remain intact. `foundations.tsv` retains the
+original Tailcat-compatible reference pair as provenance; no upstream application
+is built for this update.
 
 ## Owned Tailcat-derived assembly
 
@@ -36,33 +36,30 @@ Previously downstream Tailcat patches remain owned behavior:
 
 ## Maintained Tailscale patches
 
+Eleven commits on upstream v1.104.7. Each is removed when its removal condition holds.
+
 | Files | Patch and owner | Removal condition |
 | --- | --- | --- |
-| `wgengine/userspace.go`, `wgengine/magicsock/{magicsock,derp}.go` | Injectable region carrier, reliable discovery/bootstrap send hook, fatal receive-error classification; preserve exact fatal authority errors after reader cleanup and fence late replacement readers (`derp_terminal_error_test.go`, Tasks 11/23). Packet-body debug logging removed. | Reviewed upstream equivalent carrier API and passing authority/recovery regressions. |
-| `net/udprelay/server.go` | Trusted allocation policy with absolute expiry/capacity, immediate per-packet authorization, post-source-validation forwarding quota, packet bounds, safe endpoint revocation and remaining-authority lifetimes. Existing Geneve/disco protocol retained (`paperboat_policy_test.go`, Task 10). | Reviewed upstream equivalent scoped lifecycle API. |
-| `wgengine/userspace.go` | Thread magicsock packet-listener test injection through the engine for real path/failure fixtures (Task 10). | Equivalent upstream test seam. |
-| `wgengine/magicsock/endpoint.go` | Clear relay-discovery throttle with stale selected route on connectivity changes, allowing immediate rebind (`paperboat_rebind_test.go`, Task 10). | Reviewed upstream equivalent recovery behavior. |
-| `wgengine/magicsock/{derp.go,paperboat_regional_status.go}` | Preserve live inventory/carrier state, prepare/send through exact region, expose actual carrier legs; injected carriers probe liveness on socket rebind, with stale probes fenced from newer carriers (Task 13). | Equivalent upstream regional/carrier seams. |
-| `net/udprelay/server.go` | Keep the zero client discovery-key guard in the shared allocator, protecting Paperboat policy calls as well as ordinary allocations. The newer upstream base already includes the relay-manager zero server-key guard and both regressions. | Upstream shared allocator enforces the same policy. |
-| `util/cloudenv/cloudenv.go` | No metadata-server probe for old GCP, Azure or Hyper-V guests: Paperboat never uses the cloud identity and the probe cost up to 2 s on every cold start of a Hyper-V guest (2026-10-19). | Never needed upstream; remove if Paperboat starts using cloud identity. |
+| `wgengine/magicsock/{magicsock,derp,paperboat_regional_status}.go`, `wgengine/userspace.go` | Injectable DERP carrier (`DERPCarrierFactory`, `DERPControlSender`), reliable discovery/bootstrap send (`SendDERPPacketTo` as control, `SendDERPPacketToRegion` to the exact region), fatal receive-error classification with late-reader fencing, actual carrier leg (`RelayTransport`), liveness probe on socket rebind fenced per carrier (`derp_terminal_error_test.go`, `rebind_carrier_test.go`). Packet-body debug logging removed. | Reviewed upstream equivalent carrier API and passing authority/recovery regressions. |
+| `wgengine/userspace.go` | Thread magicsock `TestOnlyPacketListener` through the engine for real path/failure fixtures. | Equivalent upstream test seam. |
+| `net/udprelay/server.go` | Trusted allocation policy (`AllocateEndpointWithPolicy`, `SetEndpointAuthorizer`, `SetForwardingLimiter`, `RevokeEndpoint`): absolute expiry/capacity, per-packet authorization, forwarding quota, packet bounds, zero client discovery-key guard in the shared allocator (`paperboat_policy_test.go`). | Reviewed upstream equivalent scoped lifecycle API. |
+| `wgengine/magicsock/endpoint.go` | Clear the relay-discovery throttle on connectivity change so a rebind re-discovers immediately (`paperboat_rebind_test.go`). | Reviewed upstream equivalent recovery behavior. |
+| `wgengine/magicsock/{derp,magicsock}.go` | Magicsock never picks a STUN-only region as DERP home or fallback (`pickDERPFallback`, `maybeSetNearestDERP`, `setNearestDERP`; `stun_only_test.go`); per-family `localEndpointCandidates` advertises each family's own bound port (`local_endpoints_test.go`). | Upstream magicsock filters STUN-only regions and uses per-family ports. |
+| `net/netcheck/netcheck.go`, `tailcfg/derpmap.go` | Backport of upstream `dc6986976` (`DERPRegion.CanServeDERP`, STUN-only never the netcheck home). It is not in v1.104.7. | Drop on the first stable release containing `dc6986976`. |
+| `wgengine/magicsock/paperboat_underlay_trace.go` + hooks | Bounded underlay metadata (direction, type, size, endpoint, failure, transport; no bodies or keys) through the existing logger. Parsed by `mesh/underlay_diagnostics.go` and `cmd/pb/reconnect_metadata.go`. | Upstream per-packet metadata hook, or those parsers removed. |
+| `wgengine/magicsock/endpoint.go` | Lossy direct-path series: 10-probe heartbeat window per address (`endpoint.pathLoss`, bounded, cleared on network change); 3 lost heartbeats demote the direct path to relay with a doubling hold-down and probation; only a heartbeat timeout counts as loss. Fixes 10-30x throughput collapse on 16-61% loss paths. | Upstream path-quality demotion. |
+| `util/cloudenv/cloudenv.go` | No metadata-server probe for old GCP, Azure or Hyper-V guests: Paperboat never uses the cloud identity and the probe cost up to 2 s on every Hyper-V cold start. | Never needed upstream; remove if Paperboat starts using cloud identity. |
+| `wgengine/magicsock/magicsock_test.go` | `TestTwoDevicePing` accepts the IPv6 loopback path; `TestConn_receiveIP` sets `logf` (needed by the underlay trace). Test-only. | Underlay trace removed and the IPv6 flake gone upstream. |
 
-The 2026-09-23 update rebased the one Paperboat patch commit on current upstream
-without merge conflicts. The fork now consumes WireGuard
-`e3222a3340cd` and gVisor `a6f909f08a72`; Paperboat's QUIC transport uses
-WireGuard's UDP path, so Tailcat's gVisor TCP benchmark is not evidence of a
+Dropped at the 1.104.7 rebase: the fork's own `HasDERP` helper and its stricter
+netcheck `prevDERP`/forced-DERP delta (the upstream backport above replaces them;
+Paperboat never sets `ForcePreferredDERP`). Paperboat supplies supplementary
+discovery separately through signed regional configuration; these destinations
+never receive application traffic or relay credentials.
+
+WireGuard and gVisor come from the v1.104.7 `go.mod`; Paperboat's QUIC transport
+uses WireGuard's UDP path, so Tailcat's gVisor TCP benchmark is not evidence of a
 Paperboat performance gain. Tailcat 0.7 peer path status informed the authorized,
-address-free `mesh.Server.PeerPath` diagnostic. Its Windows localhost fix informed
+address-free `mesh.Server.PeerPath` diagnostic; its Windows localhost fix informed
 Paperboat's private-preview IPv6 loopback fallback. Tailcat's standalone
-Listen/exit-node/SSH/SCP/browser/Android/packaging modes are not consumed by
-Paperboat's owned UDP assembly.
-
-The September 28 discovery correction preserves that upstream base. Magicsock
-advertises local IPv4/IPv6 candidates using each family's actual bound port;
-`local_endpoints_test.go` covers fallback ports and disabled families. Netcheck
-and magicsock use `DERPRegion.HasDERP` to exclude STUN-only regions from relay
-home selection, retained history, forced homes and fallback. `stun_only_test.go`
-in both packages verifies mixed inventories, unreachable relays, and continued
-STUN probing. Paperboat supplies supplementary discovery separately through
-signed regional configuration; these destinations never receive application
-traffic or relay credentials. Latest official upstream inspected was
-2d4379386a5f02342f1a52006555764a22320d6e; these fixes were absent there.
+Listen/exit-node/SSH/SCP/browser/Android/packaging modes are not consumed.
