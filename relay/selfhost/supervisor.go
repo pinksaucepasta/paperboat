@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"path/filepath"
 	"sync"
 	"time"
@@ -15,10 +16,10 @@ import (
 func Run(ctx context.Context, dir, binaryDir string, output io.Writer, observe func(context.Context, string, error)) error {
 	ticker := time.NewTicker(certificateCheckInterval)
 	defer ticker.Stop()
-	return run(ctx, dir, binaryDir, output, ticker.C, observe)
+	return run(ctx, dir, binaryDir, output, ticker.C, listenTCP, observe)
 }
-func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals <-chan time.Time, observe func(context.Context, string, error)) error {
-	return runWithLauncher(ctx, dir, binaryLauncher{directory: binaryDir}, output, renewals, observe)
+func run(ctx context.Context, dir, binaryDir string, output io.Writer, renewals <-chan time.Time, listen func(string) (net.Listener, error), observe func(context.Context, string, error)) error {
+	return runWithLauncher(ctx, dir, binaryLauncher{directory: binaryDir}, output, renewals, listen, observe)
 }
 
 // RuntimeLauncher runs exactly one selected component until it exits or ctx is
@@ -40,10 +41,10 @@ func RunWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 	}
 	ticker := time.NewTicker(certificateCheckInterval)
 	defer ticker.Stop()
-	return runWithLauncher(ctx, dir, launcher, output, ticker.C, observe)
+	return runWithLauncher(ctx, dir, launcher, output, ticker.C, listenTCP, observe)
 }
 
-func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, output io.Writer, renewals <-chan time.Time, observe func(context.Context, string, error)) error {
+func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, output io.Writer, renewals <-chan time.Time, listen func(string) (net.Listener, error), observe func(context.Context, string, error)) error {
 	output = &synchronizedWriter{writer: output}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -95,7 +96,7 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		return nil
 	}
 	serverDone := make(chan error, 1)
-	go func() { serverDone <- Serve(ctx, dir, notify, observe) }()
+	go func() { serverDone <- serve(ctx, dir, listen, notify, observe) }()
 	for {
 		select {
 		case err := <-serverDone:

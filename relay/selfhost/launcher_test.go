@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,17 +32,11 @@ func (l shellRuntimeLauncher) Run(ctx context.Context, capability, dir string, o
 func TestSupervisorRuntimeLauncherWithoutLocalBinaries(t *testing.T) {
 	dir, _, _, server := testInstallation(t, false)
 	server.Close()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	listener.Close()
 	state, err := load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state.Config.Listen = address
+	state.Config.Listen = "127.0.0.1:0" // Serve binds it; nothing here dials it
 	claim := testClaim(false)
 	state.Claim = &claim
 	if err := applyClaim(t.Context(), dir, &state); err != nil {

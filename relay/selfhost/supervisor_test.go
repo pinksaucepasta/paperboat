@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,17 +17,11 @@ import (
 func TestSupervisorRestartsAndRetiresOwnedChildren(t *testing.T) {
 	dir, _, _, server := testInstallation(t, false)
 	server.Close()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	listener.Close()
 	s, err := load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Config.Listen = address
+	s.Config.Listen = "127.0.0.1:0" // Serve binds it; nothing here dials it
 	claim := testClaim(false)
 	s.Claim = &claim
 	if err := applyClaim(context.Background(), dir, &s); err != nil {
@@ -113,17 +106,11 @@ wait "$child"
 func TestSupervisorCertificateRenewalRestartsOwnedRuntime(t *testing.T) {
 	dir, _, _, server := testInstallation(t, false)
 	server.Close()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	listener.Close()
 	s, err := load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Config.Listen = address
+	s.Config.Listen = "127.0.0.1:0" // Serve binds it; nothing here dials it
 	claim := testClaim(false)
 	s.Claim = &claim
 	if err := applyClaim(context.Background(), dir, &s); err != nil {
@@ -145,7 +132,7 @@ wait "$child"
 	done := make(chan error, 1)
 	renewals := make(chan time.Time, 1)
 	var logs bytes.Buffer
-	go func() { done <- run(ctx, dir, binaries, &logs, renewals, nil) }()
+	go func() { done <- run(ctx, dir, binaries, &logs, renewals, listenTCP, nil) }()
 	readPID := func(previous int) int {
 		deadline := time.Now().Add(3 * time.Second)
 		for {

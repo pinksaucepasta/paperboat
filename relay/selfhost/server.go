@@ -364,6 +364,13 @@ func applyClaim(ctx context.Context, dir string, s *state) error {
 
 // Serve exposes the bounded local claim API and drains it on cancellation.
 func Serve(ctx context.Context, dir string, onClaim func(), observe func(context.Context, string, error)) error {
+	return serve(ctx, dir, listenTCP, onClaim, observe)
+}
+
+func listenTCP(address string) (net.Listener, error) { return net.Listen("tcp", address) }
+
+// serve binds the claim address through listen, so a test hands over the listener it already holds.
+func serve(ctx context.Context, dir string, listen func(string) (net.Listener, error), onClaim func(), observe func(context.Context, string, error)) error {
 	lock, err := lockState(dir)
 	if err != nil {
 		return err
@@ -383,7 +390,7 @@ func Serve(ctx context.Context, dir string, onClaim func(), observe func(context
 	if err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", s.Config.Listen)
+	listener, err := listen(s.Config.Listen)
 	if err != nil {
 		return err
 	}

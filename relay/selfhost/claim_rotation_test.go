@@ -52,7 +52,6 @@ func TestSupervisorRerunsComponentsOnRotatedTrustDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	listener.Close()
 	s, err := load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +69,9 @@ func TestSupervisorRerunsComponentsOnRotatedTrustDocuments(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	var logs bytes.Buffer
-	go func() { done <- run(ctx, dir, binaries, &logs, make(chan time.Time), nil) }()
+	go func() {
+		done <- run(ctx, dir, binaries, &logs, make(chan time.Time), func(string) (net.Listener, error) { return listener, nil }, nil)
+	}()
 	readPID := func(previous int) int {
 		deadline := time.Now().Add(5 * time.Second)
 		for {

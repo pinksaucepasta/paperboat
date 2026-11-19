@@ -269,7 +269,6 @@ func TestServeCancellationReleasesListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	listener.Close()
 	dir := t.TempDir()
 	os.Chmod(dir, 0700)
 	if err := Initialize(dir, Config{Name: "cancel", EndpointHost: "127.0.0.1", Listen: address, Components: []Component{{Capability: "relay", TCPPort: 27445, QUICPort: 27446, Region: "test", FailureDomain: "test", CapacityLimit: 1}}}); err != nil {
@@ -277,7 +276,7 @@ func TestServeCancellationReleasesListener(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, dir, nil, nil) }()
+	go func() { done <- serve(ctx, dir, func(string) (net.Listener, error) { return listener, nil }, nil, nil) }()
 	deadline := time.Now().Add(time.Second)
 	for {
 		conn, err := net.DialTimeout("tcp", address, 50*time.Millisecond)
@@ -295,9 +294,9 @@ func TestServeCancellationReleasesListener(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	listener, err = net.Listen("tcp", address)
+	rebound, err := net.Listen("tcp", address)
 	if err != nil {
 		t.Fatal("claim listener leaked")
 	}
-	listener.Close()
+	rebound.Close()
 }
