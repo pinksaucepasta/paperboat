@@ -631,7 +631,7 @@ func TestDistributionRequestCancelledByTheEdgeIsNotAControlPlaneFailure(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	send := func(outage error, cancelled bool) int {
+	send := func(outage error, cancelled bool) (code int, reference string) {
 		hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 			Credential: []byte(credential), NodeCredentials: cancelAwareCredentials{outage: outage}, Identity: identity})
 		if err != nil {
@@ -640,7 +640,8 @@ func TestDistributionRequestCancelledByTheEdgeIsNotAControlPlaneFailure(t *testi
 		request := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, strings.NewReader(`{"hostname":"fresh-preview.example.test"}`))
 		request.Header.Set("Authorization", "Bearer a-self-hosted-edge-runtime-credential-0123456789")
 		request.Header.Set("X-Paperboat-Edge-Node-ID", "edge_01")
-		ctx, cancel := context.WithCancel(reporter.Context(runCtx, supportreport.NewReference()))
+		reference = supportreport.NewReference()
+		ctx, cancel := context.WithCancel(reporter.Context(runCtx, reference))
 		if cancelled {
 			cancel()
 		} else {
@@ -648,25 +649,23 @@ func TestDistributionRequestCancelledByTheEdgeIsNotAControlPlaneFailure(t *testi
 		}
 		response := httptest.NewRecorder()
 		hub.Handler().ServeHTTP(response, request.WithContext(ctx))
-		return response.Code
+		return response.Code, reference
 	}
-	if code := send(errors.New("database unavailable"), true); code != statusClientClosedRequest {
+	if code, _ := send(errors.New("database unavailable"), true); code != statusClientClosedRequest {
 		t.Fatalf("a request the edge cancelled answered %d, want 499", code)
 	}
-	select {
-	case record := <-store.records:
-		t.Fatalf("a request the edge cancelled was reported as a failure: %+v", record)
-	case <-time.After(300 * time.Millisecond):
-	}
-	if code := send(errors.New("database unavailable"), false); code != http.StatusServiceUnavailable {
+	// The reporter's queue is FIFO: the first record that arrives is the live outage's only if the cancelled
+	// request reported nothing before it, so no sleep is needed to prove the absence.
+	code, reference := send(errors.New("database unavailable"), false)
+	if code != http.StatusServiceUnavailable {
 		t.Fatalf("a credential outage on a live request answered %d, want 503", code)
 	}
 	select {
 	case record := <-store.records:
-		if record.Code != "control_unavailable" {
-			t.Fatalf("outage reported as %+v", record)
+		if record.Code != "control_unavailable" || record.Reference != reference {
+			t.Fatalf("outage reported as %+v, want the live request %s first", record, reference)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("a real credential outage was not reported")
 	}
 }
@@ -713,8 +712,11 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 		hub.Handler().ServeHTTP(response, request)
 		return response.Code
 	}
-	// One issuance at a time, like the coordinator's shared issuance lock: the first caller issues for 600 ms.
+	// One issuance at a time, like the coordinator's shared issuance lock: the first caller issues until the other
+	// request has been turned away by the lock, so the second request provably arrived during the issuance.
 	var mu sync.Mutex
+	var turnedAway sync.Once
+	locked := make(chan struct{})
 	issuing, issued, issuances := false, false, 0
 	hub := newHub(func(context.Context, DistributionNodeIdentity, string) error {
 		mu.Lock()
@@ -724,11 +726,15 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 		}
 		if issuing {
 			mu.Unlock()
+			turnedAway.Do(func() { close(locked) })
 			return ErrIssuanceLocked
 		}
 		issuing, issuances = true, issuances+1
 		mu.Unlock()
-		time.Sleep(600 * time.Millisecond)
+		select {
+		case <-locked:
+		case <-time.After(10 * time.Second):
+		}
 		mu.Lock()
 		issuing, issued = false, true
 		mu.Unlock()
@@ -743,6 +749,11 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 			t.Fatalf("a concurrent first request answered %d, want 204 after the in-flight issuance", code)
 		}
 	}
+	select {
+	case <-locked:
+	default:
+		t.Fatal("the second request was never turned away by the issuance in flight")
+	}
 	if issuances != 1 {
 		t.Fatalf("issuances = %d, want 1", issuances)
 	}
@@ -752,15 +763,15 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 	if code := send(stalled, "edge_01", short); code != http.StatusConflict {
 		t.Fatalf("a wait that ran out answered %d, want 409", code)
 	}
-	select {
-	case record := <-store.records:
-		t.Fatalf("waiting for an issuance was reported as a failure: %+v", record)
-	case <-time.After(300 * time.Millisecond):
-	}
 	// Cancellation that lands inside the callback: the edge leaving is a 499, our own wait running out a 409; neither is reported.
-	blocked := newHub(func(ctx context.Context, _ DistributionNodeIdentity, _ string) error { <-ctx.Done(); return ctx.Err() })
+	inCallback := make(chan struct{}, 2)
+	blocked := newHub(func(ctx context.Context, _ DistributionNodeIdentity, _ string) error {
+		inCallback <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	})
 	gone, leave := context.WithCancel(reporter.Context(runCtx, supportreport.NewReference()))
-	time.AfterFunc(100*time.Millisecond, leave)
+	go func() { <-inCallback; leave() }() // the edge leaves while the callback is running
 	if code := send(blocked, "edge_01", gone); code != statusClientClosedRequest {
 		t.Fatalf("an edge that left during issuance answered %d, want 499", code)
 	}
@@ -771,21 +782,19 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 	if code != http.StatusConflict {
 		t.Fatalf("a wait that ran out inside issuance answered %d, want 409", code)
 	}
-	select {
-	case record := <-store.records:
-		t.Fatalf("a cancelled issuance was reported as a failure: %+v", record)
-	case <-time.After(300 * time.Millisecond):
-	}
+	// The reporter's queue is FIFO: the first record to arrive is the outage's only if none of the requests above
+	// reported anything before it, so no sleep is needed to prove the absence.
 	broken := newHub(func(context.Context, DistributionNodeIdentity, string) error { return ErrIssuerUnavailable })
-	if code := send(broken, "edge_01", reporter.Context(runCtx, supportreport.NewReference())); code != http.StatusServiceUnavailable {
+	reference := supportreport.NewReference()
+	if code := send(broken, "edge_01", reporter.Context(runCtx, reference)); code != http.StatusServiceUnavailable {
 		t.Fatalf("issuer unavailable answered %d, want 503", code)
 	}
 	select {
 	case record := <-store.records:
-		if record.Code != "control_unavailable" {
-			t.Fatalf("issuer outage reported as %+v", record)
+		if record.Code != "control_unavailable" || record.Reference != reference {
+			t.Fatalf("issuer outage reported as %+v, want the outage %s first", record, reference)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("a real issuance failure was not reported")
 	}
 }
