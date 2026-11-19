@@ -48,27 +48,45 @@ func TestWatchSharedRoleRedialsWhenTheRoleChanges(t *testing.T) {
 	var serverViewer, joinedViewer atomic.Bool
 	serverViewer.Store(true)
 	joinedViewer.Store(true)
+	polls := make(chan struct{}, 1<<16)
 	redials := make(chan struct{}, 4)
-	go watchSharedRole(ctx, 10*time.Millisecond, func(context.Context) (bool, error) { return serverViewer.Load(), nil }, joinedViewer.Load, func() {
+	go watchSharedRole(ctx, time.Millisecond, func(context.Context) (bool, error) {
+		polls <- struct{}{}
+		return serverViewer.Load(), nil
+	}, joinedViewer.Load, func() {
 		joinedViewer.Store(serverViewer.Load())
 		redials <- struct{}{}
 	})
-	select {
-	case <-redials:
-		t.Fatal("redialed while the role was unchanged")
-	case <-time.After(100 * time.Millisecond):
+	// "Nothing happened" is counted in polls, not milliseconds: a poll that finds a matching role must not redial.
+	quietPolls := func(n int) {
+		t.Helper()
+		for range n {
+			select {
+			case <-polls:
+			case <-redials:
+				t.Fatal("redialed while the role was unchanged")
+			case <-time.After(30 * time.Second):
+				t.Fatal("the watcher stopped polling")
+			}
+		}
+		select {
+		case <-redials:
+			t.Fatal("redialed while the role was unchanged")
+		default:
+		}
 	}
+	quietPolls(5)
 	serverViewer.Store(false)
 	select {
 	case <-redials:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("an upgrade to interactive did not redial")
 	}
-	select {
-	case <-redials:
-		t.Fatal("redialed again after the role matched")
-	case <-time.After(100 * time.Millisecond):
+	// The redial runs on the watcher goroutine before its next poll, so polls queued before it are drained first.
+	for len(polls) > 0 {
+		<-polls
 	}
+	quietPolls(5)
 }
 
 type recordingSessionCloser struct {
