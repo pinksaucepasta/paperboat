@@ -24,9 +24,10 @@ type Button struct{ Label, URL string }
 
 const (
 	fontStack = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`
-	// Brand colours (brand/styles/brand.css): ground, paper, ink, text, fog, rule and the cobalt button.
+	// Brand colours (brand/styles/brand.css): ground, paper, ink, text, fog, rule and the cobalt button; the dark button
+	// is the lightest blue that keeps white text at 4.5:1 or better.
 	darkStyle = `@media (prefers-color-scheme: dark){.bg{background:#141414!important}.card{background:#1c1c1c!important;border-color:#2e2e2e!important}` +
-		`.ink{color:#f4f4f2!important}.txt{color:#dcdcd8!important}.fog{color:#a3a3a0!important}.btn{background:#4275f8!important}}`
+		`.ink{color:#f4f4f2!important}.txt{color:#dcdcd8!important}.fog{color:#a3a3a0!important}.btn{background:#3868f0!important}}`
 )
 
 // Compose renders c with the shared layout and returns the message with its HTML and plain-text bodies. The wordmark,
@@ -57,7 +58,7 @@ func renderHTML(logo, site, footer, title string, c Content) string {
 		b.WriteString(`<img src="` + e(logo) + `" width="28" height="28" alt="Paperboat" style="vertical-align:middle;border:0;border-radius:6px;margin-right:8px">`)
 	}
 	b.WriteString(`<a href="` + e(site) + `" class="ink" style="vertical-align:middle;color:#141414;text-decoration:none">paperboat</a></td></tr>` +
-		`<tr><td class="card" style="background:#ffffff;border:1px solid #e8e8e6;border-radius:12px;padding:32px;font-family:` + fontStack + `">`)
+		`<tr><td class="card" style="background:#ffffff;border:1px solid #e8e8e6;border-radius:12px;padding:32px;font-family:` + fontStack + `;overflow-wrap:anywhere;word-break:break-word">`)
 	if c.Heading != "" {
 		b.WriteString(`<h1 class="ink" style="margin:0 0 16px;font-size:20px;line-height:1.3;font-weight:600;color:#141414">` + e(c.Heading) + `</h1>`)
 	}
@@ -66,13 +67,13 @@ func renderHTML(logo, site, footer, title string, c Content) string {
 	}
 	for _, d := range c.Details {
 		b.WriteString(`<p class="txt" style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#2a2a2a"><span class="fog" style="display:block;font-size:12px;color:#6b6b6b">` + e(d.Label) +
-			`</span><span style="white-space:pre-wrap;word-break:break-word">` + e(d.Value) + `</span></p>`)
+			`</span><span style="white-space:pre-wrap">` + e(d.Value) + `</span></p>`)
 	}
 	if c.Button != nil {
 		b.WriteString(`<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 0"><tr><td class="btn" style="background:#1d52eb;border-radius:8px">` +
 			`<a href="` + e(c.Button.URL) + `" style="display:inline-block;padding:12px 20px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none">` + e(c.Button.Label) + `</a></td></tr></table>`)
 	}
-	b.WriteString(`</td></tr><tr><td class="fog" style="padding:20px 4px 0;font-family:` + fontStack + `;font-size:12px;line-height:1.6;color:#6b6b6b">` + e(footer))
+	b.WriteString(`</td></tr><tr><td class="fog" style="padding:20px 4px 0;font-family:` + fontStack + `;font-size:12px;line-height:1.6;color:#6b6b6b;overflow-wrap:anywhere;word-break:break-word">` + e(footer))
 	if c.Why != "" {
 		b.WriteString(`<br>` + e(c.Why))
 	}
