@@ -70,9 +70,15 @@ func TestPCBListAttributesAnIPv6LoopbackConnectionToItsUID(t *testing.T) {
 	}
 }
 
+const churnRounds = 6
+
 // TestPCBListAttributionUnderTupleReuseChurn is the macOS twin of the Linux churn test (F23-02): a client port reused
 // after a reset reaches the gateway as the same tuple, and each connection is attributed to its user only while its
 // own connecting socket is live; the reset client's stale accepted connection is refused, never given a uid.
+// The round count is small on purpose: macOS drops the SYN of about every other reused tuple and the client
+// retransmits it after exactly 1 s (measured on macos-latest: 100 rounds took 49 s of dial per network, 109 s a
+// run, so -count=20 outran the 15 min workflow timeout). Six rounds still run both kernel paths (immediate and
+// retransmitted reuse) twice or more; more rounds only add kernel retransmit waits.
 func TestPCBListAttributionUnderTupleReuseChurn(t *testing.T) {
 	for _, network := range []string{"tcp4", "tcp6"} {
 		host := map[string]string{"tcp4": "127.0.0.1", "tcp6": "[::1]"}[network]
@@ -88,7 +94,7 @@ func TestPCBListAttributionUnderTupleReuseChurn(t *testing.T) {
 		_ = probe.Close()
 		dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: listener.Addr().(*net.TCPAddr).IP, Port: port}}
 		var previous string
-		for round := 0; round < 100; round++ {
+		for round := 0; round < churnRounds; round++ {
 			accepted := make(chan net.Conn, 1)
 			go func() {
 				c, _ := listener.Accept()
