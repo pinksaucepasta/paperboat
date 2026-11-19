@@ -96,9 +96,17 @@ type Result struct {
 	Pagination Pagination `json:"pagination"`
 }
 
+// BandwidthDebiter charges hosted relay bytes to the workspace's pool (the same allowance as edge traffic) inside the transaction that
+// records them; billing.WorkspaceService is the owner.
+type BandwidthDebiter interface {
+	DebitWorkspaceBandwidthTx(ctx context.Context, tx *db.Tx, workspaceID string, bytes int64, at time.Time) (granted int64, exhausted bool, err error)
+}
+
 type Service struct {
 	Store *db.DB
 	Now   func() time.Time
+	// Debiter is optional: without it native usage is history only.
+	Debiter BandwidthDebiter
 	// Analytics is optional (nil: off): first uses of a feature go to product analytics.
 	Analytics *posthogcapture.Client
 }

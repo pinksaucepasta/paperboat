@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// Native relay bytes on a hosted node are recorded for history and capacity statistics, once, as the
-// greatest cumulative counters of each per-minute record, and never charged to the workspace allowance
-// (a relay caps each account's speed instead).
-func TestNativeRelayBytesAreRecordedButNeverChargedPostgres(t *testing.T) {
+// Native relay bytes on a hosted node are recorded once, as the greatest cumulative counters of each per-minute record, and each
+// growth is charged once to the workspace's pool (the same allowance as edge traffic); direct bytes are recorded and never charged.
+func TestNativeRelayBytesAreRecordedAndChargedOncePostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL required")
@@ -53,6 +53,8 @@ func TestNativeRelayBytesAreRecordedButNeverChargedPostgres(t *testing.T) {
 		}
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM cli_client_sessions WHERE id=$1`, client)
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM control_tunnel_nodes WHERE id=$1`, node)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM billing_workspace_usage_periods WHERE workspace_id='personal:'||$1`, user)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM billing_workspaces WHERE id='personal:'||$1`, user)
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM users WHERE id=$1`, user)
 	})
 	exec(`INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@usage.invalid','active')`, user)
@@ -62,6 +64,10 @@ func TestNativeRelayBytesAreRecordedButNeverChargedPostgres(t *testing.T) {
 	exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0',$1)`, node)
 
 	service := New(store)
+	service.Debiter = billing.NewWorkspaceService(store, nil, "")
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO billing_operator_policy(singleton,personal_allowance_bytes,team_allowance_bytes) VALUES(true,NULL,NULL) ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
 	report := func(stream, mode, nodeID string, up, down int64) NativeReport {
 		return NativeReport{AccessSessionID: session, StreamID: stream, Consumer: "file_transfer", Mode: mode, NodeID: nodeID, IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), UploadBytes: up, DownloadBytes: down}
 	}
@@ -107,8 +113,9 @@ func TestNativeRelayBytesAreRecordedButNeverChargedPostgres(t *testing.T) {
 	}
 	wg.Wait()
 	want(1500, 1150, "a report replayed concurrently is recorded once")
-	var periods int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM billing_workspace_usage_periods WHERE workspace_id='personal:'||$1 AND (consumed_bytes>0 OR observed_bytes>0)`, user).Scan(&periods); err != nil || periods != 0 {
-		t.Fatalf("native relay bytes were charged to the workspace allowance: %d periods, err %v", periods, err)
+	// Hosted relay growth: 300+50 on the first stream, 200+100 on the burst stream; the replays and the lower report add nothing.
+	var observed int64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(observed_bytes),0) FROM billing_workspace_usage_periods WHERE workspace_id='personal:'||$1`, user).Scan(&observed); err != nil || observed != 650 {
+		t.Fatalf("workspace observed %d bytes (err %v), want 650: relay growth only, once, no direct bytes", observed, err)
 	}
 }

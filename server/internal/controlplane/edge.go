@@ -61,7 +61,7 @@ type EdgeService struct {
 	relayMetrics            *sharedmetrics.Metrics
 	ingressLimits           edgelimits.IngressLimits
 	fairUse                 config.FairUse
-	relayVolume             *bandwidthgate.Gate
+	relayPool               *bandwidthgate.Gate
 	workspaceGate           *bandwidthgate.Gate // whether a workspace used its included traffic (terminals)
 	relayCountsMu           sync.Mutex
 	relayCounts             map[string]int // relays carrying each account on more than one (relaysPerAccount)
@@ -75,9 +75,9 @@ type EdgeService struct {
 	}
 }
 
-// SetRelayVolumeGate makes relay observations list the connected accounts past the month's included relay bytes (the relay's
-// second speed tier). Nil lists none.
-func (s *EdgeService) SetRelayVolumeGate(gate *bandwidthgate.Gate) { s.relayVolume = gate }
+// SetRelayPoolGate makes relay observations list the connected accounts with a workspace whose pool (edge and relay traffic) is used
+// up this month: the relay holds them to the plan's slow speed. Nil lists none.
+func (s *EdgeService) SetRelayPoolGate(gate *bandwidthgate.Gate) { s.relayPool = gate }
 
 // SetFairUse sets the slowdown speeds the edges' throttle entries carry.
 func (s *EdgeService) SetFairUse(fair config.FairUse) { s.fairUse = fair }
