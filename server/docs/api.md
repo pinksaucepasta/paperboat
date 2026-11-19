@@ -350,7 +350,7 @@ reconciliation never changes purchased quantity. Other role, resource and
 personal subscription boundaries remain independent of seats.
 
 Free and Pro provide the same personal features and differ in count limits
-(`billing.limits`): machines and concurrent previews plus tunnels 100 and 1000, console browser
+(`billing.limits`): machines 100 and 1000, concurrent previews plus tunnels 10 and 100, console browser
 terminals 10 and 100; Teams are advertised as unlimited, with hidden ceilings of 10000, 10000 and
 1000. A new resource past its limit is refused and existing ones keep working. Bandwidth allowances
 remain configurable, with unset values imposing no limit. Prices remain unset. An uncertain checkout must retain its operation ID; a
