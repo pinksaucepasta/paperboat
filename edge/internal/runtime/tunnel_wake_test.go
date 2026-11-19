@@ -34,7 +34,11 @@ func TestTunnelChangeSeenByEndpointPullWakesRouteWorker(t *testing.T) {
 	var mu sync.Mutex
 	changedAt := ""
 	endpoint := &runtimeSourceFake{admissions: []runtimewire.Admission{runtimeRoute}}
+	var deltas atomic.Int32 // endpoint pulls that carried a since cursor: the "many empty deltas" the test counts
 	endpoint.endpointUpdate = func(since string) control.EndpointUpdate {
+		if since != "" {
+			deltas.Add(1)
+		}
 		if since == "" {
 			return control.EndpointUpdate{Complete: true, Admissions: []runtimewire.Admission{}, Cursor: "c"}
 		}
@@ -75,7 +79,7 @@ func TestTunnelChangeSeenByEndpointPullWakesRouteWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = carrier.Shutdown(context.Background()) }()
-	time.Sleep(100 * time.Millisecond) // many empty deltas: no wake, no extra route pull
+	waitRuntime(t, func() bool { return deltas.Load() >= 20 }) // many empty deltas: no wake, no extra route pull
 	if c, p := changes.Load(), routes.pulls.Load(); c != 0 || p != 1 {
 		t.Fatalf("with no change: %d wakes, %d route pulls, want 0 and the start pull", c, p)
 	}
@@ -84,7 +88,8 @@ func TestTunnelChangeSeenByEndpointPullWakesRouteWorker(t *testing.T) {
 		changedAt = token
 		mu.Unlock()
 		waitRuntime(t, func() bool { return routes.pulls.Load() == int32(i+2) })
-		time.Sleep(50 * time.Millisecond) // the same token repeats on every delta: still one wake
+		seen := deltas.Load() // the same token repeats on every delta: still one wake across the next ones
+		waitRuntime(t, func() bool { return deltas.Load() >= seen+10 })
 		if c := changes.Load(); c != int32(i+1) {
 			t.Fatalf("after change %d: %d wakes, want %d", i+1, c, i+1)
 		}

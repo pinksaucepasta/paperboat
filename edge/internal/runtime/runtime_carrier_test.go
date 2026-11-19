@@ -29,12 +29,24 @@ type runtimeSourceFake struct {
 	// endpointUpdate, when set, answers endpoint pulls; endpointPulls records each since sent.
 	endpointUpdate func(since string) control.EndpointUpdate
 	endpointPulls  []string
+	pulls          int // RuntimeCarrierAdmissions calls, failed ones too
 }
 
 func (s *runtimeSourceFake) RuntimeCarrierAdmissions(context.Context, string, string) ([]runtimewire.Admission, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pulls++
 	return append([]runtimewire.Admission(nil), s.admissions...), s.err
+}
+
+// pullsAfter waits for n more admission pulls to start: the worker pulls one at a time, so the pulls before the last
+// have been fully handled by then. This is how a test asserts that nothing changed across pulls without a sleep.
+func (s *runtimeSourceFake) pullsAfter(t *testing.T, n int) {
+	t.Helper()
+	s.mu.Lock()
+	want := s.pulls + n
+	s.mu.Unlock()
+	waitRuntime(t, func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.pulls >= want })
 }
 func (s *runtimeSourceFake) EndpointAdmissions(_ context.Context, _, _, since string, _ time.Duration) (control.EndpointUpdate, error) {
 	s.mu.Lock()
@@ -70,9 +82,18 @@ func runtimeAdmission(t *testing.T) runtimewire.Admission {
 	}
 	return runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "runtime_route", RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])}, AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EdgeEndpoints: []string{"h2://edge.example.test:27443", "h3://edge.example.test:27444"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
 }
+
+// runtimeWaitBound bounds every wait for something that must happen: a wait returns the moment its condition holds, so a
+// generous bound costs nothing when the machine is healthy and keeps a loaded CI runner from failing a correct run.
+const runtimeWaitBound = 30 * time.Second
+
+// runtimeExpiryHeadroom is how far ahead an admission that must expire mid-test is set: it must outlast the worker's
+// start, first pull and carrier attach on a loaded runner.
+const runtimeExpiryHeadroom = 4 * time.Second
+
 func waitRuntime(t *testing.T, f func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(runtimeWaitBound)
 	for time.Now().Before(deadline) {
 		if f() {
 			return
@@ -86,7 +107,7 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			a := runtimeAdmission(t)
 			if mode == "expiry" {
-				a.ExpiresAt = time.Now().Add(700 * time.Millisecond)
+				a.ExpiresAt = time.Now().Add(runtimeExpiryHeadroom)
 			}
 			source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
 			expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
@@ -136,12 +157,13 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 			source.mu.Lock()
 			source.err = errors.New("control unavailable")
 			source.mu.Unlock()
-			time.Sleep(60 * time.Millisecond)
+			source.pullsAfter(t, 3) // three failed pulls, not 60 ms of them
 			if routes.Len() != 1 {
 				t.Fatal("failed pull removed valid route")
 			}
 			if mode == "expiry" {
-				time.Sleep(time.Until(a.ExpiresAt) + 100*time.Millisecond)
+				waitRuntime(t, func() bool { return time.Now().After(a.ExpiresAt) })
+				source.pullsAfter(t, 3) // three failed pulls past the expiry
 				if routes.Len() != 1 {
 					t.Fatal("admitted runtime carrier expired during authority outage")
 				}
@@ -167,14 +189,14 @@ func TestRuntimeCarrierReadinessRevocationExpiryAndRecovery(t *testing.T) {
 				_ = second.Close()
 				select {
 				case <-secondDone:
-				case <-time.After(time.Second):
+				case <-time.After(runtimeWaitBound):
 					t.Fatal("replacement handler leaked")
 				}
 			}
 			_ = server.Close()
 			select {
 			case <-done:
-			case <-time.After(time.Second):
+			case <-time.After(runtimeWaitBound):
 				t.Fatal("handler leaked")
 			}
 		})
@@ -230,24 +252,25 @@ func TestRuntimeCarrierRoutesStayOnHostGoaway(t *testing.T) {
 	}
 	// A short goaway (whole seconds on the wire): the carrier stays open past it, as a shared
 	// carrier the agent keeps using does (audit T10, prod 2026-10-26).
-	if err := connectorprotocol.WriteGoawayNotice(hostEnd, connectorprotocol.GoawayHostDraining, time.Now().Add(2*time.Second)); err != nil {
+	if err := connectorprotocol.WriteGoawayNotice(hostEnd, connectorprotocol.GoawayHostDraining, time.Now().Add(runtimeExpiryHeadroom)); err != nil {
 		t.Fatal(err)
 	}
 	_ = hostEnd.Close()
 	waitRuntime(t, server.DrainingNow)
-	select {
-	case err := <-done:
-		t.Fatalf("handler left before the host closed its carrier: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
 	if routes.Len() != 1 {
 		t.Fatal("a goaway detached the routes of a carrier that still serves")
 	}
 	// The goaway ends while the carrier is still open: it is a normal carrier again.
-	for deadline := time.Now().Add(6 * time.Second); server.DrainingNow(); time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(runtimeWaitBound); server.DrainingNow(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the goaway did not end on a carrier that is still open")
 		}
+	}
+	// The whole goaway has run its course: the handler must not have left during it.
+	select {
+	case err := <-done:
+		t.Fatalf("handler left before the host closed its carrier: %v", err)
+	default:
 	}
 	if routes.Len() != 1 {
 		t.Fatal("routes left when the goaway ended")
@@ -258,7 +281,7 @@ func TestRuntimeCarrierRoutesStayOnHostGoaway(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handler after the carrier closed: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(runtimeWaitBound):
 		t.Fatal("handler kept a closed carrier")
 	}
 }
@@ -292,7 +315,7 @@ func TestRuntimeCarrierRequestPullCoalescesAndSeesNewAdmissions(t *testing.T) {
 	asked := time.Now()
 	select {
 	case <-w.RequestPull():
-	case <-time.After(3 * time.Second):
+	case <-time.After(runtimeWaitBound):
 		t.Fatal("requested pull did not finish")
 	}
 	if len(expected.Snapshot()) != 1 {

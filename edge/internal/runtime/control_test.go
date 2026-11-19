@@ -62,26 +62,19 @@ func TestControlDependencyLoadsAndRefreshesRevocationsAtomically(t *testing.T) {
 	source.document = []byte(`{"jtis":["revoked"]}`)
 	source.mu.Unlock()
 	<-source.calls
-	time.Sleep(2 * time.Millisecond)
+	// The call is counted before its document is applied: wait for the snapshot, not for 2 ms.
+	waitRuntime(t, func() bool { mu.Lock(); defer mu.Unlock(); return current == `{"jtis":["revoked"]}` })
+	source.mu.Lock()
+	source.document = []byte("invalid")
+	source.mu.Unlock()
+	waitRuntime(t, func() bool { return dependency.LastError() != nil })
 	mu.Lock()
 	got := current
 	mu.Unlock()
 	if got != `{"jtis":["revoked"]}` {
-		t.Fatalf("snapshot = %s", got)
-	}
-	source.mu.Lock()
-	source.document = []byte("invalid")
-	source.mu.Unlock()
-	for dependency.LastError() == nil {
-		time.Sleep(time.Millisecond)
-	}
-	mu.Lock()
-	got = current
-	mu.Unlock()
-	if got != `{"jtis":["revoked"]}` {
 		t.Fatalf("invalid refresh replaced snapshot: %s", got)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), runtimeWaitBound)
 	defer cancel()
 	if err := dependency.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -117,7 +110,7 @@ func TestControlDependencyRefreshesIssuerKeysThroughRotation(t *testing.T) {
 	has := func(id string) bool { _, err := snapshot.Key(context.Background(), id); return err == nil }
 	eventually := func(what string, ok func() bool) {
 		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); !ok(); time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(runtimeWaitBound); !ok(); time.Sleep(time.Millisecond) {
 			if time.Now().After(deadline) {
 				t.Fatal(what)
 			}
