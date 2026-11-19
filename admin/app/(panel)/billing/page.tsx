@@ -48,6 +48,7 @@ function Workspaces() {
           { header: "Plan", cell: (w) => w.product_code ?? "—" },
           { header: "State", cell: (w) => <StatusBadge state={w.state} /> },
           { header: "Seats", cell: (w) => w.quantity, className: "text-right tabular-nums" },
+          { header: "Add-on", cell: (w) => w.addon ?? "—" },
           { header: "Renews", cell: (w) => (w.period_end ? <Time iso={w.period_end} /> : "—") },
         ]}
       />

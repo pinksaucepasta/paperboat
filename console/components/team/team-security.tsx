@@ -51,21 +51,25 @@ export function TeamSecurity({ team, emails }: { team: Team; emails: Map<string,
       </p>
     )
   const data = identity.data
-  if (!data.eligible) {
-    return (
-      <p className="rounded-lg bg-surface px-4 py-3 text-sm text-muted-foreground">
-        Single sign-on and directory sync are available from {data.min_seats} seats. This team has {data.seats}.{" "}
-        <Link href="/billing" className="text-foreground underline underline-offset-4">
-          Add seats
-        </Link>
-      </p>
-    )
-  }
+  const needs = (what: string, addon: string) => (
+    <p className="rounded-lg bg-surface px-4 py-3 text-sm text-muted-foreground">
+      {what} needs the {addon} add-on, for a team of any size.{" "}
+      <Link href="/billing" className="text-foreground underline underline-offset-4">
+        Add it in Billing
+      </Link>
+    </p>
+  )
   return (
     <div className="flex flex-col gap-10">
-      <Domains team={team} identity={data} />
-      <SingleSignOn team={team} identity={data} emails={emails} />
-      <Directory team={team} identity={data} />
+      {data.sso_addon ? (
+        <>
+          <Domains team={team} identity={data} />
+          <SingleSignOn team={team} identity={data} emails={emails} />
+        </>
+      ) : (
+        needs("Single sign-on", "SSO")
+      )}
+      {data.scim_addon ? <Directory team={team} identity={data} /> : needs("Directory sync", "SCIM")}
     </div>
   )
 }
