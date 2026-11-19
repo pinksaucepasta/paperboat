@@ -22,7 +22,6 @@ for tool in tar sha256sum install systemctl timeout; do command -v "$tool" >/dev
 # Choose what to run before anything is downloaded or changed. Stdin is the pipe from curl, so the
 # questions go to the terminal, as rustup-init.sh does. Nothing else is required: the host's public
 # address is detected and the claim code is printed at the end.
-install_url=https://get.pprbt.dev/selfhost
 components=0
 for arg in "$@"; do
  case "$arg" in
@@ -34,8 +33,8 @@ if [ "$components" -gt 1 ]; then echo 'Choose only one of --relay, --edge and --
 # An existing installation keeps its components, so upgrades ask nothing.
 if [ "$components" -eq 0 ] && ! systemctl cat paperboat-selfhost.service >/dev/null 2>&1; then
  if ! (: </dev/tty) 2>/dev/null; then
-  echo 'Choose what to run on this host. Run the installer again with one of these flags:' >&2
-  for flag in relay edge both; do echo "  curl -fsSL $install_url | sh -s -- --$flag" >&2; done
+  echo 'Choose what to run on this host. Run the same install command again with one of these flags after "sh -s --":' >&2
+  for flag in relay edge both; do echo "  sh -s -- --$flag" >&2; done
   exit 2
  fi
  printf 'What should this host run?\n  1) Relay - carries your machines'"'"' connections when they cannot connect directly\n  2) Edge  - serves your previews and tunnels\n  3) Both\n' >&2

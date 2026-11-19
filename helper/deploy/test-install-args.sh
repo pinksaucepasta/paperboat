@@ -22,7 +22,7 @@ grep -q 'only one of' <<< "$out" || fail "two flags error: $out"
 
 out=$(run) && fail "no flag and no terminal did not fail"
 for flag in relay edge both; do
-  grep -qF "curl -fsSL https://get.pprbt.dev/selfhost | sh -s -- --$flag" <<< "$out" || fail "no command for --$flag: $out"
+  grep -qF "sh -s -- --$flag" <<< "$out" || fail "no command for --$flag: $out"
 done
 ! grep -q STUB <<< "$out" || fail "installer went on without a choice"
 out=$(installed=1 run || true)

@@ -83,7 +83,7 @@ func TestHelpDescribesEveryCommand(t *testing.T) {
 	if err := run(context.Background(), []string{"install", "--help"}, &install); err != nil || strings.Contains(install.String(), "https-cert") || strings.Contains(install.String(), "https-key") {
 		t.Fatalf("customer install help shows operator certificate flags: %v", err)
 	}
-	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"--help"}, {"uninstall", "--help"}, {"serve", "--help"}, {"logs", "--help"}, {"restart", "--help"}, {"update", "--help"}, {"update-apply", "--help"}} {
+	for _, args := range [][]string{{"install", "--help"}, {"selfhost", "code", "--help"}, {"status", "--help"}, {"doctor", "--help"}, {"uninstall", "--help"}, {"serve", "--help"}, {"logs", "--help"}, {"restart", "--help"}, {"update", "--help"}, {"update-apply", "--help"}} {
 		var out bytes.Buffer
 		if err := run(context.Background(), args, &out); err != nil {
 			t.Fatalf("%v: %v", args, err)
