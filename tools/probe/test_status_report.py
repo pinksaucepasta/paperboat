@@ -17,7 +17,8 @@ class Handler(BaseHTTPRequestHandler):
                       "/tuf-naive": (200, b'{"signed":{"expires":"2999-01-01T00:00:00"}}'),
                       "/redirect": (302, b""),
                       "/tuf-old": (200, b'{"signed":{"expires":"2001-01-01T00:00:00Z"}}')}.get(self.path, (404, b""))
-        self.send_response(code); self.end_headers(); self.wfile.write(body)
+        # A length-delimited body: HTTP/1.0 without one ends at the TLS socket close, which OpenSSL 3.5 reports as a read error.
+        self.send_response(code); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def log_message(self, *args):
         pass
