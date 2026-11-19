@@ -253,6 +253,7 @@ github.com/go-toolsmith/strparse v1.1.0/go.mod h1:7ksGy58fsaQkGQlY8WVoBFNyEPMGuJ
 github.com/go-toolsmith/typep v1.1.0/go.mod h1:fVIw+7zjdsMxDA3ITWnH1yOiw1rnTQKCsF/sk2H/qig=
 github.com/go-viper/mapstructure/v2 v2.5.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
 github.com/go-xmlfmt/xmlfmt v1.1.3/go.mod h1:aUCEOzzezBEjDBbFBoSiya/gduyIiWYRP6CnSFIV8AM=
+github.com/go4org/hashtriemap v0.0.0-20260925222741-44e5305f85d9 h1:J8S+Ms89nvHX1F9Ma2m3KhdTl41ZhbFKMyAJqvDA+iE=
 github.com/go4org/hashtriemap v0.0.0-20260925222741-44e5305f85d9/go.mod h1:OGmRfY/9QEK2P5zCRtmqfbCF283xPkU2dvVA4MvbvpI=
 github.com/gobuffalo/flect v1.0.3/go.mod h1:A5msMlrHtLqh9umBSnvabjsMrCcCpAyzglnDvkbYKHs=
 github.com/gobwas/glob v0.2.3/go.mod h1:d3Ez4x06l9bZtSvzIay5+Yzi0fmZzPgnTbPcKjJAkT8=
@@ -555,6 +556,7 @@ github.com/stretchr/testify v1.12.0/go.mod h1:bOYBZb5qJ00vPzWfIqBUZPaxK8jWiXc6d3
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
 github.com/syndtr/goleveldb v1.0.1-0.20220721030215-126854af5e6d/go.mod h1:RRCYJbIwD5jmqPI9XoAFR0OcDxqUctll6zUj/+B4S48=
 github.com/tailscale/depaware v0.0.0-20260720165112-f20f66241ec6/go.mod h1:F4qVQ0ffCtHizbxsWWCMGl8OIieayJWw8XetPiILDNA=
+github.com/tailscale/gliderssh v0.3.4-0.20261026144310-31f7cf365d3a h1:LQfS++EBVN2Bk9/FbFjJmdP/CsebU0OupOX58tO4p04=
 github.com/tailscale/gliderssh v0.3.4-0.20261026144310-31f7cf365d3a/go.mod h1:wn16Km1EZOX4UEAyaZa3dBwfFGOJ7neck40NcwosJUw=
 github.com/tailscale/goexpect v0.0.0-20210902213824-6e8c725cea41/go.mod h1:/roCdA6gg6lQyw/Oz6gIIGu3ggJKYhF+WC/AQReE5XQ=
 github.com/tailscale/mkctr v0.0.0-20260902181255-cbad597122da/go.mod h1:4st7fy3NTWcWsQdOC69JcHK4UXnncgcxSOvSR8aD8a0=
