@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
 func TestSplitComponentFindsRelayOrEdgeAmongFlags(t *testing.T) {
@@ -50,5 +54,26 @@ func TestPrefixWriterMarksEachLine(t *testing.T) {
 	w.flush()
 	if out.String() != "edge | one\nedge | two\nedge | three\n" {
 		t.Fatalf("got %q", out.String())
+	}
+}
+
+// On a host with no claimed installation the commands say what to do, not "operation failed".
+func TestEverydayCommandsGuideAnUnclaimedOrMissingInstallation(t *testing.T) {
+	t.Setenv("PAPERBOAT_SENTRY_ENABLED", "false")
+	reporter, err := reporting.New("paperboat-selfhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reporter.Close()
+	missing := filepath.Join(t.TempDir(), "PRIVATE_INSTALLATION")
+	for command, want := range map[string]string{"logs": "self-host installer", "restart": "self-host installer", "update": "not claimed yet"} {
+		args := []string{command, "--state-dir", missing}
+		if command == "restart" {
+			args = append(args, "relay")
+		}
+		var public bytes.Buffer
+		if code := execute(context.Background(), reporter, args, io.Discard, &public); code != 1 || !strings.Contains(public.String(), want) || strings.Contains(public.String(), "PRIVATE_INSTALLATION") {
+			t.Fatalf("pbh %v: code %d, output %q", args, code, public.String())
+		}
 	}
 }

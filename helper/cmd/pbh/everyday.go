@@ -39,7 +39,7 @@ func splitComponent(args []string) (component string, rest []string, err error) 
 func componentContainers(dir, component string) (map[string]string, error) {
 	config, err := selfhost.ReadConfig(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read the installation (is pbh installed?): %w", err)
+		return nil, withMessage("read the installation failed; run the self-host installer first, or pass --state-dir", err)
 	}
 	found := map[string]string{}
 	for _, c := range config.Components {
@@ -55,6 +55,21 @@ func componentContainers(dir, component string) (map[string]string, error) {
 		return nil, commandError("this installation does not run the " + component + "; it runs " + installationMode(config))
 	}
 	return found, nil
+}
+
+// withMessage keeps err for typed consumers but shows the operator only message: pbh prints commandError text
+// and nothing else, so every failure of these commands names the step and what to do.
+func withMessage(message string, err error) error {
+	return fmt.Errorf("%w: %w", commandError(message), err)
+}
+
+// requireContainer fails with what to do when the component's container does not exist: an unclaimed node
+// runs only its claim server, and the relay and edge start after it is claimed.
+func requireContainer(ctx context.Context, component, container string) error {
+	if err := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.Id}}", container).Run(); err != nil {
+		return withMessage("the "+component+" is not running yet: claim this node in Dashboard → Network first (pbh selfhost code prints the code), then check pbh status", err)
+	}
+	return nil
 }
 
 // logsCommand is `pbh logs`: docker logs of the relay and/or edge container, bounded by --lines and --since.
@@ -96,6 +111,11 @@ func logsCommand(ctx context.Context, args []string, out io.Writer) error {
 	if *follow {
 		dockerArgs = append(dockerArgs, "--follow")
 	}
+	for name, container := range targets {
+		if err := requireContainer(ctx, name, container); err != nil {
+			return err
+		}
+	}
 	var lock sync.Mutex
 	var group sync.WaitGroup
 	failures := make(chan error, len(targets))
@@ -111,7 +131,7 @@ func logsCommand(ctx context.Context, args []string, out io.Writer) error {
 		go func() {
 			defer group.Done()
 			if err := cmd.Run(); err != nil && ctx.Err() == nil {
-				failures <- fmt.Errorf("read the %s logs: %w", strings.TrimSuffix(prefix, " | "), err)
+				failures <- withMessage("read the "+name+" logs failed; run pbh status", err)
 			}
 			writer.flush()
 		}()
@@ -185,8 +205,8 @@ func restartCommand(ctx context.Context, args []string, out io.Writer) error {
 		return elevated(ctx, append([]string{"restart"}, args...), out)
 	}
 	if component == "" {
-		if output, err := exec.CommandContext(ctx, "systemctl", "restart", "paperboat-selfhost.service").CombinedOutput(); err != nil {
-			return fmt.Errorf("restart the service: %w: %s", err, lastLine(string(output)))
+		if _, err := exec.CommandContext(ctx, "systemctl", "restart", "paperboat-selfhost.service").Output(); err != nil {
+			return withMessage("restart the service failed; run pbh status", err)
 		}
 		fmt.Fprintln(out, "Restarted paperboat-selfhost.service. Run pbh status to check it.")
 		return nil
@@ -196,8 +216,11 @@ func restartCommand(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	container := targets[component]
-	if output, err := exec.CommandContext(ctx, "docker", "stop", container).CombinedOutput(); err != nil {
-		return fmt.Errorf("stop the %s: %w: %s", component, err, lastLine(string(output)))
+	if err := requireContainer(ctx, component, container); err != nil {
+		return err
+	}
+	if _, err := exec.CommandContext(ctx, "docker", "stop", container).Output(); err != nil {
+		return withMessage("stop the "+component+" failed; run pbh logs "+component, err)
 	}
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -211,5 +234,5 @@ func restartCommand(ctx context.Context, args []string, out io.Writer) error {
 		case <-time.After(time.Second):
 		}
 	}
-	return fmt.Errorf("the %s did not come back within 2 minutes; run pbh logs %s", component, component)
+	return commandError("the " + component + " did not come back within 2 minutes; run pbh logs " + component)
 }

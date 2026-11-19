@@ -42,13 +42,13 @@ func updateCommand(ctx context.Context, args []string, out io.Writer) error {
 	}
 	node, err := containers.OpenUpdateNode(*dir)
 	if err != nil {
-		return fmt.Errorf("%w: claim this node in Dashboard → Network first (pbh selfhost code)", err)
+		return withMessage("this node is not claimed yet: claim it in Dashboard → Network (pbh selfhost code prints the code), then run pbh update again", err)
 	}
 	check, cancel := context.WithTimeout(ctx, time.Minute)
 	latest, err := selfupdate.Latest(check, node.ControlURL()+"/tuf", tufroot.TrustedRoot, filepath.Join(*dir, "update", "tuf"), runtime.GOARCH, node.DownloadClient())
 	cancel()
 	if err != nil {
-		return fmt.Errorf("find the latest release: %w", err)
+		return withMessage("could not find the latest signed release; check this host's network and retry", err)
 	}
 	if latest == version || selfupdate.Newer(version, latest) {
 		fmt.Fprintf(out, "pbh %s is up to date.\n", version)
@@ -76,7 +76,10 @@ func updateCommand(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return runUpdate(ctx, steps)
+	if err := runUpdate(ctx, steps); err != nil {
+		return withMessage("the update did not finish; the step lines above give the exact error and the previous version is restored when it had started", err)
+	}
+	return nil
 }
 
 func isTerminal(f *os.File) bool {
