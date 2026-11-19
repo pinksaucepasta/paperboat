@@ -64,13 +64,14 @@ func collectTunnelDoctorLocalReport(ctx context.Context) (localDoctorReport, err
 		report.HostRuntime = "invalid_local_endpoint"
 		return report, nil
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	probe := timingsOf(ctx).tunnelDoctorProbe
+	probeCtx, cancel := context.WithTimeout(ctx, probe)
 	defer cancel()
 	request, requestErr := http.NewRequestWithContext(probeCtx, http.MethodGet, endpointURL, nil)
 	if requestErr != nil {
 		return report, nil
 	}
-	client, clientErr := httptransport.NewLoopbackClient(2 * time.Second)
+	client, clientErr := httptransport.NewLoopbackClient(probe)
 	if clientErr != nil {
 		return report, nil
 	}

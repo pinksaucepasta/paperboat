@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -591,9 +592,9 @@ func realCommandTempDir(t *testing.T) string {
 }
 
 func TestCollectTunnelDoctorLocalReportUsesNoProxyAndStrictHealthJSON(t *testing.T) {
-	proxyCalls := 0
+	var proxyCalls atomic.Int32
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		proxyCalls++
+		proxyCalls.Add(1)
 		http.Error(w, "proxy must not receive loopback diagnostics", http.StatusBadGateway)
 	}))
 	t.Cleanup(proxy.Close)
@@ -607,8 +608,11 @@ func TestCollectTunnelDoctorLocalReportUsesNoProxyAndStrictHealthJSON(t *testing
 		status     int
 		location   string
 		wantStatus string
+		delay      time.Duration
 	}{
 		{name: "valid", headers: []string{"application/json"}, body: `{"live":true}`, wantStatus: "ready"},
+		// A loaded runner can answer after the production 2 s probe; the test's own budget is generous.
+		{name: "answers after the production probe budget", headers: []string{"application/json"}, body: `{"live":true}`, wantStatus: "ready", delay: 2500 * time.Millisecond},
 		{name: "wrong content type", headers: []string{"text/plain"}, body: `{"live":true}`, wantStatus: "unhealthy"},
 		{name: "multiple content types", headers: []string{"application/json", "application/json"}, body: `{"live":true}`, wantStatus: "unhealthy"},
 		{name: "duplicate live", headers: []string{"application/json"}, body: `{"live":true,"live":true}`, wantStatus: "unhealthy"},
@@ -619,7 +623,12 @@ func TestCollectTunnelDoctorLocalReportUsesNoProxyAndStrictHealthJSON(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case <-time.After(test.delay):
+				case <-r.Context().Done():
+					return
+				}
 				for _, value := range test.headers {
 					w.Header().Add("Content-Type", value)
 				}
@@ -640,13 +649,32 @@ func TestCollectTunnelDoctorLocalReportUsesNoProxyAndStrictHealthJSON(t *testing
 			descriptor := []byte(fmt.Sprintf(`{"schema":"paperboat.worker-local/v1","listen_address":%q}`, strings.TrimPrefix(server.URL, "http://")))
 			atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDirectory, "worker-local.json"), descriptor)
 			t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
-			report, err := collectTunnelDoctorLocalReport(t.Context())
+			report, err := collectTunnelDoctorLocalReport(withTunnelDoctorProbe(t.Context(), time.Minute))
 			if err != nil || report.HostRuntime != test.wantStatus {
 				t.Fatalf("report=%#v error=%v", report, err)
 			}
 		})
 	}
-	if proxyCalls != 0 {
-		t.Fatalf("proxy calls = %d", proxyCalls)
+	if proxyCalls.Load() != 0 {
+		t.Fatalf("proxy calls = %d", proxyCalls.Load())
+	}
+}
+
+// A runtime that accepts the request and never answers is reported unavailable when the probe budget ends, not
+// waited for (the budget is production's 2 s; the test shortens it through the command's timings).
+func TestTunnelDoctorLocalReportEndsAtTheProbeBudgetOnAStalledRuntime(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer server.Close()
+	stateRoot := t.TempDir()
+	runtimeDirectory := filepath.Join(stateRoot, "runtime")
+	if err := os.Mkdir(runtimeDirectory, 0o700); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	descriptor := []byte(fmt.Sprintf(`{"schema":"paperboat.worker-local/v1","listen_address":%q}`, strings.TrimPrefix(server.URL, "http://")))
+	atomicfiletest.WriteOwnerOnly(t, filepath.Join(runtimeDirectory, "worker-local.json"), descriptor)
+	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", stateRoot)
+	report, err := collectTunnelDoctorLocalReport(withTunnelDoctorProbe(t.Context(), 100*time.Millisecond))
+	if err != nil || report.HostRuntime != "unavailable" {
+		t.Fatalf("report=%#v error=%v", report, err)
 	}
 }

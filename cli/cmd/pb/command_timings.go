@@ -60,6 +60,8 @@ type commandTimings struct {
 	setupOpenSSH time.Duration
 	// windowsHandoff bounds the uninstall helper's startup acknowledgement, not the five-minute teardown itself.
 	windowsHandoff time.Duration
+	// tunnelDoctorProbe bounds the one loopback health request of `pb tunnel doctor`.
+	tunnelDoctorProbe time.Duration
 }
 
 func defaultCommandTimings() commandTimings {
@@ -82,6 +84,7 @@ func defaultCommandTimings() commandTimings {
 		sendQueuePoll:           3 * time.Second,
 		setupOpenSSH:            75 * time.Second,
 		windowsHandoff:          30 * time.Second,
+		tunnelDoctorProbe:       2 * time.Second,
 	}
 }
 

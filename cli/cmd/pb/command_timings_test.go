@@ -64,3 +64,8 @@ func TestProductionTimingsApplyWithoutAContextValue(t *testing.T) {
 		t.Fatalf("production timings %+v", got)
 	}
 }
+
+// withTunnelDoctorProbe is ctx with this loopback health probe timeout.
+func withTunnelDoctorProbe(ctx context.Context, probe time.Duration) context.Context {
+	return withTimings(ctx, func(timings *commandTimings) { timings.tunnelDoctorProbe = probe })
+}
