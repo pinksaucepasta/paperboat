@@ -1,6 +1,6 @@
 -- +goose Up
 -- An operator can lift a workspace's bandwidth throttle (grant kind throttle_lift): the workspace runs at full speed
--- until the grant ends or is revoked. Added NOT VALID (no row needs a rescan), validated in 422.
+-- until the grant ends or is revoked. Added NOT VALID (no row needs a rescan), validated in 424.
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE paperboat.billing_workspace_grants DROP CONSTRAINT billing_workspace_grants_kind_check;
 ALTER TABLE paperboat.billing_workspace_grants ADD CONSTRAINT billing_workspace_grants_kind_check
