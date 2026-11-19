@@ -68,7 +68,7 @@ func TestWindowsNewSourceHasStableUserAccessAndNeverOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = file.WriteString("# owner configuration\n"); err != nil {
+	if _, err = file.WriteString("// owner configuration\n"); err != nil {
 		t.Fatal(err)
 	}
 	if err = file.Close(); err != nil {
@@ -95,7 +95,7 @@ func TestWindowsNewSourceHasStableUserAccessAndNeverOverwrites(t *testing.T) {
 		t.Fatalf("existing source accepted: %v", err)
 	}
 	bytes, err := os.ReadFile(path)
-	if err != nil || string(bytes) != "# owner configuration\n" {
+	if err != nil || string(bytes) != "// owner configuration\n" {
 		t.Fatal("existing source changed")
 	}
 }
