@@ -298,9 +298,10 @@ collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
   else record_command_failure "$id" "${dur:-?}" "$out"; fi
 }
 
+# The command runs in the target's login shell (cmd.exe on Windows): a nested `cmd /c echo` prints the marker with a stray quote.
 test_ssh_short() {
   local t=$1 marker="ssh-$RUN_ID" t0 out status
-  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_HP ssh $t -- $(remote_echo_cmd "$t" "$marker") < /dev/null; echo rc=\$?" 2>&1); status=$?
+  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_HP ssh $t -- echo $marker < /dev/null; echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "ssh:$t" PASS $(( $(now)-t0 ))
   else record_command_failure "ssh:$t" $(( $(now)-t0 )) "$out"; fi
 }
