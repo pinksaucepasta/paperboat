@@ -525,30 +525,33 @@ func (s *Server) readDatagrams(p *peerConn) {
 	}
 	queue := make(chan shaped, 4096)
 	var waiting atomic.Int32 // datagrams queued or being forwarded by the shaper goroutine
-	go func() {
-		timer := time.NewTimer(time.Hour)
-		defer timer.Stop()
-		for {
-			select {
-			case <-p.context().Done():
-				return
-			case item := <-queue:
-				if wait := time.Until(item.at); wait > 0 {
-					timer.Reset(wait)
-					select {
-					case <-timer.C:
-					case <-p.context().Done():
+	// The shaper goroutine starts with the first datagram that has to wait: an idle carrier costs no goroutine.
+	startShaper := sync.OnceFunc(func() {
+		go func() {
+			timer := time.NewTimer(time.Hour)
+			defer timer.Stop()
+			for {
+				select {
+				case <-p.context().Done():
+					return
+				case item := <-queue:
+					if wait := time.Until(item.at); wait > 0 {
+						timer.Reset(wait)
+						select {
+						case <-timer.C:
+						case <-p.context().Done():
+							return
+						}
+					}
+					ok := forward(item.b, time.Now())
+					waiting.Add(-1)
+					if !ok {
 						return
 					}
 				}
-				ok := forward(item.b, time.Now())
-				waiting.Add(-1)
-				if !ok {
-					return
-				}
 			}
-		}
-	}()
+		}()
+	})
 	for {
 		b, err := p.conn.ReceiveDatagram(p.context())
 		if err != nil {
@@ -573,6 +576,7 @@ func (s *Server) readDatagrams(p *peerConn) {
 			}
 			continue
 		}
+		startShaper()
 		waiting.Add(1)
 		select {
 		case queue <- shaped{b, now.Add(delay)}:
