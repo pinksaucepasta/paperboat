@@ -7,11 +7,11 @@ package operatoractions
 import (
 	"context"
 	"fmt"
-	"html"
 	"regexp"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
@@ -102,15 +102,22 @@ WHERE b.hostname=$1 AND u.email_verified AND u.primary_email<>''`, host).Scan(&a
 	if err != nil {
 		return err
 	}
-	contact := "reply to this email"
-	if s.mail.AbuseMailbox != "" {
-		contact = "write to " + html.EscapeString(s.mail.AbuseMailbox)
-	}
-	message := transactionalmail.Message{
-		From: s.mail.From, To: []string{address}, Subject: "Paperboat: " + host + " was disabled",
-		HTML: fmt.Sprintf("<p>Paperboat disabled <b>%s</b> because it violated Paperboat's acceptable use policy. Visitors now see a notice instead of your app, and the address stays disabled.</p><p>Reference: %s. If you think this is a mistake, %s with that reference.</p>",
-			html.EscapeString(host), html.EscapeString(reason), contact),
-	}
+	message := blockedMessage(s.mail, address, host, reason)
 	_, err = transactionalmail.EnqueueOnceTx(ctx, tx, fmt.Sprintf("publication-blocked:%s:%d", host, version), message)
 	return err
+}
+
+func blockedMessage(policy config.TransactionalMail, address, host, reason string) transactionalmail.Message {
+	contact := "reply to this email"
+	if policy.AbuseMailbox != "" {
+		contact = "write to " + policy.AbuseMailbox
+	}
+	return transactionalmail.Compose(policy, address, "Paperboat: "+host+" was disabled", transactionalmail.Content{
+		Heading: host + " was disabled",
+		Paragraphs: []string{
+			fmt.Sprintf("Paperboat disabled %s because it violated Paperboat's acceptable use policy. Visitors now see a notice instead of your app, and the address stays disabled.", host),
+			fmt.Sprintf("Reference: %s. If you think this is a mistake, %s with that reference.", reason, contact),
+		},
+		Why: "You got this because the disabled address belongs to your account.",
+	})
 }

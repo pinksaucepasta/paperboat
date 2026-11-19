@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"html"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -40,14 +40,14 @@ type Subscriptions interface {
 // bounded; a failure never reaches the deletion, which committed before the job ran.
 type Outbox struct {
 	db     *db.DB
-	from   string
+	mail   config.TransactionalMail
 	workos WorkOSUsers
 	stripe Subscriptions
 }
 
 // Worker returns the outbox for the given provider clients. A nil client fails its jobs until configured.
 func (s *Service) Worker(workos WorkOSUsers, subscriptions Subscriptions) *Outbox {
-	return &Outbox{db: s.db, from: s.mail.From, workos: workos, stripe: subscriptions}
+	return &Outbox{db: s.db, mail: s.mail, workos: workos, stripe: subscriptions}
 }
 
 // Run keeps dispatching jobs until ctx ends. Database errors are reported; job failures are recorded on the job.
@@ -123,13 +123,7 @@ func (o *Outbox) run(ctx context.Context, j job) error {
 		return o.stripe.ScheduleCancelAtPeriodEnd(ctx, j.target)
 	case jobConfirmation:
 		return o.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			_, err := transactionalmail.EnqueueOnceTx(ctx, tx, "account-deleted:"+j.userID, transactionalmail.Message{
-				From:    o.from,
-				To:      []string{j.recipient},
-				Subject: "Your Paperboat account was deleted",
-				HTML: "<p>Your Paperboat account was deleted. Its machines, environment variables, previews and tunnels were removed, and its sessions and API tokens ended.</p>" +
-					"<p>Invoices and payment records are kept as tax law requires. You can create a new account with " + html.EscapeString(j.recipient) + " at any time.</p>",
-			})
+			_, err := transactionalmail.EnqueueOnceTx(ctx, tx, "account-deleted:"+j.userID, deletedMessage(o.mail, j.recipient))
 			return err
 		})
 	default:
@@ -164,4 +158,15 @@ func (o *Outbox) finish(ctx context.Context, j job, runErr error) error {
 func (o *Outbox) backoff(attempts int) time.Duration {
 	delay := time.Minute << min(max(attempts-1, 0), 10)
 	return min(delay, maxJobBackoff)
+}
+
+func deletedMessage(policy config.TransactionalMail, recipient string) transactionalmail.Message {
+	return transactionalmail.Compose(policy, recipient, "Your Paperboat account was deleted", transactionalmail.Content{
+		Heading: "Your Paperboat account was deleted",
+		Paragraphs: []string{
+			"Its machines, environment variables, previews and tunnels were removed, and its sessions and API tokens ended.",
+			"Invoices and payment records are kept as tax law requires. You can create a new account with " + recipient + " at any time.",
+		},
+		Why: "You got this because you deleted your Paperboat account.",
+	})
 }

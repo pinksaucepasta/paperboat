@@ -104,11 +104,11 @@ func (s *Service) Send(ctx context.Context, actor, key string, in Input) (Notice
 		return Notice{}, fmt.Errorf("%w: audience is all, paid, plan, team or user", ErrInvalid)
 	}
 	now := time.Now()
-	subject, body, late, deadline, err := render(in, now)
+	subject, content, late, deadline, err := render(in, now)
 	if err != nil {
 		return Notice{}, err
 	}
-	out := Notice{Kind: in.Kind, AudienceKind: in.AudienceKind, AudienceValue: in.AudienceValue, Subject: subject, HTML: body, Late: late}
+	out := Notice{Kind: in.Kind, AudienceKind: in.AudienceKind, AudienceValue: in.AudienceValue, Subject: subject, HTML: transactionalmail.Compose(s.mail, "", subject, content).HTML, Late: late}
 	if !deadline.IsZero() {
 		out.Deadline = &deadline
 	}
@@ -136,7 +136,7 @@ func (s *Service) Send(ctx context.Context, actor, key string, in Input) (Notice
 	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		// One statement decides the race between two requests with the same key: the loser reads the winner's row.
 		inserted, err := tx.Exec(ctx, `INSERT INTO paperboat.customer_notices(id,kind,audience_kind,audience_value,subject,html,request_hash,late,created_by,idempotency_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (created_by,idempotency_key) DO NOTHING`,
-			id, in.Kind, in.AudienceKind, in.AudienceValue, subject, body, hash, late, actor, key)
+			id, in.Kind, in.AudienceKind, in.AudienceValue, subject, out.HTML, hash, late, actor, key)
 		if err != nil {
 			return err
 		}
@@ -156,7 +156,7 @@ func (s *Service) Send(ctx context.Context, actor, key string, in Input) (Notice
 	if err != nil {
 		return Notice{}, err
 	}
-	sent, err := s.queue(ctx, id, in, subject, body)
+	sent, err := s.queue(ctx, id, in, subject, content)
 	if err != nil {
 		return Notice{}, err
 	}
@@ -165,7 +165,7 @@ func (s *Service) Send(ctx context.Context, actor, key string, in Input) (Notice
 }
 
 // queue writes one outbox mail per recipient in batches under a stable id, then records the count: a retry redoes it harmlessly.
-func (s *Service) queue(ctx context.Context, id string, in Input, subject, body string) (int, error) {
+func (s *Service) queue(ctx context.Context, id string, in Input, subject string, content transactionalmail.Content) (int, error) {
 	total, cursor := 0, ""
 	for {
 		n := 0
@@ -189,7 +189,7 @@ func (s *Service) queue(ctx context.Context, id string, in Input, subject, body 
 				return err
 			}
 			for _, t := range list {
-				if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "notice:"+id+":"+t.id, transactionalmail.Message{From: s.mail.From, To: []string{t.address}, Subject: subject, HTML: body}); err != nil {
+				if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "notice:"+id+":"+t.id, transactionalmail.Compose(s.mail, t.address, subject, content)); err != nil {
 					return err
 				}
 				cursor = t.id

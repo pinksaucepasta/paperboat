@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"net/url"
 	"slices"
 	"strings"
@@ -207,14 +206,14 @@ ORDER BY created_at DESC, id DESC LIMIT $4`, host, before, beforeID, limit+1, re
 func alertMessage(policy config.TransactionalMail, r Report) transactionalmail.Message {
 	reporter := "not given"
 	if r.ReporterEmail != "" {
-		reporter = html.EscapeString(r.ReporterEmail)
+		reporter = r.ReporterEmail
 	}
-	return transactionalmail.Message{
-		From: policy.From, To: []string{policy.AbuseMailbox},
-		Subject: "Abuse report (" + r.Reason + "): " + r.Hostname,
-		HTML: fmt.Sprintf("<p>Report %s, %s UTC.</p><p>Link: %s<br>Reason: %s<br>Reporter: %s</p><pre>%s</pre><p>Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.</p>",
-			r.ID, r.CreatedAt.Format("2006-01-02 15:04"), html.EscapeString(r.URL), html.EscapeString(r.Reason), reporter, html.EscapeString(r.Details), html.EscapeString(r.Hostname), r.ID),
-	}
+	return transactionalmail.Compose(policy, policy.AbuseMailbox, "Abuse report ("+r.Reason+"): "+r.Hostname, transactionalmail.Content{
+		Heading:    "Abuse report " + r.ID,
+		Paragraphs: []string{fmt.Sprintf("Received %s UTC. Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.", r.CreatedAt.Format("2006-01-02 15:04"), r.Hostname, r.ID)},
+		Details:    []transactionalmail.Detail{{Label: "Link", Value: r.URL}, {Label: "Reason", Value: r.Reason}, {Label: "Reporter", Value: reporter}, {Label: "Details", Value: r.Details}},
+		Why:        "You got this because this address receives abuse reports.",
+	})
 }
 
 const reportColumns = `id,hostname,url,reason,details,reporter_email,created_at,status,coalesce(triaged_by,''),triaged_at,triage_note`

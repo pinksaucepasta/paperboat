@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail/mailtest"
 )
 
 func TestValidateNormalizesAndNamesTheBadField(t *testing.T) {
@@ -166,4 +167,9 @@ func TestAlertMessageEscapesReporterText(t *testing.T) {
 	if strings.Contains(m.HTML, "<script>") || strings.Contains(m.HTML, "<b>hi") || strings.Contains(m.HTML, "<i>") || m.To[0] != "abuse@mail.example.test" || !strings.Contains(m.Subject, "a.example.test") {
 		t.Fatalf("alert = %+v", m)
 	}
+}
+
+func TestAlertMailUsesTheSharedLayout(t *testing.T) {
+	m := alertMessage(mailtest.Policy, Report{ID: "abuse_x", Hostname: "a.example.test", URL: "https://a.example.test/", Reason: "phishing", Details: "Looks like a bank login.\nSecond line.", ReporterEmail: "r@example.test", CreatedAt: time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)})
+	mailtest.Check(t, "abuse-report", m, "")
 }

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
@@ -143,12 +143,22 @@ func (s *Service) alertTx(ctx context.Context, tx *db.Tx, team, kind, message st
 	link := strings.TrimRight(s.mail.ConsoleOrigin, "/") + "/team?team=" + team + "&tab=activity"
 	label := map[string]string{"https": "HTTPS endpoint", "s3": "S3 storage"}[kind]
 	for _, r := range list {
-		msg := transactionalmail.Message{From: s.mail.From, To: []string{r.address}, Subject: "Paperboat: audit log streaming is failing",
-			HTML: fmt.Sprintf("<p>Paperboat has not been able to deliver the audit log of %s to its %s since %s (UTC): %s.</p><p>Events are kept and delivered in order once the destination accepts them again.</p><p><a href=\"%s\">Check the destination</a></p>",
-				html.EscapeString(r.name), label, since.UTC().Format("2 Jan 2006 15:04"), html.EscapeString(message), html.EscapeString(link))}
+		msg := failingMessage(s.mail, r.address, r.name, label, message, link, since)
 		if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "audit-stream-failing:"+team+":"+kind+":"+since.UTC().Format(time.RFC3339)+":"+r.id, msg); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func failingMessage(policy config.TransactionalMail, address, team, label, message, link string, since time.Time) transactionalmail.Message {
+	return transactionalmail.Compose(policy, address, "Paperboat: audit log streaming is failing", transactionalmail.Content{
+		Heading: "Audit log streaming is failing",
+		Paragraphs: []string{
+			fmt.Sprintf("Paperboat has not been able to deliver the audit log of %s to its %s since %s (UTC): %s.", team, label, since.UTC().Format("2 Jan 2006 15:04"), message),
+			"Events are kept and delivered in order once the destination accepts them again.",
+		},
+		Button: &transactionalmail.Button{Label: "Check the destination", URL: link},
+		Why:    "You got this because you administer this team.",
+	})
 }
