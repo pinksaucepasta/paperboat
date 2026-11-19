@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 )
 
 type snapshotSourceFunc func(context.Context) (Snapshot, error)
@@ -251,6 +252,17 @@ func TestLocalAPIPeerStreamSetupCancelsWhenAuthenticatedClientProcessIsKilled(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The handler reports the canceled setup after the broker returns, on a goroutine Server.Run does not wait for.
+	// Wait for that report here: left running, it called the next test's global fault observer (a data race that
+	// failed TestPeerStreamCancellationJoinsBothCopyWorkers under -shuffle).
+	reported := make(chan struct{}, 1)
+	restore := errorreport.InstallFaultObserver(func(context.Context, errorreport.Fault) {
+		select {
+		case reported <- struct{}{}:
+		default:
+		}
+	})
+	defer restore()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	serverDone := make(chan error, 1)
@@ -281,6 +293,11 @@ func TestLocalAPIPeerStreamSetupCancelsWhenAuthenticatedClientProcessIsKilled(t 
 	case <-setupCanceled:
 	case <-time.After(time.Second):
 		t.Fatal("peer process exit did not cancel in-flight stream setup")
+	}
+	select {
+	case <-reported:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the canceled setup was never reported")
 	}
 	cancel()
 	if err := <-serverDone; !errors.Is(err, context.Canceled) {
