@@ -2,7 +2,7 @@
  * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
  * for personal use and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
-import { auditRetention, plans, publicTcp, ssoMinSeats, teamTrial, topUp } from "./site"
+import { auditRetention, plans, publicTcp, ssoMinSeats, topUp } from "./site"
 import { fairUse } from "./legal-data"
 
 const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
@@ -88,7 +88,6 @@ export const faq = [
     q: "What counts as a browser terminal?",
     a: "A terminal open in the web console. Terminals from the pb command are unlimited on every plan. A shared terminal counts once, however many of its 50 possible viewers are watching.",
   },
-  { q: "How does the Team trial work?", a: teamTrial },
   {
     q: "What if I host my own relay or tunnel server?",
     a: 'Traffic through servers you run is not counted against your plan. <a href="/features/self-hosting/">Self-hosting</a> works on every plan, including Free.',

@@ -9134,7 +9134,7 @@ export interface paths {
         };
         /**
          * A full list behind a money card
-         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time. trials: `at` is the trial end, `mrr` what it becomes.
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. customers: by MRR, `at` is the first subscription start. past_due: by amount due; `amount` is what is owed, `attempts` the tries so far, `at` the next retry. renewals: next 30 days, `amount` is the renewal charge, `at` the renewal time.
          */
         get: operations["get_v1_admin_money_lists_list"];
         put?: never;
@@ -11848,8 +11848,6 @@ export interface components {
                     granted?: boolean;
                 };
             };
-            /** @description Personal overview only: the Team trial a new team would get (0 once used). */
-            team_trial_days?: number;
             id: string;
             user_id?: string;
             team_id?: string;
@@ -14724,13 +14722,6 @@ export interface components {
                 revenue_churn_percent: number;
                 previous_revenue_churn_percent: number;
                 changes_unavailable: boolean;
-            };
-            trials: {
-                /** Format: int64 */
-                active: number;
-                /** Format: int64 */
-                ending_soon: number;
-                started: components["schemas"]["OperatorMoneyPair"];
             };
             cash?: {
                 collected: components["schemas"]["OperatorMoneyPair"];
@@ -36893,7 +36884,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                list: "customers" | "past_due" | "renewals" | "trials";
+                list: "customers" | "past_due" | "renewals";
             };
             cookie?: never;
         };

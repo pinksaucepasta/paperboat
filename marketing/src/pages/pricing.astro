@@ -6,7 +6,7 @@ import Faq from "../components/Faq.astro"
 import Closing from "../components/Closing.astro"
 import Icon from "../components/Icon.astro"
 import Plans from "../components/Plans.astro"
-import { teamTrial, topUp } from "../site"
+import { topUp } from "../site"
 import { fairUse } from "../legal-data"
 import { faq, featureGroups, planNames } from "../pricing-data"
 import { directLane, relayLane, publicLane } from "../diagrams"
@@ -33,8 +33,7 @@ const lanes = [
   <section class="section plans-section" aria-label="Plans">
     <div class="wrap">
       <Plans />
-      <p class="small trial">{teamTrial}</p>
-      <p class="small trial">
+      <p class="small terms-note">
         Paid plans renew until you cancel, and payments are not refunded. See the <a href="/legal/terms/">Terms</a> and the
         <a href="/legal/refunds/">Refund Policy</a>.
       </p>
@@ -143,7 +142,7 @@ const lanes = [
     padding-top: 0;
   }
 
-  .trial {
+  .terms-note {
     margin-top: var(--s5);
     max-width: 70ch;
   }

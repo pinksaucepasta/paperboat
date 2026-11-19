@@ -211,7 +211,7 @@ export const paperboat = {
   pricing: [
     "Free: $0, every feature for personal use, 5 GB of relay and edge bandwidth a month",
     "Pro: $8 a month or $80 a year, 100 GB",
-    "Team: $15 per seat a month or $150 a year, 100 GB per seat; 14-day trial",
+    "Team: $15 per seat a month or $150 a year, 100 GB per seat",
     "Direct traffic between your machines is never counted",
   ],
 }

@@ -103,7 +103,7 @@ if (!home.includes(`data-copy="irm ${config.installer_base_url}/install.ps1 | ie
 if (!home.includes(`href="${config.console_url}"`)) fail("/", "sign-in link is not the configured console")
 if (!text(home).includes(`.${config.preview_base_domain}`)) fail("/", "the example preview address is not on the configured domain")
 if (!text(pages.get("/features/private-access/")).includes(`.${config.local_access_base_domain}`)) fail("/features/private-access/", "example addresses are not on the configured local domain")
-for (const claim of ["$0", "$8", "$80 a year", "$15", "$150 a seat a year", "5 GB", "100 GB", "1,000", "Unlimited", "14-day", "$5 per 100 GB", "30 days", "90 days", "365 days"])
+for (const claim of ["$0", "$8", "$80 a year", "$15", "$150 a seat a year", "5 GB", "100 GB", "1,000", "Unlimited", "$5 per 100 GB", "30 days", "90 days", "365 days"])
   if (!pricing.includes(claim)) fail("/pricing/", `missing pricing claim ${claim}`)
 if (!existsSync(join(dist, "robots.txt"))) fail("/robots.txt", "missing")
 
@@ -117,7 +117,7 @@ if (existsSync(join(repo, "cli/cmd/pb"))) {
 
 // Numbers that have a source in the code are compared with it, when this build runs inside the repository.
 //   Checked here: machine, preview/tunnel, browser-terminal and public-TCP limits, the free bandwidth
-//   allowance, the trial length, shared-terminal viewers (server/internal/config/config.go); audit log
+//   allowance, shared-terminal viewers (server/internal/config/config.go); audit log
 //   retention and the SSO seat minimum (config/business.go); the top-up size (billing/workspace_topups.go);
 //   the file-send limits (config.go).
 //   NOT checked, because no code holds them (they live in Stripe or the database): the prices ($8, $80,
@@ -140,7 +140,6 @@ if (serverConfig) {
   }
   const [tcpFree, tcpPro] = limit("PublicTCP")
   expect("/pricing/", `Public raw-TCP tunnel addresses ${tcpFree} ${tcpPro} ${number(serverConfig, /TeamPerSeat: (\d+)/)} per seat`, "public TCP limits")
-  expect("/pricing/", `${number(serverConfig, /TeamTrialDays: (\d+)/)}-day`, "Team trial length")
   expect("/pricing/", `${number(serverConfig, /PersonalAllowanceBytes: new\(int64\(([\d_]+)/) / 1e9} GB`, "free bandwidth")
   expect("/pricing/", `${number(serverConfig, /ViewersPerSharedTerminal: (\d+)/)} possible viewers`, "shared terminal viewers")
   const days = (plan) => number(business, new RegExp(`AuditRetention${plan}: +(\\d+) \\* day`))

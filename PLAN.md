@@ -519,7 +519,7 @@ team-default-*); console Config sync.
 **Surfaces:** server billing, console billing and bandwidth/usage screens, CLI messages at caps.
 **Known:** there is no Free tier in code today (see 1.3).
 
-- F13-01: Free plan: new accounts pair machines with no subscription or trial; the old "active subscription required" gates are replaced by the allowance model.
+- F13-01: Free plan: new accounts pair machines with no subscription; the old "active subscription required" gates are replaced by the allowance model.
 - F13-02: Metering of relay and edge bytes per workspace (personal) and per member + pool (team); direct P2P never metered.
 - F13-03: Caps enforced as in 1.3; CLI and console messages with upgrade/top-up links; team owners/admins notified.
 - F13-04: Stripe test mode: Pro monthly/yearly, upgrade/downgrade/cancel, top-ups, Team seats monthly/yearly, seat changes mid-cycle (charged immediately, billing date fixed), failed payment → grace → suspension → recovery, invoices.

@@ -67,7 +67,7 @@ export const plans = [
     machines: "Unlimited",
     publications: "Unlimited",
     browserTerminals: "Unlimited",
-    detail: "Members, and lasting access to each other's machines. Try it free for 14 days.",
+    detail: "Members, and lasting access to each other's machines.",
   },
 ] as const
 
@@ -82,10 +82,6 @@ export const ssoMinSeats = 10
 
 /** Public raw-TCP tunnel addresses per plan (server config billing.limits.public_tcp). */
 export const publicTcp = ["1", "10", "10 per seat"] as const
-
-/** The Team plan's trial, said once wherever it is mentioned. */
-export const teamTrial =
-  "Team starts with a 14-day trial. Your card is taken at the start and billing begins on day 15. We remind you 3 days before, and cancelling during the trial costs nothing."
 
 /** The mark: a paper boat on a 10 × 6 cell grid, 60 units per cell (brand guidelines 02). */
 export const boatPath =

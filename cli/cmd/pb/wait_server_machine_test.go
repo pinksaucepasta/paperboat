@@ -18,13 +18,13 @@ func waitTestSnapshot() localapi.Snapshot {
 
 // pb wait on a team machine: the daemon's snapshot does not list it, the server does (as for exec).
 func TestWaitResolvesATeamMachineOnTheServerAndUnknownNamesStayNotFound(t *testing.T) {
-	server := workspaceMachinesServer(t, map[string][]map[string]any{"laneo-f13-trial": {{"id": "machine_pb", "alias": "laneo-pb"}}})
+	server := workspaceMachinesServer(t, map[string][]map[string]any{"laneo-f13-team": {{"id": "machine_pb", "alias": "laneo-pb"}}})
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
 	if err := client.SetWorkspace("personal"); err != nil {
 		t.Fatal(err)
 	}
 	machine, backend, err := resolveWaitMachineOn(context.Background(), client, "laneo-pb")
-	if err != nil || backend == nil || machine.ID != "machine_pb" || backend.Workspace() != "laneo-f13-trial" {
+	if err != nil || backend == nil || machine.ID != "machine_pb" || backend.Workspace() != "laneo-f13-team" {
 		t.Fatalf("team machine: machine=%+v backend=%v err=%v", machine, backend, err)
 	}
 	if _, _, err := resolveWaitMachineOn(context.Background(), client, "nowhere"); !errors.Is(err, resolver.ErrMachineNotFound) {
@@ -49,7 +49,7 @@ func TestWaitOnATeamMachineReturnsWhenTheServerSeesItReady(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := waitForServerMachineWith(ctx, "laneo-f13-trial", waitTestSnapshot(), offline, "runtime", nil, refresh)
+	result, err := waitForServerMachineWith(ctx, "laneo-f13-team", waitTestSnapshot(), offline, "runtime", nil, refresh)
 	if err != nil || result.Outcome != "ready" || result.Machine.Generation != 4 || result.Validate() != nil || polls != 3 {
 		t.Fatalf("result=%+v err=%v polls=%d validate=%v", result, err, polls, result.Validate())
 	}
@@ -64,8 +64,8 @@ func TestWaitOnATeamMachineTransportUsesThePeerProbeInItsWorkspace(t *testing.T)
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := waitForServerMachineWith(ctx, "laneo-f13-trial", waitTestSnapshot(), ready, "transport", prober, nil)
-	if err != nil || result.Outcome != "ready" || result.Machine.SelectedPath != "direct" || workspace != "laneo-f13-trial" || result.Validate() != nil {
+	result, err := waitForServerMachineWith(ctx, "laneo-f13-team", waitTestSnapshot(), ready, "transport", prober, nil)
+	if err != nil || result.Outcome != "ready" || result.Machine.SelectedPath != "direct" || workspace != "laneo-f13-team" || result.Validate() != nil {
 		t.Fatalf("result=%+v err=%v workspace=%q", result, err, workspace)
 	}
 }
