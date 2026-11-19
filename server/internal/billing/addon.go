@@ -160,7 +160,7 @@ func (s *WorkspaceService) ChangeAddon(ctx context.Context, account, team, addon
 		if err != nil {
 			return Workspace{}, err
 		}
-		if _, err = s.reconcileSubscription(ctx, sub.ID, nil); err != nil {
+		if _, err = s.reconcileSubscriptionWith(ctx, sub, nil); err != nil {
 			return Workspace{}, err
 		}
 		err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -175,23 +175,24 @@ func (s *WorkspaceService) ChangeAddon(ctx context.Context, account, team, addon
 }
 
 // syncAddonTx records the add-on item of the subscription snapshot on the workspace. An item whose price is not an add-on
-// product is ignored. A removed item leaves the add-on running to the end of the paid period.
+// product counts as removed. A removed item leaves the add-on running to the end of the paid period.
 func syncAddonTx(ctx context.Context, tx *db.Tx, workspaceID string, current StripeSubscription, newSubscription bool) error {
 	if newSubscription {
 		if _, err := tx.Exec(ctx, `UPDATE billing_workspaces SET addon=NULL,addon_item_id=NULL,addon_price_id=NULL,addon_until=NULL WHERE id=$1`, workspaceID); err != nil {
 			return err
 		}
 	}
+	var addon string
 	if current.AddonItemID != "" {
 		var code string
 		err := tx.QueryRow(ctx, `SELECT code FROM billing_products WHERE provider='stripe' AND provider_price_id=$1 AND catalog_type=$2`, current.AddonPriceID, AddonCatalog).Scan(&code)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && addonOfCode(code) == "") {
-			return nil
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE billing_workspaces SET addon=$2,addon_item_id=$3,addon_price_id=$4,addon_until=NULL WHERE id=$1`, workspaceID, addonOfCode(code), current.AddonItemID, current.AddonPriceID)
+		addon = addonOfCode(code)
+	}
+	if addon != "" {
+		_, err := tx.Exec(ctx, `UPDATE billing_workspaces SET addon=$2,addon_item_id=$3,addon_price_id=$4,addon_until=NULL WHERE id=$1`, workspaceID, addon, current.AddonItemID, current.AddonPriceID)
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE billing_workspaces SET addon_item_id=NULL,addon_price_id=NULL,addon_until=coalesce(addon_until,$2) WHERE id=$1 AND addon IS NOT NULL`, workspaceID, current.PeriodEnd)
