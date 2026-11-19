@@ -138,13 +138,19 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 		}
 	}
 	var receipt OfflineAuditReceipt
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var current bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.user_machines WHERE id=$1 AND installation_generation=$2 AND revoked_at IS NULL AND deleted_at IS NULL)`, machineID, installationGeneration).Scan(&current); err != nil {
-			return err
-		}
-		if !current {
+	// The machine row fences revocation and re-enrollment and serializes backlog
+	// uploads before they read their deduplication keys.
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		receipt = OfflineAuditReceipt{}
+		var current string
+		err := tx.QueryRow(ctx, `SELECT id FROM paperboat.user_machines
+WHERE id=$1 AND installation_generation=$2 AND revoked_at IS NULL AND deleted_at IS NULL
+FOR NO KEY UPDATE`, machineID, installationGeneration).Scan(&current)
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
+		}
+		if err != nil {
+			return err
 		}
 		existing, err := stringSet(ctx, tx, `SELECT idempotency_key FROM paperboat.audit_events WHERE resource_type=ANY($1::text[]) AND resource_id=$2 AND idempotency_key=ANY($3::text[])`, []string{accessResource, "user_machine"}, machineID, keys)
 		if err != nil {

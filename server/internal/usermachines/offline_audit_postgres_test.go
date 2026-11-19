@@ -1,6 +1,7 @@
 package usermachines
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -22,10 +23,75 @@ func TestOfflineAuditBacklogLandsOnceInTheDecidingWorkspacePostgres(t *testing.T
 		{EventID: "evt_started_" + f.suffix, Kind: "offline_session_started", Capability: "terminal", PeerEndpointID: "cli_" + f.suffix, PeerAccountID: f.account, OperationID: "op_" + f.suffix, OccurredAt: now.Add(-time.Hour), Origin: "online"},
 		{EventID: "evt_refused_" + f.suffix, Kind: "offline_session_refused", Capability: "exec", PeerEndpointID: "cli_other_" + f.suffix, PeerAccountID: "gone_" + f.suffix, OperationID: "op_refused_" + f.suffix, OccurredAt: now.Add(-time.Minute), Reason: "no_scope", Origin: "offline"},
 	}
-	receipt, err := f.service.RecordOfflineAuditBacklog(f.ctx, f.machine, generation, events)
-	if err != nil || receipt.Accepted != 2 || receipt.Duplicates != 0 {
-		t.Fatalf("first upload: %+v %v", receipt, err)
+	// Hold the first insert until both uploads are in flight. Both must return
+	// exact receipts, even if the second sees the first only after waiting.
+	ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+	defer cancel()
+	blocker, err := f.store.Pool().Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer blocker.Rollback(ctx)
+	if _, err := blocker.Exec(ctx, `LOCK TABLE paperboat.audit_events IN SHARE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	var pid int32
+	if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	type uploadResult struct {
+		receipt OfflineAuditReceipt
+		err     error
+	}
+	results := make(chan uploadResult, 2)
+	before := f.store.TransactionStats()
+	for range 2 {
+		go func() {
+			receipt, err := f.service.RecordOfflineAuditBacklog(ctx, f.machine, generation, events)
+			results <- uploadResult{receipt, err}
+		}()
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting int
+		if err := f.store.Pool().QueryRow(ctx, `WITH RECURSIVE blocked(pid) AS (
+ SELECT $1::integer
+ UNION
+ SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid))
+ WHERE a.datname=current_database()
+) SELECT count(*)-1 FROM blocked`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 2 {
+			break
+		}
+		select {
+		case result := <-results:
+			t.Fatalf("upload finished before the audit table was released: %+v", result)
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	receipts := map[OfflineAuditReceipt]int{}
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		receipts[result.receipt]++
+	}
+	if retries := f.store.TransactionStats().Serializable.Retries - before.Serializable.Retries; retries != 0 {
+		t.Errorf("audit uploads retried %d transaction attempts (40001/40P01)", retries)
+	}
+	if receipts[OfflineAuditReceipt{Accepted: 2}] != 1 || receipts[OfflineAuditReceipt{Duplicates: 2}] != 1 {
+		t.Fatalf("concurrent upload receipts: %+v", receipts)
+	}
+
 	type row struct{ event, result, workspace, origin, actor string }
 	rows, err := f.store.SQL().QueryContext(f.ctx, `SELECT event_type,result,coalesce(activity_workspace_id,''),metadata->>'origin',coalesce(actor_user_id,'') FROM paperboat.audit_events WHERE resource_type IN ('machine_access','user_machine') AND resource_id=$1 AND idempotency_key LIKE 'offline:%' ORDER BY event_type`, f.machine)
 	if err != nil {
