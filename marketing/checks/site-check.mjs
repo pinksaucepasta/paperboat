@@ -150,7 +150,7 @@ if (serverConfig) {
     expect(page, rate(number(serverConfig, /EdgeBytesPerSecond: ([\d_]+)/)), "paid slow speed")
     expect(page, `${number(serverConfig, /RelayMbit: ([\d.]+)/)} Mbit/s`, "relay speed")
   }
-  expect("/pricing/", `${number(serverConfig, /TeamPerSeatBytes: ([\d_]+)/) / 1e9} GB/mo a seat`, "Team pool per seat")
+  expect("/pricing/", `${number(serverConfig, /TeamPerSeatBytes: ([\d_]+)/) / 1e9} GB/seat/mo`, "Team pool per seat")
   expect("/pricing/", `${number(serverConfig, /ViewersPerSharedTerminal: (\d+)/)} possible viewers`, "shared terminal viewers")
   const days = (plan) => number(business, new RegExp(`AuditRetention${plan}: +(\\d+) \\* day`))
   expect("/pricing/", `Audit log kept for ${days("Free")} days ${days("Pro")} days ${days("Team")} days`, "audit log retention")
