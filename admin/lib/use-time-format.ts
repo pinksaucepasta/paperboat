@@ -13,9 +13,6 @@ import { useNow } from "@/lib/use-now"
 import { createContext, useContext } from "react"
 import type { Viewer } from "@/lib/format"
 
-/** The operator panel's clock: India Standard Time, whatever the viewer's browser says. */
-const IST: Viewer = { zone: "Asia/Kolkata", locale: "en-IN" }
-
 /** The viewer's zone and locale as the server read them (see ServerData); absent in a static shell. */
 export const ViewerTime = createContext<Viewer | undefined>(undefined)
 
@@ -36,8 +33,6 @@ export function useTimeFormat(intervalMs?: number) {
     // Once hydrated the browser's own zone and locale win: the cookie is what the server saw, which is UTC on a
     // first visit and the old zone after the viewer travelled (X-27).
     dateTime: (iso: string) => (now ? formatDateTime(iso) : viewer ? formatDateTime(iso, viewer) : formatStable(iso)),
-    /** "19 Nov 2026, 9:45 pm IST": fixed zone and locale, so the server and the browser agree. */
-    ist: (iso: string) => formatDateTime(iso, IST),
     date: (iso: string, style: DateStyle) =>
       now ? formatDate(iso, style) : viewer ? formatDate(iso, style, viewer) : formatDateStable(iso, style),
     exact: (iso: string) => (now ? formatExact(iso) : { local: formatStable(iso), utc: formatStable(iso) }),

@@ -134,7 +134,7 @@ function RolloutCard({ r }: { r: Rollout }) {
         <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span>{decision[r.action] ?? r.action}{r.action === "promote" ? ` to ${r.rollout_percentage}%` : ""}</span>
           <span>{r.platforms.map(formatPlatform).join(", ")}</span>
-          <span>Started <Time iso={r.started_at} ist /></span>
+          <span>Started <Time iso={r.started_at} /></span>
         </span>
       }
     >
@@ -214,7 +214,7 @@ export function FleetOffline() {
           { header: "Machine", cell: (m) => <span className="flex flex-col"><span className="font-medium">{m.alias}</span><Mono>{m.id}</Mono></span> },
           { header: "OS", cell: (m) => `${formatPlatform(m.platform)} · ${m.architecture}` },
           { header: "Last version", cell: (m) => <Mono>{m.version}</Mono> },
-          { header: "Last seen", cell: (m) => (m.last_seen_at ? <Time iso={m.last_seen_at} ist /> : "Never") },
+          { header: "Last seen", cell: (m) => (m.last_seen_at ? <Time iso={m.last_seen_at} /> : "Never") },
           { header: "Unseen for", cell: (m) => <UnseenFor m={m} /> },
           { header: "Owner", cell: (m) => <Mono>{m.team_id || m.account_id}</Mono> },
         ]}

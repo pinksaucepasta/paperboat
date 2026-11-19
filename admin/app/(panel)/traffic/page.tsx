@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useApiQuery, type Data } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { useCursorList } from "@/lib/paging"
+import { useTimeFormat } from "@/lib/use-time-format"
 import { cn } from "@/lib/utils"
 
 type Traffic = Data<"/v1/admin/traffic">
@@ -47,7 +48,9 @@ function Series({ data }: { data: Traffic }) {
     return [...by].map(([at, parts]) => ({ at, parts, total: Object.values(parts).reduce((a, b) => a + b, 0) }))
   }, [data.series])
   const peak = Math.max(1, ...buckets.map((b) => b.total))
-  const name = (at: string) => (data.grain === "hour" ? new Date(at).toISOString().slice(11, 16) + " UTC" : at.slice(0, 10))
+  const time = useTimeFormat()
+  // Buckets are UTC hours and UTC days; each is labelled by its start in the viewer's own zone, zone named.
+  const name = (at: string) => (data.grain === "hour" ? time.dateTime(at) : `UTC day from ${time.dateTime(at)}`)
   if (buckets.length === 0) return <p className="py-8 text-center text-sm text-muted-foreground" data-series="empty">No traffic recorded in this period.</p>
   return (
     <ul role="img" data-series="ready" aria-label={`Traffic per ${data.grain}`} className="flex h-40 items-end gap-0.5 border-b border-divider">
@@ -139,11 +142,11 @@ export default function TrafficPage() {
             ))}
           </div>
           <SplitBar totals={data.totals} />
-          <Panel title={data.grain === "hour" ? "Per hour (UTC)" : "Per day (UTC)"}><Series data={data} /></Panel>
+          <Panel title={data.grain === "hour" ? "Per hour" : "Per UTC day"}><Series data={data} /></Panel>
           <Nodes kind="relay" period={period} />
           <Nodes kind="edge" period={period} />
           <p className="text-xs text-muted-foreground">
-            Direct is what each host machine reports sending and receiving, so it is a lower bound: machines that do not report are missing. Relays and edges report what they forwarded themselves. Months and days are UTC; counts only, no addresses or content.
+            Direct is what each host machine reports sending and receiving, so it is a lower bound: machines that do not report are missing. Relays and edges report what they forwarded themselves. Days and months are UTC days; times are shown in your time zone; counts only, no addresses or content.
           </p>
         </div>
       )}
