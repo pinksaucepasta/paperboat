@@ -169,6 +169,7 @@ test("an admin write refreshes incident text but never makes old decisions look 
 
 test("freshness is judged on the unrounded receipt time", async () => {
   const base = minute(Date.UTC(2026, 10, 19, 3, 0, 0))
+  await db.prepare("DELETE FROM reports").run() // earlier tests post reports stamped with the real clock, which is later than this fixed date once the day has passed
   for (let i = 4; i >= 0; i--) for (const v of ["oracle", "anvit"]) await saveReport(db, v, base - i * 60_000 + 59_000, base - i * 60_000 + 59_000, true, "t", report(v))
   await evaluate(db, base + 59_000 + 170_000) // 170 s after the last receipt (a floored timestamp would read 229 s)
   const comps = (await buildSnapshot(db, base + 229_000)).public.components
