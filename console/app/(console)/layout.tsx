@@ -2,6 +2,7 @@ import { Suspense } from "react"
 import { AnalyticsPageviews } from "@/components/analytics-pageviews"
 import { AnnouncementBanner } from "@/components/announcement-banner"
 import { ActiveNavigation, AppSidebar, Navigation } from "@/components/app-sidebar"
+import { statusUrl } from "@/lib/status-url"
 import { QuotaBanner } from "@/components/quota-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { UserMenu } from "@/components/user-menu"
@@ -19,7 +20,7 @@ export default function ConsoleLayout({ children }: LayoutProps<"/">) {
         }
         userMenu={
           <WithSession>
-            <UserMenu />
+            <UserMenu statusUrl={statusUrl(process.env.PAPERBOAT_SITE_URL, process.env.PAPERBOAT_STATUS_URL)} />
           </WithSession>
         }
       />
