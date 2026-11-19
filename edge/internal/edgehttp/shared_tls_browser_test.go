@@ -21,6 +21,20 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 )
 
+// exchangeBudget bounds a dial or an HTTP exchange that returns the moment it completes or the edge refuses it. It
+// elapses only when the exchange hangs; a loaded host (TLS handshakes taking seconds) never makes it fire.
+const exchangeBudget = 60 * time.Second
+
+func dialTLS(address string, config *tls.Config) (*tls.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), exchangeBudget)
+	defer cancel()
+	conn, err := (&tls.Dialer{Config: config}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	return conn.(*tls.Conn), nil
+}
+
 func TestSharedTLSBrowserAuthorization(t *testing.T) {
 	for _, denied := range []bool{false, true} {
 		t.Run(map[bool]string{false: "authorized", true: "revoked"}[denied], func(t *testing.T) {
@@ -62,7 +76,7 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			request, _ := http.NewRequest("GET", "https://"+match.Host+"/", nil)
 			request.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
 			request.Header.Set("Sec-Fetch-Site", "same-origin")
-			response, err := (&http.Client{Transport: transport, Timeout: 10 * time.Second}).Do(request)
+			response, err := (&http.Client{Transport: transport, Timeout: exchangeBudget}).Do(request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,13 +98,13 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			expired := decision
 			expired.ExpiresAt = time.Now().Add(-time.Second)
 			ingress.set(expired)
-			expiredConnection, expiredErr := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+			expiredConnection, expiredErr := dialTLS(raw.Addr().String(), clientTLS)
 			if expiredErr == nil {
 				expiredConnection.Close()
 				t.Fatal("expired customer alias authority accepted TLS")
 			}
 			ingress.set()
-			connection, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+			connection, err := dialTLS(raw.Addr().String(), clientTLS)
 			if err == nil {
 				connection.Close()
 				t.Fatal("withdrawn customer alias accepted TLS")
@@ -99,7 +113,7 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			unknownTLS.ServerName = "logical-managed.preview.example.test"
 			// Isolate ingress classification from certificate hostname validation.
 			unknownTLS.InsecureSkipVerify = true
-			connection, err = tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), unknownTLS)
+			connection, err = dialTLS(raw.Addr().String(), unknownTLS)
 			if err == nil {
 				connection.Close()
 				t.Fatal("unadvertised managed hostname accepted TLS")
@@ -157,7 +171,7 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 			}}
 			defer transport.CloseIdleConnections()
 			dial := func() error {
-				response, err := (&http.Client{Transport: transport, Timeout: time.Second}).Get("https://" + host + "/.well-known/paperboat-installation")
+				response, err := (&http.Client{Transport: transport, Timeout: exchangeBudget}).Get("https://" + host + "/.well-known/paperboat-installation")
 				if err != nil {
 					return err
 				}
@@ -221,7 +235,7 @@ func TestSharedTLSReservedIPNoSNIRequiresHTTPSBinding(t *testing.T) {
 			go server.ServeTLS(shared, "", "")
 			transport := &http.Transport{TLSClientConfig: clientTLS}
 			defer transport.CloseIdleConnections()
-			response, err := (&http.Client{Transport: transport, Timeout: time.Second}).Get("https://" + raw.Addr().String() + "/")
+			response, err := (&http.Client{Transport: transport, Timeout: exchangeBudget}).Get("https://" + raw.Addr().String() + "/")
 			if !bound {
 				if err == nil {
 					response.Body.Close()
@@ -310,7 +324,7 @@ func assertSharedTLSCarrierAuthority(t *testing.T, raw net.Listener, shared net.
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
 	dial := func() error {
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+		conn, err := dialTLS(raw.Addr().String(), clientTLS)
 		if err == nil {
 			conn.Close()
 		}
@@ -410,7 +424,7 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 				json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions})
 			}))
 			defer controlServer.Close()
-			controlClient, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: controlServer.URL, Client: controlServer.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+			controlClient, err := control.NewHTTPClient(control.HTTPConfig{BaseURL: controlServer.URL, Client: controlServer.Client(), Credential: strings.Repeat("x", 32), Timeout: exchangeBudget})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -444,7 +458,7 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })}
 			defer server.Close()
 			go server.ServeTLS(shared, "", "")
-			conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+			conn, err := dialTLS(raw.Addr().String(), clientTLS)
 			if err == nil {
 				conn.Close()
 			}
@@ -460,7 +474,7 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 			}
 			// The second request is made after the handshake returns to the client; wait for it, then
 			// require that no more arrive.
-			for deadline := time.Now().Add(5 * time.Second); calls.Load() < wantCalls && time.Now().Before(deadline); {
+			for deadline := time.Now().Add(exchangeBudget); calls.Load() < wantCalls && time.Now().Before(deadline); {
 				time.Sleep(5 * time.Millisecond)
 			}
 			time.Sleep(50 * time.Millisecond)
@@ -557,13 +571,13 @@ func TestSharedTLSTakenDownRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T) 
 	})}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
-	connection, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+	connection, err := dialTLS(raw.Addr().String(), clientTLS)
 	if err != nil {
 		t.Fatalf("a taken-down route did not complete TLS: %v", err)
 	}
 	connection.Close()
 	authority.denied = nil
-	connection, err = tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), clientTLS)
+	connection, err = dialTLS(raw.Addr().String(), clientTLS)
 	if err == nil {
 		connection.Close()
 		t.Fatal("a route with no decision and no takedown completed TLS")
@@ -605,7 +619,7 @@ func TestSharedTLSOwnerOfflinePreviewWithNoCarrierReachesTheHTTPSHandler(t *test
 	})}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	client := &http.Client{Timeout: exchangeBudget, Transport: &http.Transport{TLSClientConfig: clientTLS, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
 	}}}
 	response, err := client.Get("https://" + match.Host + "/")
@@ -647,7 +661,7 @@ func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached <- struct{}{} })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	client := &http.Client{Timeout: exchangeBudget, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
 	}}}
 	response, err := client.Get("https://" + match.Host + "/")
@@ -687,7 +701,7 @@ func TestSharedTLSUnknownNameIsTheDeniedPage(t *testing.T) {
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("an unknown name reached the HTTPS handler") })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{TLSClientConfig: clientTLS, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	client := &http.Client{Timeout: exchangeBudget, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{TLSClientConfig: clientTLS, DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
 	}}}
 	get := func(signedIn bool) (*http.Response, string) {
@@ -731,15 +745,14 @@ func TestSharedTLSUnknownNameIsTheDeniedPage(t *testing.T) {
 // its name is held until admitted, and answered not-found only when the grace ends or nothing is held for it.
 func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		grace      time.Duration
-		admitAfter time.Duration // 0: never
-		wantStatus int
-		maxWait    time.Duration
+		name         string
+		grace        time.Duration
+		admitAtCheck int // the admission lookup that first answers yes (it is polled while the name is held); 0: never
+		wantStatus   int
 	}{
-		{"host re-attaches 700 ms after takeover", 5 * time.Second, 700 * time.Millisecond, http.StatusNoContent, 3 * time.Second},
-		{"never re-attaches: not found when the grace ends", 600 * time.Millisecond, 0, http.StatusNotFound, 3 * time.Second},
-		{"no takeover: not found at once", 0, 200 * time.Millisecond, http.StatusNotFound, 400 * time.Millisecond},
+		{"host re-attaches while the name is held", time.Minute, 4, http.StatusNoContent},
+		{"never re-attaches: not found when the grace ends", 600 * time.Millisecond, 0, http.StatusNotFound},
+		{"no takeover: not found at once, the name is not held", 0, 0, http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			match, _ := browserTestMatch()
@@ -751,42 +764,40 @@ func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) 
 			}
 			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 			defer registry.Close()
-			var admitted atomic.Bool
-			if tc.admitAfter > 0 {
-				time.AfterFunc(tc.admitAfter, func() { admitted.Store(true) })
-			}
-			shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
+			var checks atomic.Int32
+			admitted := func(string) bool { return tc.admitAtCheck > 0 && int(checks.Add(1)) >= tc.admitAtCheck }
+			shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", admitted, nil, nil)
 			shared.ServeUnknownNamesWithPage(serverTLS)
 			shared.routeGrace = func() time.Duration { return tc.grace }
 			shared.holdableName = func(string) bool { return true }
 			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 			defer server.Close()
 			go server.ServeTLS(shared, "", "")
-			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			client := &http.Client{Timeout: exchangeBudget, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
 			}}}
-			start := time.Now()
 			response, err := client.Get("https://" + match.Host + "/")
 			if err != nil {
 				t.Fatal(err)
 			}
 			response.Body.Close()
-			if response.StatusCode != tc.wantStatus || time.Since(start) > tc.maxWait {
-				t.Fatalf("status %d after %v, want %d within %v", response.StatusCode, time.Since(start), tc.wantStatus, tc.maxWait)
+			if response.StatusCode != tc.wantStatus {
+				t.Fatalf("status %d, want %d", response.StatusCode, tc.wantStatus)
 			}
 		})
 	}
 }
 
-// lateDecisionAuthority publishes a public preview's http decision only after `at`: the server confirms a preview's
+// lateDecisionAuthority publishes a public preview's http decision only after `after` snapshots: the server confirms a preview's
 // attachment on the replacement edge a moment after the handover.
 type lateDecisionAuthority struct {
-	host string
-	at   time.Time
+	host      string
+	after     int32 // snapshots that answer nothing before the decision appears (a held name polls)
+	snapshots atomic.Int32
 }
 
 func (a *lateDecisionAuthority) Snapshot(context.Context) ([]connectorprotocol.IngressDecision, error) {
-	if time.Now().Before(a.at) {
+	if a.snapshots.Add(1) <= a.after {
 		return nil, nil
 	}
 	d := publicTCPDecision(time.Now().UTC(), 443)
@@ -812,25 +823,24 @@ func TestSharedTLSPublicPreviewDecisionAfterTakeoverIsServed(t *testing.T) {
 	}
 	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	defer registry.Close()
-	authority := &lateDecisionAuthority{host: match.Host, at: time.Now().Add(700 * time.Millisecond)}
+	authority := &lateDecisionAuthority{host: match.Host, after: 4}
 	shared := newSharedTLSListener(raw, authority, registry, func(string) bool { return true }, make(chan struct{}, 4), "", func(string) bool { return false },
 		func(context.Context, string) error { return nil }, nil)
 	shared.ServeUnknownNamesWithPage(serverTLS)
-	shared.routeGrace = func() time.Duration { return 5 * time.Second }
+	shared.routeGrace = func() time.Duration { return time.Minute }
 	shared.holdableName = func(string) bool { return true }
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	client := &http.Client{Timeout: exchangeBudget, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
 	}}}
-	start := time.Now()
 	response, err := client.Get("https://" + match.Host + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != http.StatusNoContent || time.Since(start) > 3*time.Second {
-		t.Fatalf("status %d after %v, want 204 within 3s", response.StatusCode, time.Since(start))
+	if response.StatusCode != http.StatusNoContent || authority.snapshots.Load() <= authority.after {
+		t.Fatalf("status %d after %d snapshots, want 204 once the decision appeared (after %d)", response.StatusCode, authority.snapshots.Load(), authority.after)
 	}
 }

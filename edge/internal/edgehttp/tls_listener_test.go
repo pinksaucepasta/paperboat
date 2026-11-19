@@ -163,7 +163,7 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 	})
 	roundtrip := func(i int) {
 		t.Helper()
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", address, clients[i])
+		conn, err := dialTLS(address, clients[i])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +193,7 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 	conflictClient.InsecureSkipVerify = true // detects either mode accepting, independent of which certificate is returned
 	rejectConflict := func() {
 		t.Helper()
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", address, conflictClient)
+		conn, err := dialTLS(address, conflictClient)
 		if err == nil {
 			conn.Close()
 			t.Fatal("conflicting authority reached a TLS origin or HTTPS termination")
@@ -208,14 +208,14 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 	rejectConflict()
 	httpsConflict.Store(false)
 	roundtrip(0)
-	active, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", address, clients[0])
+	active, err := dialTLS(address, clients[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer active.Close()
 	_ = active.SetReadDeadline(time.Now().Add(7 * time.Second))
 	authority.set(decisions[1], webDecision)
-	if conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", address, clients[0]); err == nil {
+	if conn, err := dialTLS(address, clients[0]); err == nil {
 		conn.Close()
 		t.Fatal("removed hostname accepted")
 	}
@@ -228,7 +228,7 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 	roundtrip(1)
 	unknown := clients[0].Clone()
 	unknown.ServerName = "unknown.customer.test"
-	if conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", address, unknown); err == nil {
+	if conn, err := dialTLS(address, unknown); err == nil {
 		conn.Close()
 		t.Fatal("unknown hostname accepted")
 	}
@@ -273,7 +273,7 @@ func TestTLSListenerRejectsConflictingTenantHostname(t *testing.T) {
 			t.Fatal(err)
 		}
 		client := &tls.Config{ServerName: d.Binding.Hostname, InsecureSkipVerify: true}
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", raw.Addr().String(), client)
+		conn, err := dialTLS(raw.Addr().String(), client)
 		if err == nil {
 			conn.Close()
 			t.Fatal("conflicting TLS mode/tenant accepted")
