@@ -6,7 +6,7 @@ and `upstream/licenses/tailcat-LICENSE.txt` are retained. The original compatibl
 source/module/toolchain facts remain in `foundations.tsv`; Tailcat is no longer
 a consumed module. `references/tailcat` remains read-only provenance.
 
-The consumed fork revision is `be55aaa472c8` on `paperboat-1.104` in
+The consumed fork revision is `b2eaa82185fc` on `win-status-trust-1.104` (`paperboat-1.104` `be55aaa472c8` plus the status patch below) in
 `github.com/pinksaucepasta/tailscale`, based on upstream Tailscale **v1.104.7**
 (`cbc74fe48`). Both Paperboat and the relay pin its immutable Go module version.
 Its LICENSE, PATENTS and other notices remain intact. `foundations.tsv` retains the
@@ -36,7 +36,7 @@ Previously downstream Tailcat patches remain owned behavior:
 
 ## Maintained Tailscale patches
 
-Eleven commits on upstream v1.104.7. Each is removed when its removal condition holds.
+Twelve commits on upstream v1.104.7. Each is removed when its removal condition holds.
 
 | Files | Patch and owner | Removal condition |
 | --- | --- | --- |
@@ -48,6 +48,7 @@ Eleven commits on upstream v1.104.7. Each is removed when its removal condition 
 | `net/netcheck/netcheck.go`, `tailcfg/derpmap.go` | Backport of upstream `dc6986976` (`DERPRegion.CanServeDERP`, STUN-only never the netcheck home). It is not in v1.104.7. | Drop on the first stable release containing `dc6986976`. |
 | `wgengine/magicsock/paperboat_underlay_trace.go` + hooks | Bounded underlay metadata (direction, type, size, endpoint, failure, transport; no bodies or keys) through the existing logger. Parsed by `mesh/underlay_diagnostics.go` and `cmd/pb/reconnect_metadata.go`. | Upstream per-packet metadata hook, or those parsers removed. |
 | `wgengine/magicsock/endpoint.go` | Lossy direct-path series: 10-probe heartbeat window per address (`endpoint.pathLoss`, bounded, cleared on network change); 3 lost heartbeats demote the direct path to relay with a doubling hold-down and probation; only a heartbeat timeout counts as loss. Fixes 10-30x throughput collapse on 16-61% loss paths. | Upstream path-quality demotion. |
+| `wgengine/magicsock/endpoint.go` | `populatePeerStatus` reports `CurAddr`/`PeerRelay` only while `trustBestAddrUntil` is open (or a WireGuard-only endpoint). Upstream sets them whenever `addrForSendLocked` returns a UDP address without a DERP one, which after the trust window also holds for a peer with no DERP address: an expired, silent `bestAddr` stayed the current direct path in status (`pb status` showed `Path: direct` for 30-42 s into a cut, victus 2026-11-19). `Test_endpoint_populatePeerStatusReportsDirectOnlyWhileTrusted` (fails without the patch). **Upstream candidate**: the same bug is in Tailscale's `populatePeerStatus`; send it upstream. | Upstream fixes `populatePeerStatus` to require a trusted address. |
 | `util/cloudenv/cloudenv.go` | No metadata-server probe for old GCP, Azure or Hyper-V guests: Paperboat never uses the cloud identity and the probe cost up to 2 s on every Hyper-V cold start. | Never needed upstream; remove if Paperboat starts using cloud identity. |
 | `wgengine/magicsock/magicsock_test.go` | `TestTwoDevicePing` accepts the IPv6 loopback path; `TestConn_receiveIP` sets `logf` (needed by the underlay trace). Test-only. | Underlay trace removed and the IPv6 flake gone upstream. |
 
