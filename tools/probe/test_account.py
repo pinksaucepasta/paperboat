@@ -48,5 +48,35 @@ class Main(unittest.TestCase):
         self.assertEqual([(s["step"], s["ok"]) for s in steps], [("signin", True), ("pair", True), ("login", False), ("cleanup", True), ("signout", True)])
 
 
+class RunPair(unittest.TestCase):
+    def pair(self, results):
+        with mock.patch.object(account, "pb", side_effect=results) as pb, mock.patch.object(account, "wait_pair_host") as wait:
+            return account.run_pair("canary-pair-1"), pb.call_count, wait.call_count
+
+    def test_container_killed_under_pair_waits_for_the_host_and_pairs_again(self):
+        self.assertEqual(self.pair([(137, {}), (0, {"ok": True})]), ((0, {"ok": True}), 2, 1))
+
+    def test_a_second_kill_is_reported_not_retried_again(self):
+        self.assertEqual(self.pair([(137, {}), (137, {})]), ((137, {}), 2, 1))
+
+    def test_an_ordinary_failure_is_not_retried(self):
+        self.assertEqual(self.pair([(1, {"ok": False})]), ((1, {"ok": False}), 1, 0))
+
+
+class WaitPairHost(unittest.TestCase):
+    def wait(self, stdouts, seconds=90):
+        done = [mock.Mock(stdout=out) for out in stdouts]
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(account.subprocess, "run", side_effect=done), mock.patch.object(account.time, "sleep"):
+            account.wait_pair_host(seconds)
+
+    def test_returns_once_the_user_manager_runs(self):
+        self.wait(["", "starting\n", "running\n"])
+
+    def test_gives_up_with_a_named_error(self):
+        with mock.patch.object(account.time, "monotonic", side_effect=[0, 1, 100]):
+            with self.assertRaisesRegex(RuntimeError, "did not come back"):
+                self.wait([""])
+
+
 if __name__ == "__main__":
     unittest.main()

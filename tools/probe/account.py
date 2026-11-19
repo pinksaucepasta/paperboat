@@ -52,6 +52,30 @@ def pb(*args, timeout=90):
     return done.returncode, body.get("data", body)
 
 
+def wait_pair_host(seconds=90):
+    """Wait until the pair host's user manager is up again after its container restarted (docker restart policy)."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        done = subprocess.run([*shlex.split(os.environ["ACCOUNT_RUN"]), "systemctl", "--user", "is-system-running", "--wait"],
+                              capture_output=True, text=True, timeout=60)
+        if done.stdout.strip() in ("running", "degraded"):
+            return
+        time.sleep(3)
+    raise RuntimeError(f"the pair host did not come back within {seconds}s after its container died")
+
+
+def run_pair(name):
+    """`pb pair`, once more if the pair host's container died under it: exit 137 is docker killing every process of the container,
+    not a pb or probe timeout. 2026-11-19 08:30Z: systemd (PID 1, 255.4) aborted in manager_reload (the daemon-reload of pb's guard
+    install), init exited 255, docker restarted the container. The retry meets the half-made enrollment through pair()'s reset branch."""
+    args = ("pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json")
+    rc, out = pb(*args, timeout=180)
+    if rc == 137:
+        wait_pair_host()
+        rc, out = pb(*args, timeout=180)
+    return rc, out
+
+
 def logged_in():
     rc, status = pb("auth", "status", "--json")
     return rc == 0 and status.get("signed_in") is True
@@ -111,14 +135,14 @@ def pair(state):
     subprocess.run([*shlex.split(os.environ["ACCOUNT_RUN"]), "sh", "-c", "umask 077; cat > /home/pbt/token; chmod 600 /home/pbt/token"], input=token.stdout, text=True, check=True, timeout=30)
     name = f"{PREFIX}{int(time.time())}"
     try:
-        rc, out = pb("pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json", timeout=180)
+        rc, out = run_pair(name)
         if rc and ("pb reset" in json.dumps(out) or "already has a Paperboat machine enrollment" in json.dumps(out)):
             # the previous run's (revoked) enrollment is still on the host: reset discards it so this run pairs afresh
             host = subprocess.run([*shlex.split(os.environ["ACCOUNT_RUN"]), "hostname"], capture_output=True, text=True, timeout=30).stdout.strip()
             rc, out = pb("reset", "--confirmation", "RESET PAPERBOAT", "--hostname", host, "--enrollment-token-file", "/home/pbt/token", "--json", timeout=120)
             if rc:
                 raise RuntimeError(f"pb reset exited {rc}: {json.dumps(out)[:300]}")
-            rc, out = pb("pair", "--enrollment-token-file", "/home/pbt/token", "--name", name, "--json", timeout=180)
+            rc, out = run_pair(name)
         if rc:
             raise RuntimeError(f"pb pair exited {rc}: {json.dumps(out)[:300]}")
     finally:
