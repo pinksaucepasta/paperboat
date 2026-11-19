@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { idempotencyKey, meQuery, needsSso, useApiQuery, useWorkspace, workspacesQuery } from "@/lib/api"
-import { billingLive, billingQuery, notLiveTitle, teamTrialDays } from "@/lib/billing"
+import { billingLive, notLiveTitle } from "@/lib/billing"
 import {
   answerInvitation,
   createPaidTeam,
@@ -251,8 +251,6 @@ function CreateTeamForm() {
   const [period, setPeriod] = useState<"month" | "year">("month")
   const [terms, setTerms] = useState<string | null>(null)
   const paid = billingLive.paidTeamCreate
-  const personal = useApiQuery(workspacesQuery).data?.find((workspace) => workspace.kind === "personal")
-  const trial = teamTrialDays(useApiQuery(billingQuery(personal)).data)
   // One operation per distinct order: changing the team, seats or interval is a new order.
   const key = useMemo(() => idempotencyKey(), [id, seats, period, terms]) // eslint-disable-line react-hooks/exhaustive-deps
   const valid = teamIdPattern.test(id)
@@ -325,9 +323,7 @@ function CreateTeamForm() {
           </ToggleGroup>
         </div>
         <span className="text-xs text-muted-foreground">
-          {paid && trial
-            ? `You take one seat. Free for ${trial} days with your card on file; billing begins on day ${trial + 1}, and cancelling before then costs nothing.`
-            : paid
+          {paid
             ? "You take one seat. Add more any time; new seats are charged for the rest of the period."
             : `${notLiveTitle}: teams are created free for now.`}
         </span>
@@ -342,11 +338,9 @@ function CreateTeamForm() {
         <Button type="submit" size="lg" disabled={!valid || (paid && terms === null) || create.isPending}>
           {create.isPending
             ? "Creating…"
-            : paid && trial
-              ? `Start ${trial}-day free trial`
-              : paid
-                ? "Continue to payment"
-                : "Create team"}
+            : paid
+              ? "Continue to payment"
+              : "Create team"}
         </Button>
       </DialogFooter>
     </form>
