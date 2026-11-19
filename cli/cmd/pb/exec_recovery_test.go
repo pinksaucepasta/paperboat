@@ -197,6 +197,9 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	out := output
 	command.SetOut(out)
 	command.SetErr(&stderr)
+	// The fixture drives stdin itself: the inherited test-process stdin is not a readable pipe on Windows CI and its fatal
+	// read error races event delivery (opens=1, or opens=3 with output "before"). EOF closes input cleanly.
+	command.SetIn(bytes.NewReader(nil))
 	command.SetArgs([]string{"--config", configPath, "--no-customization", "exec", "target", "--", "fixture-command"})
 	// The command prints only a safe sentence; the observed failures carry what ended each attachment, which is the one
 	// thing a failing Windows runner cannot otherwise show (this test failed there without a visible cause).
