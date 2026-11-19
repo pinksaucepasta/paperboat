@@ -252,8 +252,16 @@ func runSSOEnforce(c *cobra.Command, args []string) error {
 	return exitCodeError{code: 2}
 }
 
+// addonState says whether the team has a paid add-on, and where to get it when it does not.
+func addonState(on bool) string {
+	if on {
+		return "yes"
+	}
+	return "no (add it in Billing)"
+}
+
 func ssoSummary(w io.Writer, s api.TeamIdentity) error {
-	fmt.Fprintf(w, "Seats: %d (SSO from %d)\n", s.Seats, s.MinSeats)
+	fmt.Fprintf(w, "SSO add-on: %s\nSCIM add-on: %s\n", addonState(s.SSOAddon), addonState(s.SCIMAddon))
 	if len(s.SSO.Connections) == 0 {
 		fmt.Fprintln(w, "Identity provider: not connected (pb team sso setup <team>)")
 	}

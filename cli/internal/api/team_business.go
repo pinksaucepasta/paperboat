@@ -87,9 +87,8 @@ func cloneValues(in url.Values) url.Values {
 
 // TeamIdentity is a team's SSO and directory sync state.
 type TeamIdentity struct {
-	Eligible     bool `json:"eligible"`
-	MinSeats     int  `json:"min_seats"`
-	Seats        int  `json:"seats"`
+	SSOAddon     bool `json:"sso_addon"`
+	SCIMAddon    bool `json:"scim_addon"`
 	Organization bool `json:"organization"`
 	CanManage    bool `json:"can_manage"`
 	SSO          struct {

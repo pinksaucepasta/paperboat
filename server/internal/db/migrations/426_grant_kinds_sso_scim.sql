@@ -7,7 +7,6 @@ ALTER TABLE paperboat.billing_workspace_grants ADD CONSTRAINT billing_workspace_
 
 -- +goose Down
 SET LOCAL lock_timeout = '5s';
-DELETE FROM paperboat.billing_workspace_grants WHERE kind IN ('sso','scim');
 ALTER TABLE paperboat.billing_workspace_grants DROP CONSTRAINT billing_workspace_grants_kind_check;
 ALTER TABLE paperboat.billing_workspace_grants ADD CONSTRAINT billing_workspace_grants_kind_check
     CHECK (kind IN ('bandwidth','machines','publications','browser_terminals','public_tcp','seats','viewers_per_terminal')) NOT VALID;
