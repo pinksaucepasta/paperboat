@@ -96,22 +96,13 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		}
 	}()
 
-	// The browser's upstream stream is accounted to its attachment, which the server records
-	// as the session's usage authority when it admits the ticket, and is closed at the cap.
-	environment := match.Rule.Environment
-	if environment == "" && p.config.HelperAccess != nil {
-		// A runtime route's rule carries no environment; the server-signed host credential
-		// of this admission names the machine's environment.
-		if claims, err := p.config.HelperAccess.VerifyHelperAccess(ctx, admission.Credential); err == nil {
-			environment = claims.EnvironmentID
-		}
-	}
-	dialCtx := browserTerminalUsage(ctx, environment, admission, time.Now().UTC())
+	// The terminal's stream is not counted against the allowance and never slowed by it; only the workspace's terminal cap paces it
+	// (terminalPacing). Its plan limit (open browser terminals) is counted by the control plane.
 	upstreamURL := (&url.URL{Scheme: "wss", Host: host, Path: "/v1/browser-terminal"}).String()
 	upstreamHeader := make(http.Header)
 	upstreamHeader.Set("Authorization", "Bearer "+admission.Credential)
 	upstreamClient := &http.Client{Transport: p.config.RuntimeCarrierTransport}
-	upstream, response, err := websocket.Dial(dialCtx, upstreamURL, &websocket.DialOptions{
+	upstream, response, err := websocket.Dial(ctx, upstreamURL, &websocket.DialOptions{
 		HTTPClient:      upstreamClient,
 		HTTPHeader:      upstreamHeader,
 		Subprotocols:    []string{browserTerminalSubprotocol},
@@ -445,11 +436,4 @@ func (p *Policy) observeBrowserTerminal(ctx context.Context, err error) {
 	if err != nil && p.config.OnFailure != nil && !browserTerminalExpected(err) {
 		p.config.OnFailure(ctx, err)
 	}
-}
-
-func browserTerminalUsage(ctx context.Context, environment string, admission control.BrowserTerminalAdmission, now time.Time) context.Context {
-	if admission.AttachmentID == "" || environment == "" {
-		return ctx
-	}
-	return withRuntimeUsage(ctx, runtimeUsageBinding{Authority: admission.AttachmentID, Environment: environment, IssuedAt: now})
 }

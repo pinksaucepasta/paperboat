@@ -90,10 +90,10 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if throttled, err = s.addTerminalThrottles(ctx, nodeID, throttled); err != nil {
+	if err = s.assignThrottleRates(ctx, throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	if err = s.assignThrottleRates(ctx, throttled); err != nil {
+	if throttled, err = s.addTerminalCaps(ctx, nodeID, throttled); err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 	if ipRules, err = ownerIPRules(ctx, s.store, decisions); err != nil {
@@ -103,36 +103,31 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 	return decisions, throttled, blocked, ipRules, offline, err
 }
 
-// addTerminalThrottles lists, for each workspace past its included traffic that has a console browser terminal attached on this edge, the
-// runtime hostname of the terminal's machine, so the edge paces the terminal like the workspace's other public traffic (it counts
-// against the same allowance). Terminals have no ingress decision of their own; the attachments (native usage authorities, renewed while
-// attached) say which workspaces to ask. The gate is cached and fails open (a slow database never throttles a terminal).
-func (s *EdgeService) addTerminalThrottles(ctx context.Context, nodeID string, throttled []wire.IngressThrottle) ([]wire.IngressThrottle, error) {
-	rows, err := s.store.SQL().QueryContext(ctx, `SELECT DISTINCT n.workspace_id,r.public_host
+// addTerminalCaps lists, for each workspace with a console browser terminal attached on this edge, the runtime hostname of the
+// terminal's machine with this edge's share of the workspace's terminal cap (config.FairUse.TerminalMbit divided by the edges the
+// workspace's terminals are attached on), so all the workspace's terminal traffic together stays under the cap however many sessions
+// or edges carry it. Terminals have no ingress decision of their own; the attachments (native usage authorities, renewed while
+// attached) say which workspaces to list. The cap is anti-abuse only: terminals are not counted toward the allowance and never slowed by it.
+func (s *EdgeService) addTerminalCaps(ctx context.Context, nodeID string, throttled []wire.IngressThrottle) ([]wire.IngressThrottle, error) {
+	rows, err := s.store.SQL().QueryContext(ctx, `SELECT DISTINCT n.workspace_id,r.public_host,
+ (SELECT count(DISTINCT a.edge_node_id) FROM paperboat.native_usage_authorities a WHERE a.workspace_id=n.workspace_id AND a.resource_kind='terminal' AND coalesce(a.attached_until,a.expires_at)>now())
 FROM paperboat.native_usage_authorities n
 JOIN paperboat.user_machines m ON m.id=n.machine_id
 JOIN paperboat.control_routes r ON r.environment_id=m.environment_id AND r.kind='runtime_https_wss' AND r.applied_node_id=$1
 WHERE n.resource_kind='terminal' AND n.edge_node_id=$1 AND coalesce(n.attached_until,n.expires_at)>now()
- AND NOT EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=$1 AND i.scope_kind IN ('account','team'))
 LIMIT 4096`, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	listed := make(map[string]bool, len(throttled))
-	for _, t := range throttled {
-		listed[t.Hostname] = true
-	}
-	now := s.clock()
+	capBytes := int64(s.fairUse.TerminalMbit * 125_000)
 	for rows.Next() {
 		var workspace, host string
-		if err := rows.Scan(&workspace, &host); err != nil {
+		var edges int64
+		if err := rows.Scan(&workspace, &host, &edges); err != nil {
 			return nil, err
 		}
-		if !listed[host] && s.workspaceGate.Denied(ctx, workspace, now) {
-			listed[host] = true
-			throttled = append(throttled, wire.IngressThrottle{Hostname: host, Workspace: workspace})
-		}
+		throttled = append(throttled, wire.IngressThrottle{Hostname: host, Workspace: workspace, BytesPerSecond: max(capBytes/max(edges, 1), minThrottleBytesPerSecond), Terminal: true})
 	}
 	return throttled, rows.Err()
 }
