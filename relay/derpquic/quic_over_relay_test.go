@@ -311,7 +311,7 @@ func TestAccountSpeedIsSharedAcrossRelaysByDemand(t *testing.T) {
 		t.Fatalf("one flow got relay speed %.2f (+%.2f idle) and %.2f Mbit/s goodput of a %.0f Mbit/s account: want at least 90%% at the relay, the shares within the plan, at least 80%% as goodput", atFlow, atIdle, single, plan)
 	}
 
-	servers, pairs, stop = twoRelays(t, plan)
+	_, pairs, stop = twoRelays(t, plan)
 	var both [2]float64
 	done = make(chan struct{})
 	go func() {
