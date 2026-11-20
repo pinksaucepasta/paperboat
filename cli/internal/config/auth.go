@@ -479,7 +479,7 @@ func ProfileStoreFor(cfg *Config) (ProfileStore, error) {
 	if dir == "" {
 		dir = defaultDir
 		// A second config (--config elsewhere) signs in on its own: sharing the default profile would
-		// replace this computer's sign-in, a recipe machine's included (F26 device check, victus).
+		// replace this computer's sign-in, a recipe machine's included (F26 device check, Windows test machine).
 		if path := cfg.Path(); path != "" && !sameConfigFile(path) {
 			dir = filepath.Join(filepath.Dir(path), "credentials")
 		}

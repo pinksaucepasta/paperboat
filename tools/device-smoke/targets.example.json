@@ -1,0 +1,60 @@
+{
+  "smoke": {
+    "SMOKE_LINUX_NAME": "linux",
+    "SMOKE_MACOS_NAME": "macos",
+    "SMOKE_WINDOWS_NAME": "windows",
+    "SMOKE_PEER_NAME": "linux-peer",
+    "SMOKE_TEAMMATE_NAME": "teammate",
+    "SMOKE_LINUX_SSH": "tester@linux.example.test",
+    "SMOKE_MACOS_SSH": "tester@macos.example.test",
+    "SMOKE_WINDOWS_SSH": "tester@windows.example.test",
+    "SMOKE_LINUX_PEER_SSH": "tester@peer.example.test",
+    "SMOKE_MEMBER_SSH": "tester@member.example.test",
+    "SMOKE_MACOS_VM_SSH": "tester@macos-vm.example.test",
+    "SMOKE_WINDOWS_HOME": "C:/Users/tester",
+    "PAPERBOAT_SMOKE_TEAM": "smoke-team"
+  },
+  "remote_hosts": {
+    "build": "tester@build.example.test",
+    "database-test": "tester@database-test.example.test",
+    "remote-test": "tester@remote-test.example.test",
+    "test-2": "tester@test-2.example.test"
+  },
+  "ci_workflow": "test.yml",
+  "pool_jump": "tester@jump.example.test",
+  "cleanup_accounts": [
+    "user_example"
+  ],
+  "deployment_host": "tester@deployment.example.test",
+  "staging_host": "tester@staging.example.test",
+  "console_origin": "https://console.example.test",
+  "cleanup_protected": "^(linux|macos|windows|linux-peer|teammate|canary-)",
+  "cleanup_throwaway": "^test-",
+  "smoke_env_aliases": {
+    "SMOKE_LINUX_PEER_PASSWORD": "LINUX_PEER_PASSWORD",
+    "SMOKE_MACOS_PASSWORD": "MACOS_PASSWORD",
+    "SMOKE_WINDOWS_PASSWORD": "WINDOWS_PASSWORD"
+  },
+  "linux_ci_hosts": [
+    "linux-ci-1",
+    "linux-ci-2",
+    "linux-ci-3"
+  ],
+  "linux_ci_no_sudo": [
+    "linux-ci-1"
+  ],
+  "linux_ci_no_server": [
+    "linux-ci-2"
+  ],
+  "update_docker_host": "tester@update-docker.example.test",
+  "update_operator_host": "tester@update-operator.example.test",
+  "update_test_host": "tester@update-test.example.test",
+  "staging_region": "region-test",
+  "sandbox_endpoint_ipv4": "198.51.100.10",
+  "xplat_linux_host": "tester@xplat-linux.example.test",
+  "xplat_linux_home": "/home/tester",
+  "macos_fixture_dir": "~/paperboat-dev/macos",
+  "xplat_macos_vm_ssh": "tester@macos-vm.example.test",
+  "xplat_build_dir": ".build/xplat",
+  "release_staging_dir": "/srv/pb-release-staging"
+}

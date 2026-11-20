@@ -4,7 +4,7 @@
 # Managed SSH applies only to the OS user who set pb up on the machine. Any other OS user reaches the machine
 # through the same Paperboat transport and authenticates with their own key, agent or password; we never refuse
 # them and never offer them the managed key. Pairs two FRESH throwaway containers on HOST (a Linux VM with
-# Docker and the laneh-ubuntu24-systemd image whose user `pb` is signed in to the test account), the target with
+# Docker and the test-systemd image whose user `pb` is signed in to the test account), the target with
 # OpenSSH and a second OS user `bob` (own key + password), then from the client container checks, for BOTH
 # entry points (`pb ssh` and plain `ssh bob@<alias>.<domain>`):
 #   setup user : managed key logs in (baseline)
@@ -17,7 +17,7 @@ set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-T=lanei-sou-t-$STAMP C=lanei-sou-c-$STAMP ALIAS=lanei-sou-$STAMP
+T=test-sou-t-$STAMP C=test-sou-c-$STAMP ALIAS=test-sou-$STAMP
 IDS=
 finish() {
   local status=$1 detail=$2 id
@@ -33,7 +33,7 @@ set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES
   local ct=\$1 name=\$2 packages=\$3
   local X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 \$ct"
-  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock laneh-ubuntu24-systemd >/dev/null
+  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
   sleep 8
   sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
   sudo -n docker exec \$ct loginctl enable-linger pbt

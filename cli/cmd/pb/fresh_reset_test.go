@@ -31,22 +31,21 @@ func freshResetTokenFile(t *testing.T) string {
 }
 
 // noRemember keeps a reset test from writing the replacement note of the real user.
-func noRemember(t *testing.T) {
-	t.Helper()
-	original := rememberReplacedMachineFunc
-	t.Cleanup(func() { rememberReplacedMachineFunc = original })
-	rememberReplacedMachineFunc = func() (string, error) { return "", nil }
+func noRemember(ctx context.Context) context.Context {
+	return withInstallDependencies(ctx, func(d *installDependencies) {
+		d.rememberReplaced = func() (string, error) { return "", nil }
+	})
 }
 
 // noServer fails a test that reaches the server to replace a machine record.
-func noServer(t *testing.T) {
+func noServer(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
-	original := replaceUserMachine
-	t.Cleanup(func() { replaceUserMachine = original })
-	replaceUserMachine = func(*command.Context, string, string) error {
-		t.Fatal("the old machine record was replaced before a new machine was verified")
-		return nil
-	}
+	return withInstallDependencies(ctx, func(d *installDependencies) {
+		d.replaceMachine = func(*command.Context, string, string) error {
+			t.Fatal("the old machine record was replaced before a new machine was verified")
+			return nil
+		}
+	})
 }
 
 // isolatedReplacementNote points the replacement note (and the user's state) at a temporary home.
@@ -67,14 +66,14 @@ func TestFreshEnrollmentResetKeepsTheOldRecordAndNotesItBeforeCleanup(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	noServer(t)
-	originalCleanup, originalRemember := freshEnrollmentCleanup, rememberReplacedMachineFunc
-	t.Cleanup(func() { freshEnrollmentCleanup, rememberReplacedMachineFunc = originalCleanup, originalRemember })
 	var order []string
-	rememberReplacedMachineFunc = func() (string, error) { order = append(order, "remember"); return "machine_old", nil }
-	freshEnrollmentCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
+	ctx := withInstallDependencies(noServer(t, t.Context()), func(d *installDependencies) {
+		d.rememberReplaced = func() (string, error) { order = append(order, "remember"); return "machine_old", nil }
+		d.freshCleanup = func(*cobra.Command) error { order = append(order, "cleanup"); return nil }
+	})
 	var output bytes.Buffer
 	command := freshEnrollmentResetCommand()
+	command.SetContext(ctx)
 	command.SetOut(&output)
 	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
 	if err := command.Execute(); err != nil {
@@ -92,9 +91,6 @@ func TestFreshEnrollmentResetFailureNamesTheStepAndKeepsTheOldRecord(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	noServer(t)
-	originalCleanup, originalRemember := freshEnrollmentCleanup, rememberReplacedMachineFunc
-	t.Cleanup(func() { freshEnrollmentCleanup, rememberReplacedMachineFunc = originalCleanup, originalRemember })
 	for _, test := range []struct {
 		name            string
 		rememberErr     error
@@ -106,9 +102,11 @@ func TestFreshEnrollmentResetFailureNamesTheStepAndKeepsTheOldRecord(t *testing.
 		{name: "cleanup", cleanupErr: freshResetCleanupError{err: uninstallCleanupError{err: uninstallStepFailure{name: "remove system Paperboat runtime", err: errors.New("exit status 1")}}}, want: "remove system Paperboat runtime", cleanupExpected: true},
 	} {
 		cleaned := false
-		rememberReplacedMachineFunc = func() (string, error) { return "machine_old", test.rememberErr }
-		freshEnrollmentCleanup = func(*cobra.Command) error { cleaned = true; return test.cleanupErr }
 		command := freshEnrollmentResetCommand()
+		command.SetContext(withInstallDependencies(noServer(t, t.Context()), func(d *installDependencies) {
+			d.rememberReplaced = func() (string, error) { return "machine_old", test.rememberErr }
+			d.freshCleanup = func(*cobra.Command) error { cleaned = true; return test.cleanupErr }
+		}))
 		command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
 		err := command.Execute()
 		value := classifyCLIJSONError(err)
@@ -155,7 +153,7 @@ func TestFreshEnrollmentResetKeepsTheNoteAndDiagnosticsThroughTheWipe(t *testing
 	}
 	command := freshEnrollmentResetCommand()
 	preserved := freshEnrollmentPreserved(command)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,15 +192,14 @@ func TestFreshEnrollmentResetKeepsTheNoteAndDiagnosticsThroughTheWipe(t *testing
 // when the cutover fails, so nothing is stranded; with no note nothing is replaced.
 func TestFinishMachineReplacementCutsOverOnlyAfterTheNewMachineWorks(t *testing.T) {
 	isolatedReplacementNote(t)
-	original := replaceUserMachine
-	t.Cleanup(func() { replaceUserMachine = original })
 	var calls []string
 	var replaceErr error
-	replaceUserMachine = func(_ *command.Context, replacement, retired string) error {
-		calls = append(calls, replacement+"<"+retired)
-		return replaceErr
-	}
-	ctx := &command.Context{Context: context.Background()}
+	ctx := &command.Context{Context: withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.replaceMachine = func(_ *command.Context, replacement, retired string) error {
+			calls = append(calls, replacement+"<"+retired)
+			return replaceErr
+		}
+	})}
 	if err := finishMachineReplacement(ctx, "machine_new"); err != nil || len(calls) != 0 {
 		t.Fatalf("no note: err=%v calls=%v", err, calls)
 	}
@@ -238,15 +235,14 @@ func TestFinishMachineReplacementCutsOverOnlyAfterTheNewMachineWorks(t *testing.
 // F1-09: a pairing that fails (anywhere up to the daemon bind) never replaces the old record.
 func TestPairThatFailsNeverReplacesTheOldRecord(t *testing.T) {
 	isolatedReplacementNote(t)
-	noServer(t)
 	if err := bootstrap.SaveReplacement("machine_old", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	original := pairBootstrap
-	t.Cleanup(func() { pairBootstrap = original })
 	reached := false
-	pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { reached = true; return 1 }
 	command := pairCommand()
+	command.SetContext(withAuthDependencies(noServer(t, t.Context()), func(d *authDependencies) {
+		d.pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { reached = true; return 1 }
+	}))
 	command.PersistentFlags().String("server", "", "") // the root command's flag
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
@@ -260,19 +256,18 @@ func TestPairThatFailsNeverReplacesTheOldRecord(t *testing.T) {
 }
 
 func TestFreshEnrollmentResetRequiresCleanupBeforeSuccess(t *testing.T) {
-	noRemember(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := freshEnrollmentCleanup
-	t.Cleanup(func() { freshEnrollmentCleanup = original })
 	cleanupCalls := 0
-	freshEnrollmentCleanup = func(*cobra.Command) error {
-		cleanupCalls++
-		return errors.New("retained service")
-	}
 	command := freshEnrollmentResetCommand()
+	command.SetContext(withInstallDependencies(noRemember(t.Context()), func(d *installDependencies) {
+		d.freshCleanup = func(*cobra.Command) error {
+			cleanupCalls++
+			return errors.New("retained service")
+		}
+	}))
 	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
 	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "retained service") {
 		t.Fatalf("reset error = %v", err)
@@ -283,16 +278,15 @@ func TestFreshEnrollmentResetRequiresCleanupBeforeSuccess(t *testing.T) {
 }
 
 func TestFreshEnrollmentResetReportsOnlyAfterCleanup(t *testing.T) {
-	noRemember(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := freshEnrollmentCleanup
-	t.Cleanup(func() { freshEnrollmentCleanup = original })
-	freshEnrollmentCleanup = func(*cobra.Command) error { return nil }
 	var output bytes.Buffer
 	command := freshEnrollmentResetCommand()
+	command.SetContext(withInstallDependencies(noRemember(t.Context()), func(d *installDependencies) {
+		d.freshCleanup = func(*cobra.Command) error { return nil }
+	}))
 	command.SetOut(&output)
 	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", freshResetTokenFile(t), "--json"})
 	if err := command.Execute(); err != nil {
@@ -395,7 +389,6 @@ func TestFreshEnrollmentResetDiscardsTheUnfinishedEnrollmentWhenTheRuntimePurgeF
 }
 
 func TestFreshEnrollmentResetPreservesMatchingResume(t *testing.T) {
-	noRemember(t)
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
@@ -407,16 +400,12 @@ func TestFreshEnrollmentResetPreservesMatchingResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokenFile := freshResetTokenFile(t)
-	original := freshEnrollmentCleanup
-	originalExecutable := resolveFreshEnrollmentExecutable
-	t.Cleanup(func() {
-		freshEnrollmentCleanup = original
-		resolveFreshEnrollmentExecutable = originalExecutable
-	})
-	freshEnrollmentCleanup = func(*cobra.Command) error { t.Fatal("matching resume was reset"); return nil }
-	resolveFreshEnrollmentExecutable = func() (string, error) { return "/owned/pb", nil }
 	var output bytes.Buffer
 	command := freshEnrollmentResetCommand()
+	command.SetContext(withInstallDependencies(noRemember(t.Context()), func(d *installDependencies) {
+		d.freshCleanup = func(*cobra.Command) error { t.Fatal("matching resume was reset"); return nil }
+		d.freshExecutable = func() (string, error) { return "/owned/pb", nil }
+	}))
 	command.SetOut(&output)
 	command.SetArgs([]string{"--confirmation", "RESET PAPERBOAT", "--hostname", hostname, "--enrollment-token-file", tokenFile, "--state-root", root, "--json"})
 	if err := command.Execute(); err != nil {

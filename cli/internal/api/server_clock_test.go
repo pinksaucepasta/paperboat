@@ -14,7 +14,7 @@ import (
 
 // A machine whose clock runs 10 minutes ahead of the server: the server's answer teaches this process
 // the server's clock, so a grant that is valid for 5 more server minutes is not judged expired by the
-// local clock (Lane X #2, clock skew).
+// local clock (#2, clock skew).
 func TestAServerGrantIsJudgedByTheServerClock(t *testing.T) {
 	serverNow := time.Now().Add(-10 * time.Minute)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

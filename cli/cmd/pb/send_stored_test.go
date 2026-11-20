@@ -133,7 +133,7 @@ func TestSendOfflineStoresCiphertextForEveryRecipientMachine(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- daemon.Run(daemonCtx) }()
 	defer stopLocalDaemonReadinessServer(t, cancel, done)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

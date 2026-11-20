@@ -38,7 +38,7 @@ func parsePCBList(buf []byte, tuple socketTuple) ([]socketOwner, error) {
 		}
 		// inp_dependfaddr / inp_dependladdr are 16-byte unions at 48 and 64: an IPv6 address, or an IPv4 one in
 		// the last 4 bytes (xnu in_pcb.h). The IPv6 case is read from the same offsets; it is unverified on a
-		// live Mac (the IPv4 layout was checked on macOS 26), so the macOS lane runs the ::1 check.
+		// live Mac (the IPv4 layout was checked on macOS 26), so the macOS suite runs the ::1 check.
 		var src, dst netip.AddrPort
 		known := true
 		switch {

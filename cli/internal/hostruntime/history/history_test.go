@@ -189,7 +189,7 @@ func BenchmarkPooledHistoryCompaction(b *testing.B) {
 }
 
 // Continuous output never drains a session's history; the released events must not keep growing
-// the slice (Lane X audit H1: ~56 B per chunk for the session's life).
+// the slice (audit H1: ~56 B per chunk for the session's life).
 func TestContinuousOutputKeepsHistoryStorageBounded(t *testing.T) {
 	h, err := New(4096)
 	if err != nil {
@@ -212,7 +212,7 @@ func TestContinuousOutputKeepsHistoryStorageBounded(t *testing.T) {
 }
 
 // A retained event must not pin its 32 KiB pooled read buffer when it holds a few bytes: 64 KiB of
-// history made of 1-byte reads held 2 GiB (victus session owner, 5.9 GB working set).
+// history made of 1-byte reads held 2 GiB (Windows test machine session owner, 5.9 GB working set).
 func TestSmallPooledReadsDoNotPinTheirBuffers(t *testing.T) {
 	h, _ := New(64 << 10)
 	for range 1000 {

@@ -33,22 +33,24 @@ case " ${modules[*]:-} " in *" e2e "*) [ -z "$run$count" ] || [ "$run$count" = 1
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 command -v gh >/dev/null || { echo "ci-test: gh is required" >&2; exit 2; }
-git cat-file -e HEAD:.github/workflows/lane-test.yml 2>/dev/null ||
-  { echo "ci-test: HEAD has no .github/workflows/lane-test.yml; rebase onto origin/main" >&2; exit 2; }
+workflow=$(python3 tools/device-smoke/dev_targets.py ci_workflow)
+workflow=${workflow:-test.yml}
+git cat-file -e "HEAD:.github/workflows/$workflow" 2>/dev/null ||
+  { echo "ci-test: the configured workflow is missing from HEAD" >&2; exit 2; }
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "ci-test: note: uncommitted changes are NOT tested (only HEAD $(git rev-parse --short HEAD))" >&2
 fi
 
-lane=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
+worktree=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 sha=$(git rev-parse --short HEAD)
-branch="ci/$lane-$sha-$(date +%H%M%S)-$$"
+branch="ci/$worktree-$sha-$(date +%H%M%S)-$$"
 
 # A ci branch is deleted only once no run on it is queued or in progress: deleting it under a queued run
 # wasted that run (2026-11-05, GitHub took longer than this script waited to list a dispatched run).
 # Unknown (the API call failed) keeps the branch too. Only the branch this invocation created is ever
-# deleted: other ci/<lane>-* branches belong to concurrent runs (cross-platform dispatches) that still use them.
+# deleted: other ci/<worktree>-* branches belong to concurrent runs (cross-platform dispatches) that still use them.
 active_runs() {
-  gh run list --workflow lane-test.yml --branch "$1" --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null ||
+  gh run list --workflow "$workflow" --branch "$1" --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null ||
     echo unknown
 }
 remove_branch() {
@@ -63,10 +65,10 @@ remove_branch() {
 trap 'remove_branch "$branch"' EXIT
 
 # Branches of runs killed before their trap ran (reboot, SIGKILL) are never swept by name or pid: delete a
-# ci/* branch of any lane only when its last commit is older than 24 h and no run on it is queued or in progress.
+# ci/* branch of any worktree only when its last commit is older than 24 h and no run on it is queued or in progress.
 sweep_old_branches() {
   local cutoff=$(($(date +%s) - 86400)) sha ref when
-  # Never fetch the branches: --depth made the shared repo shallow for every lane (2026-11-11). ls-remote + API only.
+  # Never fetch the branches: --depth made the shared repo shallow for every worktree (2026-11-11). ls-remote + API only.
   while read -r sha ref; do
     when=$(gh api "repos/{owner}/{repo}/commits/$sha" --jq '.commit.committer.date | fromdate' 2>/dev/null) || continue
     [ "$when" -lt "$cutoff" ] && remove_branch "${ref#refs/heads/}"
@@ -76,21 +78,21 @@ sweep_old_branches || true
 
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
 # is the only run, and it carries the module/-run inputs.
-commit=$(git commit-tree "HEAD^{tree}" -p HEAD -m "ci-test $lane $sha [skip ci]")
+commit=$(git commit-tree "HEAD^{tree}" -p HEAD -m "ci-test $worktree $sha [skip ci]")
 # Retry once (GitHub sometimes refuses a push for a moment) and show git's own error if it still fails.
 push_err=$(git push -q --no-verify origin "$commit:refs/heads/$branch" 2>&1) ||
   { sleep 5; push_err=$(git push -q --no-verify origin "$commit:refs/heads/$branch" 2>&1); } ||
   { echo "ci-test: could not push the ci branch $branch: $push_err" >&2; exit 1; }
 
 args=(--ref "$branch" -f "modules=${modules[*]:-}" -f "run=$run" -f "count=$count")
-gh workflow run lane-test.yml "${args[@]}"
+gh workflow run "$workflow" "${args[@]}"
 
 # GitHub can take minutes to list a dispatched run when its queue is long: look for 15 min, one API call
-# every 30 s (the 5000/h budget is shared by every lane), and survive a failed call.
+# every 30 s (the 5000/h budget is shared by every worktree), and survive a failed call.
 id=""
 for attempt in $(seq 30); do
   sleep 30
-  id=$(gh run list --workflow lane-test.yml --branch "$branch" --event workflow_dispatch -L1 \
+  id=$(gh run list --workflow "$workflow" --branch "$branch" --event workflow_dispatch -L1 \
     --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null) || id=""
   [ -n "$id" ] && break
 done
@@ -112,7 +114,7 @@ while :; do
   done
   [ "$(jq -r .status <<<"$state")" = completed ] && break
   [ $SECONDS -lt $deadline ] || { echo "ci-test: gave up waiting after 90 min: $url" >&2; exit 1; }
-  sleep 120  # one GitHub API call per run per 2 min: ~20 lanes poll at once and 5000/h is shared (hit 11-05)
+  sleep 120  # one GitHub API call per run per 2 min: ~20 worktrees poll at once and 5000/h is shared (hit 11-05)
 done
 
 for attempt in $(seq 30); do

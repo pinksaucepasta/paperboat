@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var passwordVaultForCommand = func(command *cobra.Command) (environmentmanager.PasswordVault, error) {
+func defaultPasswordVault(command *cobra.Command) (environmentmanager.PasswordVault, error) {
 	client, store, profile, err := e2eeClient(actionContext(command, nil))
 	if err != nil {
 		return environmentmanager.PasswordVault{}, err
@@ -31,7 +31,7 @@ var passwordVaultForCommand = func(command *cobra.Command) (environmentmanager.P
 	return environmentmanager.PasswordVault{WorkspaceID: client.Workspace(), Client: client, Store: store, Issuer: profile.Issuer, AccountID: profile.Account.ID}, nil
 }
 
-var passwordVaultPrompt = func(command *cobra.Command, title string) ([]byte, error) {
+func defaultPasswordPrompt(command *cobra.Command, title string) ([]byte, error) {
 	input, ok := command.InOrStdin().(*os.File)
 	if !ok || !environmentVariableTerminal(command) {
 		return nil, localArgumentError("vault passwords require an interactive hidden prompt")
@@ -112,7 +112,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 					return localArgumentError("choose --disable or --recovery-file")
 				}
 			}
-			manager, err := passwordVaultForCommand(command)
+			manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 			if err != nil {
 				return err
 			}
@@ -128,7 +128,7 @@ func addPasswordVaultCommands(root *cobra.Command) {
 					}
 					return false
 				}) {
-					err = safeEnvironmentVariableCommandError(err)
+					err = safeEnvironmentVariableCommandError(command.Context(), err)
 				}
 				if onlyEnvironmentLayerRefreshConflict(err) {
 					err = nil
@@ -261,7 +261,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 	if jsonOutputRequested(command) && passwordPath == "" && !passwordStdin {
 		return localArgumentError("--json requires --password-file or --password-stdin")
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
@@ -302,7 +302,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 		if recoverySaved {
 			return fmt.Errorf("%w; retain the new recovery file: activation is unconfirmed; run `pb env resume` to reconcile any pending publication before retrying", err)
 		}
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	fields := map[string]any{"reset": true}
 	if recoveryPath != "" {
@@ -312,7 +312,7 @@ func runPasswordVaultReset(command *cobra.Command) error {
 }
 
 func runPasswordVaultRemove(command *cobra.Command) error {
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func runPasswordVaultRemove(command *cobra.Command) error {
 		return localArgumentError("vault remove requires --confirm `REMOVE LOCAL ENV <account_id>`")
 	}
 	if err := manager.Store.RemovePasswordVault(manager.Issuer, manager.AccountID); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	return writeVaultResult(command, "remove", "Removed local ENV vault custody; cloud personal and team ciphertext was not changed.", map[string]any{"removed": true, "remote_unchanged": true})
 }

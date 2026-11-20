@@ -179,7 +179,7 @@ func (c Coordinator) Reconcile(ctx context.Context) error {
 		if !status.Running {
 			// A crash may have happened after native removal but before
 			// catalogue bookkeeping, or a retirement stopped and disabled the
-			// owner but did not finish removing it (victus: a disabled owner
+			// owner but did not finish removing it (Windows test machine: a disabled owner
 			// failed every pass on the running path and stayed catalogued). Read history through the current owner;
 			// privileged reconciliation never opens account-owned stores.
 			active, err := Connect(ctx, c.Active)

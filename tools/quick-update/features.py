@@ -81,7 +81,7 @@ except subprocess.TimeoutExpired:webp.kill()
 if not NOWEB:R(f"{U} python3 -c \"import sys;sys.path.insert(0,'/tmp/smoke');from session_cleanup import cleanup;cleanup('/home/pbt/.local/bin/pb','{TG}','{wname}')\"",check=False)
 # The probe kills its clients; the remote tickers are its own and must not outlive the run.
 R("pkill -u $(id -un) -f '^(ba)?sh -c i=0; while' || true",check=False)
-# exec_stdin clients killed on their timeout leave the remote cat waiting on stdin (dadape 2026-11-05); count, then remove
+# exec_stdin clients killed on their timeout leave the remote cat waiting on stdin (Linux peer 2026-11-05); count, then remove
 (run/'orphans.txt').write_text(R("n=0; for p in $(pgrep -u $(id -un) -f __runtime-session-owner); do c=$(pgrep -P $p -x cat | wc -l); n=$((n+c)); pkill -P $p -x cat; done; echo $n; systemctl list-units --no-legend 'paperboat-session-owner-*' | wc -l",check=False))
 # The held terminal stops after its 2000 markers; its marker receive times become term_cli rows.
 for _ in range(300):

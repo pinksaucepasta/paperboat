@@ -200,9 +200,9 @@ func TestInstallPowerShellRefusesAMalformedRecipeTokenAndABadRepository(t *testi
 	}
 }
 
-// Release 2026.11.09.7, clean Windows Sandbox and victus: the one-liner stopped at "fresh enrollment reset failed with
-// exit code 2". The installer confirmed the reset with the NetBIOS name (VICTUS; 26D84BEC-68A9-4, cut at 15
-// characters) and pb compares with os.Hostname(), the DNS host name (Victus; 26d84bec-68a9-401c-b77e-65503ff3c2c5).
+// Release 2026.11.09.7, clean Windows Sandbox and Windows test machine: the one-liner stopped at "fresh enrollment reset failed with
+// exit code 2". The installer confirmed the reset with the NetBIOS name (Windows test machine; 26D84BEC-68A9-4, cut at 15
+// characters) and pb compares with os.Hostname(), the DNS host name (Windows test machine; 26d84bec-68a9-401c-b77e-65503ff3c2c5).
 func TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads(t *testing.T) {
 	const expression = "[System.Net.Dns]::GetHostName()"
 	script, err := os.ReadFile("install.ps1")

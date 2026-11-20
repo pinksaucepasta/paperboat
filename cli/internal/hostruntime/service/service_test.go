@@ -374,7 +374,7 @@ func TestRootUserServicesAreSystemUnits(t *testing.T) {
 }
 
 func TestAccountNamesAllowSafelyPlacedDots(t *testing.T) {
-	for _, value := range []string{"pujan.pm", "first.last-1", "user_name"} {
+	for _, value := range []string{"tester.pm", "first.last-1", "user_name"} {
 		if !safeAccount(value) {
 			t.Fatalf("safe account %q was rejected", value)
 		}

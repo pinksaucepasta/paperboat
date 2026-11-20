@@ -37,15 +37,15 @@ func workOSActionRequest(t *testing.T, body string, at time.Time, secret string)
 	return r
 }
 
-const registrationBody = `{"id":"action_1","object":"user_registration_action_context","user_data":{"object":"user_data","email":"Pprbtdev+1234@gmail.com","first_name":"A"}}`
+const registrationBody = `{"id":"action_1","object":"user_registration_action_context","user_data":{"object":"user_data","email":"Tester+1234@example.test","first_name":"A"}}`
 
 func TestWorkOSRegistrationActionDeniesAnAliasOfAnExistingAccount(t *testing.T) {
 	now := time.Now()
-	checker := &aliasCheckerFake{canonical: "pprbtdev@gmail.com", exists: true}
+	checker := &aliasCheckerFake{canonical: "tester@example.test", exists: true}
 	handler := workOSRegistrationAction(checker, workOSActionTestSecret, func() time.Time { return now })
 	w := httptest.NewRecorder()
 	handler(w, workOSActionRequest(t, registrationBody, now, workOSActionTestSecret))
-	if w.Code != 200 || checker.asked != "Pprbtdev+1234@gmail.com" {
+	if w.Code != 200 || checker.asked != "Tester+1234@example.test" {
 		t.Fatalf("status=%d asked=%q body=%s", w.Code, checker.asked, w.Body)
 	}
 	var response struct {
@@ -61,7 +61,7 @@ func TestWorkOSRegistrationActionDeniesAnAliasOfAnExistingAccount(t *testing.T) 
 		Verdict   string `json:"verdict"`
 		Message   string `json:"error_message"`
 	}
-	if err := json.Unmarshal(response.Payload, &payload); err != nil || payload.Verdict != "Deny" || payload.Message != "An account for pprbtdev@gmail.com already exists. Sign in with that address." {
+	if err := json.Unmarshal(response.Payload, &payload); err != nil || payload.Verdict != "Deny" || payload.Message != "An account for tester@example.test already exists. Sign in with that address." {
 		t.Fatalf("payload=%s err=%v", response.Payload, err)
 	}
 	want := workOSActionMAC(workOSActionTestSecret, strconv.FormatInt(payload.Timestamp, 10), response.Payload)
@@ -86,7 +86,7 @@ func TestWorkOSRegistrationActionAllowsAnythingElse(t *testing.T) {
 
 func TestWorkOSRegistrationActionRefusesUnsignedStaleAndMalformedRequests(t *testing.T) {
 	now := time.Now()
-	checker := &aliasCheckerFake{canonical: "pprbtdev@gmail.com", exists: true}
+	checker := &aliasCheckerFake{canonical: "tester@example.test", exists: true}
 	handler := workOSRegistrationAction(checker, workOSActionTestSecret, func() time.Time { return now })
 	for name, r := range map[string]*http.Request{
 		"wrong secret": workOSActionRequest(t, registrationBody, now, "another-secret"),

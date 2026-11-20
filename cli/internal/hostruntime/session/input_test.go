@@ -149,7 +149,7 @@ func TestInputSequenceDuplicateReturnsOriginalDecision(t *testing.T) {
 }
 
 // A terminal session takes input for its whole life: sequenced decisions are kept only for the recent
-// window, so input is never refused for having taken many writes (Lane X audit H2: refused after
+// window, so input is never refused for having taken many writes (audit H2: refused after
 // MaxInputDecisions), a resend inside the window is still answered from the journal, and a sequence that
 // left the window is refused, never written twice. A new process generation drops the old decisions.
 func TestInputJournalKeepsARecentWindowForLongSessions(t *testing.T) {

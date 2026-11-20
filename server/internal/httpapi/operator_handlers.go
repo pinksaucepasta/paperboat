@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 )
 
 // Staff authority is independent of workspace/team membership. Unknown routes deny.
@@ -63,6 +64,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/breakglass/runs/{run_id}/cancel":                  {"admin", "run_id", ""},
 
 	"GET /v1/admin/backups":                                                         {"operations", "", "backups"},
+	"GET /v1/admin/host-health":                                                     {"operations", "", "host-health"},
 	"GET /v1/admin/backups/runs":                                                    {"operations", "", "backup-runs"},
 	"GET /v1/admin/support":                                                         {"support", "", "support-references"},
 	"GET /v1/admin/sentry/logs":                                                     {"operations", "", "sentry-logs"},
@@ -94,6 +96,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/billing/workspaces":                                              {"support", "", "workspaces"},
 	"GET /v1/admin/billing/workspace-operations":                                    {"billing", "", "billing-operations"},
 	"GET /v1/admin/control-operations":                                              {"operations", "", "control-operations"},
+	"GET /v1/admin/transactional-mails":                                             {"operations", "", "transactional-mails"},
 	"GET /v1/admin/billing/products":                                                {"billing", "", "billing-products"},
 	"PUT /v1/admin/billing/products/{code}":                                         {"admin", "code", ""},
 	"GET /v1/admin/config/billing":                                                  {"billing", "", "billing-policy"},
@@ -157,6 +160,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/edge/usage-keys/{key_id}/revoke":                                {"admin", "key_id", ""},
 	"POST /v1/admin/mint/signing-keys/{key_id}/revoke":                              {"admin", "key_id", ""},
 	"POST /v1/admin/control-operations/{operation_id}/recover":                      {"operations", "operation_id", ""},
+	"POST /v1/admin/transactional-mails/{mail_id}/redrive":                          {"operations", "mail_id", ""},
 	"POST /v1/admin/billing/workspace-operations/{operation_id}/retire":             {"billing", "operation_id", ""},
 	"POST /v1/admin/billing/workspace-operations/{operation_id}/reconcile-checkout": {"billing", "operation_id", ""},
 	"POST /v1/admin/billing/workspace-operations/{operation_id}/supersede-portal":   {"billing", "operation_id", ""},
@@ -326,6 +330,7 @@ func (w *operatorResponse) Write(b []byte) (int, error) {
 
 func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerBackupReportRoute(mux, opts)
+	registerHostHealthRoutes(mux, opts)
 	registerTestFixtureRoutes(mux, opts)
 	if opts.OperatorAuth == nil {
 		return
@@ -358,6 +363,7 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/billing/workspaces", "workspaces", ""},
 		{"GET /v1/admin/billing/workspace-operations", "billing_operations", ""},
 		{"GET /v1/admin/control-operations", "control_operations", ""},
+		{"GET /v1/admin/transactional-mails", "mail_failures", ""},
 		{"GET /v1/admin/accounts/{account_id}", "account", "account_id"},
 		{"GET /v1/admin/teams/{team_id}", "team", "team_id"},
 		{"GET /v1/admin/billing/workspaces/{workspace_id}", "billing", "workspace_id"},
@@ -607,6 +613,45 @@ func operatorStatus(opts Options) http.Handler {
 				dimensions[string(d)] = map[string]any{"status": state.Status, "code": state.Code, "since": state.Since, "retry": state.Retry, "next_retry_at": state.NextRetryAt}
 			}
 		}
+		if opts.Config.ReleaseDirectory != "" {
+			dimensions["release_metadata"] = releaseMetadataHealth(opts.Config.ReleaseDirectory, time.Now())
+		}
 		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"observed_at": time.Now().UTC(), "build": map[string]string{"version": buildinfo.Version, "commit": buildinfo.Commit}, "readiness": readiness, "dimensions": dimensions, "providers": map[string]any{"workos_configured": opts.Config.Secrets.WorkOSClientID != "" && opts.Config.Secrets.WorkOSAPIKey != "", "stripe_configured": opts.Config.Secrets.StripeAPIKey != "", "github_configured": opts.Config.Secrets.GitHubClientID != "", "live_availability": "not_probed"}, "configuration": map[string]any{"host_offline_after_seconds": opts.Config.UserMachines.OfflineAfter.Seconds(), "request_timeout_seconds": opts.Config.HTTP.RequestTimeout.Seconds(), "billing_policy": "/v1/admin/config/billing", "deployment_settings": "managed_by_deployment"}}})
+	})
+}
+
+// releaseMetadataHealth is the Overview item for signed release metadata: failed once a role has expired or cannot be
+// read, degraded while one is inside its warning window (the refresh is not running), healthy otherwise.
+func releaseMetadataHealth(directory string, now time.Time) map[string]any {
+	expiries, err := releases.ReadMetadataExpiry(directory)
+	if err != nil {
+		return map[string]any{"status": "failed", "code": "release_metadata_unreadable"}
+	}
+	warnings := releases.ExpiryWarnings(expiries, now)
+	if len(warnings) == 0 {
+		return map[string]any{"status": "healthy", "code": "release_metadata_fresh"}
+	}
+	roles := make([]string, 0, len(warnings))
+	status := "degraded"
+	for _, w := range warnings {
+		roles = append(roles, w.Role)
+		if w.Expired {
+			status = "failed"
+		}
+	}
+	return map[string]any{"status": status, "code": "release_metadata_expiring_" + strings.Join(roles, "_"), "since": warnings[0].Expires}
+}
+
+// adminRedriveMail puts a failed transactional mail back in the queue (the operator guard audits the request).
+func adminRedriveMail(service *operator.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch err := service.RedriveMail(r.Context(), r.PathValue("mail_id")); {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, operator.ErrNotFound):
+			writeError(w, r, http.StatusConflict, "mail_not_failed", "The mail is not in the failed list. It was sent, is still retrying, or does not exist.")
+		default:
+			writeError(w, r, http.StatusServiceUnavailable, "operator_unavailable", "The mail could not be requeued. Try again later.", err)
+		}
 	})
 }

@@ -384,7 +384,7 @@ func failureLimited(r *http.Request) bool {
 }
 
 // signInLimit limits sign-in requests per client network in memory, before any database work
-// (PLAN F21-14, Lane X #15), and failed secret exchanges the same way.
+// (PLAN F21-14 #15), and failed secret exchanges the same way.
 func signInLimit(limiter *ratelimit.Limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if signInRoutes[r.Method+" "+r.URL.Path] {

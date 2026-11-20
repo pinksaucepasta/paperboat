@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Paperboat production host resource capacity
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/paperboat-canary.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/paperboat/deploy/host_resources.py
+TimeoutStartSec=90
+Nice=10

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Deploy a committed device binary using XZ, verified bytes and one remote installer.
 
-Example: deploy.py --device hp --ssh-target user@host --binary .build/dev-HASH/pb-linux-amd64
+Example: deploy.py --device linux --ssh-target user@host --binary .build/dev-HASH/pb-linux-amd64
   --version dev-HASH --receipts /private/path
-For apple and dadape, supply DEVICE_PASSWORD in the environment (sshpass must be installed).
+For a device with password login, supply DEVICE_PASSWORD or use its local development target settings.
 Upload budgets scale with compressed size at 128 KiB/s plus connection/setup slack.
 No enrollment, credentials, OS approval policies or existing identity are changed.
 """
@@ -22,8 +22,7 @@ import tempfile
 import uuid
 
 HERE = Path(__file__).resolve().parent
-# Devices without key login: the password comes from DEVICE_PASSWORD and never reaches argv.
-PASSWORD_DEVICES = ('apple', 'dadape')
+from dev_targets import smoke_value
 
 
 def run(argv, *, timeout, receipt, env=None, payload=None):
@@ -47,9 +46,12 @@ def deploy(args):
     prefix = []
     env = dict(os.environ)
     password = env.pop('DEVICE_PASSWORD', '')
-    if args.device in PASSWORD_DEVICES:
-        if not password:
-            raise RuntimeError(args.device + ' installation requires DEVICE_PASSWORD')
+    for role, label, key in [('MACOS', 'macos', 'SMOKE_MACOS_PASSWORD'), ('PEER', 'linux-peer', 'SMOKE_LINUX_PEER_PASSWORD')]:
+        if args.device == smoke_value(f'SMOKE_{role}_NAME', label):
+            password = password or smoke_value(key)
+            if not password:
+                raise RuntimeError('configure the device password or export DEVICE_PASSWORD')
+    if password:
         env['SSHPASS'] = password
         prefix = ['sshpass', '-e']
     digest = hashlib.sha256(args.binary.read_bytes()).hexdigest()
@@ -101,7 +103,7 @@ def deploy(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--device', required=True, choices=['hp', 'apple', 'dadape', 'ubuntu24'])
+    parser.add_argument('--device', required=True)
     parser.add_argument('--ssh-target', required=True)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--version', required=True)

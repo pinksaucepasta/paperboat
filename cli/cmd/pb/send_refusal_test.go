@@ -76,10 +76,10 @@ func TestTeamSuspendedRefusalNamesTheSuspension(t *testing.T) {
 // F6-05: a receiver whose disk is full refuses at once and the sender names it, in text and JSON.
 func TestSendToAFullDiskNamesTheComputerAndStopsRetrying(t *testing.T) {
 	remote := &filetransfer.Error{Code: "insufficient_storage", StatusCode: http.StatusInsufficientStorage, NeededBytes: 20 << 20, FreeBytes: 4 << 20}
-	err := destinationStorageFull("hp", fmt.Errorf("send batch: %w", remote))
+	err := destinationStorageFull("laptop", fmt.Errorf("send batch: %w", remote))
 	failure := classifyCommandFailure(err)
 	message := commandFailureMessage(err, failure)
-	for _, want := range []string{"hp has no room for this in its Inbox", "needs 20 MiB, 4 MiB free", "pb inbox set", "Nothing was delivered"} {
+	for _, want := range []string{"laptop has no room for this in its Inbox", "needs 20 MiB, 4 MiB free", "pb inbox set", "Nothing was delivered"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("message %q lacks %q", message, want)
 		}
@@ -89,12 +89,12 @@ func TestSendToAFullDiskNamesTheComputerAndStopsRetrying(t *testing.T) {
 		t.Fatalf("kind=%v json=%+v", failure.kind, result)
 	}
 	// It ran out of room while receiving (the size was not known up front).
-	late := destinationStorageFull("hp", &filetransfer.Error{Code: "insufficient_storage", StatusCode: http.StatusInsufficientStorage})
+	late := destinationStorageFull("laptop", &filetransfer.Error{Code: "insufficient_storage", StatusCode: http.StatusInsufficientStorage})
 	if m := commandFailureMessage(late, classifyCommandFailure(late)); !strings.Contains(m, "ran out of room in its Inbox while receiving") {
 		t.Fatalf("late message %q", m)
 	}
 	other := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusServiceUnavailable}
-	if destinationStorageFull("hp", other) != error(other) {
+	if destinationStorageFull("laptop", other) != error(other) {
 		t.Fatal("another failure was converted")
 	}
 }
@@ -137,7 +137,7 @@ func TestSendOfAFileTheInboxFileSystemCannotHoldNamesTheLimit(t *testing.T) {
 		t.Fatalf("kind=%v json=%+v", failure.kind, result)
 	}
 	other := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusServiceUnavailable}
-	if destinationFileTooLarge("hp", other) != error(other) {
+	if destinationFileTooLarge("laptop", other) != error(other) {
 		t.Fatal("another failure was converted")
 	}
 }
@@ -161,7 +161,7 @@ func TestSendToAnInboxTheReceiverCannotWriteNamesTheOSError(t *testing.T) {
 		t.Fatalf("kind=%v json=%+v", failure.kind, result)
 	}
 	ordinary := &filetransfer.Error{Code: "storage_unavailable", StatusCode: http.StatusServiceUnavailable}
-	if destinationStorageFull("hp", ordinary) != error(ordinary) {
+	if destinationStorageFull("laptop", ordinary) != error(ordinary) {
 		t.Fatal("a storage failure without an operating system error was converted")
 	}
 }

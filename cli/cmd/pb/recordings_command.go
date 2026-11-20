@@ -90,7 +90,7 @@ func recordingsKeyReset(c *command.Context) error {
 	if !ok {
 		return errors.New("resetting the key requires CLI command context")
 	}
-	vault, err := passwordVaultForCommand(parent)
+	vault, err := envDependenciesOf(parent.Context()).passwordVault(parent)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func recordingsKeyReplace(c *command.Context) error {
 	if !ok {
 		return errors.New("replacing the key requires CLI command context")
 	}
-	vault, err := passwordVaultForCommand(parent)
+	vault, err := envDependenciesOf(parent.Context()).passwordVault(parent)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func recordingsControl(c *command.Context, action string) error {
 	if !ok {
 		return errors.New("recording control requires CLI command context")
 	}
-	local, _, err := localDaemonSnapshot(parent, installLocalDaemonService)
+	local, _, err := localDaemonSnapshot(parent, installDependenciesOf(c.Context).installService)
 	if err != nil {
 		return err
 	}
@@ -337,7 +337,7 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 		return errors.New("the recording's machine is not available to you")
 	}
 	environmentID, generation := machine.EnvironmentID, uint64(machine.InstallationGeneration)
-	local, _, err := localDaemonSnapshot(parent, installLocalDaemonService)
+	local, _, err := localDaemonSnapshot(parent, installDependenciesOf(c.Context).installService)
 	if err != nil {
 		return err
 	}
@@ -365,7 +365,7 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 
 // openRecordingKey opens the team recording key of a replay answer with this account's unlocked vault.
 func openRecordingKey(c *command.Context, parent *cobra.Command, replay wire.Replay) ([]byte, error) {
-	vault, err := passwordVaultForCommand(parent)
+	vault, err := envDependenciesOf(parent.Context()).passwordVault(parent)
 	if err != nil {
 		return nil, err
 	}

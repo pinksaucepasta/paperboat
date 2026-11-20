@@ -38,6 +38,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/hosthealth"
 	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
@@ -94,6 +95,7 @@ type Options struct {
 	// Database serves replica-safe reads and the commit position of writes (commit_position.go).
 	Database                 *db.DB
 	OperatorBackups          *backupreport.Service
+	HostHealth               *hosthealth.Service
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
 	OperatorAnalytics        *posthogquery.Service
@@ -203,6 +205,10 @@ func tunnelMachineAuth(user *auth.Service, machines *auth.DeviceService, next ht
 func NewRouter(opts Options) http.Handler {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
+	}
+	var peerNet *peerNetworkShedder
+	if opts.PeerNetwork != nil {
+		peerNet = shedPeerNetwork(opts.PeerNetwork, opts.Config.RateLimits.PeerNetworkConfigMaxInflight)
 	}
 	var handler http.Handler
 	if opts.OverrideHandler != nil {
@@ -505,7 +511,7 @@ func NewRouter(opts Options) http.Handler {
 					return requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", next))
 				}
 				mux.Handle("POST /v1/peer-network/register", peerNetworkAuth(peerNetworkRegister(opts.PeerNetwork)))
-				mux.Handle("POST /v1/peer-network/config", peerNetworkAuth(peerNetworkConfig(opts.PeerNetwork)))
+				mux.Handle("POST /v1/peer-network/config", peerNetworkAuth(peerNetworkConfig(peerNet)))
 			}
 			if opts.ManagedSSH != nil && opts.DeviceAuth != nil {
 				sshRead := func(next http.Handler) http.Handler {
@@ -757,7 +763,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.PeerNetwork != nil && opts.RuntimeIdentity != nil {
 			mux.HandleFunc("POST /v1/machine-peer-network/register", machinePeerNetworkRegister(opts.PeerNetwork, opts.RuntimeIdentity))
-			mux.HandleFunc("POST /v1/machine-peer-network/config", machinePeerNetworkConfig(opts.PeerNetwork, opts.RuntimeIdentity, ratelimit.New(opts.Config.RateLimits.MachinePeerNetworkConfigPerMinute, opts.Config.RateLimits.MachinePeerNetworkConfigBurst, opts.Config.RateLimits.MaxClients)))
+			mux.HandleFunc("POST /v1/machine-peer-network/config", machinePeerNetworkConfig(peerNet, opts.RuntimeIdentity, ratelimit.New(opts.Config.RateLimits.MachinePeerNetworkConfigPerMinute, opts.Config.RateLimits.MachinePeerNetworkConfigBurst, opts.Config.RateLimits.MaxClients)))
 		}
 		if opts.WorkspaceBilling != nil {
 			mux.Handle("POST /v1/teams", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, paidTeamCreation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins)))))
@@ -1035,6 +1041,9 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 	}
 	if opts.OperationRecovery != nil {
 		mux.Handle("POST /v1/admin/control-operations/{operation_id}/recover", operatorRoute(opts, adminRecoverControlOperation(opts.OperationRecovery)))
+	}
+	if opts.Operator != nil {
+		mux.Handle("POST /v1/admin/transactional-mails/{mail_id}/redrive", operatorRoute(opts, adminRedriveMail(opts.Operator)))
 	}
 	if opts.WorkspaceBillingRecovery != nil {
 		mux.Handle("POST /v1/admin/billing/workspace-operations/{operation_id}/retire", operatorRoute(opts, adminRetireWorkspaceBillingOperation(opts.WorkspaceBillingRecovery)))

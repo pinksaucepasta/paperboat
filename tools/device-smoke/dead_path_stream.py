@@ -2,7 +2,7 @@
 """F21-160 device check: a dead direct path is noticed in seconds and a running stream recovers over the relay.
 
   dead_path_stream.py PEER [--peer-address ADDRESS] [--bound 12]   (run on a paired Linux or macOS machine; needs sudo -n iptables or pfctl)
-  With PB_SMOKE_WINDOWS_PB (and SMOKE_WINDOWS_SSH, VICTUS_PASS) the stream client and every `pb status` run ON that Windows device (lines are
+  With PB_SMOKE_WINDOWS_PB (and SMOKE_WINDOWS_SSH, SMOKE_WINDOWS_PASSWORD) the stream client and every `pb status` run ON that Windows device (lines are
   timestamped here as the ssh session delivers them); the cut must keep pb.exe running (pd.udp_blocked() restarts it), so
   SMOKE_PEER_CUT is required (container_cut.sh `silent` drop on the peer's host; repeat --device-address for the address the peer sees the
   device at, as direct_path_cut.py does).

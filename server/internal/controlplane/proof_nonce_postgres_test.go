@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// F21-13 (Lane X #16): a proof nonce is used once until the proof expires; requests HTTP may send
+// F21-13 (#16): a proof nonce is used once until the proof expires; requests HTTP may send
 // again (GET/HEAD, Idempotency-Key) are not reserved, and a proof without a nonce is refused.
 func TestProofNonceIsUsedOnce(t *testing.T) {
 	store := openControlPlaneTestDB(t)

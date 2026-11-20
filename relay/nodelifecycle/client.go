@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
+	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
@@ -62,13 +63,12 @@ type AccountSpeed struct {
 }
 
 type Lease struct {
-	NodeID        string                      `json:"node_id"`
-	Generation    uint64                      `json:"node_generation"`
-	ProcessEpoch  string                      `json:"process_epoch"`
-	ExpiresAt     int64                       `json:"expires_at"`
-	CapacityLimit uint64                      `json:"capacity_limit"`
-	Revocations   []Revocation                `json:"revocations"`
-	PeerRelay     *derpquic.ServiceDescriptor `json:"peer_relay,omitempty"`
+	NodeID       string                      `json:"node_id"`
+	Generation   uint64                      `json:"node_generation"`
+	ProcessEpoch string                      `json:"process_epoch"`
+	ExpiresAt    int64                       `json:"expires_at"`
+	Revocations  []Revocation                `json:"revocations"`
+	PeerRelay    *derpquic.ServiceDescriptor `json:"peer_relay,omitempty"`
 	// PoolHandover lists accounts whose pool no longer includes this relay and when to close their carriers; nil
 	// (absent) keeps the list the relay holds, an empty list clears it.
 	PoolHandover *[]PoolHandover `json:"pool_handover,omitempty"`
@@ -225,7 +225,7 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	if err := wirejson.Decode(raw, &out); err != nil {
 		return Lease{}, failure(err, 0, true)
 	}
-	if out.NodeID != c.cfg.NodeID || out.Generation == 0 || out.ProcessEpoch == "" || out.CapacityLimit == 0 || out.CapacityLimit > derpquic.MaxConnections || len(out.Revocations) > derpquic.MaxConnections {
+	if out.NodeID != c.cfg.NodeID || out.Generation == 0 || out.ProcessEpoch == "" {
 		return Lease{}, ErrFenced
 	}
 	now := time.Now()
@@ -369,13 +369,13 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	if mesh, ok := server.MeshStats(); ok {
 		body["mesh"] = mesh
 	}
-	// What each connected account offered this relay since the last observation (bytes per second): the control plane divides an
-	// account's speed among its relays by it. The first observation only opens the window.
+	// What each connected account offered this relay since the last observation and how much the limit held back (bytes per second): the
+	// control plane divides an account's speed among its relays by it. The first observation only opens the window.
 	taken, now := server.TakeAccountDemand(), time.Now()
 	if elapsed := now.Sub(c.demandAt).Seconds(); !c.demandAt.IsZero() && elapsed > 0 {
-		demand := make(map[string]float64, len(taken))
-		for account, n := range taken {
-			demand[account] = float64(n) / elapsed
+		demand := make(map[string]relayshare.Demand, len(taken))
+		for account, d := range taken {
+			demand[account] = relayshare.Demand{Offered: float64(d.Offered) / elapsed, Held: float64(d.Held) / elapsed}
 		}
 		body["account_demand"] = demand
 	}
@@ -388,7 +388,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	if err != nil {
 		return err
 	}
-	if out.Generation != c.lease.Generation || out.ProcessEpoch != c.lease.ProcessEpoch || out.CapacityLimit != c.lease.CapacityLimit || !server.MatchesControlService(out.PeerRelay) {
+	if out.Generation != c.lease.Generation || out.ProcessEpoch != c.lease.ProcessEpoch || !server.MatchesControlService(out.PeerRelay) {
 		return ErrFenced
 	}
 	// A revocation only restricts: one for an endpoint this relay does not hold fences its future

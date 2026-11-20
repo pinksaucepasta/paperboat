@@ -8,16 +8,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 )
 
-// The two probes an update asks, as variables so a test can answer for them.
-var (
-	readDaemonConnections = daemonConnectionsForUpdate
-	readCarrierSSH        = carrierSSHForUpdate
-)
-
 // openConnectionsForUpdate counts what an update would cut: the SSH streams and access forwards the daemon carries as a
 // client, and the SSH connections into this machine that its carrier bridges (F14-02).
 func openConnectionsForUpdate(ctx context.Context) (liveconnections.Counts, error) {
-	open, daemonErr := readDaemonConnections(ctx)
-	incoming, carrierErr := readCarrierSSH(ctx)
+	return readUpdateConnections(ctx, daemonConnectionsForUpdate, carrierSSHForUpdate)
+}
+
+func readUpdateConnections(ctx context.Context, readDaemon func(context.Context) (liveconnections.Counts, error), readCarrier func(context.Context) (int, error)) (liveconnections.Counts, error) {
+	open, daemonErr := readDaemon(ctx)
+	incoming, carrierErr := readCarrier(ctx)
 	return liveconnections.Combine(open, daemonErr, incoming, carrierErr)
 }

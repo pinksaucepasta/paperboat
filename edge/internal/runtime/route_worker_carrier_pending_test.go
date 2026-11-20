@@ -108,7 +108,7 @@ func TestRouteWorkerPublishesPendingRouteWhenItsCarrierConnects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	carriers, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 8})
+	carriers, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestCarrierConnectBurstCoalescesIntoOneWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	carriers, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 8})
+	carriers, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

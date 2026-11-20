@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 
@@ -154,7 +155,7 @@ func (h *Handler) serveHolders(w http.ResponseWriter, r *http.Request, raw []byt
 		holders = []nodemesh.Holder{}
 	}
 	encoded, err := json.Marshal(nodemesh.HoldersResponse{Holders: holders, Next: next})
-	if err != nil || len(encoded) > 16<<20 {
+	if err != nil || len(encoded) > connectorprotocol.MaximumSnapshotBytes {
 		serviceError(w, r, ErrUnavailable)
 		return
 	}

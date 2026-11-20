@@ -26,7 +26,7 @@ type StagedCandidate struct {
 // its own executable (stageCandidateByExecutable). Each build renders and checks
 // only its own units, and the installing process is often another build: a signed
 // update's helper is the previous build, and pb update --from runs the invoking CLI
-// (pbvm1). nil means no carrier generation was staged.
+// (Linux test VM). nil means no carrier generation was staged.
 func stageUnixUpgrade(ctx context.Context, request Request, paths installPaths, carrier bool) (*carrierUpgrade, error) {
 	var retained CarrierConfig
 	if carrier {

@@ -36,15 +36,15 @@ func TestProtectedBrowserDomainSelectionValidation(t *testing.T) {
 }
 func TestNamedBrowserAliasesRequireExactNumericTarget(t *testing.T) {
 	domain := "mynet.xyz"
-	numeric := "8989.hp." + domain
-	named := "jellyfin.hp." + domain
+	numeric := "8989.laptop." + domain
+	named := "jellyfin.laptop." + domain
 	aliases := map[string]string{numeric: splitdns.BrowserGatewayHostname, named: numeric}
 	if got := browserAliasTarget(aliases, named, domain); got != numeric {
 		t.Fatal("named route did not resolve its numeric registration")
 	}
-	for _, target := range []string{splitdns.BrowserGatewayHostname, "3000.hp." + domain, "8989.other." + domain, "8989.hp.local.example.test", named, "second.hp." + domain} {
+	for _, target := range []string{splitdns.BrowserGatewayHostname, "3000.laptop." + domain, "8989.other." + domain, "8989.laptop.local.example.test", named, "second.laptop." + domain} {
 		aliases[named] = target
-		aliases["second.hp."+domain] = numeric
+		aliases["second.laptop."+domain] = numeric
 		if browserAliasTarget(aliases, named, domain) != "" {
 			t.Fatalf("accepted invalid target %q", target)
 		}

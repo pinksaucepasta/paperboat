@@ -44,7 +44,7 @@ func TestAccountDeleteOnlyPrintsTheConsoleLink(t *testing.T) {
 	}
 }
 
-// `pb version` prints the version instead of looking for a machine named "version" (Lane O).
+// `pb version` prints the version instead of looking for a machine named "version".
 func TestVersionIsACommand(t *testing.T) {
 	c := versionCommand()
 	var out bytes.Buffer

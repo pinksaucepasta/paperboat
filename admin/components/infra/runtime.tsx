@@ -202,3 +202,44 @@ export function ControlOperations() {
     </div>
   )
 }
+
+type FailedMails = Data<"/v1/admin/transactional-mails">
+
+/** Mail that stayed undelivered after its retries; a failed one can be put back in the queue. */
+export function FailedMail() {
+  const can = useCanOperate()
+  const list = useCursorList<FailedMails>("/v1/admin/transactional-mails", {})
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium">Failed mail</h2>
+      <DataTable
+        what="failed mail"
+        list={list}
+        rows={(d) => d.mails}
+        rowKey={(m) => m.id}
+        empty="No failed mail."
+        columns={[
+          { header: "Mail", cell: (m) => <Mono>{m.id}</Mono> },
+          { header: "Invitation", className: "hidden md:table-cell", cell: (m) => (m.invitation_id ? <Mono>{m.invitation_id}</Mono> : "—") },
+          { header: "Attempts", cell: (m) => m.attempts, className: "text-right tabular-nums" },
+          { header: "Queued", cell: (m) => <Time iso={m.created_at} relative /> },
+          {
+            header: "",
+            className: "text-right",
+            cell: (m) =>
+              can ? (
+                <ActionDialog
+                  title={`Redrive ${m.id}`}
+                  description="Puts it back in the queue with fresh attempts."
+                  target={m.id}
+                  submitLabel="Redrive mail"
+                  trigger={(open) => <Button variant="outline" onClick={open}>Redrive</Button>}
+                  run={(h) => operatorAction("POST", `/v1/admin/transactional-mails/${encodeURIComponent(m.id)}/redrive`, h)}
+                />
+              ) : null,
+          },
+        ]}
+      />
+    </div>
+  )
+}

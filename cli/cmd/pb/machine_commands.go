@@ -152,7 +152,7 @@ func machineRevokeCommand() *cobra.Command {
 		target, err := resolveUserMachine(ctx.Context, client, args[0])
 		if errors.Is(err, resolver.ErrMachineNotFound) {
 			// A disconnected machine is no longer listed by default, yet revoking it again is done, not a
-			// failure (laneo-ha/hb, round 26 reported operation_failed/local_io).
+			// failure (test-ha/hb, round 26 reported operation_failed/local_io).
 			if machine, found := findDisconnectedMachine(ctx.Context, client, args[0]); found {
 				return reportMachineRevoked(cobraCommand, jsonOutput, machine.ID, machine.Alias, "already_disconnected")
 			}

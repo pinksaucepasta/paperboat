@@ -31,20 +31,21 @@ func (a blockedAuth) Credential() (config.Credential, error) {
 	return config.Credential{AccessToken: "late"}, nil
 }
 
-func noDaemonOutage(t *testing.T) {
+// withDaemonSnapshot is the context of a host whose daemon answers with snapshot.
+func withDaemonSnapshot(t *testing.T, snapshot localapi.Snapshot) context.Context {
 	t.Helper()
-	previous := loadWarmMachineSnapshot
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return localapi.Snapshot{}, nil }
+	return withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.warmSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
+	})
 }
 
 // A control plane that refuses connections ends the descriptor request at once and resolves from the host's own
 // rules; a token refresh stuck behind it is not waited for.
 func TestControlPlaneProbeDownCutsTheRequestAndTheCredentialWait(t *testing.T) {
-	noDaemonOutage(t)
+	ctx := withDaemonSnapshot(t, localapi.Snapshot{})
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
-	probe := startControlPlaneProbe(context.Background(), dead.URL)
+	probe := startControlPlaneProbe(ctx, dead.URL)
 	auth := blockedAuth{release: make(chan struct{})}
 	defer close(auth.release)
 	started := time.Now()
@@ -53,7 +54,7 @@ func TestControlPlaneProbeDownCutsTheRequestAndTheCredentialWait(t *testing.T) {
 		t.Fatalf("credential = %+v, %v, down = %v", cred, err, probe.Down())
 	}
 	r := &probeResolver{}
-	info, err := resolveWhileProbing(context.Background(), r, resolver.ConnectRequest{Machine: "m", Credential: config.Credential{AccessToken: "t"}}, probe)
+	info, err := resolveWhileProbing(ctx, r, resolver.ConnectRequest{Machine: "m", Credential: config.Credential{AccessToken: "t"}}, probe)
 	if err != nil || info.Machine != "m" || time.Since(started) > 2*time.Second {
 		t.Fatalf("info = %+v, err = %v after %s", info, err, time.Since(started))
 	}
@@ -64,12 +65,12 @@ func TestControlPlaneProbeDownCutsTheRequestAndTheCredentialWait(t *testing.T) {
 
 // A healthy control plane is asked once, with the credential, and never told it is down.
 func TestControlPlaneProbeUpResolvesOnlineOnce(t *testing.T) {
-	noDaemonOutage(t)
+	ctx := withDaemonSnapshot(t, localapi.Snapshot{})
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer up.Close()
-	probe := startControlPlaneProbe(context.Background(), up.URL)
+	probe := startControlPlaneProbe(ctx, up.URL)
 	r := &probeResolver{}
-	info, err := resolveWhileProbing(context.Background(), r, resolver.ConnectRequest{Machine: "healthy"}, probe)
+	info, err := resolveWhileProbing(ctx, r, resolver.ConnectRequest{Machine: "healthy"}, probe)
 	<-probe.done
 	if err != nil || info.Machine != "healthy" || len(r.calls) != 1 || r.calls[0].ControlPlaneUnavailable || probe.Down() {
 		t.Fatalf("info = %+v, err = %v, calls = %+v, down = %v", info, err, r.calls, probe.Down())
@@ -78,12 +79,8 @@ func TestControlPlaneProbeUpResolvesOnlineOnce(t *testing.T) {
 
 // The daemon's own outage report is the verdict before any request is made.
 func TestControlPlaneProbeTakesTheDaemonOutageReportAtOnce(t *testing.T) {
-	previous := loadWarmMachineSnapshot
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) {
-		return localapi.Snapshot{Health: []localapi.HealthItem{{Code: "control_plane_unavailable"}}}, nil
-	}
-	if !startControlPlaneProbe(context.Background(), "http://127.0.0.1:1").Down() {
+	ctx := withDaemonSnapshot(t, localapi.Snapshot{Health: []localapi.HealthItem{{Code: "control_plane_unavailable"}}})
+	if !startControlPlaneProbe(ctx, "http://127.0.0.1:1").Down() {
 		t.Fatal("daemon outage not taken as the verdict")
 	}
 }

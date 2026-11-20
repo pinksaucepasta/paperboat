@@ -127,7 +127,7 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertNotIn('machine_never_online', out)
 
     def test_fresh_or_blipping_machine_does_not_fail_the_gate(self):
-        # prod 2026-11-16 22:53: a lane's container enrolled at 22:39 went offline in the window and blocked edge .30
+        # prod 2026-11-16 22:53: a worktree's container enrolled at 22:39 went offline in the window and blocked edge .30
         code, out = self.run_gate(offline='machine_new\n')
         self.assertEqual(code, 0, out)
         self.assertIn('still offline after the deploy=0', out)

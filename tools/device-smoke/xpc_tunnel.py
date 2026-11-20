@@ -37,7 +37,7 @@ sys.path.insert(0, str(HERE))
 import xplat_fleet as fleet  # noqa: E402
 from xplat_tunnel import BIG, confirm_delete, curl, endpoint  # noqa: E402
 
-BUILD = Path.home() / '.pbmac/xpc/build'
+BUILD = Path.home() / '.mac-vm/xpc/build'
 BINDS = {'v4': '127.0.0.1', 'v6': '::1', 'all': '0.0.0.0'}
 results = {}
 errors = []
@@ -337,7 +337,7 @@ def t_closed_port(dev):
 
 # Browsers: one per OS the controller or a runner has (headless): Chromium on L (the controller), Chrome on M, Edge on W.
 BROWSERS = {
-    'L': (['bash', '-c'], 'PW_MODULE=%s PW_CHROMIUM=%s node %s %%s %%s' % (Path.home() / '.pbmac/xpc/pw/node_modules/playwright-core/index.mjs',
+    'L': (['bash', '-c'], 'PW_MODULE=%s PW_CHROMIUM=%s node %s %%s %%s' % (Path.home() / '.mac-vm/xpc/pw/node_modules/playwright-core/index.mjs',
           Path.home() / '.cache/ms-playwright/chromium-1248/chrome-linux-arm64/chrome', HERE / 'xpc_browser.mjs')),
     'M': (['ssh', 'macpool-5'], 'cd ~/xpc-pw && PW_CHANNEL=chrome node xpc_browser.mjs %s %s'),
     'W': (['ssh', 'winpool-4'], 'cd %%USERPROFILE%%\\xpc-pw && set PW_CHANNEL=msedge&& node xpc_browser.mjs %s %s'),

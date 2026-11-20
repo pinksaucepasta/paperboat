@@ -40,6 +40,7 @@ type removedScenario struct {
 	// answer is the choice made at the "Add it again?" prompt; titles records what it asked.
 	answer *string
 	titles *[]string
+	ctx    context.Context // carries this scenario's login dependencies
 }
 
 func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
@@ -59,8 +60,6 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 		t.Fatal(err)
 	}
 	paths := localapi.Paths{StateRoot: root, RuntimeRoot: root, SocketPath: filepath.Join(root, "api.sock"), LockPath: filepath.Join(root, "daemon.lock")}
-	oldPaths := currentLocalDaemonPaths
-	currentLocalDaemonPaths = func() (localapi.Paths, error) { return paths, nil }
 	var refused atomic.Bool
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -74,52 +73,55 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 	}()
 	steps := &[]string{}
 	var token, paired string
-	oldTerminal, oldChoose := workspaceTerminal, chooseLoginAction
-	oldMachine, oldPair, oldRemember, oldCleanup, oldSource, oldInstall := loginLocalMachineID, pairLoginDevice, rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
 	t.Cleanup(func() {
 		cancel()
 		<-done
-		currentLocalDaemonPaths = oldPaths
-		workspaceTerminal, chooseLoginAction = oldTerminal, oldChoose
-		loginLocalMachineID, pairLoginDevice, rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable = oldMachine, oldPair, oldRemember, oldCleanup, oldSource, oldInstall
 	})
 	answer, titles := "add", &[]string{}
-	workspaceTerminal = func() bool { return true }
-	chooseLoginAction = func(o selector.Options) (selector.Item, error) {
-		*titles = append(*titles, o.Title)
-		if answer == "" { // Enter: the selector's default is the first item
-			return o.Items[0], nil
-		}
-		for _, item := range o.Items {
-			if item.ID == answer {
-				return item, nil
-			}
-		}
-		return selector.Item{}, selector.ErrCanceled
-	}
-	loginLocalMachineID = func(*config.Config) (string, error) {
-		if len(*steps) > 0 {
-			return "", nil // the setup was wiped
-		}
-		return "machine_login", nil
-	}
-	rememberReplacedMachineFunc = func() (string, error) { *steps = append(*steps, "remember"); return "machine_login", nil }
-	freshEnrollmentCleanup = func(*cobra.Command) error { *steps = append(*steps, "cleanup"); return nil }
-	runningInstallSource = func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
-	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) {
+	rememberReplaced := func() (string, error) { *steps = append(*steps, "remember"); return "machine_login", nil }
+	freshCleanup := func(*cobra.Command) error { *steps = append(*steps, "cleanup"); return nil }
+	runningSource := func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
+	installExecutable := func(context.Context, string, installsource.Source, string, string) (string, error) {
 		*steps = append(*steps, "install")
 		refused.Store(false)
 		return "/tmp/pb", nil
 	}
-	pairLoginDevice = func(_ *command.Context, _ string, e *config.LoginEnrollment, _ string) error {
-		*steps = append(*steps, "pair")
-		token, paired = e.BootstrapToken, e.WorkspaceID
-		return nil
-	}
+	authCtx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.chooseLoginAction = func(o selector.Options) (selector.Item, error) {
+			*titles = append(*titles, o.Title)
+			if answer == "" { // Enter: the selector's default is the first item
+				return o.Items[0], nil
+			}
+			for _, item := range o.Items {
+				if item.ID == answer {
+					return item, nil
+				}
+			}
+			return selector.Item{}, selector.ErrCanceled
+		}
+		d.localMachineID = func(*config.Config) (string, error) {
+			if len(*steps) > 0 {
+				return "", nil // the setup was wiped
+			}
+			return "machine_login", nil
+		}
+		d.pairLoginDevice = func(_ *command.Context, _ string, e *config.LoginEnrollment, _ string) error {
+			*steps = append(*steps, "pair")
+			token, paired = e.BootstrapToken, e.WorkspaceID
+			return nil
+		}
+	})
 	waitForCommandSocket(t, paths.SocketPath)
-	s := removedScenario{f: f, configPath: configPath, profiles: profiles, url: srv.URL, steps: steps, refused: &refused, token: &token, paired: &paired, answer: &answer, titles: titles}
+	authCtx = withInstallDependencies(authCtx, func(d *installDependencies) {
+		d.rememberReplaced, d.freshCleanup, d.runningSource, d.installExecutable = rememberReplaced, freshCleanup, runningSource, installExecutable
+	})
+	authCtx = withHostDependencies(authCtx, func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) { return paths, nil }
+		d.isTerminal = func() bool { return true }
+	})
+	s := removedScenario{f: f, configPath: configPath, profiles: profiles, url: srv.URL, steps: steps, refused: &refused, token: &token, paired: &paired, answer: &answer, titles: titles, ctx: authCtx}
 	// The first sign-in is the one the computer later loses; the daemon accepts it.
-	if out, err := runBrowserLogin(t, ctx, configPath, "login", "--no-browser"); err != nil {
+	if out, err := runBrowserLogin(t, s.ctx, configPath, "login", "--no-browser"); err != nil {
 		t.Fatalf("first login: %v\n%s", err, out)
 	}
 	f.authorize, f.enrollCalls = nil, 0
@@ -135,7 +137,7 @@ func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 	if err := bootstrap.SaveReplacement("machine_stale", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
+	out, err := runBrowserLogin(t, s.ctx, s.configPath, "login", "--no-browser", "--reauth")
 	if err != nil {
 		t.Fatalf("login --reauth: %v\n%s", err, out)
 	}
@@ -161,8 +163,8 @@ func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 // that fails without saying "no such machine" proves nothing and wipes nothing either.
 func TestLoginDoesNotReaddAComputerThatIsStillOnTheAccount(t *testing.T) {
 	for name, f := range map[string]*loginDeviceFixture{
-		"personal":       {machines: []any{map[string]any{"id": "machine_login", "alias": "hp"}}},
-		"team-owned":     {machines: []any{map[string]any{"id": "machine_login", "alias": "hp", "owner_team_id": "team_x"}}},
+		"personal":       {machines: []any{map[string]any{"id": "machine_login", "alias": "laptop"}}},
+		"team-owned":     {machines: []any{map[string]any{"id": "machine_login", "alias": "laptop", "owner_team_id": "team_x"}}},
 		"lookup failure": {lookupFail: 500},
 		// A 404 is also what a live machine the account cannot see (left the team, no grant) answers.
 		"invisible but alive": {invisible: true},
@@ -173,7 +175,7 @@ func TestLoginDoesNotReaddAComputerThatIsStillOnTheAccount(t *testing.T) {
 
 func assertNotReadded(t *testing.T, f *loginDeviceFixture) {
 	s := newRemovedScenario(t, f)
-	out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
+	out, err := runBrowserLogin(t, s.ctx, s.configPath, "login", "--no-browser", "--reauth")
 	if err == nil || !strings.Contains(err.Error(), "pb login --fresh") || len(*s.steps) != 0 || s.f.enrollCalls != 0 {
 		t.Fatalf("err=%v steps=%v enrollments=%d\n%s", err, *s.steps, s.f.enrollCalls, out)
 	}
@@ -183,7 +185,7 @@ func assertNotReadded(t *testing.T, f *loginDeviceFixture) {
 func TestLoginReauthApprovedByAnotherAccountNeverReadds(t *testing.T) {
 	s := newRemovedScenario(t, &loginDeviceFixture{})
 	s.f.approvedBy = "other@example.test"
-	out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
+	out, err := runBrowserLogin(t, s.ctx, s.configPath, "login", "--no-browser", "--reauth")
 	if err == nil || !strings.Contains(err.Error(), "approval came from other@example.test") || len(*s.steps) != 0 || s.f.enrollCalls != 0 {
 		t.Fatalf("err=%v steps=%v enrollments=%d\n%s", err, *s.steps, s.f.enrollCalls, out)
 	}
@@ -192,7 +194,7 @@ func TestLoginReauthApprovedByAnotherAccountNeverReadds(t *testing.T) {
 // The server refuses the new enrollment (plan limit): the refusal is shown, the sign-in is kept and nothing is wiped.
 func TestLoginShowsTheServersRefusalToReaddARemovedComputer(t *testing.T) {
 	s := newRemovedScenario(t, &loginDeviceFixture{enrollRefusal: "machine limit"})
-	_, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
+	_, err := runBrowserLogin(t, s.ctx, s.configPath, "login", "--no-browser", "--reauth")
 	if err == nil || !strings.Contains(err.Error(), "plan machine limit is reached") || len(*s.steps) != 0 {
 		t.Fatalf("err=%v steps=%v", err, *s.steps)
 	}
@@ -215,9 +217,9 @@ func TestLoginDoesNotWipeARemovedComputerWithoutAYes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := newRemovedScenario(t, &loginDeviceFixture{})
-			workspaceTerminal = func() bool { return c.terminal }
+			s.ctx = withHostDependencies(s.ctx, func(d *hostDependencies) { d.isTerminal = func() bool { return c.terminal } })
 			*s.answer = c.answer
-			out, err := runBrowserLogin(t, t.Context(), s.configPath, append([]string{"login", "--no-browser", "--reauth"}, c.args...)...)
+			out, err := runBrowserLogin(t, s.ctx, s.configPath, append([]string{"login", "--no-browser", "--reauth"}, c.args...)...)
 			if err == nil || len(*s.steps) != 0 || s.f.enrollCalls != 0 {
 				t.Fatalf("err=%v steps=%v enrollments=%d\n%s", err, *s.steps, s.f.enrollCalls, out)
 			}
@@ -246,7 +248,7 @@ func TestLoginReaddsToTheNamedWorkspaceOrFallsBackToPersonal(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := newRemovedScenario(t, &loginDeviceFixture{forbidTeam: c.forbid})
-			out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth", "--workspace", "myteam")
+			out, err := runBrowserLogin(t, s.ctx, s.configPath, "login", "--no-browser", "--reauth", "--workspace", "myteam")
 			if err != nil {
 				t.Fatalf("login: %v\n%s", err, out)
 			}
@@ -269,7 +271,7 @@ func TestLoginReaddStopsBeforeTheWipeWhenTheStaleNoteCannotBeCleared(t *testing.
 	if err = os.MkdirAll(filepath.Join(note, "blocker"), 0o700); err != nil { // removing a non-empty directory fails
 		t.Fatal(err)
 	}
-	_, err = runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
+	_, err = runBrowserLogin(t, s.ctx, s.configPath, "login", "--no-browser", "--reauth")
 	if err == nil || !strings.Contains(err.Error(), "replacement note") || len(*s.steps) != 0 {
 		t.Fatalf("err=%v steps=%v", err, *s.steps)
 	}

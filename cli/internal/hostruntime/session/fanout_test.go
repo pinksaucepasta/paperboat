@@ -297,7 +297,7 @@ func TestFanoutRejectsNoncontiguousOutputWithoutPartialDelivery(t *testing.T) {
 
 // A terminal that stops releases its output buffers, but an attached viewer still receives the output
 // it was owed (the shell's last words before exit); what no attached cursor needs is freed at once, and
-// the rest as soon as it is read (Lane G: browser broadcast publisher stopped on ErrOutputOrder).
+// the rest as soon as it is read (browser broadcast publisher stopped on ErrOutputOrder).
 func TestFanoutReleaseKeepsOutputOwedToAttachedViewers(t *testing.T) {
 	f := NewFanout()
 	for _, id := range []string{"read", "owed"} {

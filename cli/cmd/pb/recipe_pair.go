@@ -55,19 +55,20 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 		return invocationError(err)
 	}
 	cfg.ServerURL = issuer
-	store, err := loginProfileStore(cfg, issuer)
+	store, err := loginProfileStore(c.Context, cfg, issuer)
 	if err != nil {
 		return err
 	}
 	// A machine identity that cannot be read is not "paired": the preflight below then names the missing
-	// administrator rights, which is why it is unreadable for a standard Windows user (victus, rcpwn).
-	machineID, identityErr := loginLocalMachineID(cfg)
+	// administrator rights, which is why it is unreadable for a standard Windows user (Windows test machine, rcpwn).
+	deps := authDependenciesOf(c.Context)
+	machineID, identityErr := deps.localMachineID(cfg)
 	if _, loadErr := store.Load(issuer); identityErr == nil && machineID != "" && loadErr == nil {
 		// A machine removed since (recipe revoked, lifetime, offline) is not "paired": say how to start over.
 		// The session source refreshes an expired access token, so only a rejected session counts.
 		if source, err := auth.NewSource(cfg); err == nil {
 			if credential, err := source.Credential(); err == nil {
-				client := api.New(issuer, credential, loginHTTPClient())
+				client := api.New(issuer, credential, deps.httpClient())
 				client.SetCredentialSource(source)
 				if _, err := client.Me(c.Context); errors.Is(err, api.ErrUnauthenticated) {
 					return usageError{err: err, publicMessage: recipeMachineRemovedMessage, refusal: true}
@@ -83,7 +84,7 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	if err := os.Setenv("PB_RECIPE", tokenText); err != nil {
 		return err
 	}
-	if err := recipeInstallPreflight(c.Context); err != nil {
+	if err := deps.recipeInstallPreflight(c.Context); err != nil {
 		return usageError{err: err, publicMessage: hostruntimecmd.RecipeNeedsRootMessage, refusal: true}
 	}
 	if identityErr != nil {
@@ -99,7 +100,7 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 		return errors.New("the server returned an invalid session for the recipe")
 	}
 	credential := config.Credential{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, TokenType: t.TokenType, ExpiresAt: serverclock.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)}
-	client := api.New(issuer, credential, loginHTTPClient())
+	client := api.New(issuer, credential, deps.httpClient())
 	me, err := client.Me(c.Context)
 	if err != nil {
 		return fmt.Errorf("check the recipe's account: %w", friendlyCommandError(err))
@@ -129,15 +130,15 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	if path := strings.TrimSpace(c.String("config")); path != "" {
 		args = append([]string{"--config", path}, args...)
 	}
-	if code := runRecipeSetup(c, append(args, setupArgs...)); code != 0 {
+	if code := deps.runRecipeSetup(c, append(args, setupArgs...)); code != 0 {
 		return exitCodeError{code: code}
 	}
-	if recipeConfigNeedsService && recipeHasConfig(started.Recipe.Recipe) {
+	if deps.recipeConfigNeedsService && recipeHasConfig(started.Recipe.Recipe) {
 		// The daemon applies [config] unelevated; on Windows the config service needs an administrator
 		// once, and pairing already runs elevated (recipeInstallPreflight).
-		machineID, err := loginLocalMachineID(cfg)
+		machineID, err := deps.localMachineID(cfg)
 		if err == nil {
-			err = recipeConfigService(c.Context, machineID, true)
+			err = deps.recipeConfigService(c.Context, machineID, true)
 		}
 		if err != nil {
 			return fmt.Errorf("install the config sync service; run pb config sync apply in an administrator PowerShell: %w", err)
@@ -145,12 +146,6 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 	}
 	return nil
 }
-
-// recipeConfigNeedsService and recipeConfigService are replaced by tests.
-var (
-	recipeConfigNeedsService = runtime.GOOS == "windows"
-	recipeConfigService      = manageConfigService
-)
 
 func recipeHasConfig(spec json.RawMessage) bool {
 	var r struct {
@@ -163,19 +158,8 @@ func recipeHasConfig(spec json.RawMessage) bool {
 
 const recipeMachineRemovedMessage = "This machine was removed from Paperboat (its recipe was revoked, or machine_lifetime or remove_after_offline removed it). Run `pb uninstall`, then the recipe install again."
 
-// recipeSessionStart, recipeInstallPreflight and runRecipeSetup are replaced by tests.
-var recipeInstallPreflight = hostruntimecmd.RecipeInstallPreflight
-var recipeSessionStart = func(c *command.Context, issuer string, token recipe.Token, label string) (clientapi.RecipeSession, error) {
-	return api.StartRecipeSession(c.Context, issuer, token, label, recipeDeviceType(), runtime.GOOS, loginHTTPClient())
-}
-
-var runRecipeSetup func(c *command.Context, args []string) int
-
-// Set in init: run builds the command tree, which refers back to recipePair.
-func init() {
-	runRecipeSetup = func(c *command.Context, args []string) int {
-		return run(c.Context, args, c.Writer, c.ErrWriter)
-	}
+func recipeSessionStart(c *command.Context, issuer string, token recipe.Token, label string) (clientapi.RecipeSession, error) {
+	return api.StartRecipeSession(c.Context, issuer, token, label, recipeDeviceType(), runtime.GOOS, authDependenciesOf(c.Context).httpClient())
 }
 
 func recipeDeviceType() string {

@@ -2,9 +2,9 @@
 """C280 / C281: `pb tunnel ip-rules` and `pb preview ip-rules` against the edge, from two real source addresses.
 
 A disposable enrolled machine (reached through --machine-cmd, a command prefix such as
-`ssh pbvm4 sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 small-t1`) runs origin_proxy_matrix/app.py
+`ssh Linux test VM sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 small-t1`) runs origin_proxy_matrix/app.py
 (it answers with the X-Forwarded-For the edge sent) and a tunnel or a preview in front of it. Two observers fetch the public URL:
-A runs on this host, B through --observer-b-cmd (e.g. `ssh ubuntu@anvit`), so the edge sees two different client addresses.
+A runs on this host, B through --observer-b-cmd (e.g. `ssh tester@host.example.test`), so the edge sees two different client addresses.
 Checks: show (empty), deny one address, allow-only, each flag replaces only its own list, deny beats allow, `--allow` /0 and a
 malformed address are refused and change nothing, a CIDR form, `--clear`. Everything it creates it removes again.
 

@@ -448,7 +448,7 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 			return nil, err
 		}
 	}
-	rows, err := s.DB.Pool().Query(ctx, `SELECT admission FROM runtime_carrier_attachments WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false) ORDER BY route_id LIMIT $3`, edge.NodeID, edge.ProcessEpoch, runtimewire.MaximumAdmissions+1)
+	rows, err := s.DB.Pool().Query(ctx, `SELECT admission FROM runtime_carrier_attachments WHERE edge_node_id=$1 AND edge_process_epoch=$2 AND paperboat.runtime_carrier_valid(route_id,edge_node_id,edge_process_epoch,false) ORDER BY route_id`, edge.NodeID, edge.ProcessEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +462,7 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 			return nil, err
 		}
 		totalBytes += len(raw)
-		if totalBytes > 16<<20 {
+		if totalBytes > connectorprotocol.MaximumSnapshotBytes {
 			return nil, ErrUnavailable
 		}
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -470,20 +470,14 @@ func (s *Service) Pull(ctx context.Context, edge previewattachment.PreviewEdgeId
 		}
 		a.ExpiresAt = admission.Deadline(time.Now(), s.admissionLifetime())
 		out = append(out, a)
-		if len(out) > runtimewire.MaximumAdmissions {
-			return nil, ErrUnavailable
-		}
 	}
 	// An edge taking endpoint deltas gets its endpoint routes only from the endpoint pull.
 	if err := rows.Err(); err != nil || len(capabilities) == 0 || runtimewire.HasCapability(capabilities, runtimewire.CapabilityEndpointDeltas) {
 		return out, err
 	}
-	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.admissionLifetime()), runtimewire.MaximumAdmissions-len(out))
+	routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.admissionLifetime()))
 	if err != nil {
 		return nil, err
-	}
-	if len(out)+len(routes) > runtimewire.MaximumAdmissions {
-		return nil, ErrUnavailable
 	}
 	return append(out, routes...), nil
 }
@@ -516,12 +510,9 @@ func (s *Service) PullEndpoints(ctx context.Context, edge previewattachment.Prev
 		if err := endpoints.RecordEdgeServes(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, runtimewire.HasCapability(capabilities, runtimewire.CapabilityTunnelEndpoints)); err != nil {
 			return runtimewire.Snapshot{}, err
 		}
-		routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.admissionLifetime()), runtimewire.MaximumAdmissions)
+		routes, err := endpoints.EdgeAdmissions(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, admission.Deadline(time.Now(), s.admissionLifetime()))
 		if err != nil {
 			return runtimewire.Snapshot{}, err
-		}
-		if len(routes) > runtimewire.MaximumAdmissions {
-			return runtimewire.Snapshot{}, ErrUnavailable
 		}
 		out.Complete, out.Admissions = true, &routes
 		return out, nil
@@ -663,9 +654,6 @@ const (
 )
 
 func (s *Service) Observe(ctx context.Context, edge previewattachment.PreviewEdgeIdentity, observations []runtimewire.Observation) error {
-	if len(observations) > runtimewire.MaximumAdmissions {
-		return ErrInvalid
-	}
 	// A stale observation (its carrier was replaced) must not roll back the
 	// renewal of the edge's other carriers: those commit, then the edge hears 409.
 	// Read committed: every write below is fenced by its own WHERE (generation,
@@ -812,7 +800,7 @@ func (s *Service) Tunnels(ctx context.Context, proof previewattachment.MachinePr
 FROM endpoints e JOIN tunnel_config_generations g ON g.tunnel_id=e.tunnel_id AND g.activation_state='active'
 JOIN tunnels t ON t.id=e.tunnel_id AND t.account_id=$2 AND t.created_by_host_id=$1
 WHERE e.kind='tunnel' AND e.agent_machine_id=$1 AND e.desired_state='active'
-ORDER BY g.tunnel_id LIMIT $3`, proof.MachineID, proof.UserID, runtimewire.MaximumAdmissions)
+ORDER BY g.tunnel_id`, proof.MachineID, proof.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -849,7 +837,7 @@ FROM control_tunnel_nodes n LEFT JOIN machine_edge_placements p ON p.machine_id=
 AND p.installation_generation=$4 AND p.worker_generation=$5 AND p.observed_at>now()-interval '2 minutes'
 WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
-AND n.capacity_observed_at>now()-interval '30 seconds' AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
+AND n.capacity_observed_at>now()-interval '30 seconds'
 AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND ` + eligible + `
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL

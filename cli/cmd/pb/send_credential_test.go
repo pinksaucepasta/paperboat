@@ -86,7 +86,7 @@ func TestSendUsesRenewedCredentialWhileWaitingForApproval(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- server.Run(ctx) }()
 	defer stopLocalDaemonReadinessServer(t, cancel, done)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

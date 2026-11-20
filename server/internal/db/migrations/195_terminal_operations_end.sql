@@ -1,5 +1,5 @@
 -- +goose Up
--- Finished terminal session operations are deleted 7 days after they complete (Lane K terminal plan, slice 8);
+-- Finished terminal session operations are deleted 7 days after they complete (terminal plan, slice 8);
 -- this index serves that sweep.
 -- small-table: one row per terminal lifecycle operation, kept 7 days after it finishes.
 CREATE INDEX user_machine_terminal_session_operations_finished

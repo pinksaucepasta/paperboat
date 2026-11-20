@@ -44,7 +44,7 @@ func TestCoordinatorRetriesTheBrowserGatewayAfterAFailedCertificate(t *testing.T
 	c.ctx, c.running = t.Context(), true
 	c.mu.Unlock()
 	t.Cleanup(c.resetReconcileRetry)
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
 		t.Fatalf("a browser certificate failure must keep native access: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestCoordinatorKeepsLocalAccessWhenTheGuardRefusesANameAndRetries(t *testin
 	c.ctx, c.running = t.Context(), true
 	c.mu.Unlock()
 	t.Cleanup(c.resetReconcileRetry)
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
 		t.Fatalf("a refused name must not fail local access: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestCoordinatorNamesAFailedBrowserPortListenerAndRetries(t *testing.T) {
 	c.ctx, c.running = t.Context(), true
 	c.mu.Unlock()
 	t.Cleanup(c.resetReconcileRetry)
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
 		t.Fatalf("a failed browser port listener must not fail local access: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestCoordinatorNamesAFailedBrowserPortListenerAndRetries(t *testing.T) {
 
 // A port another program or the OS owns (sshd on 22, a Windows excluded port range) cannot be served by any retry:
 // like a native port conflict it is not a pending step, so pb doctor stays healthy on a Windows PC whose
-// peers export port 22, and the ports that can be bound are still served (victus, 2026-11-14).
+// peers export port 22, and the ports that can be bound are still served (Windows test machine, 2026-11-14).
 func TestCoordinatorDoesNotNagAboutABrowserPortAnotherProgramOwns(t *testing.T) {
 	ca, err := testcert.New()
 	if err != nil {
@@ -190,7 +190,7 @@ func TestCoordinatorDoesNotNagAboutABrowserPortAnotherProgramOwns(t *testing.T) 
 	c.ctx, c.running = t.Context(), true
 	c.mu.Unlock()
 	t.Cleanup(c.resetReconcileRetry)
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{22, 8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{22, 8080}}
 	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 	c.ctx, c.running = t.Context(), true
 	c.mu.Unlock()
 	t.Cleanup(c.resetReconcileRetry)
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
 		t.Fatalf("a busy gateway port must not fail local access: %v", err)
 	}

@@ -16,11 +16,11 @@ func TestTwoNodeReassignmentFencesStaleOwner(t *testing.T) {
 	if !stateOne.MarkReady() || !stateTwo.MarkReady() {
 		t.Fatal("nodes did not become ready")
 	}
-	nodeOne, err := node.NewManager(stateOne, 1)
+	nodeOne, err := node.NewManager(stateOne)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeTwo, err := node.NewManager(stateTwo, 1)
+	nodeTwo, err := node.NewManager(stateTwo)
 	if err != nil {
 		t.Fatal(err)
 	}

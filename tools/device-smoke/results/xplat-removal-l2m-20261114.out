@@ -1,6 +1,0 @@
-new identity True 3
-L->rx41n-m exec ok after 5 s
-ping 0  sample 4: path=direct connect=228.54ms summary: sent=4 received=4 loss=0.0% connect min/avg/max=228.14/228.48/228.97ms 
-L->rx41n-w exec ok after 5 s
-ping 0  sample 4: path=direct connect=259.66ms summary: sent=4 received=4 loss=0.0% connect min/avg/max=256.90/259.89/262.78ms 
-rc=0

@@ -15,20 +15,19 @@ import (
 func TestLoginOnASignedInComputerWhoseDaemonIsNotEnrolledAsksForApprovalAgain(t *testing.T) {
 	f := &loginDeviceFixture{}
 	srv := loginDeviceServer(t, f)
-	oldMachine, oldPair, oldDaemon := loginLocalMachineID, pairLoginDevice, loginDaemonAwaitingEnrollment
-	t.Cleanup(func() {
-		loginLocalMachineID, pairLoginDevice, loginDaemonAwaitingEnrollment = oldMachine, oldPair, oldDaemon
+	awaiting := false
+	ctx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
+		d.pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
+		d.daemonAwaitingEnrollment = func(context.Context) bool { return awaiting }
 	})
-	loginLocalMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
-	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
-	loginDaemonAwaitingEnrollment = func(context.Context) bool { return false }
 	path, _ := browserLoginFixture(t, srv.URL)
-	if out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser"); err != nil {
+	if out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser"); err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
-	loginDaemonAwaitingEnrollment = func(context.Context) bool { return true }
+	awaiting = true
 	f.authorize = nil
-	again, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
+	again, err := runBrowserLogin(t, ctx, path, "login", "--no-browser")
 	if err != nil || strings.Contains(again, "Already signed in") || f.authorize["enrolled_machine_id"] != "machine_abc" {
 		t.Fatalf("login with an unenrolled daemon: err=%v authorize=%v output=%s", err, f.authorize, again)
 	}

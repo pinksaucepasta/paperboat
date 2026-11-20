@@ -138,7 +138,7 @@ func TestPrivateDurableRouteAcceptsOnlyInternalCarrierToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	const token = "private-access-token-0123456789abcdef"
-	connections, _ := NewPrivateAccessConnectionRegistry(8)
+	connections := NewPrivateAccessConnectionRegistry()
 	expires := time.Now().Add(time.Minute)
 	accessRequest := connectorprotocol.PrivateAccessRequest{AccountID: "account_1", ResourceKind: "preview", ResourceID: "preview_1", RouteID: "route_private_01", Audience: "paperboat-preview-http", MachineID: "machine_1", SessionID: "installation_4", InstallationGeneration: 4, ExpiresAt: expires, Nonce: "nonce_1", OperationID: "operation_1", CarrierSessionID: "session_1", RouteGeneration: 1, ProcessGeneration: 2, ConfigGeneration: 3, SessionGeneration: 4, AssignmentGeneration: 5, EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Protocol: "http", Method: http.MethodConnect, Host: "tunnel.example.test", Path: "/", IdempotencyKey: "access_1", RequestID: "request_1", CorrelationID: "correlation_1"}
 	_, err := connections.Register("127.0.0.1:41001", accessRequest, expires)
@@ -1130,7 +1130,7 @@ func TestFormatForwardedUsesSafeAddressForms(t *testing.T) {
 	}
 }
 
-// Lane I (PLAN 3b, first-preview miss): a request to a preview the server admitted on this edge
+// (PLAN 3b, first-preview miss): a request to a preview the server admitted on this edge
 // waits for its carrier route instead of getting a 404; one that does not attach in time gets a
 // 503 the caller can retry, and an unknown preview still gets an immediate 404.
 func TestAdmittedPreviewWaitsForItsRouteInsteadOfNotFound(t *testing.T) {

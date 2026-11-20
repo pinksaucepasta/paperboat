@@ -2,30 +2,33 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
 
-func readyManager(t *testing.T, capacity uint32) *Manager {
+func readyManager(t *testing.T) *Manager {
 	t.Helper()
 	state := New("edge_test_01")
 	if !state.MarkReady() {
 		t.Fatal("ready transition failed")
 	}
-	manager, err := NewManager(state, capacity)
+	manager, err := NewManager(state)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return manager
 }
 
-func TestCapacityReplacementAndStaleGeneration(t *testing.T) {
-	manager := readyManager(t, 1)
+func TestAnyNumberOfConnectorsReplacementAndStaleGeneration(t *testing.T) {
+	manager := readyManager(t)
 	if err := manager.AdmitConnector("connector", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.AdmitConnector("other", 1); err != ErrCapacity {
-		t.Fatalf("capacity = %v", err)
+	for i := range 5000 { // no connector limit: a node holds every machine that attaches
+		if err := manager.AdmitConnector(fmt.Sprintf("other_%d", i), 1); err != nil {
+			t.Fatalf("connector %d refused: %v", i, err)
+		}
 	}
 	if err := manager.OpenStream("connector", 1); err != nil {
 		t.Fatal(err)
@@ -48,7 +51,7 @@ func TestCapacityReplacementAndStaleGeneration(t *testing.T) {
 }
 
 func TestDrainRejectsNewWorkAndWaitsForExistingStreams(t *testing.T) {
-	manager := readyManager(t, 2)
+	manager := readyManager(t)
 	if err := manager.AdmitConnector("connector", 1); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,7 @@ func TestDrainRejectsNewWorkAndWaitsForExistingStreams(t *testing.T) {
 }
 
 func TestDrainDeadlineFencesAllOwnership(t *testing.T) {
-	manager := readyManager(t, 1)
+	manager := readyManager(t)
 	if err := manager.AdmitConnector("connector", 1); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +90,7 @@ func TestDrainDeadlineFencesAllOwnership(t *testing.T) {
 }
 
 func TestAggregateStreamCountsSaturateWithoutAppearingEmpty(t *testing.T) {
-	manager := readyManager(t, 2)
+	manager := readyManager(t)
 	manager.connectors["first"] = &connector{generation: 1, streams: ^uint32(0), retired: make(map[uint64]uint32)}
 	manager.connectors["second"] = &connector{generation: 1, streams: 1, retired: map[uint64]uint32{2: 1}}
 

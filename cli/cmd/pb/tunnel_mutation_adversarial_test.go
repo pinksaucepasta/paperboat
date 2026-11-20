@@ -15,14 +15,14 @@ import (
 
 const tunnelMutationSecretCanary = "pb_secret_mutation_canary_7f0d"
 
-func executeAdversarialTunnelCommand(t *testing.T, args ...string) (string, string, error) {
+func executeAdversarialTunnelCommand(t *testing.T, deps tunnelDependencies, args ...string) (string, string, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	command := tunnelCobraCommandV1()
 	command.SetOut(&stdout)
 	command.SetErr(&stderr)
 	command.SetArgs(args)
-	err := command.Execute()
+	err := command.ExecuteContext(deps.context(t.Context()))
 	return stdout.String(), stderr.String(), err
 }
 
@@ -38,7 +38,7 @@ func assertNoTunnelMutationSecret(t *testing.T, values ...string) {
 func TestTunnelRouteMutationIdempotencyReplayAndConflict(t *testing.T) {
 	var firstBody []byte
 	requests := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
 			tunnel := validCommandTunnel()
 			w.Header().Set("ETag", tunnel.ETag)
@@ -76,11 +76,11 @@ func TestTunnelRouteMutationIdempotencyReplayAndConflict(t *testing.T) {
 	})
 
 	args := []string{"route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080", "--json"}
-	firstOut, firstErrOut, err := executeAdversarialTunnelCommand(t, args...)
+	firstOut, firstErrOut, err := executeAdversarialTunnelCommand(t, deps, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondOut, secondErrOut, err := executeAdversarialTunnelCommand(t, args...)
+	secondOut, secondErrOut, err := executeAdversarialTunnelCommand(t, deps, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestTunnelRouteMutationIdempotencyReplayAndConflict(t *testing.T) {
 		t.Fatalf("first=%q second=%q stderr=%q/%q", firstOut, secondOut, firstErrOut, secondErrOut)
 	}
 
-	stdout, stderr, err := executeAdversarialTunnelCommand(t, "route", "add", "tun_1", "--name", "different", "--to", "http://127.0.0.1:8080", "--json")
+	stdout, stderr, err := executeAdversarialTunnelCommand(t, deps, "route", "add", "tun_1", "--name", "different", "--to", "http://127.0.0.1:8080", "--json")
 	var apiErr *api.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Code != "idempotency_conflict" {
 		t.Fatalf("error=%T %v", err, err)
@@ -121,7 +121,7 @@ func TestTunnelMutationsRequireCurrentETagAndMapStaleWrites(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name+" stale", func(t *testing.T) {
 			mutations := 0
-			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+			deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == test.readMethod && r.URL.Path == test.readPath:
 					test.writeRead(w)
@@ -137,7 +137,7 @@ func TestTunnelMutationsRequireCurrentETagAndMapStaleWrites(t *testing.T) {
 					t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 				}
 			})
-			stdout, stderr, err := executeAdversarialTunnelCommand(t, test.args...)
+			stdout, stderr, err := executeAdversarialTunnelCommand(t, deps, test.args...)
 			var apiErr *api.APIError
 			if !errors.As(err, &apiErr) || apiErr.Status != http.StatusPreconditionFailed || apiErr.Code != "etag_mismatch" || mutations != 1 {
 				t.Fatalf("error=%T %v mutations=%d", err, err, mutations)
@@ -177,14 +177,14 @@ func TestTunnelMutationsRejectWrongAccountResourceProjection(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			requests := 0
-			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+			deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				requests++
 				if r.Method != http.MethodGet {
 					t.Fatalf("cross-account mutation was attempted: %s %s", r.Method, r.URL.Path)
 				}
 				test.serve(w, r)
 			})
-			stdout, stderr, err := executeAdversarialTunnelCommand(t, test.args...)
+			stdout, stderr, err := executeAdversarialTunnelCommand(t, deps, test.args...)
 			if !errors.Is(err, api.ErrUnsafeTunnelResponse) || requests != 1 || stdout != "" || stderr != "" {
 				t.Fatalf("error=%v requests=%d stdout=%q stderr=%q", err, requests, stdout, stderr)
 			}
@@ -195,13 +195,13 @@ func TestTunnelMutationsRejectWrongAccountResourceProjection(t *testing.T) {
 
 func TestTunnelMutationSelectorsRejectCursorCyclesAndOversizePages(t *testing.T) {
 	t.Run("route cursor cycle", func(t *testing.T) {
-		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet || r.URL.Path != "/v1/tunnels/tun_1/routes" {
 				t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRoutePage{NextCursor: "cycle"}})
 		})
-		stdout, stderr, err := executeAdversarialTunnelCommand(t, "route", "update", "tun_1", "missing", "--name", "renamed", "--json")
+		stdout, stderr, err := executeAdversarialTunnelCommand(t, deps, "route", "update", "tun_1", "missing", "--name", "renamed", "--json")
 		if !errors.Is(err, api.ErrUnsafeTunnelResponse) || stdout != "" || stderr != "" {
 			t.Fatalf("error=%v stdout=%q stderr=%q", err, stdout, stderr)
 		}
@@ -210,7 +210,7 @@ func TestTunnelMutationSelectorsRejectCursorCyclesAndOversizePages(t *testing.T)
 
 // A newer server may add fields to a success response. They are dropped, never printed.
 func TestTunnelMutationDropsSecretBearingUnknownSuccessFieldsWithoutEchoingThem(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1" {
 			tunnel := validCommandTunnel()
 			w.Header().Set("ETag", tunnel.ETag)
@@ -227,7 +227,7 @@ func TestTunnelMutationDropsSecretBearingUnknownSuccessFieldsWithoutEchoingThem(
 			"enrollment_token": tunnelMutationSecretCanary,
 		}})
 	})
-	stdout, stderr, err := executeAdversarialTunnelCommand(t, "route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080", "--json")
+	stdout, stderr, err := executeAdversarialTunnelCommand(t, deps, "route", "add", "tun_1", "--name", "api", "--to", "http://127.0.0.1:8080", "--json")
 	if err != nil || !strings.Contains(stdout, `"route_1"`) {
 		t.Fatalf("an added response field broke the command: error=%v stdout=%q stderr=%q", err, stdout, stderr)
 	}

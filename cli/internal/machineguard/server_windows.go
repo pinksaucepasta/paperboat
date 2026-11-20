@@ -27,7 +27,7 @@ const DefaultStateDir = `C:\ProgramData\Paperboat\MachineGuard`
 // releaseDefersPolicy: a release shuts the guard's own socket at once (no other program may accept on the range,
 // and the daemon holds no descriptor), and the WFP rule left behind only lets that OS user connect to its own
 // claimed address. A full WFP transaction per release, under the guard lock, held every OS user's daemon past its
-// deadline whenever routes went away (victus, 2026-11-16: local access degraded every ~20 min).
+// deadline whenever routes went away (Windows test machine, 2026-11-16: local access degraded every ~20 min).
 const releaseDefersPolicy = true
 
 // portRedirects: machine ports listen on their own port; Windows lets a program bind 0.0.0.0 on the same

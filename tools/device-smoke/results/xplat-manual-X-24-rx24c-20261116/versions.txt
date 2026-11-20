@@ -1,4 +1,0 @@
-rx24c-l    ▄▄▝▀▀▀▀▀▘▄▄   Version dev-49332aea7
-rx24c-l2   ▄▄▝▀▀▀▀▀▘▄▄   Version dev-49332aea7
-rx24c-m    ▄▄▝▀▀▀▀▀▘▄▄   Version dev-49332aea7
-rx24c-w2   ▄▄▝▀▀▀▀▀▘▄▄   Version dev-49332aea7

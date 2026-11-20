@@ -719,12 +719,12 @@ The current Task 30 topology, explicitly narrowed by the user on 2026-09-08, is
 Hetzner only: two task-owned Docker edges with independently reachable public test
 endpoints. Helsinki's shared server, database and services must remain online and
 untouched. This demonstrates simulated edge loss only, not geographic outage survival.
-The earlier Mumbai/hp ingress proposal is superseded for this gate.
+The earlier Mumbai/linux-test ingress proposal is superseded for this gate.
 
 A single ready node is valid `redundancy: reduced`, with no node/region failover claim.
 The present server/database also run in Helsinki. Whole-host/region failure cannot
 meet the freshness-bound availability target unless control authority and its
-persistence survive that failure domain. hp alone does not establish this; Task 30
+persistence survive that failure domain. linux-test alone does not establish this; Task 30
 requires a surviving control-plane deployment or an explicitly narrower availability
 claim. No offline authorization grace is introduced to mask it.
 
@@ -740,7 +740,7 @@ passes; remove its obsolete producers, consumers, fixtures and configuration tog
 Task 34 checks residual wiring, not a permanent dual-stack period. Applied migration
 history remains history; remove obsolete live columns through a new forward migration.
 Shared carrier/route/bootstrap machinery is adapted where still required, not deleted
-when supported native consumers still use it. hp's unrelated Coolify Caddy is outside this inventory.
+when supported native consumers still use it. linux-test's unrelated deployment-host Caddy is outside this inventory.
 
 | Existing surface | Owning replacement/deletion gate |
 | --- | --- |

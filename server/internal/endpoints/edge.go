@@ -48,10 +48,25 @@ AND n.endpoints_epoch=e.epoch AND (NOT $3 OR n.tunnel_endpoints_epoch=e.epoch)`,
 // whose agent runtime carrier on this edge is still valid becomes an admission bound to that
 // carrier's identity, with the route's own id, hostname and kind. Callers send these only to an
 // edge that advertised runtimewire.CapabilityEndpoints.
-func EdgeAdmissions(ctx context.Context, q Querier, nodeID, epoch string, expiresAt time.Time, limit int) ([]runtimewire.Admission, error) {
-	admissions, _, err := EdgeAdmissionsPage(ctx, q, nodeID, epoch, Position{}, expiresAt, limit)
-	return admissions, err
+func EdgeAdmissions(ctx context.Context, q Querier, nodeID, epoch string, expiresAt time.Time) ([]runtimewire.Admission, error) {
+	all := []runtimewire.Admission{}
+	var after Position
+	for {
+		// A page of rows may end in rows that are not live admissions; Position is the last row either way.
+		page, last, err := EdgeAdmissionsPage(ctx, q, nodeID, epoch, after, expiresAt, edgeAdmissionsPageRows-1)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < edgeAdmissionsPageRows {
+			return all, nil
+		}
+		after = last
+	}
 }
+
+// edgeAdmissionsPageRows is how many rows one query of the full set reads.
+const edgeAdmissionsPageRows = 500
 
 // Position is a keyset position in an edge's endpoint assignments, ordered by carrier session and
 // route id; the zero Position is before the first.
@@ -154,7 +169,7 @@ func ObserveTx(ctx context.Context, tx *db.Tx, nodeID, epoch string, o runtimewi
 	var current bool
 	// A route is ready on an edge only while the agent's carrier session there is ready too: after a
 	// host restart an edge kept reporting its routes on a carrier that was gone (ready=false), and
-	// DNS, health and private access kept sending traffic to that edge (pbvm2 lanemg-s1, 2026-10-26).
+	// DNS, health and private access kept sending traffic to that edge (Linux test VM test-s1, 2026-10-26).
 	err := tx.QueryRow(ctx, `WITH assignment AS (
 SELECT x.route_id,x.edge_node_id,x.observed_ready AS was,x.observed_ready,x.observed_at,
  ($6 AND x.desired='active' AND EXISTS(SELECT 1 FROM runtime_carrier_attachments ra WHERE ra.edge_node_id=x.edge_node_id

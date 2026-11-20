@@ -2,7 +2,7 @@
 //
 // The check itself (internal/app, TestPerformanceBudgetsOnSeededPostgres) drives the real router against a
 // database seeded by Prepare and fails when an endpoint's median latency or its query count per request exceeds
-// its budget. The gate host is shared with every lane's builds, so its p95 measures their load, not ours: the
+// its budget. The gate host is shared with every other build, so its p95 measures their load, not ours: the
 // median (with headroom) and the query count are the regression signals, and p95 is reported.
 // It runs in `make gate` when PAPERBOAT_PERF_DATABASE_DSN names an isolated *_test database.
 package perf

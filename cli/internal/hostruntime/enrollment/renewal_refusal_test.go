@@ -244,3 +244,30 @@ func TestHelperProofsCarryAFreshNonce(t *testing.T) {
 		nonces[claims.Nonce] = true
 	}
 }
+
+// A 401 whose Date is minutes off the machine's clock may only mean the proof was signed with a wrong clock. It is
+// not recorded as a refusal (that would hold renewal for an hour after the clock is fixed); the retry renews.
+func TestRenewalUnauthorizedWithSkewedDateIsNotARefusal(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var requests atomic.Int32
+	root, server := enrolledRoot(t, now, func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Date", now.Add(10*time.Minute).Format(http.TimeFormat))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "credential_invalid"}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"helper_id": "hlp_1", "machine_id": "machine_1", "environment_id": "env_1", "credential": strings.Repeat("r", 40), "expires_at": now.Add(time.Hour)}})
+	})
+	source := renewalSourceFor(t, server.URL, root, now, server.Client().Transport)
+	if _, err := source.Token(context.Background()); err == nil || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("skewed 401 err=%v, want a transient unavailable answer", err)
+	}
+	if RenewalRefused(root, now) {
+		t.Fatal("a 401 with a skewed Date was recorded as a refusal")
+	}
+	if token, err := source.Token(context.Background()); err != nil || token != strings.Repeat("r", 40) {
+		t.Fatalf("the retry did not renew: %q %v", token, err)
+	}
+}

@@ -11,12 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/posthogcapture"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
-const MaxWindow = 90 * 24 * time.Hour
+const MaxWindow = config.ResourceBandwidthWindow
 const MaxResources = 200
 const MaxPaths = 32
 

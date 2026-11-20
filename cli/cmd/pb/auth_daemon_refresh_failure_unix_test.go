@@ -55,11 +55,11 @@ func TestLoginDaemonRefreshFailureAfterRevocationPointsToFreshLogin(t *testing.T
 			go func() { done <- server.Run(ctx) }()
 			t.Cleanup(func() { cancel(); <-done })
 			waitForCommandSocket(t, socket)
-			old := currentLocalDaemonPaths
-			currentLocalDaemonPaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: socket}, nil }
-			t.Cleanup(func() { currentLocalDaemonPaths = old })
+			callCtx := withHostDependencies(ctx, func(d *hostDependencies) {
+				d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: socket}, nil }
+			})
 
-			err = refreshLocalInventory(ctx)
+			err = refreshLocalInventory(callCtx)
 			var remote *localapi.RemoteError
 			if !errors.As(err, &remote) || remote.Code != c.code {
 				t.Fatalf("refresh err=%v, want a daemon refusal with code %s", err, c.code)

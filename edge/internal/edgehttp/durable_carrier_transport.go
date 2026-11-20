@@ -23,7 +23,6 @@ import (
 
 const (
 	defaultDataCarrierRouteOpenTimeout = 10 * time.Second
-	maximumDataCarrierRoutes           = 4096
 	maximumDataCarrierProbeHeader      = 64 << 10
 )
 
@@ -47,7 +46,6 @@ type DataCarrierRouteRegistry struct {
 	ingressAuthority func(context.Context, route.RouteRule) (connectorprotocol.IngressDecision, error)
 	ingressLimits    *IngressLimits
 	usage            IngressUsage
-	maximum          int
 	publicTCPIdle    time.Duration
 	done             chan struct{}
 	once             sync.Once
@@ -100,7 +98,6 @@ type DataCarrierRouteRegistryConfig struct {
 	IngressAuthority func(context.Context, route.RouteRule) (connectorprotocol.IngressDecision, error)
 	IngressLimits    *IngressLimits
 	Usage            IngressUsage
-	MaximumRoutes    int
 	// PublicTCPIdleTimeout closes a public TCP or TLS stream after this long without traffic in
 	// either direction; zero keeps idle streams open.
 	PublicTCPIdleTimeout time.Duration
@@ -109,17 +106,14 @@ type DataCarrierRouteRegistryConfig struct {
 }
 
 func NewDataCarrierRouteRegistry(config DataCarrierRouteRegistryConfig) (*DataCarrierRouteRegistry, error) {
-	if config.MaximumRoutes == 0 {
-		config.MaximumRoutes = maximumDataCarrierRoutes
-	}
-	if config.MaximumRoutes < 1 || config.MaximumRoutes > maximumDataCarrierRoutes || config.PublicTCPIdleTimeout < 0 {
+	if config.PublicTCPIdleTimeout < 0 {
 		return nil, ErrDataCarrierRouteInvalid
 	}
 	limits, err := newIngressLimits(config.IngressLimits)
 	if err != nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, publicTCPIdle: config.PublicTCPIdleTimeout, addressAllowed: config.AddressAllowed, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry), connected: make(chan struct{}, 1)}, nil
+	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, publicTCPIdle: config.PublicTCPIdleTimeout, addressAllowed: config.AddressAllowed, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry), connected: make(chan struct{}, 1)}, nil
 }
 
 // Attach registers one already-authenticated server. The Server identity is
@@ -185,10 +179,6 @@ func (r *DataCarrierRouteRegistry) attachState(server *datacarrier.Server, machi
 		}
 		old.once.Do(func() { close(old.done) })
 	}
-	if old == nil && len(r.byKey) >= r.maximum {
-		r.mu.Unlock()
-		return ErrDataCarrierRouteInvalid
-	}
 	r.byKey[key] = entry
 	r.mu.Unlock()
 	select {
@@ -245,7 +235,7 @@ func validateReplicaState(server *datacarrier.Server, state ReplicaState) error 
 	if server == nil || state.Generation == 0 || state.Generation != server.Identity().Generation || state.FailureDomain == "" || state.Latency < 0 || state.Capacity == 0 {
 		return ErrDataCarrierRouteInvalid
 	}
-	if len(state.RouteIDs) == 0 || len(state.RouteIDs) > maximumDataCarrierRoutes || len(state.HealthyRoutes) > len(state.RouteIDs) || len(state.RouteBindings) != len(state.RouteIDs) {
+	if len(state.RouteIDs) == 0 || len(state.HealthyRoutes) > len(state.RouteIDs) || len(state.RouteBindings) != len(state.RouteIDs) {
 		return ErrDataCarrierRouteInvalid
 	}
 	seen := make(map[string]bool, len(state.RouteIDs))

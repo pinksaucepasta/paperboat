@@ -1,6 +1,6 @@
 #!/bin/bash
 # final_pair_extras.sh MODE HOST [PREVIOUS|CANDIDATE [WRONG_PLATFORM]]: final re-check checks that need fresh throwaway pairs, on fresh throwaway containers on HOST
-# (a Docker host with the laneh-ubuntu24-systemd image). Every machine is installed with the published one-liner (the official
+# (a Docker host with the test-systemd image). Every machine is installed with the published one-liner (the official
 # Latest) and enrolled in the fresh throwaway account of the run: FRESH_MINT is a pb signed in to that account (final_recheck.py
 # sets it up); there is no fallback to any other account.
 #
@@ -35,9 +35,9 @@ MODE=${1:?exec|revoke|history|reinstall|continuity|failures|scheduled} HOST=${2:
 : "${FRESH_MINT:?the pb of the fresh throwaway account (see final_recheck.py)}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-# A Docker host whose user needs no sudo for docker (hp): SMOKE_CT_DOCKER=docker turns the scripts' `sudo -n docker` into `docker`.
+# A Docker host whose user needs no sudo for docker (Linux test machine): SMOKE_CT_DOCKER=docker turns the scripts' `sudo -n docker` into `docker`.
 SHIM=; [ "${SMOKE_CT_DOCKER:-}" = docker ] && SHIM='sudo() { shift; "$@"; }'
-T=final-$MODE-t-$STAMP P=final-$MODE-p-$STAMP ALIAS=lanea-fx-$STAMP
+T=final-$MODE-t-$STAMP P=final-$MODE-p-$STAMP ALIAS=test-fx-$STAMP
 MACHINE_IDS=
 
 finish() {

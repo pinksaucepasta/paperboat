@@ -384,7 +384,7 @@ func (r *absentOwnerRunner) Output(_ context.Context, name string, args ...strin
 	return "LoadState=not-found\n", nil
 }
 
-// victus: an update's retirement stopped and disabled an old owner that had never opened its store, but did not
+// Windows test machine: an update's retirement stopped and disabled an old owner that had never opened its store, but did not
 // finish removing it. Reconcile took the running path for the still-registered owner, failed to connect every pass
 // and kept it catalogued forever; every exec start then probed it. A stopped owner with no history is now removed
 // and forgotten.

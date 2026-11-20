@@ -54,23 +54,23 @@ func (w accessMachineOutput) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func withAccessMachineRuntime(t *testing.T, runtime accessMachineRuntime, machineID string) {
-	t.Helper()
-	original := accessMachineRuntimeForCommand
-	accessMachineRuntimeForCommand = func(*cobra.Command, string) (accessMachineRuntime, string, error) { return runtime, machineID, nil }
-	t.Cleanup(func() { accessMachineRuntimeForCommand = original })
+func withAccessMachineRuntime(ctx context.Context, runtime accessMachineRuntime, machineID string) context.Context {
+	return withAccessDependencies(ctx, func(d *accessDependencies) {
+		d.machineRuntime = func(*cobra.Command, string) (accessMachineRuntime, string, error) { return runtime, machineID, nil }
+	})
 }
 
 func TestAccessMachineRejectsUnsafeListenerAndPortBeforeAuthentication(t *testing.T) {
 	called := false
-	original := accessMachineRuntimeForCommand
-	accessMachineRuntimeForCommand = func(*cobra.Command, string) (accessMachineRuntime, string, error) {
-		called = true
-		return nil, "", errors.New("unexpected")
-	}
-	t.Cleanup(func() { accessMachineRuntimeForCommand = original })
+	ctx := withAccessDependencies(t.Context(), func(d *accessDependencies) {
+		d.machineRuntime = func(*cobra.Command, string) (accessMachineRuntime, string, error) {
+			called = true
+			return nil, "", errors.New("unexpected")
+		}
+	})
 	for _, args := range [][]string{{"machine", "--port", "0"}, {"machine", "--port", "70000"}, {"machine", "--port", "443", "--listen", "0.0.0.0:0"}, {"machine", "--port", "443", "--listen", "localhost:0"}} {
 		command := accessMachineCobraCommandV1()
+		command.SetContext(ctx)
 		command.SetArgs(args)
 		if err := command.Execute(); !errors.Is(err, errAccessMachineInvalid) || !strings.Contains(err.Error(), "--") {
 			t.Fatalf("args=%v err=%v", args, err)
@@ -107,8 +107,7 @@ func TestAccessMachineForwardsFreshAuthorizedFlowsAndHalfClose(t *testing.T) {
 	runtime := &accessMachineTestRuntime{dial: func(ctx context.Context) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "tcp4", origin.Addr().String())
 	}}
-	withAccessMachineRuntime(t, runtime, "machine_01")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withAccessMachineRuntime(t.Context(), runtime, "machine_01"))
 	defer cancel()
 	lines := make(chan string, 1)
 	command := accessMachineCobraCommandV1()
@@ -159,12 +158,13 @@ func TestAccessMachineForwardsFreshAuthorizedFlowsAndHalfClose(t *testing.T) {
 }
 
 func TestAccessMachineRuntimeErrorIsActionableAndDoesNotListen(t *testing.T) {
-	original := accessMachineRuntimeForCommand
-	accessMachineRuntimeForCommand = func(*cobra.Command, string) (accessMachineRuntime, string, error) {
-		return nil, "", fmt.Errorf("Paperboat sign-in credentials are unavailable; run the enrollment command from the Paperboat dashboard, then retry")
-	}
-	t.Cleanup(func() { accessMachineRuntimeForCommand = original })
+	ctx := withAccessDependencies(t.Context(), func(d *accessDependencies) {
+		d.machineRuntime = func(*cobra.Command, string) (accessMachineRuntime, string, error) {
+			return nil, "", fmt.Errorf("Paperboat sign-in credentials are unavailable; run the enrollment command from the Paperboat dashboard, then retry")
+		}
+	})
 	command := accessMachineCobraCommandV1()
+	command.SetContext(ctx)
 	command.SetArgs([]string{"office", "--port", "443"})
 	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "enrollment command from the Paperboat dashboard") {
 		t.Fatalf("error=%v", err)
@@ -194,8 +194,7 @@ func TestAccessMachineJSONOutputIsBoundedPublicState(t *testing.T) {
 		go server.Close()
 		return client, nil
 	}}
-	withAccessMachineRuntime(t, runtime, "machine_01")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withAccessMachineRuntime(t.Context(), runtime, "machine_01"))
 	lines := make(chan string, 1)
 	command := accessMachineCobraCommandV1()
 	command.SetContext(ctx)
@@ -369,7 +368,7 @@ func TestTeamMemberIsToldWhyASharedMachinePortIsNotOffered(t *testing.T) {
 	}
 }
 
-// Round 29, lanea-r1: a port with no service ended "while reading the machine from the local Paperboat
+// Round 29, test-r1: a port with no service ended "while reading the machine from the local Paperboat
 // service: DeadlineExceeded" when the daemon call hit the same deadline; it is the wait for the port.
 func TestMachineServiceWaitNamesTheWaitWhenTheDaemonCallTimesOut(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)

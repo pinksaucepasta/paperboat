@@ -722,7 +722,7 @@ func (g *guardServer) acquireGatewayRoute(ctx context.Context, conn controlConn,
 }
 
 // nameKey is the reservation key of a machine name or browser alias. Where the gateway is routed by uid (F23-01) a
-// name belongs to one OS user's namespace only: two users may both have hp.<domain>, each reaching their own
+// name belongs to one OS user's namespace only: two users may both have Linux test machine.<domain>, each reaching their own
 // machine. Elsewhere a name is reserved for the whole host.
 func nameKey(uid, hostname string) string {
 	if gatewayRouting {

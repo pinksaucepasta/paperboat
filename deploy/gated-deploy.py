@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Canary-gated deploy of the server and/or tunnel edges with automatic rollback (deploy/README.md step 6).
 
-Runs on oracle, next to the production canary (tools/probe/canary.py, user unit paperboat-canary):
+Runs on build host, next to the production canary (tools/probe/canary.py, user unit paperboat-canary):
   0. with --stage CMD: runs it first (deploy the candidate to staging and require a green staging canary,
      deploy/staging.py + deploy/staging-canary.sh); a failing stage refuses the deploy before prod or the lock is touched;
   1. refuses when the canary is red before the deploy (--force "<reason>" overrides);
@@ -157,7 +157,7 @@ def shell(target, script):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--what", required=True, help="lane and what is deployed, written into the deploy lock")
+    p.add_argument("--what", required=True, help="worktree and what is deployed, written into the deploy lock")
     p.add_argument("--stage", default="", help="staging step, run with sh -c before anything else; must exit 0")
     p.add_argument("--deploy", required=True, help="the deploy command, run with sh -c on this host")
     p.add_argument("--server-host", required=True, help="ssh target of the control-plane host")

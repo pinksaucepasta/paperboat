@@ -13,16 +13,16 @@ import (
 // before the value is read or the vault is touched, and a good one reaches the vault.
 func TestEnvSetVaultRefusesBadNamesBeforeTouchingTheVault(t *testing.T) {
 	reached := errors.New("reached the vault")
-	previous := namedVaultSessionFor
-	namedVaultSessionFor = func(*cobra.Command) (namedVaultSession, error) { return namedVaultSession{}, reached }
-	t.Cleanup(func() { namedVaultSessionFor = previous })
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.namedVaultSession = func(*cobra.Command) (namedVaultSession, error) { return namedVaultSession{}, reached }
+	})
 	run := func(args ...string) error {
 		root := newRootCommand()
 		root.SetIn(strings.NewReader("value"))
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
 		root.SetArgs(args)
-		return root.Execute()
+		return root.ExecuteContext(ctx)
 	}
 	for _, name := range []string{strings.Repeat("A", 129), "LD_PRELOAD", "1ABC", "A-B"} {
 		for _, args := range [][]string{{"env", "set", name, "--vault", "canary-env", "--value-stdin"}} {

@@ -146,21 +146,12 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 	go readFrames(conn, frames, readerDone)
 	// One worker handles frames in arrival order, so a PTY write stuck behind a program that does not read never
 	// stops this loop reading: heartbeats are still answered and an interrupt key can overtake the stuck input.
-	work := make(chan readResult, connectionWorkQueue)
+	work := frameBacklog{queue: make(chan readResult, connectionWorkQueue)}
 	failed := make(chan error, 1)
-	var backlog frameBacklog
-	defer close(work)
-	go func() {
-		for result := range work {
-			err := s.serveFrame(result, connectionCtx, writer, authorizer, conn, terminalState, selected)
-			backlog.end()
-			if err != nil {
-				failed <- err
-				cancelConnection()
-				return
-			}
-		}
-	}()
+	defer close(work.queue)
+	go work.serve(func(result readResult) error {
+		return s.serveFrame(result, connectionCtx, writer, authorizer, conn, terminalState, selected)
+	}, failed, cancelConnection)
 	heartbeat := time.NewTicker(s.config.HeartbeatInterval)
 	defer heartbeat.Stop()
 	for {
@@ -199,14 +190,9 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 				}
 				continue
 			}
-			s.offerInterrupt(connectionCtx, result.binary, terminalState, backlog.busy())
-			backlog.begin()
-			select {
-			case work <- result:
-			case err := <-failed:
+			s.offerInterrupt(connectionCtx, result.binary, terminalState, work.busy())
+			if err := work.enqueue(result, failed, s.ctx.Done()); err != nil {
 				return err
-			case <-s.ctx.Done():
-				return ErrServerStopped
 			}
 		}
 	}
@@ -233,11 +219,43 @@ func (s *Server) offerInterrupt(ctx context.Context, message []byte, state *term
 // frameBacklog counts the frames handed to the worker and not yet served: queued, or being served. The read loop counts
 // a frame before it queues it and the worker uncounts it after serving it, so no moment between a frame being queued and
 // the worker starting on it reads as idle (a Ctrl-C arriving then must still be offered as an interrupt).
-type frameBacklog struct{ frames atomic.Int64 }
+type frameBacklog struct {
+	queue  chan readResult
+	frames atomic.Int64
+}
 
-func (b *frameBacklog) begin()     { b.frames.Add(1) }
-func (b *frameBacklog) end()       { b.frames.Add(-1) }
 func (b *frameBacklog) busy() bool { return b.frames.Load() > 0 }
+
+func (b *frameBacklog) enqueue(result readResult, failed <-chan error, stopped <-chan struct{}) error {
+	b.frames.Add(1)
+	var err error
+	select {
+	case b.queue <- result:
+		return nil
+	case err = <-failed:
+	case <-stopped:
+		err = ErrServerStopped
+	}
+	b.frames.Add(-1)
+	return err
+}
+
+func (b *frameBacklog) serve(handle func(readResult) error, failed chan<- error, cancel context.CancelFunc) {
+	for result := range b.queue {
+		err := handle(result)
+		b.frames.Add(-1)
+		if err != nil {
+			failed <- err
+			cancel()
+			// The reader closes the queue when it observes the failure. The remaining frames
+			// belong to this queue too, even though the connection can no longer serve them.
+			for range b.queue {
+				b.frames.Add(-1)
+			}
+			return
+		}
+	}
+}
 
 // connectionWorkQueue holds more frames than a client leaves unanswered (256 input chunks), so only a client that
 // ignores its own window fills it; the read loop then waits for the worker, as it always did.

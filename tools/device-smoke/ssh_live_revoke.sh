@@ -25,7 +25,7 @@ if [ "$MODE" != cli ]; then
 fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-T=lanei-slr-t-$STAMP C=lanei-slr-c-$STAMP ALIAS=lanei-slr-$STAMP
+T=test-slr-t-$STAMP C=test-slr-c-$STAMP ALIAS=test-slr-$STAMP
 IDS=
 TID= BID=
 OWNER='PB=~/.local/bin/pb; gen() { $PB team get "$TEAM" --json | python3 -c "import json,sys;print(json.load(sys.stdin)[\"generation\"])"; };'
@@ -55,7 +55,7 @@ mk() { # mk CONTAINER PACKAGES: a fresh systemd container with the build install
   ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 ct=$1; X='$(dx "$1")'
-sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock laneh-ubuntu24-systemd >/dev/null
+sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
 sleep 8
 sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y $2 >/dev/null 2>&1; true"
 sudo -n docker exec \$ct loginctl enable-linger pbt

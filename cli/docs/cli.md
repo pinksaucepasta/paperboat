@@ -91,14 +91,14 @@ stored on the server and work on every computer of everyone allowed the port.
 
 ### Machine names and ports
 
-For a machine named `hp` and a published port `5432` (the default domain
+For a machine named `linux-test` and a published port `5432` (the default domain
 is shown; use your own domain if you set one):
 
 | You type | What you reach |
 |---|---|
-| `https://5432.hp.ppr.boats` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
-| `https://hp.ppr.boats:5432` | The same service; the port after the name selects it |
-| `https://hp.ppr.boats` | A page that lists the machine's published ports |
+| `https://5432.laptop.ppr.boats` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
+| `https://linux-test.ppr.boats:5432` | The same service; the port after the name selects it |
+| `https://linux-test.ppr.boats` | A page that lists the machine's published ports |
 | the machine's own `127.100.x.y` address, port 5432 | Raw TCP of any kind (a database, SSH, a game server) |
 
 The first three go through Paperboat's local web gateway at `127.100.0.1`. It
@@ -106,8 +106,8 @@ ends TLS on this computer with the local certificate Paperboat trusts for the
 domain and forwards the request as plain HTTP to the port, so they are for
 HTTP, HTTPS and WebSocket services only. Anything else, such as a database
 connection string, must use the machine's own address on this computer: `pb
-resolve hp` shows it (another OS user on this computer may get a different
-one for the same machine), and `pb access machine hp --port 5432 --listen
+resolve linux-test` shows it (another OS user on this computer may get a different
+one for the same machine), and `pb access machine linux-test --port 5432 --listen
 127.0.0.1:5432` forwards the same port to a local one. Names never resolve to
 that address, because Paperboat does not change this computer's DNS, resolver,
 hosts file or VPN settings. The `host:port` form serves every published port

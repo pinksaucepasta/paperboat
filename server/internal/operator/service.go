@@ -209,6 +209,7 @@ type Overview struct {
 	Accounts          []StateCount `json:"accounts"`
 	BillingWorkspaces []StateCount `json:"billing_workspaces"`
 	ControlOperations []StateCount `json:"control_operations"`
+	TransactionalMail []StateCount `json:"transactional_mail"`
 	Hosts             int64        `json:"hosts"`
 	HostsReady        int64        `json:"hosts_ready"`
 	HostsStale        int64        `json:"hosts_stale"`
@@ -296,18 +297,18 @@ func allowed(role auth.Role, kind string) bool {
 	case "billing":
 		return kind == "account" || kind == "team" || kind == "billing" || kind == "billing_operation" || kind == "workspaces" || kind == "billing_operations" || kind == "machines" || kind == "machine"
 	case "operations":
-		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
+		return kind == "infrastructure" || kind == "control_operation" || kind == "control_operations" || kind == "mail_failures" || kind == "tunnel_status" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
 	default:
 		return false
 	}
 }
 
 func validKind(kind string) bool {
-	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
+	return kind == "account" || kind == "team" || kind == "billing" || kind == "infrastructure" || kind == "control_operation" || kind == "billing_operation" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "mail_failures" || kind == "overview" || kind == "tunnel_status" || kind == "audit_events" || kind == "machines" || kind == "machine" || kind == "capacity" || kind == "traffic" || kind == "traffic_nodes" || kind == "operators" || kind == "operator_sessions" || kind == "entitlements" || kind == "account_ips" || kind == "ip_blocks" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
 }
 
 func pageKind(kind string) bool {
-	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "traffic_nodes" || kind == "operators" || kind == "ip_blocks" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
+	return kind == "infrastructure" || kind == "audit" || kind == "accounts" || kind == "teams" || kind == "workspaces" || kind == "billing_operations" || kind == "control_operations" || kind == "mail_failures" || kind == "audit_events" || kind == "machines" || kind == "capacity" || kind == "traffic_nodes" || kind == "operators" || kind == "ip_blocks" || kind == "fleet_versions" || kind == "fleet_rollouts" || kind == "fleet_offline"
 }
 
 func safeID(v string) bool {
@@ -370,6 +371,8 @@ func (s *Service) readTx(ctx context.Context, tx *db.Tx, kind, target, after str
 		return readBillingOperations(ctx, tx, target, after, limit)
 	case "control_operations":
 		return readControlOperations(ctx, tx, target, after, limit)
+	case "mail_failures":
+		return readMailFailures(ctx, tx, target, after, limit)
 	case "overview":
 		return s.readOverview(ctx, tx, target)
 	case "capacity":
@@ -775,6 +778,9 @@ func (s *Service) readOverview(ctx context.Context, tx *db.Tx, target string) (_
 		return v, err
 	}
 	if err := readCounts(`SELECT state,count(*) FROM control_operations GROUP BY state ORDER BY state`, &v.ControlOperations); err != nil {
+		return v, err
+	}
+	if err := readCounts(`SELECT state,count(*) FROM transactional_mail_outbox GROUP BY state ORDER BY state`, &v.TransactionalMail); err != nil {
 		return v, err
 	}
 	var host, relay sql.NullTime

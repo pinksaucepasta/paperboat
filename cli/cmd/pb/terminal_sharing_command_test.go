@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -96,13 +95,11 @@ func TestTerminalSharingReturnsOutputErrorsBeforeReportingSuccessOrMutating(t *t
 	defer backend.Close()
 	writeTestProfile(t, root, configPath, backend.URL)
 
-	if runtime.GOOS != "windows" { // there commandRuntimeTestRoot already names a private pipe nothing listens on
-		previousPaths := currentLocalDaemonPaths
-		currentLocalDaemonPaths = func() (localapi.Paths, error) {
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) {
 			return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
 		}
-		t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
-	}
+	})
 
 	var stderr bytes.Buffer
 	var faults []errorreport.Fault
@@ -111,7 +108,7 @@ func TestTerminalSharingReturnsOutputErrorsBeforeReportingSuccessOrMutating(t *t
 	})
 	defer restoreObserver()
 	listingWriter := &terminalSharingFailWriter{}
-	code := runWithReporter(context.Background(), []string{"--no-customization", "--config", configPath, "session", "shared"}, listingWriter, &stderr, nil)
+	code := runWithReporter(ctx, []string{"--no-customization", "--config", configPath, "session", "shared"}, listingWriter, &stderr, nil)
 	if code == 0 {
 		t.Fatal("session listing reported success after stdout failed")
 	}
@@ -128,7 +125,7 @@ func TestTerminalSharingReturnsOutputErrorsBeforeReportingSuccessOrMutating(t *t
 	var stdout bytes.Buffer
 	var stderrWriter = &terminalSharingFailWriter{}
 	faults = nil
-	code = runWithReporter(context.Background(), []string{"--no-customization", "--config", configPath, "session", "share", "ses_1", "--team", "team_1", "--member", "usr_1"}, &stdout, stderrWriter, nil)
+	code = runWithReporter(ctx, []string{"--no-customization", "--config", configPath, "session", "share", "ses_1", "--team", "team_1", "--member", "usr_1"}, &stdout, stderrWriter, nil)
 	if code == 0 {
 		t.Fatal("share reported success after its safety notice failed to write")
 	}

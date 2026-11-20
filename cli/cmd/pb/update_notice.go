@@ -17,7 +17,7 @@ func showLocalUpdateNotice(command *cobra.Command) {
 	}
 	ctx, cancel := context.WithTimeout(command.Context(), 300*time.Millisecond)
 	defer cancel()
-	client, err := newUpdateControlClient(300 * time.Millisecond)
+	client, err := newUpdateControlClient(command.Context(), 300*time.Millisecond)
 	if err != nil {
 		return
 	}

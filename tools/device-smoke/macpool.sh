@@ -6,15 +6,16 @@
 #   macpool.sh list              machines whose tunnel is up, and who started them
 #   macpool.sh ssh N [COMMAND]   SSH into machine N
 #   macpool.sh stop [N...]       stop machines you started (default: all of yours)
-#   macpool.sh release N...      give up your claim but leave the machine running for the next lane
+#   macpool.sh release N...      give up your claim but leave the machine running for the next worktree
 #   macpool.sh adopt [N]         claim a running machine nobody claims (default: the first one), print its target
 #
 # Machine N is the SSH host macpool-N: user runner (passwordless sudo), reached through the jump host's loopback port
-# 22300+N with the key ~/.ssh/winpool_controller. "You" is your worktree (or MACPOOL_OWNER): every lane starts its
+# 22300+N with the key ~/.ssh/winpool_controller. "You" is your worktree (or MACPOOL_OWNER): every worktree starts its
 # machines from this one controller, which is where the start lock and the owner records live.
 set -euo pipefail
 
-JUMP=${WINPOOL_JUMP:-ubuntu@anvit}
+JUMP=${WINPOOL_JUMP:-$(python3 "$(dirname "$0")/dev_targets.py" pool_jump)}
+[ -n "$JUMP" ] || { echo 'configure pool_jump in local development targets' >&2; exit 2; }
 MAX=8
 CONF=$HOME/.ssh/macpool.conf
 KNOWN=$HOME/.ssh/macpool_known_hosts
@@ -61,7 +62,7 @@ start() {
   [[ $count =~ ^[1-8]$ ]] || die "usage: macpool.sh start N [HOURS] (N 1-$MAX)"
   [[ $hours =~ ^[1-5]$ ]] || die "HOURS must be 1-5"
   # One start at a time on this controller, and a machine that was just started is taken before its tunnel is up:
-  # two lanes starting seconds apart otherwise pick the same numbers.
+  # two worktrees starting seconds apart otherwise pick the same numbers.
   mkdir -p "$CLAIMS"
   exec 9>"$CLAIMS/lock"; flock 9
   busy=$(up; pending; find "$CLAIMS" -regextype posix-extended -regex '.*/[1-8]' -mmin -15 -printf '%f\n')
@@ -85,7 +86,7 @@ start() {
 
 owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
 
-stop() { # only machines this caller started: another lane's checks are running on the others
+stop() { # only machines this caller started: another worktree's checks are running on the others
   local n targets=("$@")
   [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do
@@ -98,7 +99,7 @@ stop() { # only machines this caller started: another lane's checks are running 
   done
 }
 
-release() { # the next lane adopts it: reuse takes seconds, a new runner minutes plus GitHub's queue
+release() { # the next worktree adopts it: reuse takes seconds, a new runner minutes plus GitHub's queue
   local n
   for n in "$@"; do
     slot "$n"

@@ -18,7 +18,7 @@ import (
 // snapshot lease is not renewed from here: a host renews it by announcing, a content-identical
 // renewal moves no topic, and a host that goes away leaves the inventory, which withdraws its
 // ports. Renewing before the earliest lease of every machine in the account cost one GET every
-// ~7 s per idle daemon (Lane W, F21-19).
+// ~7 s per idle daemon (F21-19).
 const (
 	// machineServicesIdleRefresh bounds the wait between topics: a missed topic still shows up
 	// within it.

@@ -12,10 +12,10 @@ func TestWarnIfFileLimitLow(t *testing.T) {
 	if have > 1<<30 {
 		t.Skip("file limit is effectively unlimited")
 	}
-	if !warnIfFileLimitLow(1, 1) {
-		t.Fatalf("a limit of %d is below 1+1+%d", have, fileLimitMargin)
+	if !warnIfFileLimitLow(1) {
+		t.Fatalf("a limit of %d is below 1+%d", have, fileLimitMargin)
 	}
-	if warnIfFileLimitLow(int(have), int(have)) {
-		t.Fatalf("a limit of %d cannot hold %d listeners and %d connections", have, have, have)
+	if warnIfFileLimitLow(int(have)) {
+		t.Fatalf("a limit of %d cannot hold %d listeners and the margin", have, have)
 	}
 }

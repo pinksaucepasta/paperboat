@@ -38,7 +38,6 @@ const (
 	// whole request (Cloudflare's 100 s). It is not the control-plane timeout: report exports and
 	// non-streaming AI calls run for tens of seconds.
 	originFirstByteTimeout              = 100 * time.Second
-	dataCarrierPreviewMaxRoutes         = 4096
 	dataCarrierPreviewMaxResponseHeader = 64 << 10
 )
 
@@ -76,9 +75,8 @@ type DataCarrierPreviewRoute struct {
 }
 
 type DataCarrierPreviewRegistryConfig struct {
-	BaseDomain    string
-	ProcessEpoch  string
-	MaximumRoutes int
+	BaseDomain   string
+	ProcessEpoch string
 	// HostRoute names the route id a public hostname the registry holds no route for is admitted on:
 	// a self-hosted edge publishes a preview under the account's own domain while its carrier attaches
 	// under the platform name. Empty when the host is not admitted.
@@ -88,7 +86,6 @@ type DataCarrierPreviewRegistryConfig struct {
 type DataCarrierPreviewRegistry struct {
 	baseDomain   string
 	processEpoch string
-	maximum      int
 	hostRoute    func(host string) string
 	done         chan struct{}
 	closeOnce    sync.Once
@@ -121,17 +118,11 @@ func NewDataCarrierPreviewRegistry(config DataCarrierPreviewRegistryConfig) (*Da
 	if config.BaseDomain != "" && !validPreviewCarrierDomain(baseDomain) {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
-	if config.MaximumRoutes == 0 {
-		config.MaximumRoutes = dataCarrierPreviewMaxRoutes
-	}
-	if config.MaximumRoutes < 1 || config.MaximumRoutes > dataCarrierPreviewMaxRoutes {
-		return nil, ErrDataCarrierPreviewRegistryInvalid
-	}
 	if connectorprotocol.ValidateOpaqueEpoch(config.ProcessEpoch) != nil {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
 	return &DataCarrierPreviewRegistry{
-		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, maximum: config.MaximumRoutes, hostRoute: config.HostRoute,
+		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, hostRoute: config.HostRoute,
 		done: make(chan struct{}), byRoute: make(map[string]*dataCarrierPreviewRouteEntry),
 		byHost: make(map[string]*dataCarrierPreviewRouteEntry), standby: make(map[string][]*dataCarrierPreviewRouteEntry),
 	}, nil
@@ -186,10 +177,6 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 		}
 	}
 	if occupied := r.byHost[entry.host]; occupied != nil && occupied.route.RouteID != validated.RouteID {
-		r.mu.Unlock()
-		return ErrDataCarrierPreviewRegistryConflict
-	}
-	if old == nil && len(r.byRoute) >= r.maximum {
 		r.mu.Unlock()
 		return ErrDataCarrierPreviewRegistryConflict
 	}

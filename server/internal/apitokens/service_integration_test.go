@@ -254,7 +254,7 @@ func TestAPITokenAuthenticateRejectsExpiredAndInactive(t *testing.T) {
 	}
 }
 
-// F21-12 (Lane X #16): a create retried with the same Idempotency-Key returns the same token and
+// F21-12 (#16): a create retried with the same Idempotency-Key returns the same token and
 // once-shown secret; the secret is held only encrypted and only for the retry window.
 func TestAPITokenCreateRetryReturnsTheSameSecret(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

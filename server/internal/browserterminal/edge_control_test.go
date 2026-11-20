@@ -160,7 +160,7 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 	}
 	// pb update moves the machine's route to another edge (its new worker activates its own carrier there) while
 	// this attachment is held on edge_1, whose carrier the old worker keeps for it. That is routing, not access: the
-	// attachment stays through two live checks (pbvm1 2026-11-05: it was ended "revoked" mid-update, a 3.8 s pause).
+	// attachment stays through two live checks (Linux test VM 2026-11-05: it was ended "revoked" mid-update, a 3.8 s pause).
 	authorizer.mu.Lock()
 	authorizer.decision.EdgeNodeID, authorizer.decision.EdgeProcessEpoch, authorizer.decision.EdgeEndpointHost = "edge_2", "epoch_2", "edge-2.example.test"
 	authorizer.mu.Unlock()
@@ -322,7 +322,7 @@ func TestEdgeAdmissionCapturesOperationalCauseAndCanRecover(t *testing.T) {
 	}
 }
 
-// Slice 7 (Lane K terminal plan): a refused admission closes the control channel with the typed reason the edge
+// Slice 7 (terminal plan): a refused admission closes the control channel with the typed reason the edge
 // sends to the browser, so a lost machine, a closed terminal and a lapsed ticket are told apart.
 func TestEdgeControlRefusalsCarryATypedReason(t *testing.T) {
 	signer, err := mint.NewEphemeral(time.Minute)

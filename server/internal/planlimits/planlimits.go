@@ -136,8 +136,12 @@ func CheckTx(ctx context.Context, tx *db.Tx, scope Scope, kind Kind) error {
 	var limit int
 	switch {
 	case kind == PublicTCP:
+		own, err := ownEdgesTx(ctx, tx, scope)
+		if err != nil {
+			return err
+		}
 		var exempt bool
-		if limit, exempt, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan); err != nil || exempt {
+		if limit, exempt, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan, own); err != nil || exempt {
 			return err
 		}
 	case kind == Publications:
@@ -207,17 +211,18 @@ func UsageTx(ctx context.Context, tx *db.Tx, scope Scope) (map[Kind]Usage, error
 	if err != nil {
 		return nil, err
 	}
+	overrides, err := OverridesTx(ctx, tx, scope.workspaceID(), kinds...)
+	if err != nil {
+		return nil, err
+	}
 	out := make(map[Kind]Usage, len(kinds))
 	for i, kind := range kinds {
 		u := Usage{Used: used[i]}
-		override, overridden, err := OverrideTx(ctx, tx, scope.workspaceID(), kind)
-		if err != nil {
-			return nil, err
-		}
+		override, overridden := overrides[kind]
 		switch {
 		case kind == PublicTCP:
 			// Per plan, and per paid seat for a team; nil when the workspace's tunnel edge is self-hosted.
-			limit, exempt, err := publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan)
+			limit, exempt, err := publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan, own)
 			if err != nil {
 				return nil, err
 			}
@@ -249,9 +254,9 @@ func ownEdgesTx(ctx context.Context, tx *db.Tx, scope Scope) (own bool, err erro
 
 // publicTCPLimitTx is the workspace's public raw-TCP tunnel limit: per plan for a personal workspace, per paid
 // seat (pooled) for a team. A workspace whose tunnel edge is self-hosted is exempt, its listeners are its own.
-func publicTCPLimitTx(ctx context.Context, tx *db.Tx, l config.PublicTCPLimit, scope Scope, plan Plan) (limit int, exempt bool, err error) {
-	if exempt, err = ownEdgesTx(ctx, tx, scope); err != nil || exempt {
-		return 0, exempt, err
+func publicTCPLimitTx(ctx context.Context, tx *db.Tx, l config.PublicTCPLimit, scope Scope, plan Plan, own bool) (limit int, exempt bool, err error) {
+	if own {
+		return 0, true, nil
 	}
 	switch plan {
 	case Team:

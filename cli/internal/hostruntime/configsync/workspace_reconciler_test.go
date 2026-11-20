@@ -244,7 +244,7 @@ func TestWorkspaceReconcilerPublishesCleanMergeFromPersistedBase(t *testing.T) {
 		t.Fatalf("resolution by path not acknowledged: %#v, %v", byPath.acknowledged, err)
 	}
 	// A confirmed force of the whole configuration takes the current remote, even when the
-	// repository moved after the status the user saw (a test VM lanel-a, 2026-10-23: it was never applied).
+	// repository moved after the status the user saw (a test VM test-a, 2026-10-23: it was never applied).
 	authority = &testResolutionAuthority{items: []ConflictResolution{{
 		ID: "force-resolution", Path: ".", Scope: "config", Action: "force_pull",
 		ConflictRevision:       diagnostics.Conflicts[0].Revision,
@@ -498,7 +498,7 @@ func TestOnlyTheMatchingHalfOfASplitAssignmentCarriesOutAResolution(t *testing.T
 }
 
 // The pull and push halves may name one disagreement with two revisions when they saw the
-// repository at different moments (lanel-a, 2026-10-23): it is listed once, and the half that
+// repository at different moments (test-a, 2026-10-23): it is listed once, and the half that
 // must carry out the resolution applies it although the listed revision is the other half's.
 func TestSplitHalvesListAConflictOnceAndResolveItByPath(t *testing.T) {
 	pull := ReconciliationDiagnostics{Conflicts: []PathSummary{{Path: "cfg/value.txt", Reason: "concurrent_update", Revision: strings.Repeat("a", 64)}}}

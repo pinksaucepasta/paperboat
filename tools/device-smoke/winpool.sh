@@ -8,11 +8,12 @@
 #
 # Machine N is the SSH host winpool-N: administrator runneradmin, reached through the jump host's loopback port
 # 22200+N with the key ~/.ssh/winpool_controller. Point the Windows checks at it with SMOKE_WINDOWS_SSH=winpool-N
-# (and no VICTUS_PASS). "You" is your worktree (or WINPOOL_OWNER): every lane starts its machines from this one
+# (and no SMOKE_WINDOWS_PASSWORD). "You" is your worktree (or WINPOOL_OWNER): every worktree starts its machines from this one
 # controller, which is where the start lock and the owner records live.
 set -euo pipefail
 
-JUMP=${WINPOOL_JUMP:-ubuntu@anvit}
+JUMP=${WINPOOL_JUMP:-$(python3 "$(dirname "$0")/dev_targets.py" pool_jump)}
+[ -n "$JUMP" ] || { echo 'configure pool_jump in local development targets' >&2; exit 2; }
 SLOTS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14)
 CONF=$HOME/.ssh/winpool.conf
 KNOWN=$HOME/.ssh/winpool_known_hosts
@@ -49,7 +50,7 @@ start() {
   [[ $count =~ ^([1-9]|1[0-4])$ ]] || die "usage: winpool.sh start N [HOURS] (N 1-14)"
   [[ $hours =~ ^[1-5]$ ]] || die "HOURS must be 1-5"
   # One start at a time on this controller, and a machine that was just started is taken before its tunnel is up:
-  # two lanes starting seconds apart otherwise pick the same numbers.
+  # two worktrees starting seconds apart otherwise pick the same numbers.
   mkdir -p "$CLAIMS"
   exec 9>"$CLAIMS/lock"; flock 9
   busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-4])' -mmin -15 -printf '%f\n')
@@ -73,7 +74,7 @@ start() {
 
 owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
 
-stop() { # only machines this caller started: another lane's checks are running on the others
+stop() { # only machines this caller started: another worktree's checks are running on the others
   local n targets=("$@")
   [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do

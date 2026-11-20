@@ -19,7 +19,7 @@ func TestDoctorReportsNoPathToAPeerAsUnhealthy(t *testing.T) {
 	noPath := localapi.HealthItem{Code: localapi.NoPathCode, Severity: "error", Title: "No path to macl: the last connection attempt failed", Recovery: "Check that macl is online, then run pb doctor macl.", ETag: localapi.NoPathCode}
 	snapshot := localapi.Snapshot{DaemonState: "ready", Machines: []localapi.MachineStatus{
 		{ID: "machine_macl", Alias: "macl", SelectedPath: "none", Health: []localapi.HealthItem{noPath}},
-		{ID: "machine_hp", Alias: "hp", SelectedPath: "direct"},
+		{ID: "machine_hp", Alias: "laptop", SelectedPath: "direct"},
 		{ID: "machine_idle", Alias: "idle", SelectedPath: "none"},
 	}}
 	var check doctor.Check
@@ -42,7 +42,7 @@ func TestDoctorReportsNoPathToAPeerAsUnhealthy(t *testing.T) {
 	}
 	// With a path, it is named and healthy.
 	snapshot.Machines[0] = localapi.MachineStatus{ID: "machine_macl", Alias: "macl", SelectedPath: "relay", RelayRegion: "india"}
-	if check = doctorPeerPathsCheck(snapshot.Machines, time.Now()); check.Status != doctor.StatusPass || check.Summary != "Paths: macl relay, hp direct." {
+	if check = doctorPeerPathsCheck(snapshot.Machines, time.Now()); check.Status != doctor.StatusPass || check.Summary != "Paths: macl relay, laptop direct." {
 		t.Fatalf("peer paths check = %+v", check)
 	}
 	// Selecting the machine fails its selected_path check the same way.

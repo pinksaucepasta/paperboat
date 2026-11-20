@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// A first pair does ~50 s of other work (measured on victus and fresh runners), then waits for the host service and
+// A first pair does ~50 s of other work (measured on Windows test machine and fresh runners), then waits for the host service and
 // the per-user daemon: both windows, that work and a margin must fit the activation budget of the elevated operation.
 func TestReadinessWindowsFitTheActivationBudget(t *testing.T) {
 	const otherWork, margin = 50 * time.Second, 30 * time.Second
@@ -17,7 +17,7 @@ func TestReadinessWindowsFitTheActivationBudget(t *testing.T) {
 	}
 }
 
-// The readiness probe does not share the install phases' budget (victus used all of it before readiness began):
+// The readiness probe does not share the install phases' budget (Windows test machine used all of it before readiness began):
 // it has its own tail, at least both windows, and an install's bridge expiry (recovery + activation, 35 min) holds the activation budget plus it.
 func TestReadinessHasItsOwnTailAfterTheInstallPhases(t *testing.T) {
 	if ReadinessTail < ReadinessHostdWindow+ReadinessDaemonBudget {

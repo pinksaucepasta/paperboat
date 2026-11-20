@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """win_console_fixtures.py FIXTURE [COMMAND...]: the Windows counterpart of mac_console_fixtures.sh, run on the controller.
 
-Holds a fixture on the Windows device (winhost: PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_SSH, VICTUS_PASS) while COMMAND runs
+Holds a fixture on the Windows device (winhost: PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_SSH, SMOKE_WINDOWS_PASSWORD) while COMMAND runs
 here with the fixture's values in its environment, then removes the fixture by exact id. Exits with COMMAND's status.
   origin           an HTTP origin on the device's loopback                    PORT
   preview          origin + background preview                                PORT PREVIEW_ID PREVIEW_HOST

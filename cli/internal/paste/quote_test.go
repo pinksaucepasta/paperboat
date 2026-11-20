@@ -23,7 +23,7 @@ func TestQuoteRemotePathsAsLiteralArguments(t *testing.T) {
 			t.Fatalf("path=%q output=%q err=%v", path, output, err)
 		}
 	}
-	for _, path := range []string{`C:\Users\Pujan\Paperboat Inbox\image (2).png`, `C:\Users\Pujan\Paperboat Inbox\a'b & c.txt`, `\\host\share\file name.txt`} {
+	for _, path := range []string{`C:\Users\Tester\Paperboat Inbox\image (2).png`, `C:\Users\Tester\Paperboat Inbox\a'b & c.txt`, `\\host\share\file name.txt`} {
 		got, err := quoteRemotePath(path)
 		if err != nil || got != "\""+path+"\"" {
 			t.Fatalf("path=%q got=%q err=%v", path, got, err)
@@ -39,7 +39,7 @@ func TestQuoteRemotePathsAsLiteralArguments(t *testing.T) {
 func TestUploadedPathQuotesPreservePasteFramingAndWhitespace(t *testing.T) {
 	dir := t.TempDir()
 	local := makeImage(t, dir, "local name.png")
-	for _, remote := range []string{"/remote/Paperboat Inbox/image (2).png", `C:\Users\Pujan\Paperboat Inbox\image (2).png`} {
+	for _, remote := range []string{"/remote/Paperboat Inbox/image (2).png", `C:\Users\Tester\Paperboat Inbox\image (2).png`} {
 		var dest bytes.Buffer
 		i := New(&dest, fixedUploader{remote}, defaultLimits(), WithPartialFlushDelay(0))
 		writeInChunks(t, i, wrap("  '"+local+"'\t"), 3)

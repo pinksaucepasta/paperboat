@@ -42,7 +42,7 @@ func TestStandingRuleAdmitsExecWithoutHostRefresh(t *testing.T) {
 	serverConfig.Peers[0].Scopes = []tailnet.NetworkScope{
 		{ResourceKind: "machine_access", ResourceID: "machine_host", ResourceGeneration: 1, Capability: "exec", Direction: "accept", Port: tailnet.NetworkPort, ExpiresAt: 0},
 		// The owner's standing inspector rule (server: owner only): pb preview inspect asked one host refresh per
-		// request, which a budgeted host could not give in time (hp 2026-10-27, 10 of 10 end_of_stream).
+		// request, which a budgeted host could not give in time (Linux test machine 2026-10-27, 10 of 10 end_of_stream).
 		{ResourceKind: "machine_access", ResourceID: "machine_host", ResourceGeneration: 1, Capability: "inspector", Direction: "accept", Port: tailnet.NetworkPort, ExpiresAt: 0},
 	}
 	clientConfig.Peers[0].Scopes = append(clientConfig.Peers[0].Scopes, tailnet.NetworkScope{ResourceKind: "machine_access", ResourceID: "grant_test", ResourceGeneration: 1, Capability: "inspector", Direction: "dial", Port: tailnet.NetworkPort, ExpiresAt: now + 300})

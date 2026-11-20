@@ -64,7 +64,7 @@
     "mint_proof_lifetime": 120000000000,
     "device_grant_lifetime": 600000000000,
     "access_token_lifetime": 900000000000,
-    "refresh_token_lifetime": 2592000000000000,
+    "refresh_token_lifetime": 7776000000000000,
     "poll_interval": 5000000000,
     "max_client_label_length": 120,
     "network_requests_per_minute": 30,

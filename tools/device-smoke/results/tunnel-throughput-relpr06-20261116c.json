@@ -1,7 +1,0 @@
-{"row": "PR-06", "build": "dev-03c7d234f on both machines; prod server .30; prod edges (oracle 140.245.11.41, anvit 152.67.0.60) with net.core.rmem_max/wmem_max raised to 7340032 and the edge processes restarted (UDP 443 sockets show rb 14680064 on both)",
- "method": "same as tunnel-throughput-relpr06-20261116b.json: two throwaway containers on anvit, tc netem delay 50 ms limit 100000, tools/device-smoke/tunnel_throughput.py (3 x 200 MiB, median)",
- "after_udp_buffers_7MiB": {"tunnel_throughput_py_50ms_mbit_s": [25.0, 23.7, 26.3], "median": 25.0, "anvit_load1": 21,
-  "variants_50ms_mbit_s": {"edge_140.245.11.41": [33.8, 34.5], "edge_152.67.0.60": [29.4, 31.2]}},
- "edge_host_cpu_pressure_during_run": {"anvit_psi_cpu_some_avg10_pct": [70, 84, 83], "anvit_load1": [20, 26], "oracle_psi_cpu_some_avg10_pct": [20, 40, 48], "oracle_load1": [8, 10.6]},
- "finding": "The UDP buffers were not the limit: the +50 ms median is 25 before and after the 7 MiB change. The edge hosts are CPU starved by the other lanes' builds (tasks wait for a CPU 70-84% of the time on anvit, 20-48% on oracle); the earlier run at anvit load 4 gave 81-168 Mbit/s at +50 ms and +25 ms gave 134-187 at load 8-9. A clean measurement needs the edge hosts and the test host quiet, or edges on dedicated hosts.",
- "cleanup": "both machines revoked by exact id, containers and temp files removed"}

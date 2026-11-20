@@ -18,13 +18,13 @@ func TestPairWithoutSystemdChangesNothingAndPrintsTheForegroundCommand(t *testin
 	old := hostruntimecmd.NoSystemd
 	hostruntimecmd.NoSystemd = func() bool { return true }
 	t.Cleanup(func() { hostruntimecmd.NoSystemd = old })
-	oldBootstrap := pairBootstrap
-	pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int {
-		t.Fatal("pair reached the bootstrap on a machine without systemd")
-		return 1
-	}
-	t.Cleanup(func() { pairBootstrap = oldBootstrap })
 	command := pairCommand()
+	command.SetContext(withAuthDependencies(t.Context(), func(d *authDependencies) {
+		d.pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int {
+			t.Fatal("pair reached the bootstrap on a machine without systemd")
+			return 1
+		}
+	}))
 	var stdout, stderr bytes.Buffer
 	command.SetOut(&stdout)
 	command.SetErr(&stderr)

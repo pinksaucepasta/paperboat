@@ -52,9 +52,6 @@ func TestBrowserLoginRefreshesSignedOutDaemonBeforeSuccess(t *testing.T) {
 				}
 			}))
 			defer backend.Close()
-			oldHTTP := loginHTTPClient
-			loginHTTPClient = backend.Client
-			t.Cleanup(func() { loginHTTPClient = oldHTTP })
 			configPath, profiles := browserLoginFixture(t, backend.URL)
 			root := commandRuntimeTestRoot(t)
 			t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", filepath.Join(root, "identity"))
@@ -67,12 +64,11 @@ func TestBrowserLoginRefreshesSignedOutDaemonBeforeSuccess(t *testing.T) {
 				t.Fatal(err)
 			}
 			paths := localapi.Paths{StateRoot: root, RuntimeRoot: root, SocketPath: filepath.Join(root, "api.sock"), LockPath: filepath.Join(root, "daemon.lock")}
-			oldPaths := currentLocalDaemonPaths
-			currentLocalDaemonPaths = func() (localapi.Paths, error) { return paths, nil }
-			t.Cleanup(func() { currentLocalDaemonPaths = oldPaths })
 			var failRefresh atomic.Bool
 			failRefresh.Store(recoverRotation)
 			ctx, cancel := context.WithCancel(t.Context())
+			ctx = withAuthDependencies(ctx, func(d *authDependencies) { d.httpClient = backend.Client })
+			ctx = withHostDependencies(ctx, func(d *hostDependencies) { d.daemonPaths = func() (localapi.Paths, error) { return paths, nil } })
 			done := make(chan error, 1)
 			go func() {
 				done <- localdaemon.Run(ctx, localdaemon.DaemonConfig{Paths: paths, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), RefreshInterval: time.Hour, Source: loginInventorySource(func(context.Context) ([]api.UserMachine, error) {

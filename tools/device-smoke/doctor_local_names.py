@@ -14,7 +14,7 @@ import argparse, os, json, shlex, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.pbmac/ssh.sh for the apple VM (host: vm)
+SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.mac-vm/ssh.sh for the macmini VM (host: vm)
 sys.path.insert(0, str(HERE))
 ANCHOR = "com.apple/pbsmoke-dns"
 

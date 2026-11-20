@@ -17,13 +17,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
-	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
-var authCredentialStoreAvailable = config.CredentialStoreAvailable
-var chooseLoginAction = selector.Choose
-var loginWait = func(ctx context.Context, delay time.Duration) error {
+func waitForLoginPoll(ctx context.Context, delay time.Duration) error {
 	t := time.NewTimer(delay)
 	defer t.Stop()
 	select {
@@ -33,7 +30,7 @@ var loginWait = func(ctx context.Context, delay time.Duration) error {
 		return nil
 	}
 }
-var loginHTTPClient = func() *http.Client {
+func newLoginHTTPClient() *http.Client {
 	return &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
@@ -91,7 +88,8 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 		return invocationError(err)
 	}
 	cfg.ServerURL = issuer
-	store, err := loginProfileStore(cfg, issuer)
+	deps := authDependenciesOf(c.Context)
+	store, err := loginProfileStore(c.Context, cfg, issuer)
 	if err != nil {
 		return err
 	}
@@ -116,7 +114,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 		}
 		if state.DeviceCode == "" {
 			if e == nil && !c.Bool("reauth") && !c.Bool("change-account") {
-				machineID, err := loginLocalMachineID(cfg)
+				machineID, err := deps.localMachineID(cfg)
 				if err != nil {
 					return err
 				}
@@ -133,11 +131,11 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 			if label == "" {
 				label = "Paperboat CLI"
 			}
-			join, err := loginJoin(cfg, c.String("workspace"))
+			join, err := loginJoin(c.Context, cfg, c.String("workspace"))
 			if err != nil {
 				return err
 			}
-			a, err := api.DeviceAuthorize(c.Context, issuer, label, "desktop", runtime.GOOS, join, loginHTTPClient())
+			a, err := api.DeviceAuthorize(c.Context, issuer, label, "desktop", runtime.GOOS, join, deps.httpClient())
 			if err != nil {
 				return friendlyCommandError(err)
 			}
@@ -156,7 +154,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 			}
 			if err = save(); err != nil {
 				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Context), 5*time.Second)
-				cleanupErr := api.CancelDeviceLogin(cleanupCtx, issuer, a.DeviceCode, loginHTTPClient())
+				cleanupErr := api.CancelDeviceLogin(cleanupCtx, issuer, a.DeviceCode, deps.httpClient())
 				cancel()
 				return browserLoginFailure{message: "Pending login could not be saved; approval cleanup may be incomplete. Retry pb login or pb logout when connected.", cause: errors.Join(err, cleanupErr)}
 			}
@@ -173,7 +171,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 				}
 			}
 			if !c.Bool("no-browser") && !c.Bool("json") {
-				if err := openBrowser(state.ApprovalURL); err != nil {
+				if err := hostDependenciesOf(c.Context).openBrowser(state.ApprovalURL); err != nil {
 					if _, writeErr := fmt.Fprintln(c.ErrWriter, "Could not open a browser. Use the link above on another device."); writeErr != nil {
 						return browserLoginFailure{message: "Browser opening and fallback guidance did not finish. Run pb login again to resume the saved approval.", cause: errors.Join(err, writeErr)}
 					}
@@ -187,7 +185,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 				if !serverclock.Now().Before(state.ExpiresAt) {
 					return abortBrowserLogin(c.Context, issuer, state, save, browserLoginFailure{message: "The sign-in link expired before it was approved. Run `pb login` again (or rerun the install command) to get a new link.", cause: errors.New("login link expired")})
 				}
-				t, err := api.PollDeviceLogin(c.Context, issuer, state.DeviceCode, loginHTTPClient())
+				t, err := api.PollDeviceLogin(c.Context, issuer, state.DeviceCode, deps.httpClient())
 				if err == nil {
 					if t.TokenType != "Bearer" || t.AccessToken == "" || t.RefreshToken == "" || t.CLIClientSessionID == "" || t.ExpiresIn <= 0 || t.ExpiresIn > 86400 {
 						return abortBrowserLogin(c.Context, issuer, state, save, errors.New("server returned an invalid login session"))
@@ -195,7 +193,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 					expires := serverclock.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)
 					state.Credential = &config.Credential{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, TokenType: t.TokenType, ExpiresAt: expires}
 					// Never save an unchecked account; retaining the device grant recovers ambiguous responses.
-					me, meErr := api.New(issuer, *state.Credential, loginHTTPClient()).Me(c.Context)
+					me, meErr := api.New(issuer, *state.Credential, deps.httpClient()).Me(c.Context)
 					if meErr != nil {
 						state.Credential = nil
 						return fmt.Errorf("approval received; run `pb login` to finish securely: %w", friendlyCommandError(meErr))
@@ -242,7 +240,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 				if remaining := serverclock.Until(state.ExpiresAt); remaining < delay {
 					delay = remaining
 				}
-				if err = loginWait(c.Context, delay); err != nil {
+				if err = deps.loginWait(c.Context, delay); err != nil {
 					return abortBrowserLogin(c.Context, issuer, state, save, err)
 				}
 			}
@@ -259,7 +257,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 			if !serverclock.Now().Before(state.Credential.ExpiresAt) {
 				return abortBrowserLogin(c.Context, issuer, state, save, errors.New("approved login session expired; run `pb login` again"))
 			}
-			if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: api.New(issuer, *state.Credential, loginHTTPClient()), Issuer: issuer, Credential: *state.Credential, SessionID: state.Profile.CLIClientSessionID, ExpectedAccountID: state.Profile.Account.ID, PreviousSessionID: &state.PreviousSessionID, AllowAccountChange: true}); err != nil {
+			if _, err = auth.CompleteLogin(c.Context, auth.LoginCompletion{Store: store, Client: api.New(issuer, *state.Credential, deps.httpClient()), Issuer: issuer, Credential: *state.Credential, SessionID: state.Profile.CLIClientSessionID, ExpectedAccountID: state.Profile.Account.ID, PreviousSessionID: &state.PreviousSessionID, AllowAccountChange: true}); err != nil {
 				return fmt.Errorf("sign-in not activated; retry `pb login`: %w", err)
 			}
 		}
@@ -275,7 +273,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 		account := state.Profile.Account
 		joinedWorkspace, joinedAdmission := "", ""
 		if state.Enrollment != nil {
-			if err = pairLoginDevice(c, issuer, state.Enrollment, loginDeviceName()); err != nil {
+			if err = deps.pairLoginDevice(c, issuer, state.Enrollment, loginDeviceName()); err != nil {
 				return browserLoginFailure{message: "Signed in, but this computer could not be added: " + err.Error() + ". Run pb login again to retry.", cause: err}
 			}
 			joinedWorkspace, joinedAdmission = state.Enrollment.WorkspaceID, state.Enrollment.Admission
@@ -312,7 +310,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 	}))
 }
 
-// loginInProgressFailure names a concurrent sign-in on this profile instead of a bare local_io failure (lanex2-m
+// loginInProgressFailure names a concurrent sign-in on this profile instead of a bare local_io failure (test-m
 // 2026-11-16: two logins at once ended one with only "could not finish the command").
 func loginInProgressFailure(err error) error {
 	if errors.Is(err, config.ErrLoginInProgress) {
@@ -350,7 +348,7 @@ func cancelBrowserLogin(ctx context.Context, issuer string, s *config.BrowserLog
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := api.CancelDeviceLogin(ctx, issuer, s.DeviceCode, loginHTTPClient()); err != nil {
+	if err := api.CancelDeviceLogin(ctx, issuer, s.DeviceCode, authDependenciesOf(ctx).httpClient()); err != nil {
 		return browserLoginFailure{message: "login cancellation is pending; retry `pb login` or `pb logout` when connected", cause: err}
 	}
 	*s = config.BrowserLoginState{}
@@ -374,12 +372,12 @@ func daemonRefreshFailureMessage(err error) string {
 // loginProfileStore is the credential store a sign-in saves to. Without an OS credential store
 // (a headless Linux machine or container) the first sign-in uses owner-only files, as recorded in the
 // config; saved credentials that need the configured store are never replaced silently.
-func loginProfileStore(cfg *config.Config, issuer string) (config.ProfileStore, error) {
+func loginProfileStore(ctx context.Context, cfg *config.Config, issuer string) (config.ProfileStore, error) {
 	store, err := config.ProfileStoreFor(cfg)
 	if err != nil {
 		return store, err
 	}
-	if !cfg.Auth.AllowFileFallback && !authCredentialStoreAvailable() {
+	if !cfg.Auth.AllowFileFallback && !authDependenciesOf(ctx).credentialStoreAvailable() {
 		if _, e := store.Load(issuer); e == nil {
 			return store, errors.New("saved credentials require the configured credential store; unlock it before signing in again")
 		} else if !errors.Is(e, config.ErrNoCredentials) {

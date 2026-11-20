@@ -94,7 +94,7 @@ func (w *dyingWorker) Stop(context.Context) error {
 	return nil
 }
 
-// Device finding: the HP runtime worker died around a server restart and hostd,
+// Device finding: the Linux test machine runtime worker died around a server restart and hostd,
 // which never waited on it, did not notice or restart it.
 func TestOwnedWorkersReportAnActiveWorkerThatExitsUnstopped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pb")

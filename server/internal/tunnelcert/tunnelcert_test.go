@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -270,7 +271,7 @@ func TestCoordinatorStagesAllEdgesBeforeActivationAndCompletesCreate(t *testing.
 		t.Fatalf("result = %+v", result)
 	}
 	wantEvents := []string{"stage:edge_a", "stage:edge_b", "ready:edge_a", "ready:edge_b", "activate:edge_a", "activate:edge_b"}
-	if strings.Join(distributor.Events, ",") != strings.Join(wantEvents, ",") {
+	if joinEvents(distributor.Events) != strings.Join(wantEvents, ",") {
 		t.Fatalf("events = %v, want %v", distributor.Events, wantEvents)
 	}
 	if len(operations.Completed) != 1 || !strings.HasSuffix(operations.Completed[0], ":1") {
@@ -462,7 +463,7 @@ func TestCoordinatorRedistributesActiveCertificateToLateEdgeWithoutIssuance(t *t
 		t.Fatalf("late edge caused a second issuance: %d", len(issuer.seen))
 	}
 	want := []string{"stage:edge_a", "stage:edge_b", "ready:edge_a", "ready:edge_b", "activate:edge_a", "activate:edge_b", "stage:edge_c", "ready:edge_c", "activate:edge_c"}
-	if strings.Join(distributor.Events, ",") != strings.Join(want, ",") {
+	if joinEvents(distributor.Events) != strings.Join(want, ",") {
 		t.Fatalf("late edge events = %v, want %v", distributor.Events, want)
 	}
 }
@@ -696,10 +697,11 @@ func TestCoordinatorCleansEverySuccessfullyStagedEdgeBeforeActivation(t *testing
 		name         string
 		failStageAt  int
 		failReadyAt  int
+		oneEdge      bool // a single target: its readiness failing leaves no ready edge
 		wantRollback []string
 	}{
 		{name: "second stage", failStageAt: 2, wantRollback: []string{"edge_a"}},
-		{name: "second readiness", failReadyAt: 2, wantRollback: []string{"edge_a", "edge_b"}},
+		{name: "only edge not ready", failReadyAt: 1, oneEdge: true, wantRollback: []string{"edge_b"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
@@ -709,7 +711,11 @@ func TestCoordinatorCleansEverySuccessfullyStagedEdgeBeforeActivation(t *testing
 			distributor.failStageAt = test.failStageAt
 			distributor.failReadyAt = test.failReadyAt
 			coordinator.config.Distributor = distributor
-			_, err := coordinator.Ensure(context.Background(), testDomain("app.example.test", StrategyDelegatedDNS01))
+			domain := testDomain("app.example.test", StrategyDelegatedDNS01)
+			if test.oneEdge {
+				domain.EdgeTargets = domain.EdgeTargets[:1]
+			}
+			_, err := coordinator.Ensure(context.Background(), domain)
 			if err == nil {
 				t.Fatal("failed pre-activation transition unexpectedly succeeded")
 			}
@@ -743,10 +749,12 @@ func TestCoordinatorJoinsPreActivationCompensationFailure(t *testing.T) {
 	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 24*time.Hour)}
 	coordinator, _, _, _ := coordinatorForTest(t, issuer)
 	distributor := newStagedFailureDistributor()
-	distributor.failReadyAt = 2
+	distributor.failReadyAt = 1
 	distributor.rollbackErr = errors.New("edge cleanup unavailable")
 	coordinator.config.Distributor = distributor
-	_, err := coordinator.Ensure(context.Background(), testDomain("app.example.test", StrategyDelegatedDNS01))
+	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
+	domain.EdgeTargets = domain.EdgeTargets[:1] // no ready edge: the issuance fails and its staged copy is cleaned up
+	_, err := coordinator.Ensure(context.Background(), domain)
 	if err == nil || !errors.Is(err, ErrCertificateNotReady) || !errors.Is(err, ErrDistributionUnavailable) || !strings.Contains(err.Error(), "edge cleanup unavailable") {
 		t.Fatalf("compensation error was not joined: %v", err)
 	}
@@ -987,4 +995,19 @@ func TestPreviewRenewalRevokesOnlyTheEdgesThatActivated(t *testing.T) {
 	if strings.Join(distributor.rolledBack, ",") != "edge_a" || len(distributor.staged) != 0 {
 		t.Fatalf("revoked=%v staged=%v, want only edge_a (activated) revoked and edge_b's staged copy retired", distributor.rolledBack, distributor.staged)
 	}
+}
+
+// joinEvents joins distributor events with each run of "ready:" events sorted: edges are waited for in parallel,
+// so their order within the run is not defined (every stage precedes it, every activation follows it).
+func joinEvents(events []string) string {
+	out := append([]string(nil), events...)
+	for i := 0; i < len(out); {
+		j := i
+		for j < len(out) && strings.HasPrefix(out[j], "ready:") {
+			j++
+		}
+		sort.Strings(out[i:j])
+		i = max(j, i+1)
+	}
+	return strings.Join(out, ",")
 }

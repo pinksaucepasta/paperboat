@@ -1,7 +1,7 @@
 #!/bin/bash
 # stage_binary SRC HOST DEST: puts the build SRC at HOST:DEST (mode 755). Source it; HOST "local" is a plain copy.
 # The build crosses the link once per host, gzipped and streamed: scp's SFTP stalled to 0.2-0.9 MB/s on the VM link
-# (oracle to pbvm2/pbvm3, 98 MB took 22 and 6 minutes, 2026-11-20) where a pipe held 1.7 MB/s and gzip halves the bytes.
+# (build host to Linux test VM/Linux test VM, 98 MB took 22 and 6 minutes, 2026-11-20) where a pipe held 1.7 MB/s and gzip halves the bytes.
 # The host keeps the gunzipped build under /tmp/.pb-stage-<sha256>; every later staging of the same bytes is a
 # host-local copy, and caches older than 12 h are swept so a 5 GB VM never fills up.
 stage_binary() {

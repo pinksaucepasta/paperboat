@@ -12,7 +12,7 @@ import (
 )
 
 // udpRefused is what quic-go returns when the first datagram cannot leave the
-// machine: a local firewall's OUTPUT drop (EPERM, as on laner-b with Lane O's
+// machine: a local firewall's OUTPUT drop (EPERM, as on test-run- with the
 // nft rules), or no route for UDP (ENETUNREACH, EHOSTUNREACH).
 func udpRefused(errno syscall.Errno) error {
 	send := &net.OpError{Op: "write", Net: "udp", Err: os.NewSyscallError("sendmsg", errno)}

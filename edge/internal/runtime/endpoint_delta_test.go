@@ -13,7 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
 )
 
-// Lane W scale matrix: with 1,000 endpoint routes and no change, the edge takes the full set only
+// scale matrix: with 1,000 endpoint routes and no change, the edge takes the full set only
 // when its full interval comes round and otherwise only deltas (an empty delta per poll), and a
 // single new route is installed within a couple of polls. The full set's size at 1k and 10k
 // endpoints is logged for the scale matrix.

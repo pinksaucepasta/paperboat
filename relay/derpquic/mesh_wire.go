@@ -118,7 +118,7 @@ func newRemoteSource(g Grant, route key.NodePublic, namespace [32]byte, via *mes
 }
 
 // remoteCache is the bounded LRU of remote senders' grants, fetched on demand (NeedGrant). A grant is large (up to
-// 256 memberships), so the bound is the node's connection capacity, not the whole mesh. Guarded by Mesh.mu.
+// 256 memberships), so the bound is maxRemoteGrants, not the whole mesh. Guarded by Mesh.mu.
 type remoteCache struct {
 	limit int
 	list  *list.List // front = most recently used; values are *remoteSource

@@ -16,7 +16,7 @@ import (
 )
 
 // A publisher stream nobody reads any more (an edge that stopped reading) must not block a viewer
-// leaving: Leave used to wait on the publication lock the stalled write held (Lane G CI deadlock).
+// leaving: Leave used to wait on the publication lock the stalled write held (CI deadlock).
 func TestAStalledPublisherStreamDoesNotBlockLeave(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("requires /bin/sh")

@@ -11,7 +11,7 @@ import (
 // A user daemon started before `pb pair` waits for enrollment. Pairing on a headless computer then rewrites
 // config.json to use the protected file credential store; the daemon kept the configuration it read at start
 // (OS keyring), so every control-plane call failed with a credential error and the daemon sat at
-// "degraded: Control plane is unavailable" until restarted (laneh-relC, a test VM, 2026-10-22).
+// "degraded: Control plane is unavailable" until restarted (test-relC, a test VM, 2026-10-22).
 func TestDaemonRunsWithTheConfigurationPairingWrote(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	started, err := config.Load(path)

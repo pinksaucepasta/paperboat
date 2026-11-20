@@ -57,15 +57,9 @@ func (p *PublicTCPListeners) InjectTCP(conn net.Conn, port uint16) error {
 	if !ok || !p.cfg.Routes.carrierFor(decision) {
 		return errNoPublicTCPTunnel
 	}
-	select {
-	case p.connections <- struct{}{}:
-	default:
-		return forward.ErrBusy
-	}
 	p.streams.Add(1)
 	go func() {
 		defer p.streams.Done()
-		defer func() { <-p.connections }()
 		forwarded := &forwardedTCPConn{Conn: conn, local: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: int(port)}}
 		p.observe(ctx, "public_tcp_stream", p.cfg.Routes.ForwardPublicTCP(ctx, forwarded, decision, p.cfg.Authority.ResolveDecision))
 	}()

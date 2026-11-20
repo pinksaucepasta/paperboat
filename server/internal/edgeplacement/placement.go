@@ -29,7 +29,6 @@ WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[]
 AND n.last_heartbeat_at>$2::timestamptz-interval '30 seconds'
 AND n.registry_expires_at>$2 AND n.capacity_observed_at>$2::timestamptz-interval '30 seconds'
-AND n.capacity_used<n.capacity_limit-n.capacity_limit/10
 AND n.drain_deadline IS NULL AND paperboat.node_workspace_edge_eligible(n.id,$1,$4)
 AND paperboat.workspace_edge_set_allows(n.id,$1,$4)
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL

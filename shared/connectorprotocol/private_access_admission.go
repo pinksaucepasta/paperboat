@@ -17,7 +17,6 @@ const (
 	PrivateAccessSnapshotKind  = "private_access_carrier_snapshot"
 	PrivateAccessGrantKind     = "private_access_authorization"
 
-	MaxPrivateAccessAdmissions       = 4096
 	MaxPrivateAccessCertificateChain = 64 << 10
 )
 
@@ -75,7 +74,7 @@ type PrivateAccessSnapshot struct {
 
 // ValidateEnvelope checks the snapshot's own fields; each admission is checked by its consumer.
 func (s PrivateAccessSnapshot) ValidateEnvelope() error {
-	if s.Schema != PrivateAccessSchema || s.Kind != PrivateAccessSnapshotKind || !s.Complete || s.Admissions == nil || len(s.Admissions) > MaxPrivateAccessAdmissions {
+	if s.Schema != PrivateAccessSchema || s.Kind != PrivateAccessSnapshotKind || !s.Complete || s.Admissions == nil {
 		return ErrInvalidInput
 	}
 	return nil

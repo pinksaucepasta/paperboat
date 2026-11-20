@@ -95,6 +95,45 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 		started = true
 		return nil
 	}
+	// renewAll renews what is due: the installation's own certificate and the browser HTTPS certificate; a renewal
+	// restarts the components so they load it. An unavailable CA keeps the current certificate and is retried at the
+	// next check; only a failed restart ends the run.
+	renewAll := func(now time.Time) error {
+		restart := false
+		renewed, err := RenewCertificate(dir, now)
+		if err != nil {
+			if observe != nil {
+				observe(ctx, "selfhost_certificate", err)
+			}
+			fmt.Fprintln(output, "Infrastructure certificate renewal unavailable; existing certificate retained; retry scheduled.")
+		}
+		if renewed {
+			fmt.Fprintln(output, "Infrastructure certificate renewed; runtime components restarted with the same TLS identity.")
+			restart = true
+		}
+		publicRenewed, err := RenewPublicHTTPS(ctx, dir, PublicACMEDirectoryURL, now)
+		if err != nil {
+			if observe != nil {
+				observe(ctx, "selfhost_public_https", err)
+			}
+			fmt.Fprintln(output, "Browser HTTPS certificate renewal failed; the current certificate is retained; retry scheduled. Run pbh status for the reason.")
+		}
+		if publicRenewed {
+			fmt.Fprintln(output, "Browser HTTPS certificate renewed; runtime components restarted to load it.")
+			restart = true
+		}
+		if !restart {
+			return nil
+		}
+		stopChildren()
+		wg.Wait()
+		childContext, stopChildren = context.WithCancel(ctx)
+		started = false
+		return start()
+	}
+	// The first browser HTTPS attempt waits for the edge to be answering on port 80.
+	firstPublicRenewal := time.NewTimer(30 * time.Second)
+	defer firstPublicRenewal.Stop()
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- serve(ctx, dir, listen, notify, observe) }()
 	for {
@@ -120,27 +159,20 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 				return err
 			}
 		case now := <-renewals:
-			renewed, err := RenewCertificate(dir, now)
-			if err != nil {
-				if observe != nil {
-					observe(ctx, "selfhost_certificate", err)
-				}
-				fmt.Fprintln(output, "Infrastructure certificate renewal unavailable; existing certificate retained; retry scheduled.")
-				continue
-			}
-			if renewed {
+			if err := renewAll(now); err != nil {
+				cancel()
 				stopChildren()
+				<-serverDone
 				wg.Wait()
-				childContext, stopChildren = context.WithCancel(ctx)
-				started = false
-				if err := start(); err != nil {
-					cancel()
-					stopChildren()
-					<-serverDone
-					wg.Wait()
-					return err
-				}
-				fmt.Fprintln(output, "Infrastructure certificate renewed; runtime components restarted with the same TLS identity.")
+				return err
+			}
+		case now := <-firstPublicRenewal.C:
+			if err := renewAll(now); err != nil {
+				cancel()
+				stopChildren()
+				<-serverDone
+				wg.Wait()
+				return err
 			}
 		case <-ctx.Done():
 			cancel()

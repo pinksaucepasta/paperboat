@@ -19,7 +19,7 @@ func TestWindowsUnstampedNativeOwnerUsesProtectedFeatureVersion(t *testing.T) {
 	install := hostinstall.WindowsRuntimeConfig{Source: installsource.Source{Version: "2026.09.03.2"},
 		OwnerSID: "S-1-5-21-1-2-3-1001", MachineID: "machine",
 		ListenAddress: "127.0.0.1:8080", TokenFile: hostinstall.WindowsHostdTokenPath(),
-		StateRoot: `C:\Users\Pujan\AppData\Local\Paperboat\runtime`,
+		StateRoot: `C:\Users\Tester\AppData\Local\Paperboat\runtime`,
 		Artifact: bootstrap.ArtifactTarget{
 			Version: "2026.09.03.2", Architecture: "amd64",
 			RepositoryURL: "https://get.example.test/tuf",

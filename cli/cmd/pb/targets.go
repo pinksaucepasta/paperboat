@@ -290,7 +290,7 @@ func resolveEnvironmentTargetWithMachine(ctx context.Context, client *api.Client
 func resolveUserMachine(ctx context.Context, client *api.Client, requested string) (api.UserMachine, error) {
 	// The server filters by a case-insensitive substring of name and ID, so a machine named or
 	// identified exactly by requested is always in this page; the account is not listed in full
-	// (Lane X audit A2: ~50 serial pages at 10,000 machines).
+	// (audit A2: ~50 serial pages at 10,000 machines).
 	machines, err := client.ListUserMachinesFiltered(ctx, url.Values{"q": {requested}})
 	if err != nil {
 		return api.UserMachine{}, err
@@ -326,21 +326,6 @@ func resolveUserMachineIn(machines []api.UserMachine, requested string) (api.Use
 		return api.UserMachine{}, fmt.Errorf("%w: %q matches machine IDs %s; use an exact ID", resolver.ErrMachineAmbiguous, requested, strings.Join(ids, ", "))
 	}
 	return api.UserMachine{}, fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, requested)
-}
-
-// resolveWarmUserMachine uses the daemon's authenticated inventory snapshot
-// for selection. Operation descriptors remain fetched from the control plane;
-// this only removes a redundant catalog round trip on an already-warm client.
-var loadWarmMachineSnapshot = func(ctx context.Context) (localapi.Snapshot, error) {
-	paths, err := currentLocalDaemonPaths()
-	if err != nil {
-		return localapi.Snapshot{}, err
-	}
-	client, err := localapi.NewClient(paths.SocketPath, 300*time.Millisecond)
-	if err != nil {
-		return localapi.Snapshot{}, err
-	}
-	return client.Snapshot(ctx)
 }
 
 // workspaceSnapshotMachines selects the daemon snapshot's machines that belong to the
@@ -388,7 +373,7 @@ func warmUserMachine(ctx context.Context, requested string, anyState bool) (api.
 	if _, local := workspaceSnapshotMachines(ctx, nil); !local {
 		return api.UserMachine{}, false
 	}
-	snapshot, err := loadWarmMachineSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).warmSnapshot(ctx)
 	if err != nil {
 		return api.UserMachine{}, false
 	}
@@ -408,7 +393,7 @@ const controlPlaneProbeTimeout = 5 * time.Second
 
 // daemonReportsControlPlaneUnavailable is the daemon's own health: its last refresh could not reach Paperboat.
 func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
-	snapshot, err := loadWarmMachineSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).warmSnapshot(ctx)
 	return err == nil && len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
 }
 

@@ -1640,6 +1640,12 @@ type HelperIdentityRenewal struct {
 	CreatedAt          time.Time
 }
 
+type HostHealthReport struct {
+	Source     string
+	Payload    []byte
+	ReportedAt time.Time
+}
+
 type InspectorCredential struct {
 	CredentialID            string
 	TokenHash               []byte

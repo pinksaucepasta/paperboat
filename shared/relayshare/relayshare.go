@@ -1,37 +1,69 @@
-// Package relayshare divides an account's relay speed among the relays that carry it, by the demand each reports. The control plane
-// computes the shares; tests of the relay use the same function.
+// Package relayshare divides an account's relay speed among the relays that carry it, by what each reports. The control plane computes
+// the shares; the relay's tests use the same function.
 package relayshare
 
-import "math"
+import "github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
-// floorOf is the least share of an account's speed a relay that carries it gets, so a new flow on an idle relay can start and
-// show its demand: 5% of the speed, and enough for control traffic.
-func floorOf(mbit float64, relays int) float64 {
-	return min(max(0.05*mbit, MinMbit), mbit/float64(relays))
+// Demand is what an account offered one relay over a window, in bytes per second: Offered is everything that arrived, Held the part the
+// relay's speed limit delayed or dropped. A relay that held traffic back has a flow that wants more than it gets.
+type Demand struct {
+	Offered float64 `json:"offered"`
+	Held    float64 `json:"held"`
 }
 
-// MinMbit keeps one relay's share of an account able to carry its control traffic.
-const MinMbit = 0.064
+// limited reports whether the relay held back a real part of the account's traffic (a few delayed packets of a flow that fits its share
+// do not count).
+func (d Demand) limited() bool { return d.Held > 0 && d.Held >= 0.1*d.Offered }
 
-// Share is one relay's share, in Mbit/s, of an account's speed mbit across relays that offered demand (bytes per second, the
-// relay's own among them): the floor plus the rest in proportion to demand, so the shares of all the relays add up to the speed; an
-// idle relay holds the floor, a lone busy one nearly everything, and with no demand anywhere the speed is split evenly.
-// Prior art: Google Doorman's ProportionalShare (github.com/youtube/doorman, doc/algorithms.md): clients report what they want and
-// the server divides the capacity by it.
-func Share(mbit, own float64, demand map[string]float64) float64 {
+// Shares divides an account's speed mbit among the relays that report demand (relay id -> demand), summing to mbit: max-min fairness.
+// A relay whose flows fit (nothing held back) keeps what it offers plus 25% (at least relaylimits.AccountStartMbit); the relays that are held back share the
+// rest equally, so one busy relay gets everything but its idle neighbours' start allowance, and two busy relays get half each at once.
+// With nobody held back the spare speed is spread evenly.
+// Prior art: max-min fair allocation as in Google Doorman's FairShare (github.com/youtube/doorman, doc/algorithms.md), where each
+// client keeps what it asks for up to the fair share and the rest is split among the clients that want more.
+func Shares(mbit float64, demand map[string]Demand) map[string]float64 {
 	n := len(demand)
-	if n <= 1 {
-		return mbit
+	out := make(map[string]float64, n)
+	if n == 0 {
+		return out
 	}
-	var sum float64
-	for _, d := range demand {
-		if d > 0 && !math.IsInf(d, 0) {
-			sum += d
+	if n == 1 {
+		for id := range demand {
+			out[id] = mbit
+		}
+		return out
+	}
+	start := min(relaylimits.AccountStartMbit, mbit/float64(n))
+	var wants float64 // what the relays that are not held back keep
+	var held int
+	for id, d := range demand {
+		if d.limited() {
+			held++
+			continue
+		}
+		want := max(start, 1.25*d.Offered*8/1e6)
+		out[id] = want
+		wants += want
+	}
+	// The relays held back each keep at least the start allowance; the rest of the speed is what the others may take.
+	if available := mbit - float64(held)*start; wants > available {
+		for id := range out {
+			out[id] *= available / wants
+		}
+		wants = available
+	}
+	switch {
+	case held > 0:
+		for id, d := range demand {
+			if d.limited() {
+				out[id] = (mbit - wants) / float64(held)
+			}
+		}
+	default:
+		spare := (mbit - wants) / float64(n)
+		for id := range out {
+			out[id] += spare
 		}
 	}
-	if sum <= 0 || own < 0 {
-		return mbit / float64(n)
-	}
-	floor := floorOf(mbit, n)
-	return floor + (mbit-float64(n)*floor)*own/sum
+	return out
 }

@@ -48,7 +48,7 @@ func verifyHandler(document schema.Document) error {
 	}
 	handler, err := edgediagnostics.NewHandler(edgediagnostics.Sources{
 		Node:     func() node.Snapshot { return node.Snapshot{Live: true, Ready: true} },
-		Manager:  func() node.ManagerSnapshot { return node.ManagerSnapshot{Capacity: 8} },
+		Manager:  func() node.ManagerSnapshot { return node.ManagerSnapshot{} },
 		Sessions: func() int { return 1 }, SessionRoutes: func() int { return 1 },
 		ActiveStreams: func() uint32 { return 1 }, RouteCount: func() int { return 1 },
 		Usage:      func() usage.QueueStats { return usage.QueueStats{MaxReports: 8, MaxBytes: 1024} },

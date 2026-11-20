@@ -37,7 +37,7 @@ func (c *Client) send(req *http.Request) (*http.Response, error) {
 	if req.Method == http.MethodGet || req.Method == http.MethodHead {
 		// Failures before the request is written (dial, TLS) are retried once by the transport
 		// (tlsHandshakeRetryTransport); this layer retries only a read whose response was lost, so the two
-		// never multiply against an unreachable server (Lane X audit A3).
+		// never multiply against an unreachable server (audit A3).
 		var resp *http.Response
 		var err error
 		for attempt := 0; attempt < readRetryAttempts; attempt++ {

@@ -51,9 +51,12 @@ def windows_install(host, pb_new):
     return c.host_run(host, f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}", 330)
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--budget", type=float, default=8.0, help="seconds without a completing exec (Linux baseline 3.7 s)")
     parser.add_argument("--seconds", type=int, default=90)
     parser.add_argument("--target-ssh", help="ssh host of a macOS target that runs ~/pb-new install (default: the rel-sco-b container)")
@@ -61,6 +64,8 @@ def main():
     parser.add_argument("--target-name", default=c.NAMES["b"])
     parser.add_argument("--probe-ct", default=c.NAMES["a"])
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     host = args.host
     probe_ct = args.probe_ct
     probe_script = "/home/pbt/update_probe.py"

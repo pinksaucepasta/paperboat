@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+from dev_targets import configured_path, device_names, load
 from preview_receipt import receipt_timestamp
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,7 +61,7 @@ def build_commit(receipt, root=ROOT):
 
 def deploys(root, start, end):
     """PLAN is the existing deployment log; retain its dated entries, never invent deploy times."""
-    plan = root / 'PLAN.md'
+    plan = configured_path(load(), 'deployment_log', root / 'PLAN.md') if root == ROOT else root / 'PLAN.md'
     if not plan.exists():
         return []
     entries = []
@@ -71,8 +72,13 @@ def deploys(root, start, end):
         if re.search(r'\bserver(?=\b|[0-9])', line, re.I) and re.search(r'\bdeployed\b', line, re.I):
             position = line.lower().index('deployed')
             excerpt = line[max(0, position-90):position+130]
-            entries.append(f'PLAN.md:{number} {day[1]} …{excerpt}…')
+            entries.append(f'{plan.name}:{number} {day[1]} …{excerpt}…')
     return entries
+
+
+def check_devices(identity):
+    names = '|'.join(re.escape(name) for name in sorted(device_names(), key=len, reverse=True))
+    return re.findall(r'(?<![a-z])(' + names + r')(?![a-z])', identity.partition(':')[2])
 
 
 def report(result, directory, root=ROOT, check=None):
@@ -85,10 +91,10 @@ def report(result, directory, root=ROOT, check=None):
         row = next((row for row in current.get('results', []) if row.get('id') == identity), {})
         if row.get('triage') == 'NETWORK' and row.get('failure_code') == 'network_dns':
             lines.append(f'NETWORK {identity}: network-inconclusive; FAIL retained, no product regression range established.')
-            devices = list(dict.fromkeys(re.findall(r'(?<![a-z])(hp|apple|victus)(?![a-z])', identity.split(':')[-1])))
+            devices = list(dict.fromkeys(check_devices(identity)))
             command = ['tools/device-smoke/smoke.sh', '--expect-version', current.get('expect_version', 'BUILD_VERSION'),
-                       '--targets', ','.join(devices or ['hp', 'apple']), '--only-check', identity]
-            lines.append('Record one PLAN Log line and rerun this exact check once: ' + shlex.join(command))
+                       '--targets', ','.join(devices or device_names()[:2]), '--only-check', identity]
+            lines.append('Record the network failure and rerun this exact check once: ' + shlex.join(command))
             continue
         previous = last_pass(directory, identity, before)
         if previous is None:
@@ -106,9 +112,9 @@ def report(result, directory, root=ROOT, check=None):
         lines.append(history or '(no cli/relay/shared commits in this range)')
         lines.append('First rerun this single check on the last passing build against the current server.')
         lines.append(shlex.join(['git', 'bisect', 'start', head, commit, '--', *PATHS]))
-        devices = list(dict.fromkeys(re.findall(r'(?<![a-z])(hp|apple|victus)(?![a-z])', identity.split(':')[-1])))
+        devices = list(dict.fromkeys(check_devices(identity)))
         command = ['tools/device-smoke/smoke.sh', '--expect-version', 'BUILD_VERSION',
-                   '--targets', ','.join(devices or ['hp', 'apple']), '--only-check', identity]
+                   '--targets', ','.join(devices or device_names()[:2]), '--only-check', identity]
         lines.append('At each bisect step, build/install that committed revision, then: ' + shlex.join(command))
         lines.append('Server versions in receipts: ' + str(data.get('server', 'not recorded')) + ' -> ' + str(current.get('server', 'not recorded')))
         entries = deploys(root, at, before)

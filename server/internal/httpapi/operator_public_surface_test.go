@@ -14,7 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/operatorauth"
 )
 
-// An unknown or malformed email must not answer differently from an operator's: no account oracle.
+// An unknown or malformed email must not answer differently from an operator's: no account build host.
 func TestOperatorEmailDoesNotRevealWhetherTheAccountExists(t *testing.T) {
 	mux := http.NewServeMux()
 	registerOperatorAuthentication(mux, Options{OperatorAuth: &operatorauth.Service{}})

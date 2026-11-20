@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """F21-160 on a Windows device: a dead direct path is noticed in seconds, not by the 2 minute QUIC idle timeout.
 
-The Windows device (SMOKE_WINDOWS_SSH, PB_SMOKE_WINDOWS_PB, VICTUS_PASS for a password login) runs one long
+The Windows device (SMOKE_WINDOWS_SSH, PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_PASSWORD for a password login) runs one long
 `pb exec PEER -- sh -c 'while true; do echo; sleep 0.5; done'` and timestamps every line as it arrives on the device. The
 direct path to PEER (a Unix machine of the account on the same LAN) is then dropped with a firewall block of pb.exe's
 UDP to --peer-address (winhost.cut_peer_udp: UDP only, so the SSH that drives the device keeps working, with a

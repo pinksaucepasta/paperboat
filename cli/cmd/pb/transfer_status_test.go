@@ -42,8 +42,7 @@ func TestTransferStatusJSONUsesNativeStreamAndClosesLease(t *testing.T) {
 	defer transferServer.Close()
 
 	closed := false
-	previousTransferClient := newTransferCommandClient
-	newTransferCommandClient = func(ctx context.Context, target *resolver.FileTransferTarget, destination api.UserMachine, operationID string) (*clienttransfer.NativeClient, io.Closer, error) {
+	transferClient := func(ctx context.Context, target *resolver.FileTransferTarget, destination api.UserMachine, operationID string) (*clienttransfer.NativeClient, io.Closer, error) {
 		if target == nil || target.SourceMachineID != "machine_source" || target.DestinationMachineID != "machine_host" || target.InitiatingUserID != "user_1" || target.Auth.Token != "transfer-token" || target.Auth.ResourceID != "access_1" || destination.ID != "machine_host" || operationID == "" {
 			t.Errorf("transfer target=%+v", target)
 			return nil, nil, context.Canceled
@@ -53,7 +52,6 @@ func TestTransferStatusJSONUsesNativeStreamAndClosesLease(t *testing.T) {
 		})
 		return client, transferLeaseCloser(func() error { closed = true; return nil }), err
 	}
-	t.Cleanup(func() { newTransferCommandClient = previousTransferClient })
 
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.Method + " " + request.URL.Path {
@@ -93,7 +91,7 @@ func TestTransferStatusJSONUsesNativeStreamAndClosesLease(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "send", "status", want.TransferID, "--on", "hn", "--json"}, &stdout, &stderr); code != 0 {
+	if code := run(withInstallDependencies(t.Context(), func(d *installDependencies) { d.transferClient = transferClient }), []string{"--config", configPath, "send", "status", want.TransferID, "--on", "hn", "--json"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var output struct {

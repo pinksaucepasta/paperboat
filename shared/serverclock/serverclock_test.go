@@ -99,3 +99,22 @@ func TestAClockSetBackMakesItAskTheServerAgain(t *testing.T) {
 		t.Fatalf("the server was asked %d times, want exactly 1", n)
 	}
 }
+
+func TestSkewedComparesTheResponseDateWithTheLocalClock(t *testing.T) {
+	local := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		date string
+		want bool
+	}{
+		{local.Add(30 * time.Second).Format(http.TimeFormat), false},
+		{local.Add(Threshold).Format(http.TimeFormat), true},
+		{local.Add(-10 * time.Minute).Format(http.TimeFormat), true},
+		{"", false},
+		{"not a date", false},
+	} {
+		response := &http.Response{Header: http.Header{"Date": {test.date}}}
+		if got := Skewed(response, local); got != test.want {
+			t.Errorf("Date %q: Skewed = %v, want %v", test.date, got, test.want)
+		}
+	}
+}

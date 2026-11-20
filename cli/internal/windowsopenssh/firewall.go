@@ -257,7 +257,7 @@ func RemovePaperboatState(ctx context.Context, config Config) error {
 		return err
 	}
 	// Access state (authorized_keys, host keys, config) goes even when the service or a firewall rule
-	// could not be removed: a leftover root made the next install refuse it (victus, second user).
+	// could not be removed: a leftover root made the next install refuse it (Windows test machine, second user).
 	result := RemoveServiceOwned(ctx, config)
 	var firewallErr error
 	state, exists, stateErr := readFirewallState(config)

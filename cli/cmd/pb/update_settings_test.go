@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
@@ -126,11 +125,9 @@ func (f *updateSettingsControlFixture) recordedRequests() []updated.ControlReque
 
 func runUpdateSettingsCommand(t *testing.T, fixture *updateSettingsControlFixture, args ...string) (string, string, error) {
 	t.Helper()
-	previousSocket := updateControlSocketForCommand
-	updateControlSocketForCommand = func() (string, error) {
-		return fixture.socket, nil
-	}
-	t.Cleanup(func() { updateControlSocketForCommand = previousSocket })
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return fixture.socket, nil }
+	})
 
 	root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
 	update := &cobra.Command{Use: "update"}
@@ -141,7 +138,7 @@ func runUpdateSettingsCommand(t *testing.T, fixture *updateSettingsControlFixtur
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
-	err := root.ExecuteContext(context.Background())
+	err := root.ExecuteContext(ctx)
 	return stdout.String(), stderr.String(), err
 }
 
@@ -216,15 +213,15 @@ func TestUpdateSettingsReadsByDefaultAndWritesOnlyChangedValues(t *testing.T) {
 	})
 
 	t.Run("invalid time is a static usage error before contacting the updater", func(t *testing.T) {
-		previousSocket := updateControlSocketForCommand
 		contacts := 0
-		updateControlSocketForCommand = func() (string, error) {
-			contacts++
-			return "", errors.New("unexpected updater contact")
-		}
-		t.Cleanup(func() { updateControlSocketForCommand = previousSocket })
+		ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+			deps.socket = func() (string, error) {
+				contacts++
+				return "", errors.New("unexpected updater contact")
+			}
+		})
 		var stdout, stderr bytes.Buffer
-		code := run(context.Background(), []string{"--no-customization", "update", "settings", "--time", "25:60"}, &stdout, &stderr)
+		code := run(ctx, []string{"--no-customization", "update", "settings", "--time", "25:60"}, &stdout, &stderr)
 		if code != 2 || contacts != 0 || !strings.Contains(stderr.String(), "HH:MM") || strings.Contains(stderr.String(), "25:60") || stdout.Len() != 0 {
 			t.Fatalf("invalid-time CLI result: code=%d contacts=%d stdout=%q stderr=%q", code, contacts, stdout.String(), stderr.String())
 		}

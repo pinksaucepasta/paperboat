@@ -8,7 +8,7 @@ import (
 )
 
 // sshTargetNotReadyError is a managed SSH connection to a machine whose SSH the daemon already knows is
-// not ready: it names why and what to do instead of an OpenSSH banner error (Lane W, F5: cloned host
+// not ready: it names why and what to do instead of an OpenSSH banner error (F5: cloned host
 // keys showed as "kex_exchange_identification: Connection closed").
 type sshTargetNotReadyError struct {
 	machine, title, recovery string
@@ -23,7 +23,7 @@ func (e *sshTargetNotReadyError) Error() string {
 func sshTargetHealth(ctx context.Context, machineID, alias string) error {
 	ctx, cancel := context.WithTimeout(ctx, daemonSnapshotLookupTimeout)
 	defer cancel()
-	snapshot, err := readDaemonSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).readSnapshot(ctx)
 	if err != nil {
 		return nil
 	}

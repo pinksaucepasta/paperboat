@@ -827,6 +827,7 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/v1/admin/edge/usage-keys":                                          {"post"},
 		"/v1/admin/edge/usage-keys/{key_id}/revoke":                          {"post"},
 		"/v1/admin/control-operations/{operation_id}/recover":                {"post"},
+		"/v1/admin/transactional-mails/{mail_id}/redrive":                    {"post"},
 		"/v1/admin/billing/workspace-operations/{operation_id}/retire":       {"post"},
 		"/v1/environments/{environment_id}/helper-enrollments":               {"post"},
 		"/v1/environments/{environment_id}/helpers/{helper_id}/replace":      {"post"},

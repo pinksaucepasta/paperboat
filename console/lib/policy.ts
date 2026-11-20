@@ -94,7 +94,7 @@ export const policyQuery = (workspace: string) =>
     retry: (count, error) => !(error instanceof ApiError && error.status >= 400 && error.status < 500) && count < 2,
   })
 
-/** Machine tags in the console (Lane K's tag API, server 2026.10.23.44). */
+/** Machine tags in the console (the tag API, server 2026.10.23.44). */
 export const tagsLive = true
 
 export type WorkspaceTags = Schemas["WorkspaceTags"]

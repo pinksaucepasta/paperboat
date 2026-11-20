@@ -102,7 +102,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatalf("a throttled browser terminal is still accounted: %d err=%v", capped, err)
 	}
 
-	// Lane R N3: after an outage the edge carrier re-attaches up to ~30 s after presence returns, and
+	// N3: after an outage the edge carrier re-attaches up to ~30 s after presence returns, and
 	// native exec does not need it. Without a current edge route, a client that accepts native-only gets
 	// the descriptor with no edge endpoints and an access session without an edge base URL; a client that
 	// does not still gets machine_not_ready.

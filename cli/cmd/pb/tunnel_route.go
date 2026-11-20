@@ -31,7 +31,7 @@ func routeListCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -109,7 +109,7 @@ func routeAddCommand() *cobra.Command {
 		if maxStreams < 1 || maxStreams > 10000 {
 			return errors.New("max-streams must be between 1 and 10000")
 		}
-		key, e := tunnelKey()
+		key, e := tunnelKey(command.Context())
 		if e != nil {
 			return e
 		}
@@ -158,7 +158,7 @@ func routeAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -341,7 +341,7 @@ func routeUpdateCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -391,7 +391,7 @@ func routeUpdateCommand() *cobra.Command {
 		if effectiveProtocol == "http" && effectiveOrigin.Scheme == "tcp" {
 			return errors.New("HTTP routes cannot target a tcp origin")
 		}
-		key, e := tunnelKey()
+		key, e := tunnelKey(ctx)
 		if e != nil {
 			return e
 		}
@@ -440,7 +440,7 @@ func routeRemoveCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -451,7 +451,7 @@ func routeRemoveCommand() *cobra.Command {
 		if e := confirmMutation(command, "tunnel-route-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Remove route %s from tunnel %s? Matching traffic will stop; the tunnel and domains remain.", current.ID, tunnelID)); e != nil {
 			return e
 		}
-		key, e := tunnelKey()
+		key, e := tunnelKey(ctx)
 		if e != nil {
 			return e
 		}

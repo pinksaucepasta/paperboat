@@ -29,17 +29,6 @@ func (s *Server) Ready() bool {
 	return s.listener != nil && !s.draining
 }
 
-// SetConnectionLimit applies approved registry capacity before any listener starts.
-func (s *Server) SetConnectionLimit(limit int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if limit < 1 || limit > MaxConnections || s.listener != nil || len(s.connections)+len(s.wssConnections) != 0 {
-		return ErrProtocol
-	}
-	s.connectionLimit = limit
-	return nil
-}
-
 // MatchesControlService gates readiness on the registry's exact public service
 // identity; a DERP-only process cannot advertise a missing peer-relay service.
 func (s *Server) MatchesControlService(identity *ServiceDescriptor) bool {

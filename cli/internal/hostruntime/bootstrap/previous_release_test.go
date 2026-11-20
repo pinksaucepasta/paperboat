@@ -17,7 +17,7 @@ func TestLoadsResumeWrittenByPreviousRelease(t *testing.T) {
 	root := t.TempDir()
 	atomicfiletest.WriteOwnerOnly(t, filepath.Join(root, "bootstrap-resume.json"), raw)
 	record, err := loadResumeDocument(root)
-	if err != nil || record.Alias != "Victus" {
+	if err != nil || record.Alias != "Win-target" {
 		t.Fatalf("previous release's resume record = %+v, %v", record, err)
 	}
 }

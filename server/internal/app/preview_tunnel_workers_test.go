@@ -65,7 +65,7 @@ func (r *recordingTunnelExpiryReconciler) ReconcileExpired(_ context.Context, re
 }
 
 // A failing iteration is retried with backoff and never ends the worker, so the supervisor and the server
-// stay up through a database blip (Lane X S1); the worker ends only on cancellation.
+// stay up through a database blip (S1); the worker ends only on cancellation.
 func TestPeriodicPreviewTunnelWorkerKeepsRunningThroughFailures(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

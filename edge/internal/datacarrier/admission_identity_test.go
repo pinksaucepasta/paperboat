@@ -32,7 +32,7 @@ func TestExpectedAdmissionRegistryPeerBindingUsesCarrierURNSessionFence(t *testi
 	newIdentity.SessionID = "session_2"
 	newIdentity.ProcessGeneration = 2
 
-	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12", MaximumAdmissions: 2})
+	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12"})
 	if err != nil {
 		t.Fatal(err)
 	}

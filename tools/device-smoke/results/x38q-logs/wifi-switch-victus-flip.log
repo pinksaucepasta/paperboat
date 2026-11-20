@@ -1,5 +1,0 @@
-17:52:59 baseline route-via=[vEthernet (External Virtual Switch)] ping-pbvm2=True internet=404
-17:53:26 flipped to Wi-Fi route-via=[Wi-Fi] ping-pbvm2=True internet=404
-17:54:11 still Wi-Fi route-via=[Wi-Fi] ping-pbvm2=True internet=404
-17:54:17 back to Ethernet route-via=[vEthernet (External Virtual Switch)] ping-pbvm2=True internet=404
-17:54:38 settled route-via=[vEthernet (External Virtual Switch)] ping-pbvm2=True internet=404

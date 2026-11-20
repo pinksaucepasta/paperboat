@@ -156,8 +156,8 @@ func (c *accessorDiscoveryClient) fetchSnapshot(ctx context.Context) ([]accessor
 	if values := resp.Header.Values("Content-Type"); len(values) != 1 || values[0] != "application/json" {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, privateAccessMaxBody+1))
-	if err != nil || len(raw) == 0 || len(raw) > privateAccessMaxBody {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, connectorprotocol.MaximumSnapshotBytes+1))
+	if err != nil || len(raw) == 0 || len(raw) > connectorprotocol.MaximumSnapshotBytes {
 		return nil, privatepreviewproxy.ErrAccessTemporarilyUnavailable
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))

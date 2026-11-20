@@ -57,8 +57,14 @@ VALUES($1,'preview',$2,$3,$4,$5,'lease',$1)`, p.LeaseID, p.AccountID, team, p.Ag
 // liveEndpoint is the SQL predicate for an endpoint that should be served now. A preview is live
 // while its lease is active and unexpired.
 const liveEndpoint = `e.desired_state='active' AND (e.kind<>'preview' OR EXISTS(SELECT 1 FROM preview_leases p
-WHERE p.id=e.preview_lease_id AND p.terminal_state='active' AND p.lease_deadline>now()))
+WHERE p.id=e.preview_lease_id AND ` + livePreview + `))
 AND (e.kind<>'tunnel' OR EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id AND ` + liveTunnel + `))`
+
+const livePreview = `p.terminal_state='active' AND p.lease_deadline>now()`
+
+// LivePreviewsByOwner lists the ids of one machine's ($1) live previews. Stopped leases outnumber live ones
+// (3,224 of 3,224 on prod's busiest machine), so it must stay on preview_leases_active_by_owner.
+const LivePreviewsByOwner = `SELECT p.id FROM preview_leases p WHERE p.owner_machine_id=$1 AND ` + livePreview
 
 // liveTunnel is the SQL predicate (over tunnels t) for a tunnel that should be served now.
 const liveTunnel = `t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>now())`
@@ -95,13 +101,24 @@ func LockMachine(ctx context.Context, machineID string) (func(), error) {
 func reconcileTx(ctx context.Context, tx *db.Tx, machineID, endpointID string) error {
 	// Callers that write a machine's routes hold LockMachine (runtime attach, preview create, tunnel changes), so its
 	// carrier report and a reconcile queue instead of aborting each other with 40001 (prod 2026-11-20: 18 in 30 min).
-	_, err := tx.Exec(ctx, `WITH desired AS (
+	// Read live resources by owner before joining their projections. Starting with all of a machine's
+	// endpoints looked up every preview retained for delayed accounting, even when none could be served.
+	liveEndpoints := `WITH live_previews AS MATERIALIZED (` + LivePreviewsByOwner + `)
+SELECT e.id,e.kind FROM live_previews p JOIN endpoints e ON e.preview_lease_id=p.id
+WHERE e.agent_machine_id=$1 AND e.desired_state='active'
+UNION ALL
+SELECT e.id,e.kind FROM tunnels t JOIN endpoints e ON e.tunnel_id=t.id
+WHERE t.created_by_host_id=$1 AND ` + liveTunnel + `
+AND e.agent_machine_id=$1 AND e.desired_state='active'`
+	if endpointID != "" {
+		liveEndpoints = `SELECT e.id,e.kind FROM endpoints e WHERE e.agent_machine_id=$1 AND e.id=$2 AND ` + liveEndpoint
+	}
+	_, err := tx.Exec(ctx, `WITH live_endpoints AS (`+liveEndpoints+`), desired AS (
 SELECT DISTINCT ON (r.id,a.edge_node_id) r.id route_id,e.id endpoint_id,a.edge_node_id,a.edge_process_epoch,a.session_id
-FROM endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
-JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.agent_capabilities @> CASE WHEN e.kind='tunnel'
+FROM live_endpoints e JOIN endpoint_routes r ON r.endpoint_id=e.id
+JOIN runtime_carrier_attachments a ON a.machine_id=$1 AND a.agent_capabilities @> CASE WHEN e.kind='tunnel'
  THEN ARRAY['endpoints','tunnel_endpoints'] ELSE ARRAY['endpoints'] END::text[]
-JOIN user_machines um ON um.id=e.agent_machine_id AND paperboat.node_edge_eligible_core(a.edge_node_id,um.user_id,um.owner_team_id)
-WHERE e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND `+liveEndpoint+`
+JOIN user_machines um ON um.id=a.machine_id AND paperboat.node_edge_eligible_core(a.edge_node_id,um.user_id,um.owner_team_id)
 ORDER BY r.id,a.edge_node_id,a.active DESC
 ), upserted AS (
 INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id)

@@ -30,8 +30,8 @@ func TestPublicTCPListenersBindBeforeReadyObservation(t *testing.T) {
 	port := probe.Addr().(*net.TCPAddr).Port
 	_ = probe.Close()
 	authority := &publicTCPAuthorityFixture{}
-	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, MaximumConnections: 64, ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour})
+	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +89,11 @@ func TestPublicTCPListenersBindPersistAndWithdrawExactReservation(t *testing.T) 
 	_ = probe.Close()
 	authority := &publicTCPAuthorityFixture{}
 	authority.set(publicTCPListenerDecision(port, "listener_1"))
-	routes, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	routes, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, MaximumListeners: 4, MaximumConnections: 2})
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,14 +137,14 @@ func TestPublicTCPFatalAcceptWithdrawsOnlyItsIdentityAndRebinds(t *testing.T) {
 	_ = probe.Close()
 	authority := &publicTCPAuthorityFixture{}
 	authority.set(publicTCPListenerDecision(port, "listener_1"))
-	routes, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	routes, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer routes.Close()
 	type ctxKey struct{}
 	reported := make(chan error, 4)
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, MaximumConnections: 64, ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(ctx context.Context, phase string, cause error) {
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(ctx context.Context, phase string, cause error) {
 		if phase == "public_tcp_listener" {
 			if ctx.Value(ctxKey{}) != "borrowed" {
 				t.Error("invocation context lost")
@@ -239,8 +239,8 @@ func listenInPublicTCPRange() (net.Listener, error) {
 func TestPublicTCPListenersRefusePortsOutsideTheRange(t *testing.T) {
 	var failures []error
 	authority := &publicTCPAuthorityFixture{}
-	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, MaximumConnections: 64, ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(_ context.Context, _ string, err error) { failures = append(failures, err) }})
+	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(_ context.Context, _ string, err error) { failures = append(failures, err) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,16 +262,5 @@ func TestPublicTCPListenersRefusePortsOutsideTheRange(t *testing.T) {
 	manager.mu.Unlock()
 	if bound != 0 || len(failures) != 3 {
 		t.Fatalf("listeners=%d failures=%d, want none bound and 3 reported", bound, len(failures))
-	}
-}
-
-func TestSlotsUsedPercent(t *testing.T) {
-	for _, c := range []struct {
-		used, capacity int
-		want           uint64
-	}{{0, 512, 0}, {410, 512, 80}, {512, 512, 100}, {3, 0, 0}} {
-		if got := slotsUsedPercent(c.used, c.capacity); got != c.want {
-			t.Errorf("slotsUsedPercent(%d, %d) = %d, want %d", c.used, c.capacity, got, c.want)
-		}
 	}
 }

@@ -799,7 +799,7 @@ func (w *windowsRuntimeWorker) Activate(ctx context.Context) (hostdproto.Status,
 }
 
 // exitFailure adds the worker's own last output to an end of its lifecycle output: the worker exited, and only its
-// stderr says why (a bare EOF rolled an update back on victus with no cause anywhere).
+// stderr says why (a bare EOF rolled an update back on Windows test machine with no cause anywhere).
 func (w *windowsRuntimeWorker) exitFailure(err error) error {
 	if !errors.Is(err, io.EOF) || w.stderr == nil {
 		return err

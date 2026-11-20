@@ -12,7 +12,7 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
-// Lane H's round-33 finding: after an unsupported downgrade the carrier unit restarted every few seconds,
+// the round-33 finding: after an unsupported downgrade the carrier unit restarted every few seconds,
 // every ping and exec failed, and `pb doctor` said "healthy". The values below were read from that unit.
 func TestDoctorWarnsWhenTheNativeCarrierKeepsFailingToStart(t *testing.T) {
 	systemd := t.TempDir()

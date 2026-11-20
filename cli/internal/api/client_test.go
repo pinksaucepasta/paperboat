@@ -131,7 +131,7 @@ func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGenerati
 			SSHPort                 uint16          `json:"ssh_port"`
 			CanReuseRuntimeIdentity bool            `json:"can_reuse_runtime_identity"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact != nil || input.SSHUser != "pujan" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.InstallationGeneration != 7 || input.PublicIdentityKey != "public-key" || input.Verifier != "verifier-012345678901234567890123" || input.Artifact != nil || input.SSHUser != "tester" || input.SSHPort != 22 || !input.CanReuseRuntimeIdentity {
 			t.Fatalf("input=%+v err=%v", input, err)
 		}
 		writeData(w, http.StatusCreated, AuthenticatedMachineInstallation{ExpiresAt: expiresAt})
@@ -139,7 +139,7 @@ func TestPrepareAuthenticatedMachineInstallationBindsMachineOperationAndGenerati
 	defer server.Close()
 	result, err := New(server.URL, config.Credential{AccessToken: "token"}, server.Client()).PrepareAuthenticatedMachineInstallation(context.Background(), "mch_1", "machine-installation-operation-1", AuthenticatedMachineInstallationInput{
 		Verifier: "verifier-012345678901234567890123", PublicIdentityKey: "public-key",
-		InstallationGeneration: 7, SSHUser: "pujan", SSHPort: 22, CanReuseRuntimeIdentity: true,
+		InstallationGeneration: 7, SSHUser: "tester", SSHPort: 22, CanReuseRuntimeIdentity: true,
 	})
 	if err != nil || !result.ExpiresAt.Equal(expiresAt) {
 		t.Fatalf("result=%+v err=%v", result, err)
@@ -995,7 +995,7 @@ func TestConfigSyncStatusRefusesAPageThatDoesNotAdvance(t *testing.T) {
 }
 
 // Team default calls go to the team they name: in the personal workspace the server refused them with
-// 409 workspace_target_conflict, so `pb config team-default-set/adopt/unadopt` never worked (Lane L, a test VM).
+// 409 workspace_target_conflict, so `pb config team-default-set/adopt/unadopt` never worked (a test VM).
 func TestConfigTeamDefaultCallsUseTheNamedTeamWorkspace(t *testing.T) {
 	seen := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

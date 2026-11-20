@@ -182,7 +182,7 @@ func runtimeFailureMessage(err error) string {
 		}
 	}
 	// A step that failed in this (unelevated) process, such as the readiness wait of a first pair, names itself too:
-	// without this the user saw only the generic string below (a Windows test VM, victus: first pair after ~100 s).
+	// without this the user saw only the generic string below (a Windows test VM, Windows test machine: first pair after ~100 s).
 	var named interface{ ElevationFailureCode() string }
 	if errors.As(err, &named) {
 		if message := elevation.RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {

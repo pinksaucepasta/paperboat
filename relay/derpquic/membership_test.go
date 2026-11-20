@@ -46,7 +46,7 @@ func TestMembershipGrantsAuthorizeExactlyTheReciprocalPairs(t *testing.T) {
 		t.Fatal("an access grant pairs the wrong endpoints")
 	}
 	// A share or a private route is one id held by its host (accept) and every viewer (dial): two viewers
-	// hold the same membership in the same direction and must not be paired with each other (Lane B review).
+	// hold the same membership in the same direction and must not be paired with each other (review).
 	host := membershipGrant("account_b", "share_host", later, scope("machine_access", "share_1", "terminal", "accept", later))
 	viewer1 := membershipGrant("account_c", "viewer_1", later, scope("machine_access", "share_1", "terminal", "dial", later))
 	viewer2 := membershipGrant("account_d", "viewer_2", later, scope("machine_access", "share_1", "terminal", "dial", later))

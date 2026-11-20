@@ -64,6 +64,13 @@ type MeshConfig struct {
 	RetryBase, RetryMax time.Duration
 }
 
+// Memory bounds of one Mesh, constants of the mesh itself: maxMeshHolders is the remote route keys a relay keeps (each a
+// 32-byte key and a pointer, about 100 MB in all), maxRemoteGrants the fetched sender grants (each up to 256 memberships).
+const (
+	maxMeshHolders  = 1 << 20
+	maxRemoteGrants = 1 << 14
+)
+
 // Mesh is one relay's side of the relay mesh. A Server owns it (SetMesh).
 type Mesh struct {
 	s                   *Server
@@ -77,9 +84,8 @@ type Mesh struct {
 	mu      sync.RWMutex
 	links   map[string]*meshLink // by peer node id
 	holders map[key.NodePublic]*meshLink
-	// holderLimit bounds the remote route keys held: each costs a 32-byte key and a pointer. A relay holds at most
-	// MaxConnections carriers, so the whole mesh fits four times that; past it new Presents are dropped (counted)
-	// and a reconnect refloods, instead of growing with whatever a peer announces.
+	// holderLimit bounds the remote route keys held (maxMeshHolders): this is memory safety against what a peer
+	// announces, not a capacity cap on connections; past it new Presents are dropped (counted) and a reconnect refloods.
 	holderLimit int
 	remote      *remoteCache
 	needed      map[key.NodePublic]time.Time
@@ -123,7 +129,7 @@ func NewMesh(cfg MeshConfig) (*Mesh, error) {
 		return nil, ErrProtocol
 	}
 	m := &Mesh{cert: cfg.Cert, retryBase: cfg.RetryBase, retryMax: cfg.RetryMax, links: make(map[string]*meshLink), holders: make(map[key.NodePublic]*meshLink),
-		holderLimit: 4 * MaxConnections, remote: newRemoteCache(MaxConnections), needed: make(map[key.NodePublic]time.Time), dialers: make(map[string]*meshDialer)}
+		holderLimit: maxMeshHolders, remote: newRemoteCache(maxRemoteGrants), needed: make(map[key.NodePublic]time.Time), dialers: make(map[string]*meshDialer)}
 	if m.retryBase == 0 {
 		m.retryBase = defaultRetryBase
 	}

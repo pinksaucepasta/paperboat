@@ -15,7 +15,7 @@ func (u *recordingGuardUndo) Restore(context.Context) error { u.restored++; retu
 func (u *recordingGuardUndo) Discard()                      { u.discarded++ }
 
 // A failed update puts back the machine guard it replaced; a committed one keeps the new guard. The
-// restore runs even when the caller's context is already canceled (Lane A: a failed update to 2026.10.23.6
+// restore runs even when the caller's context is already canceled (a failed update to 2026.10.23.6
 // rolled the daemon back but left the new guard installed).
 func TestAFailedUpdateRestoresTheMachineGuard(t *testing.T) {
 	failed := &recordingGuardUndo{}

@@ -77,7 +77,7 @@ func (a *resolveErrAuthorizer) ResolveRole(ctx context.Context, user, terminal s
 	return a.testBrowserAuthorizer.ResolveRole(ctx, user, terminal)
 }
 
-// Slice 7 (Lane K terminal plan): the refusal says what is wrong, so the console does not show "No access" for a
+// Slice 7 (terminal plan): the refusal says what is wrong, so the console does not show "No access" for a
 // machine whose edge connection is down or an owner's closed terminal.
 func TestGatewayIssueNamesWhyATerminalCannotBeOpened(t *testing.T) {
 	routed := Decision{WorkspaceID: "personal", UserID: "usr_1", OwnerAccountID: "usr_1", TerminalSessionID: "term_1", MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", EdgeEndpointHost: "edge-one.example.test", Role: "owner", PolicyGeneration: 1}

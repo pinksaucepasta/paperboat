@@ -92,13 +92,11 @@ func TestSwitchWorkspaceWithoutTerminalNamesTheArgument(t *testing.T) {
 	defer server.Close()
 	writeWorkspaceAuthProfile(t, dir, configPath, server.URL, "account-1")
 	t.Setenv("PAPERBOAT_WORKSPACE", "")
-	oldTerminal := workspaceTerminal
-	workspaceTerminal = func() bool { return false }
-	t.Cleanup(func() { workspaceTerminal = oldTerminal })
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) { d.isTerminal = func() bool { return false } })
 
 	for _, args := range [][]string{{"switch"}, {"switch", "team-unknown"}} {
 		var output bytes.Buffer
-		if code := run(context.Background(), append([]string{"--config", configPath}, args...), &output, &output); code == 0 {
+		if code := run(ctx, append([]string{"--config", configPath}, args...), &output, &output); code == 0 {
 			t.Fatalf("%v unexpectedly succeeded: %q", args, output.String())
 		}
 		if !strings.Contains(output.String(), "pb switch personal") || strings.Contains(output.String(), "could not finish") {
@@ -123,20 +121,18 @@ func TestSwitchWorkspaceCancellationDoesNotPersist(t *testing.T) {
 	writeWorkspaceAuthProfile(t, dir, configPath, server.URL, "account-1")
 	t.Setenv("PAPERBOAT_WORKSPACE", "")
 
-	oldTerminal, oldChoose := workspaceTerminal, chooseWorkspace
-	workspaceTerminal = func() bool { return true }
-	chooseWorkspace = func(options selector.Options) (selector.Item, error) {
-		if len(options.Items) != 2 {
-			t.Fatalf("workspace picker items=%d, want Personal and Team A", len(options.Items))
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) { d.isTerminal = func() bool { return true } })
+	ctx = withWorkspaceDependencies(ctx, func(d *workspaceDependencies) {
+		d.choose = func(options selector.Options) (selector.Item, error) {
+			if len(options.Items) != 2 {
+				t.Fatalf("workspace picker items=%d, want Personal and Team A", len(options.Items))
+			}
+			return selector.Item{}, selector.ErrCanceled
 		}
-		return selector.Item{}, selector.ErrCanceled
-	}
-	t.Cleanup(func() {
-		workspaceTerminal, chooseWorkspace = oldTerminal, oldChoose
 	})
 
 	var output bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "switch"}, &output, &output); code != 0 {
+	if code := run(ctx, []string{"--config", configPath, "switch"}, &output, &output); code != 0 {
 		t.Fatalf("canceled switch exit=%d output=%q", code, output.String())
 	}
 	cfg, err := config.Load(configPath)
@@ -147,7 +143,7 @@ func TestSwitchWorkspaceCancellationDoesNotPersist(t *testing.T) {
 		t.Fatalf("canceled switch persisted workspace %q (err=%v)", selected, err)
 	}
 	parent := newRootCommand()
-	parent.SetContext(context.Background())
+	parent.SetContext(ctx)
 	if err := parent.PersistentFlags().Set("config", configPath); err != nil {
 		t.Fatal(err)
 	}

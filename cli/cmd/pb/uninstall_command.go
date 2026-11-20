@@ -64,7 +64,7 @@ func uninstallCommand() *cobra.Command {
 				return usageError{err: errors.New("uninstall confirmation did not match"), publicMessage: "The confirmation must be exactly: UNINSTALL PAPERBOAT"}
 			}
 			if strings.TrimSpace(second) != hostname {
-				// Case counts: victus reports "Victus" (F26 device check).
+				// Case counts: Windows test machine reports "Windows test machine" (F26 device check).
 				return usageError{err: errors.New("hostname confirmation did not match"), publicMessage: fmt.Sprintf("The hostname confirmation must be this machine's exact hostname: %s", hostname)}
 			}
 			jsonWriter := command.OutOrStdout()

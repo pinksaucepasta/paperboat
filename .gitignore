@@ -1,5 +1,4 @@
 # Credentials and local machine access (never commit)
-REMOTE_TESTING.md
 **/.env
 **/.env.*
 !**/.env.example
@@ -24,3 +23,6 @@ coverage.*
 
 # Device smoke results (local evidence)
 tools/device-smoke/results/
+
+# Local status drill evidence
+status/drill-results/

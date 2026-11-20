@@ -44,7 +44,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// An account's self-hosted-only pool with a public-ingress edge (as in
 	// ingress_projection_postgres_test.go): the edge is eligible only for a
 	// route whose verified domain names this ingress address (064 publication).
-	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID)
+	exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='93.184.216.35',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.accountID, installation)
 	f.setCarrierHost(t, database, false)
 	if rows := read(); len(rows) != 0 {
@@ -57,7 +57,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("unverified custom domain admitted: %+v", rows)
 	}
-	exec(`UPDATE paperboat.tunnel_domains SET ownership_state='verified',expected_records='[{"type":"A","value":"140.245.11.41"}]'::jsonb WHERE id=$1`, domain)
+	exec(`UPDATE paperboat.tunnel_domains SET ownership_state='verified',expected_records='[{"type":"A","value":"93.184.216.35"}]'::jsonb WHERE id=$1`, domain)
 	rows := read()
 	if len(rows) != 1 || rows[0].ScopedDomainHostname != hostname || rows[0].ScopedDomainMatchType != "exact" || rows[0].DomainBindings != "[]" {
 		t.Fatalf("pre-TLS bootstrap = %+v", rows)

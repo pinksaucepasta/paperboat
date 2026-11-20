@@ -125,7 +125,7 @@ class WindowsDeviceTest(unittest.TestCase):
         self.assertEqual('STATE', fake.calls[0]['payload']['name'])
 
     def test_pb_path_and_command_result_route_to_the_device(self):
-        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE, 'VICTUS_PASS': 'p'}):
+        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE, 'SMOKE_WINDOWS_PASSWORD': 'p'}):
             pb = winhost.pb_path()
             fake = FakeSsh((0, envelope(0, b'{"ok":true,"data":{"x":1}}')))
             with patch('subprocess.run', fake):
@@ -277,7 +277,7 @@ class SnippetsInPowerShell(unittest.TestCase):
             calls = []
             with patch.object(self.device, 'snippet', lambda *a, **payload: calls.append(payload) or (0, b'', b'')):
                 winhost.write_pattern(pattern, bytes(range(256)) * 256, 800)  # the checks' 50 MiB file
-            self.assertLess(len(calls[0]['block']), 1024)  # victus stopped answering SSH at this step with ~117 KB of stdin
+            self.assertLess(len(calls[0]['block']), 1024)  # windows stopped answering SSH at this step with ~117 KB of stdin
             random = directory / 'random.bin'
             digest = winhost.write_random(random, 3 << 20)
             self.assertEqual(3 << 20, random.size())
@@ -498,7 +498,7 @@ class PortedScriptsRouteToTheDevice(unittest.TestCase):
         record = {k: k + '-value' for k in ('machine_id', 'environment_id', 'public_identity_key', 'public_key_id',
                                             'installation_generation', 'account_id', 'inbox_path')}
         fake = FakeSsh((0, rb'C:\Users\u\AppData\Local'), (0, base64.b64encode(json.dumps(record).encode())))
-        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': r'C:\x\pb.exe', 'VICTUS_PASS': 'p'}), \
+        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': r'C:\x\pb.exe', 'SMOKE_WINDOWS_PASSWORD': 'p'}), \
                 patch('subprocess.run', fake):
             winhost._device.cache_clear()
             self.assertEqual(record, install_lifecycle.registration())
@@ -621,11 +621,11 @@ class WindowsTargetPlumbing(unittest.TestCase):
     def test_is_windows_reads_the_machine_platform_once(self):
         import windows_target
         windows_target._platforms.clear()
-        listing = {'machines': [{'id': 'machine_1', 'alias': 'victus', 'platform': 'windows'},
-                                {'id': 'machine_2', 'alias': 'hp', 'platform': 'linux'}]}
+        listing = {'machines': [{'id': 'machine_1', 'alias': 'windows', 'platform': 'windows'},
+                                {'id': 'machine_2', 'alias': 'linux', 'platform': 'linux'}]}
         with patch('pairing_lifecycle.invoke', return_value=listing) as invoke:
-            self.assertTrue(windows_target.is_windows('pb', 'victus'))
-            self.assertTrue(windows_target.is_windows('pb', 'victus'))
+            self.assertTrue(windows_target.is_windows('pb', 'windows'))
+            self.assertTrue(windows_target.is_windows('pb', 'windows'))
             self.assertFalse(windows_target.is_windows('pb', 'machine_2'))
             self.assertFalse(windows_target.is_windows('pb', 'unknown'))
         self.assertEqual(3, invoke.call_count)
@@ -642,14 +642,14 @@ class WindowsTargetPlumbing(unittest.TestCase):
 
         with patch('exec_lifecycle.run', run):
             with self.assertRaises(KeyError):
-                with windows_target.staged('pb', 'victus', 'exit 3') as path:
+                with windows_target.staged('pb', 'windows', 'exit 3') as path:
                     self.assertEqual('C:\\Temp\\pb-smoke-1.ps1', path)
                     raise KeyError
         self.assertEqual('exec', calls[0][0])
         self.assertEqual(3, len(calls))  # one piece, decode, remove
         self.assertEqual(['powershell', '-NoProfile'], list(calls[1][5:7]))
         calls.clear()
-        with patch('exec_lifecycle.run', run), windows_target.staged('pb', 'victus', windows_target.exec_script('a', 'b' * 64, 'u', 'e', 1)):
+        with patch('exec_lifecycle.run', run), windows_target.staged('pb', 'windows', windows_target.exec_script('a', 'b' * 64, 'u', 'e', 1)):
             pass
         self.assertGreater(len(calls), 3)  # at least two pieces
         for call in calls:  # pb exec refuses a command of more than 4096 characters
@@ -664,12 +664,12 @@ class WindowsTargetPlumbing(unittest.TestCase):
     def test_target_pb_prefers_the_environment(self):
         import windows_target
         with patch.dict(os.environ, {'PB_SMOKE_TARGET_WINDOWS_PB': r'C:\x\pb.exe'}):
-            self.assertEqual(r'C:\x\pb.exe', windows_target.target_pb('pb', 'victus'))
+            self.assertEqual(r'C:\x\pb.exe', windows_target.target_pb('pb', 'windows'))
 
 
 class SessionFamily(unittest.TestCase):
     def test_terminal_argv_is_plain_on_unix_and_ssh_tt_on_windows(self):
-        self.assertEqual(['/bin/pb', 'connect', 'hp'], winhost.terminal_argv(pathlib.Path('/bin/pb'), ['connect', 'hp']))
+        self.assertEqual(['/bin/pb', 'connect', 'linux'], winhost.terminal_argv(pathlib.Path('/bin/pb'), ['connect', 'linux']))
         device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
         with patch.dict(os.environ, {}, clear=True):
             argv = winhost.terminal_argv(winhost.WindowsPb(device), ['connect', 'my box', '--name', "it's"])
@@ -701,8 +701,8 @@ class SessionFamily(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout=b'{"version":"1","sessions":[]}')
 
         remote = Remote()
-        self.assertEqual((0, {'version': '1', 'sessions': []}), session_cleanup.command(remote, 'list', 'hp'))
-        self.assertEqual(['session', 'list', 'hp', '--json'], remote.arguments)
+        self.assertEqual((0, {'version': '1', 'sessions': []}), session_cleanup.command(remote, 'list', 'linux'))
+        self.assertEqual(['session', 'list', 'linux', '--json'], remote.arguments)
 
 
 class LocalTransferHelpers(unittest.TestCase):
@@ -1065,6 +1065,7 @@ class TerminalFamilyInPowerShell(unittest.TestCase):
     def test_terminal_lifecycle_windows_phases_against_a_console_that_echoes(self):
         import terminal_lifecycle
         terminal = terminal_lifecycle.Terminal(self.fake_cmd())
+        terminal.wait_raw = lambda: None  # the fake console stays in line mode; ssh -tt, which wait_raw polls, goes raw
         try:
             phases = terminal_lifecycle.windows_phases(terminal, 'main', 'off')
         finally:
@@ -1078,8 +1079,8 @@ class TerminalFamilyInPowerShell(unittest.TestCase):
     def test_matrix_client_types_powershell_lines_at_a_windows_session(self):
         import terminal_matrix
         import windows_target
-        with patch.object(terminal_matrix, 'TARGET', 'victus'), \
-                patch.dict(windows_target._platforms, {(str(terminal_matrix.PB), 'victus'): True}):
+        with patch.object(terminal_matrix, 'TARGET', 'windows'), \
+                patch.dict(windows_target._platforms, {(str(terminal_matrix.PB), 'windows'): True}):
             client = terminal_matrix.Client(self.fake_cmd())
             try:
                 client.resize(31, 97)
@@ -1116,7 +1117,7 @@ class TerminalFamilyPlumbing(unittest.TestCase):
     def test_windows_target_strings_and_rows_without_an_equivalent(self):
         import terminal_matrix as matrix
         import windows_target
-        with patch.object(matrix, 'TARGET', 'victus'), patch.dict(windows_target._platforms, {(str(matrix.PB), 'victus'): True}), \
+        with patch.object(matrix, 'TARGET', 'windows'), patch.dict(windows_target._platforms, {(str(matrix.PB), 'windows'): True}), \
                 patch.object(matrix, 'RESULTS', []), patch('builtins.print'):
             self.assertEqual('set "PB_RESTART_MARK=m"', matrix.set_mark('m'))
             sent = []
@@ -1126,9 +1127,9 @@ class TerminalFamilyPlumbing(unittest.TestCase):
             client.run(matrix.noop())
             self.assertRegex(sent[0], r'^set "PB_RESTART_MARK=m" & powershell -NoProfile -Command ".*"\r$')
             self.assertRegex(sent[1], r'^powershell -NoProfile -Command ".*"\r$')
-            self.assertFalse(matrix.target_darwin('victus'))  # without running uname there
+            self.assertFalse(matrix.target_darwin('windows'))  # without running uname there
             # reconnect_keeps_control no longer skips on a Windows target: the size is read from `pb session list --json`
-            matrix.large_paste(SimpleNamespace(target='victus'), [])
+            matrix.large_paste(SimpleNamespace(target='windows'), [])
             self.assertEqual(['SKIP'], [state for _, state in matrix.RESULTS])
 
     def test_device_clients_are_found_by_their_command_line_and_firewall_rows_use_the_device(self):
@@ -1152,7 +1153,7 @@ class TerminalFamilyPlumbing(unittest.TestCase):
             self.assertEqual([('suspend', 12), ('resume', 12), ('stop', 12)], [c for c in device.calls if c[0] != 'processes'])
             self.assertEqual(('processes', 'smoke\\-matrix\\-0123456789'), device.calls[0])
             self.assertTrue(matrix.has_iptables())  # the device's firewall is the cut (winhost.cut_network)
-            matrix.echo_latency(SimpleNamespace(target='hp'), [])
+            matrix.echo_latency(SimpleNamespace(target='linux'), [])
             self.assertEqual(['SKIP'], [state for _, state in matrix.RESULTS])
             device.processes = lambda pattern: []
             with self.assertRaisesRegex(RuntimeError, 'expected one pb.exe'):
@@ -1245,7 +1246,7 @@ class PrivateAccessFamily(unittest.TestCase):
 
         with patch.object(private_access, 'exposed', exposed), patch.object(private_access, 'registration', lambda: {'machine_id': 'machine_w'}), \
                 patch('builtins.print', lambda line, **_: printed.append(json.loads(line))):
-            worker = threading.Thread(target=private_access.origin, args=(SimpleNamespace(check='access-machine', target='victus'),))
+            worker = threading.Thread(target=private_access.origin, args=(SimpleNamespace(check='access-machine', target='windows'),))
             worker.start()
             for _ in range(100):
                 if printed:
@@ -1291,18 +1292,18 @@ class PrivateAccessFamily(unittest.TestCase):
         import private_access
         started, probed = [], []
         fake, calls = self.job(b'40123\n')
-        machines = {'machines': [{'id': 'machine_p', 'alias': 'hp'}, {'id': 'machine_w', 'alias': 'victus'}]}
-        args = SimpleNamespace(target='hp', check='private-address', phase=None)
+        machines = {'machines': [{'id': 'machine_p', 'alias': 'linux'}, {'id': 'machine_w', 'alias': 'windows'}]}
+        args = SimpleNamespace(target='linux', check='private-address', phase=None)
         with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE}), patch.object(private_access, 'invoke', lambda *a, **k: machines), \
                 patch.object(winhost, 'job', lambda b, arguments: started.append(arguments) or fake), \
                 patch.object(private_access, 'probe', lambda a: probed.append(json.loads(a.phase))):
             private_access.pair(args)
         argv = started[0]
-        self.assertEqual(['exec', 'hp', '--timeout', '170s', '--', 'python3', '-c'], argv[:7])
+        self.assertEqual(['exec', 'linux', '--timeout', '170s', '--', 'python3', '-c'], argv[:7])
         self.assertNotRegex(argv[7], r'[\n"]')  # one line that survives the Windows command line
         self.assertIn(b64.b64encode(private_access.PEER_ORIGIN.encode()).decode(), argv[7])
         self.assertEqual('private-address', argv[8])
-        self.assertEqual({'state': 'private_access_required', 'check': 'private-address', 'target': 'hp', 'machine_id': 'machine_p',
+        self.assertEqual({'state': 'private_access_required', 'check': 'private-address', 'target': 'linux', 'machine_id': 'machine_p',
                           'port': 40123, 'marker': argv[9]}, probed[0])
         self.assertEqual(['kill', 'close'], calls)
         with patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit):
@@ -1575,8 +1576,8 @@ class EnvFamilyInPowerShell(FakeCmdMixin, unittest.TestCase):
         with patch.object(winhost, 'terminal_argv', lambda binary, arguments: argv), \
                 patch.object(env_scopes, 'windows', lambda machine: True), \
                 patch.dict(os.environ, {'PB_T_TERM': 'o-77'}):
-            self.assertEqual('o-77', env_scopes.terminal_sees('victus', 'PB_T_TERM', 'PBENVab12cd'))
-            self.assertEqual('', env_scopes.terminal_sees('victus', 'PB_T_NONE', 'PBENVab12cd'))
+            self.assertEqual('o-77', env_scopes.terminal_sees('windows', 'PB_T_TERM', 'PBENVab12cd'))
+            self.assertEqual('', env_scopes.terminal_sees('windows', 'PB_T_NONE', 'PBENVab12cd'))
 
 
 class EnvFamilyPlumbing(unittest.TestCase):
@@ -1594,7 +1595,7 @@ class EnvFamilyPlumbing(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(RuntimeError, 'PB_SMOKE_WINDOWS_PB'):
             winhost.side_run('windows', ['env', 'list'])
         fake = FakeSsh((0, envelope(out=b'{}')), (0, rb'C:\Users\u'), (0, envelope(out=b'{}')))
-        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE, 'VICTUS_PASS': 'p'}), patch('subprocess.run', fake):
+        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE, 'SMOKE_WINDOWS_PASSWORD': 'p'}), patch('subprocess.run', fake):
             winhost._device.cache_clear()
             winhost.side_run('windows', ['env', 'list', '--json'], input='v')
             winhost.side_run('windows-teammate', ['RESET ENV TEAM t'])
@@ -1615,12 +1616,12 @@ class EnvFamilyPlumbing(unittest.TestCase):
         seen = []
         done = subprocess.CompletedProcess([], 0, 'p-1\n', '')
         listing = subprocess.CompletedProcess([], 0, json.dumps({'machines': [
-            {'id': 'machine_1', 'alias': 'victus', 'platform': 'windows'}, {'id': 'machine_2', 'alias': 'hp', 'platform': 'linux'}]}), '')
+            {'id': 'machine_1', 'alias': 'windows', 'platform': 'windows'}, {'id': 'machine_2', 'alias': 'linux', 'platform': 'linux'}]}), '')
         answer = lambda binary, arguments, **options: seen.append(arguments) or (listing if arguments[0] == 'machine' else done)
         with patch.object(winhost, 'pb_text', answer), patch.dict(env_scopes.PLATFORMS, {}, clear=True):
-            self.assertEqual('p-1', env_scopes.sees('hp', 'PB_N'))
-            self.assertEqual(('exec', 'hp', '--', 'printenv', 'PB_N'), seen[-1])
-            for machine in ('victus', 'machine_1'):  # by alias and by id
+            self.assertEqual('p-1', env_scopes.sees('linux', 'PB_N'))
+            self.assertEqual(('exec', 'linux', '--', 'printenv', 'PB_N'), seen[-1])
+            for machine in ('windows', 'machine_1'):  # by alias and by id
                 env_scopes.sees(machine, 'PB_N')
                 self.assertEqual(('exec', machine, '--', 'powershell'), seen[-1][:4])
             self.assertEqual(1, sum(arguments[0] == 'machine' for arguments in seen))  # the platforms are read once
@@ -1635,7 +1636,7 @@ class EnvFamilyPlumbing(unittest.TestCase):
         with patch.object(winhost, 'device', lambda: device), patch.object(env_scopes, 'run', lambda *a, **k: (0, '', '')), \
                 patch.object(env_scopes, 'windows', lambda machine: False):
             env_scopes.Output.seen = ['clean']
-            self.assertEqual(['diagnostics on this machine'], env_scopes.leaked(('p-1', 'o-2'), 'hp'))
+            self.assertEqual(['diagnostics on this machine'], env_scopes.leaked(('p-1', 'o-2'), 'linux'))
         self.assertEqual([(r'C:\Users\u\AppData\Local\Paperboat\state\diagnostics', 'p-1', True),
                           (r'C:\Users\u\AppData\Local\Paperboat\state\diagnostics', 'o-2', True)], counted)
 
@@ -1692,7 +1693,7 @@ class PolicyFamily(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, code, out, '')
 
         printed = io.StringIO()
-        with patch.object(winhost, 'pb_text', pb_text), patch.object(sys, 'argv', ['policy_cli.py', 'hp']), \
+        with patch.object(winhost, 'pb_text', pb_text), patch.object(sys, 'argv', ['policy_cli.py', 'linux']), \
                 contextlib.redirect_stdout(printed):
             code = policy_cli.main()
         return code, printed.getvalue(), calls
@@ -1704,7 +1705,7 @@ class PolicyFamily(unittest.TestCase):
         self.assertEqual(13, printed.count('PASS '))
         self.assertEqual('PASS', windows_checks.verdict(code, printed))
         self.assertEqual(['policy restore', 'policy versions', 'api-token create', 'api-token list', 'api-token revoke'], calls[-5:])
-        self.assertIn('"dst": "machine:hp"', __import__('policy_cli').policy_file('me@example.test', 'hp'))
+        self.assertIn('"dst": "machine:linux"', __import__('policy_cli').policy_file('me@example.test', 'linux'))
 
     def test_a_failed_step_still_restores_the_policy_revokes_the_token_and_hides_the_secret(self):
         import windows_checks
@@ -1790,7 +1791,7 @@ class TeamFamily(unittest.TestCase):
 
     def test_business_check_on_unix_keeps_cat_rm_and_relative_names(self):
         import team_business
-        check = team_business.Check(SimpleNamespace(cmd='ssh hp', pb='pb', team='t'))
+        check = team_business.Check(SimpleNamespace(cmd='ssh linux', pb='pb', team='t'))
         self.assertFalse(check.windows)
         self.assertEqual('f19.csv', check.file('f19.csv'))
         seen = []
@@ -1981,7 +1982,7 @@ class RemainingFamilyInPowerShell(unittest.TestCase):
 
             def invoke(binary, *arguments, **options):
                 if arguments[-3:] == ('list', '--all', '--json'):  # one page of the account's machines hid the record
-                    return {'machines': [{'id': 'machine_1', 'alias': 'victus'}]}
+                    return {'machines': [{'id': 'machine_1', 'alias': 'windows'}]}
                 source = winhost.RemotePath(self.device, arguments[1])
                 target = inbox / source.name
                 self.device.copy(source, target)  # the transfer: a local copy into the Inbox
@@ -1990,7 +1991,7 @@ class RemainingFamilyInPowerShell(unittest.TestCase):
 
             printed = io.StringIO()
             with patch.object(winhost, 'device', lambda: self.device), patch.object(send_self, 'invoke', invoke), \
-                    patch.object(send_self, 'registration', lambda: record), patch.object(sys, 'argv', ['send_self.py', 'victus']), \
+                    patch.object(send_self, 'registration', lambda: record), patch.object(sys, 'argv', ['send_self.py', 'windows']), \
                     contextlib.redirect_stdout(printed):
                 send_self.main()
             self.assertEqual('PASS', json.loads(printed.getvalue())['status'])
@@ -2222,9 +2223,9 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         import contextlib
         import io
         import completion_lifecycle
-        replies = {'completion': 'pb ' + 'x' * 600, '__complete': 'exec\ndoctor\nmachine\nhp\n'}
+        replies = {'completion': 'pb ' + 'x' * 600, '__complete': 'exec\ndoctor\nmachine\nlinux\n'}
         printed = io.StringIO()
-        with patch.object(winhost, 'device', lambda: device), patch.object(sys, 'argv', ['completion_lifecycle.py', 'hp']), \
+        with patch.object(winhost, 'device', lambda: device), patch.object(sys, 'argv', ['completion_lifecycle.py', 'linux']), \
                 patch.object(completion_lifecycle, 'run', lambda *arguments, **options: (0, replies[arguments[0]])), \
                 contextlib.redirect_stdout(printed):
             completion_lifecycle.main()
@@ -2298,13 +2299,13 @@ class RemainingFamilyPlumbing(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, 0, '', '')
 
         with patch.object(winhost, 'device', lambda: object()), patch.object(winhost, 'which', lambda name: SimpleNamespace(run_remote=run_remote)):
-            self.assertTrue(inventory_freshness.resolves('hp.example.test'))
+            self.assertTrue(inventory_freshness.resolves('linux.example.test'))
             self.assertFalse(inventory_freshness.resolves('slow.example.test'))
-        self.assertEqual(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'hp.example.test', 'true'], calls[0])
+        self.assertEqual(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'linux.example.test', 'true'], calls[0])
         done = subprocess.CompletedProcess([], 0, b'', b'')
         with patch.object(winhost, 'device', lambda: None), patch('subprocess.run', return_value=done) as local:
-            self.assertTrue(inventory_freshness.resolves('hp.example.test'))
-        self.assertEqual(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'hp.example.test', 'true'], local.call_args[0][0])
+            self.assertTrue(inventory_freshness.resolves('linux.example.test'))
+        self.assertEqual(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'linux.example.test', 'true'], local.call_args[0][0])
 
     def test_terminal_checks_type_a_powershell_marker_at_a_windows_target(self):
         import doctor_lifecycle
@@ -2771,7 +2772,7 @@ class ConfigSyncPlumbing(unittest.TestCase):
 class ScriptedServerDevice(ScriptedHookDevice):
     """The same device with the VS Code server on it: each start keeps the environment its PowerShell had then."""
 
-    DIR = r'C:\Users\u\.lanej-vscode-server'
+    DIR = r'C:\Users\u\.test-vscode-server'
 
     def __init__(self, test, fresh_sees_hook=True, reported_by_server=True):
         super().__init__(test)
@@ -2865,7 +2866,7 @@ class EnvVscodeRemote(unittest.TestCase):
         import env_vscode_remote
         import tempfile
         with tempfile.TemporaryDirectory() as home:
-            root = pathlib.Path(home) / '.lanej-vscode-server'
+            root = pathlib.Path(home) / '.test-vscode-server'
             (root / 'bin').mkdir(parents=True)
             server = root / 'bin' / 'code-server.cmd'  # stands in for the launcher: records what it was given
             server.write_text('#!/bin/sh\nprintf "%s|%s|%s" "$NODE_OPTIONS" "$PB_ENV_HOOK_PROBE" "$*" > "$(dirname "$0")/../seen"\n'

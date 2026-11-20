@@ -62,7 +62,7 @@ func emitEnvironmentHook(command *cobra.Command, shell string) {
 		return
 	}
 	if result.reason != "" {
-		writeEnvHookNotice(fmt.Sprintf("Paperboat ENV not loaded: %s. Run `pb env hook --status`.\n", result.reason))
+		writeEnvHookNotice(envDependenciesOf(ctx).hookTerminal, fmt.Sprintf("Paperboat ENV not loaded: %s. Run `pb env hook --status`.\n", result.reason))
 		return
 	}
 	var out strings.Builder
@@ -245,7 +245,7 @@ func powerShellSingleQuote(value string) string {
 }
 
 // powerShellValueLiteral is a value as ASCII only: PowerShell decodes the native output of the hook line with the console's
-// OEM code page (437 over ssh), which turned 'emoji \U0001F680' into mojibake in a plain ssh session on Windows (X lane, X-11).
+// OEM code page (437 over ssh), which turned 'emoji \U0001F680' into mojibake in a plain ssh session on Windows (X-11).
 // Non-ASCII characters therefore travel as code points, line breaks as [char] joins (see powerShellSingleQuote).
 func powerShellValueLiteral(value string) string {
 	var out strings.Builder
@@ -272,14 +272,8 @@ func fishSingleQuote(value string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
 }
 
-// envHookTerminal is where the one-line notice goes. The hook line discards
-// pb's stderr so an old or broken pb never adds noise to shell startup; the
-// notice goes to the controlling terminal, which non-interactive ssh and VS
-// Code's environment probe do not have.
-var envHookTerminal = envHookConsole
-
-func writeEnvHookNotice(message string) {
-	tty, err := os.OpenFile(envHookTerminal, os.O_WRONLY, 0)
+func writeEnvHookNotice(terminal, message string) {
+	tty, err := os.OpenFile(terminal, os.O_WRONLY, 0)
 	if err != nil {
 		return
 	}

@@ -10,7 +10,8 @@ import (
 	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 )
 
-// fileLimitMargin is what carrier, mesh, control and file descriptors need besides listeners and visitors.
+// fileLimitMargin is what carrier, mesh, control and visitor file descriptors need besides listeners: the edge has no
+// connection limit, so the operator sizes the rest.
 const fileLimitMargin = 1024
 
 // openFileLimit is the process's effective soft RLIMIT_NOFILE (Go raises it to the hard limit at startup).
@@ -23,11 +24,11 @@ func openFileLimit() (uint64, bool) {
 }
 
 // warnIfFileLimitLow logs a warning event when the soft file limit cannot hold one listening socket for every public
-// TCP tunnel port plus every admitted visitor connection plus a margin. A node that forwards binds every port the
+// TCP tunnel port plus a margin. A node that forwards binds every port the
 // peer directory names, up to the whole public range, so the unit's limit (LimitNOFILE, or the container's ulimit)
 // must be at least this large; it returns whether the limit suffices.
-func warnIfFileLimitLow(listeners, connections int) bool {
-	need := uint64(listeners) + uint64(connections) + fileLimitMargin
+func warnIfFileLimitLow(listeners int) bool {
+	need := uint64(listeners) + fileLimitMargin
 	have, ok := openFileLimit()
 	if !ok || have >= need {
 		return true

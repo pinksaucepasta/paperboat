@@ -350,7 +350,7 @@ func (s windowsInstallationState) Restore(ctx context.Context, snapshot []byte) 
 var prepareRestoredSessionOwner = PrepareSessionOwner
 
 // restoreWindowsSessionOwner starts the restored installation's session owner again, as repair does, before the
-// lifecycle restores its services: hostd exits without its owner's pipe (victus 2026-11-10: the rolled-back hostd
+// lifecycle restores its services: hostd exits without its owner's pipe (Windows test machine 2026-11-10: the rolled-back hostd
 // found none and stayed stopped).
 func restoreWindowsSessionOwner(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout) error {
 	if config.SessionOwnerGeneration == "" {
@@ -496,7 +496,7 @@ func WindowsInstallInterrupted(ownerSID string) (bool, error) {
 
 // withdrawRecordedWindowsCandidate removes what the recorded replacement published for its version unless that
 // version is the installed one, then the record. It runs once the lifecycle journal is gone: after a failed
-// attempt's rollback, and after the recovery of an attempt whose process died (victus 2026-11-10: the killed
+// attempt's rollback, and after the recovery of an attempt whose process died (Windows test machine 2026-11-10: the killed
 // update's session owner stayed running until the next update).
 func withdrawRecordedWindowsCandidate(ctx context.Context, ownerSID string) error {
 	path, err := windowsCandidateRecordPath(ownerSID)
@@ -532,7 +532,7 @@ func withdrawRecordedWindowsCandidate(ctx context.Context, ownerSID string) erro
 var withdrawRecordedCandidate = withdrawWindowsCandidate
 
 // withdrawWindowsCandidate removes what a replacement that did not commit published for its source: the session
-// owner (service and catalogue descriptor) and the SSH generation (victus 2026-11-10: both stayed after the
+// owner (service and catalogue descriptor) and the SSH generation (Windows test machine 2026-11-10: both stayed after the
 // rollback). The restored installation's own generation is never touched.
 func withdrawWindowsCandidate(ctx context.Context, request Request, candidate candidateSessionOwner) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)

@@ -56,7 +56,7 @@ func TestWindowsManagedSSHDelegatesAuthorizedKeysToPrivilegedHostService(t *test
 	if err != nil || !changed || !recorder.deadline || !reflect.DeepEqual(recorder.keys, keys) {
 		t.Fatalf("changed=%t deadline=%t keys=%v err=%v", changed, recorder.deadline, recorder.keys, err)
 	}
-	if _, err := reconcilePlatformAuthorizedKeys(`C:\Users\Pujan\.ssh`, 0, keys, "pb:machine_1", nil); err == nil {
+	if _, err := reconcilePlatformAuthorizedKeys(`C:\Users\Tester\.ssh`, 0, keys, "pb:machine_1", nil); err == nil {
 		t.Fatal("owner-selected authorized-keys root was accepted")
 	}
 }

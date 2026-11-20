@@ -10,8 +10,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
-const maximumIngressDecisions = 4096
-
 // IngressSnapshot is one complete server snapshot for an edge process: the
 // public decisions, the routes whose workspace is throttled, and the
 // http-01 responses the edge serves for its ACME challenges.
@@ -56,16 +54,16 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		Offline         []connectorprotocol.IngressOffline  `json:"offline"`
 		HTTP01Responses []connectorprotocol.HTTP01Response  `json:"http01_responses"`
 	}
-	if err := c.postNodeWithMaximumAndIdentity(ctx, ingressDecisionsPath, nodeID, epoch, input, &output, 16<<20); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, ingressDecisionsPath, nodeID, epoch, input, &output, connectorprotocol.MaximumSnapshotBytes); err != nil {
 		return IngressSnapshot{}, err
 	}
 	if output.Unchanged {
-		if !output.Complete || version == "" || output.Version != version || len(output.Expiries) > maximumIngressDecisions {
+		if !output.Complete || version == "" || output.Version != version {
 			return IngressSnapshot{}, ErrControlUnavailable
 		}
 		return IngressSnapshot{Version: version, Unchanged: true, IssuedAt: output.IssuedAt, Expiries: output.Expiries}, nil
 	}
-	if !output.Complete || len(output.Decisions) > maximumIngressDecisions || len(output.Throttled) > maximumIngressDecisions || len(output.Blocked) > maximumIngressDecisions || len(output.IPRules) > maximumIngressDecisions || len(output.Offline) > maximumIngressDecisions || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
+	if !output.Complete || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
 		return IngressSnapshot{}, ErrControlUnavailable
 	}
 	// A decision this edge cannot accept refuses only its own name. Rejecting the whole snapshot would

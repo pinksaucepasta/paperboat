@@ -26,7 +26,7 @@ func domainListCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -62,7 +62,7 @@ func domainAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -70,7 +70,7 @@ func domainAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		key, e := tunnelKey()
+		key, e := tunnelKey(ctx)
 		if e != nil {
 			return e
 		}
@@ -99,7 +99,7 @@ func domainRemoveCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		tunnelID, e := resolveTunnelSelectorForCommand(ctx, c, args[0])
+		tunnelID, e := tunnelDependenciesOf(ctx).resolve(ctx, c, args[0])
 		if e != nil {
 			return e
 		}
@@ -110,7 +110,7 @@ func domainRemoveCommand() *cobra.Command {
 		if e := confirmMutation(command, "tunnel-domain-remove:"+tunnelID+":"+current.ID+":"+current.ETag, fmt.Sprintf("Stop serving tunnel %s at %s? The workspace domain and your DNS records stay.", tunnelID, current.Hostname)); e != nil {
 			return e
 		}
-		key, e := tunnelKey()
+		key, e := tunnelKey(ctx)
 		if e != nil {
 			return e
 		}

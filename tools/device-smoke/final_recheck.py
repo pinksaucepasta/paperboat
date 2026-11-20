@@ -5,7 +5,7 @@
   final_recheck.py run --build dev-X [options] run the checks against one build and write one result table
 
 Check kinds (nothing new: each runs through an existing tool)
-  smoke    ids of smoke.sh (green/hp.list and test_application_pairs); run once through smoke.sh --only-list on hp containers
+  smoke    ids of smoke.sh (green/linux.list and test_application_pairs); run once through smoke.sh --only-list on linux containers
   go       named Go tests found in the evidence; run through tools/ci-test.sh <module> -run (GitHub Actions, committed HEAD)
   console  console/scripts/check-*.js on the live console, through console/scripts/run-console-check.mjs
   device   a device script run inside container A of --ct-map (needs a peer: container B)
@@ -151,8 +151,8 @@ def run(argv, env=None, stdin=None, timeout=3600):
 
 
 def pair_ids(groups, labels):
-    """Exact smoke ids of the given groups for these device labels, taken from the green lists (hp, and hp+dadape for pairs)."""
-    names = {'hp': labels[0], 'dadape': labels[-1]}
+    """Exact smoke ids of the given groups for these device labels, taken from the green lists (linux, and linux+peer for pairs)."""
+    names = {'linux': labels[0], 'peer': labels[-1]}
     found = set()
     for listing in (HERE / 'green').glob('*.list'):
         for line in listing.read_text().splitlines():
@@ -170,14 +170,14 @@ def run_smoke(groups, args, results):
     labels = [pair.split('=')[0] for pair in args.ct_map.split(',')]
     ids = pair_ids(groups, labels)
     for group in sorted(set(groups) - {i.partition(':')[0] for i in ids}):
-        known = bool(pair_ids({group}, ['hp', 'dadape']))
+        known = bool(pair_ids({group}, ['linux', 'peer']))
         results.append({'check': 'smoke:' + group, 'kind': 'smoke', 'status': 'SKIP' if known else 'FAIL', 'seconds': 0,
                         'detail': 'needs a second container (source and target differ)' if known else 'no id in green/*.list; add one so the final run knows how to run it'})
     if not ids:
         return
     listing = Path('/tmp/final-recheck-smoke.list')
     listing.write_text('\n'.join(sorted(ids)) + '\n')
-    env = {'SMOKE_CT_MAP': args.ct_map, 'SMOKE_CT_DOCKER': os.environ.get('SMOKE_CT_DOCKER', 'docker'), 'SMOKE_CT_USER': CT_USER, 'SMOKE_CT_UID': CT_UID}
+    env = {'SMOKE_CT_MAP': args.ct_map, 'SMOKE_CLIENT': labels[0], 'SMOKE_PEER': labels[-1], 'SMOKE_CT_DOCKER': os.environ.get('SMOKE_CT_DOCKER', 'docker'), 'SMOKE_CT_USER': CT_USER, 'SMOKE_CT_UID': CT_UID}
     long_exec = ['--long-seconds', '1801'] if any(i.startswith('exec-long:') for i in ids) else []  # F4-02: a command of 30+ minutes
     code, out, secs = run([str(HERE / 'smoke.sh'), '--targets', ','.join(labels), '--expect-version', args.version, '--only-list', str(listing)] + long_exec, env)
     seen = {}
@@ -297,7 +297,7 @@ class Fresh:
         return json.load(open(self.accounts[n][0] + '/account.json'))['email']
 
     def fixtures(self, *extra):
-        """final_fixtures.py (Server lane; an empty database has no paid team): a team with a paid entitlement owned by the first account, the
+        """final_fixtures.py (Server worktree; an empty database has no paid team): a team with a paid entitlement owned by the first account, the
         second a member. Prints one JSON line {"env": {...}} whose variables every check inherits; --teardown makes the members inactive again."""
         if self.args.no_fixtures:
             return {}
@@ -461,7 +461,7 @@ def main():
     inv.add_argument('--out')
     go = sub.add_parser('run')
     go.add_argument('--build', required=True)
-    go.add_argument('--host', default='hp')
+    go.add_argument('--host', default='linux')
     go.add_argument('--previous', default='2026.10.27.0', help='the previous official release the update-with-history extra starts from (the update goes to the Latest)')
     go.add_argument('--binary', default='', help='local build file for the update checks that install a supplied build ({binary} in the manifest)')
     go.add_argument('--origin', default=os.environ.get('PB_CONSOLE_ORIGIN', ''))

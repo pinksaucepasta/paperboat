@@ -54,7 +54,7 @@ const (
 	// checks; 90 s expired in the final health check and rolled a good update back.
 	//
 	// A first pair on a fresh machine then waits for the host service and the per-user daemon to settle (a
-	// first scan of the new executable, the first server refresh, certificate and guard reconcile): victus and
+	// first scan of the new executable, the first server refresh, certificate and guard reconcile): Windows test machine and
 	// every fresh hosted runner ran past the former 25 s + 30 s windows after ~100 s and needed a second attempt.
 	// The two readiness windows below, the work before them (~50 s measured) and a margin must fit this budget.
 	RuntimeActivationDuration = 4 * time.Minute
@@ -63,7 +63,7 @@ const (
 	// ReadinessDaemonBudget is how long the per-user daemon gets to report the installed version and state ready.
 	ReadinessDaemonBudget = 90 * time.Second
 	// ReadinessTail is the time a committed installation gets after its install phases, whatever they used of
-	// RuntimeActivationDuration: victus (Defender scanning each new executable, SCM starts) spent the whole 4
+	// RuntimeActivationDuration: Windows test machine (Defender scanning each new executable, SCM starts) spent the whole 4
 	// minutes in the install phases and left nothing for the two readiness windows, so a first pair failed with
 	// install_readiness while everything converged minutes later (2026-11-11).
 	ReadinessTail = ReadinessHostdWindow + ReadinessDaemonBudget + 30*time.Second

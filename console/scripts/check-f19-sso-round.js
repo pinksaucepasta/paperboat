@@ -1,4 +1,4 @@
-// Browser check for F19-13's Require SSO round as an owner/admin (team in window.__team, default lanes-sso;
+// Browser check for F19-13's Require SSO round as an owner/admin (team in window.__team, default test-sso;
 // window.__me is the signed-in account id). It reads the team's identity first and runs the path that team
 // can take: exempts the signed-in account and removes the exemption again (always), and
 //  - with an active identity-provider connection: requires SSO (the review lists who loses access), checks
@@ -21,7 +21,7 @@
     return null
   }
   const me = window.__me
-  const team = window.__team ?? "lanes-sso"
+  const team = window.__team ?? "test-sso"
   delete window.__me
   delete window.__team
   const mine = async () => (await (await fetch("/api/v1/me")).json()).data

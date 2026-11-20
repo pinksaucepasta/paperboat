@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run every module's Go tests on our own hosts in parallel instead of waiting for GitHub's one Linux CI run.
 
-  tools/linux-ci.py [--dry] [--no-race] [--hosts linpool-5,linpool-6,ana@hermes]
+  tools/linux-ci.py [--dry] [--no-race] [--hosts runner-a,runner-b,test-host]
 
 Jobs: the cli packages split like tools/ci-shards.py (Linux seconds in tools/ci-shard-weights-linux.json), relay, edge, shared, helper,
 server (PostgreSQL). Each host runs its queue one job at a time through tools/remote-test.sh (it holds a per-host lock and caps memory);
@@ -13,13 +13,14 @@ import argparse, importlib.util, json, re, subprocess, sys, threading, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'tools/device-smoke'))
+from dev_targets import load
+
+
 spec = importlib.util.spec_from_file_location("ci_shards", ROOT / "tools/ci-shards.py")
 shards = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shards)
 
-DEFAULT_HOSTS = ["linpool-5", "linpool-6", "ana@hermes"]
-NO_SUDO = {"ana@hermes"}  # cli root-updater and isolated-filesystem tests need passwordless sudo
-NO_SERVER = {"ana@hermes"}  # the server -race suite ran ~48 min there (6 GB RAM, 2026-11-20); the linpool hosts have 16 GB
 SMALL = {"relay": 90, "edge": 130, "shared": 40, "helper": 20, "server": 600}  # seconds of work (CI test steps, 2026-11-20)
 CLI_SHARDS = 1  # one job: with -p 2 the whole cli module is ~670 s and the server suite fills the other sudo host
 PARALLEL = 2  # remote-test.sh runs go test -p 2: a shard takes about half its summed package seconds (but never less than its slowest package)
@@ -31,11 +32,11 @@ def jobs():
     return out + [(module, ["./..."], seconds) for module, seconds in SMALL.items()]
 
 
-def assign(job_list, hosts):
+def assign(job_list, hosts, no_sudo=(), no_server=()):
     """cli first (it needs sudo), then the rest longest first, each onto the host with the least queued seconds."""
     queues = {host: [0, []] for host in hosts}
     for module, pkgs, seconds in sorted(job_list, key=lambda j: (j[0] != "cli", -j[2])):
-        allowed = [h for h in hosts if not (module == "cli" and h in NO_SUDO) and not (module == "server" and h in NO_SERVER)]
+        allowed = [h for h in hosts if not (module == "cli" and h in no_sudo) and not (module == "server" and h in no_server)]
         host = min(allowed, key=lambda h: queues[h][0])
         queues[host][0] += seconds
         queues[host][1].append((module, pkgs, seconds))
@@ -43,7 +44,7 @@ def assign(job_list, hosts):
 
 
 def reachable(hosts):
-    """Hosts that answer ssh now: a linpool runner's tunnel can be down (22405/22406 refused), which failed jobs at start."""
+    """Hosts that answer ssh now: a linuxpool runner's tunnel can be down (22405/22406 refused), which failed jobs at start."""
     up = []
     for host in hosts:
         ok = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, "true"], capture_output=True).returncode == 0
@@ -67,13 +68,21 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry", action="store_true")
     parser.add_argument("--no-race", action="store_true")
-    parser.add_argument("--hosts", default=",".join(DEFAULT_HOSTS))
+    parser.add_argument("--hosts", help="comma-separated hosts, default: local development targets")
     args = parser.parse_args()
-    hosts = args.hosts.split(",") if args.dry else reachable(args.hosts.split(","))
-    if not any(h not in NO_SUDO for h in hosts):
-        print("no reachable host with passwordless sudo for cli", file=sys.stderr)
-        return 1
-    plan = assign(jobs(), hosts)
+    settings = load()
+    requested = args.hosts.split(",") if args.hosts else settings.get("linux_ci_hosts", [])
+    aliases = settings.get("remote_hosts", {})
+    hosts = [aliases.get(host, host) for host in requested]
+    if not args.dry:
+        hosts = reachable(hosts)
+    no_sudo = {aliases.get(host, host) for host in settings.get("linux_ci_no_sudo", [])}
+    no_server = {aliases.get(host, host) for host in settings.get("linux_ci_no_server", [])}
+    if not any(host not in no_sudo for host in hosts):
+        parser.error("configure at least one reachable test host with passwordless sudo")
+    if not any(host not in no_server for host in hosts):
+        parser.error("configure at least one reachable test host for server tests")
+    plan = assign(jobs(), hosts, no_sudo, no_server)
     for host, queue in plan.items():
         print(f"{host}: " + ", ".join(f"{m}({len(p)} pkgs, ~{s}s)" for m, p, s in queue), flush=True)
     if args.dry:

@@ -16,7 +16,7 @@ type orderedGuardUndo struct{ note func(string) }
 func (u orderedGuardUndo) Restore(context.Context) error { u.note("guard restored"); return nil }
 func (u orderedGuardUndo) Discard()                      { u.note("guard kept") }
 
-// victus 2026-11-10: a Windows update that failed after its services had started rolled back to the previous
+// Windows test machine 2026-11-10: a Windows update that failed after its services had started rolled back to the previous
 // version, but the candidate's session owner and SSH service stayed and the machine guard stayed on the
 // candidate's version. A failed replacement withdraws its candidate and puts the guard back, after the lifecycle
 // restored the previous version and even when the caller's context is gone; a committed one keeps both.

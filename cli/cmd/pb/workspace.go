@@ -21,7 +21,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/store"
 	"github.com/pinksaucepasta/paperboat/cli/internal/selector"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 const workspacePreferenceVersion = 1
@@ -37,9 +36,6 @@ type workspaceEnvironmentFile struct {
 	Version   int    `json:"version"`
 	MachineID string `json:"machine_id"`
 }
-
-var workspaceTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
-var chooseWorkspace = selector.Choose
 
 func workspaceSwitchCommand() *cobra.Command {
 	return &cobra.Command{
@@ -89,7 +85,7 @@ func selectWorkspace(command *cobra.Command, args []string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !workspaceTerminal() {
+	if !hostDependenciesOf(command.Context()).isTerminal() {
 		return false, localArgumentError("pb switch needs a workspace when it has no terminal to ask in. Run `pb switch personal` or `pb switch <team-slug>`.")
 	}
 	items := make([]selector.Item, 0, len(workspaces))
@@ -103,7 +99,7 @@ func selectWorkspace(command *cobra.Command, args []string) (bool, error) {
 		}
 		items = append(items, selector.Item{ID: workspace.ID, Title: workspace.Name, Description: description, Search: workspace.ID + " " + workspace.Name})
 	}
-	selection, err := chooseWorkspace(selector.Options{
+	selection, err := workspaceDependenciesOf(command.Context()).choose(selector.Options{
 		Context: command.Context(), Title: "Switch workspace", Subtitle: "Resource discovery and new operations use this workspace",
 		Items: items, Empty: "No workspaces are available", Footer: "↑/↓ move  enter switch  esc cancel",
 		Stdin: os.Stdin, Output: command.ErrOrStderr(),

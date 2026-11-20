@@ -54,7 +54,7 @@ func newMeshAPI(t *testing.T) *meshAPI {
 		defer a.mu.Unlock()
 		a.last = body
 		json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(),
-			CapacityLimit: 256, Revocations: []Revocation{}, MeshPeers: a.peers})
+			Revocations: []Revocation{}, MeshPeers: a.peers})
 	}))
 	t.Cleanup(a.srv.Close)
 	return a

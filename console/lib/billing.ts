@@ -60,7 +60,7 @@ export type BillingInterval = "month" | "year"
 /**
  * Billing features whose endpoints the console may call. An unknown /v1 path answers 401, which
  * signs the user out (NOTES.md), so the UI for a feature is built but disabled until its endpoint
- * is deployed. Flip one when Lane B logs the deploy.
+ * is deployed. Flip one when logs the deploy.
  */
 export const billingLive = {
   seats: true,

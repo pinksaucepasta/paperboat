@@ -315,7 +315,7 @@ func workerStartupFixture(t *testing.T) (*hostdproto.Server, string, []byte, []s
 	return server, endpoint, token, []string{"--socket", endpoint, "--token-file", tokenPath}
 }
 
-// TestWorkerLivenessReportsAFrozenWorker: lanex2-l2 (2026-11-13) kept a worker
+// TestWorkerLivenessReportsAFrozenWorker: test-l2 (2026-11-13) kept a worker
 // alive that had stopped serving and heartbeating; hostd never restarted it and
 // the machine showed offline for 2.5 h. A heartbeat that stops advancing for
 // workerFrozenAfter of hostd's own time is now a lost worker.

@@ -737,7 +737,7 @@ func (e namedTimedOutStep) Error() string              { return RuntimeInstallFa
 func (e namedTimedOutStep) Unwrap() error              { return e.cause }
 func (namedTimedOutStep) ElevationFailureCode() string { return "install_runtime" }
 
-// victus: the install timed out in the machine guard phase and the message said "failed while installing runtime
+// Windows test machine: the install timed out in the machine guard phase and the message said "failed while installing runtime
 // services" twice; the phase that ran out of time was only in a log file.
 func TestTimedOutStepMessageNamesThePhaseOnce(t *testing.T) {
 	err := namedTimedOutStep{cause: fmt.Errorf("install Paperboat machine guard: %w", context.DeadlineExceeded)}

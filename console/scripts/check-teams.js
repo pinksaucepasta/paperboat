@@ -132,7 +132,7 @@
         await sleep(300)
         pass("invalid address is flagged", /Not an email: not-an-email/.test(dialog().innerText))
         pass("send is disabled for an invalid address", button(dialog(), (t) => /^Send invitation/.test(t)).disabled)
-        type(email, "lanec-check@example.test")
+        type(email, "test-check@example.test")
         await sleep(300)
         const free = seats ? Number(seats[2]) - Number(seats[1]) : 0
         // The seat count arrives with the billing query, a moment after the dialog opens.

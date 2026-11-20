@@ -428,7 +428,7 @@ func assertConfigAudit(t *testing.T, store interface{ SQL() *sql.DB }, teamID, e
 
 // Unadopt revokes the adopted assignment but keeps adopted_team_id; the machine is personal again.
 // It stayed team-scoped, so every personal config call on it answered 404 and `pb config sync apply`
-// failed on each machine that had been through an adopt and unadopt (Lane H, pbvm3).
+// failed on each machine that had been through an adopt and unadopt (Linux test VM).
 func TestUnadoptedMachineIsPersonalAgain(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()

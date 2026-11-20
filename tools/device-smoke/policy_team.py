@@ -2,9 +2,9 @@
 """F18-02 team enforcement on real machines, run from the control host.
 
 OWNER runs pb as the team owner on the machine that is shared (commands through OWNER_CMD, e.g.
-`ssh pbvm2 sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a`);
+`ssh Linux test VM sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a`);
 MEMBER runs pb as an accepted member of the team on another machine (MEMBER_CMD, e.g.
-`ssh pujan@ubuntu24`). The check shares the owner machine into the team, then:
+`ssh tester@host.example.test`). The check shares the owner machine into the team, then:
   no rule -> the member's exec is refused; a simple-view grant (pb team machine grant) -> exec
   works; a deny rule in the policy file -> exec is refused again and explain names the rule.
 With the deny saved it also checks F18-04 (a failing in-file test blocks a save, owner guard,
@@ -14,9 +14,9 @@ who-can, what-can, explain on a draft), F18-05 (the review before save, audit ev
 Afterwards it restores the team policy's starting version and unshares the machine.
 
 Usage: policy_team.py --team T --machine-id ID --machine-name NAME \
-         --owner-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
-         --member-cmd 'ssh pujan@ubuntu24'
-Either side may be `windows`: pb.exe on the Windows device (PB_SMOKE_WINDOWS_PB, VICTUS_PASS; see winhost.py) runs from
+         --owner-cmd 'ssh Linux test VM sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
+         --member-cmd 'ssh tester@host.example.test'
+Either side may be `windows`: pb.exe on the Windows device (PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_PASSWORD; see winhost.py) runs from
 here with no shell quoting, and its policy drafts go to the device's temp directory.
 """
 import argparse

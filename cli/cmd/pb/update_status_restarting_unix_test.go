@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,12 +13,12 @@ import (
 // While an approved update activates the updater restarts and its socket is gone; `pb update status` must say so and
 // give the retry step, not the generic "could not finish the command" (the test host, 2026-10-27).
 func TestUpdateStatusNamesTheRestartingUpdater(t *testing.T) {
-	previous := updateControlSocketForCommand
-	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing.sock"), nil }
-	t.Cleanup(func() { updateControlSocketForCommand = previous })
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return filepath.Join(t.TempDir(), "missing.sock"), nil }
+	})
 	command := &cobra.Command{Use: "status"}
 	command.Flags().Bool("json", false, "")
-	command.SetContext(context.Background())
+	command.SetContext(ctx)
 
 	err := actionUpdateStatus(command, nil)
 	if err == nil {

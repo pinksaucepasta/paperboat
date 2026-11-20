@@ -390,7 +390,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		_ = certificateClient.Close()
 	}()
 	state := node.New(cfg.NodeID)
-	manager, err := node.NewManager(state, deployment.NodeCapacity)
+	manager, err := node.NewManager(state)
 	if err != nil {
 		return nil, fmt.Errorf("create node manager: %w", err)
 	}
@@ -421,7 +421,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create canonical route registry: %w", err)
 	}
-	durableAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
+	durableAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier admission registry: %w", err)
 	}
@@ -430,11 +430,11 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	verifier := &auth.Verifier{Issuer: deployment.CredentialIssuer, NodeID: cfg.NodeID, Keys: trust.Snapshot, Revocations: trust.Snapshot, ClockSkew: 30 * time.Second}
 	var ingressAuthority *control.IngressAuthority // set below; the preview registry asks it which route a host is admitted on
-	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, MaximumRoutes: 4096, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }})
+	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }})
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint route registry: %w", err)
 	}
-	runtimeExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
+	runtimeExpected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch})
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +442,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if deployment.SelfHosted {
 		runtimeBaseDomain = ""
 	}
-	runtimeRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: runtimeBaseDomain, ProcessEpoch: processEpoch, MaximumRoutes: 4096})
+	runtimeRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: runtimeBaseDomain, ProcessEpoch: processEpoch})
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +469,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		OnPull: func(pull uint64, admissions, previous int) {
 			edgetelemetry.Log(context.Background(), sharedtelemetry.SeverityInfo, "runtime_admission_pull", sharedtelemetry.OutcomeSuccess, "pull", pull, "admissions", admissions, "previous", previous)
 		}}
-	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch, MaximumAdmissions: 4096})
+	accessorAdmissions, err := datacarrier.NewDurableAdmissionRegistry(datacarrier.DurableAdmissionRegistryConfig{NodeID: cfg.NodeID, ProcessEpoch: processEpoch})
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +489,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	routeGrace := func() time.Duration { return handover.RemainingAfterTakeover(cfg.ShutdownTimeout / 2) }
 	ingressAuthority = &control.IngressAuthority{Client: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch, Grace: routeGrace}
 	freeRequests := edgehttp.NewFreeRequestLimits()
-	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4096, Usage: meter, IngressAuthority: ingressAuthority.Resolve, PublicTCPIdleTimeout: deployment.PublicTCPIdle(), AddressAllowed: ingressAuthority.AddressAllowed})
+	durableRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{Usage: meter, IngressAuthority: ingressAuthority.Resolve, PublicTCPIdleTimeout: deployment.PublicTCPIdle(), AddressAllowed: ingressAuthority.AddressAllowed})
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)
 	}
@@ -503,7 +503,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("parse public listener port %q: want 1-65535", publicListenPort)
 	}
 	if publicListenHost == "" {
-		publicListenHost = "0.0.0.0"
+		publicListenHost = "::" // both address families; 0.0.0.0 would leave IPv6 clients out
 	}
 	publicPreviewAuthority := func(ctx context.Context, r edgehttp.DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error) {
 		return ingressAuthority.ResolvePreview(ctx, r.PreviewID, r.Hostname, r.Revision, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.Identity.AccountID, TunnelID: r.Identity.TunnelID, ConnectorID: r.Identity.ConnectorID, SessionID: r.Identity.SessionID, ProcessGeneration: r.Identity.ProcessGeneration, Generation: r.Identity.Generation, RouteID: r.RouteID, RequestID: "preview-authority", Kind: "http"})
@@ -518,16 +518,14 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		return false
 	}
-	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{SlotsUsed: func(percent uint64) {
-		_ = typedMetrics.SetGauge(edgetelemetry.MetricAdmissionSlotsUsed, nil, percent)
-	}, RouteGrace: routeGrace, HoldableName: holdableName, OnFailure: func(ctx context.Context, phase string, cause error) {
+	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{RouteGrace: routeGrace, HoldableName: holdableName, OnFailure: func(ctx context.Context, phase string, cause error) {
 		switch phase {
 		case "public_tcp_reconcile", "public_tcp_listener", "public_tcp_stream", "tls_dispatch":
 			reporter.ObserveFailure(ctx, phase, cause)
 		}
 	}, PreviewHTTPSAuthority: func(ctx context.Context, host string) error {
 		return previewHTTPSMatcher.AuthorizePublicHTTPS(ctx, host, publicPreviewAuthority)
-	}, UnknownNameTLS: certificateSelector.WildcardTLSConfig(), ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1, MaximumConnections: int(deployment.NodeCapacity) * 128})
+	}, UnknownNameTLS: certificateSelector.WildcardTLSConfig(), ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval})
 	if err != nil {
 		return nil, fmt.Errorf("configure public TCP listeners: %w", err)
 	}
@@ -561,7 +559,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("schedule process carrier trust refresh: %w", err)
 	}
 	forwardSink := &forwardStats{NodeSink: client}
-	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: forwardSink, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, Metrics: nodeMetrics(), OnAnswer: func(answer control.NodeAnswer) error {
+	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: forwardSink, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, Metrics: nodeMetrics(), OnAnswer: func(answer control.NodeAnswer) error {
 		if answer.IngressLimits == nil {
 			return nil
 		}
@@ -665,10 +663,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		RouteKind: "tunnel_https_wss",
 		NodeID:    cfg.NodeID,
 	})
-	privateConnections, err := edgehttp.NewPrivateAccessConnectionRegistry(int(deployment.NodeCapacity))
-	if err != nil {
-		return nil, fmt.Errorf("create private connection registry: %w", err)
-	}
+	privateConnections := edgehttp.NewPrivateAccessConnectionRegistry()
 	privateConnections.Revalidate = revalidatePrivate
 	var browserAccess *edgehttp.BrowserAccess
 	if deployment.BrowserAccessEnabled {
@@ -733,7 +728,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			HTTP:       edgehttp.PrivateAccessHTTPTarget{Address: deployment.PrivateHTTPSListenAddress, Connections: privateConnections},
 			Admissions: durableAdmissions, Carriers: durableRoutes,
 		},
-		MaximumStreams: int(deployment.NodeCapacity), AuthorizeTimeout: deployment.ControlTimeout, OpenTimeout: deployment.ControlTimeout,
+		AuthorizeTimeout: deployment.ControlTimeout, OpenTimeout: deployment.ControlTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create private access stream bridge: %w", err)
@@ -774,7 +769,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	var usageComponent edgeruntime.Component = usageWorker
 	if forwarding != nil {
 		// A forwarding node listens on every public TCP tunnel port its peers hold, up to the whole range.
-		warnIfFileLimitLow(edgeports.PublicTCPMax-edgeports.PublicTCPMin+1, int(deployment.NodeCapacity)*128)
+		warnIfFileLimitLow(edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1)
 		usageComponent = componentPair{first: usageWorker, second: forwarding} // starts last, stops right after the carriers
 	}
 	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
@@ -793,7 +788,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 				previewHTTPSMatcher.HasAdmittedHTTPSHostname(host) ||
 				(!deployment.SelfHosted && edgehttp.NewPreviewCarrierRouteMatcher(runtimeRoutes).HasAdmittedHTTPSHostname(host))
 		})
-	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: ingressAuthority.HTTP01Handler(redirectHandler)})
+	}, GatewayMaxHeaderBytes: int(deployment.MaxHeaderBytes), PrivateAddress: deployment.PrivateHTTPSListenAddress, PrivateHandler: gatewayHandler, PrivateTLS: certificateSelector.TLSConfig(), RedirectAddress: deployment.PublicHTTPListenAddress, RedirectHandler: ingressAuthority.HTTP01Handler(acmeChallenge(deployment.PublicACMEChallengeDir, redirectHandler))})
 	if err != nil {
 		if carrierCleanup != nil {
 			_ = carrierCleanup()

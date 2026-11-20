@@ -31,7 +31,7 @@ func TestUpdaterStateIsOwnedByLocalSystemWhoeverCreatedIt(t *testing.T) {
 	}
 	if err := secureWindowsPrivilegedTree(root); errors.Is(err, windows.ERROR_INVALID_OWNER) {
 		// The service is LocalSystem and may always name itself owner. An administrator may only where its restore
-		// privilege is honoured for this call (victus over SSH: yes; a hosted CI runner: no).
+		// privilege is honoured for this call (Windows test machine over SSH: yes; a hosted CI runner: no).
 		t.Skipf("this account may not make LocalSystem the owner; run as LocalSystem: %v", err)
 	} else if err != nil {
 		t.Fatal(err)

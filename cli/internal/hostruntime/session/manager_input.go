@@ -90,7 +90,7 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 		// backed up 5 s on a disk that takes ~5 ms per fsync).
 		m.writer().decided(store.InputDecision{SessionID: sessionID, ClientID: key.ClientID, AttachmentID: key.AttachmentID, Generation: key.Generation, InputID: storageID, Hash: hash[:], Status: string(decision.Status), BytesWritten: decision.BytesWritten, ErrorCode: decision.WriteError})
 		// The journal keeps only the last InputDecisionWindow sequenced decisions of a client; the
-		// durable rows follow it in batches so a long session stays bounded (Lane X audit H2).
+		// durable rows follow it in batches so a long session stays bounded (audit H2).
 		if key.InputSequence > InputDecisionWindow && key.InputSequence%inputPruneBatch == 0 {
 			if pruneErr := m.config.Store.PruneInputDecisions(context.Background(), sessionID, key.ClientID, key.AttachmentID, key.Generation, key.InputSequence-InputDecisionWindow); pruneErr != nil {
 				observeSessionFailure(session, "lifecycle", classifySessionFailure("lifecycle", pruneErr))

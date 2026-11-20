@@ -60,7 +60,7 @@ generate:
 generate-check:
 	@before="$$(git diff -- internal/db/dbsqlc)"; $(MAKE) generate >/dev/null; test "$$(git diff -- internal/db/dbsqlc)" = "$$before" || { echo "generated sqlc output is stale; run make generate" >&2; git diff -- internal/db/dbsqlc; exit 1; }
 
-## policy-checks: the non-test checks of `make check`; tools/ci-test.sh runs them too, so a green lane run means main's checks pass
+## policy-checks: the non-test checks of `make check`; tools/ci-test.sh runs them too, so a green CI run means main's checks pass
 policy-checks: standalone-build verify-toolchain dependencies source-policy metrics-check scenario-matrix-check fmt-check generate-check
 
 check: policy-checks vet test build

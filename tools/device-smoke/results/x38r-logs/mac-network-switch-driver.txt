@@ -1,5 +1,0 @@
-Installed Paperboat dev-2e3cad1f5 at /Users/runner/.local/bin/pb. Background update checks: false. Enrollment is unchanged.
-{"schema_version":"1.0","ok":true,"data":{"environment_id":"machine_c39c4ab7-0736-499b-8b2e-96acc0a4767b","installation_
-23:02:54 doctor: Paperboat doctor: healthy
-23:06:01 collected
-rc=0

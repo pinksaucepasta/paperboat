@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,14 @@ var (
 )
 
 const maximumCertificateDemandCalls = 1024
+
+// A leaf with less than this left is one the server should already have replaced: the push that carried the
+// replacement may have missed this edge (the distribution message lives 10 minutes), so the edge asks for it,
+// at most once per certificateRefreshInterval per name, while it keeps serving the leaf it has.
+const (
+	certificateNearExpiry      = 24 * time.Hour
+	certificateRefreshInterval = time.Minute
+)
 
 type CertificateSource interface {
 	GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
@@ -53,6 +62,7 @@ type CertificateSelector struct {
 	timeout time.Duration
 	mu      sync.Mutex
 	demand  map[string]*certificateDemandCall
+	refresh map[string]time.Time
 }
 
 func NewCertificateSelector(config CertificateSelectorConfig) (*CertificateSelector, error) {
@@ -62,7 +72,7 @@ func NewCertificateSelector(config CertificateSelectorConfig) (*CertificateSelec
 	if config.HandshakeTimeout == 0 {
 		config.HandshakeTimeout = 2 * time.Second
 	}
-	return &CertificateSelector{source: config.Source, onDemand: config.OnDemandRequester, matcher: config.OnDemandMatcher, wildcard: config.Wildcard, timeout: config.HandshakeTimeout, demand: make(map[string]*certificateDemandCall)}, nil
+	return &CertificateSelector{source: config.Source, onDemand: config.OnDemandRequester, matcher: config.OnDemandMatcher, wildcard: config.Wildcard, timeout: config.HandshakeTimeout, demand: make(map[string]*certificateDemandCall), refresh: make(map[string]time.Time)}, nil
 }
 
 func (s *CertificateSelector) TLSConfig() *tls.Config {
@@ -121,6 +131,7 @@ func (s *CertificateSelector) lookupExact(ctx context.Context, hostname string) 
 	exact := s.matcher != nil && s.matcher.RequiresExactCertificate(hostname)
 	certificate, sourceErr := s.source.GetCertificate(&tls.ClientHelloInfo{ServerName: hostname})
 	if sourceErr == nil && certificate != nil && ((!exact && certificateCoversHost(certificate, hostname)) || (exact && certificateCoversExactHost(certificate, hostname))) {
+		s.refreshNearExpiry(certificate, hostname)
 		return certificate, nil
 	}
 	if sourceErr != nil && !errors.Is(sourceErr, tlscert.ErrCertificateMissing) && !errors.Is(sourceErr, tlscert.ErrCertificateExpired) {
@@ -143,6 +154,37 @@ func (s *CertificateSelector) lookupExact(ctx context.Context, hostname string) 
 		return nil, tlscert.ErrCertificateMissing
 	}
 	return certificate, nil
+}
+
+// refreshNearExpiry asks for a replacement in the background when the leaf served for exactly this name is
+// about to expire. A shared wildcard has no name of its own and is not requested per host.
+func (s *CertificateSelector) refreshNearExpiry(certificate *tls.Certificate, hostname string) {
+	leaf, ok := certificateLeaf(certificate)
+	if s.onDemand == nil || !ok || time.Until(leaf.NotAfter) > certificateNearExpiry || !slices.Contains(leaf.DNSNames, hostname) {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	if last, ok := s.refresh[hostname]; ok && now.Sub(last) < certificateRefreshInterval {
+		s.mu.Unlock()
+		return
+	}
+	for name, last := range s.refresh {
+		if now.Sub(last) >= certificateRefreshInterval {
+			delete(s.refresh, name)
+		}
+	}
+	if len(s.refresh) >= maximumCertificateDemandCalls {
+		s.mu.Unlock()
+		return
+	}
+	s.refresh[hostname] = now
+	s.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+		defer cancel()
+		_ = s.request(ctx, hostname) // best effort: the current leaf keeps serving until it expires
+	}()
 }
 
 func (s *CertificateSelector) request(ctx context.Context, hostname string) error {

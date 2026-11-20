@@ -66,8 +66,8 @@ func (o candidateSessionOwner) withdrawUnless(ctx context.Context, committed str
 		return err
 	}
 	// Read wraps a missing descriptor in ErrInvalid, which installNotExistOnly fails closed on: look first. An attempt that
-	// died before it published has nothing to withdraw; reporting that as a failure wedged every later install (X lane,
-	// Windows: install_recovery kept failing on the never-published candidate).
+	// died before it published has nothing to withdraw; reporting that as a failure wedged every later install (Windows:
+	// install_recovery kept failing on the never-published candidate).
 	if _, err := os.Lstat(path); installNotExistOnly(err) {
 		return nil
 	}

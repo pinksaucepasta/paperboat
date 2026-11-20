@@ -219,3 +219,36 @@ func TestInfrastructureTLSWithoutFilesServesIdentityOnlyOnSelfHostedEdge(t *test
 		t.Fatalf("managed edge without files must keep the base TLS config: %v", err)
 	}
 }
+
+// pbh answers ACME HTTP-01 for the browser HTTPS certificate through files; port 80 serves exactly those answers.
+func TestACMEChallengeServesOnlyTokensPbhWrote(t *testing.T) {
+	dir := t.TempDir()
+	const token = "abcdefghijklmnop0123456789_-ABCD"
+	if err := os.WriteFile(filepath.Join(dir, token), []byte(token+".thumbprint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	handler := acmeChallenge(dir, next)
+	get := func(method, path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(method, "http://203.0.113.7"+path, nil))
+		return w
+	}
+	if w := get("GET", "/.well-known/acme-challenge/"+token); w.Code != 200 || w.Body.String() != token+".thumbprint" {
+		t.Fatalf("written token = %d %q, want its key authorization", w.Code, w.Body.String())
+	}
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/.well-known/acme-challenge/notwrittentoken0123456789"}, // unknown token
+		{"GET", "/.well-known/acme-challenge/../" + token},               // traversal
+		{"GET", "/.well-known/acme-challenge/short"},                     // not a token
+		{"POST", "/.well-known/acme-challenge/" + token},                 // wrong method
+		{"GET", "/anything-else"},
+	} {
+		if w := get(c.method, c.path); w.Code != http.StatusTeapot {
+			t.Fatalf("%s %s = %d, want it to fall through", c.method, c.path, w.Code)
+		}
+	}
+	if w := acmeChallenge("", next); w == nil {
+		t.Fatal("no challenge directory must pass the handler through")
+	}
+}

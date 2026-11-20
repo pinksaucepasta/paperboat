@@ -480,7 +480,7 @@ func resultContextError(base error, message string) error {
 // resume journal without guessing whether staging, SCM activation, or cleanup
 // was interrupted.
 // timedOutMessage is the result message of an operation that ran out of time. A named step still names itself, and
-// since that step's Error() is the same prose, the cause leaves say which phase ran out (victus: "install Paperboat
+// since that step's Error() is the same prose, the cause leaves say which phase ran out (Windows test machine: "install Paperboat
 // machine guard: context deadline exceeded" was only in a log file, the message repeated the step twice).
 func timedOutMessage(operationErr error) string {
 	var named interface{ ElevationFailureCode() string }

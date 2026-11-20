@@ -686,7 +686,7 @@ func TestCanonicalPrimaryDomainAndReadyAliasPublishOnce(t *testing.T) {
 			if len(before) != 1 || len(after) != 1 || after[0].ID != a.RouteID || after[0].Target != a.RouteID || after[0].MatchType != before[0].MatchType || after[0].Hostname != before[0].Hostname || after[0].WildcardSuffix != before[0].WildcardSuffix {
 				t.Fatalf("TLS activation changed primary matcher: before=%+v after=%+v", before, after)
 			}
-			registry := route.NewGenerationRegistry(4)
+			registry := route.NewGenerationRegistry()
 			for index, rules := range [][]route.RouteRule{before, after} {
 				generation := uint64(index + 1)
 				if err := registry.StageGeneration(generation, rules); err != nil {

@@ -343,7 +343,7 @@ func backendForCommand(command *cobra.Command) (*api.Client, error) {
 }
 
 func executeInteractiveCommand(parent *cobra.Command, args []string) error {
-	command := newInteractiveRootCommand()
+	command := homeDependenciesOf(parent.Context()).newRoot()
 	command.SetIn(parent.InOrStdin())
 	command.SetOut(parent.OutOrStdout())
 	command.SetErr(parent.ErrOrStderr())

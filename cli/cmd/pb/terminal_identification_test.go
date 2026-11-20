@@ -8,7 +8,7 @@ import (
 
 func TestSessionIdentificationPresentation(t *testing.T) {
 	s := api.TerminalSession{Name: "backend-work", Title: "✳ Fixing auth", ForegroundProcess: "claude", CurrentDirectory: "/projects/api", StartedIn: "/home/user"}
-	if got := sessionIdentificationDetails(s, "hp · attached"); got != "✳ Fixing auth · /projects/api · hp · attached" {
+	if got := sessionIdentificationDetails(s, "laptop · attached"); got != "✳ Fixing auth · /projects/api · laptop · attached" {
 		t.Fatalf("details=%q", got)
 	}
 	if s.Name != "backend-work" {

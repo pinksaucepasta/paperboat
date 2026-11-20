@@ -586,7 +586,7 @@ func TestSnapshotRotationSurvivesSaturatedDetailMetrics(t *testing.T) {
 	}
 	snapshots := make([]Snapshot, maxSnapshots+1)
 	snapshots[0] = Snapshot{Name: "paperboat_relay_sessions", Kind: "gauge", Value: 30}
-	snapshots[1] = Snapshot{Name: "paperboat_relay_capacity_limit", Kind: "gauge", Value: 256}
+	snapshots[1] = Snapshot{Name: "paperboat_peer_relay_allocations", Kind: "gauge", Value: 256}
 	for i := 2; i < maxSnapshots; i++ {
 		snapshots[i] = Snapshot{Name: "paperboat_relay_sessions", Kind: "gauge", Value: float64(i)}
 	}
@@ -601,7 +601,7 @@ func TestSnapshotRotationSurvivesSaturatedDetailMetrics(t *testing.T) {
 	mu.Lock()
 	firstWindow := bytes.Join(envelopes, nil)
 	mu.Unlock()
-	for _, name := range []string{"paperboat_relay_sessions", "paperboat_relay_capacity_limit", "paperboat_reporting_metrics_dropped_total_snapshot"} {
+	for _, name := range []string{"paperboat_relay_sessions", "paperboat_peer_relay_allocations", "paperboat_reporting_metrics_dropped_total_snapshot"} {
 		if !bytes.Contains(firstWindow, []byte(name)) {
 			t.Fatalf("health snapshot missing after production drain: %s", name)
 		}

@@ -1,1 +1,0 @@
-{"check": "env-team-scopes", "status": "FAIL", "detail": "rotate failed: The encrypted ENV source change was saved, but authorized devices still need refresh. Run `pb env resume` to retry any staged publication exactly and refresh authorized workspace layers."}

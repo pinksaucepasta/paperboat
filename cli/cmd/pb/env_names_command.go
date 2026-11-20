@@ -62,7 +62,7 @@ func runEnvironmentNamesAccess(command *cobra.Command, workspace string, args []
 	if len(args) == 1 && args[0] != "on" && args[0] != "off" {
 		return localArgumentError("use: pb env names access [on|off]")
 	}
-	client, err := environmentVariableBackendForCommand(command)
+	client, err := envDependenciesOf(command.Context()).backendForCommand(command)
 	if err != nil {
 		return err
 	}

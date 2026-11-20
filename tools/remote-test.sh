@@ -1,21 +1,10 @@
 #!/usr/bin/env bash
 # Run one module's Go tests for the committed HEAD on a spare VM instead of the shared build host.
 #   tools/remote-test.sh <host> <module> [go test args...]
-#   tools/remote-test.sh pbvm2 cli -run TestExec ./cmd/pb
-#   tools/remote-test.sh pbvm3 shared            # go test -p 2 ./...
-#   tools/remote-test.sh linpool-1 server -run . ./internal/edgeset/   # a GitHub runner, PostgreSQL included
-# <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit, ana@hermes, linpool-N). The VMs have 3-4 GB
-# of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`. Where a
-# systemd user manager exists the job runs in a scope capped at 60% of RAM: a -race PostgreSQL suite once froze anvit,
-# which also hosts a prod canary machine, for two minutes (2026-11-19).
-# Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
-# on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
-# The synced tree has no .git, so the full HEAD goes over as GITHUB_SHA (tools/tuf-repository reads it for its release source commit).
-# linpool-N (tools/device-smoke/linpool.sh start N) is a GitHub-hosted Linux runner kept alive for hours with Go, gcc,
-# passwordless sudo and a postgres:17 container behind ~/.pb-test-pg-dsn already set up: start it once, reuse it for every job.
-# gcc is installed on all of them, so -race works. The cli module needs passwordless sudo on the host (root updater fixture,
-# frozen-filesystem bandwidth test): anvit has it, hermes does not.
-# ana@hermes has user-scoped Go 1.27.4 (~/go-sdk-1.27.4): fine for -race package runs, not for cli root/filesystem suites.
+# The host is an SSH destination or an alias in the local development target configuration.
+# Use a Linux host with Go, gcc, and passwordless sudo for CLI system fixtures. A host with
+# ~/.pb-test-pg-dsn runs PostgreSQL suites in separate databases. Each host runs one job at a time.
+# Only committed files are synced, and GITHUB_SHA identifies the source revision.
 set -euo pipefail
 
 usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -26,6 +15,7 @@ case $module in shared | cli | relay | edge | helper | server) ;; *) echo "remot
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+host=$(python3 tools/device-smoke/dev_targets.py ssh "$host")
 [ -d "$module" ] || { echo "remote-test: no $module/ in $root" >&2; exit 2; }
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "remote-test: note: uncommitted changes are NOT tested (only HEAD $(git rev-parse --short HEAD))" >&2
@@ -37,8 +27,8 @@ for a in "$@"; do case $a in ./* | ...) wanted_pkg=1 ;; esac; done
 
 # One sync tree per worktree, so two worktrees never overwrite each other's sources; this script
 # serializes against itself per worktree and host.
-lane=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
-exec 8>"${TMPDIR:-/tmp}/pb-remote-test-$host-$lane.lock"
+worktree=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
+exec 8>"${TMPDIR:-/tmp}/pb-remote-test-$host-$worktree.lock"
 flock 8
 
 stage=$(mktemp -d "${TMPDIR:-/tmp}/pb-remote-test.XXXXXX")
@@ -46,33 +36,30 @@ trap 'rm -rf "$stage"' EXIT
 git archive HEAD -- . ':!console' ':!marketing' | tar x -C "$stage"
 sha=$(git rev-parse --short HEAD)
 
-echo "remote-test: syncing $sha to $host:pb-remote-test/$lane" >&2
-ssh -o BatchMode=yes "$host" "mkdir -p pb-remote-test/$lane"
-rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remote-test/$lane/"
+echo "remote-test: syncing $sha to $host:pb-remote-test/$worktree" >&2
+ssh -o BatchMode=yes "$host" "mkdir -p pb-remote-test/$worktree"
+rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:pb-remote-test/$worktree/"
 
 # The quoted heredoc is the remote script; arguments are passed as positional parameters (no re-parsing).
 echo "remote-test: $host: go test -p 2 $* ($module)" >&2
 printf -v quoted ' %q' "$@"
 exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
-  "cap=; systemctl --user show-environment >/dev/null 2>&1 && cap='systemd-run --user --scope -q -p MemoryMax=60%'; GITHUB_SHA=$(git rev-parse HEAD) \$cap flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $lane$quoted" <<'REMOTE'
+  "cap=; systemctl --user show-environment >/dev/null 2>&1 && cap='systemd-run --user --scope -q -p MemoryMax=60%'; GITHUB_SHA=$(git rev-parse HEAD) \$cap flock -w 3600 \$HOME/pb-remote-test/host.lock bash -s -- $module $worktree$quoted" <<'REMOTE'
 set -euo pipefail
 umask 022 # a host default of 002 makes every t.TempDir group-writable, which the daemon socket check refuses
-module=$1 lane=$2
+module=$1 worktree=$2
 shift 2
 if [ "$module" = cli ] && ! sudo -n true 2>/dev/null; then
-  echo "remote-test: warning: $(hostname) has no passwordless sudo; cli root-updater and isolated-filesystem tests will fail here, run cli on tools/ci-test.sh or anvit" >&2
+  echo "remote-test: warning: $(hostname) has no passwordless sudo; cli root-updater and isolated-filesystem tests will fail here, run cli on tools/ci-test.sh or a host with passwordless sudo" >&2
 fi
 export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local
-# One build cache per lane: lanes share the host but must never share (or clean) one cache, and a
-# host disk guard only ever touches the default ~/.cache/go-build. (2026-11-19: an hourly `rm -rf`
-# of the shared default cache on pbvm2 broke in-flight builds with dozens of `could not import ...
-# no such file` failures.)
-export GOCACHE=$HOME/.cache/go-build-$lane
-cd "$HOME/pb-remote-test/$lane/$module"
+# Keep each job’s build cache separate from other jobs and the host default.
+export GOCACHE=$HOME/.cache/go-build-$worktree
+cd "$HOME/pb-remote-test/$worktree/$module"
 go version
-# A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.
+# A host with ~/.pb-test-pg-dsn runs PostgreSQL suites like CI: each package gets its own fresh database.
 case $module in server | edge | helper) ;; *) exec nice go test -p 2 "$@" ;; esac # no database suites elsewhere
 [ -f "$HOME/.pb-test-pg-dsn" ] || exec nice go test -p 2 "$@"
 # One go test run: tools/pg-test-exec.sh (git archive ships tools/) gives each package a fresh database, packages in parallel.
-PAPERBOAT_TEST_DATABASE_DSN=$(cat "$HOME/.pb-test-pg-dsn") exec nice go test -p 2 -exec "$HOME/pb-remote-test/$lane/tools/pg-test-exec.sh" "$@"
+PAPERBOAT_TEST_DATABASE_DSN=$(cat "$HOME/.pb-test-pg-dsn") exec nice go test -p 2 -exec "$HOME/pb-remote-test/$worktree/tools/pg-test-exec.sh" "$@"
 REMOTE

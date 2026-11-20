@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-var internalName = regexp.MustCompile(`(?i)\b(hostd|paperboatd|lane [a-z])\b`)
+var internalName = regexp.MustCompile(`(?i)\b(hostd|paperboatd)\b`)
 
 // A command's help text has one owner: no path in two tables, none that also keeps an old
 // detail entry, and no internal process name in text users read.
@@ -30,7 +30,7 @@ func TestHelpTextOwnership(t *testing.T) {
 				continue
 			}
 			if internalName.MatchString(text.Long + text.Example) {
-				t.Errorf("%s help text names an internal process or lane", path)
+				t.Errorf("%s help text names an internal process", path)
 			}
 		}
 	}

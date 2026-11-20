@@ -30,10 +30,9 @@ type ForwardHooks struct {
 // SetForwarding installs the forwarding hooks; it may be called while the listener serves.
 func (l *SharedTLSListener) SetForwarding(hooks ForwardHooks) { l.hooks.Store(&hooks) }
 
-// Inject serves a visitor another node forwarded: conn carries the visitor's bytes from its ClientHello on. It takes
-// a dispatch slot without blocking (forward.ErrBusy when none is free), applies the visitor's handshake rate, and
-// dispatches the connection as forwarded, which is never forwarded again. It refuses (forward.ErrDraining) only once
-// the listener has ended; a draining edge that closed its listener still serves the visitors its HTTP server accepts.
+// Inject serves a visitor another node forwarded: conn carries the visitor's bytes from its ClientHello on. It applies the visitor's
+// handshake rate (forward.ErrBusy over it) and dispatches the connection as forwarded, which is never forwarded again.
+// It refuses (forward.ErrDraining) only once the listener has ended; a draining edge that closed its listener still serves the visitors its HTTP server accepts.
 // On nil Inject owns conn.
 func (l *SharedTLSListener) Inject(conn net.Conn, visitor net.Addr) error {
 	if host, _, err := net.SplitHostPort(visitor.String()); err == nil {
@@ -42,15 +41,9 @@ func (l *SharedTLSListener) Inject(conn net.Conn, visitor net.Addr) error {
 			return forward.ErrBusy
 		}
 	}
-	select {
-	case l.slots <- struct{}{}:
-	default:
-		return forward.ErrBusy
-	}
 	l.mu.Lock()
 	if l.ctx.Err() != nil {
 		l.mu.Unlock()
-		<-l.slots
 		return forward.ErrDraining
 	}
 	l.workers.Add(1)
@@ -60,21 +53,15 @@ func (l *SharedTLSListener) Inject(conn net.Conn, visitor net.Addr) error {
 }
 
 // forwardVisitor passes the visitor to the node that holds host. It reports whether it took ownership of the
-// connection; false (no forwarding, no holder, no room) leaves the visitor to the local paths.
+// connection; false (no forwarding, no holder) leaves the visitor to the local paths.
 func (l *SharedTLSListener) forwardVisitor(hooks *ForwardHooks, conn, replay net.Conn, host string, releaseName func()) bool {
 	if hooks == nil || hooks.Forwarder == nil || len(hooks.Forwarder.Holders(host)) == 0 {
-		return false
-	}
-	select {
-	case l.forwarding <- struct{}{}:
-	default:
 		return false
 	}
 	// Not a listener worker: run waits for its workers when the listener closes, and a forwarded visitor must outlive a
 	// drain (the mesh ends it, not the listener).
 	go func() {
 		defer releaseName()
-		defer func() { <-l.forwarding }()
 		defer conn.Close()
 		if err := hooks.Forwarder.Forward(l.ctx, replay, host); err != nil {
 			l.forwardFailed(replay, host, err)

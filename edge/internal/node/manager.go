@@ -26,13 +26,11 @@ type ConnectorSnapshot struct {
 type ManagerSnapshot struct {
 	Connectors []ConnectorSnapshot
 	Streams    uint32
-	Capacity   uint32
 	Draining   bool
 }
 
 type Manager struct {
-	state    *State
-	capacity uint32
+	state *State
 
 	mu         sync.Mutex
 	connectors map[string]*connector
@@ -45,11 +43,11 @@ type connector struct {
 	retired    map[uint64]uint32
 }
 
-func NewManager(state *State, capacity uint32) (*Manager, error) {
-	if state == nil || capacity == 0 {
-		return nil, ErrCapacity
+func NewManager(state *State) (*Manager, error) {
+	if state == nil {
+		return nil, ErrUnknown
 	}
-	return &Manager{state: state, capacity: capacity, connectors: make(map[string]*connector), wake: make(chan struct{})}, nil
+	return &Manager{state: state, connectors: make(map[string]*connector), wake: make(chan struct{})}, nil
 }
 
 func (m *Manager) AdmitConnector(id string, generation uint64) error {
@@ -63,9 +61,6 @@ func (m *Manager) AdmitConnector(id string, generation uint64) error {
 	}
 	if _, exists := m.connectors[id]; exists {
 		return nil
-	}
-	if uint32(len(m.connectors)) >= m.capacity {
-		return ErrCapacity
 	}
 	m.connectors[id] = &connector{generation: generation, retired: make(map[uint64]uint32)}
 	return nil
@@ -187,7 +182,7 @@ func (m *Manager) Drain(ctx context.Context, deadline time.Time) (forced bool) {
 func (m *Manager) Snapshot() ManagerSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	snapshot := ManagerSnapshot{Capacity: m.capacity, Connectors: make([]ConnectorSnapshot, 0, len(m.connectors))}
+	snapshot := ManagerSnapshot{Connectors: make([]ConnectorSnapshot, 0, len(m.connectors))}
 	for id, current := range m.connectors {
 		snapshot.Connectors = append(snapshot.Connectors, ConnectorSnapshot{ID: id, Generation: current.generation, Streams: current.streams})
 		snapshot.Streams = saturatingAddUint32(snapshot.Streams, current.streams)

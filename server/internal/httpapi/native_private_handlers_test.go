@@ -140,7 +140,7 @@ func TestNativePrivateGrantRequiresMachinePrincipalAndStrictBody(t *testing.T) {
 }
 
 // A port the policy allows but the machine has not announced yet (a service started moments ago) is a
-// retryable 409, not the final 403 of a policy denial (Lane A, access-machine 0-byte failures).
+// retryable 409, not the final 403 of a policy denial (access-machine 0-byte failures).
 func TestNativePrivateGrantNotYetAnnouncedPortIsRetryable(t *testing.T) {
 	requestBody := `{"operation_id":"operation_10000000-0000-4000-8000-000000000031","resource_kind":"machine_service","resource_id":"machine_10000000-0000-4000-8000-000000000032","route_id":"tcp:3000","protocol":"tcp"}`
 	signer, err := mint.NewEphemeral(time.Hour)

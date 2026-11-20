@@ -15,33 +15,30 @@ const (
 	MetricUpdateOperations  = sharedmetrics.UpdateOperations
 	MetricOperationLatency  = sharedmetrics.OperationLatency
 
-	MetricConnectorSessions        = "paperboat_edge_connector_sessions"
-	MetricConnectorConnections     = "paperboat_edge_connector_connections_total"
-	MetricConnectorReconnects      = "paperboat_edge_connector_reconnects_total"
-	MetricConnectorBackoff         = "paperboat_edge_connector_backoff_seconds"
-	MetricConnectorHandshake       = "paperboat_edge_connector_handshake_latency_seconds"
-	MetricConnectorDisconnects     = "paperboat_edge_connector_disconnects_total"
-	MetricDesiredConfigGeneration  = "paperboat_edge_config_desired_generation"
-	MetricAppliedConfigGeneration  = "paperboat_edge_config_applied_generation"
-	MetricActiveStreams            = "paperboat_edge_active_streams"
-	MetricQueueDepth               = "paperboat_edge_queue_depth"
-	MetricFlowControlStalls        = "paperboat_edge_flow_control_stalls_total"
-	MetricTrafficBytes             = "paperboat_edge_traffic_bytes_total"
-	MetricStreamDuration           = "paperboat_edge_stream_duration_seconds"
-	MetricStreamCancellations      = "paperboat_edge_stream_cancellations_total"
-	MetricRouteErrors              = "paperboat_edge_route_errors_total"
-	MetricRouteLatency             = "paperboat_edge_route_latency_seconds"
-	MetricOriginFailures           = "paperboat_edge_origin_connect_failures_total"
-	MetricProtocolUpgrades         = "paperboat_edge_protocol_upgrades_total"
-	MetricHealthProbes             = "paperboat_edge_health_probes_total"
-	MetricDomainVerification       = "paperboat_edge_domain_verification_seconds"
-	MetricDomainVerificationFails  = "paperboat_edge_domain_verification_failures_total"
-	MetricCertificateExpiryHorizon = "paperboat_edge_certificate_expiry_horizon_seconds"
-	MetricCertificateFailures      = "paperboat_edge_certificate_failures_total"
-	MetricServiceUptime            = "paperboat_edge_service_uptime_seconds"
-	// MetricAdmissionSlotsUsed is the percent of the shared TLS listener's admission slots in use
-	// (NodeCapacity x 128); the alert fires above 80 for 2 minutes.
-	MetricAdmissionSlotsUsed        = "paperboat_edge_admission_slots_used_percent"
+	MetricConnectorSessions         = "paperboat_edge_connector_sessions"
+	MetricConnectorConnections      = "paperboat_edge_connector_connections_total"
+	MetricConnectorReconnects       = "paperboat_edge_connector_reconnects_total"
+	MetricConnectorBackoff          = "paperboat_edge_connector_backoff_seconds"
+	MetricConnectorHandshake        = "paperboat_edge_connector_handshake_latency_seconds"
+	MetricConnectorDisconnects      = "paperboat_edge_connector_disconnects_total"
+	MetricDesiredConfigGeneration   = "paperboat_edge_config_desired_generation"
+	MetricAppliedConfigGeneration   = "paperboat_edge_config_applied_generation"
+	MetricActiveStreams             = "paperboat_edge_active_streams"
+	MetricQueueDepth                = "paperboat_edge_queue_depth"
+	MetricFlowControlStalls         = "paperboat_edge_flow_control_stalls_total"
+	MetricTrafficBytes              = "paperboat_edge_traffic_bytes_total"
+	MetricStreamDuration            = "paperboat_edge_stream_duration_seconds"
+	MetricStreamCancellations       = "paperboat_edge_stream_cancellations_total"
+	MetricRouteErrors               = "paperboat_edge_route_errors_total"
+	MetricRouteLatency              = "paperboat_edge_route_latency_seconds"
+	MetricOriginFailures            = "paperboat_edge_origin_connect_failures_total"
+	MetricProtocolUpgrades          = "paperboat_edge_protocol_upgrades_total"
+	MetricHealthProbes              = "paperboat_edge_health_probes_total"
+	MetricDomainVerification        = "paperboat_edge_domain_verification_seconds"
+	MetricDomainVerificationFails   = "paperboat_edge_domain_verification_failures_total"
+	MetricCertificateExpiryHorizon  = "paperboat_edge_certificate_expiry_horizon_seconds"
+	MetricCertificateFailures       = "paperboat_edge_certificate_failures_total"
+	MetricServiceUptime             = "paperboat_edge_service_uptime_seconds"
 	MetricServiceRestarts           = "paperboat_edge_service_restarts_total"
 	MetricWatchdogFailures          = "paperboat_edge_watchdog_failures_total"
 	MetricCrashLoop                 = "paperboat_edge_crash_loop"
@@ -86,7 +83,6 @@ var localMetricDescriptors = []sharedmetrics.Descriptor{
 	{Name: MetricCertificateExpiryHorizon, Kind: sharedmetrics.Gauge},
 	{Name: MetricCertificateFailures, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "operation", AllowedValues: []string{"issue", "renew", "replace", "revoke"}}, {Name: "reason", AllowedValues: []string{"dns", "acme", "expired", "revoked", "distribution", "unknown"}}}},
 	{Name: MetricServiceUptime, Kind: sharedmetrics.Gauge},
-	{Name: MetricAdmissionSlotsUsed, Kind: sharedmetrics.Gauge},
 	{Name: MetricServiceRestarts, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "reason", AllowedValues: []string{"crash", "upgrade", "shutdown", "unknown"}}}},
 	{Name: MetricWatchdogFailures, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "reason", AllowedValues: []string{"timeout", "crash", "unhealthy", "unknown"}}}},
 	{Name: MetricCrashLoop, Kind: sharedmetrics.Gauge},

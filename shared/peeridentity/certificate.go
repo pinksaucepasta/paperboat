@@ -229,7 +229,7 @@ const (
 	MinimumRemainingLifetime = time.Hour
 	// CertificateLifetime is what a client asks for: its expiry is anchored to its own clock, so it keeps twice
 	// the skew allowance below the server's cap. A client exactly at the cap was refused (invalid_certificate)
-	// as soon as its clock was a second ahead (victus, 2026-11-11).
+	// as soon as its clock was a second ahead (Windows test machine, 2026-11-11).
 	CertificateLifetime = MaxCertificateLifetime - 2*ClockSkewAllowance
 )
 

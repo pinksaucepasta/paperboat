@@ -124,6 +124,7 @@ type workflowAcceptanceHarness struct {
 	commandContext       context.Context
 	lastRequest          tunnelCreateWorkflowRequest
 	hasRequest           bool
+	deps                 tunnelDependencies
 	interruptFirstCreate bool
 }
 
@@ -133,19 +134,9 @@ func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
 	h.server = httptest.NewServer(http.HandlerFunc(h.serveControlPlane))
 	t.Cleanup(h.server.Close)
 
-	oldClient := tunnelClientForCommand
-	oldWorkflow := beginTunnelCreateWorkflowForCommand
-	oldKey := newTunnelIdempotencyKey
-	oldProbe, oldRepair := tunnelHostRuntimeProbe, tunnelHostRuntimeRepair
-	t.Cleanup(func() {
-		tunnelClientForCommand = oldClient
-		beginTunnelCreateWorkflowForCommand = oldWorkflow
-		newTunnelIdempotencyKey = oldKey
-		tunnelHostRuntimeProbe, tunnelHostRuntimeRepair = oldProbe, oldRepair
-	})
-
+	h.deps = defaultTunnelDependencies()
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", h.stateRoot)
-	tunnelHostRuntimeProbe = func(ctx context.Context, _ string) error {
+	h.deps.probeHost = func(ctx context.Context, _ string) error {
 		if !h.ready {
 			h.events.add("hostd.probe.unready")
 			return errors.New("hostd is stopped")
@@ -155,7 +146,7 @@ func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
 		}
 		return nil
 	}
-	tunnelHostRuntimeRepair = func(ctx context.Context) error {
+	h.deps.repairHost = func(ctx context.Context) error {
 		if h.event("service.install") {
 			return ctx.Err()
 		}
@@ -165,24 +156,24 @@ func newWorkflowAcceptanceHarness(t *testing.T) *workflowAcceptanceHarness {
 		h.ready = true
 		return nil
 	}
-	tunnelClientForCommand = func(command *cobra.Command) (*api.Client, error) {
+	h.deps.client = func(command *cobra.Command) (*api.Client, error) {
 		if err := ensureTunnelHostRuntime(command.Context(), h.stateRoot); err != nil {
 			return nil, err
 		}
 		return api.New(h.server.URL, config.Credential{AccessToken: "client-session"}, h.server.Client()), nil
 	}
-	newTunnelIdempotencyKey = func() (string, error) {
+	h.deps.newKey = func() (string, error) {
 		h.keySequence++
 		return fmt.Sprintf("operation_00000000-0000-4000-8000-%012d", h.keySequence), nil
 	}
-	beginTunnelCreateWorkflowForCommand = func(ctx context.Context, request tunnelCreateWorkflowRequest) (tunnelCreateWorkflow, error) {
+	h.deps.beginWorkflow = func(ctx context.Context, request tunnelCreateWorkflowRequest) (tunnelCreateWorkflow, error) {
 		h.events.add("workflow.begin")
 		h.lastRequest, h.hasRequest = request, true
 		nameDigest := sha256.Sum256([]byte(request.Name))
 		session, err := tunnelcreatejournal.Begin(ctx, tunnelcreatejournal.Config{
 			StateRoot: h.stateRoot, HostID: "host_workflow", NameDigest: hex.EncodeToString(nameDigest[:]),
 			RequestDigest: request.RequestDigest, DomainCount: request.DomainCount, ExpiresAt: request.ExpiresAt,
-			NewKey: tunnelKey,
+			NewKey: func() (string, error) { return tunnelKey(ctx) },
 		})
 		if err != nil {
 			return nil, err
@@ -330,12 +321,12 @@ func (h *workflowAcceptanceHarness) execute(jsonOutput, withDomain bool) (string
 
 func (h *workflowAcceptanceHarness) executeWithWait(jsonOutput, withDomain, wait bool) (string, string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	h.commandContext, h.cancel = ctx, cancel
+	h.commandContext, h.cancel = h.deps.context(ctx), cancel
 	defer cancel()
 	out := &workflowAcceptanceWriter{harness: h}
 	var stderr bytes.Buffer
 	command := tunnelCobraCommandV1()
-	command.SetContext(ctx)
+	command.SetContext(h.commandContext)
 	command.SetOut(out)
 	if h.trackWait {
 		command.SetErr(&workflowAcceptanceStderr{harness: h, buffer: &stderr})
@@ -366,7 +357,7 @@ func (h *workflowAcceptanceHarness) assertJournalLockReleased(t *testing.T) {
 	session, err := tunnelcreatejournal.Begin(t.Context(), tunnelcreatejournal.Config{
 		StateRoot: h.stateRoot, HostID: "host_workflow", NameDigest: hex.EncodeToString(nameDigest[:]),
 		RequestDigest: h.lastRequest.RequestDigest, DomainCount: h.lastRequest.DomainCount, ExpiresAt: h.lastRequest.ExpiresAt,
-		NewKey: tunnelKey,
+		NewKey: h.deps.newKey,
 	})
 	if err != nil {
 		t.Fatalf("workflow lock was not released: %v", err)
@@ -447,7 +438,7 @@ func TestTunnelCreateSelfhostPendsUntilItsEndpointIsReadyAndResumes(t *testing.T
 	journal, err := tunnelcreatejournal.Begin(t.Context(), tunnelcreatejournal.Config{
 		StateRoot: h.stateRoot, HostID: "host_workflow", NameDigest: hex.EncodeToString(nameDigest[:]),
 		RequestDigest: h.lastRequest.RequestDigest, DomainCount: h.lastRequest.DomainCount, ExpiresAt: h.lastRequest.ExpiresAt,
-		NewKey: tunnelKey,
+		NewKey: h.deps.newKey,
 	})
 	if err != nil {
 		t.Fatal(err)

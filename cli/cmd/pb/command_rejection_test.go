@@ -272,16 +272,14 @@ func TestCommandAPIReporterChild(t *testing.T) {
 	}
 	restore := errorreport.Install(reporter)
 	defer restore()
-	old := tunnelClientForCommand
-	tunnelClientForCommand = func(command *cobra.Command) (*api.Client, error) {
-		client := api.New(os.Getenv("PB_COMMAND_REPORTER_CONTROL"), config.Credential{}, nil)
-		_, err := client.Me(command.Context())
-		return client, err
-	}
-	defer func() { tunnelClientForCommand = old }()
-	oldSelector := resolveTunnelSelectorForCommand
-	resolveTunnelSelectorForCommand = func(context.Context, *api.Client, string) (string, error) { return "tun_test", nil }
-	defer func() { resolveTunnelSelectorForCommand = oldSelector }()
+	ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+		deps.client = func(command *cobra.Command) (*api.Client, error) {
+			client := api.New(os.Getenv("PB_COMMAND_REPORTER_CONTROL"), config.Credential{}, nil)
+			_, err := client.Me(command.Context())
+			return client, err
+		}
+		deps.resolve = func(context.Context, *api.Client, string) (string, error) { return "tun_test", nil }
+	})
 	finalFaults := 0
 	restoreObserver := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
 		if fault.Stage == "command" && fault.Code == "unexpected_cli_failure" {
@@ -291,7 +289,7 @@ func TestCommandAPIReporterChild(t *testing.T) {
 	defer restoreObserver()
 	reference := os.Getenv("PB_COMMAND_REPORTER_REF")
 	var stdout, stderr bytes.Buffer
-	code := runWithReporter(supportref.WithContext(t.Context(), reference), []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &stdout, &stderr, reporter)
+	code := runWithReporter(supportref.WithContext(ctx, reference), []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &stdout, &stderr, reporter)
 	reporter.Flush(t.Context())
 	if code != 1 || finalFaults != 1 || stderr.Len() != 0 {
 		t.Fatalf("final command status=%d final_faults=%d stderr_bytes=%d", code, finalFaults, stderr.Len())
@@ -391,7 +389,7 @@ func TestApproveRefusalsAreCodedAndChangeNothing(t *testing.T) {
 // not set up and how to set it up; it is not an authentication failure.
 func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
 	for _, cause := range []error{config.ErrSecretNotFound, fmt.Errorf("load vault: %w", config.ErrSecretNotFound)} {
-		err := safeEnvironmentVariableCommandError(cause)
+		err := safeEnvironmentVariableCommandError(t.Context(), cause)
 		failure := classifyCommandFailure(err)
 		result := classifyCLIJSONFailure(err, failure)
 		if failure.kind != commandRejected || result.Code != "env_not_set_up" || result.StateChanged != false || result.Retryable {
@@ -407,7 +405,7 @@ func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
 // F21-170: the 129th variable (or the byte after 256 KiB) is a definite refusal that says the scope is full and what to do,
 // not a publication of unknown outcome.
 func TestENVScopeLimitRefusalIsClear(t *testing.T) {
-	err := safeEnvironmentVariableCommandError(&api.APIError{Status: 409, Code: "record_capacity_exceeded"})
+	err := safeEnvironmentVariableCommandError(t.Context(), &api.APIError{Status: 409, Code: "record_capacity_exceeded"})
 	failure := classifyCommandFailure(err)
 	result := classifyCLIJSONFailure(err, failure)
 	message := userFacingError(err)

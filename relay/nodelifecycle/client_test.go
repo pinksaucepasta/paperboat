@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"math/big"
 	"net"
 	"net/http"
@@ -32,7 +33,7 @@ import (
 func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	credential := strings.Repeat("test", 16)
 	var revoke atomic.Bool
-	var demandSeen atomic.Pointer[map[string]float64] // the last account_demand an observation carried
+	var demandSeen atomic.Pointer[map[string]relayshare.Demand] // the last account_demand an observation carried
 	var storedMu sync.Mutex
 	var stored []derpquic.AuthoritySubject
 	// The grant's generation; a revocation's min_generation is the next one.
@@ -44,12 +45,12 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 			return
 		}
 		var in struct {
-			NodeID             string                      `json:"node_id"`
-			ExpectedGeneration uint64                      `json:"expected_generation"`
-			Generation         uint64                      `json:"node_generation"`
-			Epoch              string                      `json:"process_epoch"`
-			Subjects           []derpquic.AuthoritySubject `json:"subjects"`
-			AccountDemand      map[string]float64          `json:"account_demand"`
+			NodeID             string                       `json:"node_id"`
+			ExpectedGeneration uint64                       `json:"expected_generation"`
+			Generation         uint64                       `json:"node_generation"`
+			Epoch              string                       `json:"process_epoch"`
+			Subjects           []derpquic.AuthoritySubject  `json:"subjects"`
+			AccountDemand      map[string]relayshare.Demand `json:"account_demand"`
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			http.Error(w, "invalid", 400)
@@ -62,7 +63,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 		if r.URL.Path == "/v1/relay/nodes/start" {
 			gen = in.ExpectedGeneration + 1
 		}
-		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
+		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}}
 		// Like the control plane, keep the last full subjects list: a steady node sends only its digest.
 		storedMu.Lock()
 		if in.Subjects != nil {
@@ -187,7 +188,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	// the account's speed among its relays by it): the account is listed, with a non-negative rate.
 	if seen := demandSeen.Load(); seen == nil {
 		t.Fatal("the observation carried no account demand")
-	} else if rate, listed := (*seen)[account]; !listed || rate < 0 {
+	} else if d, listed := (*seen)[account]; !listed || d.Offered < 0 || d.Held < 0 {
 		t.Fatalf("account demand = %v, want the connected account %q listed", *seen, account)
 	}
 	deadline := time.Now().Add(time.Second)
@@ -225,7 +226,7 @@ func TestControlTraceFailureThenRecovery(t *testing.T) {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 8})
+		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix()})
 	}))
 	defer api.Close()
 	client, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state"), ControlTrace: func(_ context.Context, operation string) (string, string, func(string, string)) {
@@ -254,7 +255,7 @@ func TestControlCorrelationPropagatesWithoutTrace(t *testing.T) {
 		if r.Header.Get("Support-Reference") != reference || r.Header.Get("sentry-trace") != "" {
 			t.Fatalf("correlation headers=%v", r.Header)
 		}
-		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 8})
+		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix()})
 	}))
 	defer api.Close()
 	client, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state"), ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
@@ -287,7 +288,7 @@ func TestNativeRelayStartupStateRetryAndExclusiveOwner(t *testing.T) {
 		if in.Epoch != epoch {
 			t.Error("startup retry changed epoch")
 		}
-		json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, CapacityLimit: 256, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}})
+		json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}})
 	}))
 	defer api.Close()
 	cfg := Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")}
@@ -314,7 +315,7 @@ func TestNativeRelayControlRejectionFailsImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.lease = Lease{NodeID: "relay", Generation: 1, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256}
+	c.lease = Lease{NodeID: "relay", Generation: 1, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix()}
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	server, err := derpquic.NewServer(derpquic.Verifier{Issuer: "test", NodeID: "relay", NodeGeneration: 1, ProcessEpoch: "epoch", Keys: map[string]ed25519.PublicKey{"test": pub}})
 	if err != nil {
@@ -349,7 +350,7 @@ func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
 			http.Error(w, `{"code":"update_required"}`, http.StatusUpgradeRequired)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 8})
+		_ = json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: "epoch", ExpiresAt: time.Now().Add(10 * time.Second).Unix()})
 	}))
 	defer api.Close()
 	c, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state"), ControlTrace: func(context.Context, string) (string, string, func(string, string)) {
@@ -411,7 +412,7 @@ func TestLeaseIgnoresUnknownFieldsAndRejectsTrailingData(t *testing.T) {
 					Epoch      string `json:"process_epoch"`
 				}
 				_ = json.NewDecoder(r.Body).Decode(&in)
-				raw, _ := json.Marshal(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, CapacityLimit: 256, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}})
+				raw, _ := json.Marshal(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}})
 				_, _ = w.Write(append(raw[:len(raw)-1], tc.suffix...))
 			}))
 			defer api.Close()

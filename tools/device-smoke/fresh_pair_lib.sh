@@ -1,9 +1,9 @@
-# fresh_pair_lib.sh: sourced on a Docker host (laneh-ubuntu24-systemd image, whose user `pbt` has uid 1000 and
+# fresh_pair_lib.sh: sourced on a Docker host (test-systemd image, whose user `pbt` has uid 1000 and
 # passwordless sudo). The host's own `pb` is signed in to the test account and only mints enrollment tokens; set
 # FRESH_MINT to another signed-in pb command to mint for a second account. The enrollment token stays in files.
 
 start_ct() { # start_ct CONTAINER: a fresh systemd container
-  sudo -n docker run -d --name $1 --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock laneh-ubuntu24-systemd >/dev/null
+  sudo -n docker run -d --name $1 --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
   sleep 8
   # The image has no SSH server; managed SSH (pb ssh) needs one with keys of its own on every machine.
   sudo -n docker exec -e DEBIAN_FRONTEND=noninteractive $1 bash -c 'apt-get -qq update && apt-get -qq install -y openssh-server && rm -f /etc/ssh/ssh_host_* && ssh-keygen -A && systemctl enable --now ssh' >/dev/null 2>&1

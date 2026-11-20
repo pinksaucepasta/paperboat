@@ -32,11 +32,6 @@ func browserLoginFixture(t *testing.T, issuer string) (string, config.ProfileSto
 	t.Helper()
 	dir := t.TempDir()
 	isolateCommandCredentialLocation(t, dir)
-	// Login asks this computer's own daemon whether it still awaits enrollment, and answers a new approval if so. On a
-	// development host with a paired-but-unenrolled daemon that made these tests fail while CI, with no daemon, passed.
-	oldAwaiting := loginDaemonAwaitingEnrollment
-	loginDaemonAwaitingEnrollment = func(context.Context) bool { return false }
-	t.Cleanup(func() { loginDaemonAwaitingEnrollment = oldAwaiting })
 	path := filepath.Join(dir, "config.json")
 	c, e := config.Load(path)
 	if e != nil {
@@ -61,7 +56,8 @@ func runBrowserLogin(t *testing.T, ctx context.Context, path string, args ...str
 	r.SetOut(&b)
 	r.SetErr(&b)
 	r.SetArgs(append([]string{"--config", path}, args...))
-	e := r.ExecuteContext(ctx)
+	// Login asks this computer's own daemon whether it awaits enrollment (see quietAuthDependencies).
+	e := r.ExecuteContext(withAuthDependencies(ctx, func(*authDependencies) {}))
 	return b.String(), e
 }
 func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
@@ -117,20 +113,19 @@ func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	oldHTTP, oldWait, oldBrowser := loginHTTPClient, loginWait, openBrowser
-	t.Cleanup(func() { loginHTTPClient, loginWait, openBrowser = oldHTTP, oldWait, oldBrowser })
-	loginHTTPClient = srv.Client
-	loginWait = func(context.Context, time.Duration) error { return nil }
-	openBrowser = func(string) error { t.Fatal("headless login opened browser"); return nil }
+	ctx := loginDeviceContext(t, srv, nil)
+	ctx = withHostDependencies(ctx, func(d *hostDependencies) {
+		d.openBrowser = func(string) error { t.Fatal("headless login opened browser"); return nil }
+	})
 	path, store := browserLoginFixture(t, srv.URL)
-	out, e := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
+	out, e := runBrowserLogin(t, ctx, path, "login", "--no-browser")
 	if e == nil || !strings.Contains(out, "/cli/authorize?code=ABCD-EFGH") || strings.Contains(out, code) {
 		t.Fatalf("first login error=%v output=%s", e, out)
 	}
 	if _, e = store.Load(srv.URL); !errors.Is(e, config.ErrNoCredentials) {
 		t.Fatalf("unvalidated session saved: %v", e)
 	}
-	_, e = runBrowserLogin(t, context.Background(), path, "auth", "login", "--no-browser")
+	_, e = runBrowserLogin(t, ctx, path, "auth", "login", "--no-browser")
 	if e == nil {
 		t.Fatal("failed enrollment activated login")
 	}
@@ -145,7 +140,7 @@ func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	out, e = runBrowserLogin(t, context.Background(), path, "auth", "login", "--no-browser")
+	out, e = runBrowserLogin(t, ctx, path, "auth", "login", "--no-browser")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -158,10 +153,10 @@ func TestBrowserLoginAliasesApprovalAndRecovery(t *testing.T) {
 		t.Fatal(out)
 	}
 	// An added, signed-in computer is told where it stands and is not signed in as someone else.
-	oldMachine := loginLocalMachineID
-	t.Cleanup(func() { loginLocalMachineID = oldMachine })
-	loginLocalMachineID = func(*config.Config) (string, error) { return "machine_added", nil }
-	again, e := runBrowserLogin(t, context.Background(), path, "login", "--json")
+	ctx = withAuthDependencies(ctx, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) { return "machine_added", nil }
+	})
+	again, e := runBrowserLogin(t, ctx, path, "login", "--json")
 	if e != nil || !strings.Contains(again, "Already signed in as browser@example.test") || authorizations != 1 {
 		t.Fatalf("existing account was not reported: %v %q grants=%d", e, again, authorizations)
 	}
@@ -185,11 +180,11 @@ func TestBrowserLoginCancelPreservesExistingAccount(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	oldHTTP, oldWait := loginHTTPClient, loginWait
-	t.Cleanup(func() { loginHTTPClient, loginWait = oldHTTP, oldWait })
-	loginHTTPClient = srv.Client
-	ctx, cancel := context.WithCancel(context.Background())
-	loginWait = func(context.Context, time.Duration) error { cancel(); return context.Canceled }
+	ctx, cancel := context.WithCancel(t.Context())
+	ctx = withAuthDependencies(ctx, func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.loginWait = func(context.Context, time.Duration) error { cancel(); return context.Canceled }
+	})
 	path, store := browserLoginFixture(t, srv.URL)
 	if e := store.Save(config.Profile{Issuer: srv.URL, Account: config.Account{ID: "usr_old"}, CLIClientSessionID: "cls_old"}, config.Credential{AccessToken: "old-access", RefreshToken: "old-refresh"}); e != nil {
 		t.Fatal(e)
@@ -241,15 +236,15 @@ func TestBrowserLoginCancellationFailureRetainsCauseAndReference(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	oldHTTP, oldWait := loginHTTPClient, loginWait
-	t.Cleanup(func() { loginHTTPClient, loginWait = oldHTTP, oldWait })
-	loginHTTPClient = srv.Client
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	loginWait = func(context.Context, time.Duration) error {
-		cancel()
-		return context.Canceled
-	}
+	ctx = withAuthDependencies(ctx, func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.loginWait = func(context.Context, time.Duration) error {
+			cancel()
+			return context.Canceled
+		}
+	})
 	path, store := browserLoginFixture(t, srv.URL)
 	if err := store.Save(config.Profile{Issuer: srv.URL, Account: config.Account{ID: "usr_old"}, CLIClientSessionID: "cls_old"}, config.Credential{AccessToken: "old-access", RefreshToken: "old-refresh"}); err != nil {
 		t.Fatal(err)
@@ -281,13 +276,16 @@ func TestBrowserLoginCancellationFailureRetainsCauseAndReference(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resumeCtx, resumeCancel := context.WithCancel(context.Background())
+	resumeCtx, resumeCancel := context.WithCancel(t.Context())
 	defer resumeCancel()
+	resumeCtx = withAuthDependencies(resumeCtx, func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.loginWait = func(context.Context, time.Duration) error {
+			resumeCancel()
+			return context.Canceled
+		}
+	})
 	resumeCtx = supportref.WithContext(resumeCtx, reference)
-	loginWait = func(context.Context, time.Duration) error {
-		resumeCancel()
-		return context.Canceled
-	}
 	if _, err := runBrowserLogin(t, resumeCtx, path, "auth", "login", "--change-account", "--no-browser"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("resumed login did not preserve its later cancellation: %v", err)
 	}
@@ -412,9 +410,6 @@ func TestBrowserLoginPeerActivationPreservesPreviousCredentialsOnFailure(t *test
 				acceptBrowserPeerEnrollment(t, w, r, "usr_previous", "cls_pending")
 			}))
 			defer srv.Close()
-			oldHTTP := loginHTTPClient
-			loginHTTPClient = srv.Client
-			defer func() { loginHTTPClient = oldHTTP }()
 			_, store := browserLoginFixture(t, srv.URL)
 			oldProfile := config.Profile{Issuer: srv.URL, Account: config.Account{ID: "usr_previous"}, CLIClientSessionID: "cls_previous"}
 			if err := store.Save(oldProfile, config.Credential{AccessToken: "previous-access", RefreshToken: "previous-refresh"}); err != nil {
@@ -471,7 +466,7 @@ func TestBrowserLoginPeerActivationPreservesPreviousCredentialsOnFailure(t *test
 			store.Secrets = faulty
 			pending := config.BrowserLoginState{Issuer: srv.URL, PreviousSessionID: oldProfile.CLIClientSessionID, Profile: &config.Profile{Issuer: srv.URL, Account: oldProfile.Account, CLIClientSessionID: "cls_pending"}, Credential: &config.Credential{AccessToken: "pending-access", RefreshToken: "pending-refresh", TokenType: "Bearer", ExpiresAt: time.Now().Add(time.Hour)}}
 			complete := func(ctx context.Context) error {
-				_, err := auth.CompleteLogin(ctx, auth.LoginCompletion{Store: store, Client: api.New(srv.URL, *pending.Credential, loginHTTPClient()), Issuer: srv.URL, Credential: *pending.Credential, SessionID: pending.Profile.CLIClientSessionID, ExpectedAccountID: pending.Profile.Account.ID, PreviousSessionID: &pending.PreviousSessionID})
+				_, err := auth.CompleteLogin(ctx, auth.LoginCompletion{Store: store, Client: api.New(srv.URL, *pending.Credential, srv.Client()), Issuer: srv.URL, Credential: *pending.Credential, SessionID: pending.Profile.CLIClientSessionID, ExpectedAccountID: pending.Profile.Account.ID, PreviousSessionID: &pending.PreviousSessionID})
 				return err
 			}
 			err := complete(ctx)
@@ -506,7 +501,6 @@ func TestBrowserLoginPeerActivationPreservesPreviousCredentialsOnFailure(t *test
 			}
 			faulty.fail = ""
 			faulty.cancel = nil
-			loginHTTPClient = srv.Client
 			if err := complete(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -558,9 +552,6 @@ func TestBrowserLoginEnrollsBeforeActivationAndRevocation(t *testing.T) {
 	}))
 	defer srv.Close()
 	issuer = srv.URL
-	oldHTTP := loginHTTPClient
-	loginHTTPClient = srv.Client
-	defer func() { loginHTTPClient = oldHTTP }()
 	path, fixtureStore := browserLoginFixture(t, issuer)
 	store = fixtureStore
 	old := config.Profile{Issuer: issuer, Account: config.Account{ID: "usr_previous"}, CLIClientSessionID: "cls_previous"}
@@ -575,7 +566,7 @@ func TestBrowserLoginEnrollsBeforeActivationAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	const reference = "support_a33a480a-947c-4a20-bd74-6b8cbcc1ee88"
-	ctx := supportref.WithContext(context.Background(), reference)
+	ctx := supportref.WithContext(withAuthDependencies(t.Context(), func(d *authDependencies) { d.httpClient = srv.Client }), reference)
 	var faults []errorreport.Fault
 	restoreFaults := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults = append(faults, fault) })
 	defer restoreFaults()
@@ -629,14 +620,12 @@ func TestBrowserLoginPollDecodeFailureRetainsCauseAndPendingGrant(t *testing.T) 
 		}
 	}))
 	defer srv.Close()
-	oldHTTP := loginHTTPClient
-	loginHTTPClient = srv.Client
-	t.Cleanup(func() { loginHTTPClient = oldHTTP })
+	ctx := withAuthDependencies(t.Context(), func(d *authDependencies) { d.httpClient = srv.Client })
 	path, store := browserLoginFixture(t, srv.URL)
 	var faults []errorreport.Fault
 	restoreFaults := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults = append(faults, fault) })
 	defer restoreFaults()
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
+	out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser")
 	if len(faults) != 1 {
 		t.Fatalf("poll failure must be observed once across API and CLI owners: got %d", len(faults))
 	}
@@ -752,11 +741,18 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	oldHTTP, oldWait := loginHTTPClient, loginWait
-	t.Cleanup(func() { loginHTTPClient, loginWait = oldHTTP, oldWait })
-	loginHTTPClient = srv.Client
-	loginWait = func(context.Context, time.Duration) error { return nil }
 	return srv
+}
+
+// loginDeviceContext is the context of a login against srv: its HTTP client and no waiting between polls.
+func loginDeviceContext(t *testing.T, srv *httptest.Server, configure func(*authDependencies)) context.Context {
+	return withAuthDependencies(t.Context(), func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.loginWait = func(context.Context, time.Duration) error { return nil }
+		if configure != nil {
+			configure(d)
+		}
+	})
 }
 
 // A device that is not a machine yet asks to join, pairs with the enrollment its approval
@@ -764,16 +760,16 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 func TestBrowserLoginAddsUnenrolledDevice(t *testing.T) {
 	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "myteam"}}
 	srv := loginDeviceServer(t, f)
-	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
-	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
-	loginLocalMachineID = func(*config.Config) (string, error) { return "", nil }
 	var pairedToken, pairedServer string
-	pairLoginDevice = func(_ *command.Context, server string, e *config.LoginEnrollment, _ string) error {
-		pairedToken, pairedServer = e.BootstrapToken, server
-		return nil
-	}
+	ctx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) { return "", nil }
+		d.pairLoginDevice = func(_ *command.Context, server string, e *config.LoginEnrollment, _ string) error {
+			pairedToken, pairedServer = e.BootstrapToken, server
+			return nil
+		}
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
+	out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser", "--workspace", "myteam")
 	if err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
@@ -792,15 +788,15 @@ func TestBrowserLoginAddsUnenrolledDevice(t *testing.T) {
 func TestBrowserLoginSignsInEnrolledDeviceOnly(t *testing.T) {
 	f := &loginDeviceFixture{}
 	srv := loginDeviceServer(t, f)
-	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
-	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
-	loginLocalMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
-	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error {
-		t.Fatal("an enrolled machine paired again")
-		return nil
-	}
+	ctx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
+		d.pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error {
+			t.Fatal("an enrolled machine paired again")
+			return nil
+		}
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
+	out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser", "--workspace", "myteam")
 	if err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
@@ -810,7 +806,7 @@ func TestBrowserLoginSignsInEnrolledDeviceOnly(t *testing.T) {
 	if strings.Contains(out, "Added") {
 		t.Fatalf("output=%s", out)
 	}
-	again, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
+	again, err := runBrowserLogin(t, ctx, path, "login", "--no-browser")
 	if err != nil || !strings.Contains(again, "Already signed in as browser@example.test on Personal.") || !strings.Contains(again, "pb login --fresh") {
 		t.Fatalf("login on an added, signed-in machine: %v %s", err, again)
 	}
@@ -820,13 +816,13 @@ func TestBrowserLoginSignsInEnrolledDeviceOnly(t *testing.T) {
 func TestBrowserLoginReportsComputerWaitingForTeamAdmin(t *testing.T) {
 	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "myteam", "admission": "pending"}}
 	srv := loginDeviceServer(t, f)
-	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
-	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
-	loginLocalMachineID = func(*config.Config) (string, error) { return "", nil }
-	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
+	ctx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) { return "", nil }
+		d.pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
-	if err != nil || !strings.Contains(out, "Waiting for an owner or admin of myteam to accept it.") || strings.Contains(out, "Added hp") {
+	out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser", "--workspace", "myteam")
+	if err != nil || !strings.Contains(out, "Waiting for an owner or admin of myteam to accept it.") || strings.Contains(out, "Added laptop") {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
 }
@@ -835,32 +831,31 @@ func TestBrowserLoginReportsComputerWaitingForTeamAdmin(t *testing.T) {
 func TestBrowserLoginFreshRemovesThenAdds(t *testing.T) {
 	f := &loginDeviceFixture{enrollment: map[string]any{"bootstrap_token": "one-shot-token", "server_url": "https://api.example.test", "expires_at": time.Now().Add(10 * time.Minute), "workspace_id": "personal", "admission": "accepted"}}
 	srv := loginDeviceServer(t, f)
-	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
-	oldRemember, oldCleanup, oldSource, oldInstall := rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
-	t.Cleanup(func() {
-		loginLocalMachineID, pairLoginDevice = oldMachine, oldPair
-		rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable = oldRemember, oldCleanup, oldSource, oldInstall
-	})
 	var steps []string
-	rememberReplacedMachineFunc = func() (string, error) { steps = append(steps, "remember"); return "machine_old", nil }
-	freshEnrollmentCleanup = func(*cobra.Command) error { steps = append(steps, "cleanup"); return nil }
-	runningInstallSource = func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
-	installSuppliedExecutable = func(context.Context, string, installsource.Source, string, string) (string, error) {
+	rememberReplaced := func() (string, error) { steps = append(steps, "remember"); return "machine_old", nil }
+	freshCleanup := func(*cobra.Command) error { steps = append(steps, "cleanup"); return nil }
+	runningSource := func() (string, installsource.Source, error) { return "/tmp/pb", installsource.Source{}, nil }
+	installExecutable := func(context.Context, string, installsource.Source, string, string) (string, error) {
 		steps = append(steps, "install")
 		return "/tmp/pb", nil
 	}
-	loginLocalMachineID = func(*config.Config) (string, error) {
-		if len(steps) == 0 {
-			return "machine_old", nil
+	ctx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) {
+			if len(steps) == 0 {
+				return "machine_old", nil
+			}
+			return "", nil
 		}
-		return "", nil
-	}
-	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error {
-		steps = append(steps, "pair")
-		return nil
-	}
+		d.pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error {
+			steps = append(steps, "pair")
+			return nil
+		}
+	})
+	ctx = withInstallDependencies(ctx, func(d *installDependencies) {
+		d.rememberReplaced, d.freshCleanup, d.runningSource, d.installExecutable = rememberReplaced, freshCleanup, runningSource, installExecutable
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--fresh")
+	out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser", "--fresh")
 	if err != nil {
 		t.Fatalf("login --fresh: %v\n%s", err, out)
 	}

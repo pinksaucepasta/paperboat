@@ -186,9 +186,11 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		refusal := errorreport.HTTPStatusFailure(response)
-		if response.StatusCode == http.StatusUnauthorized {
+		if response.StatusCode == http.StatusUnauthorized && !serverclock.Skewed(response, time.Now()) {
 			// Terminal: the machine was removed or its credential revoked. Recorded against this identity; no
 			// renewal is attempted for it again (renewalRefused), and the daemon reads as refused, not unreachable.
+			// A 401 whose Date is a minute or more off our clock is not terminal: the proof may have been signed with
+			// a wrong clock, serverclock corrects the next one from this answer, and the retry below is transient.
 			recordRenewalRefusal(s.config.StateRoot, current, now)
 			return "", refusal
 		}

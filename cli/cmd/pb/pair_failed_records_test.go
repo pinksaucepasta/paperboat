@@ -37,20 +37,20 @@ func newFailingInstallComputer(t *testing.T) *failingInstallComputer {
 	isolatedReplacementNote(t)
 	computer := &failingInstallComputer{t: t, stateRoot: shorttemp.Dir(t), records: map[string]bool{}}
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", computer.stateRoot)
-	originalReplace, originalBootstrap := replaceUserMachine, pairBootstrap
-	t.Cleanup(func() { replaceUserMachine, pairBootstrap = originalReplace, originalBootstrap })
-	replaceUserMachine = func(_ *command.Context, replacement, retired string) error {
-		if computer.offline {
-			return errors.New("connection refused")
-		}
-		if !computer.records[replacement] {
-			return errors.New("the replacement is not a machine of this account")
-		}
-		delete(computer.records, retired)
-		computer.replaced = append(computer.replaced, replacement+"<"+retired)
-		return nil
-	}
 	return computer
+}
+
+// replaceUserMachine is the server's replace call for this computer's account.
+func (c *failingInstallComputer) replaceUserMachine(_ *command.Context, replacement, retired string) error {
+	if c.offline {
+		return errors.New("connection refused")
+	}
+	if !c.records[replacement] {
+		return errors.New("the replacement is not a machine of this account")
+	}
+	delete(c.records, retired)
+	c.replaced = append(c.replaced, replacement+"<"+retired)
+	return nil
 }
 
 // register is what the server accepting a pairing leaves behind: a record in the account and the
@@ -83,11 +83,13 @@ func (c *failingInstallComputer) install(installExit int) (string, error) {
 	}
 	c.paired++
 	id := fmt.Sprintf("machine_%d", c.paired)
-	pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int {
-		c.register(id)
-		return installExit
-	}
 	command := pairCommand()
+	command.SetContext(withInstallDependencies(withAuthDependencies(c.t.Context(), func(d *authDependencies) {
+		d.pairBootstrap = func(context.Context, []string, io.Reader, io.Writer, io.Writer) int {
+			c.register(id)
+			return installExit
+		}
+	}), func(d *installDependencies) { d.replaceMachine = c.replaceUserMachine }))
 	command.PersistentFlags().String("server", "", "") // the root command's flag
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
@@ -105,8 +107,8 @@ func (c *failingInstallComputer) recordList() string {
 	return strings.Join(ids, ",")
 }
 
-// victus, 2026-11-10: the server accepted each pairing and the local service installation then failed,
-// 18 times; every attempt left its machine record in the account (victus-2 … victus-19), because each
+// Windows test machine, 2026-11-10: the server accepted each pairing and the local service installation then failed,
+// 18 times; every attempt left its machine record in the account (Windows test machine-2 … Windows test machine-19), because each
 // reset noted only the last record and the note forgot the one before. A computer whose pairing keeps
 // failing has one record: each new attempt takes over the unfinished one before it.
 func TestAPairingThatKeepsFailingLeavesOneMachineRecord(t *testing.T) {

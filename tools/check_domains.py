@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-DOMAIN = re.compile(r"pprbt\.dev|pprbt\.app|ppr\.boats|paperboat\.cloud|newt-mermaid\.ts\.net", re.I)
+DOMAIN = re.compile(r"pprbt\.dev|pprbt\.app|ppr\.boats|paperboat\.cloud|[a-z0-9.-]+\.ts\.net", re.I)
 
 # Documentation and the planning files name real hostnames on purpose.
 DOC_SUFFIXES = (".md", ".1")

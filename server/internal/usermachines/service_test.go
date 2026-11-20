@@ -150,10 +150,10 @@ func TestCanonicalWorkspaceRootIsPlatformAware(t *testing.T) {
 		valid    bool
 	}{
 		{platform: "linux", root: "/home/sailor", want: "/home/sailor", valid: true},
-		{platform: "windows", root: `C:\Users\pujan`, want: `C:\Users\pujan`, valid: true},
+		{platform: "windows", root: `C:\Users\tester`, want: `C:\Users\tester`, valid: true},
 		{platform: "windows", root: `\\server\share\workspace`, want: `\\server\share\workspace`, valid: true},
 		{platform: "windows", root: `C:\Users\..\Windows`, valid: false},
-		{platform: "windows", root: `\Users\pujan`, valid: false},
+		{platform: "windows", root: `\Users\tester`, valid: false},
 	}
 	for _, test := range tests {
 		got, valid := canonicalWorkspaceRoot(test.platform, test.root)

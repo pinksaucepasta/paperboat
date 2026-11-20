@@ -240,7 +240,7 @@ heavy-merge-group split. Native merge limits do not amortize CI across PRs. Prio
 Measured 2026-11-12: one `pb exec` over a 290 ms path took ~12 dependent round trips. Fixed 2026-11-16 (1f9007a39): the per-exec
 network refresh (2-5 round trips) is gone. Fixed 2026-11-16 (FIX-EXECRTT): exec runs on one stream whose credential, preface, hello and
 start go out in one flight, and the peer association lingers 5 s after its last user; 290 ms path 2.57 s -> 1.05-1.3 s
-(tools/device-smoke/results/20261116T-execrtt.json). Left: the daemon's per-exec descriptor fetch from the server
+(private smoke receipt 20261116T-execrtt.json). Left: the daemon's per-exec descriptor fetch from the server
 (`MachineExecDescriptor`, one control-server round trip per exec).
 
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it).
@@ -265,7 +265,7 @@ Tailscale control plane. Dropping Tailscale itself is a rewrite; dropping the fo
 | DERP carrier factory (~350) | Keep. Upstream relays are TCP only; Tailscale documents DERP head-of-line blocking and TCP meltdown under load/loss and moved to UDP peer relays. Our fallback, QUIC datagrams (`relay/derpquic`), is the better design there |
 
 Also: the derpquic relay drops on its 64-slot per-peer queue (`server.go` select/default); a loaded loopback
-benchmark lost up to 1.5 %. Tune before measuring under loss (two victus VMs, forced relay, `tc netem` 1/3/5 %
+benchmark lost up to 1.5 %. Tune before measuring under loss (two windows-test VMs, forced relay, `tc netem` 1/3/5 %
 loss + 100 ms: transfer rate, terminal echo, network switch). `cli/upstream/PATCHES.md` names fork commit
 ac1095ce while both go.mod files pin 2d32e5f0.
 
@@ -313,7 +313,7 @@ the useful set for tunnels and custom domains.
   one client (`tools/probe/status_report.py`), and the admin panel reaches incidents and maintenance through one server-side interface
   (`admin/lib/server/status-provider.ts`); a hosted provider (incident.io, Atlassian Statuspage) means one new adapter there plus publishing
   component states from `status/lib/tick.ts`.
-- **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
+- **Shared contracts not merged yet** (skipped on purpose by the dedup worktree; code health only, no user-visible gain):
   release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach
   descriptor (an optional field becomes required; client and server deploy together), tunnel config snapshot
   (hash-relevant field tags and two diverging validators must become one). Also still to check: inspector, tunnel view
@@ -374,6 +374,9 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 ## Scale: the peer-network config is rebuilt for the whole account on every change (O(N²) fan-out)
 Measured on prod 2026-11-19 (server log "peer network configuration slow"): 2,187 slow builds in 2 hours, each 300–400 ms for an account with 88–169 peers (`build_ms` 281–382, `sign_ms` 5–12), every peer re-fetching the full document when any peer changes (a new machine, a `home_relay` change). That fan-out is why a busy account amplifies Postgres predicate-lock pressure: on 2026-11-19 08:48–08:56Z the pool (`max_pred_locks_per_transaction` 64 × 100 connections) filled and a revoke hit its 10 s deadline. Direction: send per-peer deltas (the mesh log already has `mesh_seq`) instead of the whole document, cap build cost per account, and build under a read-only snapshot (`InReadOnlySnapshot`) so a build takes no SIREAD locks. Prior art: Tailscale/headscale send map deltas (`PeersChanged`/`PeersRemoved`), not full maps.
 
+## Drop control_tunnel_nodes.capacity_limit
+drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
+
 ## Next server deploy after this release: drop recipes.source_format
 Migration 447 made `recipes.source_format` optional (the server no longer writes it: one HuJSON file format). The server of the deploy that ships 447 no longer reads the column either; the migration that drops the column ships one deploy later (AGENTS.md: a column the previous server reads is dropped one deploy after the code stops reading it): `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.recipes DROP COLUMN source_format;` (forward-only Down).
 
@@ -383,3 +386,9 @@ Migration 447 made `recipes.source_format` optional (the server no longer writes
 - Record a country per machine and per sign-up: GeoIP of the connecting public IP at enrollment/attach (store the country only, never the address); admin shows active machines and sign-ups by country. Today nothing stores a location (`users`, `user_machines` have no country; PostHog GeoIP is on for the marketing site only).
 - Relays need no change: machines already measure every relay and pick the best (`cli/internal/peertransport/tailnet/regional_selection.go`).
 - Edges do: an account's edge pair is chosen when its first machine attaches and kept while healthy (`server/internal/edgeset/reconcile.go` `EnsureTx`, `select.go` `choose`), so a new closer edge only gets new accounts. Move existing accounts make-before-break: the machine opens a carrier to the new edge, the new edge serves once its previews/tunnels are ready, the old one drains its open requests and is dropped. Prior art: cloudflared keeps several connections to different colos and replaces them one at a time. Test: a preview keeps serving during the move.
+
+## Before running a second server: per-server limits (2026-11-20)
+Relay speed sharing (each account's relay budget split by per-relay demand), sign-up/sign-in rate limits and abuse-report rate limits live in one server's memory. Before a second server runs, move them to Postgres or a shared store, so two servers do not double the limits.
+
+## Flood protection (2026-11-20)
+Plan bandwidth limits stop big transfers, not floods of tiny requests; per-address limits stop one attacker, not a flood from many addresses (DDoS) against a preview or tunnel. Later: DDoS protection in front of the edges (e.g. Cloudflare Spectrum or an anycast scrubbing provider) and per-route request shedding.

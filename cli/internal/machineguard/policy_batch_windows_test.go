@@ -102,7 +102,7 @@ func acquireMachine(t *testing.T, g *guardServer, conn controlConn, i int) {
 	t.Cleanup(func() { _ = listener.Close() })
 }
 
-// victus, 2026-11-11: every acquire ran a full WFP Apply (enumerate every system filter, delete and re-add the
+// Windows test machine, 2026-11-11: every acquire ran a full WFP Apply (enumerate every system filter, delete and re-add the
 // Paperboat ones) under the guard lock, one peer after another, so ~20 peers never finished inside the daemon's
 // 15 s reconcile and no native listener came up. Acquires now only bind; the daemon's one "apply" per reconcile
 // installs the policy for all of them. A failed apply keeps the previous policy (the new addresses stay denied)
@@ -213,7 +213,7 @@ func TestGuardReleaseDefersPolicy(t *testing.T) {
 	}
 }
 
-// victus, 2026-11-16: three OS users' daemons share one guard. When one daemon's routes went away, each release
+// Windows test machine, 2026-11-16: three OS users' daemons share one guard. When one daemon's routes went away, each release
 // ran a full WFP transaction under the guard lock; the other users' guard calls waited past their 5 s pipe deadline
 // and their local access went degraded (deadline_exceeded) until the daemon was restarted.
 func TestGuardReleaseSparesOtherUsers(t *testing.T) {

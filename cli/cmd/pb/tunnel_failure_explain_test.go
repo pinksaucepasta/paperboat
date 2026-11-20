@@ -48,7 +48,7 @@ func TestTunnelStatusDoctorAndLogsExplainEachFailure(t *testing.T) {
 		"bandwidth_throttled": failingHealth("bandwidth_throttled", "access", "bandwidth_throttled", "Your workspace used its fair-use bandwidth, so public traffic is slowed down. Nothing is stopped.", "Add bandwidth or change plan on the Billing page, or wait for the next billing period.", false),
 	} {
 		t.Run(name, func(t *testing.T) {
-			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+			deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case strings.HasSuffix(r.URL.Path, "/status"):
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": health})
@@ -59,7 +59,7 @@ func TestTunnelStatusDoctorAndLogsExplainEachFailure(t *testing.T) {
 				}
 			})
 			for _, command := range []string{"status", "doctor", "logs"} {
-				out, _, err := executeAdversarialTunnelCommand(t, command, "tun_1")
+				out, _, err := executeAdversarialTunnelCommand(t, deps, command, "tun_1")
 				if err != nil {
 					t.Fatalf("%s: %v", command, err)
 				}

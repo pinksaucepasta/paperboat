@@ -74,7 +74,7 @@ func TestBrowserLoginParseFailureRetainsCauseWithoutExposingStoredState(t *testi
 	}
 }
 
-// lanex2-m 2026-11-16: a second sign-in while another process held this profile's login lock failed as a bare
+// test-m 2026-11-16: a second sign-in while another process held this profile's login lock failed as a bare
 // local_io error. It must say another login is running.
 func TestSecondBrowserLoginNamesTheLoginInProgress(t *testing.T) {
 	root := t.TempDir()

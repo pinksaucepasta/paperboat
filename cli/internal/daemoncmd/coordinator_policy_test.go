@@ -18,7 +18,7 @@ func manyPeers(n int) []*daemonrpc.PeerUpdate {
 	return peers
 }
 
-// victus, 2026-11-11: with ~20 peers the guard applied the whole WFP policy once per acquired listener and the
+// Windows test machine, 2026-11-11: with ~20 peers the guard applied the whole WFP policy once per acquired listener and the
 // reconcile never finished inside its deadline, so no native listener ever came up. One reconcile now asks the
 // guard for one policy transaction, however many listeners it acquired.
 func TestCoordinatorAppliesTheGuardPolicyOncePerReconcile(t *testing.T) {

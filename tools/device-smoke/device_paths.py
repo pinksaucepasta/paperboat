@@ -19,7 +19,7 @@ import argparse, base64, contextlib, json, os, re, shlex, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.pbmac/ssh.sh for the apple VM (host: vm)
+SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.mac-vm/ssh.sh for the macmini VM (host: vm)
 sys.path.insert(0, str(HERE))
 RANGE = "41000-41999"
 PF_CUT = "com.apple/pbsmoke-cut"
@@ -202,7 +202,7 @@ class Peer:
         self.host, self.ct = host, ct
         if direct:
             self.prefix = f"sudo -n -u {user} env HOME=/home/{user} XDG_RUNTIME_DIR=/run/user/$(id -u {user})" if user else ""
-        else:  # a container; --peer-user names its user (the fleet's lanex2-l2 runs pb as tester), default pbt
+        else:  # a container; --peer-user names its user (the fleet's test-l2 runs pb as tester), default pbt
             user = user or "pbt"
             self.prefix = f"sudo -n docker exec -u {user} -e HOME=/home/{user} -e XDG_RUNTIME_DIR=/run/user/$(sudo -n docker exec {ct} id -u {user}) -w /home/{user} {ct}"
 
@@ -333,10 +333,13 @@ def udp443(args, target, peer):
     return report.finish()
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("check", choices=["rebind", "relay", "udp443"])
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--mac", help="SSH host of the Mac")
     parser.add_argument("--windows", action="store_true")
     parser.add_argument("--name", required=True, help="the target's machine name")
@@ -351,6 +354,8 @@ def main():
     parser.add_argument("--same-lan", action="store_true", help="the peer is on the target's LAN: also check with no usable relay")
     parser.add_argument("--relay-ports", default="27445,27446", help="the relays' ports, first to last (TCP and UDP)")
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     target = Mac(args.mac, args.name, args.cut_ip) if args.mac else Windows(args.name)
     peer = Peer(args.peer_ssh or args.host, args.peer, direct=bool(args.peer_ssh), user=args.peer_user)
     if args.check == "relay":

@@ -30,7 +30,7 @@ func TestDurableCarrierWebSocketUpgradeTraversesGatewayDuplex(t *testing.T) {
 	rule.Node = "edge_01"
 	rule.EdgeProcessEpoch = "epoch_0001"
 	rule.EdgeFailureDomain = "region_01"
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

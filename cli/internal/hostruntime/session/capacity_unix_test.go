@@ -260,7 +260,7 @@ func (p *floodProcess) Terminate(ctx context.Context, _ time.Duration) (pty.Exit
 }
 func (p *floodProcess) CloseIO() error { p.once.Do(func() { close(p.done) }); return nil }
 
-// Lane W load test on ubuntu24: with 100 busy terminals every output chunk was its own fsync'd
+// load test on teammate machine: with 100 busy terminals every output chunk was its own fsync'd
 // transaction on the one store connection; the persister fell behind, memory grew tenfold and
 // Close waited for the backlog without a deadline. On a slow disk, output is group-committed
 // (a few transactions, not one per chunk) and Close returns within its bounded wait.
@@ -314,7 +314,7 @@ func TestSlowStoreCannotMakeCloseHangOrCommitPerChunk(t *testing.T) {
 	}
 }
 
-// Lane W load test: after closing every flooded session the heap kept ~0.9 MiB per closed
+// load test: after closing every flooded session the heap kept ~0.9 MiB per closed
 // session, far above its 64 KiB history. A closed session keeps its listing, not its buffers.
 func TestClosedSessionsReleaseTheirOutputBuffers(t *testing.T) {
 	const sessions = 10 // each close waits out one group commit of the others still flooding, so cost grows with the square

@@ -2,7 +2,7 @@
 
 What one Hetzner CX23-sized node (2 vCPU, 4 GB) running our edge or our relay holds. The real `paperboat-edge` and `paperboat-relay` images (built from
 `edge/deploy/Dockerfile`, `relay/deploy/Dockerfile`) run the way pbh starts them (`--network host --cap-drop ALL --read-only`, plus `--cpus=2 --cpuset-cpus=0,1
---memory=4g`) on a GitHub-hosted runner (`tools/device-smoke/linpool.sh start`); the load generator runs on the runner's other two cores. Two runners cannot
+--memory=4g`) on a GitHub-hosted runner (`tools/device-smoke/linuxpool.sh start`); the load generator runs on the runner's other two cores. Two runners cannot
 reach each other (no inbound path; only the reverse tunnels to the jump host), so there is one node per runner: the numbers carry no NIC limit.
 
 | Piece | Where | What |
@@ -20,7 +20,7 @@ Runs, in order: `loadctl init`, `loadctl serve`, start the edge or relay contain
 | | before the fixes | after |
 |---|---|---|
 | Idle carriers | 270 KB and 0.8% of a core per 100 | same |
-| Carriers per node | 1,024 (fixed cap) | `node_capacity`, at most 4,096 admissions in all |
+| Carriers per node | 1,024 (fixed cap) | no cap |
 | Requests/s at p99 < 200 ms | 200 | 800 |
 | New TLS connections/s at p99 < 250 ms | 200 | 400 |
 | Large downloads | 260 Mbit/s, edge 34% CPU: the account byte limit (32 MiB/s), not the node | same |

@@ -21,7 +21,7 @@ func previewCompletionItems(ctx context.Context, client *api.Client, machines []
 			return nil, api.ErrPreviewLeaseInvalid
 		}
 		seen[cursor] = true
-		// Completion offers only live previews; walking ended history cost ~600 ms per page on every daemon each minute (Lane Q).
+		// Completion offers only live previews; walking ended history cost ~600 ms per page on every daemon each minute.
 		page, err := client.ListPreviewLeasesFiltered(ctx, cursor, min(200, maximum-len(items)), url.Values{"state": {"active"}})
 		if err != nil {
 			return nil, err

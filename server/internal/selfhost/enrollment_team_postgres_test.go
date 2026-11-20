@@ -31,7 +31,7 @@ func startTeamEnrollmentHelper(t *testing.T, binary, capability string) (string,
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	command := exec.Command(binary, "install", "--no-service", "--state-dir", directory, "--endpoint-host", "140.245.11.41", "--claim-listen", address, "--enable", capability)
+	command := exec.Command(binary, "install", "--no-service", "--state-dir", directory, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--enable", capability)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("install packaged helper: %v: %s", err, output)
 	}
@@ -328,7 +328,7 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	eligible(installation.NodeID, false)
 	var target, state, recordType string
 	var generation int64
-	if err = store.SQL().QueryRowContext(ctx, `SELECT dns_target,ownership_state,expected_records->0->>'type',generation FROM paperboat.preview_domains WHERE preview_id=$1`, preview).Scan(&target, &state, &recordType, &generation); err != nil || target != "140.245.11.41" || state != "pending" || recordType != "A" || generation != 2 {
+	if err = store.SQL().QueryRowContext(ctx, `SELECT dns_target,ownership_state,expected_records->0->>'type',generation FROM paperboat.preview_domains WHERE preview_id=$1`, preview).Scan(&target, &state, &recordType, &generation); err != nil || target != "93.184.216.35" || state != "pending" || recordType != "A" || generation != 2 {
 		t.Fatalf("placement DNS reset: %q %q %q %d %v", target, state, recordType, generation, err)
 	}
 	exec(`UPDATE paperboat.preview_domains SET ownership_state='verified' WHERE preview_id=$1`, preview)

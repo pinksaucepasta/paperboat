@@ -26,10 +26,10 @@ func TestRefreshLocalInventoryAsksTheDaemon(t *testing.T) {
 	})}
 	go server.Serve(listener)
 	t.Cleanup(func() { server.Close() })
-	old := currentLocalDaemonPaths
-	currentLocalDaemonPaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: socket}, nil }
-	t.Cleanup(func() { currentLocalDaemonPaths = old })
-	if err := refreshLocalInventory(t.Context()); err != nil || !refreshed.Load() {
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: socket}, nil }
+	})
+	if err := refreshLocalInventory(ctx); err != nil || !refreshed.Load() {
 		t.Fatalf("refresh err=%v asked=%v", err, refreshed.Load())
 	}
 }

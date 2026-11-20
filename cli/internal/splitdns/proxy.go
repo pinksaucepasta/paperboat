@@ -161,8 +161,7 @@ func browserRouteTable(explicit map[string]BrowserRoute, deniedHosts map[string]
 }
 
 // SetRoutes replaces the routes and denied hostnames of a running proxy without stopping its listeners,
-// so a service that just started is reachable at once instead of after a gateway restart (Lane H:
-// private-https to a fresh port saw TLS internal errors and refused connections during the rebuild).
+// so a service that just started is reachable at once instead of after a gateway restart (// private-https to a fresh port saw TLS internal errors and refused connections during the rebuild).
 // Cached certificates are issued per request, so names no longer routed are refused at the next hello.
 func (p *Proxy) SetRoutes(explicit map[string]BrowserRoute, deniedHosts map[string]bool) error {
 	routes, denied, machines, err := browserRouteTable(explicit, deniedHosts, p.domain)
@@ -356,7 +355,7 @@ func (p *Proxy) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, er
 	permitted, machine := p.routedName(serverName)
 	if !permitted && !machine && p.awaitRoute != nil && p.knownMachinePort(serverName) {
 		// A service that just started is announced before its route reaches this gateway: wait for it
-		// rather than failing the handshake (Lane H: TLS internal error on a fresh port).
+		// rather than failing the handshake (TLS internal error on a fresh port).
 		ctx, cancel := context.WithTimeout(hello.Context(), awaitRouteTimeout)
 		if p.awaitRoute(ctx, serverName) {
 			permitted, machine = p.routedName(serverName)

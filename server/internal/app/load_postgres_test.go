@@ -2,7 +2,7 @@
 
 package app
 
-// Server load checks for the scale matrix (PLAN 3b, Lane W). They boot the real router on a real listener over the
+// Server load checks for the scale matrix (PLAN 3b). They boot the real router on a real listener over the
 // seeded perf database and measure where the control plane first degrades:
 //
 //   - TestLoadHeldEventWaiters: N daemons holding the event long-poll with no changes. Reports database queries per

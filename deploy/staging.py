@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""R-04 staging control plane on anvit: own Compose project, own PostgreSQL, own ports, never prod.
+"""R-04 staging control plane on the staging host: own Compose project, own PostgreSQL, own ports, never prod.
 
-Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcommands:
+Run from the build host; each remote step uses SSH to the configured staging host (STAGING_HOST). Subcommands:
   build-edge | build-relay <commit>  the same for paperboat-edge / paperboat-relay:stg-<short> (staging runs main's edge and relay)
-  build <commit>       build paperboat-server:stg-<short> natively (arm64) on anvit from that commit
+  build <commit>       build paperboat-server:stg-<short> natively (arm64) on the staging host from that commit
   init                 write the stack's files and secrets (kept on rerun); WorkOS ids and the Cloudflare DNS token
                        are read from the production server env over ssh and never printed
   up <image>           start the stack on that image (migrate first), wait for /readyz; build and up refuse a commit/image that is not on origin/main
@@ -13,7 +13,7 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
   edge <image>         register and run the managed staging edge (carrier on TCP 18445)
   edge-b <image>       the same for a second managed edge (carrier on TCP 18455, HTTPS probe port 18456)
-  relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside anvit) for the staging account
+  relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside the staging host) for the staging account
   reset                new empty database from main's migrations (refuses an image not on origin/main); the regional certificate is kept
   check                applied migrations must equal main's set at the running image's commit (also run by up and reset)
   status | down | logs
@@ -23,15 +23,20 @@ Encrypt wildcard, DNS-01 on the dev zone), the same way a production regional no
 import base64, datetime, hashlib, io, json, os, secrets, subprocess, sys, tarfile, time, urllib.request
 from pathlib import Path
 
-HOST = os.environ.get("STAGING_HOST", "ubuntu@anvit")
-PROD = os.environ.get("STAGING_PROD_HOST", "root@coolify")
+ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parent
+sys.path.insert(0, str(REPO / 'tools/device-smoke'))
+from dev_targets import get_setting
+
+HOST = os.environ.get("STAGING_HOST") or get_setting("staging_host")
+PROD = os.environ.get("STAGING_PROD_HOST") or get_setting("deployment_host")
 DIR = "pb-release-staging"                     # on HOST, relative to its home
-REGION, INSTANCE = "anvit", "slot-01"
+REGION, INSTANCE = get_setting("staging_region", "staging"), "slot-01"
 PUBLIC_LABEL = "pub"
 # The regional domain is "stg." under the production API host's parent domain (read from the prod server env at init,
 # kept in the stack's .env): no domain is written in code.
-PORT = int(os.environ.get("STAGING_PORT", "18443"))           # inside anvit's open public range 10000-59999
-LOOPBACK = 18091                                              # plain API on anvit's loopback (seed, probes)
+PORT = int(os.environ.get("STAGING_PORT", "18443"))           # inside the staging host's open public range 10000-59999
+LOOPBACK = 18091                                              # plain API on the staging host's loopback (seed, probes)
 ACME = os.environ.get("STAGING_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory")
 ACCOUNT_REF, DNS_REF = "secret://acme/account", "secret://cloudflare/dns"
 # PAPERBOAT_CERT_SECRET_ names are derived from the references (tunnelcert.EnvironmentReferenceName).
@@ -41,8 +46,6 @@ CERT_MASTER_REF = 'secret://staging/certificate-master'
 CERT_MASTER_ENV = 'PAPERBOAT_CERT_SECRET_SECRET___STAGING_CERTIFICATE_MASTER_b0f655ac3c53'
 CERT_DISTRIBUTION_REF = 'secret://staging/certificate-distribution'
 CERT_DISTRIBUTION_ENV = 'PAPERBOAT_CERT_SECRET_SECRET___STAGING_CERTIFICATE_DISTRIBUTION_582a6e05e22a'
-ROOT = Path(__file__).resolve().parent
-REPO = ROOT.parent
 
 
 def read_remote_env(host, path):
@@ -185,24 +188,34 @@ def init():
 
 
 def ensure_dns(prod):
-    """Regional and shared public wildcard A records; never per-publication DNS."""
+    """Regional and shared public wildcard A and AAAA records; never per-publication DNS. The AAAA record is written
+    only when the host has a global IPv6 address."""
     address = ssh(HOST, "curl -s -m10 https://api.ipify.org").strip()
+    address6 = ssh(HOST, "curl -6 -s -m10 https://api6.ipify.org || true").strip()
+    try:
+        import ipaddress
+        address6 = str(ipaddress.IPv6Address(address6)) if ipaddress.IPv6Address(address6).is_global else ""
+    except ValueError:
+        address6 = ""
     zone, name = prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], f"{REGION}.{domain()}"
     def api(method, path, body=None):
         request = urllib.request.Request("https://api.cloudflare.com/client/v4" + path, method=method, headers={
             "Authorization": "Bearer " + prod[DNS_ENV], "Content-Type": "application/json"}, data=json.dumps(body).encode() if body else None)
         return json.load(urllib.request.urlopen(request, timeout=20))["result"]
     names = [name, f"*.{PUBLIC_LABEL}.{domain()}"]
-    for name in names:
-        have = api("GET", f"/zones/{zone}/dns_records?type=A&name={name}")
-        if have and have[0]["content"] == address and not have[0]["proxied"]:
-            continue
-        record = {"type": "A", "name": name, "content": address, "ttl": 60, "proxied": False}
-        if have:
-            api("PUT", f"/zones/{zone}/dns_records/{have[0]['id']}", record)
-        else:
-            api("POST", f"/zones/{zone}/dns_records", record)
-    return {name: address for name in names}
+    published = {}
+    for kind, value in (("A", address), ("AAAA", address6)):
+        for name in names if value else []:
+            have = api("GET", f"/zones/{zone}/dns_records?type={kind}&name={name}")
+            published[f"{kind} {name}"] = value
+            if have and have[0]["content"] == value and not have[0]["proxied"]:
+                continue
+            record = {"type": kind, "name": name, "content": value, "ttl": 60, "proxied": False}
+            if have:
+                api("PUT", f"/zones/{zone}/dns_records/{have[0]['id']}", record)
+            else:
+                api("POST", f"/zones/{zone}/dns_records", record)
+    return published
 
 
 def dns():
@@ -385,7 +398,7 @@ except urllib.error.HTTPError as error:
 
 
 EDGE_QUIC_PORT = 18448  # UDP is closed on the host; the config still needs a distinct QUIC port
-EDGE_PORT = 18445   # carrier TCP (inside anvit's open 10000-59999 range); the prod edge keeps 80/443/27443-27446
+EDGE_PORT = 18445   # carrier TCP (inside the staging host's open 10000-59999 range); the prod edge keeps 80/443/27443-27446
 EDGE_NAME, EDGE_DIR = "pb-stg-edge", "edge"
 EDGE_TRUST = "edge-trust"  # certificates of the staging edges, read by the server (compose mounts it)
 
@@ -548,11 +561,11 @@ except (OSError,subprocess.CalledProcessError,KeyError):
 
 
 RELAY_NAME, RELAY_DIR = "pb-stg-relay", "relay"
-RELAY_TCP_PORT, RELAY_QUIC_PORT = 18444, 18449   # both inside anvit's open 10000-59999 range; the QUIC (UDP) one is closed on the host
+RELAY_TCP_PORT, RELAY_QUIC_PORT = 18444, 18449   # both inside the staging host's open 10000-59999 range; the QUIC (UDP) one is closed on the host
 
 
 def relay(image):
-    """Account-scoped self-hosted relay for usr_staging, as plain `docker run` (no pbh, no host firewall change). Machines outside anvit
+    """Account-scoped self-hosted relay for usr_staging, as plain `docker run` (no pbh, no host firewall change). Machines outside the staging host
     (UDP dropped) reach it over its DERP/WSS carrier on TCP RELAY_TCP_PORT after the 5 s QUIC fallback. Registration mirrors the claim
     flow for capability 'relay' (server/internal/selfhost/enrollment.go); a relay needs no usage key and no 443 ingress probe."""
     from cryptography.hazmat.primitives import serialization

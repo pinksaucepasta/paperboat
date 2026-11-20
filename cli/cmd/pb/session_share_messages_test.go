@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -21,15 +20,15 @@ import (
 func TestSharedSessionsAreFoundInEveryWorkspace(t *testing.T) {
 	root := commandRuntimeTestRoot(t)
 	configPath := filepath.Join(root, "config.json")
-	sharingIn := map[string]bool{"lanetv-n10": true}
+	sharingIn := map[string]bool{"test-n10": true}
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		workspace := r.URL.Query().Get("workspace")
 		switch {
 		case r.URL.Path == "/v1/workspaces":
-			writeTestWorkspaces(t, w, "personal", "lanetv-n10", "other-team")
+			writeTestWorkspaces(t, w, "personal", "test-n10", "other-team")
 		case r.URL.Path == "/v1/terminal-sessions":
 			sessions := []any{}
-			if workspace == "lanetv-n10" {
+			if workspace == "test-n10" {
 				sessions = append(sessions, map[string]any{"id": "terminal_1", "name": "shared-one", "role": "interactive"})
 			}
 			writeAPIData(t, w, map[string]any{"sessions": sessions, "pagination": map[string]any{"limit": echoedLimit(r), "offset": 0, "total": len(sessions), "next_offset": nil}})
@@ -41,22 +40,20 @@ func TestSharedSessionsAreFoundInEveryWorkspace(t *testing.T) {
 	}))
 	defer backend.Close()
 	writeTestProfile(t, root, configPath, backend.URL)
-	if runtime.GOOS != "windows" { // there commandRuntimeTestRoot already names a private pipe nothing listens on
-		previousPaths := currentLocalDaemonPaths
-		currentLocalDaemonPaths = func() (localapi.Paths, error) {
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) {
 			return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
 		}
-		t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
-	}
+	})
 	var out, stderr bytes.Buffer
-	if code := runWithReporter(context.Background(), []string{"--no-customization", "--config", configPath, "session", "shared"}, &out, &stderr, nil); code != 0 || !strings.Contains(out.String(), "terminal_1") {
+	if code := runWithReporter(ctx, []string{"--no-customization", "--config", configPath, "session", "shared"}, &out, &stderr, nil); code != 0 || !strings.Contains(out.String(), "terminal_1") {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), stderr.String())
 	}
 	client := api.New(backend.URL, config.Credential{AccessToken: "token"}, backend.Client())
 	if err := client.SetWorkspace("personal"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := sharedSessionWorkspace(context.Background(), client, "terminal_1"); err != nil || got != "lanetv-n10" {
+	if got, err := sharedSessionWorkspace(context.Background(), client, "terminal_1"); err != nil || got != "test-n10" {
 		t.Fatalf("join workspace=%q err=%v", got, err)
 	}
 	if got, err := sharedSessionWorkspace(context.Background(), client, "terminal_missing"); err != nil || got != "personal" {
@@ -64,7 +61,7 @@ func TestSharedSessionsAreFoundInEveryWorkspace(t *testing.T) {
 	}
 	sharingIn["other-team"] = true
 	_, err := sharedSessionWorkspace(context.Background(), client, "terminal_1")
-	if err == nil || !strings.Contains(err.Error(), "--workspace lanetv-n10") || !strings.Contains(err.Error(), "--workspace other-team") {
+	if err == nil || !strings.Contains(err.Error(), "--workspace test-n10") || !strings.Contains(err.Error(), "--workspace other-team") {
 		t.Fatalf("ambiguous err=%v", err)
 	}
 	explicit := context.WithValue(context.Background(), workspaceExplicitKey{}, true)

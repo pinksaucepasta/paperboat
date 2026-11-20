@@ -216,7 +216,7 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 		t.Fatalf("promoted=%+v error=%v", promoted, err)
 	}
 	// The host learns of the trusted set at once (machine_access wakes its key reconcile): pb ssh was refused for
-	// about a minute after pb ssh trust-host (hp 2026-10-27).
+	// about a minute after pb ssh trust-host (Linux test machine 2026-10-27).
 	if accessGeneration() <= beforePromotion {
 		t.Fatal("promoting a host key set did not publish machine_access for the machine")
 	}

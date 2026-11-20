@@ -38,15 +38,7 @@ const (
 
 var errUnrecoverableWindowsHelperRecord = errors.New("unrecoverable prior Windows uninstall helper record")
 
-var (
-	purgeWindowsHostRuntime    = hostinstall.Purge
-	windowsUninstallExecutable = os.Executable
-	windowsProcessIsRunning    = isWindowsProcessRunning
-	windowsHelperIsRunning     = windowsExecutableIsRunning
-	readUninstallStatus        = readWindowsUninstallStatus
-	windowsUninstallRoot       = func() string { return filepath.Join(os.TempDir(), "Paperboat Uninstall") }
-	recoverWindowsUninstall    = recoverExpiredWindowsUninstallHelpers
-)
+var purgeWindowsHostRuntime = hostinstall.Purge
 
 type windowsUninstallPlan struct {
 	Schema           string    `json:"schema"`
@@ -196,7 +188,8 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 			}
 		}
 	}()
-	executable, err := windowsUninstallExecutable()
+	edges := windowsUninstallDependenciesOf(ctx)
+	executable, err := edges.executable()
 	if err != nil {
 		return "", err
 	}
@@ -204,7 +197,7 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 	if _, err := io.ReadFull(rand.Reader, identifierBytes); err != nil {
 		return "", err
 	}
-	directory := filepath.Join(windowsUninstallRoot(), hex.EncodeToString(identifierBytes))
+	directory := filepath.Join(edges.root(), hex.EncodeToString(identifierBytes))
 	helperPath := filepath.Join(directory, "paperboat-uninstall-helper.exe")
 	planPath := filepath.Join(directory, "plan.json")
 	processIDs := []uint32{uint32(os.Getpid())}
@@ -229,7 +222,7 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 		}
 	}()
 	if err := asWindowsUninstallUser(func() error {
-		if err := recoverWindowsUninstall(); err != nil {
+		if err := recoverExpiredWindowsUninstallHelpers(ctx); err != nil {
 			return err
 		}
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -249,7 +242,7 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 		return "", err
 	}
 	if err := elevation.LaunchDetached(ctx, helperPath, []string{"__complete-uninstall", "--plan", planPath}); err != nil {
-		if helperStartedDespite(helperPath) {
+		if helperStartedDespite(ctx, helperPath) {
 			keepDirectory = true // the helper runs from this directory and holds status.json: removing it fails, the helper finishes
 			return statusPath, nil
 		}
@@ -258,7 +251,7 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 	}
 	keepDirectory = true
 	if err := waitForWindowsUninstallHandoff(ctx, statusPath); err != nil {
-		if pendingWindowsUninstallHandoff(err, helperPath) {
+		if pendingWindowsUninstallHandoff(ctx, err, helperPath) {
 			return statusPath, nil // started, only slow to acknowledge: the pending contract below
 		}
 		return "", err
@@ -269,8 +262,8 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 // helperStartedDespite reports a helper image that is running from its directory although the launch reported an
 // error (hop-910b: ok:false, 'Could not remove ...Temp\Paperboat Uninstall', while the helper went on and completed
 // at 07:18:02Z): the launch worked, so the uninstall is pending, not failed, and its directory must not be removed.
-func helperStartedDespite(helperPath string) bool {
-	running, err := windowsHelperIsRunning(helperPath)
+func helperStartedDespite(ctx context.Context, helperPath string) bool {
+	running, err := windowsUninstallDependenciesOf(ctx).helperIsRunning(helperPath)
 	return err == nil && running
 }
 
@@ -278,16 +271,17 @@ func helperStartedDespite(helperPath string) bool {
 // the start of the cleanup, not its completion ("Windows cleanup was started..."); a helper that is slow to write its
 // acknowledgement (UAC consent, a loaded machine) goes on and completes, and the CLI had exited 1 for it although
 // status.json later read completed (Windows test VMs). A helper that is gone, or any other failure, stays one.
-func pendingWindowsUninstallHandoff(waitErr error, helperPath string) bool {
+func pendingWindowsUninstallHandoff(ctx context.Context, waitErr error, helperPath string) bool {
 	if !errors.Is(waitErr, context.DeadlineExceeded) {
 		return false
 	}
-	running, err := windowsHelperIsRunning(helperPath)
+	running, err := windowsUninstallDependenciesOf(ctx).helperIsRunning(helperPath)
 	return err == nil && running
 }
 
-func recoverExpiredWindowsUninstallHelpers() error {
-	root := windowsUninstallRoot()
+func recoverExpiredWindowsUninstallHelpers(ctx context.Context) error {
+	edges := windowsUninstallDependenciesOf(ctx)
+	root := edges.root()
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -315,7 +309,7 @@ func recoverExpiredWindowsUninstallHelpers() error {
 			continue
 		}
 		directory := filepath.Join(root, entry.Name())
-		if err := recoverExpiredWindowsUninstallHelper(directory); err != nil {
+		if err := recoverExpiredWindowsUninstallHelper(edges, directory); err != nil {
 			if errors.Is(err, errUnrecoverableWindowsHelperRecord) {
 				continue
 			}
@@ -325,7 +319,7 @@ func recoverExpiredWindowsUninstallHelpers() error {
 	return result
 }
 
-func recoverExpiredWindowsUninstallHelper(directory string) error {
+func recoverExpiredWindowsUninstallHelper(edges windowsUninstallDependencies, directory string) error {
 	info, err := os.Lstat(directory)
 	if err != nil {
 		return windowsUninstallLocalFailure("", err)
@@ -403,7 +397,7 @@ func recoverExpiredWindowsUninstallHelper(directory string) error {
 		return windowsUninstallLocalFailure("", err)
 	}
 	for _, processID := range plan.ProcessIDs {
-		running, err := windowsProcessIsRunning(processID)
+		running, err := edges.processIsRunning(processID)
 		if err != nil {
 			return windowsUninstallLocalFailure("", err)
 		}
@@ -411,7 +405,7 @@ func recoverExpiredWindowsUninstallHelper(directory string) error {
 			return fmt.Errorf("%w: prior helper is still active", errUnrecoverableWindowsHelperRecord)
 		}
 	}
-	running, err := windowsHelperIsRunning(helperPath)
+	running, err := edges.helperIsRunning(helperPath)
 	if err != nil {
 		return windowsUninstallLocalFailure("", err)
 	}
@@ -556,7 +550,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	if !elevation.IsCurrentProcessElevated() {
 		return elevation.ErrNotElevated
 	}
-	plan, err := readWindowsUninstallPlan(planPath)
+	plan, err := readWindowsUninstallPlan(ctx, planPath)
 	if err != nil {
 		return err
 	}
@@ -634,9 +628,9 @@ func performWindowsRegisteredCleanup(ctx context.Context, ownerSID string) error
 	return purgeWindowsHostRuntime(ctx, ownerSID)
 }
 
-func readWindowsUninstallPlan(planPath string) (windowsUninstallPlan, error) {
+func readWindowsUninstallPlan(ctx context.Context, planPath string) (windowsUninstallPlan, error) {
 	var plan windowsUninstallPlan
-	helperPath, helperErr := windowsUninstallExecutable()
+	helperPath, helperErr := windowsUninstallDependenciesOf(ctx).executable()
 	if helperErr != nil {
 		return plan, windowsUninstallLocalFailure("", helperErr)
 	}
@@ -730,7 +724,7 @@ func waitForWindowsUninstallHandoff(ctx context.Context, statusPath string) erro
 	defer cancel()
 	var readErr error
 	for {
-		status, err := readUninstallStatus(statusPath)
+		status, err := windowsUninstallDependenciesOf(ctx).readStatus(statusPath)
 		if err != nil {
 			// The helper (SYSTEM) replaces status.json while this reads it: an open that hits a sharing violation
 			// or half a file is not a verdict. Keep reading until the acknowledgement or the timeout; a file
@@ -754,7 +748,7 @@ func waitForWindowsUninstallHandoff(ctx context.Context, statusPath string) erro
 			}
 			return windowsUninstallRemoteFailure{metadata: *status.Failure}
 		case "scheduled":
-			running, err := windowsHelperIsRunning(filepath.Join(filepath.Dir(statusPath), "paperboat-uninstall-helper.exe"))
+			running, err := windowsUninstallDependenciesOf(ctx).helperIsRunning(filepath.Join(filepath.Dir(statusPath), "paperboat-uninstall-helper.exe"))
 			if err != nil {
 				return windowsUninstallLocalFailure("", err)
 			}
@@ -896,22 +890,19 @@ func copyWindowsUninstallHelper(source, destination string) (result error) {
 	return nil
 }
 
-// windowsUninstallRunOnceKey is the user's own list of commands Windows runs once at that user's next sign-in.
-var windowsUninstallRunOnceKey = `Software\Microsoft\Windows\CurrentVersion\RunOnce`
-
 // scheduleWindowsUninstallDirectoryRemovalObserved leaves the removal of the helper directory to the user's next
 // sign-in. The helper cannot delete its own running image, and the status file must stay readable after it
 // exits. Nothing is registered for deletion at restart: Windows does that as LocalSystem by path, and the
 // directory is the user's to swap for a link.
 func scheduleWindowsUninstallDirectoryRemovalObserved(ctx context.Context, directory string) {
-	if err := asWindowsUninstallUser(func() error { return scheduleWindowsUninstallDirectoryRemoval(directory) }); err != nil {
+	if err := asWindowsUninstallUser(func() error { return scheduleWindowsUninstallDirectoryRemoval(ctx, directory) }); err != nil {
 		errorreport.Current().ObserveFailure(ctx, "paperboat-cli", "lifecycle", "component_shutdown", "service_failed", err)
 	}
 }
 
 // scheduleWindowsUninstallDirectoryRemoval writes the command into the user's registry; callers run it as the
 // user. The command runs as the user too, so it can remove only what the user could remove anyway.
-func scheduleWindowsUninstallDirectoryRemoval(directory string) (result error) {
+func scheduleWindowsUninstallDirectoryRemoval(ctx context.Context, directory string) (result error) {
 	// The parent comes from the user's TEMP. Inside the quotes cmd still expands %NAME% (and !NAME! when the
 	// user's registry turns on delayed expansion), and a quote would end the argument: refuse all three.
 	if !filepath.IsAbs(directory) || !strings.EqualFold(filepath.Base(filepath.Dir(directory)), "Paperboat Uninstall") || !isWindowsUninstallIdentifier(filepath.Base(directory)) || strings.ContainsAny(directory, `%!"`) {
@@ -926,7 +917,7 @@ func scheduleWindowsUninstallDirectoryRemoval(directory string) (result error) {
 	if len(command) > 260 { // Windows ignores a longer RunOnce command
 		return errors.New("the Windows uninstall helper directory path is too long to schedule its removal")
 	}
-	key, _, err := registry.CreateKey(registry.CURRENT_USER, windowsUninstallRunOnceKey, registry.SET_VALUE)
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, windowsUninstallDependenciesOf(ctx).runOnceKey, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,7 @@ import type { Machine } from "@/lib/api"
 import { queryKeys, keepWithinWorkspace } from "@/lib/query-keys"
 import type { Filters } from "@/lib/machine-filter"
 
-/** The search box's filters as GET /v1/machines takes them (Lane Q, PQ-04 C1). */
+/** The search box's filters as GET /v1/machines takes them (PQ-04 C1). */
 function serverFilters(filters: Filters): Record<string, string> {
   return {
     ...(filters.status && { state: filters.status }),

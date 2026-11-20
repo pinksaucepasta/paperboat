@@ -15,7 +15,7 @@ func statusCommand() *cobra.Command {
 		Short: "Show local Paperboat machine status",
 		Args:  commandArgs(cobra.MaximumNArgs(1)),
 		RunE: func(command *cobra.Command, args []string) error {
-			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
+			_, snapshot, err := localDaemonSnapshot(command, installDependenciesOf(command.Context()).installService)
 			if err != nil {
 				return fmt.Errorf("read local Paperboat status: %w", err)
 			}

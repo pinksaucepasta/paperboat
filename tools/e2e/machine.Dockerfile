@@ -1,5 +1,5 @@
 # A machine of both end-to-end jobs (e2e.yml: TestE2ECore and tools/e2e/run.sh): the device-smoke systemd image
-# (tools/device-smoke/ubuntu24-systemd.Dockerfile) plus an OpenSSH server, which managed SSH (pb ssh) bridges to.
+# (tools/device-smoke/test-systemd.Dockerfile) plus an OpenSSH server, which managed SSH (pb ssh) bridges to.
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y -qq systemd systemd-sysv dbus sudo python3 curl ca-certificates iproute2 iptables procps openssh-client openssh-server nftables libnss3-tools \

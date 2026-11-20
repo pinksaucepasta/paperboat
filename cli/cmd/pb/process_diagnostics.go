@@ -43,7 +43,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	} else {
 		var directory string
 		if directory = foregroundDiagnosticsDirectory(command, args); directory == "" {
-			directory, storageErr = processDiagnosticsDirectory(command)
+			directory, storageErr = processDiagnosticsDirectory(ctx, command)
 		}
 		if storageErr == nil {
 			reporter.PersistFloodState(filepath.Join(directory, "sentry-flood.json"))
@@ -200,9 +200,6 @@ func sourceIdentifier(value string, maximum int) string {
 	return value
 }
 
-// processEUID is the effective user; a variable so tests can act as root.
-var processEUID = os.Geteuid
-
 // processDiagnosticsDirectory is the user's state directory, except for the
 // root update service and its activation helper, and the root machine guard:
 // they run under the service manager with no HOME and own their own state root,
@@ -217,17 +214,17 @@ func foregroundDiagnosticsDirectory(command *cobra.Command, args []string) strin
 	return hostruntimecmd.ForegroundDiagnosticsDirectory()
 }
 
-func processDiagnosticsDirectory(command *cobra.Command) (string, error) {
+func processDiagnosticsDirectory(ctx context.Context, command *cobra.Command) (string, error) {
 	if command != nil && command.Name() == "__runtime-updated" {
 		if root := os.Getenv("PAPERBOAT_UPDATE_STATE_ROOT"); filepath.IsAbs(root) && filepath.Clean(root) == root {
 			return filepath.Join(root, "diagnostics"), nil
 		}
 	}
 	// Root `machine-guard install|uninstall` under sudo keeps the user's HOME, whose diagnostics directory root refuses.
-	if command != nil && (command.Name() == "run" || processEUID() == 0) && command.Parent() != nil && command.Parent().Name() == "machine-guard" && machineguard.DefaultStateDir != "" {
+	if command != nil && (command.Name() == "run" || hostDependenciesOf(ctx).euid() == 0) && command.Parent() != nil && command.Parent().Name() == "machine-guard" && machineguard.DefaultStateDir != "" {
 		return filepath.Join(machineguard.DefaultStateDir, "diagnostics"), nil
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return "", err
 	}

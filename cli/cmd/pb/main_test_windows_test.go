@@ -17,7 +17,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,9 +32,12 @@ import (
 
 func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testing.T) {
 	directory := t.TempDir()
-	previousExecutable := windowsUninstallExecutable
-	windowsUninstallExecutable = func() (string, error) { return filepath.Join(directory, "paperboat-uninstall-helper.exe"), nil }
-	t.Cleanup(func() { windowsUninstallExecutable = previousExecutable })
+	executableIn := func(directory string) context.Context {
+		return withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+			d.executable = func() (string, error) { return filepath.Join(directory, "paperboat-uninstall-helper.exe"), nil }
+		})
+	}
+	ctx := executableIn(directory)
 	if err := protectWindowsUninstallPath(directory, true); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := readWindowsUninstallPlan(planPath)
+	loaded, err := readWindowsUninstallPlan(ctx, planPath)
 	if err != nil || loaded.Schema != windowsUninstallPlanSchema || loaded.StatusPath != statusPath {
 		t.Fatalf("loaded plan=%+v error=%v", loaded, err)
 	}
@@ -87,7 +89,7 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readWindowsUninstallPlan(planPath); err != nil {
+	if _, err := readWindowsUninstallPlan(ctx, planPath); err != nil {
 		t.Fatalf("elevated Paperboat state in this profile was rejected: %v", err)
 	}
 	nestedState := filepath.Join(adminState, "runtime")
@@ -101,7 +103,7 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readWindowsUninstallPlan(planPath); err != nil {
+	if _, err := readWindowsUninstallPlan(ctx, planPath); err != nil {
 		t.Fatalf("nested elevated Paperboat state was rejected: %v", err)
 	}
 	unrelatedState := filepath.Join(profileScratch, "unrelated-admin-state")
@@ -112,7 +114,7 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readWindowsUninstallPlan(planPath); err == nil {
+	if _, err := readWindowsUninstallPlan(ctx, planPath); err == nil {
 		t.Fatal("unrelated administrator-owned state was authorized")
 	}
 	plan.UserStatePaths = []string{filepath.Join(directory, "user-state")}
@@ -120,7 +122,7 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readWindowsUninstallPlan(planPath); err == nil {
+	if _, err := readWindowsUninstallPlan(ctx, planPath); err == nil {
 		t.Fatal("foreign-user cleanup plan accepted")
 	}
 	plan.OwnerSID = user.User.Sid.String()
@@ -128,26 +130,22 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readWindowsUninstallPlan(planPath); err == nil {
+	if _, err := readWindowsUninstallPlan(ctx, planPath); err == nil {
 		t.Fatal("filesystem-root cleanup plan accepted")
 	}
 	plan.UserStatePaths = []string{filepath.Join(directory, "user-state")}
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	windowsUninstallExecutable = func() (string, error) {
-		return filepath.Join(directory, "other", "paperboat-uninstall-helper.exe"), nil
-	}
-	if _, err := readWindowsUninstallPlan(planPath); err == nil {
+	if _, err := readWindowsUninstallPlan(executableIn(filepath.Join(directory, "other")), planPath); err == nil {
 		t.Fatal("plan outside the running helper directory was accepted")
 	}
-	windowsUninstallExecutable = func() (string, error) { return filepath.Join(directory, "paperboat-uninstall-helper.exe"), nil }
 	plan.CreatedAt = now.Add(-6 * time.Minute)
 	plan.ExpiresAt = now.Add(-time.Minute)
 	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readWindowsUninstallPlan(planPath); err == nil {
+	if _, err := readWindowsUninstallPlan(ctx, planPath); err == nil {
 		t.Fatal("expired uninstall plan was accepted")
 	}
 	command := platformUninstallHelperCommand()
@@ -258,12 +256,12 @@ func TestWindowsUninstallFailureCrossProcessOwnershipAndRecovery(t *testing.T) {
 		}
 	})
 	defer restoreObserver()
-	old := tunnelClientForCommand
-	defer func() { tunnelClientForCommand = old }()
 	for index, failure := range []error{local, remote} {
-		tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) { return nil, failure }
+		ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+			deps.client = func(*cobra.Command) (*api.Client, error) { return nil, failure }
+		})
 		var out, stderr bytes.Buffer
-		if code := runWithReporter(t.Context(), []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &out, &stderr, nil); code != 1 || stderr.Len() != 0 {
+		if code := runWithReporter(ctx, []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &out, &stderr, nil); code != 1 || stderr.Len() != 0 {
 			t.Fatal("final command failure contract lost")
 		}
 		decoder := json.NewDecoder(&out)
@@ -311,16 +309,13 @@ func TestWindowsUninstallRequiresConfirmedDaemonStopBeforeProductRemoval(t *test
 // junction, for deletion at restart; Windows deletes those paths as LocalSystem. The removal is now a command in
 // the user's own registry that runs as the user at the next sign-in, and nothing is left for the restart.
 func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *testing.T) {
-	previous := windowsUninstallRunOnceKey
-	windowsUninstallRunOnceKey = `Software\Paperboat Test\RunOnce ` + strconv.Itoa(os.Getpid())
-	t.Cleanup(func() {
-		_ = registry.DeleteKey(registry.CURRENT_USER, windowsUninstallRunOnceKey)
-		windowsUninstallRunOnceKey = previous
-	})
+	runOnceKey := `Software\Paperboat Test\RunOnce ` + strconv.Itoa(os.Getpid())
+	t.Cleanup(func() { _ = registry.DeleteKey(registry.CURRENT_USER, runOnceKey) })
+	ctx := withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) { d.runOnceKey = runOnceKey })
 	scheduled := func() map[string]string {
 		t.Helper()
 		values := map[string]string{}
-		key, err := registry.OpenKey(registry.CURRENT_USER, windowsUninstallRunOnceKey, registry.QUERY_VALUE)
+		key, err := registry.OpenKey(registry.CURRENT_USER, runOnceKey, registry.QUERY_VALUE)
 		if errors.Is(err, registry.ErrNotExist) {
 			return values
 		}
@@ -349,7 +344,7 @@ func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *te
 	t.Cleanup(func() { _ = os.RemoveAll(temporary) })
 	root := filepath.Join(temporary, "Paperboat Uninstall")
 	for _, directory := range []string{`C:\unrelated`, filepath.Join(root, "not-an-identifier"), filepath.Join(temporary, "100%TEMP%", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef"), filepath.Join(temporary, "x\" & calc & \"", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef"), filepath.Join(temporary, "!PATH!", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef")} {
-		if err := scheduleWindowsUninstallDirectoryRemoval(directory); err == nil {
+		if err := scheduleWindowsUninstallDirectoryRemoval(ctx, directory); err == nil {
 			t.Fatalf("removal of %s was scheduled", directory)
 		}
 	}
@@ -361,7 +356,7 @@ func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *te
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	scheduleWindowsUninstallDirectoryRemovalObserved(t.Context(), directory)
+	scheduleWindowsUninstallDirectoryRemovalObserved(ctx, directory)
 	system, err := windows.GetSystemDirectory()
 	if err != nil {
 		t.Fatal(err)
@@ -388,24 +383,18 @@ func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *te
 }
 
 func TestRecoverExpiredWindowsUninstallHelpersRemovesOnlyValidatedInactiveRecords(t *testing.T) {
-	previousRunning := windowsProcessIsRunning
-	previousHelperRunning := windowsHelperIsRunning
-	previousRoot := windowsUninstallRoot
 	testRoot := filepath.Join(t.TempDir(), "Paperboat Uninstall")
-	windowsUninstallRoot = func() string { return testRoot }
-	windowsProcessIsRunning = func(processID uint32) (bool, error) {
-		if processID != 4242 {
-			t.Fatalf("unexpected process ID %d", processID)
+	ctx := withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+		d.root = func() string { return testRoot }
+		d.processIsRunning = func(processID uint32) (bool, error) {
+			if processID != 4242 {
+				t.Fatalf("unexpected process ID %d", processID)
+			}
+			return false, nil
 		}
-		return false, nil
-	}
-	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
-	t.Cleanup(func() {
-		windowsProcessIsRunning = previousRunning
-		windowsHelperIsRunning = previousHelperRunning
-		windowsUninstallRoot = previousRoot
+		d.helperIsRunning = func(string) (bool, error) { return false, nil }
 	})
-	root := windowsUninstallRoot()
+	root := testRoot
 	directory := filepath.Join(root, "0123456789abcdef0123456789abcdef")
 	_ = os.RemoveAll(root)
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
@@ -431,7 +420,7 @@ func TestRecoverExpiredWindowsUninstallHelpersRemovesOnlyValidatedInactiveRecord
 	if err := protectWindowsUninstallPath(helper, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := recoverExpiredWindowsUninstallHelpers(); err != nil {
+	if err := recoverExpiredWindowsUninstallHelpers(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {
@@ -440,18 +429,14 @@ func TestRecoverExpiredWindowsUninstallHelpersRemovesOnlyValidatedInactiveRecord
 }
 
 func TestRecoverExpiredWindowsUninstallHelpersRefusesActiveOrMalformedRecords(t *testing.T) {
-	previousRunning := windowsProcessIsRunning
-	previousHelperRunning := windowsHelperIsRunning
-	previousRoot := windowsUninstallRoot
 	testRoot := filepath.Join(t.TempDir(), "Paperboat Uninstall")
-	windowsUninstallRoot = func() string { return testRoot }
-	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
-	t.Cleanup(func() {
-		windowsProcessIsRunning = previousRunning
-		windowsHelperIsRunning = previousHelperRunning
-		windowsUninstallRoot = previousRoot
+	processRunning := false
+	ctx := withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+		d.root = func() string { return testRoot }
+		d.processIsRunning = func(uint32) (bool, error) { return processRunning, nil }
+		d.helperIsRunning = func(string) (bool, error) { return false, nil }
 	})
-	root := windowsUninstallRoot()
+	root := testRoot
 	_ = os.RemoveAll(root)
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	directory := filepath.Join(root, "fedcba9876543210fedcba9876543210")
@@ -477,18 +462,18 @@ func TestRecoverExpiredWindowsUninstallHelpersRefusesActiveOrMalformedRecords(t 
 	if err := protectWindowsUninstallPath(helper, false); err != nil {
 		t.Fatal(err)
 	}
-	windowsProcessIsRunning = func(uint32) (bool, error) { return true, nil }
-	if err := recoverExpiredWindowsUninstallHelpers(); err != nil {
+	processRunning = true
+	if err := recoverExpiredWindowsUninstallHelpers(ctx); err != nil {
 		t.Fatalf("active helper blocked safe recovery scan: %v", err)
 	}
 	if _, err := os.Stat(directory); err != nil {
 		t.Fatalf("active helper was removed: %v", err)
 	}
-	windowsProcessIsRunning = func(uint32) (bool, error) { return false, nil }
+	processRunning = false
 	if err := os.WriteFile(filepath.Join(directory, "unexpected"), []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := recoverExpiredWindowsUninstallHelpers(); err != nil {
+	if err := recoverExpiredWindowsUninstallHelpers(ctx); err != nil {
 		t.Fatalf("malformed helper blocked safe recovery scan: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(directory, "unexpected")); err != nil {
@@ -497,23 +482,24 @@ func TestRecoverExpiredWindowsUninstallHelpersRefusesActiveOrMalformedRecords(t 
 }
 
 func TestWindowsInstallUsesRunningBytesAndFixedLayout(t *testing.T) {
-	previousSource, previousInstall := runningInstallSource, installSuppliedExecutable
 	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: "amd64", SHA256: strings.Repeat("a", 64), Length: 42, Distribution: installsource.Custom}
-	runningInstallSource = func() (string, installsource.Source, error) { return `C:\staged\pb.exe`, source, nil }
 	called := false
-	installSuppliedExecutable = func(_ context.Context, path string, got installsource.Source, directory, _ string) (string, error) {
+	installExecutable := func(_ context.Context, path string, got installsource.Source, directory, _ string) (string, error) {
 		called = true
 		if path != `C:\staged\pb.exe` || got != source || directory != "" {
 			t.Fatalf("install request path=%q source=%+v directory=%q", path, got, directory)
 		}
 		return `C:\Program Files\Paperboat\users\owner\bin\pb.exe`, nil
 	}
-	t.Cleanup(func() { runningInstallSource, installSuppliedExecutable = previousSource, previousInstall })
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.runningSource = func() (string, installsource.Source, error) { return `C:\staged\pb.exe`, source, nil }
+		d.installExecutable = installExecutable
+	})
 	command := platformInstallCommand()
 	command.SetArgs([]string{"--json"})
 	var output bytes.Buffer
 	command.SetOut(&output)
-	if err := command.ExecuteContext(context.Background()); err != nil || !called || !strings.Contains(output.String(), `"enrollment":"unchanged"`) {
+	if err := command.ExecuteContext(ctx); err != nil || !called || !strings.Contains(output.String(), `"enrollment":"unchanged"`) {
 		t.Fatalf("called=%t output=%q error=%v", called, output.String(), err)
 	}
 }
@@ -568,8 +554,6 @@ func TestFilesystemRootRejectsWindowsDriveAndUNCShare(t *testing.T) {
 	}
 }
 
-var commandRuntimeTestSequence uint64
-
 func commandLocalAPIServerConfig(path string, source localapi.SnapshotSource) (localapi.ServerConfig, error) {
 	sid, err := localdaemon.CurrentUserSID()
 	if err != nil {
@@ -581,21 +565,6 @@ func commandLocalAPIServerConfig(path string, source localapi.SnapshotSource) (l
 func commandRuntimeTestRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	sequence := atomic.AddUint64(&commandRuntimeTestSequence, 1)
-	stateRoot := filepath.Join(root, "state")
-	runtimeRoot := filepath.Join(root, "runtime")
-	// Named pipes are global on Windows. The process ID prevents a retry from
-	// colliding with a pipe retained by an earlier test process, while the
-	// sequence keeps roots distinct inside this process.
-	socketPath := `\\.\pipe\paperboat-test-` + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatUint(sequence, 10)
-	previousPaths := currentLocalDaemonPaths
-	currentLocalDaemonPaths = func() (localapi.Paths, error) {
-		return localapi.Paths{
-			StateRoot: stateRoot, RuntimeRoot: runtimeRoot, SocketPath: socketPath,
-			LockPath: filepath.Join(stateRoot, "daemon.lock"),
-		}, nil
-	}
-	t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
 	t.Setenv("LOCALAPPDATA", root)
 	t.Setenv("APPDATA", root)
 	previous := []string{xdg.Home, xdg.ConfigHome, xdg.CacheHome, xdg.DataHome, xdg.StateHome, xdg.RuntimeDir}
@@ -609,26 +578,6 @@ func commandRuntimeTestRoot(t *testing.T) string {
 		xdg.Home, xdg.ConfigHome, xdg.CacheHome, xdg.DataHome, xdg.StateHome, xdg.RuntimeDir = previous[0], previous[1], previous[2], previous[3], previous[4], previous[5]
 	})
 	return root
-}
-
-func TestCommandRuntimeTestRootUsesProcessScopedNamedPipes(t *testing.T) {
-	firstRoot := commandRuntimeTestRoot(t)
-	first, err := currentLocalDaemonPaths()
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondRoot := commandRuntimeTestRoot(t)
-	second, err := currentLocalDaemonPaths()
-	if err != nil {
-		t.Fatal(err)
-	}
-	prefix := `\\.\pipe\paperboat-test-` + strconv.Itoa(os.Getpid()) + "-"
-	if !strings.HasPrefix(first.SocketPath, prefix) || !strings.HasPrefix(second.SocketPath, prefix) {
-		t.Fatalf("pipes must include the test process ID: first=%q second=%q", first.SocketPath, second.SocketPath)
-	}
-	if first.SocketPath == second.SocketPath || first.RuntimeRoot == second.RuntimeRoot || firstRoot == secondRoot {
-		t.Fatalf("test roots must be distinct: first=%#v second=%#v", first, second)
-	}
 }
 
 func isolateCommandCredentialLocation(t *testing.T, root string) {

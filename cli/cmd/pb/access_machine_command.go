@@ -26,10 +26,7 @@ import (
 
 const accessMachineMaximumConnections = 128
 
-var (
-	errAccessMachineInvalid        = errors.New("invalid machine access request")
-	accessMachineRuntimeForCommand = newProductionAccessMachineRuntime
-)
+var errAccessMachineInvalid = errors.New("invalid machine access request")
 
 type accessMachineRuntime interface {
 	DialMachine(context.Context, string, int) (net.Conn, error)
@@ -147,7 +144,7 @@ func accessMachineCobraCommandV1() *cobra.Command {
 }
 
 // accessMachineStepError names the step of `pb access machine` that failed, its cause and what to do. A
-// generic "could not finish the command" hid the cause of the private-access P0 (Lane H repro, 2026-10-26).
+// generic "could not finish the command" hid the cause of the private-access P0 (repro, 2026-10-26).
 type accessMachineStepError struct {
 	step, action string
 	cause        error
@@ -175,7 +172,7 @@ func runAccessMachine(command *cobra.Command, args []string) error {
 		return usageError{err: fmt.Errorf("%w: --listen must be a literal loopback address", errAccessMachineInvalid),
 			publicMessage: "--listen must be a literal loopback address such as 127.0.0.1:8080 or [::1]:8080; other addresses are refused"}
 	}
-	runtime, machineID, err := accessMachineRuntimeForCommand(command, args[0])
+	runtime, machineID, err := accessDependenciesOf(command.Context()).machineRuntime(command, args[0])
 	if err != nil {
 		return err
 	}

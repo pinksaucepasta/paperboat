@@ -164,7 +164,7 @@ func pairCommand() *cobra.Command {
 			if jsonOutput {
 				operationOut, operationErr = io.Discard, &failureOutput
 			}
-			code := pairBootstrap(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr)
+			code := authDependenciesOf(command.Context()).pairBootstrap(command.Context(), arguments, command.InOrStdin(), operationOut, operationErr)
 			if code != 0 {
 				if created, err := identityStore.Registration(); err == nil {
 					pairingFailed(actionContext(command, nil), registration.MachineID, created.MachineID)
@@ -211,9 +211,6 @@ func pairCommand() *cobra.Command {
 	return command
 }
 
-// pairBootstrap runs the pairing; it returns 0 only once the new machine is verified (daemon bound).
-var pairBootstrap = hostruntimecmd.Execute
-
 func setupCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "setup",
@@ -227,7 +224,7 @@ func setupCommand() *cobra.Command {
 			}
 			var err error
 			if runtime.GOOS == "windows" {
-				sshPort, setupErr := setupHostPrerequisites(command.Context())
+				sshPort, setupErr := installDependenciesOf(command.Context()).setupPrerequisites(command.Context())
 				if setupErr != nil {
 					return fmt.Errorf("prepare Windows OpenSSH: %w", setupErr)
 				}
@@ -249,7 +246,7 @@ func setupCommand() *cobra.Command {
 			}
 			sshUser := account.Username
 			ctx := actionContext(command, nil)
-			client, err := setupBackendClient(ctx)
+			client, err := installDependenciesOf(ctx.Context).setupBackend(ctx)
 			if err != nil {
 				return err
 			}
@@ -381,7 +378,7 @@ func setupCommand() *cobra.Command {
 			if machine.Installation == nil {
 				return setupFailure(errors.New("server did not return installation material"))
 			}
-			if err := verifySetupInstallSource(); err != nil {
+			if err := installDependenciesOf(command.Context()).verifySetupSource(); err != nil {
 				return setupFailure(fmt.Errorf("verify supplied installation executable: %w", err))
 			}
 			// An OS account managed SSH cannot target (a quote, comma, $, % or wildcard in its name) is set up

@@ -22,14 +22,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/machinecontrol"
 	hostruntime "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/runtime"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/spf13/cobra"
-)
-
-var (
-	tunnelHostRuntimeProbe  = probeTunnelHostRuntime
-	tunnelHostRuntimeRepair = hostruntimecmd.RepairManagedHost
 )
 
 const (
@@ -122,12 +116,12 @@ func ensureTunnelHostRuntime(ctx context.Context, stateRoot string) error {
 	if ctx == nil || !filepath.IsAbs(stateRoot) {
 		return errors.New("Paperboat host runtime state is invalid")
 	}
-	if err := tunnelHostRuntimeProbe(ctx, stateRoot); err == nil {
+	if err := tunnelDependenciesOf(ctx).probeHost(ctx, stateRoot); err == nil {
 		return nil
 	}
 	repairCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	if err := tunnelHostRuntimeRepair(repairCtx); err != nil {
+	if err := tunnelDependenciesOf(repairCtx).repairHost(repairCtx); err != nil {
 		return fmt.Errorf("repair the Paperboat host service: %w", err)
 	}
 	deadline := time.NewTimer(45 * time.Second)
@@ -135,7 +129,7 @@ func ensureTunnelHostRuntime(ctx context.Context, stateRoot string) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if err := tunnelHostRuntimeProbe(ctx, stateRoot); err == nil {
+		if err := tunnelDependenciesOf(ctx).probeHost(ctx, stateRoot); err == nil {
 			return nil
 		}
 		select {

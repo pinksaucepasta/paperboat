@@ -2,6 +2,8 @@ package derpquic
 
 import (
 	"encoding/binary"
+	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"io"
 	"strings"
 	"sync"
@@ -91,11 +93,15 @@ func decodeControl(b []byte) (packet, error) {
 	copy(k[:], b[:32])
 	return packet{key.NodePublicFromRaw32(mem.B(k[:])), b[32:], true}, nil
 }
+
+// sendPacket sends p as one datagram when the carrier's path MTU allows it now (quic-go's path MTU discovery grows it; losing
+// either of two fragments loses the whole packet, which doubled the loss the inner connection saw), and as fragments of
+// fragmentPayload only when it does not fit. Prior art: quic-go Conn.SendDatagram reports DatagramTooLargeError instead of fragmenting.
 func sendPacket(c *quic.Conn, sequence *atomic.Uint64, p packet) error {
 	return sendFragments(c, sequence, p.peer, nil, p.data, false)
 }
 
-// sendFragments sends data as one or two datagrams, one per fragmentPayload bytes. A nil dst is the client wire
+// sendFragments sends data as one datagram when the carrier's path MTU allows it, else as two fragments of fragmentPayload. A nil dst is the client wire
 // (the destination is the peer the datagram is addressed to); a dst is a mesh forward from src to dst.
 func sendFragments(c *quic.Conn, sequence *atomic.Uint64, src key.NodePublic, dst *key.NodePublic, data []byte, control bool) error {
 	if len(data) == 0 || len(data) > MaxPacket {
@@ -106,8 +112,7 @@ func sendFragments(c *quic.Conn, sequence *atomic.Uint64, src key.NodePublic, ds
 	if dst != nil {
 		keys, header = dst.AppendTo(keys), meshFragmentHeader
 	}
-	for off := 0; off < len(data); off += fragmentPayload {
-		end := min(off+fragmentPayload, len(data))
+	datagram := func(off, end int) []byte {
 		b := make([]byte, header+end-off)
 		binary.BigEndian.PutUint64(b, id)
 		copy(b[8:], keys)
@@ -117,7 +122,17 @@ func sendFragments(c *quic.Conn, sequence *atomic.Uint64, src key.NodePublic, ds
 			b[header-1] |= meshControlFlag
 		}
 		copy(b[header:], data[off:end])
-		if err := c.SendDatagram(b); err != nil {
+		return b
+	}
+	if len(data) > fragmentPayload {
+		err := c.SendDatagram(datagram(0, len(data)))
+		var tooLarge *quic.DatagramTooLargeError
+		if !errors.As(err, &tooLarge) {
+			return err
+		}
+	}
+	for off := 0; off < len(data); off += fragmentPayload {
+		if err := c.SendDatagram(datagram(off, min(off+fragmentPayload, len(data)))); err != nil {
 			return err
 		}
 	}
@@ -154,7 +169,7 @@ func (r *reassembler) acceptFragment(b []byte, now time.Time, authorize func(key
 	if r.mesh {
 		header = meshFragmentHeader
 	}
-	if len(b) < header+1 || len(b) > header+fragmentPayload {
+	if len(b) < header+1 || len(b) > header+MaxPacket {
 		return meshPacket{}, false, ErrProtocol
 	}
 	id := binary.BigEndian.Uint64(b)
@@ -171,7 +186,10 @@ func (r *reassembler) acceptFragment(b []byte, now time.Time, authorize func(key
 		copy(rawDst[:], b[40:72])
 		dst = key.NodePublicFromRaw32(mem.B(rawDst[:]))
 	}
-	if id == 0 || size < 1 || size > MaxPacket || index > 1 || index*fragmentPayload >= size || len(b)-header != min(fragmentPayload, size-index*fragmentPayload) {
+	part := len(b) - header
+	// A packet is one datagram carrying all of it (index 0), or two fragments of fragmentPayload and the rest.
+	whole := index == 0 && part == size
+	if id == 0 || size < 1 || size > MaxPacket || index > 1 || index*fragmentPayload >= size || !whole && part != min(fragmentPayload, size-index*fragmentPayload) {
 		return meshPacket{}, false, ErrProtocol
 	}
 	if authorize != nil && !authorize(peer) {
@@ -182,6 +200,10 @@ func (r *reassembler) acceptFragment(b []byte, now time.Time, authorize func(key
 	}
 	if id > r.highest {
 		r.highest = id
+	}
+	if whole {
+		r.completed[id%128] = id
+		return meshPacket{packet{peer, append([]byte(nil), b[header:]...), control}, dst}, true, nil
 	}
 	if r.pending == nil {
 		r.pending = make(map[uint64]*assembly)
@@ -242,7 +264,8 @@ type budget struct {
 	burst   float64
 	at      time.Time
 	tokens  float64
-	offered uint64 // demand since the last takeOffered: the bytes offered to reserve, counted twice when the limit delayed or dropped them
+	offered uint64 // bytes offered to reserve since the last takeDemand
+	held    uint64 // of them, the bytes the limit delayed or dropped
 }
 
 func newBudget(bytesPerSecond float64) *budget {
@@ -297,9 +320,8 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 		b.tokens -= cost
 		return 0, true
 	}
-	// The limit held this packet back: the flow wanted more than it got, which the demand reports by counting the bytes twice (so a flow
-	// held at a small share can grow it, instead of looking as small as the share it was given).
-	b.offered += uint64(size)
+	// The limit holds this packet back: the flow wants more than it gets, which the demand reports (relayshare).
+	b.held += uint64(size)
 	delay := time.Duration((cost - b.tokens) / b.rate * float64(time.Second))
 	if delay > maxDelay {
 		return 0, false
@@ -308,13 +330,22 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 	return delay, true
 }
 
-// takeOffered returns the bytes offered since the last call and starts a new window.
-func (b *budget) takeOffered() uint64 {
+// AccountDemand is what an account offered a relay over a window, in bytes, and the part of it the relay's speed limit delayed or dropped.
+type AccountDemand struct{ Offered, Held uint64 }
+
+// takeDemand returns the demand since the last call and starts a new window.
+func (b *budget) takeDemand() AccountDemand {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	n := b.offered
-	b.offered = 0
-	return n
+	d := AccountDemand{b.offered, b.held}
+	b.offered, b.held = 0, 0
+	return d
+}
+
+// wireRate is the budget rate, in bytes per second, for an account whose plan speed is rate: grossed up by relaylimits.AccountWireOverhead, never
+// above the ceiling of a relay.
+func wireRate(rate float64) float64 {
+	return min(rate*relaylimits.AccountWireOverhead, accountBytesPerSecond)
 }
 
 // setRate changes the refill rate and the burst; tokens already held are cut to the new burst.

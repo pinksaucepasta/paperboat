@@ -2,4 +2,4 @@
 
 package main
 
-func warnIfFileLimitLow(int, int) bool { return true }
+func warnIfFileLimitLow(int) bool { return true }

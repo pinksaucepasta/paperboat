@@ -133,7 +133,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 			if !refreshAttempted {
 				// A failure of the local credential store never reached Paperboat, so there is nothing to back off from.
 				// Remembering it gave one lost lock race to every peer operation of the daemon for 15 s to 5 min
-				// (victus 2026-11-10: pb ping and pb exec to every machine failed until the service restarted).
+				// (Windows test machine 2026-11-10: pb ping and pb exec to every machine failed until the service restarted).
 				return
 			}
 			failure := accountCredentialFailure(err)

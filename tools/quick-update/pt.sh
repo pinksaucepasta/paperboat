@@ -1,6 +1,6 @@
 #!/bin/sh
 # pt.sh start|stop (on the VM, user pb): a trivial local page on 127.0.0.1:18765 plus a pb preview and an ephemeral
-# pb tunnel to it, as user units. start prints the two endpoints (preview first). Port of dadape/feat/pt.sh.
+# pb tunnel to it, as user units. start prints the two endpoints (preview first). Port of Linux peer/feat/pt.sh.
 set -u
 D=$HOME/gap5/pt
 case "$1" in

@@ -95,7 +95,7 @@ func (l *sharedLock) Lock() error {
 		// The directory is another process's lock, and that process may release it while it is inspected. On Windows it
 		// then vanishes before the open (ERROR_FILE_NOT_FOUND) or under the open handle (its final path no longer
 		// resolves): "not acquired yet", not a failure. Ten parallel pb.exe and the daemon failed their credential reads
-		// on it (victus 2026-11-10). Only a directory that stays invalid is refused.
+		// on it (Windows test machine 2026-11-10). Only a directory that stays invalid is refused.
 		if err := inspectSharedLock(l.path); err != nil {
 			if invalidSince.IsZero() {
 				invalidSince = time.Now()

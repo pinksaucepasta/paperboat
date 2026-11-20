@@ -58,12 +58,13 @@ function OverviewStats({ data }: { data?: Overview }) {
   const v = (value: (d: Overview) => React.ReactNode) => (data ? value(data) : <Skeleton className="my-1.5 h-5 w-12" />)
   const n = (value: (d: Overview) => string) => (data ? value(data) : <Skeleton className="my-0.5 h-3 w-24" />)
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5" data-overview-ready={data ? "" : undefined}>
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" data-overview-ready={data ? "" : undefined}>
       <Stat label="Accounts" value={v((d) => sum(d.accounts))} note={n((d) => states(d.accounts))} />
       <Stat label="Machines" value={v((d) => d.hosts)} note={n((d) => `${d.hosts_ready} ready · ${d.hosts_stale} stale`)} />
       <Stat label="Relays" value={v((d) => d.relays)} note={n((d) => `${d.relays_ready} ready · ${d.relays_stale} stale`)} />
       <Stat label="Billing workspaces" value={v((d) => sum(d.billing_workspaces))} note={n((d) => states(d.billing_workspaces))} />
       <Stat label="Control operations" value={v((d) => sum(d.control_operations))} note={n((d) => states(d.control_operations))} />
+      <Stat label="Failed mail" value={v((d) => sum(d.transactional_mail.filter((r) => r.state === "failed")))} note={n((d) => states(d.transactional_mail))} />
     </div>
   )
 }

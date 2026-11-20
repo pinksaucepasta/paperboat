@@ -98,7 +98,7 @@ func reconnectsToARestartedGuard(t *testing.T, watch time.Duration, kill func(*r
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Stop() })
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	if err = c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
 		t.Fatal(err)
 	}

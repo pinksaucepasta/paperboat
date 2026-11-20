@@ -2,7 +2,7 @@
 
 package tailnet
 
-// Scale check (PLAN 3b, Lane W): a machine with no usable relay node (none configured in its region, all relays down,
+// Scale check (PLAN 3b): a machine with no usable relay node (none configured in its region, all relays down,
 // or hosted relays withheld for an exhausted bandwidth quota) must not ask for its signed peer configuration every
 // second. The regional recovery loop requests an on-demand refresh every regionalStaleRetry (1 s) while it finds no
 // node, so during a relay outage the whole fleet would poll the control plane once a second. Found on staging (a test VM,

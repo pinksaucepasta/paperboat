@@ -1,8 +1,8 @@
 // The status page's components: which units each has and which vantage points report them. Plain TypeScript so every bundler reads it.
 export default {
   "vantages": [
-    "oracle",
-    "anvit",
+    "vantage-a",
+    "vantage-b",
     "cloudflare"
   ],
   "components": [
@@ -15,8 +15,8 @@ export default {
           "id": "api_health",
           "name": "Service ready",
           "vantages": [
-            "oracle",
-            "anvit",
+            "vantage-a",
+            "vantage-b",
             "cloudflare"
           ],
           "slowMs": 3000
@@ -25,8 +25,8 @@ export default {
           "id": "api_read",
           "name": "Public read",
           "vantages": [
-            "oracle",
-            "anvit",
+            "vantage-a",
+            "vantage-b",
             "cloudflare"
           ],
           "slowMs": 3000
@@ -35,8 +35,8 @@ export default {
           "id": "api_auth",
           "name": "Signed-in read",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 8000
         }
@@ -51,8 +51,8 @@ export default {
           "id": "exec",
           "name": "Exec",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 15000
         },
@@ -60,8 +60,8 @@ export default {
           "id": "ssh",
           "name": "SSH",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 15000
         }
@@ -76,8 +76,8 @@ export default {
           "id": "relay_india_1",
           "name": "India \u00b7 relay 1",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 3000
         },
@@ -85,8 +85,8 @@ export default {
           "id": "relay_india_2",
           "name": "India \u00b7 relay 2",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 3000
         }
@@ -101,8 +101,8 @@ export default {
           "id": "edge_india_1",
           "name": "India \u00b7 edge 1",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 5000
         },
@@ -110,8 +110,8 @@ export default {
           "id": "edge_india_2",
           "name": "India \u00b7 edge 2",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 5000
         },
@@ -119,8 +119,8 @@ export default {
           "id": "previews",
           "name": "Previews",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 15000
         }
@@ -135,8 +135,8 @@ export default {
           "id": "send",
           "name": "Send",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 20000
         }
@@ -151,8 +151,8 @@ export default {
           "id": "console_load",
           "name": "Page load",
           "vantages": [
-            "oracle",
-            "anvit",
+            "vantage-a",
+            "vantage-b",
             "cloudflare"
           ],
           "slowMs": 5000
@@ -168,8 +168,8 @@ export default {
           "id": "release_meta",
           "name": "Release metadata",
           "vantages": [
-            "oracle",
-            "anvit",
+            "vantage-a",
+            "vantage-b",
             "cloudflare"
           ],
           "slowMs": 5000
@@ -185,8 +185,8 @@ export default {
           "id": "website_home",
           "name": "Home page",
           "vantages": [
-            "oracle",
-            "anvit",
+            "vantage-a",
+            "vantage-b",
             "cloudflare"
           ],
           "slowMs": 5000

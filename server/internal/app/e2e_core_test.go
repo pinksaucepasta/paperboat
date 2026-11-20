@@ -137,6 +137,7 @@ func TestE2ECore(t *testing.T) {
 	e.assertCore("relayed")
 	e.assertTeamExec("relayed")
 	if e.previous != "" {
+		e.step("previous pbh against this server", e.previousPbhProbe)
 		e.step("unblock the direct path (before the update)", e.unblockDirect)
 		e.updateToHead()
 		e.assertAll("after update to HEAD")
@@ -181,6 +182,26 @@ func (e *e2eCore) updateToHead() {
 			return nil
 		})
 	}
+}
+
+// previousPbhProbe runs the previous release's pbh client code (a test binary built from its source by skew_check.sh)
+// against this server with the claimed edge installation's node credential. A previous release that predates the
+// probe has no such binary: that one run is skipped, and the next release checks pbh.
+func (e *e2eCore) previousPbhProbe() error {
+	probe := filepath.Join(e.previous, "pbh-probe.test")
+	if _, err := os.Stat(probe); err != nil {
+		e.t.Logf("previous release has no pbh probe (%v): pbh is checked from the next release on", err)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, probe, "-test.run", "^TestPbhServerProbe$", "-test.v")
+	cmd.Env = append(os.Environ(), "PAPERBOAT_E2E_PBH_STATE_DIR="+filepath.Join(e.work, "edge"))
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestPbhServerProbe") {
+		return fmt.Errorf("previous pbh against this server: %v: %s", err, lastBytes(string(out), 1500))
+	}
+	return nil
 }
 
 // usePrevious moves the HEAD build at work/name aside to work/head/name and puts the previous release's in its place.
@@ -572,7 +593,7 @@ func (e *e2eCore) cleanup() {
 }
 
 // freePort is a port in 20000-29999 free on host now; the server binds it moments later. Not the kernel's
-// ephemeral range: a firewall that admits containers to the host (anvit: 10000-59999) may not cover it.
+// ephemeral range: a firewall that admits containers to the host (database test host: 10000-59999) may not cover it.
 func freePort(t *testing.T, host string) string {
 	for range 100 {
 		port := strconv.Itoa(20000 + mathrand.IntN(10000))

@@ -12,14 +12,14 @@ import (
 // Alias targets come from the inventory's own list: no lookup per machine and no second listing.
 func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T) {
 	machines := []api.UserMachine{{
-		ID: "machine_1", Alias: "victus", State: "active", InstallationGeneration: 1,
-		SSH: &api.MachineSSH{OSUser: "Pujan", Port: 38222, TargetGeneration: 1},
+		ID: "machine_1", Alias: "win-target", State: "active", InstallationGeneration: 1,
+		SSH: &api.MachineSSH{OSUser: "Tester", Port: 38222, TargetGeneration: 1},
 	}}
-	assertManagedSSHAliasTarget(t, managedSSHAliasTargets(machines), managedSSHExpectedAliasTarget{alias: "victus", user: "Pujan", port: 38222})
+	assertManagedSSHAliasTarget(t, managedSSHAliasTargets(machines), managedSSHExpectedAliasTarget{alias: "win-target", user: "Tester", port: 38222})
 
 	machines[0].InstallationGeneration = 2
 	machines[0].SSH = &api.MachineSSH{OSUser: "Administrator", Port: 38223, TargetGeneration: 2}
-	assertManagedSSHAliasTarget(t, managedSSHAliasTargets(machines), managedSSHExpectedAliasTarget{alias: "victus", user: "Administrator", port: 38223})
+	assertManagedSSHAliasTarget(t, managedSSHAliasTargets(machines), managedSSHExpectedAliasTarget{alias: "win-target", user: "Administrator", port: 38223})
 
 	machines[0].InstallationGeneration = 3 // re-enrolled; its old target no longer applies
 	if got := managedSSHAliasTargets(machines); len(got) != 0 {

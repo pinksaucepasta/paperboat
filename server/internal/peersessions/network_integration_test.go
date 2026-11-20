@@ -434,7 +434,7 @@ func TestNetworkAuthorityProductionIdentityAndAccessLifecycle(t *testing.T) {
 	if holdBinary != "" {
 		listenAddress := os.Getenv("PAPERBOAT_NETWORK_RUNTIME_LISTEN")
 		if listenAddress == "" {
-			listenAddress = "100.95.70.63:15443"
+			listenAddress = "127.0.0.1:0"
 		}
 		holdDir := t.TempDir()
 		holdInput := filepath.Join(holdDir, "runtime.json")

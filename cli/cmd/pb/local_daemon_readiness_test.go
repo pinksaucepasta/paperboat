@@ -55,7 +55,7 @@ func (c *concurrentLocalDaemonReadinessClient) Snapshot(ctx context.Context) (lo
 
 func localDaemonReadinessServer(t *testing.T) (*localapi.Server, localapi.Snapshot) {
 	t.Helper()
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestStartLocalDaemonAndWaitUsesReadyDaemonWithoutInstaller(t *testing.T) {
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Run(serverCtx) }()
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

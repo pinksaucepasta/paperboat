@@ -9,7 +9,7 @@ func TestRedactStringRules(t *testing.T) {
 	}{
 		{"Authorization: Bearer abc.def", "Authorization: " + RedactedValue, 2}, // header rule, then the key: value rule matches the already redacted line
 		{`{"password": "hunter2"}`, `{"password": "` + RedactedValue + `"}`, 1},
-		{"opened /home/ana/.config/pb failed", "opened " + RedactedValue + " failed", 1},
+		{"opened /home/user/.config/pb failed", "opened " + RedactedValue + " failed", 1},
 		{"see https://user:pw@example.test/x", "see " + RedactedValue, 2},
 		{"nothing sensitive here", "nothing sensitive here", 0},
 	} {

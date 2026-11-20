@@ -1207,7 +1207,7 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) (resultEr
 		return err
 	}
 	// The artifact descriptor is what signed recovery authorizes against: without it a failed first install
-	// cannot restore anything (victus 2026-11-10: TUF target descriptor invalid).
+	// cannot restore anything (Windows test machine 2026-11-10: TUF target descriptor invalid).
 	request.Artifact.Version = request.Source.Version
 	hostdSocket, _, err := windowsHostdSockets(instance, request.Source, nil)
 	if err != nil {

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Freeze the shell program and device fixtures for one source window."""
-import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 
+from dev_targets import load, smoke_environment
+
 
 def main():
     script = Path(sys.argv[1]).resolve()
+    settings = {} if any(arg in {'-h', '--help'} for arg in sys.argv[2:]) else load()
     with tempfile.TemporaryDirectory(prefix='paperboat-smoke-source-') as directory:
         frozen = Path(directory) / 'smoke.sh'
         frozen.write_bytes(script.read_bytes())
@@ -16,7 +18,7 @@ def main():
         with archive.open('wb') as output:
             subprocess.run([sys.executable, str(Path(__file__).with_name('stage_fixtures.py')),
                             str(script.parent)], stdout=output, check=True)
-        environment = dict(os.environ, PAPERBOAT_SMOKE_SNAPSHOT='1',
+        environment = dict(smoke_environment(settings), PAPERBOAT_SMOKE_SNAPSHOT='1',
                            PAPERBOAT_SMOKE_SOURCE_DIR=str(script.parent),
                            PAPERBOAT_SMOKE_FIXTURES=str(archive))
         return subprocess.run(['bash', str(frozen), *sys.argv[2:]], env=environment).returncode

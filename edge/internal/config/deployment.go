@@ -30,15 +30,18 @@ type Deployment struct {
 	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file"`
 	PublicHTTPSCertFile       string `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile        string `json:"public_https_key_file,omitempty"`
-	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
-	ControlURL                string `json:"control_url"`
-	CredentialIssuer          string `json:"credential_issuer"`
-	ControlCredentialFile     string `json:"control_credential_file"`
-	ControlCAFile             string `json:"control_ca_file"`
-	JWKSFile                  string `json:"jwks_file"`
-	RevocationsFile           string `json:"revocations_file"`
-	UsageSigningKeyFile       string `json:"usage_signing_key_file"`
-	ConnectorAdvertiseHost    string `json:"connector_advertise_host"`
+	// PublicACMEChallengeDir holds the ACME HTTP-01 answers pbh writes while it obtains the browser HTTPS certificate;
+	// port 80 serves them. Empty: no automatic certificate.
+	PublicACMEChallengeDir string `json:"public_acme_challenge_dir,omitempty"`
+	BrowserAccessEnabled   bool   `json:"browser_access_enabled"`
+	ControlURL             string `json:"control_url"`
+	CredentialIssuer       string `json:"credential_issuer"`
+	ControlCredentialFile  string `json:"control_credential_file"`
+	ControlCAFile          string `json:"control_ca_file"`
+	JWKSFile               string `json:"jwks_file"`
+	RevocationsFile        string `json:"revocations_file"`
+	UsageSigningKeyFile    string `json:"usage_signing_key_file"`
+	ConnectorAdvertiseHost string `json:"connector_advertise_host"`
 	// Carrier listeners are dedicated connector-v1 data-plane endpoints. They
 	// require mutual TLS plus the
 	// server's admission-backed peer binding.
@@ -55,7 +58,6 @@ type Deployment struct {
 	RuntimeBaseDomain string        `json:"runtime_base_domain"`
 	TrustedProxyCIDRs []string      `json:"trusted_proxy_cidrs"`
 	PublicRoutes      []PublicRoute `json:"public_routes,omitempty"`
-	NodeCapacity      uint32        `json:"node_capacity"`
 	ControlInterval   time.Duration `json:"control_interval"`
 	ControlTimeout    time.Duration `json:"control_timeout"`
 	MaxBodyBytes      int64         `json:"max_body_bytes"`
@@ -152,6 +154,9 @@ func (d Deployment) validate() error {
 			return errors.New("public HTTPS TLS paths must be bounded and absolute")
 		}
 	}
+	if d.PublicACMEChallengeDir != "" && (!filepath.IsAbs(d.PublicACMEChallengeDir) || len(d.PublicACMEChallengeDir) > 4096) {
+		return errors.New("public_acme_challenge_dir must be a bounded absolute path")
+	}
 	// Canonical preview traffic always has both dedicated carrier transports.
 	// There is no safe legacy-only deployment: buildService cannot construct a
 	// server-admitted carrier or advertise a complete endpoint without them.
@@ -227,7 +232,7 @@ func (d Deployment) validate() error {
 	if d.RequestBodyIdleTimeout != 0 && (d.RequestBodyIdleTimeout < time.Second || d.RequestBodyIdleTimeout > time.Hour) {
 		return errors.New("request_body_idle_timeout must be between 1s and 1h")
 	}
-	if d.NodeCapacity == 0 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
+	if d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
 		return errors.New("deployment bounds are invalid")
 	}
 	return nil

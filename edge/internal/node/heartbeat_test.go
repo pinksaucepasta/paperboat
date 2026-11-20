@@ -10,14 +10,14 @@ import (
 )
 
 func TestRegisterAndHeartbeatReportsDrainObservation(t *testing.T) {
-	manager := readyManager(t, 2)
+	manager := readyManager(t)
 	fake := testedge.New()
 	at := time.Unix(100, 0).UTC()
 	trust, err := control.NewProcessCarrierServerTrust("edge_test_01", "epoch", "edge.example.test", time.Now().UTC(), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registration := control.NodeRegistration{NodeID: "edge_test_01", EdgePool: "default", Artifact: "artifact", Protocol: "1.0", ProcessEpoch: "epoch", Capacity: 2, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
+	registration := control.NodeRegistration{NodeID: "edge_test_01", EdgePool: "default", Artifact: "artifact", Protocol: "1.0", ProcessEpoch: "epoch", CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
 	if _, err := manager.RegisterAndHeartbeat(context.Background(), fake, registration, at); err != nil {
 		t.Fatal(err)
 	}

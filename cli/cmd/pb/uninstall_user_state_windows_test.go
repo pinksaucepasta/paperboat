@@ -170,7 +170,7 @@ func TestWindowsUserStateRemovalAfterAPlantedJunctionHasOnlyTheUsersRights(t *te
 		t.Fatal(err)
 	}
 	planted := false
-	afterWindowsUserStateCheck = func() {
+	afterCheck := func() {
 		if planted {
 			return
 		}
@@ -192,9 +192,9 @@ func TestWindowsUserStateRemovalAfterAPlantedJunctionHasOnlyTheUsersRights(t *te
 			t.Errorf("fixture: plant the junction after the check: %v", err)
 		}
 	}
-	t.Cleanup(func() { afterWindowsUserStateCheck = func() {} })
+	base := withWindowsUninstallDependencies(context.Background(), func(d *windowsUninstallDependencies) { d.afterUserStateCheck = afterCheck })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(base, 20*time.Second)
 	defer cancel()
 	err = retryWindowsRemoval(ctx, profile, state, nil, nil)
 	if !planted {
@@ -248,16 +248,17 @@ func setTestOwner(t *testing.T, owner *windows.SID, paths ...string) {
 	}
 }
 
-// countElevatedRemovals counts how often a removal needed the helper's elevation.
-func countElevatedRemovals(t *testing.T) *int {
+// countElevatedRemovals returns a context in which removals count how often one needed the helper's elevation.
+func countElevatedRemovals(t *testing.T) (context.Context, *int) {
 	t.Helper()
 	count := 0
-	removeWindowsStateElevated = func(path string, preserved []string) error {
-		count++
-		return removeWindowsStateByHandle(path, preserved)
-	}
-	t.Cleanup(func() { removeWindowsStateElevated = removeWindowsStateByHandle })
-	return &count
+	ctx := withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+		d.removeStateElevated = func(path string, preserved []string) error {
+			count++
+			return removeWindowsStateByHandle(path, preserved)
+		}
+	})
+	return ctx, &count
 }
 
 // Security review, 2026-11-10: user state is removed as the user. What the user owns never needs more.
@@ -275,8 +276,8 @@ func TestWindowsUserStateOwnedByTheUserIsRemovedWithTheUsersRights(t *testing.T)
 	writeTestFile(t, file)
 	// An elevated run creates them with the Administrators owner; a user's session with the user's.
 	setTestOwner(t, user.User.Sid, state, filepath.Dir(file), file)
-	elevated := countElevatedRemovals(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	base, elevated := countElevatedRemovals(t)
+	ctx, cancel := context.WithTimeout(base, 20*time.Second)
 	defer cancel()
 	if err := retryWindowsRemoval(ctx, profile, state, nil, nil); err != nil {
 		t.Fatalf("remove user-owned state: %v", err)
@@ -314,9 +315,9 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 			t.Fatalf("%s was touched: %v", path, err)
 		}
 	}
-	remove := func(t *testing.T, profile, state string, preserved []string) {
+	remove := func(t *testing.T, base context.Context, profile, state string, preserved []string) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(base, 20*time.Second)
 		defer cancel()
 		if err := retryWindowsRemoval(ctx, profile, state, preserved, nil); err != nil {
 			t.Fatalf("remove Administrators-owned state: %v", err)
@@ -336,8 +337,8 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		file := filepath.Join(state, "credentials", "token.json")
 		writeTestFile(t, file)
 		setTestOwner(t, administrators, state, filepath.Dir(file), file)
-		elevated := countElevatedRemovals(t)
-		remove(t, profile, state, nil)
+		base, elevated := countElevatedRemovals(t)
+		remove(t, base, profile, state, nil)
 		if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("the state directory is still there: %v", err)
 		}
@@ -351,8 +352,8 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		administratorsOnly(t, locked)
 		writeTestFile(t, filepath.Join(locked, "store", "state.json"))
 		plantJunction(t, filepath.Join(locked, "link"), protected)
-		elevated := countElevatedRemovals(t)
-		remove(t, profile, state, nil)
+		base, elevated := countElevatedRemovals(t)
+		remove(t, base, profile, state, nil)
 		if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("the state directory is still there: %v", err)
 		}
@@ -371,7 +372,7 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		administratorsOnly(t, locked)
 		writeTestFile(t, filepath.Join(locked, "state.json"))
 		plantJunction(t, filepath.Join(locked, "link"), protected)
-		remove(t, profile, state, []string{inbox})
+		remove(t, t.Context(), profile, state, []string{inbox})
 		entries, err := os.ReadDir(state)
 		if err != nil || len(entries) != 1 || entries[0].Name() != "Inbox" {
 			t.Fatalf("left in the state directory: %v, %v; want only the Inbox", entries, err)
@@ -483,14 +484,14 @@ func TestWindowsUninstallHelperFilesAreWrittenWithTheUsersRights(t *testing.T) {
 	}
 	t.Run("a plan that is a link to an Administrators' file is not read", func(t *testing.T) {
 		directory := helperDirectory(t)
-		previous := windowsUninstallExecutable
-		windowsUninstallExecutable = func() (string, error) { return filepath.Join(directory, "paperboat-uninstall-helper.exe"), nil }
-		t.Cleanup(func() { windowsUninstallExecutable = previous })
+		ctx := withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+			d.executable = func() (string, error) { return filepath.Join(directory, "paperboat-uninstall-helper.exe"), nil }
+		})
 		planPath := filepath.Join(directory, "plan.json")
 		if err := os.Symlink(sentinel, planPath); err != nil {
 			t.Fatalf("fixture: plant the link: %v", err)
 		}
-		if _, err := readWindowsUninstallPlan(planPath); !errors.Is(err, fs.ErrPermission) {
+		if _, err := readWindowsUninstallPlan(ctx, planPath); !errors.Is(err, fs.ErrPermission) {
 			t.Fatalf("a plan behind a link to an Administrators' file: %v, want access denied as the user", err)
 		}
 	})

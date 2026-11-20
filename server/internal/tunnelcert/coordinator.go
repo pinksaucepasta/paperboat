@@ -446,17 +446,9 @@ func (c *Coordinator) reconcileActiveDistribution(ctx context.Context, certifica
 		}
 		staged = append(staged, request)
 	}
-	distributionCtx, cancel := context.WithTimeout(ctx, c.config.DistributionTimeout)
-	defer cancel()
-	for _, request := range staged {
-		if err := c.config.Distributor.WaitReady(distributionCtx, request); err != nil {
-			return Result{}, fmt.Errorf("%w: late edge %s is not ready: %w", ErrCertificateNotReady, request.Target.NodeID, err)
-		}
-	}
-	for _, request := range staged {
-		if err := c.config.Distributor.Activate(distributionCtx, request); err != nil {
-			return Result{}, fmt.Errorf("%w: activate late edge %s: %w", ErrDistributionUnavailable, request.Target.NodeID, err)
-		}
+	// Every ready late edge is activated; the stragglers fail this pass so the worker retries them.
+	if _, activated, waitErr, activateErr := c.activateReady(ctx, staged, false); activated < len(staged) {
+		return Result{}, errors.Join(waitErr, activateErr)
 	}
 	var cleanupErr error
 	if retirer, ok := c.config.Distributor.(CertificateObsoleteRetirer); ok {
@@ -1030,30 +1022,27 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 		}
 		staged = append(staged, request)
 	}
-	distributionCtx, cancel := context.WithTimeout(ctx, c.config.DistributionTimeout)
-	defer cancel()
-	for _, request := range staged {
-		if err := c.config.Distributor.WaitReady(distributionCtx, request); err != nil {
-			cause := fmt.Errorf("%w: edge %s: %w", ErrCertificateNotReady, request.Target.NodeID, err)
-			if rollbackErr := c.rollbackStaged(stored, staged, 0); rollbackErr != nil {
-				cause = errors.Join(cause, rollbackErr)
-			}
-			return Result{}, c.failStaged(ctx, stored.ID, "edge_not_ready", cause, now)
+	// One straggler edge must not hold a certificate back from the edges that are ready: it is activated where it is
+	// staged, and the straggler catches up through reconcileActiveDistribution (the worker finds the active
+	// certificate with a missing edge) or fetches it on its first handshake. Only no ready edge fails. A preview
+	// generation is all or nothing: an edge on the old generation next to one on the new would answer differently
+	// (and a revoke of the new one drops the old), so one failing edge retires every staged copy.
+	requireAll := domain.Target().KindValue() == TargetPreviewLease
+	staged, activated, waitErr, activateErr := c.activateReady(ctx, staged, requireAll)
+	if activated == 0 || requireAll && activated < len(staged) {
+		cause, code := activateErr, "edge_activate_failed"
+		if waitErr != nil {
+			cause, code = errors.Join(waitErr, activateErr), "edge_not_ready"
 		}
-	}
-	for i, request := range staged {
-		if err := c.config.Distributor.Activate(distributionCtx, request); err != nil {
-			cause := fmt.Errorf("%w: activate edge %s: %w", ErrDistributionUnavailable, request.Target.NodeID, err)
-			if rollbackErr := c.rollbackStaged(stored, staged, i); rollbackErr != nil {
-				cause = errors.Join(cause, rollbackErr)
-			}
-			return Result{}, c.failStaged(ctx, stored.ID, "edge_activate_failed", cause, now)
+		if rollbackErr := c.rollbackStaged(stored, staged, activated); rollbackErr != nil {
+			cause = errors.Join(cause, rollbackErr)
 		}
+		return Result{}, c.failStaged(ctx, stored.ID, code, cause, now)
 	}
 	active, err := c.config.Store.Activate(ctx, stored.ID, domain.Generation, now)
 	if err != nil {
 		cause := fmt.Errorf("%w: activate durable certificate: %w", ErrDistributionUnavailable, err)
-		if rollbackErr := c.rollbackStaged(stored, staged, len(staged)); rollbackErr != nil {
+		if rollbackErr := c.rollbackStaged(stored, staged, activated); rollbackErr != nil {
 			cause = errors.Join(cause, rollbackErr)
 		}
 		return Result{}, c.failStaged(ctx, stored.ID, "certificate_activate_failed", cause, now)
@@ -1152,6 +1141,48 @@ func activeCertificateMatchesDomain(certificate StoredCertificate, domain Domain
 // few seconds and the edge treats a revoke of a preview generation as "this preview ended": it also drops the older
 // generation it is serving. A renewal that failed before activation (an edge cut off from control timing out) must not
 // take the served certificate with it, so it only retires its own staged copy (F21-17 recovery, L397).
+// activateReady waits for every staged edge in parallel (one slow edge costs one timeout, not one per edge) and
+// activates the ones that are ready. It returns the requests with the activated ones first, their number, and the
+// errors of the edges that were not ready or failed to activate. With requireAll nothing is activated while an edge
+// is not ready, and activation stops at the first failure.
+func (c *Coordinator) activateReady(ctx context.Context, staged []DistributionRequest, requireAll bool) (ordered []DistributionRequest, activated int, waitErr, activateErr error) {
+	waitCtx, cancel := context.WithTimeout(ctx, c.config.DistributionTimeout)
+	defer cancel()
+	waits := make([]error, len(staged))
+	var group sync.WaitGroup
+	for i := range staged {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			waits[i] = c.config.Distributor.WaitReady(waitCtx, staged[i])
+		}()
+	}
+	group.Wait()
+	// A straggler may have used up the wait; the ready edges get their own deadline to activate.
+	activateCtx, cancelActivate := context.WithTimeout(ctx, c.config.DistributionTimeout)
+	defer cancelActivate()
+	for i, request := range staged {
+		if waits[i] != nil {
+			waitErr = errors.Join(waitErr, fmt.Errorf("%w: edge %s: %w", ErrCertificateNotReady, request.Target.NodeID, waits[i]))
+		}
+	}
+	var behind []DistributionRequest
+	for i, request := range staged {
+		if waits[i] != nil || requireAll && (waitErr != nil || activateErr != nil) {
+			behind = append(behind, request)
+			continue
+		}
+		if err := c.config.Distributor.Activate(activateCtx, request); err != nil {
+			activateErr = errors.Join(activateErr, fmt.Errorf("%w: activate edge %s: %w", ErrDistributionUnavailable, request.Target.NodeID, err))
+		} else {
+			ordered = append(ordered, request)
+			continue
+		}
+		behind = append(behind, request)
+	}
+	return append(ordered, behind...), len(staged) - len(behind), waitErr, activateErr
+}
+
 func (c *Coordinator) rollbackStaged(certificate StoredCertificate, staged []DistributionRequest, activated int) error {
 	if len(staged) == 0 {
 		return nil
@@ -1746,7 +1777,7 @@ func (l *MemoryLock) ReleaseGeneration(_ context.Context, domainID, owner string
 }
 
 // MemoryDistributor records the state transitions and enforces the intended
-// ordering.  It is also useful as a deterministic test oracle.
+// ordering.  It is also useful as a deterministic test build host.
 type MemoryDistributor struct {
 	mu      sync.Mutex
 	Targets map[string]bool

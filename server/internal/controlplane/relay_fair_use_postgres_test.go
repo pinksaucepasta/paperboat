@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
+	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 )
 
 // A Paperboat-operated relay's lease carries the account speed and names the connected accounts whose workspace pool (edge and relay
@@ -70,7 +73,7 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	period(paid120, 100_000_000_000, 120_000_000_000, true) // out of its 100 GB pool
 	period(light, 5_000_000_000, 1_000_000_000, false)
 
-	observeDemand := func(service *EdgeService, id string, demand map[string]float64, accounts ...string) relayNodeLeaseDocument {
+	observeDemand := func(service *EdgeService, id string, demand map[string]relayshare.Demand, accounts ...string) relayNodeLeaseDocument {
 		t.Helper()
 		subjects := []relaySubject{}
 		for i, u := range accounts {
@@ -113,27 +116,31 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 		t.Fatalf("a customer-owned relay was given limits: %+v", out)
 	}
 
-	// An account's speed is ONE bucket across relays, divided by the demand the relays report: the busy relay gets nearly all of it, the
-	// idle one its floor, and the shares add up to the speed (Free's 10, its slower tiers); the customer-owned relay is no carrier.
+	// An account's speed is ONE budget across relays, divided by what the relays report: the relay whose flows are held back gets
+	// everything but the idle one's start allowance (one active flow runs at the plan speed), and the shares add up to the speed (Free's
+	// 10, its slower tiers); the customer-owned relay is no carrier.
 	shared := NewEdgeService(store, "relay-observe-test-credential-0123456789")
 	shared.SetFairUse(fair)
 	shared.SetRelayPoolGate(gate)
-	observeDemand(shared, own, map[string]float64{both: 1e6}, both)
-	busy := map[string]float64{both: 1e6, paid120: 1e5}
+	held := func(mbit float64) relayshare.Demand {
+		return relayshare.Demand{Offered: 2 * mbit * 125000, Held: mbit * 125000}
+	}
+	observeDemand(shared, own, map[string]relayshare.Demand{both: held(5)}, both)
+	busy := map[string]relayshare.Demand{both: held(5), paid120: held(0.5)}
 	observeDemand(shared, node2, busy, both, paid120)
-	idle := observeDemand(shared, node, map[string]float64{both: 0}, append(users[:4:4], both)...)
+	idle := observeDemand(shared, node, map[string]relayshare.Demand{both: {}}, append(users[:4:4], both)...)
 	speeds := map[string]float64{}
 	for _, a := range idle.AccountSpeeds {
 		speeds[a.Account] = a.Mbit
 	}
-	if speeds[both] != 0.5 || speeds[paid120] != 0.064 || speeds[free12] != 0.512 || speeds[paid60] != 100 {
-		t.Fatalf("idle relay's shares = %v, want %s at its floor 0.5 (5%% of Free's 10), %s at 0.064, %s at 0.512 (one relay), %s at 100", speeds, both, paid120, free12, paid60)
+	if speeds[both] != relaylimits.AccountStartMbit || speeds[paid120] != relaylimits.AccountStartMbit || speeds[free12] != 0.512 || speeds[paid60] != 100 {
+		t.Fatalf("idle relay's shares = %v, want %s and %s at the start allowance %v, %s at 0.512 (one relay), %s at 100", speeds, both, paid120, relaylimits.AccountStartMbit, free12, paid60)
 	}
 	speeds = map[string]float64{}
 	for _, a := range observeDemand(shared, node2, busy, both, paid120).AccountSpeeds {
 		speeds[a.Account] = a.Mbit
 	}
-	if speeds[both] != 9.5 || speeds[paid120] != 1 {
-		t.Fatalf("busy relay's shares = %v, want %s at 9.5 (the idle relay holds its 0.5 floor) and %s at 1 (the other relay does not carry it, it reported no demand for it)", speeds, both, paid120)
+	if math.Abs(speeds[both]-(10-relaylimits.AccountStartMbit)) > 1e-9 || speeds[paid120] != 1 {
+		t.Fatalf("busy relay's shares = %v, want %s at %v (all but the idle relay's start allowance: 99%% of the plan) and %s at 1 (the other relay does not carry it)", speeds, both, 10-relaylimits.AccountStartMbit, paid120)
 	}
 }

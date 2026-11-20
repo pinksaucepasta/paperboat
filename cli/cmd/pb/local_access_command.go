@@ -88,7 +88,7 @@ func loadLocalAccessConfig(command *cobra.Command) (*config.Config, error) {
 
 // applyLocalAccessChange applies a new local access domain.
 func applyLocalAccessChange(command *cobra.Command, cfg *config.Config, domain, action, message string) error {
-	if err := applyLocalAccessSettings(command.Context(), cfg, domain); err != nil {
+	if err := installDependenciesOf(command.Context()).applyLocalAccess(command.Context(), cfg, domain); err != nil {
 		return localAccessFailure("local browser settings could not be applied. Inspect them with `pb config local-access show` before retrying.", err)
 	}
 	if action == "domain-set" {
@@ -108,9 +108,9 @@ func applyLocalAccessChange(command *cobra.Command, cfg *config.Config, domain, 
 	return nil
 }
 
-// localAccessGuardStatus asks the machine guard, the only owner of the local
+// machineGuardStatus asks the machine guard, the only owner of the local
 // access domain, for its status.
-var localAccessGuardStatus = func(ctx context.Context) (machineguard.RuntimeStatus, error) {
+func machineGuardStatus(ctx context.Context) (machineguard.RuntimeStatus, error) {
 	guard, err := machineguard.Connect(ctx, machineguard.DefaultSocket)
 	if err != nil {
 		return machineguard.RuntimeStatus{}, err
@@ -122,7 +122,7 @@ var localAccessGuardStatus = func(ctx context.Context) (machineguard.RuntimeStat
 // localAccessDomain is the domain local URLs use for this user; "" means the
 // guard is not reachable or records none.
 func localAccessDomain(ctx context.Context) string {
-	status, err := localAccessGuardStatus(ctx)
+	status, err := installDependenciesOf(ctx).guardStatus(ctx)
 	if err != nil {
 		return ""
 	}
@@ -132,7 +132,7 @@ func localAccessDomain(ctx context.Context) string {
 // guardDeploymentDomain is the Paperboat server's own local access domain, as
 // the machine guard recorded it when it was installed.
 func guardDeploymentDomain(ctx context.Context) string {
-	status, err := localAccessGuardStatus(ctx)
+	status, err := installDependenciesOf(ctx).guardStatus(ctx)
 	if err != nil {
 		return ""
 	}

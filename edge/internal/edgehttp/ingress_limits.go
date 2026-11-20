@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	maximumIngressLimitEntries = 4096
-	ingressPacingChunk         = 32 << 10
+	ingressPacingChunk = 32 << 10
 )
 
 // ErrIngressDecisionInvalid reports a decision the edge cannot admit (expired, malformed).
@@ -186,15 +185,12 @@ func (l *IngressLimits) acquire(decision connectorprotocol.IngressDecision, usag
 	return &IngressLease{limits: l, publication: publication, account: account, decision: decision, usage: usage}
 }
 
-// state returns key's pacer. When the table is full of keys with open streams, a new key gets
-// an unshared pacer instead of a refusal; the table stays bounded.
+// state returns key's pacer; idle keys are dropped by expireIdle, so the table follows the keys in use.
 func (l *IngressLimits) state(table map[string]*ingressLimitState, key string, config IngressLimitConfig, now time.Time) *ingressLimitState {
 	state := table[key]
 	if state == nil {
 		state = &ingressLimitState{bytes: rate.NewLimiter(config.ByteRate, config.ByteBurst)}
-		if len(l.publications)+len(l.accounts) < maximumIngressLimitEntries {
-			table[key] = state
-		}
+		table[key] = state
 	}
 	state.lastUsed = now
 	return state

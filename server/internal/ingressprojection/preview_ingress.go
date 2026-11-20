@@ -47,13 +47,13 @@ WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
  AND n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[] AND n.registry_expires_at>$3
  AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds' AND n.drain_deadline IS NULL
  AND paperboat.node_preview_eligible(n.id,p.account_id,p.id)
- ORDER BY p.id,publication.hostname LIMIT 4097`
+ ORDER BY p.id,publication.hostname`
 
 // handoverPreviewRoutesSQL lists, during a worker handover's bounded overlap (migrations 227, 228), the
 // replaced carrier of a preview's assignment and the new carrier before the edge has observed the route on it:
 // the edge keeps the route on the old carrier until the new one serves it, so both stay authorized. The new
 // carrier is authorized from its attach: the edge may hold the route on it before it reports the carrier up
-// (pbvm1 vm1-1a6479a4-124638: 8 s of denials there).
+// (Linux test VM vm1-1a6479a4-124638: 8 s of denials there).
 // (make-before-break; Teleport keeps every agent connection of a node, lib/reversetunnel/local_cluster.go).
 // Columns as preview_routes; preview_routes itself lists the new carrier once observed.
 const handoverPreviewRoutesSQL = `SELECT p.id,p.account_id,COALESCE(c.admission->'binding'->>'tunnel_id',''),r.revision,x.route_id,
@@ -130,9 +130,6 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 	out := []wire.IngressDecision{}
 	teams := []string{}
 	for rows.Next() {
-		if len(out) >= maximumIngressDecisions {
-			return nil, wire.ErrIngressDenied
-		}
 		var d wire.IngressDecision
 		var team string
 		b := &d.Binding

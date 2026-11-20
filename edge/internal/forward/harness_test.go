@@ -229,12 +229,12 @@ func newNode(t *testing.T, id string, visitorCert, unknownCert tls.Certificate) 
 	}
 	link, pin := linkCertificate(t)
 	n := &node{t: t, id: id, region: "r1", link: link, pin: pin, ln: ln, port: uint16(ln.Addr().(*net.TCPAddr).Port), held: &fakeHeld{}, src: &fakeSource{region: "r1"}}
-	registry, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = registry.Close() })
-	n.public, err = edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{Authority: authority{}, Routes: registry, ListenHost: "127.0.0.1", MaximumListeners: 1, MaximumConnections: 256,
+	n.public, err = edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{Authority: authority{}, Routes: registry, ListenHost: "127.0.0.1",
 		UnknownNameTLS: &tls.Config{Certificates: []tls.Certificate{unknownCert}, MinVersion: tls.VersionTLS12}})
 	if err != nil {
 		t.Fatal(err)

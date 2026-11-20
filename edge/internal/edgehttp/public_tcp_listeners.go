@@ -28,9 +28,7 @@ type PublicTCPAuthority interface {
 }
 
 type PublicTCPListenerConfig struct {
-	OnFailure func(context.Context, string, error)
-	// SlotsUsed, when set, gets the percent of admission slots in use on every reconcile tick.
-	SlotsUsed             func(percent uint64)
+	OnFailure             func(context.Context, string, error)
 	PreviewHTTPSAuthority func(context.Context, string) error
 	// RouteGrace is how long a TLS name that is not admitted yet waits to be (after a handover takeover); nil or 0 waits not.
 	RouteGrace func() time.Duration
@@ -44,25 +42,22 @@ type PublicTCPListenerConfig struct {
 	Authority              PublicTCPAuthority
 	Routes                 *DataCarrierRouteRegistry
 	Interval               time.Duration
-	MaximumListeners       int
-	MaximumConnections     int
 	Listen                 func(string, string) (net.Listener, error)
 }
 
 // PublicTCPListeners owns only sockets authorized by the server's complete
 // edge-process snapshot. Numeric ports are never allocated here.
 type PublicTCPListeners struct {
-	cfg         PublicTCPListenerConfig
-	mu          sync.Mutex
-	streams     sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	done        chan struct{}
-	listeners   map[string]*publicTCPListener
-	connections chan struct{}
-	sharedTLS   *SharedTLSListener
-	browser     *BrowserAccess
-	forwarding  *ForwardHooks
+	cfg        PublicTCPListenerConfig
+	mu         sync.Mutex
+	streams    sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
+	listeners  map[string]*publicTCPListener
+	sharedTLS  *SharedTLSListener
+	browser    *BrowserAccess
+	forwarding *ForwardHooks
 }
 
 // SetForwarding makes the shared TLS listener forward to other nodes (and take their forwarded visitors). It may be
@@ -120,13 +115,13 @@ func NewPublicTCPListeners(cfg PublicTCPListenerConfig) (*PublicTCPListeners, er
 	if cfg.Interval == 0 {
 		cfg.Interval = 2 * time.Second
 	}
-	if cfg.Interval < 100*time.Millisecond || cfg.MaximumListeners < 1 || cfg.MaximumConnections < 1 {
+	if cfg.Interval < 100*time.Millisecond {
 		return nil, errors.New("public TCP listener bounds are invalid")
 	}
 	if cfg.Listen == nil {
 		cfg.Listen = handover.Listen
 	}
-	return &PublicTCPListeners{cfg: cfg, listeners: make(map[string]*publicTCPListener), connections: make(chan struct{}, cfg.MaximumConnections)}, nil
+	return &PublicTCPListeners{cfg: cfg, listeners: make(map[string]*publicTCPListener)}, nil
 }
 
 // PrepareTCPRoutes binds every reserved socket before the route worker reports
@@ -160,9 +155,6 @@ func (p *PublicTCPListeners) PrepareTCPRoutes(ctx context.Context, rules []route
 			}
 			live.preparedUntil = time.Now().Add(2 * p.cfg.Interval)
 			continue
-		}
-		if len(p.listeners) >= p.cfg.MaximumListeners {
-			return errors.New("public listener limit exceeded")
 		}
 		listener, err := p.cfg.Listen("tcp", net.JoinHostPort(p.cfg.ListenHost, strconv.Itoa(int(rule.PublicTCPPort))))
 		if err != nil {
@@ -206,9 +198,6 @@ func (p *PublicTCPListeners) run(done chan struct{}) {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
-			if p.cfg.SlotsUsed != nil {
-				p.cfg.SlotsUsed(slotsUsedPercent(len(p.connections), cap(p.connections)))
-			}
 			ctx, cancel := context.WithTimeout(p.ctx, p.cfg.Interval)
 			p.observe(ctx, "public_tcp_reconcile", p.reconcile(ctx))
 			cancel()
@@ -221,10 +210,6 @@ func (p *PublicTCPListeners) reconcile(ctx context.Context) error {
 	if err != nil {
 		p.withdrawDecisionListeners()
 		return err
-	}
-	if len(decisions) > 4096 {
-		p.withdrawDecisionListeners()
-		return errors.New("public ingress decision limit exceeded")
 	}
 	sort.Slice(decisions, func(i, j int) bool { return decisions[i].Binding.ListenerID < decisions[j].Binding.ListenerID })
 	desired := make(map[string]connectorprotocol.IngressDecision)
@@ -253,11 +238,7 @@ func (p *PublicTCPListeners) reconcile(ctx context.Context) error {
 			desired[d.Binding.ListenerID] = d
 		}
 	}
-	if len(desired) > p.cfg.MaximumListeners {
-		p.withdrawDecisionListeners()
-		return errors.New("public TCP listener limit exceeded")
-	}
-	wanted := p.forwardedPorts(ports, p.cfg.MaximumListeners-len(desired))
+	wanted := p.forwardedPorts(ports)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.adoptForwardListeners(desired, ports, wanted)
@@ -294,12 +275,12 @@ func (p *PublicTCPListeners) reconcile(ctx context.Context) error {
 }
 
 // forwardedPorts are the public ports to listen on only to forward: the ones the peer directory has a holder for and
-// no local decision covers, within the listener limit.
-func (p *PublicTCPListeners) forwardedPorts(local map[uint16]string, room int) []uint16 {
+// no local decision covers.
+func (p *PublicTCPListeners) forwardedPorts(local map[uint16]string) []uint16 {
 	p.mu.Lock()
 	hooks := p.forwarding
 	p.mu.Unlock()
-	if hooks == nil || room <= 0 {
+	if hooks == nil {
 		return nil
 	}
 	directory, ok := hooks.Forwarder.(interface{ TCPPorts() []uint16 })
@@ -308,7 +289,7 @@ func (p *PublicTCPListeners) forwardedPorts(local map[uint16]string, room int) [
 	}
 	var wanted []uint16
 	for _, port := range directory.TCPPorts() {
-		if _, covered := local[port]; !covered && edgeports.PublicTCP(int(port)) && len(wanted) < room {
+		if _, covered := local[port]; !covered && edgeports.PublicTCP(int(port)) {
 			wanted = append(wanted, port)
 		}
 	}
@@ -403,24 +384,18 @@ func (p *PublicTCPListeners) accept(ctx context.Context, live *publicTCPListener
 			p.observe(failureCtx, "public_tcp_listener", err)
 			return
 		}
-		select {
-		case p.connections <- struct{}{}:
-			p.mu.Lock()
-			decision, forwardPort, hooks := live.decision, live.forwardPort, p.forwarding
-			p.mu.Unlock()
-			p.streams.Add(1)
-			go func() {
-				defer p.streams.Done()
-				defer func() { <-p.connections }()
-				if forwardPort != 0 {
-					p.forwardTCP(ctx, connection, forwardPort, hooks)
-					return
-				}
-				p.observe(ctx, "public_tcp_stream", p.cfg.Routes.ForwardPublicTCP(ctx, connection, decision, p.cfg.Authority.ResolveDecision))
-			}()
-		default:
-			_ = connection.Close()
-		}
+		p.mu.Lock()
+		decision, forwardPort, hooks := live.decision, live.forwardPort, p.forwarding
+		p.mu.Unlock()
+		p.streams.Add(1)
+		go func() {
+			defer p.streams.Done()
+			if forwardPort != 0 {
+				p.forwardTCP(ctx, connection, forwardPort, hooks)
+				return
+			}
+			p.observe(ctx, "public_tcp_stream", p.cfg.Routes.ForwardPublicTCP(ctx, connection, decision, p.cfg.Authority.ResolveDecision))
+		}()
 	}
 }
 
@@ -512,9 +487,7 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	if listener == nil || httpsHostname == nil || p.cfg.InfrastructureHostname != "" && !validSNIHostname(p.cfg.InfrastructureHostname) && net.ParseIP(p.cfg.InfrastructureHostname) == nil {
 		return nil, errors.New("shared TLS listener configuration is invalid")
 	}
-	// Opaque TLS streams, raw TCP streams and pending TLS inspections share
-	// the existing process admission budget.
-	shared := newSharedTLSListener(listener, p.cfg.Authority, p.cfg.Routes, httpsHostname, p.connections, p.cfg.InfrastructureHostname, admittedHTTPSHostname, p.cfg.PreviewHTTPSAuthority, func(_ context.Context, phase string, cause error) {
+	shared := newSharedTLSListener(listener, p.cfg.Authority, p.cfg.Routes, httpsHostname, p.cfg.InfrastructureHostname, admittedHTTPSHostname, p.cfg.PreviewHTTPSAuthority, func(_ context.Context, phase string, cause error) {
 		p.mu.Lock()
 		ctx := p.ctx
 		p.mu.Unlock()
@@ -532,11 +505,4 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	}
 	p.sharedTLS = shared
 	return shared, nil
-}
-
-func slotsUsedPercent(used, capacity int) uint64 {
-	if capacity <= 0 {
-		return 0
-	}
-	return uint64(used * 100 / capacity)
 }

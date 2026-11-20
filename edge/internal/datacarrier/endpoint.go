@@ -405,6 +405,7 @@ func (l *QUICListener) closed() bool {
 func endpointQUICConfig(config Config) *quic.Config {
 	idle := cmp.Or(config.QUICIdleTimeout, defaultQUICIdleTimeout) // keepalive at half the idle: 10 s idle, 5 s keepalive
 	return &quic.Config{
+		CongestionControl:              quic.CongestionControlBBR,
 		MaxIdleTimeout:                 idle,
 		KeepAlivePeriod:                min(config.KeepAliveInterval, idle/2),
 		MaxIncomingStreams:             int64(config.MaximumStreams + config.QueueDepth + 1),

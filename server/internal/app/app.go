@@ -46,6 +46,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/hosthealth"
 	"github.com/pinksaucepasta/paperboat/server/internal/httpapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/inboxdispatch"
 	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
@@ -791,6 +792,7 @@ func New(opts Options) (*App, error) {
 		ServerNodes:              newServerNodeEnroller(store, opts.Config),
 		Database:                 store,
 		OperatorBackups:          backupService,
+		HostHealth:               hosthealth.NewService(store, opts.Config.Secrets.HostHealthToken),
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,
 		OperatorMoney:            moneyService(stripeClient, store),
@@ -920,6 +922,12 @@ func New(opts Options) (*App, error) {
 			return controlplane.NodeUpdateState(ctx, release, component, version, time.Now())
 		})
 	}), progress))
+	if opts.Config.ReleaseDirectory != "" {
+		releaseNotices := announcements.New(store)
+		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_release_expiry_notices", periodicPreviewTunnelWorker(10*time.Minute, func(ctx context.Context) error {
+			return releaseExpiryNotices(ctx, opts.Config.ReleaseDirectory, releaseNotices, time.Now())
+		}), progress))
+	}
 	// The Fleet page's rollout chart: today's version counts, rewritten every 10 minutes (fleet_version_daily).
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_fleet_snapshot", periodicPreviewTunnelWorker(10*time.Minute, operatorService.SnapshotFleet), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_recipe_machines", periodicPreviewTunnelWorker(time.Minute, recipeService.CollectMachines), progress))
@@ -1082,7 +1090,7 @@ func New(opts Options) (*App, error) {
 	application := &App{
 		draining:             draining,
 		warmed:               warmed,
-		warm:                 warmUp(store, edgeControlService, opts.Logger),
+		warm:                 warmUp(store, edgeControlService, peerNetworkService, opts.Logger),
 		machineEvents:        machineEventHub,
 		supportReports:       supportService,
 		healthMonitor:        healthMonitor,

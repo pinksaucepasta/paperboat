@@ -46,7 +46,7 @@ func TestShouldInstallBootstrapRuntime(t *testing.T) {
 func TestBootstrapCLIHostEnrollmentInstallsClientProfileAndDaemon(t *testing.T) {
 	store := testBootstrapProfileStore(t)
 	issuer := "https://api.example.test"
-	resume := bootstrap.NewResumeRecord(issuer, "public-key", "token", "Victus", "verifier-012345678901234567890123456789", time.Now().UTC().Add(time.Hour))
+	resume := bootstrap.NewResumeRecord(issuer, "public-key", "token", "Win-target", "verifier-012345678901234567890123456789", time.Now().UTC().Add(time.Hour))
 	material := bootstrap.Material{ClientSession: testBootstrapSession("cli_host")}
 	installCalls := 0
 	if err := completeBootstrapCLIResume(context.Background(), store.Path, issuer, material, &resume, func(_ context.Context, session *bootstrap.ClientSession, serverURL string) error {

@@ -44,7 +44,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(command.Context()).daemonPaths()
 	if err != nil {
 		return err
 	}

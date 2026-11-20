@@ -9,6 +9,7 @@ signed network's 2 minute refresh hint, so the host records origin 'offline'). T
 rules are removed on every exit path, and the audit rows of the target (production database, read-only) must hold an offline start and
 its end: same session id, outcome closed, bytes in and out above zero. Prints one JSON line.
 """
+from dev_targets import get_setting
 import ipaddress
 import json
 import os
@@ -20,7 +21,7 @@ from urllib.parse import urlparse
 
 import xplat_fleet as fleet
 
-DB_HOST = os.environ.get('PB_AUDIT_DB_HOST', 'root@coolify')
+DB_HOST = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('deployment_host')
 OUTAGE_SECONDS = 150
 ANCHOR = 'com.apple/pbsmoke-offline'
 RESOLVE = ("import socket,sys\n"

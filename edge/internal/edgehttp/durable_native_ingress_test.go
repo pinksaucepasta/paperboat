@@ -62,7 +62,7 @@ func testPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T, afterExpiry bool
 	rule.AccessMode, rule.ResourceKind, rule.Hostname, rule.PathPrefix, rule.MatchType = "private", "tunnel", request.Host, "/", route.MatchExact
 	rule.Node, rule.EdgeProcessEpoch = request.EdgeNodeID, request.EdgeProcessEpoch
 	rule.ViewerPolicyGeneration = 1
-	published, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	published, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func testPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T, afterExpiry bool
 		}
 		originDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "private origin reached") }), 4096, time.Second)
 	}()
-	registry, _ := NewPrivateAccessConnectionRegistry(8)
+	registry := NewPrivateAccessConnectionRegistry()
 	var revalidations atomic.Int32
 	registry.Revalidate = func(_ context.Context, current connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 		revalidations.Add(1)

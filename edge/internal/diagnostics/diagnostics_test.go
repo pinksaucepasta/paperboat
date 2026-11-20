@@ -45,7 +45,7 @@ func TestPrivateHandlerReportsBoundedDiagnosticsAndMetrics(t *testing.T) {
 	if !state.MarkReady() {
 		t.Fatal("mark ready")
 	}
-	manager, _ := node.NewManager(state, 8)
+	manager, _ := node.NewManager(state)
 	queue, _ := usage.NewQueue(4, 4096)
 	now := time.Unix(200, 0).UTC()
 	if err := queue.Enqueue(usage.Report{OperationID: "op", Interval: [2]time.Time{now.Add(-10 * time.Second), now}, Payload: []byte("signed-private-payload")}); err != nil {
@@ -115,7 +115,7 @@ func TestPrivateHandlerProjectsTypedHealthEventsMetricsAndDrops(t *testing.T) {
 	if !state.MarkReady() {
 		t.Fatal("mark ready")
 	}
-	manager, _ := node.NewManager(state, 8)
+	manager, _ := node.NewManager(state)
 	queue, _ := usage.NewQueue(4, 4096)
 	now := time.Unix(300, 0).UTC()
 	healthTracker, err := edgetelemetry.NewHealthTracker(func() time.Time { return now })
@@ -199,7 +199,7 @@ func TestReadyzSevenSessionsEightRoutesIsReady(t *testing.T) {
 	if !state.MarkReady() {
 		t.Fatal("mark ready")
 	}
-	manager, _ := node.NewManager(state, 8)
+	manager, _ := node.NewManager(state)
 	queue, _ := usage.NewQueue(4, 4096)
 	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 7 }, SessionRoutes: func() int { return 8 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 8 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot})
 	if err != nil {

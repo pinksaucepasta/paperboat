@@ -8,7 +8,8 @@
 # One-time setup on the box (not done by this script): the pbadmin user, /opt/paperboat-admin, /etc/paperboat-admin/admin.env,
 # and a proxy route from the panel's origin to 172.18.0.1:3101.
 set -eu
-host=${PB_ADMIN_PROD_HOST:-root@coolify}
+host=${PB_ADMIN_PROD_HOST:-$(python3 "$(dirname "$0")/device-smoke/dev_targets.py" deployment_host)}
+[ -n "$host" ] || { echo "configure the host in local development targets" >&2; exit 2; }
 dir=/opt/paperboat-admin
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git -C "$here" rev-parse --show-toplevel)

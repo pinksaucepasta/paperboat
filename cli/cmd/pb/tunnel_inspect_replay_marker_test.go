@@ -17,14 +17,14 @@ func TestTunnelInspectMarksReplays(t *testing.T) {
 			}
 			record := page["records"].([]any)[0].(map[string]any)
 			record["replay_of"] = "cap_original"
-			inspectorTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+			daemon := inspectorTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 				if mode == "detail" {
 					_ = json.NewEncoder(w).Encode(record)
 				} else {
 					_ = json.NewEncoder(w).Encode(page)
 				}
 			})
-			wireInspectorTestClients(client)
+			ctx := wireInspectorTestClients(daemon, client)
 			args := []string{"inspect", "tun_01"}
 			if mode == "detail" {
 				args = append(args, "--id", "cap_01")
@@ -32,7 +32,7 @@ func TestTunnelInspectMarksReplays(t *testing.T) {
 			if mode == "json" {
 				args = append(args, "--json")
 			}
-			output, err := runInspectorCommand(t, tunnelCobraCommandV1, args...)
+			output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, args...)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -13,7 +13,7 @@ func TestSaveResumeAcceptsRealShapedWindowsClientMaterial(t *testing.T) {
 	now := time.Now().UTC()
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", "victus-e2e", "verifier-012345678901234567890123456789", now.Add(15*time.Minute))
+	record := NewResumeRecord(server, publicKey, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOP", "win-target-e2e", "verifier-012345678901234567890123456789", now.Add(15*time.Minute))
 	record.PairingStarted = true
 	record.Material = &Material{
 		Schema:               "paperboat.machine-installation/v1",

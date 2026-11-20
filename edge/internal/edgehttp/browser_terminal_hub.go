@@ -15,7 +15,6 @@ import (
 
 const (
 	browserTerminalMaxParticipants = 100
-	browserTerminalMaxSessions     = 4096
 	browserTerminalMaxRecordBytes  = (128 << 10) + 1024
 	browserTerminalQueuedRecords   = 256
 	browserTerminalQueuedBytes     = 512 << 10
@@ -226,9 +225,6 @@ func (h *BrowserTerminalHub) Subscribe(key BrowserTerminalSessionKey, fence Brow
 	}
 	session := h.sessions[key]
 	if session == nil {
-		if len(h.sessions) >= browserTerminalMaxSessions {
-			return nil, ErrBrowserTerminalHubFull
-		}
 		session = &browserTerminalSession{subscribers: make(map[string]*BrowserTerminalSubscription)}
 		h.sessions[key] = session
 	}
@@ -260,9 +256,6 @@ func (h *BrowserTerminalHub) RegisterPublisher(key BrowserTerminalSessionKey, id
 	}
 	session := h.sessions[key]
 	if session == nil {
-		if len(h.sessions) >= browserTerminalMaxSessions {
-			return nil, ErrBrowserTerminalHubFull
-		}
 		session = &browserTerminalSession{subscribers: make(map[string]*BrowserTerminalSubscription)}
 		h.sessions[key] = session
 	}

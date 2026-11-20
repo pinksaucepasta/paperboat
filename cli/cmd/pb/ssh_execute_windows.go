@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,11 +24,21 @@ import (
 	"golang.org/x/term"
 )
 
-var (
-	buildWindowsManagedSSHDeps     = buildDeps
-	requireWindowsManagedSSHDaemon = requireLocalDaemonService
-	isWindowsSSHCommandTerminal    = term.IsTerminal
-)
+// windowsSSHDependencies are the edges of managed SSH on Windows that tests replace: the command dependencies, the
+// local daemon check and the terminal test on the command's input.
+type windowsSSHDependencies struct {
+	buildDeps       func(*command.Context) (*deps, error)
+	requireDaemon   func(context.Context, *config.Config) error
+	isInputTerminal func(int) bool
+}
+
+func defaultWindowsSSHDependencies() windowsSSHDependencies {
+	return windowsSSHDependencies{buildDeps: buildDeps, requireDaemon: requireLocalDaemonService, isInputTerminal: term.IsTerminal}
+}
+
+func windowsSSHDependenciesOf(ctx context.Context) windowsSSHDependencies {
+	return dependenciesIn(ctx, defaultWindowsSSHDependencies)
+}
 
 func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machine api.UserMachine, destination managedssh.Destination, passthrough []string, includePassthrough bool, environment []string) error {
 	client, liveMachine, liveTarget, err := resolveSSHCommandTargetWarm(ctx, machine.ID)
@@ -94,7 +105,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		return err
 	}
 	if inProcess {
-		input, err := windowsSSHCommandInput(cobraCommand.InOrStdin())
+		input, err := windowsSSHCommandInput(ctx.Context, cobraCommand.InOrStdin())
 		if err != nil {
 			_ = connection.Close()
 			return err
@@ -163,7 +174,7 @@ type windowsSSHOwnedInput struct {
 	once sync.Once
 }
 
-func windowsSSHCommandInput(input io.Reader) (io.ReadCloser, error) {
+func windowsSSHCommandInput(ctx context.Context, input io.Reader) (io.ReadCloser, error) {
 	if input == nil {
 		return nil, nil
 	}
@@ -174,7 +185,7 @@ func windowsSSHCommandInput(input io.Reader) (io.ReadCloser, error) {
 		}
 		return io.NopCloser(input), nil
 	}
-	if isWindowsSSHCommandTerminal(int(file.Fd())) {
+	if windowsSSHDependenciesOf(ctx).isInputTerminal(int(file.Fd())) {
 		return nil, nil
 	}
 	process := windows.CurrentProcess()
@@ -210,11 +221,12 @@ func (input *windowsSSHOwnedInput) Close() error {
 }
 
 func windowsManagedSSHDependencies(ctx *command.Context) (*deps, error) {
-	d, err := buildWindowsManagedSSHDeps(ctx)
+	edges := windowsSSHDependenciesOf(ctx.Context)
+	d, err := edges.buildDeps(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireWindowsManagedSSHDaemon(ctx.Context, d.cfg); err != nil {
+	if err := edges.requireDaemon(ctx.Context, d.cfg); err != nil {
 		return nil, fmt.Errorf("prepare local peer transport: %w", err)
 	}
 	return d, nil

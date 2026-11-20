@@ -66,7 +66,7 @@ func tunnelShowCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		tunnelID, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
+		tunnelID, err := tunnelDependenciesOf(ctx).resolve(ctx, client, args[0])
 		if err != nil {
 			return err
 		}
@@ -103,7 +103,7 @@ func tunnelStateCommand(action string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		tunnelID, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
+		tunnelID, err := tunnelDependenciesOf(ctx).resolve(ctx, client, args[0])
 		if err != nil {
 			return err
 		}
@@ -118,7 +118,7 @@ func tunnelStateCommand(action string) *cobra.Command {
 				return err
 			}
 		}
-		key, err := tunnelKey()
+		key, err := tunnelKey(ctx)
 		if err != nil {
 			return err
 		}

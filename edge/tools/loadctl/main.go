@@ -1,6 +1,6 @@
 // Command loadctl is a stand-in control plane for edge capacity runs (tools/loadtest/edge-capacity.md).
 //
-//	loadctl init  -dir D -control-host H -edge-host H [-preview-domain d] [-tunnel-domain d] [-capacity N]
+//	loadctl init  -dir D -control-host H -edge-host H [-preview-domain d] [-tunnel-domain d]
 //	loadctl serve -dir D -listen ADDR
 //
 // init writes everything the real paperboat-edge binary needs (deployment.json, credential, trust files, TLS
@@ -106,7 +106,6 @@ func initFiles(args []string) error {
 	controlPort := flags.String("control-port", "8443", "loadctl port")
 	edgeHost := flags.String("edge-host", "edge.example.test", "DNS name of the edge (the public certificate must cover it); the load generator resolves it, e.g. through /etc/hosts")
 	relayHost := flags.String("relay-host", "relay.example.test", "DNS name in the relay's TLS certificate")
-	nodeCapacity := flags.Uint("capacity", 4096, "node_capacity")
 	previewDomain := flags.String("preview-domain", "preview.example.test", "preview base domain")
 	tunnelDomain := flags.String("tunnel-domain", "tunnels.example.test", "tunnel base domain")
 	runtimeDomain := flags.String("runtime-domain", "runtime.example.test", "runtime base domain")
@@ -175,8 +174,8 @@ func initFiles(args []string) error {
 		"connector_advertise_host": *edgeHost, "carrier_tcp_listen_address": "0.0.0.0:27443", "carrier_quic_listen_address": "0.0.0.0:27444",
 		"public_https_listen_address": "0.0.0.0:443", "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:80",
 		"preview_base_domain": *previewDomain, "tunnel_base_domain": *tunnelDomain, "runtime_base_domain": *runtimeDomain,
-		"trusted_proxy_cidrs": []string{}, "node_capacity": *nodeCapacity,
-		"control_interval": int64(5 * time.Second), "control_timeout": int64(5 * time.Second),
+		"trusted_proxy_cidrs": []string{},
+		"control_interval":    int64(5 * time.Second), "control_timeout": int64(5 * time.Second),
 	}
 	if *extra != "" {
 		var merged map[string]any

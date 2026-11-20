@@ -49,11 +49,11 @@ func newTCPNode(t *testing.T, real bool, allowed func(host, address string) bool
 	t.Helper()
 	n := &tcpNode{authority: &publicTCPAuthorityFixture{}}
 	var err error
-	if n.routes, err = NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 8, AddressAllowed: allowed}); err != nil {
+	if n.routes, err = NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{AddressAllowed: allowed}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = n.routes.Close() })
-	cfg := PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: n.authority, Routes: n.routes, Interval: time.Hour, MaximumListeners: edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1, MaximumConnections: 256}
+	cfg := PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: n.authority, Routes: n.routes, Interval: time.Hour}
 	if !real {
 		cfg.Listen = func(_, address string) (net.Listener, error) {
 			n.binds.Add(1)

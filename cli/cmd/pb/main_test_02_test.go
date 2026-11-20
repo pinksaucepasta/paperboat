@@ -340,7 +340,7 @@ func TestUserFacingErrorSanitizesInfrastructureFailures(t *testing.T) {
 		},
 		{
 			name: "local filesystem failure",
-			err:  &os.PathError{Op: "open", Path: `C:\\Users\\Pujan\\Paperboat\\daemon.lock`, Err: os.ErrPermission},
+			err:  &os.PathError{Op: "open", Path: `C:\\Users\\Tester\\Paperboat\\daemon.lock`, Err: os.ErrPermission},
 			want: "could not access local files",
 		},
 		{
@@ -503,7 +503,7 @@ func TestBugreportJSONFailureAcrossLocalAPIHasOneResultAndCorrelatedCause(t *tes
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 	t.Setenv("TMPDIR", runtimeRoot)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

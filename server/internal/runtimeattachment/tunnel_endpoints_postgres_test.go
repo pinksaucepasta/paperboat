@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
@@ -277,7 +279,8 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if err != nil || len(logs) != 1 || logs[0].Code != "tunnel_edge_ready" || logs[0].RouteID.String != route {
 		t.Fatalf("engine tunnel logs = %+v, %v; want one tunnel_edge_ready for the route", logs, err)
 	}
-	// The tunnel is ready only once every edge holding its route has observed it (F8-06).
+	// The tunnel is ready once one live edge holding its route has observed it; the edge that lags does not
+	// withdraw it (the second edge below only has to converge, not to gate readiness).
 	health := func() string {
 		t.Helper()
 		var code string
@@ -286,8 +289,15 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		}
 		return code
 	}
-	if code := health(); code != "pending" {
-		t.Fatalf("tunnel health with one of two edges ready = %s, want pending", code)
+	// A live machine has a current control session, and its environment is its own workspace.
+	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
+	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
+	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
+	if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if code := health(); code != "ready" {
+		t.Fatalf("tunnel health with one of two edges ready = %s, want ready", code)
 	}
 	backupRows, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.backupNode, f.backupEdge.ProcessEpoch)
 	if err != nil || len(backupRows) != 1 {
@@ -303,10 +313,6 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	// A live machine has a current control session, and its environment is its own workspace.
-	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
-	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
-	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
 	if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +461,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}
 	// A custom domain on an engine tunnel gets certificate targets from the engine's ready edge assignments:
 	// the certificate worker read only connector-path route assignments, so such a domain never got an
-	// edge to place its certificate on (Lane M, staging 4.3).
+	// edge to place its certificate on (staging 4.3).
 	domain := "domain_" + f.prefix
 	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear')`, domain, f.account, tunnel, route, "custom-"+f.prefix+".example.test")
 	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND desired='active'`, tunnel)
@@ -468,6 +474,23 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 			t.Fatalf("certificate target %q is not one of the agent's edges", target.EdgeNodeID)
 		}
 	}
+	// An edge that missed the push of its domain's certificate asks for it by name: the server finds the domain only
+	// for an edge that serves its route, and only once it has an active certificate.
+	exact := func(node, epoch string) error {
+		_, err := f.database.Queries().GetExactTunnelCertificateDomainForEdgeV1(f.ctx, dbsqlc.GetExactTunnelCertificateDomainForEdgeV1Params{Hostname: "custom-" + f.prefix + ".example.test", EdgeNodeID: node, EdgeProcessEpoch: epoch})
+		return err
+	}
+	if err := exact(targets[0].EdgeNodeID, targets[0].EdgeProcessEpoch); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("domain without a certificate found for its edge: %v", err)
+	}
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='ready',certificate_reference='tcert_'||$2,certificate_expires_at=now()+interval '60 days' WHERE id=$1`, domain, f.prefix)
+	if err := exact(targets[0].EdgeNodeID, targets[0].EdgeProcessEpoch); err != nil {
+		t.Fatalf("domain with a certificate not found for its serving edge: %v", err)
+	}
+	if err := exact(targets[0].EdgeNodeID, "epoch_not_serving"); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("domain found for an edge process that does not serve it: %v", err)
+	}
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='issuing' WHERE id=$1`, domain)
 	// `pb tunnel route add --wait` on an engine tunnel ends: the route operation settles once the
 	// engine's edges serve the route's current generation (it waited on connector assignments only).
 	routeOperation := "op_route_" + f.prefix

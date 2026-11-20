@@ -12,54 +12,51 @@ import (
 )
 
 func TestTunnelCreateMissingNamePromptsBeforeNetwork(t *testing.T) {
-	oldTerminal, oldPrompt, oldClient := previewInteractiveTerminal, promptTunnelCreateName, tunnelClientForCommand
-	defer func() {
-		previewInteractiveTerminal, promptTunnelCreateName, tunnelClientForCommand = oldTerminal, oldPrompt, oldClient
-	}()
-	previewInteractiveTerminal = func(*cobra.Command) bool { return true }
+	deps := defaultPreviewDependencies()
+	deps.isTerminal = func(*cobra.Command) bool { return true }
 	accepted := false
 	sentinel := errors.New("network boundary reached")
-	tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) {
-		if !accepted {
-			t.Fatal("network started before accepting name")
-		}
-		return nil, sentinel
-	}
 	type contextKeyType struct{}
 	contextKey := contextKeyType{}
-	ctx := context.WithValue(context.Background(), contextKey, "preferences-context")
-	promptTunnelCreateName = func(options prompt.TextOptions) (string, error) {
-		if options.Context.Value(contextKey) != "preferences-context" || options.Output == nil || options.Validate(".bad") == nil || options.Validate("my-app") != nil {
-			t.Fatal("name prompt omitted context or validation")
+	ctx := withTunnelDependencies(context.WithValue(context.Background(), contextKey, "preferences-context"), func(tunnel *tunnelDependencies) {
+		tunnel.client = func(*cobra.Command) (*api.Client, error) {
+			if !accepted {
+				t.Fatal("network started before accepting name")
+			}
+			return nil, sentinel
 		}
-		accepted = true
-		return "my-app", nil
-	}
+		tunnel.promptName = func(options prompt.TextOptions) (string, error) {
+			if options.Context.Value(contextKey) != "preferences-context" || options.Output == nil || options.Validate(".bad") == nil || options.Validate("my-app") != nil {
+				t.Fatal("name prompt omitted context or validation")
+			}
+			accepted = true
+			return "my-app", nil
+		}
+	})
 	command := tunnelCreateCommand()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"--port", "3000"})
-	if err := command.ExecuteContext(ctx); !errors.Is(err, sentinel) {
+	if err := command.ExecuteContext(context.WithValue(ctx, previewDependenciesKey{}, deps)); !errors.Is(err, sentinel) {
 		t.Fatalf("accepted name did not reach real workflow: %v", err)
 	}
 }
 func TestTunnelCreateMissingNameCancelAndAutomation(t *testing.T) {
-	oldTerminal, oldPrompt, oldClient := previewInteractiveTerminal, promptTunnelCreateName, tunnelClientForCommand
-	defer func() {
-		previewInteractiveTerminal, promptTunnelCreateName, tunnelClientForCommand = oldTerminal, oldPrompt, oldClient
-	}()
-	tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) {
-		t.Fatal("canceled/invalid invocation reached network")
-		return nil, nil
-	}
-	previewInteractiveTerminal = func(*cobra.Command) bool { return true }
+	deps := defaultPreviewDependencies()
+	deps.isTerminal = func(*cobra.Command) bool { return true }
 	calls := 0
-	promptTunnelCreateName = func(prompt.TextOptions) (string, error) { calls++; return "", prompt.ErrCanceled }
+	base := withTunnelDependencies(t.Context(), func(tunnel *tunnelDependencies) {
+		tunnel.client = func(*cobra.Command) (*api.Client, error) {
+			t.Fatal("canceled/invalid invocation reached network")
+			return nil, nil
+		}
+		tunnel.promptName = func(prompt.TextOptions) (string, error) { calls++; return "", prompt.ErrCanceled }
+	})
 	command := tunnelCreateCommand()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"--port", "3000"})
-	if err := command.ExecuteContext(context.Background()); err != nil {
+	if err := command.ExecuteContext(context.WithValue(base, previewDependenciesKey{}, deps)); err != nil {
 		t.Fatalf("cancel was not clean: %v", err)
 	}
 	if calls != 1 {
@@ -69,12 +66,12 @@ func TestTunnelCreateMissingNameCancelAndAutomation(t *testing.T) {
 		terminal bool
 		args     []string
 	}{{false, []string{"--port", "3000"}}, {true, []string{"--port", "3000", "--json"}}, {true, []string{"one", "two", "--port", "3000"}}} {
-		previewInteractiveTerminal = func(*cobra.Command) bool { return test.terminal }
+		deps.isTerminal = func(*cobra.Command) bool { return test.terminal }
 		command := tunnelCreateCommand()
 		command.SetOut(io.Discard)
 		command.SetErr(io.Discard)
 		command.SetArgs(test.args)
-		if err := command.ExecuteContext(context.Background()); !errors.Is(err, errUsage) {
+		if err := command.ExecuteContext(context.WithValue(base, previewDependenciesKey{}, deps)); !errors.Is(err, errUsage) {
 			t.Fatalf("missing typed usage error: %v", err)
 		}
 	}

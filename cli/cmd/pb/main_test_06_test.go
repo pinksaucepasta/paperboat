@@ -148,7 +148,7 @@ func TestResolveSSHCommandTargetWarmAsksTheServerNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,11 +221,9 @@ func TestSelectTerminalSessionPrefersWarmMachineSnapshot(t *testing.T) {
 		Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: now, DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []localapi.MachineStatus{{ID: "mch_1", EnvironmentID: "env_1", WorkspaceRoot: "/root", Alias: "machine-ready", Eligible: true, RuntimeState: "ready", Generation: 4, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
 	}
-	previous := loadWarmMachineSnapshot
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+	ctx := withDaemonSnapshot(t, snapshot)
 
-	session, target, machine, err := selectTerminalSession(context.Background(), api.New(backend.URL, config.Credential{AccessToken: "token"}, backend.Client()), "machine-ready", "", "")
+	session, target, machine, err := selectTerminalSession(ctx, api.New(backend.URL, config.Credential{AccessToken: "token"}, backend.Client()), "machine-ready", "", "")
 	if err != nil {
 		t.Fatalf("selectTerminalSession: %v", err)
 	}
@@ -381,7 +379,7 @@ func TestCommandFailureBorrowsTerminalReferenceWithoutHidingIndependentFault(t *
 	}
 }
 
-// Round 10 (hp, lanep-r10a/b): a just-paired peer stayed cached offline in the daemon's snapshot until its next
+// Round 10 (Linux test machine, test-r10a/b): a just-paired peer stayed cached offline in the daemon's snapshot until its next
 // refresh, and pb exec refused it ("the machine is offline") for ~2 min while ping worked. A cached presence must
 // never refuse: a machine the snapshot does not see ready is resolved on the server.
 func TestCachedOfflinePeerIsResolvedOnTheServer(t *testing.T) {
@@ -399,14 +397,12 @@ func TestCachedOfflinePeerIsResolvedOnTheServer(t *testing.T) {
 		Schema: localapi.SnapshotSchemaV1, Generation: 3, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev",
 		Machines: []localapi.MachineStatus{{ID: "mch_new", EnvironmentID: "env_new", WorkspaceRoot: "/root", Alias: "just-paired", Eligible: true, RuntimeState: "offline", Generation: 1, SelectedPath: "none", TransferReadiness: "unavailable", PreviewReadiness: "unavailable", SSHReadiness: "unavailable", NATMappingIPv4: "unknown", NATMappingIPv6: "unknown", CaptivePortal: "unknown", PMTU: "unknown", RouterProtocol: "unknown", RouterMapping: "unknown", MappingLifetime: "unknown", UpdateHealth: "unknown"}},
 	}
-	previous := loadWarmMachineSnapshot
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+	ctx := withDaemonSnapshot(t, snapshot)
 
-	if got, ok := resolveWarmUserMachine(context.Background(), "just-paired"); ok {
+	if got, ok := resolveWarmUserMachine(ctx, "just-paired"); ok {
 		t.Fatalf("a peer cached offline was taken from the snapshot: %+v", got)
 	}
-	_, machine, err := resolveEnvironmentTargetWithMachine(context.Background(), api.New(backend.URL, config.Credential{AccessToken: "token"}, backend.Client()), "just-paired")
+	_, machine, err := resolveEnvironmentTargetWithMachine(ctx, api.New(backend.URL, config.Credential{AccessToken: "token"}, backend.Client()), "just-paired")
 	if err != nil || machine.ID != "mch_new" || !machine.Online {
 		t.Fatalf("resolved %+v, %v; want the server's online machine", machine, err)
 	}

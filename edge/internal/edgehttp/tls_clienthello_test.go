@@ -152,10 +152,10 @@ func FuzzTLSClientHello(f *testing.F) {
 
 func TestNoSNIIsReservedForInfrastructureIP(t *testing.T) {
 	wire := testClientHello(t, "")
-	for _, infra := range []string{"", "infrastructure.example.test", "140.245.11.41"} {
+	for _, infra := range []string{"", "infrastructure.example.test", "93.184.216.35"} {
 		conn := &helloTestConn{input: bytes.NewReader(wire)}
 		replay, host, err := inspectTLSInfrastructureClientHello(t.Context(), conn, infra)
-		if infra != "140.245.11.41" {
+		if infra != "93.184.216.35" {
 			if err == nil {
 				t.Fatal("no SNI accepted outside reserved infrastructure IP")
 			}

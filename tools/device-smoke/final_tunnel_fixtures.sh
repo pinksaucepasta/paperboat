@@ -1,6 +1,6 @@
 #!/bin/bash
 # final_tunnel_fixtures.sh MODE HOST CT_A CT_B: final re-check entries whose check needs a live tunnel first.
-# The tunnel and its origin are created here on the paired hp containers and deleted on every exit path.
+# The tunnel and its origin are created here on the paired Linux test machine containers and deleted on every exit path.
 #
 #   private-tcp      C126: CT_B serves a TCP echo behind a private tunnel with a tcp_private route; CT_A runs
 #                    tunnel_private_access.py against it (both selectors, exact bytes, listener closes).

@@ -25,23 +25,23 @@ import (
 // but the command exited 1 with the generic text, inviting a repeat of an
 // update that had already landed.
 func TestUpdateFromReportsFailuresAfterTheInstallLanded(t *testing.T) {
-	previous := installUpdateSourceForCommand
-	t.Cleanup(func() { installUpdateSourceForCommand = previous })
 	directory := t.TempDir()
 	notAProgram := filepath.Join(directory, "pb")
 	if err := os.WriteFile(notAProgram, []byte("not an executable"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
-		return notAProgram, nil
-	}
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.install = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
+			return notAProgram, nil
+		}
+	})
 	bundle := filepath.Join(directory, "release.pb-update")
 	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := &cobra.Command{Use: "update"}
 	command.Flags().Bool("json", true, "")
-	err := installStagedUpdateSource(command, t.Context(), bundle, false)
+	err := installStagedUpdateSource(command, ctx, bundle, false)
 	failure := classifyCommandFailure(err)
 	message := commandFailureMessage(err, failure)
 	if !strings.Contains(message, "was updated") || !strings.Contains(message, "pb doctor") {
@@ -143,13 +143,17 @@ func TestUpdateStagingOnAFullDiskIsReportedAsDiskFullNotUnreadable(t *testing.T)
 // F14-02: `pb update --from` ends open SSH connections too, so it refuses unless forced, and installs
 // when none are open or the daemon cannot say.
 func TestUpdateFromRefusesWhileSSHConnectionsAreOpen(t *testing.T) {
-	previousInstall, previousOpen := installUpdateSourceForCommand, openConnectionsFromDaemon
-	t.Cleanup(func() { installUpdateSourceForCommand, openConnectionsFromDaemon = previousInstall, previousOpen })
 	installs := 0
-	installUpdateSourceForCommand = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
-		installs++
-		return "", errors.New("stop after the install was attempted")
-	}
+	var openConnections func(context.Context) (liveconnections.Counts, error)
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.install = func(context.Context, string, installsource.Source, string, bool, string, string) (string, error) {
+			installs++
+			return "", errors.New("stop after the install was attempted")
+		}
+		deps.openConnections = func(ctx context.Context) (liveconnections.Counts, error) {
+			return openConnections(ctx)
+		}
+	})
 	bundle := filepath.Join(t.TempDir(), "release.pb-update")
 	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
 		t.Fatal(err)
@@ -157,23 +161,23 @@ func TestUpdateFromRefusesWhileSSHConnectionsAreOpen(t *testing.T) {
 	command := &cobra.Command{Use: "update"}
 	command.Flags().Bool("json", false, "")
 
-	openConnectionsFromDaemon = func(context.Context) (liveconnections.Counts, error) {
+	openConnections = func(context.Context) (liveconnections.Counts, error) {
 		return liveconnections.Counts{SSH: 2}, nil
 	}
-	err := installStagedUpdateSource(command, t.Context(), bundle, false)
+	err := installStagedUpdateSource(command, ctx, bundle, false)
 	failure := classifyCommandFailure(err)
 	if installs != 0 || failure.kind != commandRejected || commandFailureMessage(err, failure) != "Paperboat is busy: 2 open SSH connections. Wait, close them, or use --force." {
 		t.Fatalf("installs=%d kind=%v message=%q", installs, failure.kind, commandFailureMessage(err, failure))
 	}
-	if err = installStagedUpdateSource(command, t.Context(), bundle, true); installs != 1 {
+	if err = installStagedUpdateSource(command, ctx, bundle, true); installs != 1 {
 		t.Fatalf("--force did not proceed: installs=%d err=%v", installs, err)
 	}
-	openConnectionsFromDaemon = func(context.Context) (liveconnections.Counts, error) { return liveconnections.Counts{}, nil }
-	_ = installStagedUpdateSource(command, t.Context(), bundle, false)
-	openConnectionsFromDaemon = func(context.Context) (liveconnections.Counts, error) {
+	openConnections = func(context.Context) (liveconnections.Counts, error) { return liveconnections.Counts{}, nil }
+	_ = installStagedUpdateSource(command, ctx, bundle, false)
+	openConnections = func(context.Context) (liveconnections.Counts, error) {
 		return liveconnections.Counts{SSH: 5}, errors.New("daemon cannot answer")
 	}
-	_ = installStagedUpdateSource(command, t.Context(), bundle, false)
+	_ = installStagedUpdateSource(command, ctx, bundle, false)
 	if installs != 3 {
 		t.Fatalf("an idle daemon or one that cannot answer blocked the install: installs=%d", installs)
 	}

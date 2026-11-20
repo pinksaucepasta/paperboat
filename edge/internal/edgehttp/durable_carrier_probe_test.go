@@ -16,7 +16,7 @@ func TestDurableProbeHeaderFailureClosesStalledBodyAndRecovers(t *testing.T) {
 	carrier, connector := testEdgePreviewCarrierPair(t, identity)
 	rule := replicaRule()
 	rule.Protocol = "http"
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

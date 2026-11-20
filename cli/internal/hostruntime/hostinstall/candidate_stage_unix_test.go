@@ -14,7 +14,7 @@ import (
 )
 
 // A signed update's helper is the previous build. It must have the candidate's
-// own executable stage the candidate's units (pbvm1: the helper rendered the new
+// own executable stage the candidate's units (Linux test VM: the helper rendered the new
 // carrier's unit with its own code and the new carrier refused it), and read the
 // candidate's report as another build's output.
 func TestSignedUpdateHasTheCandidateExecutableStageItsOwnUnits(t *testing.T) {
@@ -47,7 +47,7 @@ func TestSignedUpdateHasTheCandidateExecutableStageItsOwnUnits(t *testing.T) {
 }
 
 // Every unit an install or update writes is the candidate build's own render,
-// even when the installing process is another build (pbvm1: pb update --from ran
+// even when the installing process is another build (Linux test VM: pb update --from ran
 // the invoking CLI, which rendered the new build's units with its own code).
 func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 	previous := runCandidate
@@ -116,7 +116,7 @@ func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 }
 
 // The real path: the installing process runs another executable (the candidate)
-// and reads its report from stdout. pbvm1: A2's own install failed with
+// and reads its report from stdout. Linux test VM: A2's own install failed with
 // "invalid privileged installation request; EOF" because runCandidate read the
 // candidate's stdout before running it. A script stands in for a candidate build
 // that renders every unit differently.

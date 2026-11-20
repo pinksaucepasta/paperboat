@@ -43,7 +43,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 	installation := scopedInstallationFixture(t, store, "dns-placement-test-key", owner, "tunnel")
 	// A serving edge node: its verified public ingress is the self-hosted DNS target the pool publishes
 	// (publicationdns.Target), and publication_edge_nodes needs it ready with a fresh heartbeat.
-	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='140.245.11.41',state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',public_ingress_verified_at=now(),public_ingress_ipv4='140.245.11.41' WHERE id=$1`, installation.NodeID)
+	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='93.184.216.35',state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',public_ingress_verified_at=now(),public_ingress_ipv4='93.184.216.35' WHERE id=$1`, installation.NodeID)
 	service := New(store, "dns-placement-test-key")
 	// A placement on an installation needs a self-hosted-only workspace pool; a
 	// managed placement needs a managed-only pool (placement.go SetPlacement).
@@ -118,12 +118,12 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 			}
 		}
 		// A hostname under a verified workspace domain is verified from creation, and placement moves keep it so.
-		check("140.245.11.41", "verified", "A", 1)
+		check("93.184.216.35", "verified", "A", 1)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
 		// The domain already targets the installation, so the placement does not reset it.
-		check("140.245.11.41", "verified", "A", 1)
+		check("93.184.216.35", "verified", "A", 1)
 		exec(`UPDATE `+table+` SET ownership_state='verified',conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
 		if kind == "preview" {
 			exec(`UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, id)
@@ -151,12 +151,12 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "verified", "A", 3)
+		check("93.184.216.35", "verified", "A", 3)
 		// Repeating the same placement on the verified domain changes nothing: the target is unchanged.
 		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "verified", "A", 3)
+		check("93.184.216.35", "verified", "A", 3)
 	}
 }

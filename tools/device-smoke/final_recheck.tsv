@@ -84,10 +84,10 @@ extra-update-scheduled	cmd	F14-06	tools/device-smoke/final_pair_extras.sh schedu
 extra-update-continuity	cmd	F14-02,F14-04	tools/device-smoke/final_pair_extras.sh continuity {host} {binary}
 extra-update-failures	cmd	F14-03	tools/device-smoke/final_pair_extras.sh failures {host} {binary} $(dirname {binary})/pb-darwin-arm64
 # Second-account checks. They need the member account's fixtures (env on the runner): SMOKE_MEMBER_SSH (ssh alias of a container paired to the
-# member account, default laneh-s5hm), SMOKE_CT_A_SSH (ssh alias of container a, default laneh-s5ha), SMOKE_OWNER_MACHINE_ID (container a's
+# member account, default test-s5hm), SMOKE_CT_A_SSH (ssh alias of container a, default test-s5ha), SMOKE_OWNER_MACHINE_ID (container a's
 # machine id) and SMOKE_MEMBER_MACHINE_ID (the member container's; the check REMOVES it, so create it for this run only).
 # The suspension section is skipped: it writes to the server database.
-team-two-account	cmd	@team_two_account.py	python3 tools/device-smoke/team_two_account.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} --owner-ssh ${{SMOKE_CT_A_SSH:-laneh-s5ha}} --machine $SMOKE_OWNER_MACHINE_ID --member-cmd "ssh ${{SMOKE_MEMBER_SSH:-laneh-s5hm}}" --member-machine $SMOKE_MEMBER_MACHINE_ID --skip suspension
+team-two-account	cmd	@team_two_account.py	python3 tools/device-smoke/team_two_account.py --team ${{PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}} --owner-ssh ${{SMOKE_CT_A_SSH:-test-s5ha}} --machine $SMOKE_OWNER_MACHINE_ID --member-cmd "ssh ${{SMOKE_MEMBER_SSH:-test-s5hm}}" --member-machine $SMOKE_MEMBER_MACHINE_ID --skip suspension
 # F3-04: an idle session survives 8 hours. Run session-idle-start first thing, session-idle-verify at least 8 h later (final_recheck.py run --only
 # session-idle-verify); the start is a background job of the final run, not a blocking step.
 session-idle-start	device	EXTRA	python3 session_idle.py start {peer}
@@ -121,7 +121,7 @@ network-drop	device	@network_drop.py	python3 network_drop.py {self}
 net-blip	device	@net_blip.py	python3 net_blip.py {self}
 machine-tags	cmd	@machine_tags.py	cd tools/device-smoke && python3 machine_tags.py --owner-cmd 'ssh {host} docker exec -i -u {ct_user} -e HOME=/home/{ct_user} -e XDG_RUNTIME_DIR=/run/user/{ct_uid} {ct_a}' --target {peer} --pb /home/{ct_user}/.local/bin/pb
 
-# Managed SSH (Lane I). device checks run in container A and dial {peer}, the machine with sshd; ssh-trust-host
+# Managed SSH. device checks run in container A and dial {peer}, the machine with sshd; ssh-trust-host
 # rotates {ct_b}'s ed25519 host key as root, so {ct_b} must be the container of {peer}. ssh-long holds one hour.
 ssh-main	device	F5-01,C064	python3 ssh_lifecycle.py {peer}
 ssh-alias	device	F5-04	python3 ssh_alias_lifecycle.py {peer}

@@ -533,7 +533,7 @@ func routerShellCommand(shell, workspace, script string) pty.Command {
 	}
 }
 
-// F3-05 on hp: a host whose owner kept more closed records than the session limit refused every new
+// F3-05 on Linux test machine: a host whose owner kept more closed records than the session limit refused every new
 // terminal with resource_limit while no session was live. Closed records must not consume the limit.
 func TestRouterAdmitsNewSessionsWhileClosedRecordsExceedTheLimit(t *testing.T) {
 	manager, workspace, shell := newRouterTestManager(t)
@@ -601,7 +601,7 @@ func TestRouterAttachesToEverySessionAtTheCeiling(t *testing.T) {
 }
 
 // A responsive active owner must serve new terminals even when another owner's
-// health check or inventory never answers (the hp terminal regression).
+// health check or inventory never answers (the Linux test machine terminal regression).
 func TestRouterHungOwnerDoesNotBlockFreshTerminals(t *testing.T) {
 	for _, hang := range []string{"health", "List", "ResourceCounts"} {
 		t.Run(hang, func(t *testing.T) {

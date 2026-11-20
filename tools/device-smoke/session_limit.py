@@ -2,7 +2,7 @@
 """F3-05: native terminals have no plan limit and closed sessions never count.
 
 Opens more terminals than the old 20-session limit, closes some, opens more in their place, and
-fails on any limit refusal or 409 on the way (Lane W, 2026-10-23: only the machine's protection
+fails on any limit refusal or 409 on the way (2026-10-23: only the machine's protection
 ceiling of 256 remains, covered by TestRouterAttachesToEverySessionAtTheCeiling).
 Usage: session_limit.py TARGET. Creates smoke-limit-* sessions, then removes them all.
 """

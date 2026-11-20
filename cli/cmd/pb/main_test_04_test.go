@@ -231,17 +231,13 @@ func TestFailedUnifiedSetupPreservesMachineControlCapabilitiesAndRecovery(t *tes
 			if err := os.WriteFile(custodyPath, []byte("existing protected custody"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			oldVerifier := verifySetupInstallSource
-			oldBackend := setupBackendClient
-			oldPrerequisites := setupHostPrerequisites
-			setupHostPrerequisites = func(context.Context) (uint16, error) { return 0, nil } // Windows would prompt for elevation
-			setupBackendClient = func(*command.Context) (*api.Client, error) {
-				return api.New(server.URL, config.Credential{AccessToken: "fixture-token"}, server.Client()), nil
-			}
 			sourceFailure := errors.New("invalid supplied executable")
-			verifySetupInstallSource = func() error { return sourceFailure }
-			t.Cleanup(func() {
-				verifySetupInstallSource, setupBackendClient, setupHostPrerequisites = oldVerifier, oldBackend, oldPrerequisites
+			ctx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+				d.setupPrerequisites = func(context.Context) (uint16, error) { return 0, nil } // Windows would prompt for elevation
+				d.setupBackend = func(*command.Context) (*api.Client, error) {
+					return api.New(server.URL, config.Credential{AccessToken: "fixture-token"}, server.Client()), nil
+				}
+				d.verifySetupSource = func() error { return sourceFailure }
 			})
 			configPath := filepath.Join(root, "config.json")
 			writeTestProfile(t, root, configPath, server.URL)
@@ -249,7 +245,7 @@ func TestFailedUnifiedSetupPreservesMachineControlCapabilitiesAndRecovery(t *tes
 			command.SetOut(io.Discard)
 			command.SetErr(io.Discard)
 			command.SetArgs(append([]string{"--config", configPath, "setup", "--state-root", stateRoot, "--name", "studio"}, test.flags...))
-			err = command.ExecuteContext(context.Background())
+			err = command.ExecuteContext(ctx)
 			var capabilityErr *api.APIError
 			if err == nil || (!test.failCapabilities && !errors.Is(err, sourceFailure)) || (test.failCapabilities && (!errors.As(err, &capabilityErr) || capabilityErr.Status != http.StatusServiceUnavailable)) || !strings.Contains(err.Error(), "retry `pb setup`") {
 				t.Fatalf("failure=%v", err)
@@ -495,12 +491,12 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 	writeTestProfile(t, dir, configPath, srv.URL)
 
 	var output bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Victus"}, &output, &output); code != 0 {
+	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Win-target"}, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, output.String())
 	}
 	// One token for both platforms, in the installer's environment: never in a URL or an argument. The installer address
 	// is the same for both; the server behind it picks the script by user agent.
-	want := []string{"curl -fsSL https://install.example.test/custom | PB_TOKEN='the-token' PB_NAME='Victus' sh", "$env:PB_TOKEN='the-token'; $env:PB_NAME='Victus'; irm https://install.example.test/custom | iex", "Windows (PowerShell):"}
+	want := []string{"curl -fsSL https://install.example.test/custom | PB_TOKEN='the-token' PB_NAME='Win-target' sh", "$env:PB_TOKEN='the-token'; $env:PB_NAME='Win-target'; irm https://install.example.test/custom | iex", "Windows (PowerShell):"}
 	if creates != 1 || strings.Contains(output.String(), "?p=") || strings.Contains(output.String(), "bash") {
 		t.Fatalf("output=%q", output.String())
 	}

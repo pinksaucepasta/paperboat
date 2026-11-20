@@ -78,7 +78,7 @@ def main():
     with winhost.workdir(name) as root:
         small, large = root / (name + '.txt'), root / (name + '-cancel.bin')
         small.write_bytes(b'exact-transfer-settings-fixture')
-        winhost.write_pattern(large, bytes(range(256)) * 256, 800)  # 50 MiB
+        winhost.write_random(large, 50 << 20)
         try:
             selected = call(binary, 'send', 'destination', 'set', args.target)
             observed = call(binary, 'send', 'destination')

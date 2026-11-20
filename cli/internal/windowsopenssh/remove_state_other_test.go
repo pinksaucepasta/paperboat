@@ -15,7 +15,7 @@ func (unusedRunner) Run(context.Context, string, ...string) ([]byte, error) { re
 
 // Uninstall removes the SSH access state even when the service could not be removed (here the
 // non-Windows stub always fails): a leftover users\<instance>\ssh made the next install refuse its
-// instance root (victus, second Windows user, 2026-11-16).
+// instance root (Windows test machine, second Windows user, 2026-11-16).
 func TestRemovePaperboatStateRemovesAccessStateWhenTheServiceStepFails(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "ssh")
 	for _, f := range []string{"sshd_config", "hostkeys/ssh_host_ed25519_key", "hostkeys/ssh_host_ed25519_key.pub", "authorized_keys/paperboat", "authorized_keys/revoked.krl", "logs/sshd.log"} {

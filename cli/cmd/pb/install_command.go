@@ -7,14 +7,9 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/spf13/cobra"
 )
-
-var installSuppliedExecutable = hostruntimecmd.InstallRunningBinary
-var runningInstallSource = installsource.Current
 
 func suppliedInstallTimeout(platform string) time.Duration {
 	if platform == "windows" {
@@ -26,17 +21,17 @@ func suppliedInstallTimeout(platform string) time.Duration {
 func platformInstallCommand() *cobra.Command {
 	command := &cobra.Command{Use: "install", Short: "Install this executable and its local service", Args: commandArgs(cobra.NoArgs), SilenceUsage: true, SilenceErrors: true,
 		RunE: func(c *cobra.Command, _ []string) error {
-			executable, source, err := runningInstallSource()
+			executable, source, err := installDependenciesOf(c.Context()).runningSource()
 			if err != nil {
 				return err
 			}
 			directory, _ := c.Flags().GetString("install-dir")
 			ctx, cancel := context.WithTimeout(c.Context(), suppliedInstallTimeout(runtime.GOOS))
 			defer cancel()
-			if err := windowsUninstallInFlight(); err != nil {
+			if err := windowsUninstallInFlight(ctx); err != nil {
 				return err
 			}
-			installed, err := installSuppliedExecutable(ctx, executable, source, directory, selectedInstallServer(c))
+			installed, err := installDependenciesOf(ctx).installExecutable(ctx, executable, source, directory, selectedInstallServer(c))
 			if err != nil {
 				return err
 			}
@@ -64,7 +59,7 @@ func platformInstallCommand() *cobra.Command {
 }
 
 // selectedInstallServer is the server chosen with --server, normalized, for the privileged install step
-// (which learns the local access domain from it); empty uses the configured server (Lane W: the install
+// (which learns the local access domain from it); empty uses the configured server (the install
 // read the build's default server and failed against a staging server).
 func selectedInstallServer(command *cobra.Command) string {
 	server, err := config.NormalizeServerURL(workspaceServerOverride(command))

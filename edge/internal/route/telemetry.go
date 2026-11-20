@@ -17,17 +17,16 @@ import (
 type LifecycleType string
 
 const (
-	LifecycleStageAccepted    LifecycleType = "stage_accepted"
-	LifecycleStageRejected    LifecycleType = "stage_rejected"
-	LifecycleGenerationReady  LifecycleType = "generation_ready"
-	LifecycleActivated        LifecycleType = "activated"
-	LifecycleDrainStarted     LifecycleType = "drain_started"
-	LifecycleDrainCompleted   LifecycleType = "drain_completed"
-	LifecycleDrainForced      LifecycleType = "drain_forced"
-	LifecycleStaleRejected    LifecycleType = "stale_generation_rejected"
-	LifecycleStreamAcquired   LifecycleType = "stream_acquired"
-	LifecycleStreamOverloaded LifecycleType = "stream_overloaded"
-	LifecycleStreamReleased   LifecycleType = "stream_released"
+	LifecycleStageAccepted   LifecycleType = "stage_accepted"
+	LifecycleStageRejected   LifecycleType = "stage_rejected"
+	LifecycleGenerationReady LifecycleType = "generation_ready"
+	LifecycleActivated       LifecycleType = "activated"
+	LifecycleDrainStarted    LifecycleType = "drain_started"
+	LifecycleDrainCompleted  LifecycleType = "drain_completed"
+	LifecycleDrainForced     LifecycleType = "drain_forced"
+	LifecycleStaleRejected   LifecycleType = "stale_generation_rejected"
+	LifecycleStreamAcquired  LifecycleType = "stream_acquired"
+	LifecycleStreamReleased  LifecycleType = "stream_released"
 )
 
 type RouteTelemetryRecord struct {
@@ -37,7 +36,6 @@ type RouteTelemetryRecord struct {
 	PreviousGeneration uint64
 	RouteCount         int
 	ActiveStreams      int
-	MaximumStreams     int
 	CorrelationID      string
 	IDs                sharedtelemetry.SafeIDs
 	Generations        sharedtelemetry.Generations
@@ -59,12 +57,11 @@ func (f RouteTelemetrySinkFunc) RecordRouteTelemetry(record RouteTelemetryRecord
 // CoreTelemetrySink projects route lifecycle records into the dependency-safe
 // health, fixed-cardinality metrics, and bounded event primitives.
 type CoreTelemetrySink struct {
-	mu         sync.Mutex
-	health     *health.HealthTracker
-	metrics    *sharedmetrics.Metrics
-	events     *sharedtelemetry.EventLog
-	overloaded bool
-	active     uint64
+	mu      sync.Mutex
+	health  *health.HealthTracker
+	metrics *sharedmetrics.Metrics
+	events  *sharedtelemetry.EventLog
+	active  uint64
 }
 
 func NewCoreTelemetrySink(healthTracker *health.HealthTracker, metrics *sharedmetrics.Metrics, events *sharedtelemetry.EventLog) (*CoreTelemetrySink, error) {
@@ -96,23 +93,11 @@ func (s *CoreTelemetrySink) RecordRouteTelemetry(record RouteTelemetryRecord) er
 		healthErr = s.updateHealth(health.DimensionConfig, health.StatusReady, "generation_ready", "The staged route generation passed readiness checks.", "Activate the ready route generation.", record, health.RetryNone)
 	case LifecycleActivated:
 		s.active = record.Generation
-		s.overloaded = false
 		configErr := s.updateHealth(health.DimensionConfig, health.StatusReady, "generation_active", "The active route configuration is current.", "No action is required.", record, health.RetryNone)
 		routeErr := s.updateHealth(health.DimensionRoute, health.StatusReady, "ready", "Route admission is ready.", "No action is required.", record, health.RetryNone)
 		healthErr = errors.Join(configErr, routeErr)
 	case LifecycleDrainForced:
 		healthErr = s.updateHealth(health.DimensionRoute, health.StatusDegraded, "drain_forced", "An old route generation required forced stream cancellation.", "Inspect slow streams before the next route activation.", record, health.RetryNone)
-	case LifecycleStreamOverloaded:
-		if record.Generation != s.active {
-			break
-		}
-		s.overloaded = true
-		healthErr = s.updateHealth(health.DimensionRoute, health.StatusDegraded, "stream_capacity_reached", "Route stream capacity is exhausted.", "Wait for active streams to finish or increase the configured capacity.", record, health.RetryWaitForChange)
-	case LifecycleStreamReleased:
-		if record.Generation == s.active && s.overloaded && record.ActiveStreams < record.MaximumStreams {
-			s.overloaded = false
-			healthErr = s.updateHealth(health.DimensionRoute, health.StatusReady, "ready", "Route stream capacity is available.", "No action is required.", record, health.RetryNone)
-		}
 	}
 	return errors.Join(eventErr, healthErr)
 }
@@ -168,8 +153,6 @@ func routeEventInput(record RouteTelemetryRecord) (sharedtelemetry.EventInput, e
 		severity, outcome, message, retry = sharedtelemetry.SeverityWarn, sharedtelemetry.OutcomeRejected, "Stale route generation was rejected.", health.RetryWaitForChange
 	case LifecycleStreamAcquired:
 		severity, message = sharedtelemetry.SeverityDebug, "Route stream was acquired."
-	case LifecycleStreamOverloaded:
-		severity, outcome, message, retry = sharedtelemetry.SeverityWarn, sharedtelemetry.OutcomeRejected, "Route stream capacity was exhausted.", health.RetryWaitForChange
 	case LifecycleStreamReleased:
 		severity, message = sharedtelemetry.SeverityDebug, "Route stream was released."
 	default:

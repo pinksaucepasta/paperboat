@@ -12,7 +12,7 @@ import (
 // (`<machine>.<runtime base>`, kind runtime_https_wss) live in the same registry, and a detached or closed
 // carrier is withdrawn.
 func TestHeldAnnouncesPreviewAndRuntimeHostnamesWithAttachedCarriers(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -750,7 +750,7 @@ func TestFileTransferHistoryPagesPreserveAuthorizationAndFilters(t *testing.T) {
 	}
 }
 
-// Lane W load test on ubuntu24: after one terminal printed a burst, every close on the machine
+// load test on teammate machine: after one terminal printed a burst, every close on the machine
 // failed with SQLITE_BUSY, because a deferred write transaction cannot upgrade to the write lock
 // while another connection keeps committing output, and busy_timeout does not cover that upgrade.
 // A session's state change succeeds while another session floods output.
@@ -800,7 +800,7 @@ func TestSessionUpdateSucceedsWhileAnotherSessionFloodsOutput(t *testing.T) {
 }
 
 // Sequenced input decisions that left the session's window are deleted in batches, named ones are kept,
-// and a new process generation drops the old generation's rows (Lane X audit H2).
+// and a new process generation drops the old generation's rows (audit H2).
 func TestInputDecisionsArePrunedToTheWindow(t *testing.T) {
 	store, _ := openStore(t, nil)
 	defer store.Close()

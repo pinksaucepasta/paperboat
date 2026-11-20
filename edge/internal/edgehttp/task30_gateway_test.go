@@ -58,7 +58,7 @@ func task30RouteGatewayWithAuthority(t *testing.T, ctx context.Context, server *
 	rule.Node = httpDecision.EdgeNodeID
 	rule.EdgeProcessEpoch = httpDecision.EdgeProcessEpoch
 	rule.ConfigContentHash = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, Usage: task24Usage{}, IngressAuthority: authority})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{Usage: task24Usage{}, IngressAuthority: authority})
 	if err != nil {
 		t.Fatal(err)
 	}

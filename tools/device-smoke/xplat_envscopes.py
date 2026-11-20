@@ -28,7 +28,7 @@ import xplat_fleet as fleet  # noqa: E402
 
 results = {}
 TAG = uuid.uuid4().hex[:6]
-PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw'))
+PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.mac-vm/xplat2-vault.pw'))
 WAIT = 180
 
 DUMP_UNIX = 'import os,json\nprint(json.dumps({k: v for k, v in os.environ.items() if k.upper().startswith("XS_")}))\n'

@@ -27,12 +27,12 @@ def main():
                                 ('empty.bin', b'')]:
             path = directory / (prefix + '-' + suffix)
             if content is None:  # 50 MiB, made on the device so it is not sent over SSH
-                content = bytes(range(256)) * 204800
-                winhost.write_pattern(path, bytes(range(256)) * 256, 800)
+                digest = winhost.write_random(path, 50 << 20)
             else:
                 path.write_bytes(content)
+                digest = hashlib.sha256(content).hexdigest()
             names.append(str(path))
-            expected[path.name] = hashlib.sha256(content).hexdigest()
+            expected[path.name] = digest
         # Receiver verification and cleanup use only our exact random filenames.
         cleanup = ("from pathlib import Path\n"
                    "root=Path.home()/'Paperboat/Inbox'\n"

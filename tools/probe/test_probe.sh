@@ -48,7 +48,7 @@ grep -q '"step":"edge_127.0.0.1","ok":true' <<<"$out" && grep -q '"step":"edge_1
 # Without a preview there is no verdict on an edge (a lost canary machine must not read as every edge down).
 out=$(PROBE_STEPS="preview edge_127.0.0.1" CANARY_EDGES="127.0.0.1" PB=false "$here/probe.sh") && { echo "preview without pb passed: $out"; exit 1; }
 ! grep -q '"step":"edge_' <<<"$out" || { echo "edge verdict without a preview: $out"; exit 1; }
-# A preview made from B works the same way (anvit's vantage point has only B).
+# A preview made from B works the same way (database test host's vantage point has only B).
 out=$(PROBE_STEPS="preview edge_127.0.0.1" PREVIEW_ON=B CANARY_EDGES="127.0.0.1" "$here/probe.sh") || { echo "B preview run failed: $out"; exit 1; }
 [ "$(grep -c '"ok":true' <<<"$out")" = 2 ] || { echo "B preview: $out"; exit 1; }
 # A step list runs only those steps, and the tunnel URL is not needed when the tunnel step is not wanted.

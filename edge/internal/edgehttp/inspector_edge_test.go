@@ -34,7 +34,7 @@ func TestInspectorEdgeAccessTraversesExactOwnerCarrier(t *testing.T) {
 	defer edgeCarrier.Close()
 	defer ownerCarrier.Close()
 	rule := replicaRule()
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestInspectorEdgeAccessTraversesExactOwnerCarrier(t *testing.T) {
 	if err := registry.AttachReplica(edgeCarrier, "key", "thumb", replicaState(rule, 3, rule.AssignmentID, "region_01", time.Millisecond, 2)); err != nil {
 		t.Fatal(err)
 	}
-	preview, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_0001", MaximumRoutes: 2})
+	preview, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_0001"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,9 +110,9 @@ func TestInspectorEdgeAccessTraversesExactOwnerCarrier(t *testing.T) {
 }
 
 func TestInspectorEdgeAccessDeniesBeforeCarrierAndBoundsBody(t *testing.T) {
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
-	preview, _ := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_0001", MaximumRoutes: 1})
+	preview, _ := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_0001"})
 	defer preview.Close()
 	authority := &inspectorAuthorityStub{err: errors.New("denied")}
 	handler := &InspectorEdgeAccess{Authority: authority, Carriers: registry, PreviewCarriers: preview}

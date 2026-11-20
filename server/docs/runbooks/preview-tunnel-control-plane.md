@@ -31,8 +31,9 @@ hostnames.
 
 Managed tunnel, preview and runtime hostnames are covered by DNS-only wildcards (`*.pprbt.app`, `*.runtime.pprbt.dev`)
 that list every managed edge; the server publishes no per-hostname records for them, and a custom domain's CNAME
-points at the resource's own managed name. Edges do not forward, so a route is reported ready only when every live
-edge serves it. When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
+points at the resource's own managed name. Edges do not forward, so a route is reported ready once any live edge
+serves it; an edge that lags answers its share of visitors wrongly until it converges (an address move still waits
+for every live edge to serve the new name). When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
 the wildcards are static, so until you do, about half of new connections go to the dead edge.
 
 ## Public TCP tunnel ports on the edges

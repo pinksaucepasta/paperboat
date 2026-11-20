@@ -48,7 +48,7 @@ relative paths, or a missing carrier listener stop startup with a typed error.
   neither.
 - **Names:** `connector_advertise_host`, `preview_base_domain`, `tunnel_base_domain`,
   `runtime_base_domain`.
-- **Limits:** `node_capacity`, `max_body_bytes` (default 100 MiB), `max_header_bytes`
+- **Limits:** `max_body_bytes` (default 100 MiB), `max_header_bytes`
   (default 32 KiB, at most 128 KiB), `control_interval`, `control_timeout`, and the optional
   `preview_carrier_interval`, `public_tcp_idle_timeout`, `request_body_idle_timeout`.
 - **Node forwarding (managed edges):** a visitor who reaches a node that does not hold the carrier is passed on,
@@ -59,7 +59,7 @@ relative paths, or a missing carrier listener stop startup with a typed error.
   TCP tunnel port its peers hold, so it needs a high file limit. Self-hosted edge containers started by `pbh` get
   `--ulimit nofile=1048576:1048576`. Managed edge hosts must set `LimitNOFILE=1048576` (systemd) or the equivalent
   container ulimit themselves; no managed deploy unit lives in this repo. The edge logs `file_limit_low` at startup
-  when the soft limit is below `MaximumListeners + MaximumConnections + 1024`.
+  when the soft limit is below the public TCP port range plus 1024 (the edge has no connection limit).
 - **Proxies and fixed routes:** `trusted_proxy_cidrs` and `public_routes` (host, optional path
   prefix, upstream).
 

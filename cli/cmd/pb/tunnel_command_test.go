@@ -39,33 +39,27 @@ func (w *cancelAfterWrite) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func withTunnelCommandClient(t *testing.T, handler http.HandlerFunc) {
+func tunnelCommandFixture(t *testing.T, handler http.HandlerFunc) tunnelDependencies {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	old := tunnelClientForCommand
-	tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) {
+	deps := defaultTunnelDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) {
 		return api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), nil
 	}
-	t.Cleanup(func() { tunnelClientForCommand = old })
-	oldSelector := resolveTunnelSelectorForCommand
-	resolveTunnelSelectorForCommand = func(ctx context.Context, client *api.Client, value string) (string, error) {
+	deps.resolve = func(ctx context.Context, client *api.Client, value string) (string, error) {
 		if strings.HasPrefix(value, "tun_") && validTunnelCLIResourceID(value) {
 			return value, nil
 		}
 		return resolveTunnelSelector(ctx, client, value)
 	}
-	t.Cleanup(func() { resolveTunnelSelectorForCommand = oldSelector })
-	oldKey := newTunnelIdempotencyKey
-	newTunnelIdempotencyKey = func() (string, error) { return "idem_test", nil }
-	t.Cleanup(func() { newTunnelIdempotencyKey = oldKey })
+	deps.newKey = func() (string, error) { return "idem_test", nil }
 	workflowRoot := t.TempDir()
-	oldWorkflow := beginTunnelCreateWorkflowForCommand
-	beginTunnelCreateWorkflowForCommand = func(ctx context.Context, request tunnelCreateWorkflowRequest) (tunnelCreateWorkflow, error) {
+	deps.beginWorkflow = func(ctx context.Context, request tunnelCreateWorkflowRequest) (tunnelCreateWorkflow, error) {
 		nameDigest := sha256.Sum256([]byte(request.Name))
-		return tunnelcreatejournal.Begin(ctx, tunnelcreatejournal.Config{StateRoot: workflowRoot, HostID: "host_1", NameDigest: hex.EncodeToString(nameDigest[:]), RequestDigest: request.RequestDigest, DomainCount: request.DomainCount, ExpiresAt: request.ExpiresAt, NewKey: tunnelKey})
+		return tunnelcreatejournal.Begin(ctx, tunnelcreatejournal.Config{StateRoot: workflowRoot, HostID: "host_1", NameDigest: hex.EncodeToString(nameDigest[:]), RequestDigest: request.RequestDigest, DomainCount: request.DomainCount, ExpiresAt: request.ExpiresAt, NewKey: func() (string, error) { return tunnelKey(ctx) }})
 	}
-	t.Cleanup(func() { beginTunnelCreateWorkflowForCommand = oldWorkflow })
+	return deps
 }
 
 func validCommandTunnel() api.Tunnel {
@@ -213,13 +207,13 @@ func TestTunnelCompletionUsesTheCanonicalSurface(t *testing.T) {
 }
 
 func TestTunnelCreateValidatesBeforeConstructingClient(t *testing.T) {
-	old := tunnelClientForCommand
-	t.Cleanup(func() { tunnelClientForCommand = old })
 	called := false
-	tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) { called = true; return nil, errors.New("must not be called") }
+	ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+		deps.client = func(*cobra.Command) (*api.Client, error) { called = true; return nil, errors.New("must not be called") }
+	})
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"create", "bad name", "--port", "80"})
-	if err := command.Execute(); err == nil {
+	if err := command.ExecuteContext(ctx); err == nil {
 		t.Fatal("expected validation error")
 	}
 	if called {
@@ -230,14 +224,14 @@ func TestTunnelCreateValidatesBeforeConstructingClient(t *testing.T) {
 func TestTunnelLogsFollowIsCancellationSafeAndRedacted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	requests := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, _ *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		entry := api.TunnelLogEntry{Schema: api.TunnelV1Schema, Kind: "log_entry", ID: "log_1", TunnelID: "tun_1", Level: "info", Component: "edge", Code: "ready", Message: "Bearer hidden", Metadata: map[string]any{"access_token": "hidden"}, OccurredAt: time.Unix(1, 0).UTC(), Cursor: "cur_1"}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelLogPage{Items: []api.TunnelLogEntry{entry}}})
 	})
 	output := &cancelAfterWrite{cancel: cancel}
 	command := tunnelCobraCommandV1()
-	command.SetContext(ctx)
+	command.SetContext(deps.context(ctx))
 	command.SetOut(output)
 	command.SetArgs([]string{"logs", "tun_1", "--follow", "--interval", "250ms", "--json"})
 	err := command.Execute()
@@ -254,7 +248,7 @@ func TestTunnelLogsFollowIsCancellationSafeAndRedacted(t *testing.T) {
 
 func TestTunnelHumanLogsExposeBoundedContinuation(t *testing.T) {
 	requests := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		if r.URL.Query().Get("limit") != "1" {
 			t.Errorf("limit=%s", r.URL.RawQuery)
@@ -265,7 +259,7 @@ func TestTunnelHumanLogsExposeBoundedContinuation(t *testing.T) {
 	var output bytes.Buffer
 	command.SetOut(&output)
 	command.SetArgs([]string{"logs", "tun_1", "--limit", "1"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 1 || !strings.Contains(output.String(), "logs tun_1 --cursor cur_1 --limit 1") {
@@ -275,10 +269,10 @@ func TestTunnelHumanLogsExposeBoundedContinuation(t *testing.T) {
 
 func TestTunnelLogsRejectsInvalidBoundsBeforeRequest(t *testing.T) {
 	requests := 0
-	withTunnelCommandClient(t, func(http.ResponseWriter, *http.Request) { requests++ })
+	deps := tunnelCommandFixture(t, func(http.ResponseWriter, *http.Request) { requests++ })
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"logs", "tun_1", "--limit", "201"})
-	if err := command.Execute(); err == nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err == nil {
 		t.Fatal("expected limit error")
 	}
 	if requests != 0 {
@@ -296,12 +290,12 @@ func TestTunnelHumanLogOutputReturnsWriterError(t *testing.T) {
 	command := tunnelCobraCommandV1()
 	command.SetOut(tunnelCommandFailingWriter{})
 	command.SetArgs([]string{"logs", "tun_1"})
-	withTunnelCommandClient(t, func(w http.ResponseWriter, _ *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelLogPage{
 			Items: []api.TunnelLogEntry{{Schema: api.TunnelV1Schema, Kind: "log_entry", ID: "log_1", TunnelID: "tun_1", OccurredAt: time.Unix(1, 0).UTC(), Level: "info", Component: "edge", Code: "ready", Message: "ready"}},
 		}})
 	})
-	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "output failed") {
+	if err := command.ExecuteContext(deps.context(t.Context())); err == nil || !strings.Contains(err.Error(), "output failed") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -327,7 +321,7 @@ func TestNormalizeTunnelCLIPathPrefixRejectsEmbeddedWildcards(t *testing.T) {
 }
 
 func TestTunnelDoctorPrintsDeterministicHealth(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, request *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/v1/tunnels" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelPage{Items: []api.Tunnel{validCommandTunnel()}}})
 			return
@@ -340,7 +334,7 @@ func TestTunnelDoctorPrintsDeterministicHealth(t *testing.T) {
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"doctor", "demo"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	want := "Tunnel tun_1: ready\nTunnel is ready.\n" +
@@ -353,28 +347,9 @@ func TestTunnelDoctorPrintsDeterministicHealth(t *testing.T) {
 }
 
 func TestTunnelDoctorBundleRequiresPreviewAndExplicitWrite(t *testing.T) {
-	oldReport := tunnelDoctorLocalReportForCommand
-	oldDNS := tunnelDoctorDNSCheckForCommand
-	oldHostDiagnostics := tunnelDoctorHostDiagnosticsForCommand
-	t.Cleanup(func() {
-		tunnelDoctorLocalReportForCommand = oldReport
-		tunnelDoctorDNSCheckForCommand = oldDNS
-		tunnelDoctorHostDiagnosticsForCommand = oldHostDiagnostics
-	})
-	tunnelDoctorLocalReportForCommand = func(context.Context) (localDoctorReport, error) {
-		return localDoctorReport{
-			HostRuntime: "ready", IdentityState: "valid", CredentialState: "valid",
-			StateRoot: "/Users/alice/private", MachineID: "machine_private_1", InboxPath: "/Users/alice/inbox",
-			RecoveryActions: []string{"authorization=doctor-private-secret"},
-		}, nil
-	}
-	tunnelDoctorDNSCheckForCommand = func(context.Context) bool { return true }
-	tunnelDoctorHostDiagnosticsForCommand = func(context.Context) (tunnelHostDiagnostics, error) {
-		return tunnelHostDiagnostics{}, errors.New("typed host diagnostics unavailable")
-	}
 	dimension := api.TunnelHealthDimension{Status: "healthy", Code: "ready"}
 	health := api.TunnelHealth{Schema: api.TunnelV1Schema, Kind: "health", ResourceKind: "tunnel", ResourceID: "tun_1", OverallCode: "ready", Summary: "Tunnel is ready.", RepairAction: "none", Since: time.Unix(1, 0).UTC(), Dimensions: api.TunnelHealthDimensions{Service: dimension, Edge: dimension, Config: dimension, Route: dimension, Origin: dimension, DNS: dimension, Certificate: dimension, Access: dimension, Update: dimension}}
-	withTunnelCommandClient(t, func(writer http.ResponseWriter, request *http.Request) {
+	deps := tunnelCommandFixture(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/v1/tunnels":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"data": api.TunnelPage{Items: []api.Tunnel{validCommandTunnel()}}})
@@ -384,21 +359,32 @@ func TestTunnelDoctorBundleRequiresPreviewAndExplicitWrite(t *testing.T) {
 			t.Fatalf("request=%s", request.URL.String())
 		}
 	})
+	deps.localReport = func(context.Context) (localDoctorReport, error) {
+		return localDoctorReport{
+			HostRuntime: "ready", IdentityState: "valid", CredentialState: "valid",
+			StateRoot: "/Users/alice/private", MachineID: "machine_private_1", InboxPath: "/Users/alice/inbox",
+			RecoveryActions: []string{"authorization=doctor-private-secret"},
+		}, nil
+	}
+	deps.dnsReady = func(context.Context) bool { return true }
+	deps.hostDiagnostics = func(context.Context) (tunnelHostDiagnostics, error) {
+		return tunnelHostDiagnostics{}, errors.New("typed host diagnostics unavailable")
+	}
 
 	outputPath := filepath.Join(realCommandTempDir(t), "tunnel-support.json")
-	previewOutput := executeTunnelDoctorJSON(t, "demo", outputPath, false)
+	previewOutput := executeTunnelDoctorJSON(t, deps, "demo", outputPath, false)
 	if _, err := os.Stat(outputPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("preview wrote output: %v", err)
 	}
 	if previewOutput.Bundle == nil || previewOutput.Written != nil || previewOutput.Bundle.Path != outputPath || previewOutput.Bundle.SizeBytes == 0 || previewOutput.Bundle.SHA256 == "" || len(previewOutput.Bundle.Manifest.Items) != 2 {
 		t.Fatalf("preview = %#v", previewOutput)
 	}
-	writtenOutput := executeTunnelDoctorJSON(t, "demo", outputPath, true)
+	writtenOutput := executeTunnelDoctorJSON(t, deps, "demo", outputPath, true)
 	if writtenOutput.Bundle == nil || writtenOutput.Written == nil || writtenOutput.Bundle.SHA256 != previewOutput.Bundle.SHA256 || writtenOutput.Written.SHA256 != previewOutput.Bundle.SHA256 {
 		t.Fatalf("written output = %#v", writtenOutput)
 	}
 	written, err := os.ReadFile(outputPath)
-	if err != nil || string(written) != string(mustPreviewBytes(t, health)) {
+	if err != nil || string(written) != string(mustPreviewBytes(t, deps, health)) {
 		t.Fatalf("written bundle changed: bytes=%d err=%v", len(written), err)
 	}
 	for _, unsafe := range []string{"/Users/alice", "machine_private_1", "doctor-private-secret"} {
@@ -422,7 +408,7 @@ func TestTunnelDoctorBundleRequiresPreviewAndExplicitWrite(t *testing.T) {
 
 func TestTunnelDoctorBundleValidatesBeforeNetwork(t *testing.T) {
 	requests := 0
-	withTunnelCommandClient(t, func(http.ResponseWriter, *http.Request) { requests++ })
+	deps := tunnelCommandFixture(t, func(http.ResponseWriter, *http.Request) { requests++ })
 	for _, arguments := range [][]string{
 		{"doctor", "demo", "--write-bundle"},
 		{"doctor", "demo", "--bundle", "relative.json"},
@@ -430,7 +416,7 @@ func TestTunnelDoctorBundleValidatesBeforeNetwork(t *testing.T) {
 	} {
 		command := tunnelCobraCommandV1()
 		command.SetArgs(arguments)
-		if err := command.Execute(); err == nil {
+		if err := command.ExecuteContext(deps.context(t.Context())); err == nil {
 			t.Fatalf("arguments %v succeeded", arguments)
 		}
 	}
@@ -440,15 +426,14 @@ func TestTunnelDoctorBundleValidatesBeforeNetwork(t *testing.T) {
 }
 
 func TestTunnelDoctorBundleCollectorHonorsCancellation(t *testing.T) {
-	oldReport := tunnelDoctorLocalReportForCommand
-	t.Cleanup(func() { tunnelDoctorLocalReportForCommand = oldReport })
 	called := false
-	tunnelDoctorLocalReportForCommand = func(ctx context.Context) (localDoctorReport, error) {
-		called = true
-		<-ctx.Done()
-		return localDoctorReport{}, ctx.Err()
-	}
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+		deps.localReport = func(ctx context.Context) (localDoctorReport, error) {
+			called = true
+			<-ctx.Done()
+			return localDoctorReport{}, ctx.Err()
+		}
+	}))
 	cancel()
 	_, _, err := buildTunnelDoctorBundle(ctx, api.TunnelHealth{}, tunnelDoctorBundleDefaultBytes)
 	var typed *supportbundle.Error
@@ -546,7 +531,7 @@ func TestResolveTunnelSelectorPaginatesAndRejectsCursorCycle(t *testing.T) {
 	}
 }
 
-func executeTunnelDoctorJSON(t *testing.T, selector, outputPath string, write bool) tunnelDoctorOutput {
+func executeTunnelDoctorJSON(t *testing.T, deps tunnelDependencies, selector, outputPath string, write bool) tunnelDoctorOutput {
 	t.Helper()
 	var output bytes.Buffer
 	command := tunnelCobraCommandV1()
@@ -556,7 +541,7 @@ func executeTunnelDoctorJSON(t *testing.T, selector, outputPath string, write bo
 		arguments = append(arguments, "--write-bundle")
 	}
 	command.SetArgs(arguments)
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	var result tunnelDoctorOutput
@@ -566,9 +551,9 @@ func executeTunnelDoctorJSON(t *testing.T, selector, outputPath string, write bo
 	return result
 }
 
-func mustPreviewBytes(t *testing.T, health api.TunnelHealth) []byte {
+func mustPreviewBytes(t *testing.T, deps tunnelDependencies, health api.TunnelHealth) []byte {
 	t.Helper()
-	builder, preview, err := buildTunnelDoctorBundle(t.Context(), health, tunnelDoctorBundleDefaultBytes)
+	builder, preview, err := buildTunnelDoctorBundle(deps.context(t.Context()), health, tunnelDoctorBundleDefaultBytes)
 	if err != nil || builder == nil {
 		t.Fatalf("build preview: %v", err)
 	}

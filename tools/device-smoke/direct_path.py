@@ -10,7 +10,7 @@ available. Checks:
              intact (sha256 equal), because the tunnel never sends a UDP payload above the safe 1280 byte tunnel MTU.
 Rules are removed on every exit path.
 
-  direct_path.py --host ubuntu@anvit --a rel-nat-a --b rel-nat-b
+  direct_path.py --host tester@staging.example.test --a rel-nat-a --b rel-nat-b
 """
 import argparse, base64, hashlib, json, subprocess, sys, threading, time
 from pathlib import Path
@@ -34,14 +34,19 @@ def docker(ct):
     return f"sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {ct}"
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--a", required=True)
     parser.add_argument("--b", required=True)
     parser.add_argument("--limit", type=float, default=12.0)
     parser.add_argument("--mtu", type=int, default=1350)
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     host, checks = args.host, []
 
     def add(name, ok, detail):

@@ -55,7 +55,7 @@ TLS certificate and signed-grant binding, node/epoch fencing and 60-second grant
 The carrier uses
 15-second carrier refresh, authority refresh at 30 seconds ±20% (approximately ten seconds with active regional
 recovery), bounded reliable
-control and two-fragment QUIC datagrams. WSS uses the same bounded packet frames over
+control and QUIC datagrams (one datagram per packet; two fragments only when the path MTU does not fit it). WSS uses the same bounded packet frames over
 one serialized TCP stream and therefore has TCP head-of-line blocking under loss. A configured Tailcat carrier factory replaces
 native DERP/TCP selection. Admission/protocol failures fail closed; ordinary drain and
 transport failures permit WSS reachability fallback and recovery to QUIC with current
@@ -85,8 +85,10 @@ transit; the delivering relay counts the forwarded bytes. Mesh counters (`links`
 `holder_miss`, `unreachable`, `loop_refused`, `bytes_in`, `bytes_out`) go to the control plane in the observation's `mesh`
 field. A draining relay keeps its links and announcements until the drain deadline.
 
-Relay connection capacity is the node's registered `capacity_limit` (at most 16,384); one
-account may hold all but a tenth of those slots. The UDP peer-relay role allows 128
+A relay has no connection limit: it admits every authorized connection and capacity is watched by resource alerts.
+Forwarding is fair by byte budgets per carrier and per account (an account's speed is shared across its relays by
+demand). `capacity_limit` in the registry is the node's declared size, shown on the capacity page; it never ranks or
+refuses a relay (clients rank relays by measured RTT). The UDP peer-relay role allows 128
 allocations, 16 per account, and shapes forwarding to 49,152 packets/second with a
 4,096-packet burst per account. These peer-relay limits are fixed workload budgets that
 define admission fairness and bounded resource use, so installation does not expose

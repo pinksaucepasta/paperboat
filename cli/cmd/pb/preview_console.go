@@ -27,9 +27,7 @@ import (
 	"golang.org/x/term"
 )
 
-var runPreviewConsoleForCommand = runPreviewConsole
-
-var previewInteractiveTerminal = func(command *cobra.Command) bool {
+func previewInteractiveTerminal(command *cobra.Command) bool {
 	input, ok := command.InOrStdin().(*os.File)
 	output, outOK := command.OutOrStdout().(*os.File)
 	return ok && outOK && term.IsTerminal(int(input.Fd())) && term.IsTerminal(int(output.Fd()))
@@ -425,7 +423,7 @@ func runPreviewConsole(command *cobra.Command, lease preview.Lease, target previ
 			result := previewConsoleResult{action: action}
 			switch action {
 			case "open":
-				result.err = openBrowser(lease.Endpoint)
+				result.err = hostDependenciesOf(ctx).openBrowser(lease.Endpoint)
 			case "background":
 				ttl, err := time.ParseDuration(value)
 				if err != nil || ttl <= 0 || ttl > previewMaximumTTL {

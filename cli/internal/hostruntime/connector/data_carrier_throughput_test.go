@@ -100,7 +100,7 @@ func TestQUICCarrierStreamHoldsTheBudgetAtRealRTT(t *testing.T) {
 	// The sender, the delay line and the receiver share one machine's cores. A shared GitHub runner cannot push the
 	// budget through all three (Windows: best of three 107-140 of 150, 2026-11-20), so there the test asserts only a
 	// floor that proves the carrier is not broken. The 150 Mbit/s budget is asserted on real hardware by the device
-	// smoke check carrier-throughput (this test binary run on every device, GITHUB_ACTIONS unset; victus 219-225).
+	// smoke check carrier-throughput (this test binary run on every device, GITHUB_ACTIONS unset; Windows test machine 219-225).
 	floor := throughputBudget
 	if os.Getenv("GITHUB_ACTIONS") == "true" {
 		floor = throughputSharedRunnerFloor

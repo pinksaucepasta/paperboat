@@ -40,7 +40,7 @@ func (s installedVersion) Restore(_ context.Context, data []byte) error {
 	return os.WriteFile(s.path, data, 0o600)
 }
 
-// killedInstall is an installation whose installer died after it stopped the services (victus 2026-11-10: hostd,
+// killedInstall is an installation whose installer died after it stopped the services (Windows test machine 2026-11-10: hostd,
 // the local daemon and the updater stayed stopped and the candidate's session owner stayed running).
 type killedInstall struct {
 	roles          []*lifecycleRole

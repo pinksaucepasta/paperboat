@@ -54,7 +54,7 @@ func newTrustRelay(t *testing.T, trust *jwks.Trust, startDoc ...string) *trustRe
 			gen = in.Expected + 1
 		}
 		r.mu.Lock()
-		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
+		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}}
 		if r.doc != "" {
 			out.JWKS = json.RawMessage(r.doc)
 		}

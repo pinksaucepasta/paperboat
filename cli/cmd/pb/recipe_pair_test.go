@@ -61,27 +61,25 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	oldClient, oldMachine, oldSetup := loginHTTPClient, loginLocalMachineID, runRecipeSetup
-	t.Cleanup(func() { loginHTTPClient, loginLocalMachineID, runRecipeSetup = oldClient, oldMachine, oldSetup })
-	loginHTTPClient = srv.Client
 	machineID := ""
-	loginLocalMachineID = func(*config.Config) (string, error) { return machineID, nil }
 	var setupArgs []string
-	runRecipeSetup = func(_ *command.Context, args []string) int { setupArgs, machineID = args, "machine_1"; return 0 }
-	// Windows: the elevated pairing adds the config service the daemon's unelevated [config] apply needs.
-	oldNeeds, oldService := recipeConfigNeedsService, recipeConfigService
-	t.Cleanup(func() { recipeConfigNeedsService, recipeConfigService = oldNeeds, oldService })
 	serviceFor := ""
-	recipeConfigNeedsService = true
-	recipeConfigService = func(_ context.Context, id string, install bool) error {
-		if install {
-			serviceFor = id
+	// The headless machine has no OS credential store; Windows: the elevated pairing adds the config service the
+	// daemon's unelevated [config] apply needs.
+	ctx := withAuthDependencies(t.Context(), func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.credentialStoreAvailable = func() bool { return false }
+		d.localMachineID = func(*config.Config) (string, error) { return machineID, nil }
+		d.runRecipeSetup = func(_ *command.Context, args []string) int { setupArgs, machineID = args, "machine_1"; return 0 }
+		d.recipeConfigNeedsService = true
+		d.recipeConfigService = func(_ context.Context, id string, install bool) error {
+			if install {
+				serviceFor = id
+			}
+			return nil
 		}
-		return nil
-	}
-	oldPreflight := recipeInstallPreflight
-	t.Cleanup(func() { recipeInstallPreflight = oldPreflight })
-	recipeInstallPreflight = func(context.Context) error { return nil }
+		d.recipeInstallPreflight = func(context.Context) error { return nil }
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
 	// A headless machine or container has no OS credential store: the recipe session goes to owner-only
 	// files, as a browser sign-in does (F26-02 on rcp-l, 2026-11-16: "OS credential store unavailable").
@@ -90,12 +88,9 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	if err := headless.Save(); err != nil {
 		t.Fatal(err)
 	}
-	oldStore := authCredentialStoreAvailable
-	t.Cleanup(func() { authCredentialStoreAvailable = oldStore })
-	authCredentialStoreAvailable = func() bool { return false }
 
 	t.Setenv("PB_RECIPE", "")
-	out, err := runBrowserLogin(t, context.Background(), path, "pair", token.String(), "--name", "runner-1")
+	out, err := runBrowserLogin(t, ctx, path, "pair", token.String(), "--name", "runner-1")
 	if err != nil || !strings.Contains(out, "Pairing this machine from recipe ci") {
 		t.Fatalf("pair: %v %s", err, out)
 	}
@@ -131,14 +126,14 @@ func TestRecipePairStartsARecipeSessionThenSetup(t *testing.T) {
 	// Run again on the paired machine: nothing to do, no session, no setup.
 	setupArgs = nil
 	t.Setenv("PB_RECIPE", token.String())
-	out, err = runBrowserLogin(t, context.Background(), path, "pair")
+	out, err = runBrowserLogin(t, ctx, path, "pair")
 	if err != nil || !strings.Contains(out, "already paired") || setupArgs != nil {
 		t.Fatalf("rerun: %v %s %v", err, out, setupArgs)
 	}
 
 	// The machine was removed since (recipe revoked, lifetime): not "already paired", but how to start over.
 	removed = true
-	out, err = runBrowserLogin(t, context.Background(), path, "pair")
+	out, err = runBrowserLogin(t, ctx, path, "pair")
 	if err == nil || !strings.Contains(userFacingError(err), "This machine was removed from Paperboat") || setupArgs != nil {
 		t.Fatalf("removed rerun: %v %s", err, out)
 	}
@@ -167,7 +162,7 @@ func TestRecipePairRefusesBadInputAtOnce(t *testing.T) {
 }
 
 func TestHostMachineNameKeepsTheFirstLabel(t *testing.T) {
-	for host, want := range map[string]string{"Manageds-Virtual-Machine.local": "Manageds-Virtual-Machine", "rcp-l": "rcp-l", " apple.lan ": "apple"} {
+	for host, want := range map[string]string{"Manageds-Virtual-Machine.local": "Manageds-Virtual-Machine", "rcp-l": "rcp-l", " macmini.lan ": "macmini"} {
 		if got := hostMachineName(host); got != want {
 			t.Fatalf("%q -> %q, want %q", host, got, want)
 		}
@@ -175,7 +170,7 @@ func TestHostMachineNameKeepsTheFirstLabel(t *testing.T) {
 }
 
 // A rotated token is refused with 401 recipe_replaced: pb pair says the token was replaced and which
-// recipe to rotate, not that a session must log in again (F26-07 device check, victus).
+// recipe to rotate, not that a session must log in again (F26-07 device check, Windows test machine).
 func TestRecipePairNamesAReplacedToken(t *testing.T) {
 	token, _ := recipe.NewToken("")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -199,17 +194,15 @@ func TestRecipePairChecksRootBeforeTheSession(t *testing.T) {
 		t.Errorf("unexpected request %s", r.URL.Path)
 	}))
 	defer srv.Close()
-	oldClient, oldMachine, oldPreflight := loginHTTPClient, loginLocalMachineID, recipeInstallPreflight
-	t.Cleanup(func() {
-		loginHTTPClient, loginLocalMachineID, recipeInstallPreflight = oldClient, oldMachine, oldPreflight
-	})
-	loginHTTPClient = srv.Client
 	// The identity is unreadable too (a standard Windows user): the refusal still names the rights.
-	loginLocalMachineID = func(*config.Config) (string, error) { return "", errors.New("chmod runtime: Access is denied") }
-	recipeInstallPreflight = func(context.Context) error { return errors.New("no root") }
+	ctx := withAuthDependencies(t.Context(), func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.localMachineID = func(*config.Config) (string, error) { return "", errors.New("chmod runtime: Access is denied") }
+		d.recipeInstallPreflight = func(context.Context) error { return errors.New("no root") }
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
 	t.Setenv("PB_RECIPE", "")
-	_, err := runBrowserLogin(t, context.Background(), path, "pair", token.String())
+	_, err := runBrowserLogin(t, ctx, path, "pair", token.String())
 	var refusal usageError
 	if !errors.As(err, &refusal) || refusal.publicMessage != hostruntimecmd.RecipeNeedsRootMessage || os.Getenv("PB_RECIPE") != token.String() {
 		t.Fatalf("err=%v", err)

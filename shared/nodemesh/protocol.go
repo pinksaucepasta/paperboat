@@ -27,8 +27,8 @@ const (
 	PeersPath   = "/v1/edge/forward/peers"
 	HoldersPath = "/v1/edge/forward/holders"
 
-	// MaxPeers bounds the peer directory a node holds.
-	MaxPeers = 256
+	// MaxPeers bounds the peer directory a node holds (the 4,096-node ceiling main already uses for the fleet).
+	MaxPeers = 4096
 	// MaxNameLength is the longest DNS name a forward carries (RFC 1035).
 	MaxNameLength = 253
 	// MaxFrame bounds one length-prefixed link message.

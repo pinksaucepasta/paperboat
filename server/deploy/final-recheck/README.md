@@ -32,6 +32,6 @@ owner alone when the account is deleted). It is idempotent; the entitlement is g
 ## Order
 
 1. `./final-recheck/rehearse.sh` (must print `REHEARSAL-OK`).
-2. Tell the test lanes to stop; wipe each device afterwards (the wipe makes every machine's server record disappear).
+2. Tell the test runs to stop; wipe each device afterwards (the wipe makes every machine's server record disappear).
 3. `./final-recheck/wipe-and-rebuild.sh WIPE-PROD-DATABASE`.
 4. The runner signs up its throwaway accounts, calls `final_fixtures.py --email E` for each, and pairs the devices.

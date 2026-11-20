@@ -266,14 +266,14 @@ func TestWindowsHostRuntimeFailurePreservesManagedSSHState(t *testing.T) {
 func TestWindowsRepairRequestCarriesPersistedReadinessEndpoint(t *testing.T) {
 	request := windowsRepairRequest(WindowsRuntimeConfig{
 		OwnerSID:      "S-1-5-21-1-2-3-4",
-		StateRoot:     `C:\Users\Pujan\AppData\Local\Paperboat\runtime`,
+		StateRoot:     `C:\Users\Tester\AppData\Local\Paperboat\runtime`,
 		ListenAddress: "127.0.0.1:8080",
 	})
 	if request.OwnerSID != "S-1-5-21-1-2-3-4" || request.StateRoot == "" || request.HelperListenAddress != "127.0.0.1:8080" {
 		t.Fatalf("repair request=%+v", request)
 	}
-	// A restore of a failed update validates this request: an empty Home made it invalid (victus, second admin user).
-	if request.Home != `C:\Users\Pujan\AppData\Local\Paperboat` || !safeAbsolute(request.Home) {
+	// A restore of a failed update validates this request: an empty Home made it invalid (Windows test machine, second admin user).
+	if request.Home != `C:\Users\Tester\AppData\Local\Paperboat` || !safeAbsolute(request.Home) {
 		t.Fatalf("repair request home = %q", request.Home)
 	}
 }

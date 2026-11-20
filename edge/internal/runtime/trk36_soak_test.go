@@ -74,7 +74,7 @@ func TestTRK36SustainedPreviewTunnelSoak(t *testing.T) {
 	}
 	source := &trk35IntegrationRouteSource{snapshot: control.RouteSnapshot{Routes: []control.RouteAssignment{assignment}, Complete: true, Canonical: true}}
 	observer := &trk35IntegrationRouteObserver{}
-	canonical, err := route.NewRegistryWithOptions("", "", route.GenerationRegistryOptions{MaximumStreams: 32})
+	canonical, err := route.NewRegistryWithOptions("", "", route.GenerationRegistryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestTRK36SustainedPreviewTunnelSoak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	carrierRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 32})
+	carrierRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

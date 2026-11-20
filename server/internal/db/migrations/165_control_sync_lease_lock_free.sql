@@ -1,7 +1,7 @@
 -- +goose Up
 -- A machine's local address lease (127.100.x.y) was allocated lazily inside the machine list query, under a
 -- table-wide SHARE ROW EXCLUSIVE lock and a scan of every slot: the first list of a 100-machine account ran 29 s and
--- every other list of it waited on Lock:relation (Lane W staging). The list now only reads leases; a machine gets its
+-- every other list of it waited on Lock:relation (staging). The list now only reads leases; a machine gets its
 -- lease when it connects to control sync (sync authority). Allocation takes no table lock: it reuses a released slot
 -- (SKIP LOCKED) or inserts the lowest free one, skipping a slot a concurrent allocation holds (advisory lock):
 -- concurrent allocations never wait for each other.

@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
-// The database had no time bounds (Lane X robustness #3): a stuck query or a lock queue could hold a pool
+// The database had no time bounds (robustness #3): a stuck query or a lock queue could hold a pool
 // connection forever (a test INSERT ran 5.5 h), and the pool size was fixed. Every request connection carries the
 // configured statement, lock and idle-in-transaction timeouts: a statement blocked on a lock fails with a clear
 // lock_timeout error within its bound, a query on a full pool stops waiting at the acquire bound (F21-03), and

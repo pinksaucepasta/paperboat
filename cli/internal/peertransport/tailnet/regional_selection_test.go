@@ -79,19 +79,22 @@ func TestRegionalSelectionFreshSamplesAndJitter(t *testing.T) {
 	}
 }
 
-func TestRegionalSelectionUsesCapacityAdjustedQuality(t *testing.T) {
+func TestRegionalSelectionIgnoresDeclaredCapacity(t *testing.T) {
 	now := time.Unix(1000, 0)
 	a, b := selectionScore("a", "one", 80*time.Millisecond), selectionScore("b", "two", 90*time.Millisecond)
-	a.node.CapacityUsed = 100 // Effective quality is 160 ms, despite smaller raw RTT.
+	a.node.CapacityUsed = 100 // a full relay still ranks by RTT: declared capacity never ranks or refuses it
+	scores := []regionalScore{b, a}
+	rankRegional(scores)
+	if scores[0].node.NodeID != "a" {
+		t.Fatalf("rank order = %s first, want the lower-RTT relay", scores[0].node.NodeID)
+	}
 	var s regionalSelection
 	s.choose(now, []regionalScore{a})
 	s.commit("a", now)
-	for _, offset := range []time.Duration{time.Second, 4 * time.Second, 11 * time.Second} {
-		s.choose(now.Add(offset), []regionalScore{a, b})
-	}
-	chosen, reason := s.choose(now.Add(14*time.Second), []regionalScore{a, b})
-	if chosen.node.NodeID != "b" || reason != "sustained_improvement" {
-		t.Fatal("ranking and switch quality disagree")
+	for _, offset := range []time.Duration{time.Second, 4 * time.Second, 11 * time.Second, 14 * time.Second} {
+		if chosen, _ := s.choose(now.Add(offset), []regionalScore{a, b}); chosen.node.NodeID != "a" {
+			t.Fatalf("switched to %s at %v; full capacity must not move a lower-RTT relay", chosen.node.NodeID, offset)
+		}
 	}
 }
 
@@ -113,7 +116,7 @@ func TestRegionalSelectionInvalidInputAndBackupDomains(t *testing.T) {
 		}
 	}
 	bad := a
-	bad.node.CapacityLimit = 0
+	bad.rtt = 0
 	for _, scores := range [][]regionalScore{nil, {a, a}, {bad}, make([]regionalScore, MaxRegionalCandidates+1)} {
 		var s regionalSelection
 		if chosen, _ := s.choose(time.Now(), scores); chosen.node.NodeID != "" {

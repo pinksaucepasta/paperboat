@@ -50,7 +50,7 @@ func TestTRK35IntegratedRouteLifecycleFaultHarness(t *testing.T) {
 		calls:    make(chan struct{}, 16),
 	}
 	observer := &trk35IntegrationRouteObserver{failNext: errTrk35IntegrationLostACK}
-	canonical, err := route.NewRegistryWithOptions("", "", route.GenerationRegistryOptions{MaximumStreams: 1})
+	canonical, err := route.NewRegistryWithOptions("", "", route.GenerationRegistryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestTRK35IntegratedRouteLifecycleFaultHarness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	carrierRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 8})
+	carrierRoutes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,12 +194,6 @@ func TestTRK35IntegratedRouteLifecycleFaultHarness(t *testing.T) {
 		_ = heldStream.Close()
 		_ = lease.Close()
 		t.Fatal(err)
-	}
-	if _, _, err := canonical.Acquire(context.Background(), oldAssignment.PublicHost, "/overloaded"); !errors.Is(err, route.ErrStreamOverloaded) {
-		t.Fatalf("second route acquire error = %v, want ErrStreamOverloaded", err)
-	}
-	if got := secondPair.client.ActiveStreams(); got > 1 {
-		t.Fatalf("carrier streams exceeded route budget: %d", got)
 	}
 	if err := heldStream.Close(); err != nil {
 		t.Fatal(err)

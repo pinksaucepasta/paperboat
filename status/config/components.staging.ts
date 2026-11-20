@@ -1,8 +1,8 @@
 // The status page's components: which units each has and which vantage points report them. Plain TypeScript so every bundler reads it.
 export default {
   "vantages": [
-    "oracle",
-    "anvit"
+    "vantage-a",
+    "vantage-b"
   ],
   "components": [
     {
@@ -14,8 +14,8 @@ export default {
           "id": "api_health",
           "name": "Service ready",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 3000
         },
@@ -23,8 +23,8 @@ export default {
           "id": "api_read",
           "name": "Public read",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 3000
         }
@@ -39,8 +39,8 @@ export default {
           "id": "relay_anvitstg",
           "name": "Staging relay",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 3000
         }
@@ -55,8 +55,8 @@ export default {
           "id": "edge_anvitstg",
           "name": "Staging edge",
           "vantages": [
-            "oracle",
-            "anvit"
+            "vantage-a",
+            "vantage-b"
           ],
           "slowMs": 3000
         }

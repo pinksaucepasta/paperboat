@@ -712,7 +712,7 @@ func waitPublisherClosed(t *testing.T, closed <-chan struct{}) {
 
 // The browser that joins first does so inside a request with a deadline. The shared output stream must outlive
 // that request: the carrier resets a stream whose open context ends, and every browser then lost its terminal
-// about 10 s after attaching (web lane, prod 13:51Z).
+// about 10 s after attaching (prod 13:51Z).
 func TestPublisherStreamOutlivesTheJoiningRequest(t *testing.T) {
 	root := t.TempDir()
 	adapter, err := pty.NewAdapter(root)

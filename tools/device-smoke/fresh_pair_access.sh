@@ -1,7 +1,7 @@
 #!/bin/bash
 # fresh_pair_access.sh HOST BINARY
 #
-# Pairs two FRESH throwaway containers on HOST (a Linux VM with Docker and the laneh-ubuntu24-systemd image, whose
+# Pairs two FRESH throwaway containers on HOST (a Linux VM with Docker and the test-systemd image, whose
 # user `pb` is signed in to the test account and only mints enrollment tokens) with BINARY, then runs
 # `pb access machine <target> --port N` from the client container to a marker origin on the target, end to end,
 # with no daemon restart in between. Machines paired before a
@@ -13,7 +13,7 @@ set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-TARGET=fresh-access-t-$STAMP CLIENT=fresh-access-c-$STAMP ALIAS=lanea-fpa-$STAMP PORT=18473 LISTEN=127.0.0.1:18474
+TARGET=fresh-access-t-$STAMP CLIENT=fresh-access-c-$STAMP ALIAS=test-fpa-$STAMP PORT=18473 LISTEN=127.0.0.1:18474
 MACHINE_IDS=
 
 finish() {

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Staging on a LAN (Lane W, pbvm4) claims a node at a private address only when the service allows it;
+// Staging on a LAN (Linux test VM) claims a node at a private address only when the service allows it;
 // loopback, link-local and documentation ranges stay refused either way.
 func TestPrivateIngressIsAcceptedOnlyWhenAllowed(t *testing.T) {
 	var service Service

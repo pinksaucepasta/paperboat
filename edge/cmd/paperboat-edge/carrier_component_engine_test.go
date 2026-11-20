@@ -79,14 +79,14 @@ func TestRuntimeCarrierBecomesTheReplicaOfItsEngineTunnelRoutes(t *testing.T) {
 	}
 	defer runtimeRoutes.Close()
 	worker := &edgeruntime.RuntimeCarrierWorker{Expected: runtimeExpected, Routes: runtimeRoutes}
-	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer routes.Close()
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
-		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
+		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durableExpected, nil,
 		routes, nil, nil, nil, nil, worker,
 	)
@@ -222,14 +222,14 @@ func TestRuntimeRouteAttachesWhenItsAdmissionArrivesAfterTheEngineCarrierConnect
 	}
 	defer runtimeRoutes.Close()
 	worker := &edgeruntime.RuntimeCarrierWorker{Expected: runtimeExpected, Routes: runtimeRoutes}
-	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer routes.Close()
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
-		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
+		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durableExpected, nil,
 		routes, nil, nil, nil, nil, worker,
 	)

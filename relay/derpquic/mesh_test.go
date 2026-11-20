@@ -357,10 +357,10 @@ func TestMeshDoesNotDoubleChargeAccountBudget(t *testing.T) {
 		}
 	}
 	eventually(t, func() bool { return b.server.Snapshot().BytesForwarded-before >= packets*size/2 })
-	if got := a.server.TakeAccountDemand()["account"]; got < packets*size {
+	if got := a.server.TakeAccountDemand()["account"].Offered; got < packets*size {
 		t.Fatalf("the ingress relay charges the account for what the sender offered: %d", got)
 	}
-	if got := b.server.TakeAccountDemand()["account"]; got >= packets*size/4 {
+	if got := b.server.TakeAccountDemand()["account"].Offered; got >= packets*size/4 {
 		t.Fatalf("the delivering relay charged the account budget again: %d", got)
 	}
 	if a.server.Snapshot().BytesForwarded != 0 {
@@ -415,17 +415,19 @@ func TestMeshHolderMapBounded(t *testing.T) {
 	m.holderLimit = 1000
 	l := &meshLink{m: m}
 	const peers, perFrame = 20000, 500
-	for sent := 0; sent < peers; sent += perFrame {
-		f := meshFrame{Kind: meshPresent}
-		for range perFrame {
-			f.Keys = append(f.Keys, KeyString(randomPublic()))
-		}
-		if err := m.handle(l, f); err != nil {
-			t.Fatal(err)
+	announced := make([]string, peers)
+	for i := range announced {
+		announced[i] = KeyString(randomPublic())
+	}
+	for range 2 { // the same peers announce twice: a held key is not a new entry, an over-limit one is dropped each time
+		for sent := 0; sent < peers; sent += perFrame {
+			if err := m.handle(l, meshFrame{Kind: meshPresent, Keys: announced[sent : sent+perFrame]}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if got := m.holderCount(); got != 1000 || m.drops[dropHolderFull].Load() != peers-1000 {
-		t.Fatalf("holder map holds %d entries after %d announcements, dropped %d", got, peers, m.drops[dropHolderFull].Load())
+	if got := m.holderCount(); got != 1000 || m.drops[dropHolderFull].Load() != 2*(peers-1000) {
+		t.Fatalf("holder map holds %d entries after %d announcements twice, dropped %d", got, peers, m.drops[dropHolderFull].Load())
 	}
 	cache := newRemoteCache(100)
 	for range peers {

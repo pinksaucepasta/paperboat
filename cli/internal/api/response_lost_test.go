@@ -13,8 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 )
 
-// dropAfterHandling applies the request, then closes the connection without a response (Lane S:
-// POST /v1/teams/<team>/actions logged 200 while the CLI said unreachable).
+// dropAfterHandling applies the request, then closes the connection without a response (// POST /v1/teams/<team>/actions logged 200 while the CLI said unreachable).
 func dropAfterHandling(t *testing.T, applied *atomic.Int32, failFirst int32) *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if applied.Add(1) > failFirst {
@@ -98,7 +97,7 @@ func (f *unwrittenFailure) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 // A read that fails before it is written (an unreachable server) is not repeated by this layer: the
-// transport already retries those, and stacking both turned one read into ~9 attempts (Lane X A3).
+// transport already retries those, and stacking both turned one read into ~9 attempts (A3).
 func TestAReadThatWasNeverSentIsNotRetriedHere(t *testing.T) {
 	failing := &unwrittenFailure{}
 	client := New("https://api.example.test", config.Credential{AccessToken: "token"}, &http.Client{Transport: failing})
@@ -109,7 +108,7 @@ func TestAReadThatWasNeverSentIsNotRetriedHere(t *testing.T) {
 }
 
 // A server that accepts and never answers costs one client timeout and one connection, not 3x3 attempts
-// (F21-40, Lane X audit A3).
+// (F21-40 audit A3).
 func TestAReadAgainstABlackholedServerGivesUpWithinOneBound(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

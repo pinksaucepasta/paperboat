@@ -10,7 +10,7 @@ var (
 	ErrUnavailable = errors.New("no node serving this name could be reached")
 	// ErrDraining is what an Injector answers once its HTTP server can no longer accept visitors.
 	ErrDraining = errors.New("node is draining and takes no new forwarded visitors")
-	// ErrBusy is what an Injector answers when it has no room for another forwarded visitor.
+	// ErrBusy is what an Injector answers when it has no room for another forwarded visitor from this peer or address.
 	ErrBusy = errors.New("node has no room for another forwarded visitor")
 	// ErrStopped: the mesh is not running.
 	ErrStopped = errors.New("node mesh is not running")

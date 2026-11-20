@@ -23,18 +23,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import xplat_fleet as fleet  # noqa: E402
+from dev_targets import get_setting  # noqa: E402
 from config_sync_lifecycle import HTTP_SERVER  # noqa: E402
 
-REPO_HOST = os.environ.get('XPLAT_REPO_HOST', 'hp')
+REPO_HOST = os.environ.get('XPLAT_REPO_HOST') or get_setting('xplat_linux_host')
 REPO_ADDR = os.environ.get('XPLAT_REPO_ADDR') or REPO_HOST.split('@')[-1]  # the host name as the controller dials it (ssh -R takes no user@); XPLAT_REPO_ADDR=127.0.0.1 with a pre-made `ssh -L` when the controller cannot reach the host's ports
 REPO_BRIDGE = os.environ.get('XPLAT_REPO_BRIDGE', '10.0.0.1')  # the repository host as the Linux container reaches it
-REPO_ROOT = os.environ.get('XPLAT_REPO_ROOT', '/tmp/xplat-cfg-repo')  # one per lane: lanes share hp and the account
+REPO_ROOT = os.environ.get('XPLAT_REPO_ROOT', '/tmp/xplat-cfg-repo')  # one per worktree: worktrees share Linux test machine and the account
 NAME = os.environ.get('XPLAT_REPO_NAME', 'xplat-config-fixture')
 SYNC_WAIT = 240
 GIT_ENV = 'GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@example.test GIT_COMMITTER_NAME=x GIT_COMMITTER_EMAIL=x@example.test'
 
 # Where an app's files live on each OS, as written in the config and as the filesystem sees them (below the home directory).
-APP_DIR = os.environ.get('XPLAT_APP_DIR', 'xplat')  # one per lane: a run starts by deleting this directory on every device
+APP_DIR = os.environ.get('XPLAT_APP_DIR', 'xplat')  # one per worktree: a run starts by deleting this directory on every device
 RULE_ROOT = {'linux': '~/.config/' + APP_DIR, 'darwin': '~/Library/Application Support/' + APP_DIR, 'windows': '%APPDATA%/' + APP_DIR}
 REAL_ROOT = {'linux': '.config/' + APP_DIR, 'darwin': 'Library/Application Support/' + APP_DIR, 'windows': 'AppData/Roaming/' + APP_DIR}
 results = {}
@@ -85,7 +86,7 @@ class Repo:
         return done.stdout if done.returncode == 0 else None
 
     def serve(self, password):
-        # a port inside the firewall's open range (anvit accepts 10000-59999 only), not an ephemeral one
+        # a port inside the firewall's open range (database test host accepts 10000-59999 only), not an ephemeral one
         bind = "('0.0.0.0', %d)" % int(os.environ.get('XPLAT_REPO_PORT') or random.randrange(20000, 30000))
         self.sh('cat > %s/server.py' % REPO_ROOT, input=HTTP_SERVER.replace("('127.0.0.1', 0)", bind).encode())
         self.sh('cd %s && (setsid nohup python3 server.py %s cfguser %s > port 2>/dev/null < /dev/null & echo $! > pid)'
