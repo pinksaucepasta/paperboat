@@ -72,7 +72,7 @@ func publicIngressHandler(routes []config.PublicRoute, infrastructureHost, healt
 				healthProxy.ServeHTTP(writer, request)
 				return
 			}
-			if strings.HasPrefix(request.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(request.URL.Path, "/v1/runtime/") {
+			if strings.HasPrefix(request.URL.Path, "/v1/runtime/") {
 				next.ServeHTTP(writer, request)
 				return
 			}

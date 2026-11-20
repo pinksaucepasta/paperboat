@@ -49,7 +49,7 @@ func TestPublicIngressRoutesBareNameAndIPUpstreams(t *testing.T) {
 	}
 }
 
-func TestPublicIngressForwardsBrowserTerminalAndRuntimeOnInfrastructureHost(t *testing.T) {
+func TestPublicIngressForwardsRuntimeOnlyOnInfrastructureHost(t *testing.T) {
 	handler := publicIngressHandler(nil, "infra.example.test", "127.0.0.1:1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}), nil)
@@ -57,9 +57,9 @@ func TestPublicIngressForwardsBrowserTerminalAndRuntimeOnInfrastructureHost(t *t
 		path string
 		want int
 	}{
-		{path: "/v1/browser-terminal/machine.runtime.example.test", want: http.StatusAccepted},
-		{path: "/v1/browser-terminal/", want: http.StatusAccepted},
 		{path: "/v1/runtime/machine.runtime.example.test", want: http.StatusAccepted},
+		{path: "/v1/browser-terminal/machine.runtime.example.test", want: http.StatusNotFound},
+		{path: "/v1/browser-terminal", want: http.StatusNotFound},
 		{path: "/v1/other", want: http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "https://infra.example.test"+tc.path, nil)
