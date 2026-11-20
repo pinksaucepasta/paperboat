@@ -108,23 +108,29 @@ try {
         await home.close()
         return out
       }
-      if (s !== "own") await page.waitForSelector("[data-fair-use] [role=meter] > [title^=Relay]", { timeout: 60_000 }).catch(() => {})
+      if (s !== "own") await page.waitForFunction(() => document.querySelector("[data-fair-use] [title^=Relay]") !== null, null, { timeout: 60_000 }).catch(() => {})
       const text = ((await panel?.innerText()) ?? "").replace(/\s+/g, " ")
+      // The same text with a space between every element's text (innerText drops it between flex items): headline, rows and legend.
+      const spaced = await panel?.evaluate((node) => {
+        const leaves = []
+        for (const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT); walker.nextNode();) leaves.push(walker.currentNode.textContent.trim())
+        return leaves.filter(Boolean).join(" ")
+      }) ?? ""
       const text0 = text
       check(`${name}/${s}: no asterisks`, !/\*/.test(text0))
       if (s === "team") {
-        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB/.test(text), text.slice(0, 160))
+        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB/.test(spaced), text.slice(0, 160))
       } else if (s === "own") {
         check(`${name}/${s}: it says Unlimited (your own edges) and that nothing is counted`, /Unlimited \(your own edges\)/.test(text) && /never counted or limited by Paperboat/.test(text), text.slice(0, 90))
         check(`${name}/${s}: no upsell, no banner`, (await panel.$$eval("a", (a) => a.length)) === 0 && !(await page.$("[data-quota-banner]")))
       } else {
         const used = { under: 40, nearly: 85, throttled: 104 }[s]
         const re = (gb) => `${Math.round(gb)}\\.?\\d* GB`
-        check(`${name}/${s}: it shows what is used of the amount`, new RegExp(`${re(used)} of 100 GB`).test(text), text.slice(0, 90))
+        check(`${name}/${s}: it shows what is used of the amount`, new RegExp(`${re(used)} of 100 GB`).test(spaced), spaced.slice(0, 90))
         check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of traffic included/.test(text) && /Edges and relays share it: previews, tunnels and relayed connections count\. Files you upload through a console terminal count too; typing and terminal output do not, and are never slowed by it/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Until then relayed connections run at up to 100 Mbit\/s and edges at full speed\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
         // Hosted allowance: "<X> left" (or the slowed state in its place), a bar split relay/edge, "<used> of <total>", "Resets <date>", legend.
         const legend = new RegExp(`Relay ${re(used * 0.6)} Edge ${re(used * 0.4)} `)
-        check(`${name}/${s}: legend shows relay and edge hosted traffic only (self-hosted never counts)`, legend.test(text) && !/\b7\.?\d* GB/.test(text), text.slice(0, 120))
+        check(`${name}/${s}: legend shows relay and edge hosted traffic only (self-hosted never counts)`, legend.test(spaced) && !/\b7\.?\d* GB/.test(spaced), spaced.slice(0, 120))
         const bars = await panel.$$eval("[role=meter] > div", (d) => d.map((e) => ({ w: parseFloat(e.style.width), c: e.className })))
         check(`${name}/${s}: the bar is split relay/edge 60/40 of the used share`, bars.length === 2 && /relay/.test(bars[0].c) && /edge/.test(bars[1].c) && Math.abs(bars[0].w / (bars[0].w + bars[1].w) - 0.6) < 0.01 && Math.abs(bars[0].w + bars[1].w - Math.min(100, used)) < 0.5, JSON.stringify(bars))
         check(`${name}/${s}: it says when the period resets`, /Resets [A-Za-z0-9 ]+/.test(text))
@@ -132,7 +138,7 @@ try {
         check(`${name}/${s}: home card is titled Hosted allowance`, card.title === "Hosted allowance", card.title)
         check(`${name}/${s}: home card shows <used> of <total>, Resets <date>, legend, nothing truncated`, new RegExp(`${re(used)} of 100 GB Resets .+ Relay ${re(used * 0.6)} Edge ${re(used * 0.4)}$`).test(card.text) && !card.clipped, `${card.text}${card.clipped ? " (clipped)" : ""}`)
         if (s === "throttled") {
-          check(`${name}/${s}: it says slowed to 1 Mbit/s until the reset date`, /Slowed to 1 Mbit\/s until/.test(text) && /Slowed to 1 Mbit\/s until/.test(card.text) && !/left/.test(card.text), `${text.slice(0, 40)} | ${card.text.slice(0, 40)}`)
+          check(`${name}/${s}: it says slowed to 1 Mbit/s until the reset date`, /Slowed to 1 Mbit\/s until/.test(spaced) && /Slowed to 1 Mbit\/s until/.test(card.text) && !/left/.test(card.text), `${spaced.slice(0, 40)} | ${card.text.slice(0, 40)}`)
           const links = (await panel.$$eval("a", (a) => a.map((e) => `${e.textContent.trim()}:${e.getAttribute("href")}`))).join(" ")
           check(`${name}/${s}: it offers add bandwidth and change plan`, /Add bandwidth:\/billing/.test(links) && /Change plan:\/billing/.test(links), links)
           const banner = await page.waitForSelector("[data-quota-banner]", { timeout: 30_000 }).catch(() => null)
@@ -140,7 +146,7 @@ try {
           check(`${name}/${s}: the banner is calm: slowed, never cut off`, /Slowed to 1 Mbit\/s until/.test(bannerText) && /Never cut off, never billed extra/.test(bannerText) && !/paused|stopped|exhausted|\*/i.test(bannerText), bannerText.slice(0, 80))
         } else {
           const left = { under: 60, nearly: 15 }[s]
-          check(`${name}/${s}: it says what is left, no banner`, new RegExp(`^${re(left)} left`).test(text) && !(await page.$("[data-quota-banner]")), text.slice(0, 40))
+          check(`${name}/${s}: it says what is left, no banner`, new RegExp(`^${re(left)} left`).test(spaced) && !(await page.$("[data-quota-banner]")), spaced.slice(0, 40))
           check(`${name}/${s}: home card says what is left`, new RegExp(`^Hosted allowance ${re(left)} left`).test(card.text), card.text.slice(0, 50))
           const links = await panel.$$eval("a", (a) => a.length)
           check(`${name}/${s}: ${s === "nearly" ? "past 80% it offers add bandwidth" : "no upsell below 80%"}`, s === "nearly" ? links === 2 : links === 0, `${links} links`)
