@@ -136,7 +136,7 @@ try {
         check(`${name}/${s}: no upsell, no banner`, (await live.locator("a").count()) === 0 && !(await page.$("[data-quota-banner]")))
       } else {
         const used = { under: 40, nearly: 85, throttled: 104 }[s]
-        const re = (gb) => `${Math.round(gb)}\\.?\\d* GB`
+        const re = (gb) => `${Math.floor(gb + 1e-6)}\\.?\\d* GB`
         check(`${name}/${s}: it shows what is used of the amount`, new RegExp(`${re(used)} of 100 GB`).test(spaced), spaced.slice(0, 90))
         check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of traffic included/.test(text) && /Edges and relays share it: previews, tunnels and relayed connections count\. Files you upload through a console terminal count too; typing and terminal output do not, and are never slowed by it/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Until then relayed connections run at up to 100 Mbit\/s and edges at full speed\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
         // Hosted allowance: "<X> left" (or the slowed state in its place), a bar split relay/edge, "<used> of <total>", "Resets <date>", legend.
