@@ -37,7 +37,7 @@ pb send <path>... --to <machine> [flags]
 
 ```
   -h, --help             help for send
-      --json             print JSON
+      --json             print a JSON result to stdout and throttle events to stderr
       --session string   terminal session ID for destination context
       --to string        destination machine name or ID
       --unlimited        send any size, only directly or through your own relay; waits while neither is available (default: your account's transfer mode)
