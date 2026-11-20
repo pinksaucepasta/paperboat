@@ -49,7 +49,7 @@ AND n.endpoints_epoch=e.epoch AND (NOT $3 OR n.tunnel_endpoints_epoch=e.epoch)`,
 // carrier's identity, with the route's own id, hostname and kind. Callers send these only to an
 // edge that advertised runtimewire.CapabilityEndpoints.
 func EdgeAdmissions(ctx context.Context, q Querier, nodeID, epoch string, expiresAt time.Time) ([]runtimewire.Admission, error) {
-	var all []runtimewire.Admission
+	all := []runtimewire.Admission{}
 	var after Position
 	for {
 		// A page of rows may end in rows that are not live admissions; Position is the last row either way.
