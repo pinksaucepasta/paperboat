@@ -2993,6 +2993,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/file-transfer-sessions/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release file transfer access sessions
+         * @description Ends the authenticated CLI session's dedicated file-transfer credentials after its streams close. Already released and unknown IDs are ignored.
+         */
+        post: operations["post_v1_file_transfer_sessions_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sends/prepare": {
         parameters: {
             query?: never;
@@ -22092,6 +22112,34 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    post_v1_file_transfer_sessions_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    access_session_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description File transfer credentials released. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     create_send_prepare: {

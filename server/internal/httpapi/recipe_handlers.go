@@ -48,7 +48,7 @@ func recipeRoute(r *http.Request, own string) bool {
 	if r.Method != http.MethodPost {
 		return false
 	}
-	if p == "/v1/native-private-access/grants" {
+	if p == "/v1/native-private-access/grants" || p == fileTransferReleasePath {
 		return true
 	}
 	// Read access to a config repository: the handler allows only the recipe's own [config] repository.

@@ -244,6 +244,11 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				return friendlyCommandError(err)
 			}
 		}
+		var accessSessionIDs []string
+		if descriptor.Auth.AccessSessionID != "" {
+			accessSessionIDs = append(accessSessionIDs, descriptor.Auth.AccessSessionID)
+		}
+		defer func() { releaseTransferAccess(ctx.Context, client, accessSessionIDs) }()
 		target := &resolver.FileTransferTarget{
 			Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID,
 			DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID,
@@ -293,6 +298,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				if renewErr != nil {
 					return filetransfer.NativeGrant{}, renewErr
 				}
+				accessSessionIDs = append(accessSessionIDs, fresh.Auth.AccessSessionID)
 				return grantForDescriptor(renewCtx, fresh)
 			})
 			if nativeErr != nil {
@@ -451,4 +457,11 @@ func unlimitedFlagMode(command *cobra.Command) string {
 		return "unlimited"
 	}
 	return ""
+}
+
+// The transfer's result is independent of releasing its short-lived credentials.
+func releaseTransferAccess(ctx context.Context, client *api.Client, ids []string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = client.ReleaseFileTransferSessions(ctx, ids)
 }

@@ -252,7 +252,7 @@ func scopedTokenRoute(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
 	}
-	if p == "/v1/native-private-access/grants" {
+	if p == "/v1/native-private-access/grants" || p == fileTransferReleasePath {
 		return true
 	}
 	parts := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")

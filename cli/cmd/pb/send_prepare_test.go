@@ -103,7 +103,7 @@ func TestSendPrepareOfflineWaitsOutTheGraceAndRefuses(t *testing.T) {
 // only extra round trip.
 func TestSendPreparePendingPollsThenFetchesTheDescriptor(t *testing.T) {
 	var reached []string
-	var descriptorBody string
+	var descriptorBody, releaseBody string
 	polls := 0
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		reached = append(reached, request.Method+" "+request.URL.Path)
@@ -124,7 +124,11 @@ func TestSendPreparePendingPollsThenFetchesTheDescriptor(t *testing.T) {
 			descriptorBody = string(body)
 			// A descriptor without an endpoint ends the send before any peer
 			// work, pinning that the poll path fetched it with the binding.
-			writeAPIData(t, writer, api.FileTransfer{SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Auth: api.AuthMaterial{Method: "bearer", Token: "transfer-token"}})
+			writeAPIData(t, writer, api.FileTransfer{SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Auth: api.AuthMaterial{Method: "bearer", Token: "transfer-token", AccessSessionID: "session_pending"}})
+		case "POST /v1/file-transfer-sessions/release":
+			body, _ := io.ReadAll(request.Body)
+			releaseBody = string(body)
+			writer.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -165,12 +169,15 @@ func TestSendPreparePendingPollsThenFetchesTheDescriptor(t *testing.T) {
 			t.Fatalf("descriptor request lacks %s: %s", want, descriptorBody)
 		}
 	}
+	if releaseBody != `{"access_session_ids":["session_pending"]}` {
+		t.Fatalf("failed send released the wrong sessions: %q", releaseBody)
+	}
 	if polls < 2 {
 		t.Fatalf("polls=%d, want pending then approved", polls)
 	}
 	for _, path := range reached {
 		switch path {
-		case "GET /v1/machines", "POST /v1/sends/prepare", "GET /v1/me/preferences", "GET /v1/team-inbox/requests/request_pending", "POST /v1/machines/machine_destination/file-transfer-descriptor":
+		case "GET /v1/machines", "POST /v1/sends/prepare", "GET /v1/me/preferences", "GET /v1/team-inbox/requests/request_pending", "POST /v1/machines/machine_destination/file-transfer-descriptor", "POST /v1/file-transfer-sessions/release":
 		default:
 			t.Fatalf("pending send reached %s", path)
 		}

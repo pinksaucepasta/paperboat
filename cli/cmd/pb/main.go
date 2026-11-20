@@ -764,10 +764,26 @@ func transferClientForCommand(cobraCommand *cobra.Command, args []string) (trans
 	}
 	target := &resolver.FileTransferTarget{Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID, DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID}, Policy: descriptor.Policy}
 	client, lease, err := newTransferCommandClient(ctx.Context, target, destination, newIdempotencyKey())
+	release := func() {
+		if descriptor.Auth.AccessSessionID != "" {
+			releaseTransferAccess(ctx.Context, backend, []string{descriptor.Auth.AccessSessionID})
+		}
+	}
 	if err != nil {
+		release()
 		return nil, api.UserMachine{}, nil, err
 	}
-	return client, destination, lease, nil
+	return client, destination, transferCommandCloser{lease, release}, nil
+}
+
+type transferCommandCloser struct {
+	lease   io.Closer
+	release func()
+}
+
+func (c transferCommandCloser) Close() error {
+	defer c.release()
+	return c.lease.Close()
 }
 
 var newTransferCommandClient = func(ctx context.Context, target *resolver.FileTransferTarget, destination api.UserMachine, operationID string) (*filetransfer.NativeClient, io.Closer, error) {

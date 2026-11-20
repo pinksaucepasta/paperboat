@@ -7,6 +7,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -292,6 +293,16 @@ func (c *Client) MachineFileTransferDescriptorForRequest(ctx context.Context, de
 	}
 	err := c.do(ctx, http.MethodPost, "/v1/machines/"+url.PathEscape(destinationMachineID)+"/file-transfer-descriptor", body, &out)
 	return out, err
+}
+
+// ReleaseFileTransferSessions ends a send's credentials after its streams close.
+func (c *Client) ReleaseFileTransferSessions(ctx context.Context, ids []string) error {
+	for batch := range slices.Chunk(ids, 64) {
+		if err := c.do(ctx, http.MethodPost, "/v1/file-transfer-sessions/release", map[string][]string{"access_session_ids": batch}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UserMachineConnectionReadiness polls readiness without minting a fresh

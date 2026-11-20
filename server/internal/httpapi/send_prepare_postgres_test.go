@@ -260,6 +260,9 @@ func (f *sendPrepareFixture) post(token, path string, body any) sendPrepareResul
 	rec := httptest.NewRecorder()
 	f.router.ServeHTTP(rec, req)
 	out.Status = rec.Code
+	if rec.Code == http.StatusNoContent {
+		return out
+	}
 	var envelope struct {
 		Data  json.RawMessage `json:"data"`
 		Error *struct {
@@ -600,5 +603,48 @@ func TestSendPrepareRouteRegistration(t *testing.T) {
 	}
 	if recipeRoute(httptest.NewRequest(http.MethodPost, "/v1/sends/prepare", nil), "") {
 		t.Fatal("a recipe session can prepare a send, but it cannot create the inbox request it folds")
+	}
+}
+
+func TestCompletedSendReleasesFileAccessSessionsPostgres(t *testing.T) {
+	f := newSendPrepareFixture(t)
+	sender, token := f.actor("release_sender")
+	_, otherToken := f.actor("release_other")
+	source, dest := "release_source_"+f.suffix, "release_dest_"+f.suffix
+	f.machine(source, sender, "relsrc", false, true)
+	f.machine(dest, sender, "reldst", true, true)
+	f.route("env_"+dest, dest)
+	call := f.baseCall(dest, source)
+	if res := f.post(token, "/v1/sends/prepare", call); res.Status != http.StatusCreated || !res.Descriptor {
+		t.Fatalf("prepare status=%d code=%s", res.Status, res.ErrorCode)
+	}
+	var id string
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT id FROM paperboat.user_machine_access_sessions
+WHERE user_id=$1 AND user_machine_id=$2 AND state='active' AND capabilities=ARRAY['files']`, sender, dest).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/v1/file-transfer-sessions/release"
+	body := map[string]any{"access_session_ids": []string{id}}
+	active := func() bool {
+		t.Helper()
+		var state string
+		if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT state FROM paperboat.user_machine_access_sessions WHERE id=$1`, id).Scan(&state); err != nil {
+			t.Fatal(err)
+		}
+		return state == "active"
+	}
+	f.post(otherToken, path, body)
+	if !active() {
+		t.Fatal("another client released the sender's session")
+	}
+	for range 2 {
+		res := f.post(token, path, body)
+		if active() {
+			t.Fatalf("send's file session remains active after release (HTTP %d)", res.Status)
+		}
+		if res.Status != http.StatusNoContent {
+			t.Fatalf("release status=%d, want 204", res.Status)
+		}
 	}
 }

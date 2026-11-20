@@ -34884,6 +34884,61 @@
         ]
       }
     },
+    "/v1/file-transfer-sessions/release": {
+      "post": {
+        "summary": "Release file transfer access sessions",
+        "description": "Ends the authenticated CLI session's dedicated file-transfer credentials after its streams close. Already released and unknown IDs are ignored.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "access_session_ids"
+                ],
+                "properties": {
+                  "access_session_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "File transfer credentials released."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_file_transfer_sessions_release",
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ]
+      }
+    },
     "/v1/sends/prepare": {
       "post": {
         "summary": "Prepare a file send in one call",
