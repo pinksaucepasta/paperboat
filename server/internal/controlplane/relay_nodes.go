@@ -430,7 +430,7 @@ func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
 		return
 	}
-	writeEdgeJSON(w, http.StatusOK, out)
+	writeRelayLease(w, r, out)
 }
 
 // maxRelayObservationDocument fits a relay's full subject list, whatever its length (identifiers at their 256-byte limit),
@@ -439,7 +439,14 @@ const maxRelayObservationDocument = connectorprotocol.MaximumSnapshotBytes
 
 func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeObservation
-	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) || s.refuseBelowFloor(w, r, "relay", in.Metrics) {
+	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) {
+		return
+	}
+	if node, scoped := r.Context().Value(scopedRelayObservationNodeKey{}).(string); scoped && node != in.NodeID {
+		writeEdgeError(w, r, http.StatusUnauthorized, "unauthenticated", false, 0)
+		return
+	}
+	if s.refuseBelowFloor(w, r, "relay", in.Metrics) {
 		return
 	}
 	out, err := s.ObserveRelayNode(r.Context(), in)
@@ -455,7 +462,18 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
 		return
 	}
-	writeEdgeJSON(w, http.StatusOK, out)
+	writeRelayLease(w, r, out)
+}
+
+func writeRelayLease(w http.ResponseWriter, r *http.Request, lease relayNodeLeaseDocument) {
+	raw, err := json.Marshal(lease)
+	if err != nil || len(raw) > connectorprotocol.MaximumSnapshotBytes {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000,
+			errors.Join(err, errors.New("relay lease could not be encoded within the size limit")))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(raw)
 }
 
 // relayNodeMayStart admits a relay process start for a node that is not retired or draining.

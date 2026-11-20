@@ -15,10 +15,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
 
-type scopedNodeCredential struct{}
+type scopedNodeCredential struct{ node string }
 
-func (scopedNodeCredential) RuntimeNode(_ context.Context, credential string) (string, error) {
+func (s scopedNodeCredential) RuntimeNode(_ context.Context, credential string) (string, error) {
 	if credential == "node-secret" {
+		if s.node != "" {
+			return s.node, nil
+		}
 		return "node_a", nil
 	}
 	return "", nodeauth.ErrNotFound

@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
@@ -788,6 +789,10 @@ func (s *EdgeService) decodeLimit(w http.ResponseWriter, r *http.Request, target
 	defer r.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 	if err != nil || len(data) > limit || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
+		return false
+	}
+	if _, scoped := r.Context().Value(scopedRelayObservationNodeKey{}).(string); scoped && canonicaljson.RejectDuplicateFields(data) != nil {
 		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
 		return false
 	}
