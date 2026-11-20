@@ -766,7 +766,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
-	forwarding, err := newForwardComponent(forwardSpec{deployment: deployment, nodeID: cfg.NodeID, region: cfg.EdgePool, epoch: processEpoch, certificate: carrierTrust.Certificate, client: client, ready: nodeReady,
+	forwarding, err := newForwardComponent(forwardSpec{deployment: deployment, nodeID: cfg.NodeID, epoch: processEpoch, certificate: carrierTrust.Certificate, client: client, ready: nodeReady,
 		held: forwardHeld{matcher: routeMatcher, durable: durableRoutes, assignments: canonicalRoutes, authority: ingressAuthority}, public: publicTCP, metrics: typedMetrics, reporter: reporter, stats: forwardSink})
 	if err != nil {
 		return nil, fmt.Errorf("create node forwarding: %w", err)

@@ -49,12 +49,20 @@ type peerWatch struct {
 	snapshotting bool
 }
 
-// NewDirectory returns an empty directory for a node in region; seed entries live for seedTTL.
-func NewDirectory(region string, seedTTL time.Duration, now func() time.Time) *Directory {
+// NewDirectory returns an empty directory with no region yet (see SetRegion); seed entries live for seedTTL.
+func NewDirectory(seedTTL time.Duration, now func() time.Time) *Directory {
 	if now == nil {
 		now = time.Now
 	}
-	return &Directory{now: now, region: region, ttl: seedTTL, peers: map[string]nodemesh.Peer{}, watch: map[string]*peerWatch{}, byKey: map[string]map[string]struct{}{}, seed: map[string]map[string]time.Time{}}
+	return &Directory{now: now, ttl: seedTTL, peers: map[string]nodemesh.Peer{}, watch: map[string]*peerWatch{}, byKey: map[string]map[string]struct{}{}, seed: map[string]map[string]time.Time{}}
+}
+
+// SetRegion sets the node's own region, as the server's peer answer names it. Until it is set, no holder is
+// preferred by region.
+func (d *Directory) SetRegion(region string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.region = region
 }
 
 // SetPeers replaces the peer directory. What a peer that left it held is forgotten.
@@ -244,7 +252,7 @@ func (d *Directory) Holders(key string) []Holder {
 			}
 			return -1
 		}
-		ar, br := d.peers[a.NodeID].Region == d.region, d.peers[b.NodeID].Region == d.region
+		ar, br := d.sameRegionLocked(a.NodeID), d.sameRegionLocked(b.NodeID)
 		if ar != br {
 			if ar {
 				return -1
@@ -254,6 +262,11 @@ func (d *Directory) Holders(key string) []Holder {
 		return strings.Compare(a.NodeID, b.NodeID)
 	})
 	return out
+}
+
+// sameRegionLocked reports whether peer id is in this node's region; no region known means no peer is.
+func (d *Directory) sameRegionLocked(id string) bool {
+	return d.region != "" && d.peers[id].Region == d.region
 }
 
 // Names counts the keys with at least one holder in the directory.

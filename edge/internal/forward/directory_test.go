@@ -23,7 +23,7 @@ func ids(holders []Holder) []string {
 
 func TestSeedWinsUntilWatchComplete(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	d := NewDirectory("r1", 10*time.Minute, func() time.Time { return now })
+	d := NewDirectory(10*time.Minute, func() time.Time { return now })
 	d.SetPeers([]nodemesh.Peer{peer("a", "r1", false), peer("b", "r1", false)})
 	d.ApplySeed([]nodemesh.Holder{{Name: "x.example.test", NodeIDs: []string{"a", "b"}}})
 	if got := ids(d.Holders("x.example.test")); !slices.Equal(got, []string{"a", "b"}) {
@@ -62,7 +62,8 @@ func TestSeedWinsUntilWatchComplete(t *testing.T) {
 }
 
 func TestDirectoryOrdersNonDrainingThenRegionThenID(t *testing.T) {
-	d := NewDirectory("home", time.Minute, nil)
+	d := NewDirectory(time.Minute, nil)
+	d.SetRegion("home")
 	d.SetPeers([]nodemesh.Peer{peer("a", "far", true), peer("b", "far", false), peer("cc", "home", false), peer("dd", "home", true), peer("e", "home", false)})
 	for _, id := range []string{"a", "b", "cc", "dd", "e"} {
 		if err := d.ApplyWatch(id, nodemesh.Watch{Kind: nodemesh.WatchAdd, Names: []string{"x.example.test"}}); err != nil {
@@ -85,7 +86,7 @@ func TestDirectoryOrdersNonDrainingThenRegionThenID(t *testing.T) {
 func TestDirectoryBoundsOnePeersNames(t *testing.T) {
 	defer func(old int) { maxKeysPerPeer = old }(maxKeysPerPeer)
 	maxKeysPerPeer = 1000
-	d := NewDirectory("r", time.Minute, nil)
+	d := NewDirectory(time.Minute, nil)
 	d.SetPeers([]nodemesh.Peer{peer("a", "r", false)})
 	names := make([]string, 0, maxKeysPerPeer)
 	for i := range maxKeysPerPeer {
@@ -105,7 +106,7 @@ func TestDirectoryBoundsOnePeersNames(t *testing.T) {
 
 func TestDirectoryTCPPortsListsWatchedAndSeededPortsOnly(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	d := NewDirectory("r", 10*time.Minute, func() time.Time { return now })
+	d := NewDirectory(10*time.Minute, func() time.Time { return now })
 	d.SetPeers([]nodemesh.Peer{peer("a", "r", false), peer("b", "r", false)})
 	if err := d.ApplyWatch("a", nodemesh.Watch{Kind: nodemesh.WatchSnapshot, Names: []string{nodemesh.TCPKey(30000), "x.example.test"}}); err != nil {
 		t.Fatal(err)

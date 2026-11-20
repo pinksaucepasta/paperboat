@@ -127,6 +127,7 @@ func (h *fakeHeld) Held() []string {
 // fakeSource is the server: a peer directory and a holder seed, both set by the test.
 type fakeSource struct {
 	mu          sync.Mutex
+	region      string
 	peers       []nodemesh.Peer
 	seed        map[string][]string
 	holderCalls atomic.Int64
@@ -148,10 +149,10 @@ func (s *fakeSource) setSeed(name string, nodes ...string) {
 	s.mu.Unlock()
 }
 
-func (s *fakeSource) Peers(context.Context) ([]nodemesh.Peer, error) {
+func (s *fakeSource) Peers(context.Context) (nodemesh.PeersResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]nodemesh.Peer(nil), s.peers...), nil
+	return nodemesh.PeersResponse{Region: s.region, Peers: append([]nodemesh.Peer(nil), s.peers...)}, nil
 }
 
 func (s *fakeSource) Holders(_ context.Context, page string, limit int) (nodemesh.HoldersResponse, error) {
@@ -227,7 +228,7 @@ func newNode(t *testing.T, id string, visitorCert, unknownCert tls.Certificate) 
 		t.Fatal(err)
 	}
 	link, pin := linkCertificate(t)
-	n := &node{t: t, id: id, region: "r1", link: link, pin: pin, ln: ln, port: uint16(ln.Addr().(*net.TCPAddr).Port), held: &fakeHeld{}, src: &fakeSource{}}
+	n := &node{t: t, id: id, region: "r1", link: link, pin: pin, ln: ln, port: uint16(ln.Addr().(*net.TCPAddr).Port), held: &fakeHeld{}, src: &fakeSource{region: "r1"}}
 	registry, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +256,7 @@ func (n *node) peer() nodemesh.Peer {
 // start builds and starts the node's mesh with fast intervals.
 func (n *node) start() {
 	n.t.Helper()
-	cfg := forward.Config{NodeID: n.id, Region: n.region, Certificate: n.link, Peers: n.src, Holders: n.src, Held: n.held, Injector: n.public,
+	cfg := forward.Config{NodeID: n.id, Certificate: n.link, Peers: n.src, Holders: n.src, Held: n.held, Injector: n.public,
 		DialTimeout: 500 * time.Millisecond, OpenTimeout: time.Second, PeerInterval: 50 * time.Millisecond, SeedInterval: 100 * time.Millisecond,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			conn, err := (&net.Dialer{}).DialContext(ctx, network, address)

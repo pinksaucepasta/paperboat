@@ -39,8 +39,9 @@ const (
 	minLinkLife          = 5 * time.Second
 )
 
+// PeerSource answers the server's peer directory and the caller's own region.
 type PeerSource interface {
-	Peers(ctx context.Context) ([]nodemesh.Peer, error)
+	Peers(ctx context.Context) (nodemesh.PeersResponse, error)
 }
 
 type HoldersSource interface {
@@ -62,7 +63,7 @@ type TCPInjector interface {
 
 // Config wires a Mesh. Sources, Held and Injector are required; zero timeouts and limits are the config defaults.
 type Config struct {
-	NodeID, Region string
+	NodeID string
 	// Certificate is the node's registered carrier certificate: the one whose pin the server published.
 	Certificate tls.Certificate
 	Peers       PeerSource
@@ -148,7 +149,7 @@ func New(cfg Config) (*Mesh, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	m := &Mesh{cfg: cfg, dir: NewDirectory(cfg.Region, 2*cfg.SeedInterval, cfg.Now), handshakes: make(chan struct{}, maxPendingHandshakes), peersReady: make(chan struct{}), links: map[string]*link{}, loops: map[string]*dialLoop{}, reported: map[string]bool{}}
+	m := &Mesh{cfg: cfg, dir: NewDirectory(2*cfg.SeedInterval, cfg.Now), handshakes: make(chan struct{}, maxPendingHandshakes), peersReady: make(chan struct{}), links: map[string]*link{}, loops: map[string]*dialLoop{}, reported: map[string]bool{}}
 	empty, _ := nodemesh.NewPeerSet(nil)
 	m.peers.Store(&empty)
 	return m, nil
@@ -268,10 +269,10 @@ func (m *Mesh) peerLoop(ctx context.Context) {
 func (m *Mesh) refreshPeers(ctx context.Context) {
 	rctx, cancel := context.WithTimeout(ctx, 2*m.cfg.DialTimeout+m.cfg.OpenTimeout)
 	defer cancel()
-	peers, err := m.cfg.Peers.Peers(rctx)
+	answer, err := m.cfg.Peers.Peers(rctx)
 	if err == nil {
-		kept := peers[:0:0]
-		for _, p := range peers {
+		kept := answer.Peers[:0:0]
+		for _, p := range answer.Peers {
 			if p.NodeID != m.cfg.NodeID {
 				kept = append(kept, p)
 			}
@@ -279,6 +280,9 @@ func (m *Mesh) refreshPeers(ctx context.Context) {
 		var set nodemesh.PeerSet
 		if set, err = nodemesh.NewPeerSet(kept); err == nil {
 			m.report(StageLookup, "peer directory", nil)
+			if answer.Region != "" { // an answer without a region keeps the last one
+				m.dir.SetRegion(answer.Region)
+			}
 			m.applyPeers(ctx, set)
 			m.readyOnce.Do(func() { close(m.peersReady) })
 			return

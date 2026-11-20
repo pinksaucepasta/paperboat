@@ -75,6 +75,9 @@ func (l *Launcher) startContainerNamed(ctx context.Context, capability, image, n
 	if warning != nil {
 		fmt.Fprintln(os.Stderr, "pbh: error reporting is off for the", capability, "container:", warning)
 	}
+	if capability == "tunnel" { // the edge binds one listener per raw TCP tunnel fleet-wide: it needs the file limit
+		args = append(args, "--ulimit", "nofile=1048576:1048576")
+	}
 	args = append(args, sentry...)
 	seen := map[string]bool{}
 	for _, path := range l.ReadOnlyFiles {
