@@ -658,7 +658,7 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 		}
 	}
 	if untilRevoked && self.Role == peernetwork.RoleMachine {
-		offline, err := offlineAccessPeers(ctx, tx, self, now)
+		offline, err := offlineAccessPeers(ctx, tx, self, now, meshEntries)
 		if err != nil {
 			return nil, err
 		}

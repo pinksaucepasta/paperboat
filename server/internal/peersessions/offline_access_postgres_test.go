@@ -202,7 +202,13 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,last_used_at) VALUES($1,$2,$1,'busy','desktop','test',ARRAY['machines:connect'],'active',$3,$3,now())`, cli, owner, now)
 		register(owner, cli, wire.RoleCLI)
 	}
+	loadsBefore := bindingLoads.Load()
 	offline, mesh := read(AuthorityUntilRevoked)
+	// The owner's 41 CLI endpoints come from the account's mesh in one query; only other accounts' endpoints (the
+	// members') and the host itself are loaded one by one.
+	if loads := bindingLoads.Load() - loadsBefore; loads > 15 {
+		t.Errorf("the host's document loaded %d peer bindings one by one for 41+ CLI endpoints, want a handful (N+1)", loads)
+	}
 	if got := offline["offline_cli_"+shellMember]; !slices.Equal(got, []string{"exec", "managed_ssh"}) {
 		t.Errorf("member behind 40 busy owner endpoints: host offline scopes %v, want [exec managed_ssh]", got)
 	}

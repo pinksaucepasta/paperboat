@@ -8,10 +8,15 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"log/slog"
 	"net/netip"
+	"sync/atomic"
 	"time"
 )
 
+// bindingLoads counts loadNetworkBinding calls (2 statements each): a document that loads one per peer is an N+1.
+var bindingLoads atomic.Int64
+
 func loadNetworkBinding(ctx context.Context, tx *sql.Tx, userID, endpointID string, now time.Time, admitted bool) (networkBinding, time.Time, error) {
+	bindingLoads.Add(1)
 	var b networkBinding
 	var key, disco, fingerprint, quicPublic, delivered []byte
 	var expiry time.Time
