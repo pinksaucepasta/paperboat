@@ -395,6 +395,22 @@ func TestSetEdgePairRefusesMixedKindAndUnknownRegion(t *testing.T) {
 	}
 }
 
+// A region whose nodes are all drained past their deadline is not ready: the reconcile sweep would drop it, so the PUT
+// refuses it, names no node, and accepts it again once a second region is ready.
+func TestSetEdgePairRefusesARegionWhoseNodesAreAllDrained(t *testing.T) {
+	f := newPairFixture(t)
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()-interval '1 minute' WHERE id=$1`, f.mb1)
+	_, err := f.service.SetEdgePair(f.ctx, f.owner, f.personal, "managed", f.ra, f.rb)
+	var invalid *InvalidPairError
+	if !errors.Is(err, ErrInvalid) || !errors.As(err, &invalid) {
+		t.Fatalf("drained region accepted or untyped: %v", err)
+	}
+	if strings.Contains(invalid.Message, f.stamp) {
+		t.Fatalf("drained region names a node: %q", invalid.Message)
+	}
+	f.set(f.owner, f.personal, "managed", f.ra, f.rc)
+}
+
 // A server's region comes from enrolment; one enrolled into a region of the pair joins the pool of a self-hosted
 // workspace at once, and one removed leaves it.
 func TestNewNodeInPairRegionJoinsPool(t *testing.T) {

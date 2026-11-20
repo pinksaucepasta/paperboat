@@ -267,7 +267,8 @@ func (s *Service) requireRegionReady(ctx context.Context, tx *db.Tx, ws edgeset.
    AND ((i.scope_kind=$7 AND i.scope_id=$8) OR ($7='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$8))))
   ELSE EXISTS(SELECT 1 FROM paperboat.operator_regions WHERE id=$1 AND enabled) END,
  EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes n WHERE n.region=$1 AND n.roles @> ARRAY['edge']::text[]
-  AND paperboat.node_workspace_edge_candidate(n.id,$2,$3) AND n.last_heartbeat_at>$4::timestamptz-make_interval(secs=>$5::float8))`,
+  AND paperboat.node_workspace_edge_candidate(n.id,$2,$3) AND n.last_heartbeat_at>$4::timestamptz-make_interval(secs=>$5::float8)
+  AND n.ready AND n.state='ready' AND (n.drain_deadline IS NULL OR n.drain_deadline>$4::timestamptz) AND n.registry_expires_at>$4::timestamptz)`,
 		region, ws.Account, workspaceTeam(ws), now, edgeset.ReplaceAfter.Seconds(), kind, ws.Kind, ws.ID).Scan(&name, &known, &ready); err != nil {
 		return err
 	}
