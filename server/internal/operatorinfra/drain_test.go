@@ -37,7 +37,7 @@ func drainFixture(t *testing.T) (s *Service, store *db.DB, admin string, node No
 	machine = "drain_m_" + x
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, env, user)
-	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,public_identity_key) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,'key_'||$1)`, machine, user, env)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,public_identity_key) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,rpad($1,40,'k'))`, machine, user, env)
 	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080)`, route, env)
 	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',m.public_identity_key,1,$1,$1,'{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, enrolled.Node.ID, machine)
 	t.Cleanup(func() {
