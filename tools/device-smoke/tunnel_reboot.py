@@ -19,6 +19,7 @@ import json
 import subprocess
 import tempfile
 import time
+import http.client
 import urllib.error
 import urllib.request
 import uuid
@@ -75,7 +76,7 @@ def fetch(url, timeout=20):
             return response.status, response.read().decode(errors='replace')
     except urllib.error.HTTPError as error:
         return error.code, ''
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:  # IncompleteRead: a response cut mid-body
         return 0, str(error)[:80]
 
 

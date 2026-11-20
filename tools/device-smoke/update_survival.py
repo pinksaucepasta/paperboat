@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import http.client
 import urllib.error
 import urllib.request
 import uuid
@@ -47,7 +48,7 @@ def body(url):
         return urllib.request.urlopen(url + '/', timeout=15).read().decode('utf-8', 'replace')
     except urllib.error.HTTPError as error:
         return 'HTTP %d' % error.code
-    except OSError:
+    except (OSError, http.client.HTTPException):  # IncompleteRead: a response cut by the restart being polled for
         return ''
 
 

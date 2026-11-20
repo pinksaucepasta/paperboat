@@ -14,6 +14,7 @@ from pathlib import Path
 import platform
 import tempfile
 import time
+import http.client
 import urllib.error
 import urllib.request
 import uuid
@@ -34,7 +35,7 @@ def body(endpoint):
         return urllib.request.urlopen(endpoint + '/', timeout=15).read().decode('utf-8', 'replace')
     except urllib.error.HTTPError as error:
         return 'HTTP %d' % error.code
-    except OSError:
+    except (OSError, http.client.HTTPException):  # IncompleteRead: a response cut by the stop being polled for
         return ''
 
 
