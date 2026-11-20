@@ -1083,7 +1083,7 @@ func New(opts Options) (*App, error) {
 	application := &App{
 		draining:             draining,
 		warmed:               warmed,
-		warm:                 warmUp(store, edgeControlService, opts.Logger),
+		warm:                 warmUp(store, edgeControlService, peerNetworkService, opts.Logger),
 		machineEvents:        machineEventHub,
 		supportReports:       supportService,
 		healthMonitor:        healthMonitor,
