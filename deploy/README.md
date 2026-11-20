@@ -291,7 +291,7 @@ provider null-route) still turns the canary red. With `CANARY_TEAM`/`CANARY_TEAM
 (`pb team machine transfer-to-team`; `share` would leave it personal) with an exact exec grant to the canary account, so a server that breaks team-owned machines
 (server .34, 2026-11-16) turns the canary red although personal machines still work. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
 `CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
-recovery line; both also go to `alerts.log`. With `CANARY_NTFY_URL` (the full ntfy topic URL, same env file) every alert line is also posted there, so it reaches the user's phone; the admin panel has no operator-alert inbox (its notices are customer emails), so ntfy is the user channel. Set the machines up with `tools/probe/canary-setup.sh`; keep
+recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
 all four canary containers (`canary-a`, `canary-b`, `canary-t` and the account probe's pair host `pb-canary-pair`) on the same `main` build, upgraded together (copy the binary to
 `/home/pbt/pb` in the container, `chmod 0755`, `./pb install` as `pbt`): there is no compatibility between builds, so a
 host left on an older build refuses the newer client's streams (canary-t on dev-6e1e23255 refused dev-65dddfdfe's
@@ -365,7 +365,7 @@ local filesystem, and allocated file descriptors against the host's capacity.
 The policy in `host_resources.py` fires at 80% (warning) or 90% (critical) for
 three minutes and clears each level five percentage points below its trigger.
 Transitions go to the canary's `alerts.log`, its
-`CANARY_ALERT_THREAD` and `CANARY_NTFY_URL`. A host whose sample fails three times in a row
+`CANARY_ALERT_THREAD`. A host whose sample fails three times in a row
 is reported once as UNKNOWN (and RECOVERED when sampling works), so a broken ssh key cannot silence it. Resource status is kept in `host-resources.json` in
 the canary state directory.
 

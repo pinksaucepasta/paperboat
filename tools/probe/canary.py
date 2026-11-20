@@ -5,11 +5,11 @@ State lives in CANARY_STATE (default ~/.local/state/paperboat-canary):
   history.jsonl  access runs only, newest last, at most HISTORY_MAX runs (24 h at one run a minute)
   account-history.jsonl  independently bounded account runs; they never replace access deploy evidence
   status.json    the last run, consecutive failures per step, red/green, and the steps already alerted
-  alerts.log     every alert and recovery line, also sent to the coordinator thread (CANARY_ALERT_THREAD) and the user's ntfy topic (CANARY_NTFY_URL)
+  alerts.log     every alert and recovery line, also sent to the coordinator thread (CANARY_ALERT_THREAD)
 A step that fails in two runs in a row alerts once; its first pass afterwards sends one recovery line.
 The probe's environment (RUN_A, CANARY_A, ...) comes from the unit's EnvironmentFile.
 """
-import fcntl, json, os, subprocess, sys, time, urllib.request
+import fcntl, json, os, subprocess, sys, time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,22 +129,13 @@ def write(path, text):  # atomic, so the status page and the deploy gate never r
 
 
 def send_alert(message):
-    """Coordinator thread (CANARY_ALERT_THREAD) and the user's ntfy topic (CANARY_NTFY_URL, the full topic URL). Each is
-    optional; the alerts.log line is already written, so a failed send must not fail the run or block the other."""
     thread = os.environ.get("CANARY_ALERT_THREAD")
-    if thread:
-        try:
-            subprocess.run(["t3", "thread", "send", thread, message], timeout=30, capture_output=True)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    url = os.environ.get("CANARY_NTFY_URL")
-    if url:
-        request = urllib.request.Request(url, data=message[:4000].encode(),  # ntfy rejects bodies over 4096 bytes
-                                         headers={"Title": "Paperboat production alert", "Priority": "high"})
-        try:
-            urllib.request.urlopen(request, timeout=10).close()
-        except (OSError, ValueError):
-            pass
+    if not thread:
+        return
+    try:  # the alerts.log line is already written; a failed send must not fail the run
+        subprocess.run(["t3", "thread", "send", thread, message], timeout=30, capture_output=True)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def account_steps():

@@ -50,25 +50,6 @@ class Account(unittest.TestCase):
             self.assertEqual([step['step'] for step in canary.account_steps()], ['signin','account'])
 
 
-class SendAlert(unittest.TestCase):
-    def test_ntfy_gets_the_message_from_config_and_a_failed_thread_send_does_not_block_it(self):
-        env = {"CANARY_ALERT_THREAD": "t1", "CANARY_NTFY_URL": "https://ntfy.example.test/topic"}
-        with patch.dict(os.environ, env), \
-                patch.object(canary.subprocess, "run", side_effect=OSError("no t3")), \
-                patch.object(canary.urllib.request, "urlopen") as urlopen:
-            canary.send_alert("canary RED: x")
-        request = urlopen.call_args.args[0]
-        self.assertEqual((request.full_url, request.data), ("https://ntfy.example.test/topic", b"canary RED: x"))
-
-    def test_unconfigured_or_unreachable_ntfy_sends_nothing_and_never_raises(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(canary.urllib.request, "urlopen") as urlopen:
-            canary.send_alert("x")
-        urlopen.assert_not_called()
-        with patch.dict(os.environ, {"CANARY_NTFY_URL": "https://ntfy.example.test/t"}, clear=True), \
-                patch.object(canary.urllib.request, "urlopen", side_effect=OSError("down")):
-            canary.send_alert("x")
-
-
 class Record(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
