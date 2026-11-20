@@ -28,7 +28,7 @@ export function QuotaBanner() {
       <GaugeIcon weight="fill" className="size-4 shrink-0 text-muted-foreground" />
       <p className="min-w-0 flex-1">
         <span className="font-medium">
-          {workspace.name} used its included traffic. Slowed to {formatSpeed(data.throttle_mbit)}
+          {workspace.name} used its included traffic. Speed is reduced to {formatSpeed(data.throttle_mbit)}
           {end ? ` until ${time.date(end, "day")}` : ""}.
         </span>{" "}
         <span className="text-muted-foreground">
