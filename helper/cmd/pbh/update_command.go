@@ -82,7 +82,13 @@ func updateCommand(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
+// isTerminal is true for a terminal, not for any character device: cron, systemd and `go test` hand programs /dev/null,
+// which is one too, and a prompt there reads end of file.
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	null, err := os.Stat(os.DevNull)
+	return err != nil || !os.SameFile(info, null)
 }

@@ -76,7 +76,9 @@ func TestEdgeListShowsPaperboatRegionsAndPaginates(t *testing.T) {
 		t.Fatalf("document=%+v requests=%d error=%v", document, requests, err)
 	}
 	output.Reset()
-	if code := run(context.Background(), []string{"--config", configPath, "edge", "list"}, &output, &output); code != 0 || !strings.Contains(output.String(), "REGION  NAME") || !strings.Contains(output.String(), "Frankfurt") || !strings.Contains(output.String(), "Helsinki") {
+	code := run(context.Background(), []string{"--config", configPath, "edge", "list"}, &output, &output)
+	// The table pads its columns, so the header is compared by its words.
+	if header := strings.Fields(strings.SplitN(output.String(), "\n", 2)[0]); code != 0 || strings.Join(header, " ") != "REGION NAME SOURCE STATUS" || !strings.Contains(output.String(), "Frankfurt") || !strings.Contains(output.String(), "Helsinki") {
 		t.Fatalf("human code=%d output=%s", code, output.String())
 	}
 }
