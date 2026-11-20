@@ -13082,6 +13082,18 @@ export interface components {
             registry_expires_at: string;
             ready: boolean;
             protocol_version: string;
+            /** @description Mesh counters the node last reported (shared/nodemesh Stats); absent until it reports any. */
+            forward?: {
+                links: number;
+                names: number;
+                forwarded: number;
+                accepted: number;
+                holder_miss: number;
+                unreachable: number;
+                loop_refused: number;
+                bytes_in: number;
+                bytes_out: number;
+            };
         };
         OperatorNodePage: {
             items: components["schemas"]["OperatorNode"][];
