@@ -1,11 +1,12 @@
 ## pb edge
 
-Inspect tunnel edges
+Inspect the regions tunnels and previews are served from
 
 ### Synopsis
 
-Inspect the tunnel edges that serve the active workspace: edges Paperboat runs, or the
-self-hosted edges you selected. Listing an edge never grants a route admission.
+Inspect the regions that serve the active workspace's tunnels and previews: Paperboat's
+regions, or the regions of the self-hosted servers you selected. Listing a region never grants
+a route admission.
 
 With --json, this command group lists its available commands.
 
@@ -39,5 +40,5 @@ pb edge [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb edge list](pb_edge_list.md)	 - List managed or selected self-hosted tunnel edges
+* [pb edge list](pb_edge_list.md)	 - List the regions tunnels and previews are served from
 

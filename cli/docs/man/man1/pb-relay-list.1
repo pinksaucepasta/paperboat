@@ -2,7 +2,7 @@
 .TH "PB-RELAY-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-relay-list - List hosted and self-hosted relays
+pb-relay-list - List Paperboat relay regions and self-hosted relays
 
 
 .SH SYNOPSIS
@@ -10,21 +10,22 @@ pb-relay-list - List hosted and self-hosted relays
 
 
 .SH DESCRIPTION
-List the relay candidates this computer can use: the relays from the signed network
-authority and the self-hosted relays your account has selected. In mixed pool mode both appear.
-In self-hosted-only mode only the selected self-hosted relays appear, including unavailable
-ones, and Paperboat's relays are never used instead.
+List the relays this computer can use: Paperboat's relay regions from the signed network
+authority and the self-hosted relays your account has selected. Paperboat's relays are shown
+once per region; your own relays are listed by name. In mixed pool mode both appear. In
+self-hosted-only mode only the selected self-hosted relays appear, including unavailable
+ones, and Paperboat's regions are never used instead.
 
 .PP
-STATUS is reported_ready when a signed control-plane observation of the relay is under 15
-seconds old; it is not a live connection test. LATENCY is the connect time this machine last
-measured to the relay, as its daemon reported it (measured about every 15 minutes, shown while
-under an hour old). It is "-" until a measurement exists. The numbers are for display and never
-choose a path.
+STATUS is reported_ready when a signed control-plane observation of one of the region's relays
+is under 15 seconds old; it is not a live connection test. LATENCY is the best connect time this
+machine last measured to the region's relays, as its daemon reported it (measured about every
+15 minutes, shown while under an hour old). It is "-" until a measurement exists. The numbers
+are for display and never choose a path.
 
 .PP
 Sign-in and the local daemon are required. With --json the output is paperboat.relay-list/v1:
-the pool mode and the relays, each with latency_ms and latency_measured_at once measured.
+the pool mode and the relays, each with latency_ms once measured.
 
 .PP
 JSON output is supported with --json.
