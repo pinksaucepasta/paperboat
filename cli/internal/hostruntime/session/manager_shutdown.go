@@ -202,19 +202,34 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			results <- err
 		}(id)
 	}
-	var result error
-	for range ids {
-		select {
-		case err := <-results:
-			if err != nil && !errors.Is(err, ErrSessionRunning) {
-				result = errors.Join(result, err)
-			}
-		case <-ctx.Done():
-			return errors.Join(result, ctx.Err())
-		}
+	complete, result := awaitCloses(ctx, results, len(ids))
+	if !complete {
+		return result
 	}
 	m.stopWriter()
 	return result
+}
+
+// awaitCloses collects the results of count session closes. When ctx ends first it stops waiting and reports
+// ctx.Err, but a close that already finished is still counted: with every result in, the shutdown is complete
+// whatever ctx says (a random pick between a ready result and a done ctx used to fail a finished shutdown).
+func awaitCloses(ctx context.Context, results <-chan error, count int) (complete bool, result error) {
+	for ; count > 0; count-- {
+		var err error
+		select {
+		case err = <-results:
+		case <-ctx.Done():
+			select {
+			case err = <-results:
+			default:
+				return false, errors.Join(result, ctx.Err())
+			}
+		}
+		if err != nil && !errors.Is(err, ErrSessionRunning) {
+			result = errors.Join(result, err)
+		}
+	}
+	return true, result
 }
 
 // ShutdownForRecovery stops live PTYs and flushes their history while leaving
