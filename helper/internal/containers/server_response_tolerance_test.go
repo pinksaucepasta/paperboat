@@ -49,6 +49,10 @@ func TestPbhIgnoresFieldsANewerServerAddsToEveryAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, _ := json.Marshal([]string{"-node-id", "node_1", "-control-url", server.URL, "-control-ca", caPath})
+	deployment, _ := json.Marshal(map[string]string{"control_url": server.URL, "control_ca_file": caPath})
+	if err := os.WriteFile(filepath.Join(node, "deployment.json"), deployment, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(node, "runtime.args"), args, 0o600); err != nil {
 		t.Fatal(err)
 	}

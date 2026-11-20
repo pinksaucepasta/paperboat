@@ -52,6 +52,27 @@ func filled(kind reflect.Type, depth int) reflect.Value {
 	return value
 }
 
+// withNewerFields adds a field to every non-empty JSON object. Its value copies a sibling's, so a map of strings (a new
+// key, same value type) stays a valid map; an object with declared fields takes it as the unknown field it is.
+func withNewerFields(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		var sibling any
+		for key, child := range typed {
+			typed[key] = withNewerFields(child)
+			sibling = typed[key]
+		}
+		if len(typed) > 0 {
+			typed["field_added_by_a_newer_server"] = sibling
+		}
+	case []any:
+		for index, child := range typed {
+			typed[index] = withNewerFields(child)
+		}
+	}
+	return value
+}
+
 // Every response type the client decodes (the data of each call in this package that has one), filled in at every
 // level and then given a field no client has heard of in every object: both decoders the client uses must accept it.
 // A type that cannot decode its own filled form (a strict custom decoder) is named in the log, not skipped silently.
@@ -90,7 +111,7 @@ func TestEveryResponseTypeIgnoresFieldsAddedByANewerServer(t *testing.T) {
 			if err := json.Unmarshal(base, &generic); err != nil {
 				t.Fatal(err)
 			}
-			extended, err := json.Marshal(addUnknownFields(generic))
+			extended, err := json.Marshal(withNewerFields(generic))
 			if err != nil {
 				t.Fatal(err)
 			}
