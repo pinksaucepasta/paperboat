@@ -102,7 +102,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 			return nil, err
 		}
 	}
-	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2)) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
+	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR (i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
 	}

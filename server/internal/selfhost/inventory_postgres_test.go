@@ -166,3 +166,97 @@ func TestScopedInstallationInventoryPaginationOnPostgres(t *testing.T) {
 		t.Fatalf("revoked detail: %v", err)
 	}
 }
+
+func TestGlobalInstallationsHiddenFromCustomers(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := t.Context()
+	if err = db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	owner := "globalhide_" + randomIdentity()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, owner); err != nil {
+			t.Errorf("global installation cleanup: %v", err)
+		}
+	})
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, owner, owner+"@example.test")
+	key := "inventory-test-encryption-key-32-bytes-long"
+	service := New(store, key)
+	own := scopedInstallationFixture(t, store, key, owner, "relay")
+	global := scopedInstallationFixture(t, store, key, owner, "relay")
+	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='global',scope_id='global' WHERE id=$1`, global.InstallationID)
+
+	customerList, err := service.ListScoped(ctx, owner, Scope{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !listsInstallation(customerList, own.InstallationID) || listsInstallation(customerList, global.InstallationID) {
+		t.Fatalf("customer ListScoped: %+v", customerList)
+	}
+	customerInventory, err := service.ListScopedInventory(ctx, owner, Scope{}, false, InventoryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inventoryHas(customerInventory, own.InstallationID) || inventoryHas(customerInventory, global.InstallationID) {
+		t.Fatalf("customer ListScopedInventory: %+v", customerInventory.Installations)
+	}
+	if _, err = service.GetInstallation(ctx, owner, global.InstallationID, false); !errors.Is(err, ErrInstallationNotFound) {
+		t.Fatalf("customer GetInstallation of global: %v", err)
+	}
+	if got, err := service.GetInstallation(ctx, owner, own.InstallationID, false); err != nil || got.InstallationID != own.InstallationID {
+		t.Fatalf("customer GetInstallation of own: %+v %v", got, err)
+	}
+
+	operatorList, err := service.ListScoped(ctx, owner, Scope{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !listsInstallation(operatorList, global.InstallationID) {
+		t.Fatalf("operator ListScoped lost global: %+v", operatorList)
+	}
+	operatorInventory, err := service.ListScopedInventory(ctx, owner, Scope{}, true, InventoryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inventoryHas(operatorInventory, global.InstallationID) {
+		t.Fatalf("operator ListScopedInventory lost global: %+v", operatorInventory.Installations)
+	}
+	if got, err := service.GetInstallation(ctx, owner, global.InstallationID, true); err != nil || got.InstallationID != global.InstallationID {
+		t.Fatalf("operator GetInstallation of global: %+v %v", got, err)
+	}
+}
+
+func listsInstallation(list []Installation, id string) bool {
+	for _, i := range list {
+		if i.InstallationID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func inventoryHas(inventory InstallationInventory, id string) bool {
+	for _, i := range inventory.Installations {
+		if i.InstallationID == id {
+			return true
+		}
+	}
+	return false
+}
