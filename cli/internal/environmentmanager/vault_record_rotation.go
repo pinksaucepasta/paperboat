@@ -6,6 +6,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // prepareRecordReplacement freezes the exact old live inventory and encrypts
@@ -25,7 +26,7 @@ func (v PasswordVault) prepareRecordReplacement(ctx context.Context, previous, n
 	if err != nil {
 		return out, err
 	}
-	if result.Sequence > env.MaximumContractInteger || len(result.Records) > 4096 {
+	if result.Sequence > env.MaximumContractInteger {
 		return out, ErrIntegrity
 	}
 	out.ExpectedSequence = result.Sequence
@@ -41,8 +42,12 @@ func (v PasswordVault) prepareRecordReplacement(ctx context.Context, previous, n
 	defer clear(nextKey)
 	seen := map[string]bool{}
 	names := map[string]bool{}
-	liveBytes := 0
+	liveBytes, heldBytes := 0, 0
 	for _, state := range result.Records {
+		heldBytes += len(state.Envelope)
+		if heldBytes > connectorprotocol.MaximumSnapshotBytes {
+			return out, ErrIntegrity
+		}
 		if state.WorkspaceID != coordinate.WorkspaceID || state.OwnerKind != coordinate.OwnerKind || state.OwnerID != coordinate.OwnerID || state.MachineID != coordinate.MachineID || state.KeyEpoch != previous.Claims.KeyEpoch || state.Sequence == 0 || state.Sequence > result.Sequence || seen[state.RecordID] {
 			return out, ErrIntegrity
 		}

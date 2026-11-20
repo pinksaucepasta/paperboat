@@ -379,6 +379,17 @@ func TestControlPendingInstallationBecomesCommittedWithoutRestart(t *testing.T) 
 			t.Fatal("pending native source admitted release operation", operation, err)
 		}
 	}
+	// A custom build that is still pending enrollment is told to use --force, not to pair or to take an official update.
+	official := service.config.Active.LocalSource
+	custom := source
+	custom.Distribution = installsource.Custom
+	service.config.Active.LocalSource = &custom
+	for _, operation := range []string{"check", "download", "install"} {
+		if _, err = service.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: operation, ApprovalID: strings.Repeat("a", 64)}); !errors.Is(err, ErrCustomInstallation) {
+			t.Fatal("pending custom build was offered an official update", operation, err)
+		}
+	}
+	service.config.Active.LocalSource = official
 	// A check only reads signed public metadata: it reaches the (unreachable) test repository instead of the gate.
 	response, err = service.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "check"})
 	if err == nil || errors.Is(err, ErrInstallationPending) || !response.Pending || response.UpdaterVersion != buildinfo.Version {

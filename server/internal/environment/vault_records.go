@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const vaultRecordCursorLifetime = 10 * time.Minute
@@ -164,12 +165,12 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 		if err != nil {
 			return err
 		}
-		var count, live, bytes int
-		err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE NOT deleted),COALESCE(sum(ciphertext_bytes) FILTER(WHERE NOT deleted),0) FROM(SELECT DISTINCT ON(record_id) deleted,ciphertext_bytes FROM environment_vault_record_versions WHERE `+recordScopePredicate+` ORDER BY record_id,revision DESC) current`, recordArgs(c, epoch)...).Scan(&count, &live, &bytes)
+		var held, live, bytes int
+		err = tx.QueryRow(ctx, `SELECT COALESCE(sum(octet_length(envelope)),0),count(*) FILTER(WHERE NOT deleted),COALESCE(sum(ciphertext_bytes) FILTER(WHERE NOT deleted),0) FROM(SELECT DISTINCT ON(record_id) deleted,ciphertext_bytes,envelope FROM environment_vault_record_versions WHERE `+recordScopePredicate+` ORDER BY record_id,revision DESC) current`, recordArgs(c, epoch)...).Scan(&held, &live, &bytes)
 		if err != nil {
 			return err
 		}
-		if count > MaximumVaultRecordIDs || live > 128 || bytes > MaximumVaultRecordLiveBytes {
+		if held > connectorprotocol.MaximumSnapshotBytes || live > 128 || bytes > MaximumVaultRecordLiveBytes {
 			return ErrLimitExceeded
 		}
 		_, err = tx.Exec(ctx, `UPDATE environment_vault_record_heads SET sequence=$5 WHERE workspace_id=$1 AND owner_kind=$2 AND owner_id=$3 AND machine_id=$4`, c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID, sequence)

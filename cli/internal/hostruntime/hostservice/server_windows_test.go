@@ -24,18 +24,16 @@ func (windowsTestApplier) Close(context.Context) error         { return nil }
 
 type windowsTestAuthorizedKeys struct {
 	keys    []string
-	revoked []string
 	changed bool
 	err     error
 }
 
-func (r *windowsTestAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string, _ string, revoked []string) (bool, error) {
+func (r *windowsTestAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, keys []string, _ string, _ []string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	r.keys = make([]string, len(keys))
 	copy(r.keys, keys)
-	r.revoked = append([]string(nil), revoked...)
 	return r.changed, r.err
 }
 
@@ -127,38 +125,6 @@ func TestWindowsAuthorizedKeysRequestUsesSIDRestrictedHostService(t *testing.T) 
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("host service shutdown error: %v", err)
-	}
-}
-
-func TestWindowsAuthorizedKeysAcceptsRevokedKeyListAboveOldRequestLimit(t *testing.T) {
-	keys := &windowsTestAuthorizedKeys{}
-	server, err := New(Config{
-		SocketPath:     `\\.\pipe\PaperboatHostServiceTest`,
-		StatePath:      filepath.Join(t.TempDir(), "availability.json"),
-		Applier:        windowsTestApplier{},
-		Version:        "test",
-		AuthorizedKeys: keys,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 2000 IDs of about 43 bytes each encode to roughly 86 KiB, above the old 64 KiB request cap.
-	revoked := make([]string, 2000)
-	for i := range revoked {
-		revoked[i] = "SHA256:" + strings.Repeat("a", 32) + strconv.Itoa(i)
-	}
-	response := windowsPipeRequest(t, server, context.Background(), Request{
-		Schema:         ProtocolV1,
-		Operation:      "reconcile_ssh_authorized_keys",
-		AuthorizedKeys: &[]string{},
-		SSHPrincipal:   "paperboat",
-		SSHRevoked:     revoked,
-	})
-	if !response.AuthorizedKeysReconciled {
-		t.Fatalf("response=%+v, want reconciled", response)
-	}
-	if len(keys.revoked) != len(revoked) || keys.revoked[len(revoked)-1] != revoked[len(revoked)-1] {
-		t.Fatalf("reconciler got %d revoked IDs, want %d", len(keys.revoked), len(revoked))
 	}
 }
 

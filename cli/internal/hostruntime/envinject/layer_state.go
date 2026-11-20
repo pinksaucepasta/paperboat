@@ -13,9 +13,10 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
-const maximumLayerStateBytes = 8 << 20
+const maximumLayerStateBytes = connectorprotocol.MaximumSnapshotBytes
 
 var ErrInvalidSnapshot = errors.New("invalid encrypted environment state")
 var ErrObservationLost = errors.New("environment layer floor is unavailable")

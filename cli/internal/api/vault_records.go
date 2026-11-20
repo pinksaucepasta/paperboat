@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type VaultRecordState struct {
@@ -115,7 +116,9 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 	cursor := ""
 	seen := map[string]bool{}
 	cursors := map[string]bool{}
-	for page := 0; page < 32; page++ {
+	total := 0
+	// Ends: every page must hold records with a new cursor, and the bytes read are bounded.
+	for page := 0; ; page++ {
 		next, err := c.VaultRecordsPage(ctx, coordinate, after, out.Sequence, cursor)
 		if err != nil {
 			return VaultRecordsResult{}, err
@@ -131,6 +134,10 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 				return VaultRecordsResult{}, errors.New("inconsistent ENV record snapshot")
 			}
 			seen[r.RecordID] = true
+			total += len(r.Envelope) + len(r.WriterPublic) + len(r.DocumentID) + 512
+			if total > connectorprotocol.MaximumSnapshotBytes {
+				return VaultRecordsResult{}, errors.New("ENV record snapshot exceeded the size bound")
+			}
 			out.Records = append(out.Records, r)
 		}
 		if next.NextCursor == "" {
@@ -142,5 +149,4 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 		cursors[next.NextCursor] = true
 		cursor = next.NextCursor
 	}
-	return VaultRecordsResult{}, errors.New("ENV record pagination exceeded scope bounds")
 }
