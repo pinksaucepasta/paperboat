@@ -13140,6 +13140,12 @@ export interface components {
              * @description Machines holding a live carrier attachment on the node; 0 means safe to retire.
              */
             carriers: number;
+            /** @description Whether the node's public ingress was verified; a node is published to DNS only when it was. */
+            ingress_verified: boolean;
+            /** @description The worst of the node's CPU, connection and host figures, 0 to 100; absent when it has no recent report. */
+            load_percent?: number;
+            /** @description False while the wildcard DNS sync holds the node out for load; absent for nodes the sync does not manage. */
+            in_dns?: boolean;
         };
         OperatorNodePage: {
             items: components["schemas"]["OperatorNode"][];
