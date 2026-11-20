@@ -21,6 +21,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/config"
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
@@ -43,7 +44,7 @@ type readinessControl struct {
 func readyGated(path string) bool {
 	return path == runtimewire.EdgePullPath || path == runtimewire.EdgeObservePath || path == runtimewire.EdgeEndpointPullPath ||
 		path == control.PrivateAccessCarrierAdmissionsPath || path == control.PrivateAccessGrantAuthorizePath ||
-		strings.HasPrefix(path, "/v1/edge/browser-access/")
+		path == nodemesh.PeersPath || path == nodemesh.HoldersPath || strings.HasPrefix(path, "/v1/edge/browser-access/")
 }
 
 func (c *readinessControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +94,10 @@ func (c *readinessControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answer(fmt.Sprintf(`{"schema":%q,"complete":true,"carriers":[],"cursor":"c1"}`, runtimewire.Schema))
 	case control.PrivateAccessCarrierAdmissionsPath:
 		answer(`{"schema":"paperboat.preview-tunnel/v1","kind":"private_access_carrier_snapshot","complete":true,"admissions":[]}`)
+	case nodemesh.PeersPath:
+		answer(fmt.Sprintf(`{"peers":[],"observed_at":%q}`, time.Now().UTC().Format(time.RFC3339)))
+	case nodemesh.HoldersPath:
+		answer(`{"holders":[]}`)
 	default:
 		c.t.Errorf("unexpected control request %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
