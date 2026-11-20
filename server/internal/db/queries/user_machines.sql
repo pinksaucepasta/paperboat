@@ -646,9 +646,14 @@ SELECT EXISTS(SELECT 1 FROM present)::boolean AS eligible;
 -- are already online once their row is older than gate_seconds, and writes nothing else (no version, no capabilities).
 -- It never brings an offline machine online: that takes an observation, which also restores its capabilities. One
 -- statement for every wait of the last flush interval (metering.PresenceFlushEvery).
-UPDATE user_machines SET last_seen_at = now()
-WHERE id = ANY(sqlc.arg(ids)::text[]) AND state = 'online' AND online AND deleted_at IS NULL
-  AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => sqlc.arg(gate_seconds)::float8));
+-- Rows are locked in id order and a row another transaction holds is skipped (an observation sets last_seen_at itself,
+-- the offline sweep ends the machine's presence anyway), so two statements touching many machines cannot deadlock.
+WITH due AS (
+  SELECT id FROM user_machines
+  WHERE id = ANY(sqlc.arg(ids)::text[]) AND state = 'online' AND online AND deleted_at IS NULL
+    AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => sqlc.arg(gate_seconds)::float8))
+  ORDER BY id FOR UPDATE SKIP LOCKED)
+UPDATE user_machines SET last_seen_at = now() FROM due WHERE user_machines.id = due.id;
 
 -- name: GetUserMachineRuntimeInstanceForUpdate :one
 SELECT online, last_seen_at, os_boot_id, worker_generation

@@ -11,9 +11,10 @@ import (
 
 // The presence write is batched: a machine's last_seen_at is refreshed up to PresenceFlushEvery after its wait asked
 // for it. The worst case a healthy machine reaches before its row is written is the gate it was skipped at, plus one
-// held wait, plus the flush delay; that must stay under the offline cutoff or machines flap offline and back.
+// held wait, plus the flush delay, plus a daemon's first reconnect after a server crash; that must stay under the
+// offline cutoff or machines flap offline and back.
 func TestBatchedPresenceNeverApproachesTheOfflineCutoff(t *testing.T) {
-	worst := machineWaitPresenceGate + machineevents.MaxWait + PresenceFlushEvery
+	worst := machineWaitPresenceGate + machineevents.MaxWait + PresenceFlushEvery + presenceReconnectBudget
 	cutoff := config.Default().UserMachines.OfflineAfter
 	if worst >= cutoff {
 		t.Fatalf("a healthy machine's last_seen_at can reach %v before its write; the offline cutoff is %v", worst, cutoff)

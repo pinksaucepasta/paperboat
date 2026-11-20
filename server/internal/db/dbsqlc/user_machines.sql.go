@@ -6055,9 +6055,12 @@ func (q *Queries) SetUserTransferDestinationDefault(ctx context.Context, arg Set
 }
 
 const touchUserMachinesPresence = `-- name: TouchUserMachinesPresence :execrows
-UPDATE user_machines SET last_seen_at = now()
-WHERE id = ANY($1::text[]) AND state = 'online' AND online AND deleted_at IS NULL
-  AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::float8))
+WITH due AS (
+  SELECT id FROM user_machines
+  WHERE id = ANY($1::text[]) AND state = 'online' AND online AND deleted_at IS NULL
+    AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::float8))
+  ORDER BY id FOR UPDATE SKIP LOCKED)
+UPDATE user_machines SET last_seen_at = now() FROM due WHERE user_machines.id = due.id
 `
 
 type TouchUserMachinesPresenceParams struct {
@@ -6069,6 +6072,8 @@ type TouchUserMachinesPresenceParams struct {
 // are already online once their row is older than gate_seconds, and writes nothing else (no version, no capabilities).
 // It never brings an offline machine online: that takes an observation, which also restores its capabilities. One
 // statement for every wait of the last flush interval (metering.PresenceFlushEvery).
+// Rows are locked in id order and a row another transaction holds is skipped (an observation sets last_seen_at itself,
+// the offline sweep ends the machine's presence anyway), so two statements touching many machines cannot deadlock.
 func (q *Queries) TouchUserMachinesPresence(ctx context.Context, arg TouchUserMachinesPresenceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, touchUserMachinesPresence, arg.Ids, arg.GateSeconds)
 	if err != nil {

@@ -40,15 +40,19 @@ func NewRuntimeRepository(store *db.DB, presenceRefresh time.Duration, identityC
 }
 
 // machineWaitPresenceGate is how old last_seen_at may get before a held machine-events wait refreshes it. A wait is
-// held up to 55 s, so a healthy machine's row is never older than that plus its reconnect gap, well inside the
-// offline cutoff (90 s).
-const machineWaitPresenceGate = 30 * time.Second
+// held up to 55 s, so a healthy machine's row is never older than the gate plus a wait plus the flush delay.
+const machineWaitPresenceGate = 25 * time.Second
 
 // PresenceFlushEvery is how long a wait's presence touch may sit in memory before it is written. A wait is held
 // 55 s, so one write per machine per wait became one statement a second for the whole fleet (commit and WAL sync
-// per row were ~10% of Postgres busy time in production). Together with machineWaitPresenceGate and a held wait it
-// stays under the offline cutoff (TestBatchedPresenceNeverApproachesTheOfflineCutoff).
+// per row were ~10% of Postgres busy time in production). The gate, a held wait, this delay and a client's first
+// reconnect after a server crash (presenceReconnectBudget) stay under the offline cutoff
+// (TestBatchedPresenceNeverApproachesTheOfflineCutoff).
 const PresenceFlushEvery = time.Second
+
+// presenceReconnectBudget is the longest first retry of a daemon's wait after the server dropped it: cli/internal/
+// hostruntime/machineevents minBackoff (1 s) plus reconnectSpread (5 s).
+const presenceReconnectBudget = 6 * time.Second
 
 // TouchMachinePresence records that machineID's machine-events wait is alive: it queues the machine for the next
 // FlushPresence (see TouchUserMachinesPresence for what the write does). A crash loses at most PresenceFlushEvery of
