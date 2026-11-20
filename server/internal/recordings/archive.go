@@ -87,7 +87,7 @@ func (s *Service) UploadURLs(ctx context.Context, machineID, id string, in share
 // Archived is POST /v1/machine/recordings/{id}/archived: the machine's first n segments are in the bucket. It only
 // ever grows, and only the recording's own machine moves it.
 func (s *Service) Archived(ctx context.Context, machineID, id string, n int) error {
-	if !recording.ValidRecordingID(id) || n < 0 {
+	if !recording.ValidRecordingID(id) || n < 0 || n > maxArchivedSegments {
 		return ErrInvalid
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -142,8 +142,12 @@ func (s *Service) archiveReplayTx(ctx context.Context, tx *db.Tx, t target, id s
 	return nil
 }
 
-// pruneBudget bounds the segments one PruneArchive pass deletes, so a backlog never stalls the retention worker; the
-// first recording of a pass is always finished, so the backlog drains.
+// maxArchivedSegments is the segment count no recording can exceed: shared.RecordingSegmentKey indexes end at 999999.
+const maxArchivedSegments = 1000000
+
+// pruneBudget bounds the segments one PruneArchive pass deletes, across all recordings, so a backlog never stalls the
+// retention worker. A recording is deleted from its highest segment down and its archived count shrinks with it, so
+// every pass makes progress and a huge or inflated count drains over several passes.
 const pruneBudget = 1000
 
 // PruneArchive deletes, from the team bucket, the segments of recordings that started more than
@@ -152,12 +156,13 @@ const pruneBudget = 1000
 // them until the index row's own retention removes it).
 func (s *Service) PruneArchive(ctx context.Context) error {
 	type expired struct {
-		id, team string
-		segments int
+		id, team           string
+		archived, segments int64
+		state              string
 	}
 	var batch []expired
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id, team_id, archived_segments FROM session_recordings
+		rows, err := tx.Query(ctx, `SELECT id, team_id, archived_segments, segments, state FROM session_recordings
  WHERE archived_segments > 0 AND started_at < $1 AND team_id IN (SELECT team_id FROM team_buckets) ORDER BY started_at LIMIT 50`,
 			s.now().Add(-time.Duration(s.cfg.BucketRetentionDays)*24*time.Hour))
 		if err != nil {
@@ -166,11 +171,9 @@ func (s *Service) PruneArchive(ctx context.Context) error {
 		defer rows.Close()
 		for rows.Next() {
 			var e expired
-			var n int64
-			if err := rows.Scan(&e.id, &e.team, &n); err != nil {
+			if err := rows.Scan(&e.id, &e.team, &e.archived, &e.segments, &e.state); err != nil {
 				return err
 			}
-			e.segments = int(n)
 			batch = append(batch, e)
 		}
 		return rows.Err()
@@ -180,11 +183,18 @@ func (s *Service) PruneArchive(ctx context.Context) error {
 	}
 	var failures []error
 	budget := pruneBudget
-	for i, e := range batch {
-		if i > 0 && e.segments > budget {
-			continue // next pass; this one never finishes first and the backlog still drains
+	for _, e := range batch {
+		if budget == 0 {
+			break // next pass; every pass shrinks the oldest counts, so the backlog drains
 		}
-		budget -= e.segments
+		// An ended recording's own segment count is the authorized inventory: a larger claimed count names
+		// objects that never existed.
+		count := min(e.archived, maxArchivedSegments)
+		if e.state == "ended" {
+			count = min(count, e.segments)
+		}
+		n := min(count, int64(budget))
+		budget -= int(n)
 		var store teambucket.ObjectStore
 		if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
 			store, err = s.storeTx(ctx, tx, e.team)
@@ -194,7 +204,7 @@ func (s *Service) PruneArchive(ctx context.Context) error {
 			continue
 		}
 		deleted := true
-		for i := 0; i < e.segments; i++ {
+		for i := int(count) - 1; i >= int(count-n); i-- {
 			key, err := shared.RecordingSegmentKey(store.Config().Prefix, e.id, i)
 			if err == nil {
 				err = store.Delete(ctx, key)
@@ -208,9 +218,9 @@ func (s *Service) PruneArchive(ctx context.Context) error {
 		if !deleted {
 			continue
 		}
-		// Only the count this pass deleted: a machine that archived more since is left for the next pass.
+		// Segments above count-n are gone; a machine that archived more since is left for the next pass.
 		if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE session_recordings SET archived_segments = 0 WHERE id = $1 AND archived_segments = $2`, e.id, int64(e.segments))
+			_, err := tx.Exec(ctx, `UPDATE session_recordings SET archived_segments = $3 WHERE id = $1 AND archived_segments = $2`, e.id, e.archived, count-n)
 			return err
 		}); err != nil {
 			failures = append(failures, err)
