@@ -259,6 +259,42 @@ func TestForwardTCPPreservesVisitorAddressForIPRules(t *testing.T) {
 	if _, err := io.ReadFull(stream, got); err != nil || got[0] != 'y' {
 		t.Fatalf("allowed visitor: %q %v", got, err)
 	}
+	t.Run("allowlist", forwardTCPAllowlistCase)
+}
+
+// forwardTCPAllowlistCase (a part of TestForwardTCPPreservesVisitorAddressForIPRules): the owner's allowlist is evaluated on the attested visitor, exactly as for a direct one: the forwarding node's own
+// address (127.0.0.1) does not satisfy it, the visitor's (127.0.0.2) does.
+func forwardTCPAllowlistCase(t *testing.T) {
+	port := freePublicPort(t)
+	holder := newTCPNode(t, false, func(_, address string) bool { return address == "127.0.0.2" })
+	connector, _ := tcpHolder(t, holder, port)
+	forwarder := newTCPNode(t, true, nil)
+	forwarder.p.SetForwarding(ForwardHooks{Forwarder: &directory{t: t, ports: []uint16{port}, holders: map[string][]*tcpNode{nodemesh.TCPKey(port): {holder}}}})
+	if err := forwarder.p.reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
+	outside, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outside.Close()
+	_, _ = outside.Write([]byte("x"))
+	_ = outside.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if n, err := outside.Read(make([]byte, 1)); err == nil || n != 0 {
+		t.Fatalf("a visitor outside the allowlist got through: %d %v", n, err)
+	}
+	inside, err := (&net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP("127.0.0.2")}}).Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inside.Close()
+	_, _ = inside.Write([]byte("y"))
+	stream, _ := readStreamOpen(t, connector)
+	got := make([]byte, 1)
+	if _, err := io.ReadFull(stream, got); err != nil || got[0] != 'y' {
+		t.Fatalf("allowlisted visitor: %q %v", got, err)
+	}
 }
 
 func TestForwardTCPMeteredOnHolderOnly(t *testing.T) {

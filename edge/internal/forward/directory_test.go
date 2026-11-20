@@ -120,3 +120,88 @@ func TestDirectoryTCPPortsListsWatchedAndSeededPortsOnly(t *testing.T) {
 		t.Fatalf("ports after the seed expired %v", got)
 	}
 }
+
+func TestRefusedRemovesMatchingRevision(t *testing.T) {
+	d := NewDirectory(time.Minute, nil)
+	d.SetPeers([]nodemesh.Peer{peer("a", "r", false)})
+	if err := d.ApplyWatch("a", nodemesh.Watch{Kind: nodemesh.WatchAdd, Names: []string{"x.example.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	holders := d.Holders("x.example.test")
+	if len(holders) != 1 || holders[0].Rev == 0 {
+		t.Fatalf("watch holder without a revision: %+v", holders)
+	}
+	d.Refused("x.example.test", "a", holders[0].Rev)
+	if got := d.Holders("x.example.test"); len(got) != 0 {
+		t.Fatalf("a refusal of the observed announcement left %v", got)
+	}
+}
+
+func TestRefusedPreservesNewerWatchAdd(t *testing.T) {
+	d := NewDirectory(time.Minute, nil)
+	d.SetPeers([]nodemesh.Peer{peer("a", "r", false)})
+	add := nodemesh.Watch{Kind: nodemesh.WatchAdd, Names: []string{"x.example.test"}}
+	if err := d.ApplyWatch("a", add); err != nil {
+		t.Fatal(err)
+	}
+	observed := d.Holders("x.example.test")[0].Rev
+	// The carrier dropped and came back while the Open was in flight: remove then add on the watch.
+	if err := d.ApplyWatch("a", nodemesh.Watch{Kind: nodemesh.WatchRemove, Names: add.Names}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ApplyWatch("a", add); err != nil {
+		t.Fatal(err)
+	}
+	d.Refused("x.example.test", "a", observed)
+	if got := ids(d.Holders("x.example.test")); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("a late refusal erased the newer announcement: %v", got)
+	}
+	// A repeated announcement without a removal is newer as well.
+	observed = d.Holders("x.example.test")[0].Rev
+	if err := d.ApplyWatch("a", add); err != nil {
+		t.Fatal(err)
+	}
+	d.Refused("x.example.test", "a", observed)
+	if len(d.Holders("x.example.test")) != 1 {
+		t.Fatal("a refusal erased a re-announcement")
+	}
+	// The seed entry goes whatever the revision.
+	d.ApplySeed([]nodemesh.Holder{{Name: "y.example.test", NodeIDs: []string{"a"}}})
+	d.Refused("y.example.test", "a", 0)
+	if len(d.Holders("y.example.test")) != 0 {
+		t.Fatal("seed entry survived a refusal")
+	}
+}
+
+func TestDirectoryWildcardFallbackExactFirst(t *testing.T) {
+	d := NewDirectory(time.Minute, nil)
+	d.SetPeers([]nodemesh.Peer{peer("a", "r", false), peer("b", "r", false)})
+	wild := nodemesh.WildcardKey("apps.example.test")
+	if err := d.ApplyWatch("a", nodemesh.Watch{Kind: nodemesh.WatchAdd, Names: []string{wild}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(d.Holders("one.apps.example.test")); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("concrete name did not match the wildcard: %v", got)
+	}
+	// One label only: the apex and a two-label name do not match.
+	if len(d.Holders("apps.example.test")) != 0 || len(d.Holders("x.one.apps.example.test")) != 0 {
+		t.Fatal("wildcard matched more than one label")
+	}
+	// An exact holder wins over the wildcard.
+	if err := d.ApplyWatch("b", nodemesh.Watch{Kind: nodemesh.WatchAdd, Names: []string{"one.apps.example.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(d.Holders("one.apps.example.test")); !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("exact holder must precede the wildcard: %v", got)
+	}
+	// A refusal of a concrete name does not unlist the wildcard for the other names.
+	other := d.Holders("two.apps.example.test")[0]
+	d.Refused("two.apps.example.test", "a", other.Rev)
+	if got := ids(d.Holders("three.apps.example.test")); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("a refused concrete name hid the wildcard: %v", got)
+	}
+	// A raw TCP key never matches a wildcard.
+	if len(d.Holders(nodemesh.TCPKey(30000))) != 0 {
+		t.Fatal("tcp key matched")
+	}
+}

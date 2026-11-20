@@ -27,6 +27,9 @@ var errPeerTooManyKeys = errors.New("forward peer claims more names than a node 
 type Holder struct {
 	NodeID   string
 	Draining bool
+	// Rev identifies the watch announcement this holder was listed from (0 when only the server seed lists it);
+	// Refused erases the announcement only while it is still this one.
+	Rev uint64
 }
 
 // Directory is the in-memory holder map: key -> the peer nodes serving it. Two sources feed it. A peer's watch
@@ -41,10 +44,11 @@ type Directory struct {
 	watch  map[string]*peerWatch
 	byKey  map[string]map[string]struct{}
 	seed   map[string]map[string]time.Time
+	rev    uint64 // last watch announcement revision handed out
 }
 
 type peerWatch struct {
-	names        map[string]struct{}
+	names        map[string]uint64 // key -> revision of the peer's latest announcement of it
 	complete     bool
 	snapshotting bool
 }
@@ -91,7 +95,7 @@ func (d *Directory) ApplyWatch(peer string, w nodemesh.Watch) error {
 	}
 	state := d.watch[peer]
 	if state == nil {
-		state = &peerWatch{names: map[string]struct{}{}}
+		state = &peerWatch{names: map[string]uint64{}}
 		d.watch[peer] = state
 	}
 	switch w.Kind {
@@ -120,13 +124,11 @@ func (d *Directory) ApplyWatch(peer string, w nodemesh.Watch) error {
 
 func (d *Directory) addLocked(peer string, state *peerWatch, names []string) error {
 	for _, name := range names {
-		if _, dup := state.names[name]; dup {
-			continue
-		}
-		if len(state.names) >= maxKeysPerPeer {
+		if _, dup := state.names[name]; !dup && len(state.names) >= maxKeysPerPeer {
 			return errPeerTooManyKeys
 		}
-		state.names[name] = struct{}{}
+		d.rev++
+		state.names[name] = d.rev // a repeated announcement is a newer one: it outlives a refusal of the old
 		holders := d.byKey[name]
 		if holders == nil {
 			holders = map[string]struct{}{}
@@ -192,12 +194,18 @@ func (d *Directory) ApplySeed(page []nodemesh.Holder) {
 	}
 }
 
-// Refused forgets that node holds key: it answered that it does not.
-func (d *Directory) Refused(key, node string) {
+// Refused forgets that node holds key: it answered that it does not. rev is the Holder.Rev observed when the
+// forwarder chose the node: a watch announcement newer than that (the carrier left and came back while the Open was
+// in flight) is kept, because the refusal does not speak for it. The seed entry is dropped either way (a seed
+// refresh re-adds it). A concrete name matched through a wildcard key is not listed under its own key, so a refusal
+// of it changes nothing: one name's refusal must not hide the wildcard from the other names.
+func (d *Directory) Refused(key, node string, rev uint64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if state := d.watch[node]; state != nil {
-		d.removeLocked(node, state, key)
+		if current, ok := state.names[key]; ok && current == rev {
+			d.removeLocked(node, state, key)
+		}
 	}
 	if nodes := d.seed[key]; nodes != nil {
 		delete(nodes, node)
@@ -224,25 +232,17 @@ func (d *Directory) Sweep() {
 	}
 }
 
-// Holders lists the peers serving key: watch-sourced ones, plus seeded ones whose watch is not complete.
-// Order: not draining first, then the node's own region, then node id.
+// Holders lists the peers serving key: watch-sourced ones, plus seeded ones whose watch is not complete. When no
+// peer holds the exact hostname, the holders of the one-label wildcard key covering it are listed instead (exact
+// wins; raw TCP keys never match a wildcard). Order: not draining first, then the node's own region, then node id.
 func (d *Directory) Holders(key string) []Holder {
 	now := d.now()
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	ids := map[string]struct{}{}
-	for id := range d.byKey[key] {
-		ids[id] = struct{}{}
-	}
-	for id, expires := range d.seed[key] {
-		if state := d.watch[id]; now.Before(expires) && (state == nil || !state.complete) {
-			ids[id] = struct{}{}
-		}
-	}
-	out := make([]Holder, 0, len(ids))
-	for id := range ids {
-		if peer, ok := d.peers[id]; ok {
-			out = append(out, Holder{NodeID: id, Draining: peer.Draining})
+	out := d.holdersLocked(key, now)
+	if _, tcp := nodemesh.ParseTCPKey(key); len(out) == 0 && !tcp {
+		if wild, ok := nodemesh.WildcardMatch(key); ok {
+			out = d.holdersLocked(wild, now)
 		}
 	}
 	slices.SortFunc(out, func(a, b Holder) int {
@@ -261,6 +261,25 @@ func (d *Directory) Holders(key string) []Holder {
 		}
 		return strings.Compare(a.NodeID, b.NodeID)
 	})
+	return out
+}
+
+func (d *Directory) holdersLocked(key string, now time.Time) []Holder {
+	ids := map[string]uint64{}
+	for id := range d.byKey[key] {
+		ids[id] = d.watch[id].names[key]
+	}
+	for id, expires := range d.seed[key] {
+		if state := d.watch[id]; now.Before(expires) && (state == nil || !state.complete) {
+			ids[id] = 0
+		}
+	}
+	out := make([]Holder, 0, len(ids))
+	for id, rev := range ids {
+		if peer, ok := d.peers[id]; ok {
+			out = append(out, Holder{NodeID: id, Draining: peer.Draining, Rev: rev})
+		}
+	}
 	return out
 }
 
