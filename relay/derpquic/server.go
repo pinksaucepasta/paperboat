@@ -477,7 +477,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 				}
 			}
 		}
-		s.accounts[g.AccountID] = newBudgetBurst(s.rateForLocked(g.AccountID), accountBurst(s.rateForLocked(g.AccountID)))
+		s.accounts[g.AccountID] = newAccountBudget(s.rateForLocked(g.AccountID))
 	}
 	return nil
 }

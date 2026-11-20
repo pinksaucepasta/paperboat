@@ -184,14 +184,21 @@ const (
 	MaxAccountMbit    = float64(accountBytesPerSecond) * 8 / 1e6
 	budgetBurstBytes  = 4 << 20
 	budgetMinimumCost = fragmentHeader + fragmentPayload
+	// accountMinimumCost is the least an account's budget charges a datagram or frame. The account budget is a BANDWIDTH cap, so it
+	// counts bytes: charging every datagram at least a full fragment (1067 B) made a 60-byte QUIC ACK cost as much as a data packet and a
+	// 1252-byte inner packet (two fragments) cost 2134, so a QUIC transfer got about half the account's speed (4.7 of 10, 52 of 100 Mbit/s,
+	// 0.26 of 1) and its ACKs shared the bucket with its data. The carrier budget keeps budgetMinimumCost: it bounds the work an
+	// authenticated peer can ask for (tiny frames, incomplete fragments).
+	accountMinimumCost = 64
 )
 
 type budget struct {
-	mu     sync.Mutex
-	rate   float64
-	burst  float64
-	at     time.Time
-	tokens float64
+	mu      sync.Mutex
+	minCost float64 // the least a datagram or frame is charged; zero means budgetMinimumCost
+	rate    float64
+	burst   float64
+	at      time.Time
+	tokens  float64
 }
 
 func newBudget(bytesPerSecond float64) *budget {
@@ -200,6 +207,20 @@ func newBudget(bytesPerSecond float64) *budget {
 
 func newBudgetBurst(bytesPerSecond, burst float64) *budget {
 	return &budget{rate: bytesPerSecond, burst: burst}
+}
+
+// newAccountBudget is an account's speed budget: it charges bytes (accountMinimumCost at least).
+func newAccountBudget(bytesPerSecond float64) *budget {
+	return &budget{rate: bytesPerSecond, burst: accountBurst(bytesPerSecond), minCost: accountMinimumCost}
+}
+
+// charge is what a datagram or frame of size bytes costs this budget.
+func (b *budget) charge(size int) float64 {
+	minimum := b.minCost
+	if minimum == 0 {
+		minimum = budgetMinimumCost
+	}
+	return max(float64(size), minimum)
 }
 
 // accountBurst is the burst of an account's budget: a quarter second of its speed (at least what carries one packet), so the total an
@@ -218,7 +239,7 @@ const shapingMaxDelay = 500 * time.Millisecond
 // rateLimitWait: x/time/rate ReserveN and a sleep), so the sender's TCP slows to the limit; here the relay carries datagrams, so the
 // delay is a bounded queue (readDatagrams) or a sleep before the next frame is read (the stream loop, TCP back-pressure).
 func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.Duration, bool) {
-	cost := float64(max(size, budgetMinimumCost))
+	cost := b.charge(size)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.at.IsZero() {
@@ -248,7 +269,7 @@ func (b *budget) setRate(bytesPerSecond, burst float64) {
 }
 
 func (b *budget) allow(now time.Time, size int) bool {
-	cost := float64(max(size, budgetMinimumCost))
+	cost := b.charge(size)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.at.IsZero() {

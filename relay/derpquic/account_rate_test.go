@@ -93,7 +93,7 @@ func TestAccountSpeedIsOneBucketAcrossRelays(t *testing.T) {
 			t.Fatal(err)
 		}
 		s.mu.Lock()
-		s.accounts["fair"] = newBudgetBurst(s.rateForLocked("fair"), accountBurst(s.rateForLocked("fair")))
+		s.accounts["fair"] = newAccountBudget(s.rateForLocked("fair"))
 		s.mu.Unlock()
 		return s
 	}
