@@ -11997,6 +11997,12 @@
               "$ref": "#/components/schemas/OperatorStateCount"
             }
           },
+          "transactional_mail": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorStateCount"
+            }
+          },
           "hosts": {
             "type": "integer",
             "format": "int64"
@@ -12048,6 +12054,7 @@
           "accounts",
           "billing_workspaces",
           "control_operations",
+          "transactional_mail",
           "hosts",
           "hosts_ready",
           "hosts_stale",
@@ -22272,6 +22279,68 @@
             "type": "string"
           }
         }
+      },
+      "OperatorMailFailure": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "invitation_id": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "first_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "attempts",
+          "created_at"
+        ]
+      },
+      "OperatorMailFailurePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorMailFailure"
+            }
+          },
+          "next_after": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Rows matching the filters, capped at 100000 (total_capped true)."
+          },
+          "total_capped": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mails",
+          "total"
+        ]
       }
     },
     "responses": {
@@ -66918,6 +66987,205 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/admin/transactional-mails": {
+      "get": {
+        "operationId": "get_v1_admin_transactional_mails",
+        "summary": "Operator transactional-mails",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorMailFailurePage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Lists mail that stayed undelivered after its retries (state failed)."
+      }
+    },
+    "/v1/admin/transactional-mails/{mail_id}/redrive": {
+      "post": {
+        "summary": "Requeue a failed transactional mail",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mail_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Control operation requeued."
+          },
+          "409": {
+            "description": "The mail is not in the failed list (it was sent, is retrying, or does not exist)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "post_v1_admin_transactional_mails_mail_id_redrive",
+        "x-operator-capability": "operations",
+        "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result."
       }
     }
   }

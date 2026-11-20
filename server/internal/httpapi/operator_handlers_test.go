@@ -40,6 +40,7 @@ func operatorTestRequest(method, pattern string, role auth.Role, at time.Time) *
 	r := httptest.NewRequest(method, "/v1/admin/test", nil)
 	r.Pattern = pattern
 	r.SetPathValue("operation_id", "op_test")
+	r.SetPathValue("mail_id", "op_test")
 	r.SetPathValue("account_id", "usr_target")
 	r.Header.Set("Operator-Target", "op_test")
 	r.Header.Set("Operator-Reason", "ticket_123")
@@ -61,6 +62,9 @@ func TestOperatorCapability(t *testing.T) {
 		{"worker_denied", "GET", "GET /v1/admin/accounts/{account_id}", auth.RoleSystem, now, 403},
 		{"support_no_mutation", "POST", "POST /v1/admin/control-operations/{operation_id}/recover", auth.RoleSupport, now, 403},
 		{"ops_recover", "POST", "POST /v1/admin/control-operations/{operation_id}/recover", auth.RoleOperations, now, 200},
+		{"support_no_redrive", "POST", "POST /v1/admin/transactional-mails/{mail_id}/redrive", auth.RoleSupport, now, 403},
+		{"ops_redrive", "POST", "POST /v1/admin/transactional-mails/{mail_id}/redrive", auth.RoleOperations, now, 200},
+		{"ops_list_failed_mail", "GET", "GET /v1/admin/transactional-mails", auth.RoleOperations, now, 200},
 		{"billing_no_control", "POST", "POST /v1/admin/control-operations/{operation_id}/recover", auth.RoleBilling, now, 403},
 		{"admin_read", "GET", "GET /v1/admin/accounts/{account_id}", auth.RoleAdmin, now, 200},
 		{"admin_write", "POST", "POST /v1/admin/control-operations/{operation_id}/recover", auth.RoleAdmin, now, 200},

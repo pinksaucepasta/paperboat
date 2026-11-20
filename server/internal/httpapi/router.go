@@ -1040,6 +1040,9 @@ func registerAuthRoutes(mux *http.ServeMux, opts Options) {
 	if opts.OperationRecovery != nil {
 		mux.Handle("POST /v1/admin/control-operations/{operation_id}/recover", operatorRoute(opts, adminRecoverControlOperation(opts.OperationRecovery)))
 	}
+	if opts.Operator != nil {
+		mux.Handle("POST /v1/admin/transactional-mails/{mail_id}/redrive", operatorRoute(opts, adminRedriveMail(opts.Operator)))
+	}
 	if opts.WorkspaceBillingRecovery != nil {
 		mux.Handle("POST /v1/admin/billing/workspace-operations/{operation_id}/retire", operatorRoute(opts, adminRetireWorkspaceBillingOperation(opts.WorkspaceBillingRecovery)))
 		mux.Handle("POST /v1/admin/billing/workspace-operations/{operation_id}/reconcile-checkout", operatorRoute(opts, adminReconcileWorkspaceCheckout(opts.WorkspaceBillingRecovery)))

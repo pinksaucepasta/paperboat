@@ -96,6 +96,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"GET /v1/admin/billing/workspaces":                                              {"support", "", "workspaces"},
 	"GET /v1/admin/billing/workspace-operations":                                    {"billing", "", "billing-operations"},
 	"GET /v1/admin/control-operations":                                              {"operations", "", "control-operations"},
+	"GET /v1/admin/transactional-mails":                                             {"operations", "", "transactional-mails"},
 	"GET /v1/admin/billing/products":                                                {"billing", "", "billing-products"},
 	"PUT /v1/admin/billing/products/{code}":                                         {"admin", "code", ""},
 	"GET /v1/admin/config/billing":                                                  {"billing", "", "billing-policy"},
@@ -159,6 +160,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/edge/usage-keys/{key_id}/revoke":                                {"admin", "key_id", ""},
 	"POST /v1/admin/mint/signing-keys/{key_id}/revoke":                              {"admin", "key_id", ""},
 	"POST /v1/admin/control-operations/{operation_id}/recover":                      {"operations", "operation_id", ""},
+	"POST /v1/admin/transactional-mails/{mail_id}/redrive":                          {"operations", "mail_id", ""},
 	"POST /v1/admin/billing/workspace-operations/{operation_id}/retire":             {"billing", "operation_id", ""},
 	"POST /v1/admin/billing/workspace-operations/{operation_id}/reconcile-checkout": {"billing", "operation_id", ""},
 	"POST /v1/admin/billing/workspace-operations/{operation_id}/supersede-portal":   {"billing", "operation_id", ""},
@@ -361,6 +363,7 @@ func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 		{"GET /v1/admin/billing/workspaces", "workspaces", ""},
 		{"GET /v1/admin/billing/workspace-operations", "billing_operations", ""},
 		{"GET /v1/admin/control-operations", "control_operations", ""},
+		{"GET /v1/admin/transactional-mails", "mail_failures", ""},
 		{"GET /v1/admin/accounts/{account_id}", "account", "account_id"},
 		{"GET /v1/admin/teams/{team_id}", "team", "team_id"},
 		{"GET /v1/admin/billing/workspaces/{workspace_id}", "billing", "workspace_id"},
@@ -637,4 +640,18 @@ func releaseMetadataHealth(directory string, now time.Time) map[string]any {
 		}
 	}
 	return map[string]any{"status": status, "code": "release_metadata_expiring_" + strings.Join(roles, "_"), "since": warnings[0].Expires}
+}
+
+// adminRedriveMail puts a failed transactional mail back in the queue (the operator guard audits the request).
+func adminRedriveMail(service *operator.Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch err := service.RedriveMail(r.Context(), r.PathValue("mail_id")); {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, operator.ErrNotFound):
+			writeError(w, r, http.StatusConflict, "mail_not_failed", "The mail is not in the failed list. It was sent, is still retrying, or does not exist.")
+		default:
+			writeError(w, r, http.StatusServiceUnavailable, "operator_unavailable", "The mail could not be requeued. Try again later.", err)
+		}
+	})
 }

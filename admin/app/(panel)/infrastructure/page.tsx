@@ -5,7 +5,7 @@ import { HostHealth } from "@/components/infra/host-health"
 import { Keys } from "@/components/infra/keys"
 import { ManagedNodes } from "@/components/infra/managed-nodes"
 import { RegionsTab } from "@/components/infra/regions"
-import { ControlOperations, Health, Publications } from "@/components/infra/runtime"
+import { ControlOperations, FailedMail, Health, Publications } from "@/components/infra/runtime"
 import { SelfhostTab } from "@/components/infra/selfhost"
 import { ServerNodesTab } from "@/components/infra/server-nodes"
 import { Page } from "@/components/page"
@@ -41,7 +41,12 @@ export default function InfrastructurePage() {
       {view === "relays" && <Health kind="relay" />}
       {view === "tunnels" && <Health kind="tunnel" />}
       {view === "publications" && <Publications />}
-      {view === "operations" && <ControlOperations />}
+      {view === "operations" && (
+        <>
+          <ControlOperations />
+          <FailedMail />
+        </>
+      )}
       {view === "keys" && <Keys />}
     </Page>
   )
