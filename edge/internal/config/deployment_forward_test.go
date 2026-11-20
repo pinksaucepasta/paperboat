@@ -35,3 +35,37 @@ func TestForwardKeysDefaultAndValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestForwardPeerStaleAfterDefaultsAndValidates(t *testing.T) {
+	deployment, err := LoadDeployment(writeDeployment(t, validDeploymentJSON()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deployment.ForwardPeerStale() != 50*time.Second {
+		t.Fatalf("default stale = %v, want 50s", deployment.ForwardPeerStale())
+	}
+	// A longer peer interval scales the default, so the stale window never shrinks below one refresh.
+	longer, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+`,"forward_peer_interval":60000000000}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if longer.ForwardPeerStale() != 5*time.Minute {
+		t.Fatalf("stale with 1m interval = %v, want 5m", longer.ForwardPeerStale())
+	}
+	explicit, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+`,"forward_peer_stale_after":30000000000}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.ForwardPeerStale() != 30*time.Second {
+		t.Fatalf("explicit stale = %v, want 30s", explicit.ForwardPeerStale())
+	}
+	for _, bad := range []string{
+		`,"forward_peer_stale_after":-1}`, `,"forward_peer_stale_after":5000000000}`,
+		`,"forward_peer_stale_after":3600000000001}`,
+		`,"forward_peer_interval":20000000000,"forward_peer_stale_after":10000000000}`,
+	} {
+		if _, err := LoadDeployment(writeDeployment(t, strings.TrimSuffix(validDeploymentJSON(), "}")+bad)); err == nil {
+			t.Fatalf("accepted forward setting %s", bad)
+		}
+	}
+}

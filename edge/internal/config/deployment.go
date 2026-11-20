@@ -82,6 +82,7 @@ type Deployment struct {
 	ForwardDialTimeout       time.Duration `json:"forward_dial_timeout,omitempty"`
 	ForwardOpenTimeout       time.Duration `json:"forward_open_timeout,omitempty"`
 	ForwardPeerInterval      time.Duration `json:"forward_peer_interval,omitempty"`
+	ForwardPeerStaleAfter    time.Duration `json:"forward_peer_stale_after,omitempty"`
 	ForwardSeedInterval      time.Duration `json:"forward_seed_interval,omitempty"`
 	ForwardMaxStreamsPerPeer int           `json:"forward_max_streams_per_peer,omitempty"`
 }
