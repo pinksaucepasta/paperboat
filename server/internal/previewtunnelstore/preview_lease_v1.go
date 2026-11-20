@@ -723,7 +723,11 @@ func (s *Store) MarkPreviewLeaseReadyV1(ctx context.Context, input MarkPreviewLe
 	}
 	now := input.Now.UTC()
 	var result PreviewLeaseRecord
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed: AdvancePreviewLeaseReadinessV1 is the lease's generation CAS (it locks the row and re-checks the
+	// expected generation on the newest version), and the domain and certificate rebinds below are fenced by the
+	// generations it produced, as in RenewPreviewLeaseV1.
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		result = PreviewLeaseRecord{}
 		q := tx.Queries()
 		current, err := q.GetPreviewLeaseV1(ctx, dbsqlc.GetPreviewLeaseV1Params{ID: input.PreviewID, AccountID: input.AccountID})
 		if err != nil {
