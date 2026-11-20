@@ -190,7 +190,7 @@ func validWindowsSSHTarget(target windowsServiceTarget) bool {
 
 // stageableWindowsSSHTarget is the SSH wrapper target a download may stage: none at all, or a complete valid one.
 // Real installs have only the generation-scoped PaperboatSshd-<instance>-<generation> services, never the legacy
-// PaperboatSshd-<instance> this query asks for, so "absent" is the normal case (victus: every `pb update download` of
+// PaperboatSshd-<instance> this query asks for, so "absent" is the normal case (Windows test machine: every `pb update download` of
 // official 2026.11.10.1 failed 'invalid Windows activation transaction' before any journal was written); the journal
 // validator already accepts both targets empty.
 func stageableWindowsSSHTarget(target windowsServiceTarget) bool {

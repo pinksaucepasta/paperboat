@@ -687,6 +687,19 @@ func (s *Server) SetAccountSpeeds(accounts map[string]float64) error {
 	return nil
 }
 
+// TakeAccountDemand returns, for every account with traffic admitted on this relay, the bytes it offered since the last call (counted
+// before the speed limit decides, so delayed and dropped bytes count: a relay held at its share still shows it wants more) and starts
+// a new window. The control plane divides the account's speed among its relays by it.
+func (s *Server) TakeAccountDemand() map[string]uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]uint64, len(s.accounts))
+	for account, b := range s.accounts {
+		out[account] = b.takeOffered()
+	}
+	return out
+}
+
 // AccountMbit is the speed in Mbit/s the account is held to on this relay now (the ceiling when it is not limited).
 func (s *Server) AccountMbit(account string) float64 {
 	s.mu.Lock()

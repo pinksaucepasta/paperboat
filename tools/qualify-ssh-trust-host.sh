@@ -4,9 +4,9 @@
 # regenerated inside the container, so no real machine's SSH identity is touched.
 #   DOCKER="sudo -n docker" tools/qualify-ssh-trust-host.sh --pb /path/to/arm64/pb --owner-command "ssh -o BatchMode=yes user@host"
 # The owner computer runs pb ssh; it needs a signed-in pb. --owner-command is how a shell on it is reached
-# (its arguments are one command string); --prefix names the throwaway (default lanea-); its record is revoked at the end by its exact name.
+# (its arguments are one command string); --prefix names the throwaway (default test-); its record is revoked at the end by its exact name.
 set -eu
-base=ubuntu:24.04 platform='' pb='' owner_command='' prefix=lanea-
+base=ubuntu:24.04 platform='' pb='' owner_command='' prefix=test-
 while [ "$#" -gt 0 ]; do
  case "$1" in
   --base) base=$2; shift 2;; --platform) platform=$2; shift 2;; --pb) pb=$2; shift 2;;

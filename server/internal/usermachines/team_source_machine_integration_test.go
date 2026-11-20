@@ -14,7 +14,7 @@ import (
 
 // A team member running pb on a team-owned machine gets descriptors from it: the source check accepts
 // the user's own personal machine or a machine of a team the user is an active member of, never a
-// stranger's, a suspended team's or a revoked machine (Lane O, F12: exec from a team machine was 404).
+// stranger's, a suspended team's or a revoked machine (F12: exec from a team machine was 404).
 func TestTeamOwnedSourceMachineGetsDescriptors(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()

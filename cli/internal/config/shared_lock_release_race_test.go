@@ -10,7 +10,7 @@ import (
 
 // A waiter that finds another process's lock directory inspects it; that process may release it at that moment. On
 // Windows the inspection then fails (the directory is gone before the open, or under the open handle). That is "not
-// acquired yet": victus 2026-11-10 failed credential reads on it under ten parallel pb.exe.
+// acquired yet": Windows test machine 2026-11-10 failed credential reads on it under ten parallel pb.exe.
 func TestSharedLockWaiterSurvivesReleaseDuringInspection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profile.json.lock")
 	lock := newSharedLock(path)

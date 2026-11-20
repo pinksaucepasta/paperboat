@@ -107,7 +107,7 @@ func (j *InputJournal) SetGeneration(generation uint64) {
 // InputDecisionWindow is how many recent sequenced decisions are kept per client, attachment and
 // generation. A sequenced client resends only input it has not seen decided, which is never more than
 // its outstanding window; an older sequence is refused as out of order, never written twice. Without the
-// window a session refused all input after MaxInputDecisions writes (Lane X audit H2).
+// window a session refused all input after MaxInputDecisions writes (audit H2).
 const InputDecisionWindow = 256
 
 // forgetBeforeWindowLocked drops the sequenced decision that just left the window; j.mu is held.

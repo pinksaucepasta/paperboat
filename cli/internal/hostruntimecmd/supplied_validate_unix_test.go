@@ -92,7 +92,7 @@ func hostinstallFailureForTest() error {
 }
 
 // A supplied install whose validation restarted the user's daemon and then failed restored the previous
-// files but left that daemon on the replaced binary (lanel-b, 2026-10-22). After a failed install the
+// files but left that daemon on the replaced binary (test-b, 2026-10-22). After a failed install the
 // daemon is restarted on the restored version, and only when validation had restarted it.
 func TestFailedSuppliedInstallRestartsTheDaemonOnTheRestoredVersion(t *testing.T) {
 	previous := suppliedUpdateReadyTimeout
@@ -125,7 +125,7 @@ func TestFailedSuppliedInstallRestartsTheDaemonOnTheRestoredVersion(t *testing.T
 	}
 }
 
-// Lane F's rule: a daemon that was ready must be ready again before an update commits. When it only
+// the rule: a daemon that was ready must be ready again before an update commits. When it only
 // waits for the control plane (a slow server), validation keeps polling until the deadline instead of
 // failing; when the deadline passes in that state the error names the control plane; any other
 // degradation fails at once.

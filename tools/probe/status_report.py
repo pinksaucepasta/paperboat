@@ -9,7 +9,7 @@ so a broken probe host can never make a service look down. Config (JSON, path in
               pin? (sha256//<base64 public key hash> for one check)}]
   relay_set_cmd  a shell command that prints this host's canary machine's relay file (the signed candidate set its daemon keeps); relay checks
              trust the key the SIGNED set names for that relay, the way clients do, so a certificate rotation follows the set, never this config  steps     {probe.sh step name: unit} for canary steps run on this host
-Used by canary.py (oracle, with its steps) and status_run.py (anvit and staging).
+Used by canary.py (build host, with its steps) and status_run.py (database test host and staging).
 """
 import base64, hashlib, hmac, json, os, re, socket, ssl, subprocess, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor

@@ -16,7 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/operationrevocation"
 )
 
-// Destination teardown and feed-outage timers are Lane R's separate admission checks.
+// Destination teardown and feed-outage timers are the separate admission checks.
 func TestSDKLiveSessionRevocation(t *testing.T) {
 	f, _, signer := newWorkspaceDescriptorFixture(t)
 	ctx, token, session := sdkSession(t, f, "exec")

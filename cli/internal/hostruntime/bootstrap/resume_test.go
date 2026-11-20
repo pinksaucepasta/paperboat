@@ -21,11 +21,11 @@ func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := NewResumeRecord(server, publicKey, "token-1", "Win-target", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "token-1", "Victus", now)
+	loaded, err := LoadResume(root, server, publicKey, "token-1", "Win-target", now)
 	if err != nil || loaded.Verifier != record.Verifier {
 		t.Fatalf("initial resume = %#v, err=%v", loaded, err)
 	}
@@ -36,12 +36,12 @@ func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.
 	// The installer may have consumed a token file before the process failed;
 	// the protected local journal still permits the exact same enrollment to
 	// resume without making the server replay its one-shot credential.
-	if _, err := LoadResume(root, server, publicKey, "", "Victus", now); err != nil {
+	if _, err := LoadResume(root, server, publicKey, "", "Win-target", now); err != nil {
 		t.Fatalf("resume without consumed token file: %v", err)
 	}
 	for name, args := range map[string][]string{
-		"wrong token":   {server, publicKey, "token-2", "Victus"},
-		"wrong machine": {server, base64.RawURLEncoding.EncodeToString(func() []byte { value := make([]byte, 32); value[0] = 1; return value }()), "token-1", "Victus"},
+		"wrong token":   {server, publicKey, "token-2", "Win-target"},
+		"wrong machine": {server, base64.RawURLEncoding.EncodeToString(func() []byte { value := make([]byte, 32); value[0] = 1; return value }()), "token-1", "Win-target"},
 		"wrong name":    {server, publicKey, "token-1", "Other"},
 	} {
 		if _, err := LoadResume(root, args[0], args[1], args[2], args[3], now); !errors.Is(err, ErrResumeBinding) {
@@ -59,14 +59,14 @@ func TestResumeRecordSurvivesMaterialDeliveryAndRequiresExactBinding(t *testing.
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err = LoadResume(root, server, publicKey, "token-1", "Victus", now)
+	loaded, err = LoadResume(root, server, publicKey, "token-1", "Win-target", now)
 	if err != nil || loaded.Material == nil || loaded.Material.UserMachineID != "mch_1" {
 		t.Fatalf("material resume = %#v, err=%v", loaded, err)
 	}
 	if err := ClearResume(root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "token-1", "Victus", now); !errors.Is(err, ErrResumeNotFound) {
+	if _, err := LoadResume(root, server, publicKey, "token-1", "Win-target", now); !errors.Is(err, ErrResumeNotFound) {
 		t.Fatalf("cleared resume error=%v", err)
 	}
 }
@@ -140,18 +140,18 @@ func TestTokenBackedResumeCannotDowngradeBeforePairing(t *testing.T) {
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(time.Hour))
+	record := NewResumeRecord(server, publicKey, "token-1", "Win-target", "verifier-012345678901234567890123456789", now.Add(time.Hour))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "", "Victus", now); !errors.Is(err, ErrResumeTokenRequired) {
+	if _, err := LoadResume(root, server, publicKey, "", "Win-target", now); !errors.Is(err, ErrResumeTokenRequired) {
 		t.Fatalf("pre-pair token omission error=%v", err)
 	}
 	record.PairingStarted = true
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "", "Victus", now); err != nil {
+	if _, err := LoadResume(root, server, publicKey, "", "Win-target", now); err != nil {
 		t.Fatalf("post-pair token omission should resume by verifier: %v", err)
 	}
 }
@@ -161,11 +161,11 @@ func TestResumeRecordRejectsTamperedOrExpiredState(t *testing.T) {
 	now := time.Date(2099, 8, 22, 12, 0, 0, 0, time.UTC)
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
+	record := NewResumeRecord(server, publicKey, "token-1", "Win-target", "verifier-012345678901234567890123456789", now.Add(-time.Minute))
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "token-1", "Victus", now)
+	loaded, err := LoadResume(root, server, publicKey, "token-1", "Win-target", now)
 	if !errors.Is(err, ErrResumeExpired) {
 		t.Fatalf("expired resume error=%v", err)
 	}
@@ -176,14 +176,14 @@ func TestResumeRecordRejectsTamperedOrExpiredState(t *testing.T) {
 	if err := SaveResume(root, record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err = LoadResume(root, server, publicKey, "", "Victus", now)
+	loaded, err = LoadResume(root, server, publicKey, "", "Win-target", now)
 	if !errors.Is(err, ErrResumeExpired) || !loaded.PairingStarted || loaded.Verifier != record.Verifier {
 		t.Fatalf("expired paired resume = %#v, err=%v", loaded, err)
 	}
 	if err := os.WriteFile(ResumePath(root), []byte(`{"schema":"paperboat.machine-resume/v1"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadResume(root, server, publicKey, "token-1", "Victus", now.Add(-time.Hour)); !errors.Is(err, ErrResumeBinding) {
+	if _, err := LoadResume(root, server, publicKey, "token-1", "Win-target", now.Add(-time.Hour)); !errors.Is(err, ErrResumeBinding) {
 		t.Fatalf("tampered resume error=%v", err)
 	}
 }
@@ -193,7 +193,7 @@ func TestLoadResumeReturnsExpiredMaterialForVerifierRecovery(t *testing.T) {
 	now := time.Now().UTC()
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	record := NewResumeRecord(server, publicKey, "token-1", "Victus", "verifier-012345678901234567890123456789", now.Add(-time.Hour))
+	record := NewResumeRecord(server, publicKey, "token-1", "Win-target", "verifier-012345678901234567890123456789", now.Add(-time.Hour))
 	record.PairingStarted = true
 	record.Material = &Material{
 		Schema: "paperboat.machine-installation/v1", UserMachineID: "mch_1", PairingID: "ume_1", EnvironmentID: "env_1",
@@ -213,7 +213,7 @@ func TestLoadResumeReturnsExpiredMaterialForVerifierRecovery(t *testing.T) {
 	if err := atomicfile.Write(ResumePath(root), encoded, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadResume(root, server, publicKey, "", "Victus", now)
+	loaded, err := LoadResume(root, server, publicKey, "", "Win-target", now)
 	if !errors.Is(err, ErrResumeExpired) || loaded.Material == nil || loaded.Material.UserMachineID != "mch_1" {
 		t.Fatalf("expired material resume = %#v, err=%v", loaded, err)
 	}
@@ -244,23 +244,23 @@ func TestAuthenticatedMachineSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmp
 	now := time.Now().UTC()
 	server := "https://api.example.test"
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	first, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_1", 7, now)
+	first, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_1", 7, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_1", 7, now.Add(time.Minute))
+	second, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_1", 7, now.Add(time.Minute))
 	if err != nil || second.Verifier != first.Verifier || second.SetupOperationID != first.SetupOperationID {
 		t.Fatalf("live authenticated resume=%+v err=%v, first=%+v", second, err, first)
 	}
 	if err := ClearResume(root); err != nil {
 		t.Fatal(err)
 	}
-	legacy := NewResumeRecord(server, publicKey, "", "Victus", "legacy-verifier-01234567890123456789", now.Add(-time.Minute))
+	legacy := NewResumeRecord(server, publicKey, "", "Win-target", "legacy-verifier-01234567890123456789", now.Add(-time.Minute))
 	legacy.PairingStarted = true
 	if err := SaveResume(root, legacy); err != nil {
 		t.Fatal(err)
 	}
-	replaced, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_1", 7, now)
+	replaced, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_1", 7, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestAuthenticatedMachineSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmp
 	if err := SaveResume(root, legacy); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_1", 7, now); !errors.Is(err, ErrResumeBinding) {
+	if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_1", 7, now); !errors.Is(err, ErrResumeBinding) {
 		t.Fatalf("mismatched stale journal error=%v", err)
 	}
 	loaded, err := loadResumeDocument(root)
@@ -288,7 +288,7 @@ func TestAuthenticatedMachineSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmp
 	if err := SaveResume(root, first); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_2", 8, now); !errors.Is(err, ErrResumeBinding) {
+	if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_2", 8, now); !errors.Is(err, ErrResumeBinding) {
 		t.Fatalf("mismatched authenticated journal error=%v", err)
 	}
 	loaded, err = loadResumeDocument(root)
@@ -316,7 +316,7 @@ func TestAuthenticatedMachineSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmp
 	if err := atomicfile.Write(ResumePath(root), encoded, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
 		t.Fatal(err)
 	}
-	reused, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_1", 7, now)
+	reused, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_1", 7, now)
 	if err != nil || reused.Verifier != first.Verifier || reused.SetupOperationID != first.SetupOperationID || reused.Material == nil {
 		t.Fatalf("expired material resume=%+v err=%v", reused, err)
 	}
@@ -331,7 +331,7 @@ func TestAuthenticatedMachineSetupResumeReusesLiveAndReplacesOnlyExactExpiredEmp
 		if err := atomicfile.Write(ResumePath(root), encoded, atomicfile.CurrentOwnerOptions(0o600)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Victus", "mch_1", 7, now); !errors.Is(err, ErrResumeBinding) {
+		if _, err := PrepareAuthenticatedSetupResume(root, server, publicKey, "Win-target", "mch_1", 7, now); !errors.Is(err, ErrResumeBinding) {
 			t.Fatalf("expired %s checkpoint error=%v", checkpoint, err)
 		}
 		loaded, err := loadResumeDocument(root)

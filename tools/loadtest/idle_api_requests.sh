@@ -4,7 +4,7 @@
 # stack by its build: install a pb whose version string is unique to this machine (-X ...buildinfo.Version=dev-<sha>-idle),
 # the access log's `client=paperboat/<version>` then counts exactly its requests (edge/node/trust calls and the edge's
 # Go-http-client are not the machine's). Run it next to tools/device-smoke/perf_idle.py on the machine.
-#   VERSION=dev-<sha>-idle LOG_CMD='ssh ubuntu@anvit "cd ~/pb-release-staging && docker compose logs --no-log-prefix --since $START --until $END server"' \
+#   VERSION=dev-<sha>-idle LOG_CMD='ssh tester@host.example.test "cd ~/pb-release-staging && docker compose logs --no-log-prefix --since $START --until $END server"' \
 #     idle_api_requests.sh [seconds=600]
 # LOG_CMD prints the server's log between the UTC times in $START and $END (RFC 3339).
 set -euo pipefail

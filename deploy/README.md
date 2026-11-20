@@ -141,7 +141,7 @@ git archive HEAD -- . ':!console' ':!marketing' ':!tools' | tar x -C "$dir"
 cd "$dir" && docker build --build-arg PAPERBOAT_VERSION=<YYYY.MM.DD.N> -t <name>:<tag> -f <service>/deploy/Dockerfile .
 ```
 
-**Never build or compile on the database host while a deploy gate or watch runs** (2026-11-16: a server image build on coolify ran while `/v1/edge/*` answered in 2-9 s during an edge gate): build the amd64 server image on an x86_64 Docker host (pbvm2) and move it with `docker save <image> | ssh root@<db host> docker load`; build the arm64 edge and relay images on anvit.
+**Never build or compile on the database host while a deploy gate or watch runs** (2026-11-16: a server image build on deployment-host ran while `/v1/edge/*` answered in 2-9 s during an edge gate): build the amd64 server image on an x86_64 Docker host (linux-test-vm-2) and move it with `docker save <image> | ssh root@<db host> docker load`; build the arm64 edge and relay images on database-test-host.
 
 The server also needs `--build-arg PAPERBOAT_COMMIT=<40-hex HEAD>`; it is the commit that
 `GET /v1/server-version` reports and the image build refuses anything else. Take a database backup
@@ -160,43 +160,43 @@ mode 0600, the project DSN); `pbh` passes its path to the containers it starts, 
 release (`paperboat-edge:<version>`). Write the file before the `pbh install` of the new images: a container
 whose image did not change is adopted as it is and would keep running without it.
 
-## Deploy procedure for any lane (server and edges)
+## Deploy procedure for any worktree (server and edges)
 
-Any lane may deploy its own server or edge change with this procedure. The order is fixed; skip
-nothing. Hosts: the control plane runs on `ssh root@coolify` (`/opt/paperboat`); the two edges are
-oracle (`node_fce5a4b8`, the machine the lanes run on) and anvit (`ssh anvit`, `node_e8a853d5`).
+Any worktree may deploy its own server or edge change with this procedure. The order is fixed; skip
+nothing. Hosts: the control plane runs on `ssh tester@deployment-host` (`/opt/paperboat`); the two edges are
+build-host (`node_fce5a4b8`, the machine the worktrees run on) and database-test-host (`ssh database-test-host`, `node_e8a853d5`).
 
 **1. Gate.** The change is pushed to `main` after `make gate` (or the Go/PostgreSQL tests of the
-packages you touched) passed. Database tests run only in the isolated test PostgreSQL on oracle
+packages you touched) passed. Database tests run only in the isolated test PostgreSQL on build-host
 (`~/bin/lanebtest.sh <srcdir> <go test args>`, a container on `127.0.0.1:55433`), never on the
 production database.
 
 **2. Take the deploy lock.** One deploy at a time, server or edge. `gated-deploy.py` (step 6) takes and
-releases it for you; take it by hand only for work outside the gate. The lock is a file on coolify
+releases it for you; take it by hand only for work outside the gate. The lock is a file on deployment-host
 that names its owner; `noclobber` makes taking it atomic:
 
 ```sh
-ssh root@coolify 'set -o noclobber; echo "<lane> <what> $(date -u +%FT%TZ)" > /opt/paperboat/deploy.lock' \
-  || ssh root@coolify cat /opt/paperboat/deploy.lock     # someone else deploys: wait, do not remove it
+ssh tester@deployment-host 'set -o noclobber; echo "<worktree> <what> $(date -u +%FT%TZ)" > /opt/paperboat/deploy.lock' \
+  || ssh tester@deployment-host cat /opt/paperboat/deploy.lock     # someone else deploys: wait, do not remove it
 # ... deploy ...
-ssh root@coolify rm /opt/paperboat/deploy.lock             # always release it, also after a rollback
+ssh tester@deployment-host rm /opt/paperboat/deploy.lock             # always release it, also after a rollback
 ```
 
-A lock older than 45 minutes whose owner lane is not answering may be removed after checking
-`docker ps` on coolify and `python3 /opt/paperboat/rollout-server.py --directory /opt/paperboat --reap`
+A lock older than 45 minutes whose owner worktree is not answering may be removed after checking
+`docker ps` on deployment-host and `python3 /opt/paperboat/rollout-server.py --directory /opt/paperboat --reap`
 show no rollout in progress. `rollout-server.py` also holds its own `server-rollout.lock`, so two
 rollouts cannot switch traffic together even if this file is ignored.
 
-**3. Server.** On coolify, from a clean checkout of the exact pushed commit (never the working tree):
+**3. Server.** On deployment-host, from a clean checkout of the exact pushed commit (never the working tree):
 
 ```sh
 V=2026.10.22.N                                   # next free tag: docker images paperboat-server
 C=$(git rev-parse origin/main)                   # the commit you deploy
 D=$(mktemp -d); git -C <your clone> archive $C -- . ':!console' ':!marketing' ':!tools' | tar x -C $D
 docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C \
-  -t paperboat-server:$V -f $D/server/deploy/Dockerfile $D        # or copy the archive to coolify first
+  -t paperboat-server:$V -f $D/server/deploy/Dockerfile $D        # or copy the archive to deployment-host first
 cd /opt/paperboat && ./backup-database.sh                          # always, before the migration runs
-# new migration? rehearse it first in the isolated test PostgreSQL (goose up on oracle's lane-b-test-pg)
+# new migration? rehearse it first in the isolated test PostgreSQL (goose up on build-host's pb-test-pg)
 docker inspect --format '{{.Config.Image}}' $(python3 -c "import json;print(json.load(open('server-rollout.json'))['active'])")   # PREVIOUS image: note it
 python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:$V --commit <the commit it was built from>
 # rehearse first: deploy/rehearse-migrations.sh $V <commit> (refuses a stale tag)
@@ -207,9 +207,9 @@ The rollout runs additive migrations, starts a candidate, waits for `/readyz` an
 Caddy; a failed candidate leaves the serving process untouched. Check the result:
 `curl -fsS https://api.pprbt.dev/v1/server-version` must report `$C`, and `/readyz` must be 200.
 
-**4. Edges** (only when `edge/`, `relay/`, `helper/` or shared edge code changed). Oracle builds
-natively (arm64); anvit takes the image by `docker save | ssh anvit docker load`. One edge at a time,
-oracle first, and wait for its node row to heartbeat before the next:
+**4. Edges** (only when `edge/`, `relay/`, `helper/` or shared edge code changed). build-host builds
+natively (arm64); database-test-host takes the image by `docker save | ssh database-test-host docker load`. One edge at a time,
+build-host first, and wait for its node row to heartbeat before the next:
 
 ```sh
 sudo docker build --build-arg PAPERBOAT_VERSION=$V --build-arg PAPERBOAT_COMMIT=$C -t paperboat-edge:$V -f edge/deploy/Dockerfile $D
@@ -226,35 +226,35 @@ start and drops new fields. The current tags are in `docker ps` on each edge and
 `python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:<previous>` (migrations are
 additive, so the previous server still runs on the new schema; a migration that removes or renames
 anything must not be deployed in the same step as the code that needs it). Edges: the same `pbh install`
-with the previous tags; roll edges back only after the server is back on the matching version (an edge older than the server is refused: the edge limits heartbeat answer changed in 643706cc4, so a previous edge never becomes ready against a newer server). Release the lock, then tell the lane that was waiting what happened.
+with the previous tags; roll edges back only after the server is back on the matching version (an edge older than the server is refused: the edge limits heartbeat answer changed in 643706cc4, so a previous edge never becomes ready against a newer server). Release the lock, then tell the worktree that was waiting what happened.
 
-**6. Recheck and smoke.** Every server or edge deploy runs inside the deploy gate (from oracle):
+**6. Recheck and smoke.** Every server or edge deploy runs inside the deploy gate (from build-host):
 `PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production database,
-SQL on stdin, -At>' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<oracle ip> anvit=<anvit ip>`.
-The probe machine must run a `pb` built from `main` (`pb update --from <build>`): a build from before a9f2a2e5f (2026-11-05, host handling of the edge goaway) cannot move to the replacement edge process and shows a 5 s run of 404s on every edge swap (anvit, 2026-11-09), whatever the images are. It makes a preview on the probe before the deploy, fetches it through every edge each second during it, and
+SQL on stdin, -At>' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<build-host ip> database-test-host=<database-test-host ip>`.
+The probe machine must run a `pb` built from `main` (`pb update --from <build>`): a build from before a9f2a2e5f (2026-11-05, host handling of the edge goaway) cannot move to the replacement edge process and shows a 5 s run of 404s on every edge swap (database-test-host, 2026-11-09), whatever the images are. It makes a preview on the probe before the deploy, fetches it through every edge each second during it, and
 follows the log of every edge container that runs in the window, the replaced one included. It fails unless
 all of these are 0: preview failures, edge control failures, refused host carriers
 (`carrier_connection_failed`), host route attach refusals, edge-made 5xx (`edge_http_5xx`), server 5xx
 (`support_report_groups`), and machines that were enrolled more than `STABLE_MIN` (30) minutes before the deploy, online at its
-start and still offline after it settles (a lane's fresh throwaway container or a machine that blips and returns does
+start and still offline after it settles (a worktree's fresh throwaway container or a machine that blips and returns does
 not count; such false positives rolled back edge .30 on 2026-11-16 22:53). A failure means roll
 back (step 5). A failure prints each failed request (time, edge, status, duration, path) and keeps the edge logs of the window
 in a `/tmp/pb-gate-failed.*` directory (the replaced container's logs go with it; `KEEP_LOGS=1` keeps them on a pass too; only the newest `KEEP_LAST`, default 5, stay); `INTERVAL=0.2` fetches faster than once a second. Without `--deploy` it watches for 30 s. The 2026-11-04 outage (server .3 answer field
 rejected by every .2 edge) and the 2026-11-05 edge restart (22 refused carriers, a preview 503, a
 machine_offline) both fail it. Its test: `python3 deploy/test_check_edges.py`. Then: public health (`/healthz`, `/readyz`), the `server-version`
 commit, one preview created and fetched through each edge, and `docker logs --since 5m` of the active
-server container with no new `level=ERROR` family. Then ask Lane A (thread "Lane A — CLI & Linux
+server container with no new `level=ERROR` family. Then ask maintainer (thread "maintainer — CLI & Linux
 devices") for one smoke run against the deployed server, naming the version and what changed. A check that
 passed before and fails now is a regression: roll back first, investigate second. Add one PLAN Log
 line (rows, commit, image tag) and keep the previous image tag until the smoke run is green.
 
 **Canary gate (required for every server or edge switch).** Run the step 6 command through
-`deploy/gated-deploy.py` on oracle, which holds the deploy lock from before the switch until the verdict:
+`deploy/gated-deploy.py` on build-host, which holds the deploy lock from before the switch until the verdict:
 
 ```sh
-python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' \
-  --server-host root@coolify --edge local --edge ubuntu@anvit \
-  --deploy "PROBE='...' SQL='...' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<ip> anvit=<ip>"
+python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + build-host edge' \
+  --server-host tester@deployment-host --edge local --edge tester@database-test-host \
+  --deploy "PROBE='...' SQL='...' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<ip> database-test-host=<ip>"
 ```
 
 It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
@@ -276,18 +276,18 @@ The live `/opt/paperboat/Caddyfile` carries the same block; `rollout-server.py` 
 
 ## Production canary
 
-A user unit on oracle (`deploy/paperboat-canary.{service,timer}` in `~/.config/systemd/user/`) runs
+A user unit on build-host (`deploy/paperboat-canary.{service,timer}` in `~/.config/systemd/user/`) runs
 `tools/probe/canary.py` every minute: `pb exec` both ways, `pb ssh` with a command, one managed ENV value delivered to the peer's exec (`env_exec`; `CANARY_ENV_NAME`/`CANARY_ENV_VALUE` in the env file name the value set once in the pair's workspace), a file send checked in
 the receiver's Inbox, a new preview and the permanent canary tunnel, each fetched through every edge
-address in DNS, between two dedicated machines: `canary-a` (container `pb-canary-a` on oracle, also the
-origin) and `canary-b` (container `pb-canary-b` on anvit). Oracle because the deploys are run from it and
+address in DNS, between two dedicated machines: `canary-a` (container `pb-canary-a` on build-host, also the
+origin) and `canary-b` (container `pb-canary-b` on database-test-host). build-host because the deploys are run from it and
 the gate reads the canary's state locally, and it is not the control-plane host, so a server outage cannot
 take the prober down with it. Results: `~/.local/state/paperboat-canary/` (`history.jsonl`, the last 1440
 runs; `status.json`; `alerts.log`), shown as the first card on the progress page and at its `/canary.json`.
 With `CANARY_EDGES` (every managed edge address, space separated, in the same env file) the `edges` step also
 fetches the canary tunnel at each edge's own address, so an edge that DNS already dropped (heartbeat lost,
 provider null-route) still turns the canary red. With `CANARY_TEAM`/`CANARY_TEAM_MACHINE` the `team_exec` step runs
-`pb --workspace <team> exec` from `canary-a` to `canary-t` (container `pb-canary-t` on oracle), a machine the team owns
+`pb --workspace <team> exec` from `canary-a` to `canary-t` (container `pb-canary-t` on build-host), a machine the team owns
 (`pb team machine transfer-to-team`; `share` would leave it personal) with an exact exec grant to the canary account, so a server that breaks team-owned machines
 (server .34, 2026-11-16) turns the canary red although personal machines still work. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
 `CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
@@ -320,12 +320,12 @@ Not covered yet: the browser terminal attach (needs a signed-in browser), a mach
 onto the relay (both canaries are on public cloud hosts and usually connect directly), macOS and Windows
 canaries.
 
-**Staging before prod (control plane built 2026-11-11; edge not yet).** `deploy/staging.py` (run from oracle) keeps a staging
-control plane on anvit: its own Compose project `pb-release-staging` (own PostgreSQL volume, own images, no shared
-files with prod), the API at `https://anvit.stg.<dev zone>:18443` served by the server itself (regional TLS, a Let's
+**Staging before prod (control plane built 2026-11-11; edge not yet).** `deploy/staging.py` (run from build-host) keeps a staging
+control plane on database-test-host: its own Compose project `pb-release-staging` (own PostgreSQL volume, own images, no shared
+files with prod), the API at `https://database-test-host.stg.<dev zone>:18443` served by the server itself (regional TLS, a Let's
 Encrypt wildcard issued by DNS-01 on the dev zone; the port is inside the 10000-59999 range the host firewall and the
-provider allow) and the plain API on anvit's loopback `18091`. Subcommands: `build <commit>` (native arm64 image on
-anvit), `init`, `up <image>`, `seed` (account `usr_staging`, a paid entitlement of 64 seats, a console session),
+provider allow) and the plain API on database-test-host's loopback `18091`. Subcommands: `build <commit>` (native arm64 image on
+database-test-host), `init`, `up <image>`, `seed` (account `usr_staging`, a paid entitlement of 64 seats, a console session),
 `enroll <name>` (one enrollment token on stdout, `TOKEN_CMD` for `tools/probe/canary-setup.sh`), `reset` (empty database;
 the stored regional certificate is kept so Let's Encrypt duplicate limits are not hit), `status`, `logs`, `down`.
 **Staging only ever runs migrations from main.** A branch's migrations can be renumbered before they land, and goose compares only
@@ -334,7 +334,7 @@ migrations (objects missing). So `staging.py build` refuses a commit that is not
 refuses an image whose revision label is not on `origin/main` (or has none). Test a branch on staging by landing it on main first.
 `staging.py reset` refuses an image that is not on `origin/main`, and `up`, `reset` and `check` fail when the applied goose versions differ from the migrations main holds at the running image's commit (unknown or missing versions are named). `reset` also creates `staging_guard.migration_files` (a schema the server never touches) and every apply records each migration file's SHA-256 there; `check` fails when a number's file no longer matches (a branch migration whose number main later reused). If staging's migration table ever disagrees with its objects, rebuild it (`staging.py reset`, zero compatibility: never patch the table).
 
-Staging machines: containers `pb-stg-a` and `pb-stg-b` on anvit paired with a `pb` built with that `DefaultServerURL`.
+Staging machines: containers `pb-stg-a` and `pb-stg-b` on database-test-host paired with a `pb` built with that `DefaultServerURL`.
 Staging never reads or writes prod data; it copies only the WorkOS client id/key and the Cloudflare DNS token from the
 prod env, in memory. `staging.py edge <edge image>` runs a staging edge as a plain container `pb-stg-edge` (no `pbh`, no firewall or nft
 change; the prod edge keeps 80/443/27443-27446): it registers the node the way a claim would (SQL, as
@@ -343,6 +343,34 @@ and listens on TCP 18445 (carrier). State on 2026-11-12: node ready and heartbea
 carriers attached; `pb send` still fails after the file-transfer descriptor (cause not found yet). Limits by design:
 preview URLs never carry a port, so previews and tunnels cannot be served from a non-443 edge, and UDP (HTTP/3, QUIC)
 is closed on the host. `gated-deploy.py --stage` runs `deploy/staging-canary.sh` (exec both ways + ssh) first. Prior art: Google SRE canarying (stage, then a small prod slice, then all, with automatic rollback).
+
+## Production host capacity alerts
+
+On the production canary runner, add `CANARY_RESOURCE_HOSTS` to
+`~/.config/paperboat-canary.env`. List the production control plane, database,
+and every managed edge and relay host, using one entry per physical or virtual
+host. Use `local` for the runner itself and existing noninteractive SSH
+destinations for the others. The control plane and database currently share a
+host, so the current inventory is `CANARY_RESOURCE_HOSTS="root@coolify local ubuntu@anvit"`.
+The SSH user needs Python 3 and read access to the host's Linux counters.
+
+Install `paperboat-host-resources.service` and `paperboat-host-resources.timer`
+from this directory in `~/.config/systemd/user/`, then run
+`systemctl --user daemon-reload` and
+`systemctl --user enable --now paperboat-host-resources.timer`. Check
+`journalctl --user -u paperboat-host-resources.service` for sampling errors.
+
+The timer checks memory in use, CPU busy time between samples, each persistent
+local filesystem, and allocated file descriptors against the host's capacity.
+The policy in `host_resources.py` fires at 80% (warning) or 90% (critical) for
+three minutes and clears each level five percentage points below its trigger.
+The runner also pushes the latest of both (`CANARY_REPORT_URL`, the server's origin, and
+`CANARY_REPORT_TOKEN_FILE`, a file holding the server's `PAPERBOAT_HOST_HEALTH_TOKEN`) so the admin panel's
+Servers > "Hosts & canary" tab shows each host's percentages and the canary's state, and its notices bell lists
+the open alerts. A report older than five minutes is itself an open alert. Transitions go to the canary's `alerts.log`, its
+`CANARY_ALERT_THREAD`. A host whose sample fails three times in a row
+is reported once as UNKNOWN (and RECOVERED when sampling works), so a broken ssh key cannot silence it. Resource status is kept in `host-resources.json` in
+the canary state directory.
 
 ## Edge failover
 
@@ -359,7 +387,7 @@ Flood and DDoS layers (spark plan `research-edge-ddos-abuse.md`): provider scrub
 pbh's nftables guard per source address (helper/deploy/README.md), then the edge's per-address and
 per-name limits, then byte pacing per publication and account (`edge_ingress_limits`) and, for Free-owned publications, the Free request rates (`edge_ingress_limits.free_requests`). Paperboat-run edges only: a customer-owned self-hosted edge is sent the zero set and enforces none of them. A null-routed
 edge drops out of DNS within the 60 s TTL like any other dead edge. Gap (2026-11-11): the managed
-pair is oracle and anvit, and both run at Oracle Cloud (AS31898), so one provider-wide null-route or
+pair is build-host and database-test-host, and both run at Oracle Cloud (AS31898), so one provider-wide null-route or
 outage takes both; the fallback needs a host at a second provider to close it.
 
 Abuse and takedowns (edge abuse plan 3.6): anyone reports a link with `POST /v1/abuse-reports` (no account;
@@ -429,10 +457,10 @@ the listing adds browser-level isolation between previews and needs no code chan
 ## Pull-request submission gate (R-01)
 
 `tools/push.sh` requires an administrator-enforced protected target, creates an immutable
-`lane-submit/<base>/<head>` branch, opens its PR, enables rebase auto-merge, and waits up to
+`submit/<base>/<head>` branch, opens its PR, enables rebase auto-merge, and waits up to
 one hour. Exit zero means merged (or no unsubmitted commits); a closed PR or timeout fails.
-The shared submission lock preserves lane ordering and the migration-number check without
-force pushes. Fetch the landed tooling before submitting from an older lane checkout.
+The shared submission lock preserves worktree ordering and the migration-number check without
+force pushes. Fetch the landed tooling before submitting from an older worktree checkout.
 `PB_PUSH_BASE` selects a protected throwaway target for testing the same submission path.
 
 Required checks are `Go format and vet`, `Repository policy checks`, `Console lint and types`, `Targeted Go checks` and
@@ -446,7 +474,7 @@ server, edge, relay and two daemons: exec, ssh, send, preview, tunnel, restarts;
 required). On a pull request those two jobs are skipped, which GitHub reports as passed, so a PR can enter the queue;
 pull requests run only the fast `Go format and vet` (gofmt of the changed files, go vet of the changed
 packages), the policy checks and the console checks. Every change is tested on its speculative
-integration tree before it lands. PostgreSQL and race checks run on GitHub, never on oracle. Pushes to main run only the newest tip's health runs (CI, Cross-platform, Terminal drain;
+integration tree before it lands. PostgreSQL and race checks run on GitHub, never on build-host. Pushes to main run only the newest tip's health runs (CI, Cross-platform, Terminal drain;
 older runs are cancelled), and the Go cache is warmed only when the dependency set changes. `PB_PUSH_BASE` selects a
 protected throwaway target for testing the same submission path.
 
@@ -454,14 +482,14 @@ Prior art: GitHub's [auto-merge requirements](https://docs.github.com/en/reposit
 and [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches):
 required checks, administrator enforcement, and linear history. Strict up-to-date checks
 are disabled: serialized submissions and the merge queue validate integration without
-forcing every lane to rebase and restart CI after each unrelated merge.
+forcing every worktree to rebase and restart CI after each unrelated merge.
 The script refuses an unprotected target because auto-merge there could merge before CI.
 The public organization repository supports GitHub's [merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
 `branch-protection.sh --apply` installs its rebase queue with no bypass actors, five parallel builds and one PR per merge.
 The API requires minimum-group fields: one entry and zero wait make collection inactive.
 Required workflows run on both `pull_request` and `merge_group` (the heavy jobs skip on pull requests);
 full health jobs run on main. Queue checks have a 60-minute response timeout (hosted runners took up to 5 minutes to pick a job up on 2026-11-11, and a 5-minute timeout ejected the first PR from the queue); each job keeps its own short timeout. Bootstrap order: land tooling, broadcast
-the switch to every lane, then apply the rules. Never enable protection ahead of the tooling.
+the switch to every worktree, then apply the rules. Never enable protection ahead of the tooling.
 
 Canary state has one serialized writer transaction shared by the access and account units.
 Each probe clears only its own failing steps; the deploy gate requires aggregate green and a

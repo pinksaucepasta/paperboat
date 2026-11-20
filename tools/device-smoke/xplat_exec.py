@@ -3,7 +3,7 @@
 
   xplat_exec.py [--devices L,M,W] [--only argv,stdin,...]
 
-The oracle on every target is its own Python (python3 on L and M, python on W): it prints what it received, so what is
+The build host on every target is its own Python (python3 on L and M, python on W): it prints what it received, so what is
 compared is the target's view of argv, stdin, cwd, environment and exit status. Results go to
 tools/device-smoke/results/xplat-exec-<stamp>.json with one entry per check and ordered pair (`X-17:argv:L>W`).
 """

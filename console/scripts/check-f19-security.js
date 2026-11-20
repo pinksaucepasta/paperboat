@@ -74,7 +74,7 @@
         identity.directory.groups.every((group) => t.includes(group.name)),
         `${identity.directory.groups.length} groups`,
       )
-      // Configured states (an identity provider on the team, e.g. lanes-sso).
+      // Configured states (an identity provider on the team, e.g. test-sso).
       const switchOn = (label) =>
         document.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-checked") === "true"
       const providers = identity.sso.connections.map((c) => c.type.replace(/([a-z])([A-Z])/g, "$1 $2"))

@@ -149,7 +149,7 @@ complete: check race cross-build
 verification: complete fuzz reproducible-builds static-analysis vulnerability-check license-check binary-size-check
 
 # Run the five local checks required before consuming hosted-runner time.
-# Native platform execution, Victus E2E, release packaging, and publication
+# Native platform execution, windows-test E2E, release packaging, and publication
 # remain separate workflow/integration gates.
 preflight:
 	@$(MAKE) check

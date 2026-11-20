@@ -1,5 +1,0 @@
-False
-
----ALL PaperboatInstall logs---
-
-ABSENT_CHECK_DONE

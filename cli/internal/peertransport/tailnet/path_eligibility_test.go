@@ -52,7 +52,7 @@ func TestPathEligibilityChannelEndsWithItsContext(t *testing.T) {
 
 // An Unlimited transfer stops at the first WireGuard packet that crosses a hosted relay, not at the next
 // status poll: magicsock sends both ways once its direct address stops being trusted, and a poll plus the
-// engine's cached status let megabytes through (Lane H, F22-01, 10-19 MB per direct-path loss). Data over the
+// engine's cached status let megabytes through (F22-01, 10-19 MB per direct-path loss). Data over the
 // account's own relay does not stop it.
 func TestPathEligibilityEndsAtTheFirstHostedRelayPacket(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)

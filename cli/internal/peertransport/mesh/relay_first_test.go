@@ -13,7 +13,7 @@ import (
 	"tailscale.com/wgengine/filter"
 )
 
-// Lane H, support_25a0e3be: two machines behind one NAT whose signed endpoints were unreachable from each other
+// support_25a0e3be: two machines behind one NAT whose signed endpoints were unreachable from each other
 // (docker and LAN addresses, a public pair needing hairpin) never fell back to the relay: every attempt idled out.
 // A relay must carry the traffic while no direct path is proven, as in Tailscale (DERP first, direct only after a
 // disco pong). Two engines whose only signed candidates are unreachable exchange data over the relay at once.

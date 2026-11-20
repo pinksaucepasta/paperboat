@@ -44,7 +44,7 @@ func TestDialWaitsForAPipeThatAppears(t *testing.T) {
 }
 
 // An older session owner's pipe is never re-bound in place: absent means stopped. Probing ten of them must not wait
-// AbsentWait each (exec into a Windows machine updated ten times took 20 s, victus 2026-11-16).
+// AbsentWait each (exec into a Windows machine updated ten times took 20 s, Windows test machine 2026-11-16).
 func TestDialAbsentNowDoesNotWait(t *testing.T) {
 	path := fmt.Sprintf(`\\.\pipe\paperboat-winpipe-gone-%d`, os.Getpid())
 	began := time.Now()

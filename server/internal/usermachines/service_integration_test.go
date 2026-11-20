@@ -3875,7 +3875,7 @@ func TestObservedCapabilitiesRejectUnknownPostgres(t *testing.T) {
 	}
 }
 
-// Slice 8 (Lane K terminal plan): a host that cannot be reached yet reschedules its operations without failing the
+// Slice 8 (terminal plan): a host that cannot be reached yet reschedules its operations without failing the
 // worker; a creation the host never accepts ends as failed after the configured attempts; finished operations are
 // deleted after their retention.
 func TestTerminalOperationsRescheduleQuietlyAndCreationEnds(t *testing.T) {

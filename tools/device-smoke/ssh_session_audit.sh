@@ -2,7 +2,7 @@
 # ssh_session_audit.sh HOST BINARY  (check id: ssh-session-audit, CHECKLIST F5-12)
 #
 # Each managed SSH session's start and end reach the workspace audit log. Pairs two FRESH throwaway containers
-# on HOST (a Linux VM with Docker and the laneh-ubuntu24-systemd image; see fresh_pair_lib.sh) with BINARY: the
+# on HOST (a Linux VM with Docker and the test-systemd image; see fresh_pair_lib.sh) with BINARY: the
 # target runs OpenSSH (installed BEFORE pairing so the setup user is registered), the client runs one real
 # `pb ssh <target> -- echo <marker>`. The target host queues machine.access_started and machine.access_ended
 # (capability managed_ssh, origin online, with the client's account and endpoint, the generation, and the bytes
@@ -14,10 +14,11 @@
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
-DB_HOST=${PB_AUDIT_DB_HOST:-root@coolify}
+DB_HOST=${PB_AUDIT_DB_HOST:-$(python3 "$(dirname "$0")/dev_targets.py" deployment_host)}
+[ -n "$DB_HOST" ] || { echo 'configure deployment_host in local development targets' >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-TARGET=lanes-sa-t-$STAMP CLIENT=lanes-sa-c-$STAMP ALIAS=lanes-sa-$STAMP
+TARGET=test-sa-t-$STAMP CLIENT=test-sa-c-$STAMP ALIAS=test-sa-$STAMP
 MACHINE_IDS= TARGET_ID=
 
 finish() {

@@ -244,10 +244,10 @@ func TestHTTPServicePanicAbortPrivacyAndRecovery(t *testing.T) {
 	}
 }
 
-// An edge holds every machine's carriers at once. The carrier bound must not be the accept queue
-// depth (prod 2026-10-23: queue depth 16, so the 17th carrier on an edge got 503 "carrier capacity
-// reached" and new machines could not connect or serve previews).
-func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.T) {
+// An edge holds every machine's carriers at once and counts none of them against a limit: capacity is watched
+// by resource alerts, not a carrier cap (prod 2026-10-23: a cap sized by the accept queue depth, 16, refused
+// the 17th carrier with 503 and new machines could not connect or serve previews).
+func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepth(t *testing.T) {
 	clientTLS, serverTLS, _ := testEndpointCertificates(t)
 	identity := testCarrierIdentity()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -257,7 +257,7 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.
 	// (flaky under load). The carriers must stay held: keepalives here are rare.
 	carrier := testCarrierConfig(2)
 	carrier.KeepAliveInterval = time.Hour
-	config := ServiceConfig{Carrier: carrier, MaximumCarriers: 6,
+	config := ServiceConfig{Carrier: carrier,
 		TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) { return identity, nil }}}
 	service, err := NewHTTPService(ctx, config)
 	if err != nil {
@@ -290,13 +290,10 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.
 		t.Cleanup(func() { _ = response.Body.Close() })
 		return response.StatusCode
 	}
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 7; i++ {
 		if status := connect(); status != http.StatusOK {
-			t.Fatalf("carrier %d of 6 (queue depth %d) = %d", i+1, config.Carrier.QueueDepth, status)
+			t.Fatalf("carrier %d (queue depth %d) = %d", i+1, config.Carrier.QueueDepth, status)
 		}
-	}
-	if status := connect(); status != http.StatusServiceUnavailable {
-		t.Fatalf("carrier past the maximum = %d, want 503", status)
 	}
 }
 

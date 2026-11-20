@@ -45,7 +45,7 @@ func TestWorkerSurvivesOneFailedHealthCheck(t *testing.T) {
 	}
 }
 
-// The terminal-owner health call that fails because the whole process was frozen (SIGSTOP 134 s on pbvm2) is
+// The terminal-owner health call that fails because the whole process was frozen (SIGSTOP 134 s on Linux test VM) is
 // tried again with a fresh window instead of ending the worker and hostd with it.
 func TestWorkerSurvivesAHealthCheckThatFailedOnAFreeze(t *testing.T) {
 	previous := workerHealthRetry

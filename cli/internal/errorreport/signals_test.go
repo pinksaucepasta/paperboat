@@ -322,7 +322,7 @@ func TestOwnedReferenceIndependentOfReportingAndHeaderWins(t *testing.T) {
 	}
 }
 
-// Lane X P7: every 30 s tick sent every gauge again, unchanged or not. Only changed values are sent
+// P7: every 30 s tick sent every gauge again, unchanged or not. Only changed values are sent
 // between refreshes.
 func TestSnapshotSendsOnlyChangedValuesBetweenRefreshes(t *testing.T) {
 	transport := &sentry.MockTransport{}

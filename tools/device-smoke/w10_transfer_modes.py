@@ -8,7 +8,7 @@
             with the 2 GB message pointing at --unlimited, and nothing reaches the receiver's Inbox (F6-01:over:L>M)
   unlimited `pb send --unlimited` of --bytes (default 2,100,000,000) arrives with the same sha256 (F6-01:unlimited:L>M)
 
-Needs the harness environment of tools/device-smoke/xplat_fleet.py (fleet.env, VICTUS_PASS for W, XPLAT_ALLOW_FLEET_MAC=1 for
+Needs the harness environment of tools/device-smoke/xplat_fleet.py (fleet.env, SMOKE_WINDOWS_PASSWORD for W, XPLAT_ALLOW_FLEET_MAC=1 for
 the fleet Mac, which the caller holds fleet-mac.lock for). Files are named w10-<case>-<stamp>.bin and removed from both machines.
 Prints one JSON line.
 """

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F8-03: a public tunnel survives a victus machine reboot.
+"""F8-03: a public tunnel survives a Windows machine reboot.
 
 Flow: on-device origin + `tunnel create` (public, 60m) -> assert URL serves the
 marker and `tunnel status` is ready -> record boot time + Paperboat* services +
@@ -8,13 +8,14 @@ assert new boot, services Running unassisted, doctor healthy, server-side online
 -> restart the origin on the SAME port -> within 5 min (10 s polls) the SAME
 tunnel URL serves again and status is ready with the same id (tunnel untouched)
 -> `tunnel delete` (confirmed) + stop origin -> restore VMs to pre-reboot
-states, verify pbvm2/pbvm3 ssh.
+states, verify the Linux test VMs ssh.
 
-Env: PB_SMOKE_WINDOWS_PB (installed pb.exe on victus), SMOKE_WINDOWS_SSH
-(default pujan@victus), VICTUS_PASS. Prints exactly one JSON line
+Env: PB_SMOKE_WINDOWS_PB (installed pb.exe on Windows), SMOKE_WINDOWS_SSH
+SMOKE_WINDOWS_PASSWORD. Prints exactly one JSON line
 {check:'tunnel-reboot', ...}. Cleans up on every exit path. Never prints
 tokens, passwords or file contents.
 """
+from dev_targets import get_setting, smoke_value
 import json
 import subprocess
 import tempfile
@@ -93,16 +94,16 @@ def vm_states(device):
     return json.loads(device.ps('vm states', VM_STATE, timeout=120)[1])
 
 
-def hp_online(machine_id):
+def linux_online(machine_id):
     found, deadline = False, time.monotonic() + 180
     while time.monotonic() < deadline:
         queried = subprocess.run(['ssh', '-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes',
-                                  '-o', 'StrictHostKeyChecking=accept-new', 'anvit@hp',
+                                  '-o', 'StrictHostKeyChecking=accept-new', smoke_value('SMOKE_LINUX_SSH'),
                                   '$HOME/.local/bin/pb machine list --all --json'],
                                  capture_output=True, text=True, timeout=60)
         try:
             body = json.loads(queried.stdout)
-            # hp's older pb returns the machine list bare; newer builds wrap it in a data envelope.
+            # Linux test machine's older pb returns the machine list bare; newer builds wrap it in a data envelope.
             inner = (body.get('data', body) or {}) if isinstance(body, dict) else {}
             machines = inner.get('machines', [])
             if any(m.get('id') == machine_id and m.get('online') for m in machines):
@@ -221,7 +222,7 @@ def main():
                         raise RuntimeError('doctor not healthy within 6 min of reboot: ' + doctor_last)
                     time.sleep(60)
             stamp('doctor_post_healthy')
-            if not hp_online(outcome['machine_id']):
+            if not linux_online(outcome['machine_id']):
                 raise RuntimeError('machine not online server-side after the reboot')
             stamp('online_post')
             print(json.dumps({'state': 'daemon_back_healthy'}), flush=True)
@@ -237,12 +238,12 @@ def main():
             time.sleep(60)
             outcome['vms_final'] = vm_states(device)
             stamp('vms_restored')
-            outcome['pbvm2_ssh'] = vm_ssh('pbvm2')
-            outcome['pbvm3_ssh'] = vm_ssh('pbvm3')
-            print(json.dumps({'state': 'pbvm3_back', 'pbvm3_ssh': outcome['pbvm3_ssh'],
+            outcome['test_host_a_ssh'] = vm_ssh(get_setting('update_test_host'))
+            outcome['test_host_b_ssh'] = vm_ssh(get_setting('update_docker_host'))
+            print(json.dumps({'state': 'host_b_back', 'test_host_b_ssh': outcome['test_host_b_ssh'],
                               'vms_final': outcome['vms_final']}), flush=True)
-            if not (outcome['pbvm2_ssh'] and outcome['pbvm3_ssh']):
-                raise RuntimeError('pbvm2/pbvm3 do not answer ssh after restore')
+            if not (outcome['test_host_a_ssh'] and outcome['test_host_b_ssh']):
+                raise RuntimeError('the Linux test VMs do not answer ssh after restore')
 
             # The on-device origin died with the reboot: start it again on the SAME port.
             _, stop_second = stoppable_origin(directory, page, port)

@@ -1069,7 +1069,7 @@ func waitWindowsService(ctx context.Context, service *mgr.Service, want svc.Stat
 	}
 }
 
-// windowsServiceWaitError names the service and the state it is stuck in: a bare deadline told victus's operator
+// windowsServiceWaitError names the service and the state it is stuck in: a bare deadline told Windows test machine's operator
 // nothing about which of a generation's services never left StartPending.
 func windowsServiceWaitError(name string, have, want svc.State, cause error) error {
 	return fmt.Errorf("Windows service %s is still %s, not %s (check it with: sc.exe queryex %s): %w",

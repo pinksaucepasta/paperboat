@@ -83,7 +83,7 @@ func CombineDirectionalDiagnostics(pull, push ReconciliationDiagnostics) Reconci
 // uniquePathSummaries keeps one entry per path, the first one given (the pull half's). The two
 // halves keep separate clones and may see the repository at different moments, so one
 // disagreement can carry two revisions; listing both made the user resolve an entry the half that
-// must carry it out did not recognise (lanel-a, 2026-10-23). Halves match path resolutions by
+// must carry it out did not recognise (test-a, 2026-10-23). Halves match path resolutions by
 // path for the same reason.
 func uniquePathSummaries(values []PathSummary) []PathSummary {
 	seen := make(map[string]bool, len(values))

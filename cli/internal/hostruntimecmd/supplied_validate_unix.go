@@ -91,7 +91,7 @@ func awaitDaemon(ctx context.Context, participants updated.UnixParticipants, ver
 		probe, err := participants.Probe(readyCtx)
 		if err == nil {
 			// Only a daemon waiting for the control plane (a slow server) is waited for; an update is
-			// never committed on that state, and any other degradation fails now (Lane F's rule, shared
+			// never committed on that state, and any other degradation fails now (the rule, shared
 			// with signed updates).
 			if wait, last = updated.ClassifyParticipant(probe, version, baseline, requireInventory); wait == updated.ParticipantReadyNow {
 				return nil

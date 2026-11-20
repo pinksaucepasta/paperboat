@@ -424,7 +424,7 @@ func windowsArtifactHTTPClient() *http.Client {
 }
 
 // RecipeInstallPreflight refuses a recipe install that is not elevated, before the recipe session:
-// it would otherwise wait on approval prompts nobody can answer and fail late (victus, a standard
+// it would otherwise wait on approval prompts nobody can answer and fail late (Windows test machine, a standard
 // user: 79 s, then "could not access local files"). An administrator over SSH is already elevated.
 func RecipeInstallPreflight(context.Context) error {
 	if recipeProcessElevated() {

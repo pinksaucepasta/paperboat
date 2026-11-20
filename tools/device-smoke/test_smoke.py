@@ -140,7 +140,7 @@ class UninstallInventoryPreservation(unittest.TestCase):
         fixture = pathlib.Path(account.pw_dir).parent
 
         def path(value):
-            # The host running the tests may hold real Paperboat state (oracle runs pbh): any path outside the
+            # The host running the tests may hold real Paperboat state (build host runs pbh): any path outside the
             # fixture that the test does not map reads as absent, so the result never depends on the host.
             if str(value) in paths:
                 return paths[str(value)]
@@ -222,9 +222,14 @@ class UninstallInventoryPreservation(unittest.TestCase):
 
 
 class SmokeReceipts(unittest.TestCase):
+    def setUp(self):
+        settings = patch.dict(os.environ, PB_DEV_TARGETS_FILE=str(HERE / 'targets.example.json'))
+        settings.start()
+        self.addCleanup(settings.stop)
+
     def write_script(self, script, content):
         # These fixtures run the production entry point, including its source freeze.
-        for name in ('snapshot_run.py', 'stage_fixtures.py', 'last_green.py', 'failure_triage.py', 'preview_receipt.py', 'host_sessions.py'):
+        for name in ('snapshot_run.py', 'dev_targets.py', 'stage_fixtures.py', 'last_green.py', 'failure_triage.py', 'preview_receipt.py', 'host_sessions.py'):
             shutil.copyfile(HERE / name, script.parent / name)
         script.write_text(content)
 
@@ -240,7 +245,7 @@ class SmokeReceipts(unittest.TestCase):
                 results = root / 'results'
                 results.mkdir()
                 (results / '20200101T000000Z.json').write_text(json.dumps({
-                    'expect_version': 'fixture', 'results': [{'id': 'preview-manage:hp-hp', 'status': 'PASS'}]}))
+                    'expect_version': 'fixture', 'results': [{'id': 'preview-manage:linux-linux', 'status': 'PASS'}]}))
                 payload = json.dumps({'schema_version': '1.0', 'ok': False, 'error': {
                     'code': code, 'category': 'unavailable_retryable', 'retryable': True,
                     'message': 'DNSError timeout network_dns PRIVATE_FIXTURE_NETWORK_TEXT'}})
@@ -258,11 +263,11 @@ class SmokeReceipts(unittest.TestCase):
                 fixture.write_text('import sys\nfrom pairing_lifecycle import invoke\n'
                                    'invoke(sys.executable, "-c", ' + repr('print(' + repr(payload) + '); raise SystemExit(1)') + ', "--json")\n')
                 script = root / 'smoke.sh'
-                self.write_script(script, prefix + '\non() { return 0; }\nTLIST=(hp)\n' +
+                self.write_script(script, prefix + '\non() { return 0; }\nTLIST=(linux)\n' +
                                   'output=$(python3 ' + str(fixture) + ' 2>&1)\n' +
-                                  'record_command_failure preview-manage:hp-hp 0 "$output"\n' + report)
+                                  'record_command_failure preview-manage:linux-linux 0 "$output"\n' + report)
                 environment = dict(os.environ, PYTHONPATH=str(HERE), TMPDIR=str(root))
-                result = subprocess.run(['bash', str(script), '--expect-version', 'fixture', '--targets', 'hp'],
+                result = subprocess.run(['bash', str(script), '--expect-version', 'fixture', '--targets', 'linux'],
                                         env=environment, capture_output=True, text=True, timeout=10)
                 self.assertEqual(1, result.returncode)
                 self.assertNotIn('PRIVATE_FIXTURE_NETWORK_TEXT', result.stdout + result.stderr)
@@ -272,12 +277,12 @@ class SmokeReceipts(unittest.TestCase):
                     self.assertEqual('NETWORK', row.get('triage'))
                     self.assertEqual('network_dns', row.get('failure_code'))
                     self.assertIn('network-inconclusive', result.stdout)
-                    self.assertIn('--only-check preview-manage:hp-hp', result.stdout)
-                    self.assertNotIn('REGRESSION preview-manage:hp-hp', result.stdout)
+                    self.assertIn('--only-check preview-manage:linux-linux', result.stdout)
+                    self.assertNotIn('REGRESSION preview-manage:linux-linux', result.stdout)
                     self.assertNotIn('git bisect start', result.stdout)
                 else:
                     self.assertNotIn('triage', row)
-                    self.assertIn('REGRESSION preview-manage:hp-hp', result.stdout)
+                    self.assertIn('REGRESSION preview-manage:linux-linux', result.stdout)
 
     def test_single_check_selection_keeps_failure_and_reports_previous_green(self):
         source = (HERE / 'smoke.sh').read_text()
@@ -289,40 +294,44 @@ class SmokeReceipts(unittest.TestCase):
             results.mkdir()
             (results / '20200101T000000Z.json').write_text(json.dumps({
                 'expect_version': 'dev-7a5b2e0', 'results': [
-                    {'id': 'preview-manage:hp-hp', 'status': 'PASS'}]}))
+                    {'id': 'preview-manage:linux-linux', 'status': 'PASS'}]}))
             script = root / 'smoke.sh'
             self.write_script(script, prefix + r'''
 on() { return 0; }
-TLIST=(hp)
-for check in exec-main:hp-hp preview-manage:hp-hp preview-manage:apple-apple; do
+TLIST=(linux)
+for check in exec-main:linux-linux preview-manage:linux-linux preview-manage:macos-macos; do
   skipped "${check%%:*}" && continue
   skipped "$check" && continue
   record "$check" FAIL 0 "controlled failure"
 done
 ''' + report)
             result = subprocess.run(['bash', str(script), '--expect-version', 'fixture',
-                                     '--targets', 'hp', '--only-check', 'preview-manage:hp-hp'],
+                                     '--targets', 'linux', '--only-check', 'preview-manage:linux-linux'],
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-            self.assertIn('REGRESSION preview-manage:hp-hp', result.stdout)
-            self.assertNotIn('exec-main:hp-hp', result.stdout)
-            self.assertNotIn('preview-manage:apple-apple', result.stdout)
+            self.assertIn('REGRESSION preview-manage:linux-linux', result.stdout)
+            self.assertNotIn('exec-main:linux-linux', result.stdout)
+            self.assertNotIn('preview-manage:macos-macos', result.stdout)
             self.assertIn('Build commit unavailable', result.stdout)
             current = sorted(results.glob('*.json'))[-1]
-            self.assertEqual([{'id': 'preview-manage:hp-hp', 'status': 'FAIL',
+            self.assertEqual([{'id': 'preview-manage:linux-linux', 'status': 'FAIL',
                                'seconds': '0', 'detail': 'controlled failure'}],
                              json.loads(current.read_text())['results'])
 
-    def test_windows_target_needs_its_password_before_any_device_access(self):
+    def test_configured_windows_target_needs_its_password_before_any_device_access(self):
         environment = dict(os.environ)
-        environment.pop("VICTUS_PASS", None)
-        for targets in ("victus", "hp,victus"):
-            with self.subTest(targets=targets):
-                result = subprocess.run(
-                    ["bash", str(HERE / "smoke.sh"), "--expect-version", "fixture", "--targets", targets],
-                    env=environment, capture_output=True, text=True, timeout=5)
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("export VICTUS_PASS", result.stderr)
+        environment.pop("SMOKE_WINDOWS_PASSWORD", None)
+        with tempfile.TemporaryDirectory() as directory:
+            config = pathlib.Path(directory) / 'targets.json'
+            config.write_text(json.dumps({'smoke': {'SMOKE_WINDOWS_NAME': 'custom-windows'}}))
+            environment['PB_DEV_TARGETS_FILE'] = str(config)
+            for targets in ("custom-windows", "linux,custom-windows"):
+                with self.subTest(targets=targets):
+                    result = subprocess.run(
+                        ["bash", str(HERE / "smoke.sh"), "--expect-version", "fixture", "--targets", targets],
+                        env=environment, capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("export SMOKE_WINDOWS_PASSWORD", result.stderr)
 
     def test_exec_failure_retains_private_diagnostics_without_leaking_output(self):
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
@@ -331,10 +340,10 @@ done
             script = root / 'smoke.sh'
             self.write_script(script, prefix + r'''
 on() { printf 'PRIVATE_FAILURE_DETAIL\nrc=7\n'; }
-test_exec apple
+test_exec macos
 exit "$FAILED"
 ''')
-            result = subprocess.run(['bash', str(script), '--expect-version', 'fixture', '--targets', 'hp'], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(['bash', str(script), '--expect-version', 'fixture', '--targets', 'linux'], capture_output=True, text=True, timeout=5)
             self.assertEqual(1, result.returncode)
             self.assertNotIn('PRIVATE_FAILURE_DETAIL', result.stdout + result.stderr)
             files = list((root / 'results/diagnostics').glob('*'))
@@ -357,7 +366,7 @@ exit "$FAILED"
                 script = root / "smoke.sh"
                 self.write_script(script, prefix + r'''
 HERE="$SUITE_DIR"
-PB_HP="$FIXTURE_PB"
+PB_LINUX="$FIXTURE_PB"
 on() {
   shift
   case "$*" in
@@ -366,15 +375,15 @@ on() {
     *) cat >/dev/null ;;
   esac
 }
-test_terminal hp
+test_terminal linux
 exit "$FAILED"
 ''')
-                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                     env=dict(os.environ, SUITE_DIR=str(HERE), FIXTURE_PB=str(pb), BOUNDARY=str(harness),
                              FIXTURE_STATE=str(state), TERMINAL_EXIT=str(terminal_exit), SESSION_FAULT=fault),
                     capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, int(bool(terminal_exit or fault)), result.stdout + result.stderr)
-                self.assertIn('cleanup-terminal:hp', result.stdout)
+                self.assertIn('cleanup-terminal:linux', result.stdout)
                 final = json.loads(state.read_text())
                 self.assertEqual([x['id'] for x in final['sessions'] if x['id'] != 'session_owned'],
                                  ['session_foreign', 'session_default'])
@@ -413,18 +422,18 @@ on() {
     *) return 0 ;;
   esac
 }
-test_preview hp
+test_preview linux
 exit "$FAILED"
 ''')
                 stopped = root / 'stop-command'
-                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                         env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
                                                  STOP_COMMAND=str(stopped), STOP_EXIT=str(stop_exit), STOP_ID=stop_id, STOP_STATE=stop_state, CREATE_EXIT=str(create_exit)),
                                         capture_output=True, text=True, timeout=10)
                 self.assertTrue(stopped.exists(), 'preview lease was left active')
                 self.assertIn('preview stop preview_owned --json', stopped.read_text())
                 self.assertEqual(result.returncode, int(stop_exit != 0 or stop_id != "preview_owned" or stop_state != "stopped" or create_exit != 0), result.stdout + result.stderr)
-                self.assertIn('preview:hp', result.stdout)
+                self.assertIn('preview:linux', result.stdout)
 
     def test_two_containers_on_one_docker_host_are_not_a_two_host_transfer(self):
         # transfer-manage and transfer-resume interrupt a transfer in flight; between two containers on one
@@ -434,7 +443,7 @@ exit "$FAILED"
             script = pathlib.Path(directory) / 'smoke.sh'
             self.write_script(script, prefix + '\nsame_ct_host a b && echo same-ab\nsame_ct_host a c || echo split-ac\n'
                               'same_ct_host a d || echo real-ad\n')
-            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, SMOKE_CT_MAP='a=h1:ct1,b=h1:ct2,c=h2:ct3'),
                                     capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -446,22 +455,22 @@ exit "$FAILED"
         # session_limit.py (0e712b6b) prints opened/closed_not_counted/reopened_after_close; the suite still
         # asserted the old limit/clear_message keys and recorded a passing run as FAIL.
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
-        receipt = ('{"check": "session-limit", "target": "hp", "status": "PASS", "opened": %d, '
+        receipt = ('{"check": "session-limit", "target": "linux", "status": "PASS", "opened": %d, '
                    '"closed_not_counted": true, "reopened_after_close": 5, "max_open_seconds": 3.5}')
         with tempfile.TemporaryDirectory() as directory:
             script = pathlib.Path(directory) / 'smoke.sh'
-            self.write_script(script, prefix + '\nTLIST=(hp)\nstage_terminal_fixtures() { return 0; }\n'
+            self.write_script(script, prefix + '\nTLIST=(linux)\nstage_terminal_fixtures() { return 0; }\n'
                               'on() { printf %s "$FAKE_RECEIPT"; }\ntest_device_application session-limit session_limit.py\n')
-            for opened, expected in ((25, 'session-limit:hp PASS'), (7, 'session-limit:hp FAIL')):
-                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            for opened, expected in ((25, 'session-limit:linux PASS'), (7, 'session-limit:linux FAIL')):
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                         env=dict(os.environ, FAKE_RECEIPT=receipt % opened),
                                         capture_output=True, text=True, timeout=30)
                 self.assertIn(expected.split()[0], result.stdout, result.stdout + result.stderr)
-                self.assertRegex(result.stdout, r'session-limit:hp\s+' + expected.split()[1], result.stdout)
+                self.assertRegex(result.stdout, r'session-limit:linux\s+' + expected.split()[1], result.stdout)
 
     def test_update_crossbuild_checks_readiness_after_a_slow_update(self):
         # Under load `pb update` itself can outlast the readiness budget; a build that is ready when the update
-        # returns must still pass (oracle, load 78: "not ready ... never checked" on a ready fake).
+        # returns must still pass (build host, load 78: "not ready ... never checked" on a ready fake).
         with tempfile.TemporaryDirectory() as directory:
             home = pathlib.Path(directory)
             pb = home / '.local/bin/pb'
@@ -532,7 +541,7 @@ esac
 
     def test_team_checks_run_on_the_teammate_as_member_and_on_profiled_devices_as_owner(self):
         # team-lifecycle/team-roles need a signed-in teammate profile (teammate_profile.py): the --teammate device
-        # (default ubuntu24) runs them as the member, every other device as the owner, a container only when its
+        # (default teammate) runs them as the member, every other device as the owner, a container only when its
         # profile is signed in (here boxb has one, boxa does not).
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
         body = (prefix + r"""
@@ -550,12 +559,12 @@ test_team_checks
         with tempfile.TemporaryDirectory() as directory:
             script = pathlib.Path(directory) / 'smoke.sh'
             self.write_script(script, body)
-            cases = (('boxa boxb', [], {'boxb', 'ubuntu24'}, 'ubuntu24'), ('hp', [], {'hp', 'ubuntu24'}, 'ubuntu24'),
-                     ('ubuntu24', [], {'ubuntu24'}, 'ubuntu24'),
+            cases = (('boxa boxb', [], {'boxb', 'teammate'}, 'teammate'), ('linux', [], {'linux', 'teammate'}, 'teammate'),
+                     ('teammate', [], {'teammate'}, 'teammate'),
                      ('boxa boxb', ['--teammate', 'boxc'], {'boxb', 'boxc'}, 'boxc'))
             for number, (targets, extra, expected_devices, teammate) in enumerate(cases):
                 calls = pathlib.Path(directory) / ('calls-%d' % number)
-                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp', *extra],
+                result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux', *extra],
                                         env=dict(os.environ, CALLS=str(calls), TEAM_TARGETS=targets,
                                                  SMOKE_CT_MAP='boxa=h:c1,boxb=h:c2,boxc=h:c3'),
                                         capture_output=True, text=True, timeout=30)
@@ -586,7 +595,7 @@ TLIST=($DEVICES)
             script = pathlib.Path(directory) / 'smoke.sh'
             self.write_script(script, body)
             calls = pathlib.Path(directory) / 'calls'
-            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, CALLS=str(calls), PAYLOAD=payload, DEVICES=devices, **env),
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -692,7 +701,7 @@ TLIST=($DEVICES)
             self.assertEqual(private_access.local_access_domain(fake), 'example.test')
 
     def test_a_windows_source_runs_its_python_checks_on_the_controller_not_in_powershell(self):
-        # `on victus` is PowerShell, which has no python3: check scripts reach a Windows device through device_py/ctl.
+        # `on windows` is PowerShell, which has no python3: check scripts reach a Windows device through device_py/ctl.
         text = (HERE / 'smoke.sh').read_text()
         for script in ('terminal_lifecycle.py', 'session_lifecycle.py', '$script $target$extra'):
             self.assertIn('device_py "$source" ' + ('"$script" $target$extra' if script.startswith('$') else script), text)
@@ -708,15 +717,15 @@ TLIST=($DEVICES)
         self.assertNotIn('GITHUB_ACTIONS', body)
         self.assertIn('--- PASS: TestQUICCarrierStreamHoldsTheBudgetAtRealRTT', body)
         # PowerShell splits a bare -test.run at the dot: the Windows line passes quoted -test.flag=value words.
-        windows = [line for line in body.splitlines() if 'on victus' in line][0]
+        windows = [line for line in body.splitlines() if 'on "$WINDOWS_TARGET"' in line][0]
         self.assertIn("'-test.run=^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT", windows)
         self.assertNotRegex(windows, r" -test\.")
 
     def test_the_terminal_receipt_accepts_the_windows_phase_set_for_a_windows_target(self):
         text = (HERE / 'smoke.sh').read_text()
         body = text.split('--check all --monitor-path')[1].split('record "$id" PASS')[0]
-        self.assertIn('if sys.argv[3]=="victus": phases="input_output unicode resize colour ctrl_c exit exact_session_cleanup"', body)
-        self.assertIn('"$out" "$target" "$target"', body)
+        self.assertIn('if sys.argv[3]==sys.argv[4]: phases="input_output unicode resize colour ctrl_c exit exact_session_cleanup"', body)
+        self.assertIn('"$out" "$target" "$target" "$WINDOWS_TARGET"', body)
 
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
@@ -730,7 +739,7 @@ TLIST=($DEVICES)
             script = root / 'smoke.sh'
             self.write_script(script, prefix + '\non box-a "echo \'hi there\'"\nct_of box-b || echo unmapped\n')
             last = root / 'last'
-            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], SSH_LAST=str(last),
                                              SMOKE_CT_MAP='box-a=dockerhost:ct-a,box-c=dockerhost:ct-c'),
                                     capture_output=True, text=True, timeout=15)
@@ -740,8 +749,8 @@ TLIST=($DEVICES)
             self.assertIn(' ct-a bash -lc ', command)
             self.assertIn('hi\\ there', command)
             self.assertIn('unmapped', result.stdout)
-            # The container host's docker command and the container's user are configurable (hp: plain docker, user tester).
-            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            # The container host's docker command and the container's user are configurable (linux: plain docker, user tester).
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], SSH_LAST=str(last),
                                              SMOKE_CT_MAP='box-a=dockerhost:ct-a', SMOKE_CT_USER='tester', SMOKE_CT_UID='1001',
                                              SMOKE_CT_DOCKER='docker'),
@@ -760,17 +769,17 @@ TLIST=($DEVICES)
             command = pathlib.Path(directory) / 'fake-pb'
             command.write_text('#!/usr/bin/env bash\necho "${@: -1}"\n[ "$FORGED" = 0 ] || echo rc=0\nexit "$COMMAND_EXIT"\n')
             command.chmod(0o700)
-            self.write_script(script, prefix + f'\nPB_HP={command}\n' + '''
+            self.write_script(script, prefix + f'\nPB_LINUX={command}\n' + '''
 on() { shift; eval "$*"; [ "$TRANSPORT_FAIL" = 0 ]; }
-test_exec hp
+test_exec linux
 exit "$FAILED"
 ''')
             env = dict(os.environ, COMMAND_EXIT=str(exit_code),
                        FORGED=str(int(forged_receipt)), TRANSPORT_FAIL=str(int(transport_failure)))
             # No wall-clock bound here: the script itself bounds the only command that can wait (`timeout 120`
             # around pb exec in test_exec) and nothing reads stdin. A 10 s bound on ~0.15 s of work failed under
-            # oracle's load 78 (CPU starvation, not a product delay).
-            return subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            # build host's load 78 (CPU starvation, not a product delay).
+            return subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                   env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
     def test_success_requires_command_and_transport_success(self):
@@ -804,7 +813,7 @@ exit "$FAILED"
                     # fail only the output retrieval to test that boundary.
                     script.write_text(script.read_text().replace('[ "$TRANSPORT_FAIL" = 0 ];',
                                       '[[ "$command" == test* ]] || [ "$TRANSPORT_FAIL" = 0 ];'))
-                    result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                    result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                             env=dict(os.environ, JOB_DIR=directory, TRANSPORT_FAIL=str(transport)),
                                             capture_output=True, text=True, timeout=10)
                     self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -1088,17 +1097,17 @@ on() {
     eval "$2" >&3
     echo TERMINAL_OK
 }
-test_terminal victus
+test_terminal windows
 """
         with tempfile.TemporaryDirectory() as directory:
             script = pathlib.Path(directory) / 'smoke.sh'
             script.write_text(prologue + fixture)
-            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, PAPERBOAT_SMOKE_SNAPSHOT='1', PAPERBOAT_SMOKE_SOURCE_DIR=directory),
                                     capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         _, _, target, name, line, token = result.stderr.splitlines()
-        self.assertEqual(target, 'victus')
+        self.assertEqual(target, 'windows')
         marker = name.removeprefix('smoke-')
         self.assertEqual(token, marker + '-42')
         self.assertEqual(line, f'''powershell -NoProfile -Command "Write-Output ('{marker}-'+(6*7))"''')
@@ -1109,7 +1118,7 @@ test_terminal victus
             command = pathlib.Path(directory) / 'pb'
             command.write_text('#!/bin/sh\necho PRIVATE_SENTINEL\nexit 7\n')
             command.chmod(0o700)
-            result = subprocess.run(['python3', '-c', driver, str(command), 'hp', 'owned',
+            result = subprocess.run(['python3', '-c', driver, str(command), 'linux', 'owned',
                                      'echo computed-$((6*7))', 'computed-42'],
                                     capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -1124,7 +1133,7 @@ test_terminal victus
             command.write_text('#!/bin/sh\ntrap "" TERM\necho $$ > "$PID_FILE"\nwhile read -r line; do [ "$line" = exit ] || eval "$line"; done\n')
             command.chmod(0o700)
             ready, resume = pathlib.Path(directory) / 'ready', pathlib.Path(directory) / 'resume'
-            process = subprocess.Popen(['python3', '-c', driver, str(command), 'hp', 'owned',
+            process = subprocess.Popen(['python3', '-c', driver, str(command), 'linux', 'owned',
                                         'pb_smoke=$$; echo computed-$((6*7))', 'computed-42',
                                         str(ready), str(resume),
                                         '[ "$pb_smoke" = "$$" ] && echo preserved-$((6*7))', 'preserved-42'],
@@ -1307,7 +1316,7 @@ class SkewCheckScript(unittest.TestCase):
     def test_a_fresh_runner_a_private_cache_and_a_preflight_that_fails_before_anything_runs(self):
         # Three host problems held 2026.11.20.0 three times: a full disk, a shared Go cache cleaned mid-build, a 80/443 clash.
         text = (HERE / 'skew_check.sh').read_text()
-        self.assertIn('linpool.sh', text)  # no host argument: a runner started for this run
+        self.assertIn('linuxpool.sh', text)  # no host argument: a runner started for this run
         self.assertIn('"$pool" stop', text)  # and stopped on every exit path
         self.assertIn('export GOCACHE=$(mktemp -d', text)
         for need in ('docker info', '.pb-test-pg-dsn', '(80|443)', '-ge 20'):

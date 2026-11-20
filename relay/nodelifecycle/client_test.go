@@ -32,6 +32,7 @@ import (
 func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	credential := strings.Repeat("test", 16)
 	var revoke atomic.Bool
+	var demandSeen atomic.Pointer[map[string]float64] // the last account_demand an observation carried
 	var storedMu sync.Mutex
 	var stored []derpquic.AuthoritySubject
 	// The grant's generation; a revocation's min_generation is the next one.
@@ -48,10 +49,14 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 			Generation         uint64                      `json:"node_generation"`
 			Epoch              string                      `json:"process_epoch"`
 			Subjects           []derpquic.AuthoritySubject `json:"subjects"`
+			AccountDemand      map[string]float64          `json:"account_demand"`
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			http.Error(w, "invalid", 400)
 			return
+		}
+		if len(in.AccountDemand) > 0 {
+			demandSeen.Store(&in.AccountDemand)
 		}
 		gen := in.Generation
 		if r.URL.Path == "/v1/relay/nodes/start" {
@@ -177,6 +182,13 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	}
 	if err = c.Observe(ctx, server, false); err != nil {
 		t.Fatal(err)
+	}
+	// The second observation reports what the connected account offered since the first opened the window (the control plane divides
+	// the account's speed among its relays by it): the account is listed, with a non-negative rate.
+	if seen := demandSeen.Load(); seen == nil {
+		t.Fatal("the observation carried no account demand")
+	} else if rate, listed := (*seen)[account]; !listed || rate < 0 {
+		t.Fatalf("account demand = %v, want the connected account %q listed", *seen, account)
 	}
 	deadline := time.Now().Add(time.Second)
 	for server.Snapshot().Connections != 0 && time.Now().Before(deadline) {

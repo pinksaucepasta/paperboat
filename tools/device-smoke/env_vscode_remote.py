@@ -36,7 +36,7 @@ from env_ssh_hook import (PS_SHOW, UNSET_MAC, account, arguments, host_is_mac, p
 
 PB = '$HOME/.local/bin/pb'
 PROBE = 'PB_ENV_HOOK_PROBE'
-DIR = '$HOME/.lanej-vscode-server'
+DIR = '$HOME/.test-vscode-server'
 # `pb env unset` previews first and needs the preview's confirmation code.
 UNSET = (f'c=$({PB} env unset {PROBE} --json 2>/dev/null | python3 -c "import json,sys;'
          f'print(json.load(sys.stdin).get(\'data\',{{}}).get(\'confirmation_token\',\'\'))");'
@@ -111,7 +111,7 @@ def stop_server(host, pid):
 # ---- a Windows device ---------------------------------------------------------------------------------------------
 
 SERVER_URL_WINDOWS = SERVER_URL.replace('server-linux-x64', 'server-win32-x64')  # a zip
-WINDOWS_DIR = '.lanej-vscode-server'  # in the user's profile folder, as DIR
+WINDOWS_DIR = '.test-vscode-server'  # in the user's profile folder, as DIR
 PRELOAD_NAME = 'pb-env-probe.cjs'  # .cjs: the server's package.json makes .js an ES module
 # Runs first in every node process the launch starts; only the server itself (server-main.js) writes its answer.
 PRELOAD = """const fs = require('fs'), path = require('path'), crypto = require('crypto');

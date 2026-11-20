@@ -1,5 +1,5 @@
 #!/bin/bash
-# final_fresh.sh up|down HOST STAMP [TEAMMATE_MINT]: the run's own machines for the final re-check, on a Docker host (hp).
+# final_fresh.sh up|down HOST STAMP [TEAMMATE_MINT]: the run's own machines for the final re-check, on a Docker host (Linux test machine).
 #   up    three fresh containers, each installed with the published one-liner (the official Latest) and freshly enrolled in the
 #         run's throwaway account (FRESH_MINT: a pb signed in to it, set up by final_recheck.py): final-a-STAMP as fx-a and
 #         final-b-STAMP as fx-b (a usable pair: fx-a runs a command on fx-b), final-c-STAMP as fx-c, stopped at once so the

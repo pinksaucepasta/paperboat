@@ -37,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/hosthealth"
 	"github.com/pinksaucepasta/paperboat/server/internal/lazyaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/server/internal/managedssh"
@@ -93,6 +94,7 @@ type Options struct {
 	// Database serves replica-safe reads and the commit position of writes (commit_position.go).
 	Database                 *db.DB
 	OperatorBackups          *backupreport.Service
+	HostHealth               *hosthealth.Service
 	TestFixtures             *testfixtures.Service
 	OperatorReporting        *operatorreporting.Service
 	OperatorAnalytics        *posthogquery.Service

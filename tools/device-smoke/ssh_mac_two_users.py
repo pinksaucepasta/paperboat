@@ -5,12 +5,12 @@ sessions stay isolated per user, and revoking one user's machine leaves the othe
 Usage: ssh_mac_two_users.py  (env below; wrappers take ONE shell-string argument, as in ssh_mac_rows.py)
   A_CMD / B_CMD   run it on a Linux client signed in as account A / account B (containers, e.g. macl-c / macl-r)
   MAC_CMD         runs it on the Mac
-  A_ALIAS, A_USER  account A's machine alias on the Mac and its OS user (default apple / admin)
-  B_ALIAS, B_USER  account B's machine alias and OS user (default apple-b / pbmac2)
+  A_ALIAS, A_USER  account A's machine alias on the Mac and its OS user (default macmini / admin)
+  B_ALIAS, B_USER  account B's machine alias and OS user (default apple-b / macuser2)
 Steps: both clients hold a `pb ssh` session at the same time; each lands as its own OS user; the Mac runs one sshd session
 per user, owned by that user; neither account can reach the other's machine; account B revokes its machine: B's session ends
 within 15 s and B is refused, A's session is untouched and a new A session works.
-Prints one JSON line; exit 1 on FAIL. The B machine stays revoked (re-pair pbmac2 to run again).
+Prints one JSON line; exit 1 on FAIL. The B machine stays revoked (re-pair macuser2 to run again).
 """
 import json
 import os
@@ -20,8 +20,8 @@ import time
 
 import ssh_mac_rows as m
 
-A_ALIAS, A_USER = os.environ.get('A_ALIAS', 'apple'), os.environ.get('A_USER', 'admin')
-B_ALIAS, B_USER = os.environ.get('B_ALIAS', 'apple-b'), os.environ.get('B_USER', 'pbmac2')
+A_ALIAS, A_USER = os.environ.get('A_ALIAS', 'macmini'), os.environ.get('A_USER', 'admin')
+B_ALIAS, B_USER = os.environ.get('B_ALIAS', 'apple-b'), os.environ.get('B_USER', 'macuser2')
 PB = '~/.local/bin/pb'
 REVOKE_MAX = 15.0
 

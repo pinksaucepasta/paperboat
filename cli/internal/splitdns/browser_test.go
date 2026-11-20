@@ -15,14 +15,14 @@ import (
 )
 
 func TestBrowserNamespaceRejectsForeignNames(t *testing.T) {
-	host, err := BrowserHostname("hp", 6767, testBrowserDomain)
+	host, err := BrowserHostname("laptop", 6767, testBrowserDomain)
 	if err != nil {
 		t.Fatalf("public hostname %q: %v", host, err)
 	}
-	if machine, label, err := ParseBrowserHostname(host, testBrowserDomain); err != nil || machine != "hp" || label != "6767" {
+	if machine, label, err := ParseBrowserHostname(host, testBrowserDomain); err != nil || machine != "laptop" || label != "6767" {
 		t.Fatalf("parsed %q = %q, %q: %v", host, machine, label, err)
 	}
-	for _, bad := range []string{"06767.hp.local.example.test", "0.hp.local.example.test", "6767.hp.local.example.test.evil", "6767.hp.example.test", BrowserGatewayHostname} {
+	for _, bad := range []string{"06767.laptop.local.example.test", "0.laptop.local.example.test", "6767.laptop.local.example.test.evil", "6767.laptop.example.test", BrowserGatewayHostname} {
 		if _, _, err := ParseBrowserHostname(bad, testBrowserDomain); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}

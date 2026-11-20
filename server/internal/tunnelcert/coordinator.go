@@ -1746,7 +1746,7 @@ func (l *MemoryLock) ReleaseGeneration(_ context.Context, domainID, owner string
 }
 
 // MemoryDistributor records the state transitions and enforces the intended
-// ordering.  It is also useful as a deterministic test oracle.
+// ordering.  It is also useful as a deterministic test build host.
 type MemoryDistributor struct {
 	mu      sync.Mutex
 	Targets map[string]bool

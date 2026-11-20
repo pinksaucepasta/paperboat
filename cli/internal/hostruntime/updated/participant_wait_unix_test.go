@@ -26,7 +26,7 @@ func (s *sequencedParticipants) OpenConnections(context.Context) (liveconnection
 	return liveconnections.Counts{}, nil
 }
 
-// Signed updates follow the same rule as supplied ones (Lane F): a candidate daemon only waiting for the
+// Signed updates follow the same rule as supplied ones: a candidate daemon only waiting for the
 // control plane is waited for and commits once ready; still waiting at the deadline rolls back with
 // ErrParticipantControlPlaneTimeout; degraded for another reason fails once it lasted ParticipantSettle (a new
 // daemon retries its failing steps itself; a first timeout under load is not a verdict). Recovery to the

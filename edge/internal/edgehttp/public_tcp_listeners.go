@@ -85,12 +85,6 @@ func NewPublicTCPListeners(cfg PublicTCPListenerConfig) (*PublicTCPListeners, er
 	if cfg.Interval == 0 {
 		cfg.Interval = 2 * time.Second
 	}
-	if cfg.MaximumListeners == 0 {
-		cfg.MaximumListeners = 4096
-	}
-	if cfg.MaximumConnections == 0 {
-		cfg.MaximumConnections = 4096
-	}
 	if cfg.Interval < 100*time.Millisecond || cfg.MaximumListeners < 1 || cfg.MaximumConnections < 1 {
 		return nil, errors.New("public TCP listener bounds are invalid")
 	}

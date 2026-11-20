@@ -23,7 +23,7 @@ func (s *failNthGet) Get(ref string) (string, error) {
 
 // One failed read of the local credential store (on Windows, a lost lock race) is not remembered by the daemon's
 // source: nothing reached Paperboat, so the next peer operation reads the store again instead of failing from the
-// refresh backoff for 15 s to 5 min (victus 2026-11-10: every pb ping and pb exec failed).
+// refresh backoff for 15 s to 5 min (Windows test machine 2026-11-10: every pb ping and pb exec failed).
 func TestLocalCredentialStoreFailureIsNotRemembered(t *testing.T) {
 	store, profile := credentialFailureFixture(t, "https://api.example.test")
 	// Gets 1 and 2 are the source's own read; 3 is the first read under the store lock.

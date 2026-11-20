@@ -164,7 +164,7 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		}
 	}
 	execute(`UPDATE user_machine_access_sessions SET expires_at=$2 WHERE id LIKE $1||'-term-%'`, access, now.Add(-time.Second))
-	// Admitted work outranks newer grants: on pbvm4 ~3 exec grants/s (2 min each) pushed a running `pb exec` and
+	// Admitted work outranks newer grants: on Linux test VM ~3 exec grants/s (2 min each) pushed a running `pb exec` and
 	// terminal past the grant bound after ~45 s, and the client's scope lease closed them.
 	execute(`INSERT INTO user_machine_access_sessions(credential_kind,id,user_machine_id,user_id,environment_id,cli_client_session_id,http_base_url,helper_terminal_session_id,helper_file_session_id,capabilities,operation_id,expires_at)
  SELECT 'control_plane_signed',$1||'-fresh-'||i,$2,$3,$4,$5,'https://machine.example.test',$6||i,$7||i,ARRAY['exec'],$8||i,$9 FROM generate_series(1,400) i`, access, machine, account, environment, cli, "terminal_fresh_"+suffix, "files_fresh_"+suffix, "operation_fresh_"+suffix, now.Add(2*time.Minute))

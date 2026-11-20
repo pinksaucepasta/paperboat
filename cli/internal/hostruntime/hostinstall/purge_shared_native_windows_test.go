@@ -161,7 +161,7 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 	}
 }
 
-// victus, 2026-11-10: after a failed in-place update `pb uninstall` removed the services and Program Files but
+// Windows test machine, 2026-11-10: after a failed in-place update `pb uninstall` removed the services and Program Files but
 // reported {"state":"failed","cause":"internal"}, kept the user's credentials and left one ProgramData log. The
 // failed install had written PaperboatInstall-<instance>-startup-error.log with atomicfile's descriptor (full
 // access for the installing account), which the shared cleanup refused as an untrusted writer.

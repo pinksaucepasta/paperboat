@@ -34,7 +34,7 @@ func (s *runtimeObservationSender) validateMachineService(ctx context.Context, b
 	if !announced {
 		// The service may have started after the last scan: a port reused right after its previous
 		// listener stopped is still listed at the server while this host has withdrawn it. Look once
-		// more before refusing (Lane H: access-machine read 0 bytes from a just-started origin).
+		// more before refusing (access-machine read 0 bytes from a just-started origin).
 		s.machineServicesObservation(ctx)
 		announced = s.machineServiceAnnounced(binding)
 	}

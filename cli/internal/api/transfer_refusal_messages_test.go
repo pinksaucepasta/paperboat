@@ -2,7 +2,7 @@ package api
 
 import "testing"
 
-// PLAN 3b File transfer modes step 1 (Lane O): the server's 409 refusals render from their details.
+// PLAN 3b File transfer modes step 1: the server's 409 refusals render from their details.
 func TestTransferRefusalsRenderFromTheirDetails(t *testing.T) {
 	large := apiErrorMessageFor("transfer_too_large", 409, map[string]any{"total_bytes": float64(3_400_000_000), "max_bytes": float64(2_000_000_000)})
 	if large != "This transfer is 3.4 GB. Automatic sends up to 2 GB. Send less than 2 GB." {
@@ -10,7 +10,7 @@ func TestTransferRefusalsRenderFromTheirDetails(t *testing.T) {
 	}
 }
 
-// Lane O 44a17b1f: a team at its cap answers 409 team_limit; the CLI said "resource state changed".
+// 44a17b1f: a team at its cap answers 409 team_limit; the CLI said "resource state changed".
 func TestTeamLimitRendersFromItsDetails(t *testing.T) {
 	// XE item 9: every kind names its limit and the numbers, not only machines.
 	for kind, want := range map[string]string{

@@ -74,7 +74,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if detected, detectErr := os.Hostname(); detectErr == nil {
 			detected = strings.TrimSpace(detected)
 			// macOS commonly reports a fully-qualified local hostname (for
-			// example, apple.lan), while machine names are single DNS labels.
+			// example, macmini.lan), while machine names are single DNS labels.
 			// Keep the stable first label as the machine alias.
 			if dot := strings.IndexByte(detected, '.'); dot > 0 {
 				detected = detected[:dot]

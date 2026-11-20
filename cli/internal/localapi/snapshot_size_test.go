@@ -16,7 +16,7 @@ func validSnapshot() Snapshot {
 }
 
 // A snapshot of the most machines the daemon accepts, each with a health item, fits the snapshot bound
-// (Lane X audit A1: the 1 MiB request bound broke pb status near 1,500 machines).
+// (audit A1: the 1 MiB request bound broke pb status near 1,500 machines).
 func TestASnapshotOfTheMostMachinesFits(t *testing.T) {
 	snapshot := validSnapshot()
 	template := snapshot.Machines[0]

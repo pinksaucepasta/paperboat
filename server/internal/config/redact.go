@@ -22,6 +22,9 @@ func (c Config) RedactedJSON() string {
 	if redacted.Secrets.BackupReportToken != "" {
 		redacted.Secrets.BackupReportToken = "[redacted]"
 	}
+	if redacted.Secrets.HostHealthToken != "" {
+		redacted.Secrets.HostHealthToken = "[redacted]"
+	}
 	if redacted.Database.DSN != "" {
 		redacted.Database.DSN = "[redacted]"
 	}

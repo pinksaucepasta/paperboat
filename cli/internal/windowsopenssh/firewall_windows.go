@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// firewallSnapshotAttempts bounds the retries of one transient ActiveStore read failure (victus 2026-11-10: a
+// firewallSnapshotAttempts bounds the retries of one transient ActiveStore read failure (Windows test machine 2026-11-10: a
 // single powershell exit 1 failed a whole install).
 const firewallSnapshotAttempts = 3
 

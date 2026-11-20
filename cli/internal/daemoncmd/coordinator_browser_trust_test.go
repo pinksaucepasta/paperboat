@@ -24,14 +24,14 @@ func TestCoordinatorBrowserCertificateFailureKeepsNativeMachineAccess(t *testing
 		t.Fatal(err)
 	}
 	c.ctx = t.Context()
-	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
 	for range 2 {
 		if err := c.replaceGuardedRoutes(t.Context(), []*daemonrpc.PeerUpdate{peer}); err != nil {
 			t.Fatalf("browser certificate failure withdrew machine access: %v", err)
 		}
 	}
 	names.mu.Lock()
-	_, hasNames := names.names["hp."+testBrowserDomain]
+	_, hasNames := names.names["laptop."+testBrowserDomain]
 	nativeAddress := names.addresses[8080]
 	names.mu.Unlock()
 	if !hasNames || nativeAddress == "" || len(c.routes) != 1 {

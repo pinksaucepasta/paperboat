@@ -371,7 +371,7 @@ func TestConfigSyncSourceCommandPreviewConsentAndStaleConfirmation(t *testing.T)
 func TestConfigSyncSourcePushOnlyIgnoresInheritedPull(t *testing.T) {
 	t.Setenv("PATH", "")
 	backend := configSyncSourceBackendFixture(t, map[string]string{
-		"bootstrap": `{"mode": "push_only", "pull": {"repository_id": "inactive-pull"}, "push": {"repository_id": "active-push"}}`,
+		"bootstrap":   `{"mode": "push_only", "pull": {"repository_id": "inactive-pull"}, "push": {"repository_id": "active-push"}}`,
 		"active-push": `{"mode": "push_only", "pull": {"repository_id": "inactive-pull"}, "push": {"repository_id": "active-push"}}`,
 	})
 	projection, err := buildConfigSyncProjection(context.Background(), backend, configsync.SourceConfig{}, "bootstrap", api.ConfigAssignment{}, configSyncMachineNames{}, shorttemp.Dir(t), "", shorttemp.Dir(t))
@@ -501,7 +501,7 @@ func TestConfigSyncValidateNamesARepositoryThisMachineCannotReach(t *testing.T) 
 
 // After a team-default unadopt the machine keeps a revoked assignment naming the team's repository;
 // apply read shared config from it and the server refused read access with 404, so every
-// `pb config sync apply` on that machine failed (Lane H, a test VM). Only the file decides now.
+// `pb config sync apply` on that machine failed (a test VM). Only the file decides now.
 func TestConfigSyncSourceIgnoresARevokedAssignmentsRepositories(t *testing.T) {
 	t.Setenv("PATH", "")
 	backend := configSyncSourceBackendFixture(t, map[string]string{"one": ""})

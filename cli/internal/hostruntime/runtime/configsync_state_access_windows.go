@@ -15,7 +15,7 @@ import (
 // repairConfigSyncStateAccess rebinds the sync state of every assignment under root to the owner's stable SID.
 // A worker's S4U logon SID is temporary and what a worker or its git creates can name only that session, so the
 // next worker could neither prune nor read it: os.RemoveAll answered "access denied" on every 30 s retry, the
-// factory never finished and the apply stayed pending (victus, 2026-11-14). The owner may always rewrite the
+// factory never finished and the apply stayed pending (Windows test machine, 2026-11-14). The owner may always rewrite the
 // DACL of the objects it owns, which needs no privilege.
 func repairConfigSyncStateAccess(root string) error {
 	token, err := windowssecurity.OpenEffectiveToken()

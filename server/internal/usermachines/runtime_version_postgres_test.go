@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/metering"
 )
 
-// lanec-gate showed its pairing version (round 15) as the version it runs after sixteen updates: the
+// test-gate showed its pairing version (round 15) as the version it runs after sixteen updates: the
 // machine API returned runtime_versions, which is written once at pairing. It reports what the runtime's
 // latest observation says, and the installation's own declaration stays what installation matching uses.
 func TestMachineReportsTheVersionItsRuntimeLastObserved(t *testing.T) {

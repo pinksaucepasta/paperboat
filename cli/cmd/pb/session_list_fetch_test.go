@@ -18,12 +18,12 @@ func TestResolvingTheTerminalTargetListsMachinesOnce(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		listings.Add(1)
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"hp","state":"online","online":true,"capabilities":{"terminal_host":{"configured":true,"observed":true}}}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
+		_, _ = writer.Write([]byte(`{"data":{"items":[{"id":"machine_1","alias":"laptop","state":"online","online":true,"capabilities":{"terminal_host":{"configured":true,"observed":true}}}],"pagination":{"limit":200,"offset":0,"total":1,"next_offset":null}}}`))
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "token", ExpiresAt: time.Now().Add(time.Hour)}, server.Client())
-	target, err := resolveTerminalTargetOrDefault(t.Context(), nil, client, nil, "hp")
-	if err != nil || target.id != "machine_1" || target.name != "hp" {
+	target, err := resolveTerminalTargetOrDefault(t.Context(), nil, client, nil, "laptop")
+	if err != nil || target.id != "machine_1" || target.name != "laptop" {
 		t.Fatalf("target %+v err %v", target, err)
 	}
 	if got := listings.Load(); got != 1 {

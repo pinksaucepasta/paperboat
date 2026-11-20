@@ -17,6 +17,7 @@ Steps per target OS T, in order, each its own result `X-31:<step>:<T>` (or `A>B`
   tunnel    the `pb tunnel create` line the console prints runs verbatim on T
 Nothing secret is printed: commands are matched against their shape and masked before any output.
 """
+from dev_targets import get_setting
 import json
 import os
 import re
@@ -37,7 +38,7 @@ PREFIX = os.environ.get('XPLAT_PREFIX', 'xpe')
 POSIX_SHAPE = re.compile(r"^curl -fsSL (https://[^\s'?|]+) \| PB_TOKEN='[A-Za-z0-9_.-]+' (?:PB_NAME='[A-Za-z0-9_.-]+' )?sh$")
 PS_SHAPE = re.compile(r"""^\$env:PB_TOKEN='[A-Za-z0-9_.-]+'; (?:\$env:PB_NAME='[A-Za-z0-9_.-]+'; )?irm (https://[^\s'?|]+) \| iex$""")
 GIT_BASH = r'C:\Program Files\Git\bin\bash.exe'
-BUILD = Path(os.environ.get('XPE_BUILD_DIR', '/home/ubuntu/pb-wt/xe-build/dev-9864c05bd'))
+BUILD = Path(os.environ.get('XPE_BUILD_DIR', get_setting('xplat_build_dir', '.build/xplat')))
 BINARIES = {'L': 'pb-linux-amd64', 'M': 'pb-darwin-arm64', 'W': 'pb-windows-amd64.exe'}
 NAMES = {'L': PREFIX + '-l', 'M': PREFIX + '-m', 'W': PREFIX + '-w'}
 

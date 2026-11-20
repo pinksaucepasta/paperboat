@@ -9,7 +9,7 @@ os.environ.setdefault('TEAM', 'team-x')
 import ssh_mac_member_revoke as r  # noqa: E402
 
 HELD = ('RESULT normal pb_stderr=[] plain_stderr=[]\nRESULT exit10 fails=0 seconds=[ 1.0 ] bad=[ ]\nHOLDING\nRESULT seconds=2.0 alive=no plain_seconds=2.1 plain_alive=no '
-        'stderr=[pb: access to apple was revoked] plain_stderr=[pb: access to apple was revoked]')
+        'stderr=[pb: access to macmini was revoked] plain_stderr=[pb: access to macmini was revoked]')
 ACCESS = 'RESULT access plain_s=1.2 pb_s=1.4 config_block=1 known_hosts_lines=3'
 
 

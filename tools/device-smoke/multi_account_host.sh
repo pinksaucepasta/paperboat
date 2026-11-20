@@ -15,7 +15,7 @@ set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary} MINT_B=${3:?second-account pb command on host}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-TA=mah-ta-$STAMP TB=mah-tb-$STAMP H=mah-h-$STAMP N=lanea-mah-$STAMP PORT=18480
+TA=mah-ta-$STAMP TB=mah-tb-$STAMP H=mah-h-$STAMP N=test-mah-$STAMP PORT=18480
 IDS_A= IDS_B=
 
 finish() {
@@ -61,7 +61,7 @@ echo "A_GOT=\$a"; echo "B_GOT=\$b"
 cross=\$(fetch pbu2 1001 $PORT.$N.\$DA)
 [ "\$cross" != MARKER_A_$STAMP ] && echo ISOLATED
 # Both users publish the same short name $N (keyed by uid): neither daemon may be degraded by the other's name
-# (the gateway alone passed while the second user's machine names were refused, F23-01 on pbmac).
+# (the gateway alone passed while the second user's machine names were refused, F23-01 on mac-vm).
 health() { as $H \$1 \$2 /home/\$1/.local/bin/pb status --json 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d.get("data",d);print(d.get("daemon_state"),*[h.get("code") for h in d.get("health",[])])'; }
 ha=\$(health pbt 1000); hb=\$(health pbu2 1001)
 echo "A_HEALTH=\$ha"; echo "B_HEALTH=\$hb"

@@ -7,6 +7,7 @@ import (
 	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,7 +52,6 @@ func TestCarrierAssemblyOwnsAcceptAndShutdownLifecycle(t *testing.T) {
 			handled++
 			return nil
 		},
-		MaximumHandlers: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -336,10 +336,9 @@ func TestCarrierAssemblyPeerFailureRetainsAcceptAndFatalFailureReachesOwner(t *t
 	failure := errors.New("handler failed")
 	observed := make(chan error, 1)
 	healthy := make(chan struct{})
-	calls := 0
-	carrier, err := NewCarrierAssembly(CarrierAssemblyConfig{Service: service, MaximumHandlers: 1, Handle: func(context.Context, *datacarrier.Server) error {
-		calls++
-		if calls == 1 {
+	var calls atomic.Int32
+	carrier, err := NewCarrierAssembly(CarrierAssemblyConfig{Service: service, Handle: func(context.Context, *datacarrier.Server) error {
+		if calls.Add(1) == 1 {
 			return failure
 		}
 		close(healthy)

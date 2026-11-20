@@ -15,7 +15,7 @@ import type { Env } from "../lib/types.ts"
 
 let db: D1Database
 let dispose: () => Promise<void>
-const env = () => ({ DB: db, PROBE_KEYS: JSON.stringify({ oracle: "k-oracle", anvit: "k-anvit" }), ADMIN_TOKEN: "admin-secret" }) as Env
+const env = () => ({ DB: db, PROBE_KEYS: JSON.stringify({ vantage-a: "k-oracle", vantage-b: "k-anvit" }), ADMIN_TOKEN: "admin-secret" }) as Env
 const ctx = { waitUntil() {} }
 const call = (request: unknown, e: Env, c = ctx) => handle(request as Request, e, c)
 const T0 = minute(Date.UTC(2026, 10, 18, 12, 0, 0))
@@ -47,7 +47,7 @@ test("healthy for five minutes is operational everywhere", async () => {
 })
 
 test("one relay down on two vantages for three minutes: only the relays component, degraded (the other relay is fine); then recovery after five passes", async () => {
-  const bad = { oracle: ["relay_india_1"], anvit: ["relay_india_1"] }
+  const bad = { vantage-a: ["relay_india_1"], vantage-b: ["relay_india_1"] }
   let cs = await minuteOf(5, bad)
   cs = await minuteOf(6, bad)
   assert.equal(state(cs, "relays"), "operational") // two failures are not enough
@@ -62,11 +62,11 @@ test("one relay down on two vantages for three minutes: only the relays componen
 })
 
 test("both relays down on two vantages is major; one vantage down alone is not", async () => {
-  let cs = await minuteOf(13, { oracle: ["relay_india_1", "relay_india_2"] })
-  cs = await minuteOf(14, { oracle: ["relay_india_1", "relay_india_2"] })
-  cs = await minuteOf(15, { oracle: ["relay_india_1", "relay_india_2"] })
+  let cs = await minuteOf(13, { vantage-a: ["relay_india_1", "relay_india_2"] })
+  cs = await minuteOf(14, { vantage-a: ["relay_india_1", "relay_india_2"] })
+  cs = await minuteOf(15, { vantage-a: ["relay_india_1", "relay_india_2"] })
   assert.equal(state(cs, "relays"), "operational")
-  const both = { oracle: ["relay_india_1", "relay_india_2"], anvit: ["relay_india_1", "relay_india_2"] }
+  const both = { vantage-a: ["relay_india_1", "relay_india_2"], vantage-b: ["relay_india_1", "relay_india_2"] }
   for (let i = 16; i < 19; i++) cs = await minuteOf(i, both)
   assert.equal(state(cs, "relays"), "major")
   for (let i = 19; i < 24; i++) cs = await minuteOf(i)
@@ -75,7 +75,7 @@ test("both relays down on two vantages is major; one vantage down alone is not",
 
 test("a silent probe host (no internet, results discarded) never turns anything red or green: data goes delayed after 3 minutes", async () => {
   let cs: Awaited<ReturnType<typeof minuteOf>> = []
-  for (let i = 24; i < 30; i++) cs = await minuteOf(i, {}, ["oracle", "anvit", "cloudflare"])
+  for (let i = 24; i < 30; i++) cs = await minuteOf(i, {}, ["vantage-a", "vantage-b", "cloudflare"])
   assert.ok(cs.every((c) => c.state === "delayed"))
   const stored = await db.prepare("SELECT COUNT(*) AS n FROM reports WHERE bucket >= ?").bind(T0 + 24 * 60_000).first<{ n: number }>()
   assert.equal(stored!.n, 0)
@@ -83,8 +83,8 @@ test("a silent probe host (no internet, results discarded) never turns anything 
 
 test("a vantage whose own internet is down sends a heartbeat but its results are discarded", async () => {
   const now = T0 + 40 * 60_000
-  await saveReport(db, "anvit", now, now, false, "test", report("anvit", ["api_health"]))
-  const row = await db.prepare("SELECT net_ok, results FROM reports WHERE vantage = 'anvit' AND bucket = ?").bind(minute(now)).first<{ net_ok: number; results: string }>()
+  await saveReport(db, "vantage-b", now, now, false, "test", report("vantage-b", ["api_health"]))
+  const row = await db.prepare("SELECT net_ok, results FROM reports WHERE vantage = 'vantage-b' AND bucket = ?").bind(minute(now)).first<{ net_ok: number; results: string }>()
   assert.deepEqual(row, { net_ok: 0, results: "{}" })
 })
 
@@ -95,19 +95,19 @@ async function signed(vantage: string, key: string, body: object, tsOffset = 0) 
 }
 
 test("probe writes need a valid signature for the vantage", async () => {
-  assert.equal((await call(await signed("oracle", "k-oracle", {}), env(), ctx)).status, 200)
-  assert.equal((await call(await signed("oracle", "wrong", {}), env(), ctx)).status, 401)
-  assert.equal((await call(await signed("anvit", "k-oracle", {}), env(), ctx)).status, 401)
-  assert.equal((await call(await signed("oracle", "k-oracle", {}, -600_000), env(), ctx)).status, 401) // replayed
+  assert.equal((await call(await signed("vantage-a", "k-oracle", {}), env(), ctx)).status, 200)
+  assert.equal((await call(await signed("vantage-a", "wrong", {}), env(), ctx)).status, 401)
+  assert.equal((await call(await signed("vantage-b", "k-oracle", {}), env(), ctx)).status, 401)
+  assert.equal((await call(await signed("vantage-a", "k-oracle", {}, -600_000), env(), ctx)).status, 401) // replayed
   assert.equal((await call(await signed("cloudflare", "k-oracle", {}), env(), ctx)).status, 401) // the Worker's own vantage cannot be written from outside
-  const body = await signed("oracle", "k-oracle", {})
+  const body = await signed("vantage-a", "k-oracle", {})
   const tampered = new Request(body.url, { method: "POST", headers: body.headers, body: (await body.text()).replace('"ok":true', '"ok":false') })
   assert.equal((await call(tampered, env(), ctx)).status, 401)
 })
 
 test("public status is delayed when the last decision is older than 3 minutes, never green", async () => {
   const stale = Date.now() - 200_000
-  await saveReport(db, "oracle", stale, stale, true, "t", report("oracle"))
+  await saveReport(db, "vantage-a", stale, stale, true, "t", report("vantage-a"))
   await evaluate(db, stale)
   await buildSnapshot(db, Date.now())
   const res = (await (await call(new Request("https://status.test/api/status"), env())).json()) as { delayed: boolean }
@@ -170,7 +170,7 @@ test("an admin write refreshes incident text but never makes old decisions look 
 test("freshness is judged on the unrounded receipt time", async () => {
   const base = minute(Date.UTC(2026, 10, 19, 3, 0, 0))
   await db.prepare("DELETE FROM reports").run() // earlier tests post reports stamped with the real clock, which is later than this fixed date once the day has passed
-  for (let i = 4; i >= 0; i--) for (const v of ["oracle", "anvit"]) await saveReport(db, v, base - i * 60_000 + 59_000, base - i * 60_000 + 59_000, true, "t", report(v))
+  for (let i = 4; i >= 0; i--) for (const v of ["vantage-a", "vantage-b"]) await saveReport(db, v, base - i * 60_000 + 59_000, base - i * 60_000 + 59_000, true, "t", report(v))
   await evaluate(db, base + 59_000 + 170_000) // 170 s after the last receipt (a floored timestamp would read 229 s)
   const comps = (await buildSnapshot(db, base + 229_000)).public.components
   assert.equal(comps.find((c) => c.id === "api")!.state, "operational")
@@ -179,12 +179,12 @@ test("freshness is judged on the unrounded receipt time", async () => {
 })
 
 test("probe posts: a replay is refused and a second post within 20 s is rate limited", async () => {
-  await db.prepare("DELETE FROM reports WHERE vantage = 'anvit'").run()
-  const first = await signed("anvit", "k-anvit", {})
+  await db.prepare("DELETE FROM reports WHERE vantage = 'vantage-b'").run()
+  const first = await signed("vantage-b", "k-anvit", {})
   const copy = first.clone()
   assert.equal((await call(first, env())).status, 200)
   assert.equal((await call(copy, env())).status, 409) // the same signed body again
-  const quick = await signed("anvit", "k-anvit", { ts: Date.now() + 1000 })
+  const quick = await signed("vantage-b", "k-anvit", { ts: Date.now() + 1000 })
   assert.equal((await call(quick, env())).status, 429)
 })
 
@@ -242,17 +242,17 @@ test("a snapshot build that started earlier never overwrites one that started la
 
 test("an unreadable report row is skipped and the decision still runs", async () => {
   const t = Date.UTC(2026, 10, 22, 6, 0, 0)
-  await db.prepare("INSERT INTO reports (vantage, bucket, ts, probe_ts, net_ok, build, results) VALUES ('oracle', ?, ?, 1, 1, 'x', '{not json')").bind(minute(t), t).run()
+  await db.prepare("INSERT INTO reports (vantage, bucket, ts, probe_ts, net_ok, build, results) VALUES ('vantage-a', ?, ?, 1, 1, 'x', '{not json')").bind(minute(t), t).run()
   await evaluate(db, t + 30_000)
   assert.equal(Number((await db.prepare("SELECT v FROM kv WHERE k = 'evaluated_at'").first<{ v: string }>())!.v), t + 30_000)
 })
 
 test("replay: an exact copy is refused, but a clock that ran ahead and came back does not lock the probe out", async () => {
   const t = Date.UTC(2026, 10, 22, 7, 0, 0)
-  assert.equal(await admitProbe(db, "oracle", t, t + 90_000), "ok") // the probe's clock is 90 s fast
-  await saveReport(db, "oracle", t, t + 90_000, true, "x", {})
-  assert.equal(await admitProbe(db, "oracle", t + 30_000, t + 90_000), "replayed") // the same signed body again
-  assert.equal(await admitProbe(db, "oracle", t + 60_000, t + 60_000), "ok") // corrected clock: older signed time, new data
+  assert.equal(await admitProbe(db, "vantage-a", t, t + 90_000), "ok") // the probe's clock is 90 s fast
+  await saveReport(db, "vantage-a", t, t + 90_000, true, "x", {})
+  assert.equal(await admitProbe(db, "vantage-a", t + 30_000, t + 90_000), "replayed") // the same signed body again
+  assert.equal(await admitProbe(db, "vantage-a", t + 60_000, t + 60_000), "ok") // corrected clock: older signed time, new data
 })
 
 test("two evaluations of the same minute at once count the uptime once", async () => {
@@ -265,7 +265,7 @@ test("two evaluations of the same minute at once count the uptime once", async (
 test("a unit never seen before is not green on its first healthy sample", async () => {
   await db.prepare("DELETE FROM unit_state WHERE unit = 'api_read'").run()
   const t = Date.UTC(2026, 10, 24, 9, 0, 0)
-  for (const v of ["oracle", "anvit"]) await saveReport(db, v, t + 5_000, t + 5_000, true, "t", report(v))
+  for (const v of ["vantage-a", "vantage-b"]) await saveReport(db, v, t + 5_000, t + 5_000, true, "t", report(v))
   await evaluate(db, t + 10_000)
   assert.equal((await db.prepare("SELECT state FROM unit_state WHERE unit = 'api_read'").first<{ state: string }>())!.state, "delayed")
 })

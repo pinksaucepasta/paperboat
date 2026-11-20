@@ -52,7 +52,7 @@ func readMachineGuardDomain(ctx context.Context) string {
 
 // readyMachineGuard reports nil when the installed guard is ready and not older than version, the build
 // being installed. The guard is one per machine, shared by every OS user's install: a user installing
-// an older build must not downgrade it under another user (victus: a second Windows user's release
+// an older build must not downgrade it under another user (Windows test machine: a second Windows user's release
 // install replaced the fleet's newer guard). Newer guards stay compatible with older clients, which
 // send a request field only when the guard lists its feature. Prior art: Windows Installer does not
 // downgrade a shared component unless told to (MSI component rules / file versioning rules).

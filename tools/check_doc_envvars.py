@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 VARIABLE = re.compile(r"\bPAPERBOAT_[A-Z0-9]+(?:_[A-Z0-9]+)*\b")
-PLANNING = {"PLAN.md", "CHECKLIST.md", "WHITEBOARD.md", "AGENTS.md", "REMOTE_TESTING.md"}
+PLANNING = {"PLAN.md", "CHECKLIST.md", "WHITEBOARD.md", "AGENTS.md"}
 CODE_SUFFIXES = (".go", ".py", ".sh", ".yml", ".yaml", ".service", ".timer", ".json", ".ts", ".tsx", ".js", ".mjs", ".ps1",
                  ".env", ".toml", ".sql", "Dockerfile", ".Dockerfile")
 

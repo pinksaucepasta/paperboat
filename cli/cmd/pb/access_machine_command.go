@@ -147,7 +147,7 @@ func accessMachineCobraCommandV1() *cobra.Command {
 }
 
 // accessMachineStepError names the step of `pb access machine` that failed, its cause and what to do. A
-// generic "could not finish the command" hid the cause of the private-access P0 (Lane H repro, 2026-10-26).
+// generic "could not finish the command" hid the cause of the private-access P0 (repro, 2026-10-26).
 type accessMachineStepError struct {
 	step, action string
 	cause        error

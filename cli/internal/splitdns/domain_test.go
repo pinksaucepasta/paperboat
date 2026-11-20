@@ -20,13 +20,13 @@ func TestBrowserDomainRejectsBroadAndInvalidTrust(t *testing.T) {
 	}
 }
 func TestParseBrowserHostname(t *testing.T) {
-	for _, tc := range []struct{ host, machine, label string }{{"hp.mynet.xyz", "hp", ""}, {"3000.hp.mynet.xyz", "hp", "3000"}, {"jellyfin.hp.mynet.xyz", "hp", "jellyfin"}} {
+	for _, tc := range []struct{ host, machine, label string }{{"laptop.mynet.xyz", "laptop", ""}, {"3000.laptop.mynet.xyz", "laptop", "3000"}, {"jellyfin.laptop.mynet.xyz", "laptop", "jellyfin"}} {
 		m, l, err := ParseBrowserHostname(tc.host, "mynet.xyz")
 		if err != nil || m != tc.machine || l != tc.label {
 			t.Fatalf("%s: %s %s %v", tc.host, m, l, err)
 		}
 	}
-	for _, host := range []string{"mynet.xyz", "HP.mynet.xyz", "x.y.hp.mynet.xyz", "0001.hp.mynet.xyz", "65536.hp.mynet.xyz", "hp.mynet.xyz.other", "*.hp.mynet.xyz"} {
+	for _, host := range []string{"mynet.xyz", "LAPTOP.mynet.xyz", "x.y.laptop.mynet.xyz", "0001.laptop.mynet.xyz", "65536.laptop.mynet.xyz", "laptop.mynet.xyz.other", "*.laptop.mynet.xyz"} {
 		if _, _, err := ParseBrowserHostname(host, "mynet.xyz"); err == nil {
 			t.Fatalf("invalid hostname accepted: %s", host)
 		}

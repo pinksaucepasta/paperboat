@@ -16,7 +16,7 @@ set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-TARGET=xfer-t-$STAMP CLIENT=xfer-c-$STAMP ALIAS=lanea-xfer-$STAMP
+TARGET=xfer-t-$STAMP CLIENT=xfer-c-$STAMP ALIAS=test-xfer-$STAMP
 MACHINE_IDS=
 
 finish() {

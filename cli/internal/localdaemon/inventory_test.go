@@ -737,7 +737,7 @@ func TestInventoryReconcileDoesNotInheritTheListingsTimeBudget(t *testing.T) {
 // The local reconcile asks the server for credentials, browser services and certificates. When it
 // failed because the server did not answer, the daemon said "Local machine access is unavailable", which
 // sent people to their local settings and made an update treat a slow server as a broken installation
-// and roll back at once (lanel-a, 2026-10-23). It reports the control plane instead; any other reconcile
+// and roll back at once (test-a, 2026-10-23). It reports the control plane instead; any other reconcile
 // failure stays local.
 func TestControlPlaneUnavailableNamesAnUnreachableProxy(t *testing.T) {
 	proxy := &url.Error{Op: "Get", URL: "https://api.example.test/v1/me", Err: &httptransport.ProxyError{Failure: httptransport.ProxyUnreachable}}
@@ -761,7 +761,7 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 		"server unavailable":  {fmt.Errorf("coordinator: %w", &api.APIError{Status: 503, Code: "temporarily_unavailable"}), "control_plane_unavailable"},
 		"local guard failure": {errors.New("apply local machine access: machine guard refused"), "local_access_unavailable"},
 		"server refused":      {&api.APIError{Status: 403, Code: "forbidden"}, "local_access_unavailable"},
-		// A peer or local service not answering is not the control plane (hp 2026-10-27: an update rolled back on it).
+		// A peer or local service not answering is not the control plane (Linux test machine 2026-10-27: an update rolled back on it).
 		"peer deadline": {fmt.Errorf("apply browser routes: %w", &url.Error{Op: "Get", URL: "http://100.64.0.7:38080/health", Err: context.DeadlineExceeded}), "local_access_unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -790,7 +790,7 @@ func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *tes
 }
 
 // A machine without published host keys is shown as publishing (a fresh container still installing, ltc-d7), with
-// no cloned-image text; only a refusal the server lists as another machine's keys gives the clone fix (Lane H).
+// no cloned-image text; only a refusal the server lists as another machine's keys gives the clone fix.
 func TestUnpublishedHostKeysSayPublishingAndOnlyARefusalGivesTheCloneFix(t *testing.T) {
 	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
 	machine.SSHAuthority.TargetGeneration = 4
@@ -1027,7 +1027,7 @@ func TestInventoryRefreshesAtOnceWhenTheEventWaitIsRefused(t *testing.T) {
 
 // An access change (a machine shared with this account, a grant, the team's private access setting) refreshes the
 // machine list within the request spacing, not the event spacing: a member waited 12-31 s to reach a machine just
-// shared with them (F9-04, hp 2026-10-27).
+// shared with them (F9-04, Linux test machine 2026-10-27).
 func TestInventoryRefreshesAtOnceForAnAccessChange(t *testing.T) {
 	source := &scriptedMachineSource{results: []machineResult{{machines: []api.UserMachine{{ID: "machine_1", Alias: "studio"}}}}}
 	refreshed := make(chan struct{}, 8)
@@ -1168,7 +1168,7 @@ func TestTheStartupGraceCountsFromPairing(t *testing.T) {
 }
 
 // Every degraded readiness names its health item: a machine that just came online, with managed SSH not reporting yet
-// and file transfer not observed, says those are still starting (seen on hp: ssh_readiness degraded, health empty).
+// and file transfer not observed, says those are still starting (seen on Linux test machine: ssh_readiness degraded, health empty).
 func TestADegradedReadinessAlwaysNamesItsHealthItem(t *testing.T) {
 	machine := api.UserMachine{ID: "machine_1", Alias: "fresh", Online: true, InstallationGeneration: 3,
 		SSHAuthority: api.SSHAuthority{TargetGeneration: 3, HostKeyGeneration: 3},
@@ -1189,7 +1189,7 @@ func TestADegradedReadinessAlwaysNamesItsHealthItem(t *testing.T) {
 
 // A machine list that fails because the API did not answer is the control plane; one that fails in a local step
 // (configuration, credentials, alias validation) is named as such, so the update gate does not wait on the server
-// for it (hp, 2026-10-27).
+// for it (Linux test machine, 2026-10-27).
 func TestInventoryListingFailureNamesTheControlPlaneOnlyForTheAPI(t *testing.T) {
 	for name, test := range map[string]struct {
 		err  error

@@ -3,7 +3,7 @@
 # can be done by changing the range and flushing the conntrack entries of the guest.
 # usage: bed-nat.sh on|rebind [first port]|off|conntrack     env: BED (ssh host), WGIF, NET4 (tunnel subnet to NAT), GUEST4 (address whose conntrack entries rebind flushes)
 set -eu
-BED=${BED:-pbvm2}; WGIF=${WGIF:-x38ow}; G=${GUEST4:-10.38.0.2}
+BED=${BED:-$(python3 "$(dirname "$0")/../dev_targets.py" update_test_host)}; WGIF=${WGIF:-x38ow}; G=${GUEST4:-10.38.0.2}
 OUT=$(ssh "$BED" "ip -4 route show default | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -1")
 rules() { # $1 = first port of the 1000-port range
   ssh "$BED" "sudo -n iptables -t nat -A POSTROUTING -s ${NET4:-10.38.0.0/24} -o $OUT -p udp -m comment --comment x38q -j MASQUERADE --to-ports $1-$(($1 + 999))

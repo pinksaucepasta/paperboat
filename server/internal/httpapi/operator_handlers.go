@@ -63,6 +63,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/breakglass/runs/{run_id}/cancel":                  {"admin", "run_id", ""},
 
 	"GET /v1/admin/backups":                                                         {"operations", "", "backups"},
+	"GET /v1/admin/host-health":                                                     {"operations", "", "host-health"},
 	"GET /v1/admin/backups/runs":                                                    {"operations", "", "backup-runs"},
 	"GET /v1/admin/support":                                                         {"support", "", "support-references"},
 	"GET /v1/admin/sentry/logs":                                                     {"operations", "", "sentry-logs"},
@@ -326,6 +327,7 @@ func (w *operatorResponse) Write(b []byte) (int, error) {
 
 func registerOperatorRoutes(mux *http.ServeMux, opts Options) {
 	registerBackupReportRoute(mux, opts)
+	registerHostHealthRoutes(mux, opts)
 	registerTestFixtureRoutes(mux, opts)
 	if opts.OperatorAuth == nil {
 		return

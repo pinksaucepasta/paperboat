@@ -79,7 +79,7 @@ func TestGuardInstallationRollbackPreservesExternalReplacement(t *testing.T) {
 	if err := replaceStateFile(foreign, path); err != nil {
 		t.Fatal(err)
 	}
-	// ubuntu24: the failed update's undo stopped the guard, refused the externally replaced file and left
+	// teammate machine: the failed update's undo stopped the guard, refused the externally replaced file and left
 	// the guard stopped. The installed guard is started again.
 	stopped, started := false, false
 	result := errors.New("update failed")

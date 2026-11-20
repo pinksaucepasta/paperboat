@@ -8,7 +8,7 @@ namespace (`--network container:<ct>`), so the agent reaches them on 127.0.0.1 e
 One tunnel per origin; its default route is moved between the plain-http, https and (for gRPC) h2c origins and the
 public https:// address is probed from here:
 
-  origin_tunnel_matrix.py --host pbvm4 --container small-t1 --out results/origin-tunnel-matrix-YYYYMMDD.json
+  origin_tunnel_matrix.py --host Linux test VM --container small-t1 --out results/origin-tunnel-matrix-YYYYMMDD.json
 
 Probes: C1 forwarded headers (spoofed X-Forwarded-* dropped, proto/host are the edge's), C2 an http origin that redirects
 to https shows the redirect-loop page, F an app that forces https works, C8 SSE arrives unbuffered, C12 Range, C13

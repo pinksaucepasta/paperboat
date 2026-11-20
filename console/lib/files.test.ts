@@ -66,8 +66,8 @@ test("Inbox paths of either kind give the file name", () => {
 })
 
 test("a share dialog pinned to a machine never hosts on another", () => {
-  const hosts = ["canary-a", "dadape"]
-  expect(pickHost(hosts, (host) => host === "dadape", true)).toBe("dadape")
-  expect(pickHost(["canary-a"], (host) => host === "dadape", true)).toBeUndefined()
+  const hosts = ["canary-a", "peer-host"]
+  expect(pickHost(hosts, (host) => host === "peer-host", true)).toBe("peer-host")
+  expect(pickHost(["canary-a"], (host) => host === "peer-host", true)).toBeUndefined()
   expect(pickHost(hosts, (host) => host === "gone", false)).toBe("canary-a")
 })

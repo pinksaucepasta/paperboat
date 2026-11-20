@@ -161,8 +161,8 @@ func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 // that fails without saying "no such machine" proves nothing and wipes nothing either.
 func TestLoginDoesNotReaddAComputerThatIsStillOnTheAccount(t *testing.T) {
 	for name, f := range map[string]*loginDeviceFixture{
-		"personal":       {machines: []any{map[string]any{"id": "machine_login", "alias": "hp"}}},
-		"team-owned":     {machines: []any{map[string]any{"id": "machine_login", "alias": "hp", "owner_team_id": "team_x"}}},
+		"personal":       {machines: []any{map[string]any{"id": "machine_login", "alias": "laptop"}}},
+		"team-owned":     {machines: []any{map[string]any{"id": "machine_login", "alias": "laptop", "owner_team_id": "team_x"}}},
 		"lookup failure": {lookupFail: 500},
 		// A 404 is also what a live machine the account cannot see (left the team, no grant) answers.
 		"invisible but alive": {invisible: true},

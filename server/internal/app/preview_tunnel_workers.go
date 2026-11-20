@@ -114,7 +114,7 @@ func previewTunnelWorkerRequestIDs() (string, string, error) {
 // periodicPreviewTunnelWorker runs one iteration every interval. A failed iteration is recorded (worker
 // progress and support signals), then retried after a jittered exponential backoff; only cancellation ends
 // the worker. Returning the error instead made the supervisor stop every worker and the server exit on one
-// database blip (Lane X S1). Prior art: Teleport runs background loops as retrying services
+// database blip (S1). Prior art: Teleport runs background loops as retrying services
 // (lib/utils/retryutils Linear with jitter) and Headscale's batcher logs and continues; neither exits on a
 // loop error.
 func periodicPreviewTunnelWorker(interval time.Duration, run func(context.Context) error) workers.Worker {
@@ -126,7 +126,7 @@ func periodicPreviewTunnelWorker(interval time.Duration, run func(context.Contex
 
 // listenerWorker runs LISTEN sessions of at most session back to back. Pausing between them (periodicPreviewTunnelWorker
 // waited 25 s after every 24 s session) left the listener detached about half the time: a NOTIFY in that half woke no
-// waiting host, which then learned of a grant or revocation only at its 5 s recheck (pbvm2 2026-11-09: 5 of 12 team
+// waiting host, which then learned of a grant or revocation only at its 5 s recheck (Linux test VM 2026-11-09: 5 of 12 team
 // share changes reached the host 0.9-4.0 s late). A failed session still backs off.
 func listenerWorker(session time.Duration, run func(context.Context) error) workers.Worker {
 	return pausedWorker(session+time.Second, 0, run)

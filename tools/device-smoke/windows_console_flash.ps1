@@ -18,7 +18,7 @@ public static class Win {
       GetClassName(h, c, 256); GetWindowText(h, t, 256); GetWindowThreadProcessId(h, out pid);
       r.Add(h.ToInt64() + "|" + pid + "|" + c + "|" + t); } return true; }, IntPtr.Zero); return r; }
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct SI { public int cb; public string a, b, c; public int x, y, w, h, xc, yc, fill, flags; public short show, res; public IntPtr r2, i, o, e; }
-  [StructLayout(LayoutKind.Sequential)] struct PI { public IntPtr hp, ht; public uint pid, tid; }
+  [StructLayout(LayoutKind.Sequential)] struct PI { public IntPtr hProc, ht; public uint pid, tid; }
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateProcessW(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inh, uint flags, IntPtr env, string dir, ref SI si, out PI pi);
   [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h, uint ms);
   [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr h, out uint code);
@@ -35,7 +35,7 @@ public static class Win {
     bool ok = CreateProcessW(null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, inherit, inherit_console ? 0u : 0x00000008u, IntPtr.Zero, null, ref si, out pi);
     if (file != IntPtr.Zero) CloseHandle(file);
     if (!ok) throw new System.ComponentModel.Win32Exception();
-    pid = pi.pid; if (WaitForSingleObject(pi.hp, timeoutMs) != 0) { var k = new System.Diagnostics.ProcessStartInfo("taskkill.exe", "/T /F /PID " + pi.pid); k.CreateNoWindow = true; k.UseShellExecute = false; System.Diagnostics.Process.Start(k).WaitForExit(); return -1; } uint code; GetExitCodeProcess(pi.hp, out code); return (int)code; }
+    pid = pi.pid; if (WaitForSingleObject(pi.hProc, timeoutMs) != 0) { var k = new System.Diagnostics.ProcessStartInfo("taskkill.exe", "/T /F /PID " + pi.pid); k.CreateNoWindow = true; k.UseShellExecute = false; System.Diagnostics.Process.Start(k).WaitForExit(); return -1; } uint code; GetExitCodeProcess(pi.hProc, out code); return (int)code; }
 }
 '@
 $suspect = 'ConsoleWindowClass', 'CASCADIA_HOSTING_WINDOW_CLASS', 'PseudoConsoleWindow'

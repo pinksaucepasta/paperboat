@@ -167,7 +167,7 @@ func TestRecipePairRefusesBadInputAtOnce(t *testing.T) {
 }
 
 func TestHostMachineNameKeepsTheFirstLabel(t *testing.T) {
-	for host, want := range map[string]string{"Manageds-Virtual-Machine.local": "Manageds-Virtual-Machine", "rcp-l": "rcp-l", " apple.lan ": "apple"} {
+	for host, want := range map[string]string{"Manageds-Virtual-Machine.local": "Manageds-Virtual-Machine", "rcp-l": "rcp-l", " macmini.lan ": "macmini"} {
 		if got := hostMachineName(host); got != want {
 			t.Fatalf("%q -> %q, want %q", host, got, want)
 		}
@@ -175,7 +175,7 @@ func TestHostMachineNameKeepsTheFirstLabel(t *testing.T) {
 }
 
 // A rotated token is refused with 401 recipe_replaced: pb pair says the token was replaced and which
-// recipe to rotate, not that a session must log in again (F26-07 device check, victus).
+// recipe to rotate, not that a session must log in again (F26-07 device check, Windows test machine).
 func TestRecipePairNamesAReplacedToken(t *testing.T) {
 	token, _ := recipe.NewToken("")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

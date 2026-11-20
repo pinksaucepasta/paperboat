@@ -3,7 +3,7 @@ package machinename
 import "testing"
 
 func TestValidatePortableHostnameLabel(t *testing.T) {
-	for _, value := range []string{"Victus-Windows-E2E-Fresh", "macbook", "host-01", "A"} {
+	for _, value := range []string{"Win-target-Windows-E2E-Fresh", "macbook", "host-01", "A"} {
 		if err := Validate(value); err != nil {
 			t.Errorf("Validate(%q) = %v", value, err)
 		}

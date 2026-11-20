@@ -6,10 +6,10 @@ import (
 )
 
 // F23-01: with the gateway routed by uid, machine names are per OS user. Two users whose accounts each have a
-// machine called hp both get hp.<domain>: the second is not refused because the first holds the name.
+// machine called Linux test machine both get Linux test machine.<domain>: the second is not refused because the first holds the name.
 func TestTwoOSUsersMayUseTheSameMachineName(t *testing.T) {
 	g := &guardServer{reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}}
-	name := "hp." + testBrowserDomain
+	name := "laptop." + testBrowserDomain
 	for _, uid := range []string{"1000", "1001", "1000"} {
 		if err := g.reserveName(uid, name); err != nil {
 			t.Fatalf("uid %s was refused its own machine name: %v", uid, err)
@@ -20,7 +20,7 @@ func TestTwoOSUsersMayUseTheSameMachineName(t *testing.T) {
 	}
 }
 
-// Lane K: a long-lived machine with peer churn must not fill its 512-name cap with names nothing serves.
+// a long-lived machine with peer churn must not fill its 512-name cap with names nothing serves.
 func TestReservationsOfUnservedNamesAreReleasedAtTheCap(t *testing.T) {
 	g := &guardServer{reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}, connections: map[controlConn]string{}}
 	live := "live." + testBrowserDomain

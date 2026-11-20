@@ -58,7 +58,7 @@ func superviseDeadWriters(ctx context.Context, poll, maxWait time.Duration, chec
 // errInstallerLive is an install lock held by a running installer: its journal is its own.
 var errInstallerLive = errors.New("an installation is running")
 
-// deadInstaller is one look for a Windows installation whose installer died after it stopped the services (victus
+// deadInstaller is one look for a Windows installation whose installer died after it stopped the services (Windows test machine
 // 2026-11-10: `pb update` killed 8 s after the stop left no hostd and no daemon until `pb doctor --repair`). The
 // Linux updater does this look itself (recoverDeadWriters); on Windows the installer stops the updater, so the
 // carrier's service process, which every install leaves running, does it.

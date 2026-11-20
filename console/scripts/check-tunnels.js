@@ -1,12 +1,12 @@
 // Browser check for F8-08. Paste into the console of a signed-in tab on /tunnels (Personal
 // workspace) after creating a tunnel on a machine with its local service up:
-//   pb tunnel create lanec-f808 --port 18088     (any name/port; set window.__tunnel / __port)
+//   pb tunnel create test-f808 --port 18088     (any name/port; set window.__tunnel / __port)
 // Lists the tunnel and compares the page with `GET /v1/tunnels`, shows the "New tunnel" command,
 // opens the tunnel page (status, address, machine), renames and restores it, pauses and resumes
 // it, adds a public hostname route with a path, edits its service, turns it off, removes it, and
 // checks the server after every step. Leaves the tunnel as it found it. Prints the steps.
 ;(async () => {
-  const name = window.__tunnel ?? "lanec-f808"
+  const name = window.__tunnel ?? "test-f808"
   const port = window.__port ?? "18088"
   delete window.__tunnel
   delete window.__port

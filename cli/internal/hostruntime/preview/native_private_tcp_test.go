@@ -193,8 +193,8 @@ func TestNativePrivateMachineCancellationClosesPendingReadiness(t *testing.T) {
 	}
 }
 
-// A just-started service is allowed but not yet announced (409 service_not_announced, Lane B's fix for
-// Lane H's 0-byte access-machine probes): the grant is asked again until it is, and a real denial after
+// A just-started service is allowed but not yet announced (409 service_not_announced, the fix for
+// the 0-byte access-machine probes): the grant is asked again until it is, and a real denial after
 // it is still final. Waiting is bounded.
 func TestNativePrivateTCPAccessWaitsForAServiceAnnouncement(t *testing.T) {
 	previous := serviceAnnouncementWait

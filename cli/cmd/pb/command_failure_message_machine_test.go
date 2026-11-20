@@ -16,7 +16,7 @@ func TestUnknownAndAmbiguousMachinesAreExplained(t *testing.T) {
 		want string
 	}{
 		{fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, "nosuchmachine"), "No machine has that name or ID. Run `pb machine list`"},
-		{fmt.Errorf("%w: %q matches machine IDs a, b; use an exact ID", resolver.ErrMachineAmbiguous, "hp"), "More than one machine has that name"},
+		{fmt.Errorf("%w: %q matches machine IDs a, b; use an exact ID", resolver.ErrMachineAmbiguous, "laptop"), "More than one machine has that name"},
 	} {
 		failure := classifyCommandFailure(tc.err)
 		if failure.kind != commandRejected || !strings.Contains(commandFailureMessage(tc.err, failure), tc.want) {

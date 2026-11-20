@@ -92,8 +92,8 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	flags.DurationVar(&cfg.timeout, "timeout", 3*time.Second, "timeout per key response")
 	flags.DurationVar(&cfg.interval, "interval", 20*time.Millisecond, "delay between keys")
 	flags.StringVar(&cfg.pb, "pb", "pb", "pb executable")
-	flags.StringVar(&cfg.target, "target", "hn", "Paperboat environment")
-	flags.StringVar(&cfg.sshHost, "ssh-host", "root@157.180.74.88", "SSH destination")
+	flags.StringVar(&cfg.target, "target", "", "Paperboat environment (required)")
+	flags.StringVar(&cfg.sshHost, "ssh-host", "", "SSH destination (required)")
 	flags.StringVar(&cfg.sshKey, "ssh-key", "", "SSH private key")
 	flags.IntVar(&cfg.sshPort, "ssh-port", 22, "SSH port")
 	if err := flags.Parse(args); err != nil {
@@ -105,7 +105,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		}
 		return inputBenchmarkFailure{message: "invalid benchmark flags", cause: err}
 	}
-	if cfg.runs < 1 || cfg.runs > 20 || cfg.samples < 5 || cfg.samples > 1000 || cfg.startup < time.Second || cfg.timeout <= 0 || cfg.interval < 0 || cfg.sshPort < 1 || cfg.sshPort > 65535 {
+	if cfg.runs < 1 || cfg.runs > 20 || cfg.samples < 5 || cfg.samples > 1000 || cfg.startup < time.Second || cfg.timeout <= 0 || cfg.interval < 0 || cfg.target == "" || cfg.sshHost == "" || cfg.sshPort < 1 || cfg.sshPort > 65535 {
 		return errors.New("invalid benchmark configuration")
 	}
 

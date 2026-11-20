@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Run the device-smoke checks that are ported to Windows against the Windows device, from this Linux controller.
 
-  VICTUS_PASS=... windows_checks.py --install-json FILE --machine NAME --peer NAME [--only ID,ID] [--list]
+  SMOKE_WINDOWS_PASSWORD=... windows_checks.py --install-json FILE --machine NAME --peer NAME [--only ID,ID] [--list]
 
 Only pb.exe and small PowerShell snippets run on the device (winhost.py); the checks themselves run here with
 PB_SMOKE_WINDOWS_PB set to the pb.exe path of the saved `pb install --json` receipt. Each check is reported as
-`<id>:victus`; PASS needs exit 0 and every JSON status line the check printed to be PASS. Results go to
+`<id>:<machine>`; PASS needs exit 0 and every JSON status line the check printed to be PASS. Results go to
 results/windows-<UTC>.json. Checks that need a fixture the run was not given are SKIP, never PASS.
 
 Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
@@ -124,8 +124,8 @@ def checks(args):
     table['tunnel-private-access'] = (['tunnel_private_access_windows.py', args.peer], ['--peer'])
     for mode in ('foreground', 'background'):
         table['preview-' + mode] = (['preview_lifecycle.py', '--mode', mode], [])
-    table['preview-protocols'] = (['preview_protocols.py', 'victus'], [])
-    table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
+    table['preview-protocols'] = (['preview_protocols.py', args.machine], [])
+    table['tunnel-protocols'] = (['preview_protocols.py', args.machine, '--tunnel'], [])
     table['terminal-entry'] = (['terminal_entry.py', args.peer], ['--peer'])  # C038, C046
     table['network-drop'] = (['network_drop.py', args.peer], ['--peer'])
     table['net-blip'] = (['net_blip.py', args.peer], ['--peer'])  # F21-48: a 5 min block of pb.exe's traffic, about 7 min
@@ -135,7 +135,7 @@ def checks(args):
     for name in ('preview_survival', 'tunnel_survival', 'tunnel_failures', 'tunnel_transfer', 'network_inventory'):
         table[name.replace('_', '-')] = ([name + '.py'], [])
     for name in ('manage', 'inspect', 'access'):
-        table['preview-' + name] = (['preview_%s.py' % name, 'victus'], [])
+        table['preview-' + name] = (['preview_%s.py' % name, args.machine], [])
     for name in ('rename', 'settings', 'availability', 'capabilities'):
         table['machine-' + name] = (['machine_lifecycle.py', name], [])
     # Interactive: its approval link is echoed to stderr while it waits for a browser approval.
@@ -155,7 +155,7 @@ def checks(args):
     vault, peer = args.vault_password_file or '', args.peer
     table['env-scopes'] = (['env_scopes.py', peer, '--password-file', vault, '--rotate'], ['--peer', '--vault_password_file'])
     # The plain ssh shells of the device itself (PowerShell with its profile); they unlock the same vault first.
-    hooked = [os.environ.get('SMOKE_WINDOWS_SSH', winhost.DEFAULT_TARGET), '--password-file', vault]
+    hooked = [winhost.smoke_value('SMOKE_WINDOWS_SSH'), '--password-file', vault]
     table['env-ssh-hook'] = (['env_ssh_hook.py'] + hooked, ['--vault_password_file'])
     table['env-vscode-remote'] = (['env_vscode_remote.py'] + hooked, ['--vault_password_file'])  # fetches the server
     table['env-messages'] = (['env_messages.py', peer, args.readonly_team or ''], ['--peer', '--readonly_team'])
@@ -459,8 +459,8 @@ def main():
                 outcome = run_check(check, argv, args, device)
             except (subprocess.SubprocessError, winhost.DeviceError, OSError, ValueError, KeyError) as error:
                 outcome = ('FAIL', 0, str(error)[:300])
-        results.append({'id': check + ':victus', 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
-        print('%-34s %-5s %5ss  %s' % (check + ':victus', outcome[0], outcome[1], outcome[2][:100]), flush=True)
+        results.append({'id': check + ':' + args.machine, 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
+        print('%-34s %-5s %5ss  %s' % (check + ':' + args.machine, outcome[0], outcome[1], outcome[2][:100]), flush=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     path = HERE / 'results' / ('windows-%s.json' % stamp)
     path.parent.mkdir(exist_ok=True)

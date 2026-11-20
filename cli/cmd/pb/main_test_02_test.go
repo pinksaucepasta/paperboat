@@ -340,7 +340,7 @@ func TestUserFacingErrorSanitizesInfrastructureFailures(t *testing.T) {
 		},
 		{
 			name: "local filesystem failure",
-			err:  &os.PathError{Op: "open", Path: `C:\\Users\\Pujan\\Paperboat\\daemon.lock`, Err: os.ErrPermission},
+			err:  &os.PathError{Op: "open", Path: `C:\\Users\\Tester\\Paperboat\\daemon.lock`, Err: os.ErrPermission},
 			want: "could not access local files",
 		},
 		{

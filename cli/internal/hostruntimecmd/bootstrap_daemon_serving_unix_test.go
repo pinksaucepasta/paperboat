@@ -45,7 +45,7 @@ func TestPairingWaitsForTheDaemonsFirstRefresh(t *testing.T) {
 	}
 }
 
-// C020 (round 9, hp): `pb setup` returned while its daemon was still starting, so `pb doctor` right
+// C020 (round 9, Linux test machine): `pb setup` returned while its daemon was still starting, so `pb doctor` right
 // after it said degraded. Pairing waits, bounded, for a bound daemon to leave "starting", and says so
 // when it has not instead of claiming the runtime is ready.
 func TestPairingWaitsForAStartingDaemonToSettle(t *testing.T) {

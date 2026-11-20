@@ -39,6 +39,10 @@ func (f PrivateAccessTargetFunc) OpenPrivateAccessTarget(ctx context.Context, re
 	return f(ctx, request)
 }
 
+// defaultPrivateAccessStreams is how many private streams one accessor carrier holds open at once: a bound per client (one
+// carrier), not on the node (Tailscale's derper bounds each client's queue and leaves the node unbounded).
+const defaultPrivateAccessStreams = 256
+
 type PrivateAccessStreamBridgeConfig struct {
 	OnFailure        func(context.Context, string, error)
 	Authorizer       control.PrivateAccessGrantAuthorizer
@@ -68,7 +72,7 @@ func NewPrivateAccessStreamBridge(config PrivateAccessStreamBridgeConfig) (*Priv
 		return nil, ErrPrivateAccessStreamInvalid
 	}
 	if config.MaximumStreams == 0 {
-		config.MaximumStreams = 256
+		config.MaximumStreams = defaultPrivateAccessStreams
 	}
 	if config.AuthorizeTimeout == 0 {
 		config.AuthorizeTimeout = 10 * time.Second
@@ -76,7 +80,7 @@ func NewPrivateAccessStreamBridge(config PrivateAccessStreamBridgeConfig) (*Priv
 	if config.OpenTimeout == 0 {
 		config.OpenTimeout = 10 * time.Second
 	}
-	if config.MaximumStreams < 1 || config.MaximumStreams > 4096 || config.AuthorizeTimeout <= 0 || config.AuthorizeTimeout > time.Minute || config.OpenTimeout <= 0 || config.OpenTimeout > time.Minute {
+	if config.MaximumStreams < 1 || config.AuthorizeTimeout <= 0 || config.AuthorizeTimeout > time.Minute || config.OpenTimeout <= 0 || config.OpenTimeout > time.Minute {
 		return nil, ErrPrivateAccessStreamInvalid
 	}
 	if config.Clock == nil {

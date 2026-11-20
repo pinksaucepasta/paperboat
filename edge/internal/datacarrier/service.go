@@ -19,17 +19,10 @@ type ServiceConfig struct {
 	// OnFailure receives content-free HTTP diagnostics and a typed panic marker.
 	// Fatal listener errors are returned to Accept for its final lifecycle owner.
 	OnFailure func(context.Context, error)
-	// MaximumCarriers bounds the authenticated carriers held at once (every machine's runtime,
-	// preview and tunnel carriers); a carrier past it is refused with 503. Zero means
-	// DefaultMaximumCarriers. It is not the accept queue depth.
-	MaximumCarriers int
 	// RebindInterval is how often a live carrier's machine key is checked against the current admissions. Zero
 	// means DefaultRebindInterval.
 	RebindInterval time.Duration
 }
-
-// DefaultMaximumCarriers is the carrier bound of a service that does not name one.
-const DefaultMaximumCarriers = 1024
 
 // DefaultRebindInterval is how often a live carrier's machine key is checked against the current admissions.
 const DefaultRebindInterval = 30 * time.Second

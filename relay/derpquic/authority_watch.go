@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/admission"
 )
 
 // errAuthorizeTransport marks a re-authentication that failed in the network, as opposed to one the relay refused
@@ -20,7 +21,7 @@ func authorizeError(err error) error {
 	if err == nil || errors.As(err, &fatal) && fatal.Fatal() {
 		return err
 	}
-	return fmt.Errorf("%w: %v", errAuthorizeTransport, err)
+	return fmt.Errorf("%w (retrying on the existing carrier): %w", errAuthorizeTransport, err)
 }
 
 // The carrier has already authenticated. Refresh publishes policy changes; a

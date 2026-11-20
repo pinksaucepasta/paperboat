@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// victus, pb update --from: the rollback of a failed update had to free the rollback slot, which was the image of
+// Windows test machine, pb update --from: the rollback of a failed update had to free the rollback slot, which was the image of
 // the user's still-running `pb update`. os.Remove answered "Access is denied" and the rollback stopped with every
 // service down.
 func TestRemoveWindowsFileFreesTheSlotOfARunningImage(t *testing.T) {

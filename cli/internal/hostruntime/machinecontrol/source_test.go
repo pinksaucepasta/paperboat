@@ -419,7 +419,7 @@ func TestEnsureInitialUsesHelperIdentityAndRetriesWithStableOperation(t *testing
 
 // A renewal the control plane committed but whose answer never arrived must be
 // retried with the same operation: the superseded credential is otherwise
-// rejected forever and the machine loses control authentication (HP, 2026-10-18).
+// rejected forever and the machine loses control authentication (Linux test machine, 2026-10-18).
 func TestSourceRetriesLostRenewalWithTheSameOperation(t *testing.T) {
 	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	root := filepath.Join(t.TempDir(), "runtime")
@@ -569,7 +569,7 @@ func newRecoveryFixture(t *testing.T, renewalStatus int, credentialExpiry time.D
 	return recoveryFixture{source: source, store: store, now: current, initial: &initialCalls, renewal: &renewalCalls, deny: &deny, rejectHelper: &rejectHelper, operations: &operations, helperRenews: &helperRenews}
 }
 
-// HP sat with an expired, never-renewed credential until `pb tunnel create`
+// Linux test machine sat with an expired, never-renewed credential until `pb tunnel create`
 // happened to re-establish it. Every consumer now recovers through the Source.
 func TestSourceRecoversExpiredCredentialThroughEnrolledIdentity(t *testing.T) {
 	f := newRecoveryFixture(t, http.StatusCreated, -time.Minute)

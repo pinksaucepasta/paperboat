@@ -3,9 +3,9 @@
 
 Runs on the controller:
   config_sync_pair.py REPO_SHELL REPO_ADDR SHELL_A ALIAS_A SHELL_B ALIAS_B [--machine-sections] [--repo-from-controller=ADDR]
-REPO_SHELL runs a shell on the host that serves the repository ("ssh pbvm3"); REPO_ADDR is that host's
+REPO_SHELL runs a shell on the host that serves the repository ("ssh Linux test VM"); REPO_ADDR is that host's
 address as both machines reach it (172.17.0.1 for containers on it). SHELL_X runs a shell on machine X
-("ssh pbvm3 sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lanel-a").
+("ssh Linux test VM sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 test-a").
 On a Mac use its own ssh ("ssh admin@mac"); the pb machine file, config and os.<platform> section are found per machine.
 SHELL_X `windows` is the Windows device (PB_SMOKE_WINDOWS_PB, winhost): only pb.exe and PowerShell snippets run
 there. It reaches the repository through an ssh -R loopback port to ADDR (the repository host as this controller

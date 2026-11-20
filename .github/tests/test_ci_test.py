@@ -70,6 +70,9 @@ class CITestScript(unittest.TestCase):
         (root / "tools").mkdir(parents=True)
         (root / "bin").mkdir()
         shutil.copy2(SCRIPT, root / "tools/ci-test.sh")
+        (root / "tools/device-smoke").mkdir()
+        shutil.copy2(SCRIPT.parent / "device-smoke/dev_targets.py", root / "tools/device-smoke/dev_targets.py")
+        (root / "targets.json").write_text("{}")
         state = root / "state.json"
         state.write_text(json.dumps({"lookups": 0, "appear_after": appear_after, "active_default": active_default,
                                      "active": active or {},
@@ -84,7 +87,7 @@ class CITestScript(unittest.TestCase):
             (root / "bin" / name).write_text(source)
             (root / "bin" / name).chmod(0o755)
         env = dict(os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}", FAKE_STATE=str(state),
-                   FAKE_LOG=str(log), FAKE_ROOT=str(root), FAKE_REMOTE=str(remote))
+                   PB_DEV_TARGETS_FILE=str(root / "targets.json"), FAKE_LOG=str(log), FAKE_ROOT=str(root), FAKE_REMOTE=str(remote))
         result = subprocess.run(["bash", str(root / "tools/ci-test.sh"), "smoke"], env=env, capture_output=True,
                                 text=True, stdin=subprocess.DEVNULL)
         calls = log.read_text().splitlines()
@@ -121,12 +124,12 @@ class CITestScript(unittest.TestCase):
                              (unknown, now - 90000)))
         self.assertEqual(result.returncode, 0, result.stderr)
         removed = self.deleted(calls)
-        self.assertIn(old, removed)  # another lane's, so the sweep is not limited to this lane
+        self.assertIn(old, removed)  # another worktree's, so the sweep is not limited to this worktree
         for kept in (young, queued, unknown):
             self.assertNotIn(kept, removed)
         self.assertFalse(any(young in call for call in calls if call.startswith("gh run list")), "a young branch was queried")
         self.assertEqual(len(removed), 2, calls)  # the old one and this invocation's own
-        # --depth made the shared repo shallow for every lane: the script may only list refs, never fetch
+        # --depth made the shared repo shallow for every worktree: the script may only list refs, never fetch
         self.assertFalse(any("--depth" in call or call.startswith("git fetch") for call in calls), calls)
 
 if __name__ == "__main__":

@@ -329,7 +329,7 @@ inspects, changes and stops them (`lib/tunnels.ts`, `components/tunnels/`). Gaps
   `console_<random>` session ID).
 - **Tunnel address is not editable.** The server patches only `name`, `access_mode` and `expires_at`
   (`TunnelPatchRequest`); the address is generated, so the console renames the tunnel only.
-- **Share a file (drop.new-style) lives on the Files page and waits for lane W24's server part (`inboxLive.share`).**
+- **Share a file (drop.new-style) lives on the Files page and waits for W24's server part (`inboxLive.share`).**
   Files has "Share a file" next to Send files and "Share link…" in each Inbox row's menu (`components/files/share-dialog.tsx`,
   one dialog for both); the links are previews, so Previews keeps listing them. The server stays out of the file's
   path: a new file is uploaded into the chosen machine's Inbox over the terminal's encrypted connection
@@ -520,7 +520,7 @@ Analytics page (Website / Console) reads these through `server/internal/posthogq
 Verified end to end on 2026-11-16: `scripts/check-analytics.mjs` pairs a machine through the Add machine dialog and creates a
 preview through the New preview dialog on the live console, and records that the browser sent `add_machine_started`,
 `machine_paired` and `preview_created` and that the analytics host answered each with HTTP 200
-(`tools/device-smoke/results/console-analytics-20261116.txt`). The check cannot read PostHog's own event list (no personal
+(`private smoke receipt console-analytics-20261116.txt`). The check cannot read PostHog's own event list (no personal
 API key is kept here), so "arrived" means accepted by its capture endpoint.
 
 Tunnels are created by `pb tunnel`, not the console, so there is no console tunnel event.

@@ -301,7 +301,7 @@ func TestRunOneShotSSHLoopbackBridgeFailureKillsAndReaps(t *testing.T) {
 	assertLoopbackProcessStopped(t, process)
 }
 
-// victus 2026-11-10: ssh.exe failed, reset its socket and exited; the bridge's "connection reset" was returned in place
+// Windows test machine 2026-11-10: ssh.exe failed, reset its socket and exited; the bridge's "connection reset" was returned in place
 // of the exit status, so pb printed its generic failure text. OpenSSH's own exit is the result, and it is not killed.
 func TestRunOneShotSSHLoopbackReturnsTheProcessExitWhenItResetsItsSocket(t *testing.T) {
 	exited := errors.New("ssh exited 255")

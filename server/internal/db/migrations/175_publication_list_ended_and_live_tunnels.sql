@@ -1,6 +1,6 @@
 -- +goose Up
 -- The console pages previews by Live and Ended and hides deleted tunnels, so their totals must count the same
--- sets (Lane C): state=ended is the exact complement of state=active (every preview whose lease ended), and the
+-- sets: state=ended is the exact complement of state=active (every preview whose lease ended), and the
 -- default tunnel list leaves out deleted tunnels (state=deleted still lists them).
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.manageable_preview_ids(actor text, workspace_set boolean, workspace_team text, q text, state text, owner text,

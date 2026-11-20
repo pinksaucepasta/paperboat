@@ -67,7 +67,7 @@ export function machineOptions(
   })
 }
 
-/** A target in words: `tag:prod` stays, `machine:hp` → hp. */
+/** A target in words: `tag:prod` stays, `machine:laptop` → laptop. */
 export const targetName = (target: string) => target.replace(/^machine:/, "")
 
 /** Allowed actions in plain words, e.g. "Terminal, Run commands". */

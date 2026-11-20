@@ -12,7 +12,7 @@ import (
 )
 
 // An idle machine heartbeats every few seconds. Before, each heartbeat rewrote its user_machines row two or three
-// times (presence, diagnostics), ~2,600 row versions an hour on staging (PLAN 3b, Lane W). An unchanged heartbeat
+// times (presence, diagnostics), ~2,600 row versions an hour on staging (PLAN 3b). An unchanged heartbeat
 // now leaves the row untouched (same xmin); last_seen_at is refreshed once per presence interval without a version
 // bump; a real change (offline to online, new diagnostics) still writes and bumps the version.
 func TestUnchangedHeartbeatWritesNoMachineRowOnPostgres(t *testing.T) {

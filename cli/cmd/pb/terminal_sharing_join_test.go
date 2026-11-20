@@ -16,7 +16,7 @@ import (
 
 type joinTestConn struct{ tunnel.Conn }
 
-// Lane N, F3-06: the join printed "Shared terminal … view only" before connecting, so a join stuck in
+// F3-06: the join printed "Shared terminal … view only" before connecting, so a join stuck in
 // the native dial looked attached for 90 s. The banner may only follow a connected dial.
 func TestSharedJoinAnnouncesTheTerminalOnlyAfterItConnects(t *testing.T) {
 	info := resolver.ConnectInfo{Terminal: &resolver.TerminalTarget{}}

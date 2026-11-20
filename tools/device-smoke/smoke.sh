@@ -2,18 +2,18 @@
 # Paperboat device smoke suite.
 #
 # Runs the user-visible baseline on the real test machines after every build:
-# doctor and version on every device, then from the HP client against every
-# launch target (hp, apple): short exec, long exec, terminal input, managed
+# doctor and version on every device, then from the Linux client against each
+# launch target (Linux and macOS): short exec, long exec, terminal input, managed
 # SSH (short and held), 50 MiB transfer with hash check; all-pairs interactive
 # terminals (resize, controls, paste, Unicode, Vim/less/htop) with exact cleanup; previews on the Unix
 # devices. Optional `--update <dir>` adds the update-continuity check.
 #
 # Usage:
-#   APPLE_PASS=... tools/device-smoke/smoke.sh --expect-version <version> [options]
+#   tools/device-smoke/smoke.sh --expect-version <version> [options]
 # Options:
 #   --expect-version V   version every device must report (required)
-#   --windows-install-json FILE  saved Windows pb install --json output (required for victus)
-#   --targets LIST       comma list of launch targets (default hp,apple)
+#   --windows-install-json FILE  saved Windows pb install --json output (required for Windows)
+#   --targets LIST       comma list of launch targets (default: configured Linux and macOS targets)
 #   --long-seconds N     duration of long exec (default 420)
 #   --ssh-seconds N      duration of held SSH (default 200)
 #   --skip LIST          comma list of test ids to skip (e.g. preview,transfer)
@@ -24,14 +24,14 @@
 #                        while a terminal and a long exec are running, then verify
 #                        they recover and the version changed.
 #   --update-version V   version the --update build reports (required with --update)
-#   --teammate DEVICE    the independent teammate's device for inbox-approval and team checks (default ubuntu24; a SMOKE_CT_MAP name works)
+#   --teammate DEVICE    the independent teammate's device for inbox-approval and team checks (default: configured teammate; a SMOKE_CT_MAP name works)
 #
 # Output: a PASS/FAIL table and .build-free JSON at
 #   tools/device-smoke/results/<UTC timestamp>.json
 # Exit status is non-zero when any test fails.
 #
-# Credentials: HP uses key SSH. APPLE_PASS and VICTUS_PASS must be exported by
-# the caller (values are in REMOTE_TESTING.md). They are never printed.
+# Configure targets in ~/.config/paperboat-dev/targets.json (see targets.example.json).
+# Set PB_DEV_TARGETS_FILE to use another file.
 
 if [ "${PAPERBOAT_SMOKE_SNAPSHOT:-}" != 1 ]; then
   exec python3 "$(dirname "$0")/snapshot_run.py" "$0" "$@"
@@ -41,17 +41,22 @@ set -uo pipefail
 HERE=$PAPERBOAT_SMOKE_SOURCE_DIR
 # Team creation needs a paid Checkout: team checks reuse this retained paid team.
 SMOKE_TEAM=${PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}
-RESULTS_DIR="$HERE/results"
+RESULTS_DIR=${SMOKE_RESULTS_DIR:-"$HERE/results"}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 RUN_ID="smoke$(date -u +%H%M%S)$RANDOM"
 
 EXPECT_VERSION=""
-TARGETS="hp,apple"
+LINUX_TARGET=${SMOKE_LINUX_NAME:-linux}
+MACOS_TARGET=${SMOKE_MACOS_NAME:-macos}
+WINDOWS_TARGET=${SMOKE_WINDOWS_NAME:-windows}
+PEER_TARGET=${SMOKE_PEER_NAME:-linux-peer}
+MEMBER_TARGET=${SMOKE_TEAMMATE_NAME:-teammate}
+TARGETS="$LINUX_TARGET,$MACOS_TARGET"
 # CLIENT is the Linux device that drives every pair; PEER is the second Linux device. SMOKE_CT_MAP
 # (name=host:container,...) stands a disposable systemd container on a Docker host in for a device name;
 # SMOKE_CT_USER / SMOKE_CT_UID / SMOKE_CT_DOCKER set the container user (pbt/1000) and docker command ("sudo docker").
-CLIENT=${SMOKE_CLIENT:-hp}
-PEER=${SMOKE_PEER:-dadape}
+CLIENT=${SMOKE_CLIENT:-$LINUX_TARGET}
+PEER=${SMOKE_PEER:-$PEER_TARGET}
 LONG_EXEC=420
 LONG_SSH=200
 SKIP=""
@@ -60,7 +65,7 @@ ONLY_LIST=""
 UPDATE_DIR=""
 UPDATE_VERSION=""
 WINDOWS_INSTALL_JSON=""
-TEAMMATE=ubuntu24
+TEAMMATE=$MEMBER_TARGET
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -95,29 +100,29 @@ if [ -n "$ONLY_LIST" ]; then
   done < "$ONLY_LIST"
 fi
 [ -z "$UPDATE_DIR" ] || [ -n "$UPDATE_VERSION" ] || { echo "--update requires --update-version" >&2; exit 2; }
-[ -n "${APPLE_PASS:-}" ] || [[ ",$TARGETS," != *,apple,* ]] || { echo "export APPLE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
-[ -n "${DADAPE_PASS:-}" ] || [ -n "${SMOKE_CT_MAP:-}" ] || [[ ",$TARGETS," != *,dadape,* ]] || { echo "export DADAPE_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
-[ -n "${VICTUS_PASS:-}" ] || [[ ",$TARGETS," != *,victus,* ]] || { echo "export VICTUS_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
+[ -n "${SMOKE_MACOS_PASSWORD:-}" ] || [[ ",$TARGETS," != *,"${MACOS_TARGET}",* ]] || { echo "export SMOKE_MACOS_PASSWORD (see the local development target configuration)" >&2; exit 2; }
+[ -n "${SMOKE_LINUX_PEER_PASSWORD:-}" ] || [ -n "${SMOKE_CT_MAP:-}" ] || [[ ",$TARGETS," != *,"${PEER_TARGET}",* ]] || { echo "export SMOKE_LINUX_PEER_PASSWORD (see the local development target configuration)" >&2; exit 2; }
+[ -n "${SMOKE_WINDOWS_PASSWORD:-}" ] || [[ ",$TARGETS," != *,"${WINDOWS_TARGET}",* ]] || { echo "export SMOKE_WINDOWS_PASSWORD (see the local development target configuration)" >&2; exit 2; }
 command -v sshpass >/dev/null || { echo "sshpass is required" >&2; exit 2; }
 mkdir -p "$RESULTS_DIR"
-# Preflight: a Docker host whose logind stopped retiring sessions (pbvm3, 2026-11-13: 1,450 stuck) warns above 50, fails above 500.
+# Preflight: a Docker host whose logind stopped retiring sessions warns above 50, fails above 500.
 if [ -n "${SMOKE_CT_MAP:-}" ]; then
   python3 "$HERE/host_sessions.py" $(for pair in ${SMOKE_CT_MAP//,/ }; do value=${pair#*=}; echo "${value%%:*}"; done | sort -u) || exit 2
 fi
 
 # ---------------------------------------------------------------- devices
-PB_HP='$HOME/.local/bin/pb'
-PB_APPLE='/Library/PrivilegedHelperTools/Paperboat/users/u501/bin/pb'
-# The apple device is the real Mac, or with SMOKE_APPLE_JUMP_PASSFILE the Tart VM behind it (APPLE_PASS is then the
+PB_LINUX='$HOME/.local/bin/pb'
+PB_MACOS=${SMOKE_MACOS_PB:-/Library/PrivilegedHelperTools/Paperboat/users/u501/bin/pb}
+# The macOS target is the configured Mac, or with SMOKE_APPLE_JUMP_PASSFILE the Tart VM behind it (SMOKE_MACOS_PASSWORD is then the
 # VM user's password, the file holds the Mac's; SMOKE_APPLE_PB is the pb path in the VM).
-APPLE_LOGIN=pujan.pm@apple; APPLE_OPTS=()
+MACOS_LOGIN=${SMOKE_MACOS_SSH:-}; MACOS_OPTS=()
 if [ -n "${SMOKE_APPLE_JUMP_PASSFILE:-}" ]; then
-  APPLE_LOGIN=admin@192.168.64.2; PB_APPLE=${SMOKE_APPLE_PB:?set SMOKE_APPLE_PB to the pb path in the VM}
-  APPLE_OPTS=(-o "ProxyCommand=sshpass -f $SMOKE_APPLE_JUMP_PASSFILE ssh -o StrictHostKeyChecking=accept-new -W %h:%p pujan.pm@apple")
+  MACOS_LOGIN=${SMOKE_MACOS_VM_SSH:?set the macOS VM SSH login}; PB_MACOS=${SMOKE_APPLE_PB:?set SMOKE_APPLE_PB to the pb path in the VM}
+  MACOS_OPTS=(-o "ProxyCommand=sshpass -f $SMOKE_APPLE_JUMP_PASSFILE ssh -o StrictHostKeyChecking=accept-new -W %h:%p ${SMOKE_MACOS_SSH:?set the macOS SSH login}")
 fi
-PB_VICTUS=""
-if [[ ",$TARGETS," == *,victus,* ]]; then
-  PB_VICTUS=$(python3 "$HERE/install_path.py" "$WINDOWS_INSTALL_JSON") || exit 2
+PB_WINDOWS=""
+if [[ ",$TARGETS," == *,"${WINDOWS_TARGET}",* ]]; then
+  PB_WINDOWS=$(python3 "$HERE/install_path.py" "$WINDOWS_INSTALL_JSON") || exit 2
 fi
 SSH_OPTS=(-o ConnectTimeout=15 -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new)
 
@@ -136,32 +141,31 @@ container_on() { # container_on HOST:CONTAINER CMD... : run as the enrolled user
   ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "$docker exec -i -u $user -e HOME=/home/$user -e XDG_RUNTIME_DIR=/run/user/$uid $ct bash -lc $(printf '%q' "$*")"
 }
 
-# on DEVICE CMD... : run a POSIX shell command (hp, apple) or a PowerShell
-# command (victus) on the device and print its output.
+# on DEVICE CMD... : run a POSIX shell or PowerShell command and print its output.
 on() {
   local device=$1 where; shift
   if where=$(ct_of "$device"); then container_on "$where" "$*"; return; fi
   case "$device" in
-    hp) ssh "${SSH_OPTS[@]}" -o BatchMode=yes anvit@hp "$*" ;;
-    ubuntu24) ssh "${SSH_OPTS[@]}" -o BatchMode=yes pujan@ubuntu24 "$*" ;;
-    dadape) SSHPASS="$DADAPE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" anvit@dadape "$*" ;;
-    apple) SSHPASS="$APPLE_PASS" sshpass -e ssh "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$APPLE_LOGIN" \
-      "security unlock-keychain -p '$APPLE_PASS' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; export PATH=/opt/homebrew/opt/python@3.12/libexec/bin:/opt/homebrew/bin:\$PATH; $*" ;;
-    victus) local encoded
+    "${LINUX_TARGET}") ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${SMOKE_LINUX_SSH:?set the Linux SSH login}" "$*" ;;
+    "${MEMBER_TARGET}") ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${SMOKE_MEMBER_SSH:?set the teammate SSH login}" "$*" ;;
+    "${PEER_TARGET}") SSHPASS="$SMOKE_LINUX_PEER_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "${SMOKE_LINUX_PEER_SSH:?set the Linux peer SSH login}" "$*" ;;
+    "${MACOS_TARGET}") SSHPASS="$SMOKE_MACOS_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "${MACOS_OPTS[@]}" "${MACOS_LOGIN:?set the macOS SSH login}" \
+      "security unlock-keychain -p '$SMOKE_MACOS_PASSWORD' ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; export PATH=/opt/homebrew/opt/python@3.12/libexec/bin:/opt/homebrew/bin:\$PATH; $*" ;;
+    "${WINDOWS_TARGET}") local encoded
       encoded=$(printf '%s' "$*" | iconv -t UTF-16LE | base64 -w0)
-      SSHPASS="$VICTUS_PASS" sshpass -e ssh "${SSH_OPTS[@]}" pujan@victus "powershell -NoProfile -NonInteractive -EncodedCommand $encoded" ;;
+      SSHPASS="$SMOKE_WINDOWS_PASSWORD" sshpass -e ssh "${SSH_OPTS[@]}" "${SMOKE_WINDOWS_SSH:?set the Windows SSH login}" "powershell -NoProfile -NonInteractive -EncodedCommand $encoded" ;;
     *) echo "unknown device $device" >&2; return 2 ;;
   esac
 }
 
 pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
   local device=$1; shift
-  ct_of "$device" >/dev/null && { on "$device" "$PB_HP $*"; return; }
+  ct_of "$device" >/dev/null && { on "$device" "$PB_LINUX $*"; return; }
   case "$device" in
-    hp) on hp "$PB_HP $*" ;;
-    dadape) on dadape "$PB_HP $*" ;;
-    apple) on apple "$PB_APPLE $*" ;;
-    victus) on victus "& '${PB_VICTUS//\'/\'\'}' $*" ;;
+    "${LINUX_TARGET}") on "$LINUX_TARGET" "$PB_LINUX $*" ;;
+    "${PEER_TARGET}") on "$PEER_TARGET" "$PB_LINUX $*" ;;
+    "${MACOS_TARGET}") on "$MACOS_TARGET" "$PB_MACOS $*" ;;
+    "${WINDOWS_TARGET}") on "$WINDOWS_TARGET" "& '${PB_WINDOWS//\'/\'\'}' $*" ;;
   esac
 }
 
@@ -170,8 +174,8 @@ pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
 # /tmp/$RUN_ID either way, so the same command strings work for both.
 ctl() {
   local device=$1; shift
-  if [ "$device" = victus ]; then
-    PB_SMOKE_WINDOWS_PB="$PB_VICTUS" PAPERBOAT_SMOKE_TEAM="$SMOKE_TEAM" bash -c "$*"
+  if [ "$device" = "$WINDOWS_TARGET" ]; then
+    PB_SMOKE_WINDOWS_PB="$PB_WINDOWS" PAPERBOAT_SMOKE_TEAM="$SMOKE_TEAM" bash -c "$*"
   else
     on "$device" "$*"
   fi
@@ -183,8 +187,8 @@ device_py() {
   # A Windows target needs its pb.exe path for steps that run `pb` there (windows_target.target_pb): only then is it set,
   # so every other command string stays exactly as it was.
   local target_pb=""
-  [ -z "$PB_VICTUS" ] || [[ " $* " != *" victus "* ]] || target_pb="PB_SMOKE_TARGET_WINDOWS_PB=$(printf %q "$PB_VICTUS") "
-  ctl "$device" "${target_pb}PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $*"
+  [ -z "$PB_WINDOWS" ] || [[ " $* " != *" $WINDOWS_TARGET "* ]] || target_pb="PB_SMOKE_TARGET_WINDOWS_PB=$(printf %q "$PB_WINDOWS") "
+  ctl "$device" "${target_pb}PAPERBOAT_SMOKE_TEAM=$(printf %q "$SMOKE_TEAM") python3 /tmp/$RUN_ID/$script $*"
 }
 
 # ---------------------------------------------------------------- results
@@ -235,7 +239,7 @@ check_device() { # doctor + version on the device itself
   t0=$(now); out=$(pb_on "$d" doctor 2>&1)
   if grep -q "doctor: healthy" <<<"$out"; then record "doctor:$d" PASS $(( $(now)-t0 ))
   else record "doctor:$d" FAIL $(( $(now)-t0 )) "$(grep -m3 -iE 'fail|warning|unhealthy|degraded' <<<"$out" | tr '\n' ' ')"; fi
-  [ "$d" != victus ] && ! skipped inventory && check_inventory "$d"
+  [ "$d" != "$WINDOWS_TARGET" ] && ! skipped inventory && check_inventory "$d"
   return 0
 }
 
@@ -243,7 +247,7 @@ check_device() { # doctor + version on the device itself
 # socket, pin, release slot or generation file). The privileged `inventory --check` only reports.
 check_inventory() {
   local d=$1 t0 out status pass="" stdin_flag=""
-  case "$d" in apple) pass=$APPLE_PASS ;; dadape) pass=${DADAPE_PASS:-} ;; esac
+  case "$d" in "${MACOS_TARGET}") pass=$SMOKE_MACOS_PASSWORD ;; "${PEER_TARGET}") pass=${SMOKE_LINUX_PEER_PASSWORD:-} ;; esac
   [ -z "$pass" ] || stdin_flag=1
   t0=$(now)
   on "$d" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/install_inventory_check.sh" < "$HERE/install_inventory_check.sh" >/dev/null
@@ -253,17 +257,17 @@ check_inventory() {
 }
 
 remote_echo_cmd() { # command that prints $2 on target $1
-  if [ "$1" = victus ]; then echo "cmd /c echo $2"; else echo "echo $2"; fi
+  if [ "$1" = "$WINDOWS_TARGET" ]; then echo "cmd /c echo $2"; else echo "echo $2"; fi
 }
 
 test_exec() { # test_exec TARGET [ID-PREFIX]
   local t=$1 prefix=${2:-exec} marker="ex-$RUN_ID" t0 out status
-  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_HP exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1); status=$?
+  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_LINUX exec $t -- $(remote_echo_cmd "$t" "$marker"); echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "$prefix:$t" PASS $(( $(now)-t0 ))
   else record_command_failure "$prefix:$t" $(( $(now)-t0 )) "$out"; fi
 }
 
-# Long work runs on HP in the background as uploaded job scripts, so remote
+# Long work runs on Linux test machine in the background as uploaded job scripts, so remote
 # commands never need nested shell quoting. Results are collected later.
 device_job() { # device_job DEVICE TAG (job body on stdin)
   local device=$1 tag=$2
@@ -272,18 +276,18 @@ device_job() { # device_job DEVICE TAG (job body on stdin)
 }
 start_long_exec() { # start_long_exec TARGET TAG SECONDS
   local t=$1 tag=$2 secs=$3
-  if [ "$t" = victus ]; then
-    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'FINAL'\"" | device_job "$CLIENT" "$tag"
+  if [ "$t" = "$WINDOWS_TARGET" ]; then
+    printf '%s\n' "timeout $((secs+300)) $PB_LINUX exec $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'FINAL'\"" | device_job "$CLIENT" "$tag"
   else
-    printf '%s\n' "timeout $((secs+300)) $PB_HP exec $t -- sh -c 'sleep $secs; echo FINAL'" | device_job "$CLIENT" "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_LINUX exec $t -- sh -c 'sleep $secs; echo FINAL'" | device_job "$CLIENT" "$tag"
   fi
 }
 start_long_ssh() {
   local t=$1 tag=$2 secs=$3
-  if [ "$t" = victus ]; then
-    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'SSHFINAL'\" < /dev/null" | device_job "$CLIENT" "$tag"
+  if [ "$t" = "$WINDOWS_TARGET" ]; then
+    printf '%s\n' "timeout $((secs+300)) $PB_LINUX ssh $t -- powershell -NoProfile -Command \"Start-Sleep $secs; 'SSHFINAL'\" < /dev/null" | device_job "$CLIENT" "$tag"
   else
-    printf '%s\n' "timeout $((secs+300)) $PB_HP ssh $t -- \"sleep $secs; echo SSHFINAL\" < /dev/null" | device_job "$CLIENT" "$tag"
+    printf '%s\n' "timeout $((secs+300)) $PB_LINUX ssh $t -- \"sleep $secs; echo SSHFINAL\" < /dev/null" | device_job "$CLIENT" "$tag"
   fi
 }
 collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
@@ -305,12 +309,12 @@ collect() { # collect ID TAG EXPECT-MARKER : waits for the background job
 # The command runs in the target's login shell (cmd.exe on Windows): a nested `cmd /c echo` prints the marker with a stray quote.
 test_ssh_short() {
   local t=$1 marker="ssh-$RUN_ID" t0 out status
-  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_HP ssh $t -- echo $marker < /dev/null; echo rc=\$?" 2>&1); status=$?
+  t0=$(now); out=$(on "$CLIENT" "timeout 120 $PB_LINUX ssh $t -- echo $marker < /dev/null; echo rc=\$?" 2>&1); status=$?
   if command_ok "$status" "$out" && marker_present "$out" "$marker"; then record "ssh:$t" PASS $(( $(now)-t0 ))
   else record_command_failure "ssh:$t" $(( $(now)-t0 )) "$out"; fi
 }
 
-# Terminal: a real PTY session from HP. The driver is uploaded once; it sends
+# Terminal: a real PTY session from Linux test machine. The driver is uploaded once; it sends
 # an input line that computes 6*7 and waits for the computed answer.
 TERM_DRIVER=$(cat <<'PY'
 import os, pty, sys, time, select, signal
@@ -378,7 +382,7 @@ cleanup_terminal() { # cleanup_terminal TARGET EXACT-NAME CHECK-ID
     record "$id:$t" FAIL 0 "could not upload exact session cleanup helper"
     return
   fi
-  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_cleanup.py $PB_HP $t $name" 2>&1); status=$?
+  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/session_cleanup.py $PB_LINUX $t $name" 2>&1); status=$?
   if [ "$status" = 0 ] && marker_present "$out" SESSION_CLEANUP_OK; then
     record "$id:$t" PASS $(( $(now)-t0 ))
   else
@@ -392,13 +396,13 @@ test_terminal() { # test_terminal TARGET [ID-PREFIX]
     printf '%s\n' "$TERM_DRIVER" | on "$CLIENT" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" && DRIVER_UPLOADED=1
   fi
   # The Windows terminal starts cmd.exe. Run the arithmetic in PowerShell.
-  if [ "$t" = victus ]; then
+  if [ "$t" = "$WINDOWS_TARGET" ]; then
     line="powershell -NoProfile -Command \"Write-Output ('$marker-'+(6*7))\""
   else
     line="echo $marker-\$((6*7))"
   fi
   t0=$(now)
-  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker $(printf '%q' "$line") $marker-42" 2>&1); status=$?
+  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/term.py $PB_LINUX $t smoke-$marker $(printf '%q' "$line") $marker-42" 2>&1); status=$?
   if [ "$status" = 0 ] && marker_present "$out" TERMINAL_OK; then record "$prefix:$t" PASS $(( $(now)-t0 ))
   else record "$prefix:$t" FAIL $(( $(now)-t0 )) "terminal or transport failed; output withheld"; fi
   cleanup_terminal "$t" "smoke-$marker" "cleanup-$prefix"
@@ -409,11 +413,11 @@ test_transfer() {
   local name="smoke-$RUN_ID-$t.bin" t0 src_sha out dst_sha status
   t0=$(now)
   src_sha=$(on "$CLIENT" "mkdir -p /tmp/$RUN_ID && head -c 52428800 /dev/urandom > /tmp/$RUN_ID/$name && sha256sum /tmp/$RUN_ID/$name | cut -d' ' -f1")
-  out=$(on "$CLIENT" "timeout 900 $PB_HP send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1); status=$?
+  out=$(on "$CLIENT" "timeout 900 $PB_LINUX send /tmp/$RUN_ID/$name --to $t; echo rc=\$?" 2>&1); status=$?
   if ! command_ok "$status" "$out"; then record_command_failure "transfer:$t" $(( $(now)-t0 )) "$out"; return; fi
   case "$t" in
-    victus) dst_sha=$(on victus "\$f = Get-ChildItem -Path \$HOME -Recurse -Filter '$name' -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1; if (\$f) { (Get-FileHash \$f.FullName -Algorithm SHA256).Hash.ToLower(); Remove-Item \$f.FullName }" | tr -d '\r') ;;
-    apple) dst_sha=$(on apple "f=\$(find ~ -maxdepth 3 -name '$name' 2>/dev/null | head -1); [ -n \"\$f\" ] && shasum -a 256 \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
+    "${WINDOWS_TARGET}") dst_sha=$(on "$WINDOWS_TARGET" "\$f = Get-ChildItem -Path \$HOME -Recurse -Filter '$name' -ErrorAction SilentlyContinue -Depth 3 | Select-Object -First 1; if (\$f) { (Get-FileHash \$f.FullName -Algorithm SHA256).Hash.ToLower(); Remove-Item \$f.FullName }" | tr -d '\r') ;;
+    "${MACOS_TARGET}") dst_sha=$(on "$MACOS_TARGET" "f=\$(find ~ -maxdepth 3 -name '$name' 2>/dev/null | head -1); [ -n \"\$f\" ] && shasum -a 256 \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
     *) dst_sha=$(on "$t" "f=\$(find ~ -maxdepth 3 -name '$name' -not -path '/tmp/*' 2>/dev/null | grep -v '^/tmp' | head -1); [ -n \"\$f\" ] && sha256sum \"\$f\" | cut -d' ' -f1 && rm -f \"\$f\"") ;;
   esac
   if [ -n "$dst_sha" ] && [ "$dst_sha" = "$src_sha" ]; then record "transfer:$t" PASS $(( $(now)-t0 ))
@@ -424,7 +428,7 @@ test_preview() { # on a Unix device: serve a marker on loopback, publish, fetch 
   local d=$1 port=$(( 18000 + RANDOM % 1000 )) marker="pv-$RUN_ID" t0 out url id status stopped
   t0=$(now)
   out=$(on "$d" "mkdir -p /tmp/$RUN_ID-pv && cd /tmp/$RUN_ID-pv && echo $marker > index.html && (nohup python3 -m http.server $port --bind 127.0.0.1 >/dev/null 2>&1 & echo \$! > srv.pid) && sleep 1 && \
-    $( [ "$d" = apple ] && echo "$PB_APPLE" || echo "$PB_HP" ) preview $port --background --ttl 10m --json" 2>&1)
+    $( [ "$d" = "$MACOS_TARGET" ] && echo "$PB_MACOS" || echo "$PB_LINUX" ) preview $port --background --ttl 10m --json" 2>&1)
   status=$?
   id=$(python3 "$HERE/preview_receipt.py" id <<<"$out" 2>/dev/null)
   url=$(python3 "$HERE/preview_receipt.py" endpoint <<<"$out" 2>/dev/null)
@@ -456,14 +460,14 @@ start_update_terminal() {
     printf '%s\n' "$TERM_DRIVER" | on "$CLIENT" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" || return 1
     DRIVER_UPLOADED=1
   fi
-  if [ "$t" = victus ]; then
+  if [ "$t" = "$WINDOWS_TARGET" ]; then
     line="\$pbSmoke = \$PID; echo $before-\$(6*7)"
     next="if (\$pbSmoke -eq \$PID) { echo $after-\$(6*7) }"
   else
     line="pb_smoke=\$\$; echo $before-\$((6*7))"
     next="[ \"\$pb_smoke\" = \"\$\$\" ] && echo $after-\$((6*7))"
   fi
-  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | device_job "$CLIENT" "upd-term-$t"
+  printf '%s\n' "python3 /tmp/$RUN_ID/term.py $PB_LINUX $t smoke-update-$RUN_ID '$line' $before-42 /tmp/$RUN_ID/upd-term-$t.ready /tmp/$RUN_ID/upd-term-$t.resume '$next' $after-42" | device_job "$CLIENT" "upd-term-$t"
   local deadline=$(( $(now) + 120 ))
   while [ "$(now)" -lt "$deadline" ]; do
     on "$CLIENT" "test -f /tmp/$RUN_ID/upd-term-$t.ready" && return 0
@@ -475,15 +479,15 @@ start_update_terminal() {
 update_target() { # update TARGET with the build in UPDATE_DIR while work is live
   local t=$1 bin dst t0 out
   case "$t" in
-    hp) bin=pb-linux-amd64; dst=/tmp/$RUN_ID-upd ;;
-    apple) bin=pb-darwin-arm64; dst=/tmp/$RUN_ID-upd ;;
-    victus) bin=pb-windows-amd64.exe; dst='C:/Users/Pujan/smoke-upd.exe' ;;
+    "${LINUX_TARGET}") bin=pb-linux-amd64; dst=/tmp/$RUN_ID-upd ;;
+    "${MACOS_TARGET}") bin=pb-darwin-arm64; dst=/tmp/$RUN_ID-upd ;;
+    "${WINDOWS_TARGET}") bin=pb-windows-amd64.exe; dst="${SMOKE_WINDOWS_HOME:?set the Windows home path}/smoke-upd.exe" ;;
   esac
   [ -f "$UPDATE_DIR/$bin" ] || { record "update:$t" FAIL 0 "missing $UPDATE_DIR/$bin"; return; }
   case "$t" in
-    hp) scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "anvit@hp:$dst" ;;
-    apple) SSHPASS="$APPLE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$UPDATE_DIR/$bin" "$APPLE_LOGIN:$dst" ;;
-    victus) SSHPASS="$VICTUS_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "pujan@victus:$dst" ;;
+    "${LINUX_TARGET}") scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "${SMOKE_LINUX_SSH:?set the Linux SSH login}:$dst" ;;
+    "${MACOS_TARGET}") SSHPASS="$SMOKE_MACOS_PASSWORD" sshpass -e scp -q "${SSH_OPTS[@]}" "${MACOS_OPTS[@]}" "$UPDATE_DIR/$bin" "$MACOS_LOGIN:$dst" ;;
+    "${WINDOWS_TARGET}") SSHPASS="$SMOKE_WINDOWS_PASSWORD" sshpass -e scp -q "${SSH_OPTS[@]}" "$UPDATE_DIR/$bin" "${SMOKE_WINDOWS_SSH:?set the Windows SSH login}:$dst" ;;
   esac
   # Verify shell identity before activation, then query that same PTY after it.
   if ! start_update_terminal "$t"; then
@@ -498,8 +502,8 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
   sleep 20
   t0=$(now)
   case "$t" in
-    victus) out=$(pb_on victus "update --from '$dst'" 2>&1) ;;
-    *) out=$(on "$t" "chmod +x $dst && $( [ "$t" = apple ] && echo "$PB_APPLE" || echo "$PB_HP" ) update --from $dst; echo rc=\$?" 2>&1) ;;
+    "${WINDOWS_TARGET}") out=$(pb_on "$WINDOWS_TARGET" "update --from '$dst'" 2>&1) ;;
+    *) out=$(on "$t" "chmod +x $dst && $( [ "$t" = "$MACOS_TARGET" ] && echo "$PB_MACOS" || echo "$PB_LINUX" ) update --from $dst; echo rc=\$?" 2>&1) ;;
   esac
   local ver; ver=$(pb_on "$t" --version 2>&1)
   if grep -q "$UPDATE_VERSION" <<<"$ver"; then record "update:$t" PASS $(( $(now)-t0 ))
@@ -539,7 +543,7 @@ test_application_pairs() {
       id="$kind:$source-$target"
       skipped "$id" && continue
       case "$kind" in transfer-large)
-        if [ "$source" = victus ] || [ "$target" = victus ]; then
+        if [ "$source" = "$WINDOWS_TARGET" ] || [ "$target" = "$WINDOWS_TARGET" ]; then
           record "$id" SKIP 0 "transfer_large.py verifies on Unix receivers only; the Windows form is not written yet"
           continue
         fi ;;
@@ -586,7 +590,7 @@ test_terminal_main_pairs() {
         continue
       fi
       monitor=htop
-      [ "$target" != apple ] || monitor="${APPLE_HTOP:-/opt/homebrew/bin/htop}"
+      [ "$target" != "$MACOS_TARGET" ] || monitor="${APPLE_HTOP:-/opt/homebrew/bin/htop}"
       monitor=$(python3 -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$monitor")
       t0=$(now)
       out=$(device_py "$source" terminal_lifecycle.py $target --check all --monitor-path $monitor 2>&1); status=$?
@@ -596,9 +600,9 @@ receipt=json.loads(sys.argv[1])
 assert receipt["status"]=="PASS" and receipt["check"]=="terminal-all" and receipt["target"]==sys.argv[2]
 # A Windows target (cmd.exe) has no job control, editor, pager or monitor: terminal_lifecycle.windows_phases is its set.
 phases="input_output unicode resize colour ctrl_c ctrl_z large_paste vim less htop ctrl_d exact_session_cleanup"
-if sys.argv[3]=="victus": phases="input_output unicode resize colour ctrl_c exit exact_session_cleanup"
+if sys.argv[3]==sys.argv[4]: phases="input_output unicode resize colour ctrl_c exit exact_session_cleanup"
 assert set(receipt["phases"])==set(phases.split())
-' "$out" "$target" "$target" 2>/dev/null; then
+' "$out" "$target" "$target" "$WINDOWS_TARGET" 2>/dev/null; then
         record "$id" PASS $(( $(now)-t0 ))
       else
         record_command_failure "$id" $(( $(now)-t0 )) "$out"
@@ -669,8 +673,8 @@ test_terminal_features() {
         status-bar) script=status_bar_lifecycle.py ;;
         session-sharing-owner) script=session_sharing_lifecycle.py ;;
       esac
-      if [ "$kind" != session-sharing-owner ] && [[ ",$TARGETS," == *,$CLIENT,* && ",$TARGETS," == *,apple,* ]]; then
-        [ "$source" != "$CLIENT" ] && target=$CLIENT || target=apple
+      if [ "$kind" != session-sharing-owner ] && [[ ",$TARGETS," == *,$CLIENT,* && ",$TARGETS," == *,"${MACOS_TARGET}",* ]]; then
+        [ "$source" != "$CLIENT" ] && target=$CLIENT || target=$MACOS_TARGET
       fi
       t0=$(now)
       if ! stage_terminal_fixtures "$source"; then
@@ -696,9 +700,9 @@ assert receipt["status"]=="PASS" and receipt["check"]==sys.argv[2] and receipt["
 # replay and the same shell variable through its own authenticated CLI session.
 test_terminal_replay() {
   local target out status t0 staged=1 id tag phase command controller_ok parent parent_status
-  # The second enrolled device is apple when selected, else dadape (Linux pair).
+  # The second enrolled device is the macOS target when selected, otherwise the Linux peer.
   local controller=""
-  for target in apple dadape "$PEER"; do [[ ",$TARGETS," == *,$target,* ]] && controller=$target; done
+  for target in "$MACOS_TARGET" "$PEER_TARGET" "$PEER"; do [[ ",$TARGETS," == *,$target,* ]] && controller=$target; done
   [[ ",$TARGETS," == *,$CLIENT,* && -n "$controller" ]] || return 0
   stage_terminal_fixtures "$CLIENT" || staged=0
   stage_terminal_fixtures "$controller" || staged=0
@@ -827,8 +831,8 @@ test_local_access_settings() {
       record "$id" FAIL 0 "could not stage local settings fixture"
       continue
     fi
-    password="${HP_PASS:-}"
-    [ "$device" != apple ] || password="$APPLE_PASS"
+    password="${SMOKE_LINUX_PASSWORD:-}"
+    [ "$device" != "$MACOS_TARGET" ] || password="$SMOKE_MACOS_PASSWORD"
     out=$(printf '%s\n' "$password" | device_py "$device" local_access_settings.py 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="local-access-settings" and r["status"]=="PASS" and r["domain_set_reset"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "domain set/reset; original domain restored"
@@ -849,24 +853,24 @@ test_carrier_throughput() {
     skipped "$id" && continue
     if ct_of "$device" >/dev/null; then record "$id" SKIP 0 "container device: judged on its real host"; continue; fi
     t0=$(now)
-    case "$device" in apple) goos=darwin ;; victus) goos=windows; ext=.exe ;; *) goos=linux; ext="" ;; esac
+    case "$device" in "${MACOS_TARGET}") goos=darwin ;; "${WINDOWS_TARGET}") goos=windows; ext=.exe ;; *) goos=linux; ext="" ;; esac
     run=$(mktemp -d); dest=/tmp/$RUN_ID-carrier$ext
-    [ "$device" != victus ] || dest='C:/Users/Pujan/smoke-carrier.exe'
+    [ "$device" != "$WINDOWS_TARGET" ] || dest="${SMOKE_WINDOWS_HOME:?set the Windows home path}/smoke-carrier.exe"
     if ! (cd "$HERE/../../cli" && CGO_ENABLED=0 GOOS=$goos GOARCH=$([ "$goos" = darwin ] && echo arm64 || echo amd64) \
         go test -c -o "$run/carrier$ext" ./internal/hostruntime/connector) 2>"$run/build.log"; then
       record "$id" FAIL $(( $(now)-t0 )) "test binary did not build: $(tail -c 200 "$run/build.log")"; rm -rf "$run"; continue
     fi
     case "$device" in
-      apple) SSHPASS="$APPLE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$run/carrier" "$APPLE_LOGIN:$dest" ;;
-      victus) SSHPASS="$VICTUS_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$run/carrier$ext" "pujan@victus:$dest" ;;
-      hp) scp -q "${SSH_OPTS[@]}" "$run/carrier" "anvit@hp:$dest" ;;
-      ubuntu24) scp -q "${SSH_OPTS[@]}" "$run/carrier" "pujan@ubuntu24:$dest" ;;
-      dadape) SSHPASS="$DADAPE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$run/carrier" "anvit@dadape:$dest" ;;
+      "${MACOS_TARGET}") SSHPASS="$SMOKE_MACOS_PASSWORD" sshpass -e scp -q "${SSH_OPTS[@]}" "${MACOS_OPTS[@]}" "$run/carrier" "$MACOS_LOGIN:$dest" ;;
+      "${WINDOWS_TARGET}") SSHPASS="$SMOKE_WINDOWS_PASSWORD" sshpass -e scp -q "${SSH_OPTS[@]}" "$run/carrier$ext" "${SMOKE_WINDOWS_SSH:?set the Windows SSH login}:$dest" ;;
+      "${LINUX_TARGET}") scp -q "${SSH_OPTS[@]}" "$run/carrier" "${SMOKE_LINUX_SSH:?set the Linux SSH login}:$dest" ;;
+      "${MEMBER_TARGET}") scp -q "${SSH_OPTS[@]}" "$run/carrier" "${SMOKE_MEMBER_SSH:?set the teammate SSH login}:$dest" ;;
+      "${PEER_TARGET}") SSHPASS="$SMOKE_LINUX_PEER_PASSWORD" sshpass -e scp -q "${SSH_OPTS[@]}" "$run/carrier" "${SMOKE_LINUX_PEER_SSH:?set the Linux peer SSH login}:$dest" ;;
     esac
     rm -rf "$run"
-    if [ "$device" = victus ]; then
+    if [ "$device" = "$WINDOWS_TARGET" ]; then
       # PowerShell splits an unquoted -test.run at the dot ('flag provided but not defined: -test'): every flag is one quoted word.
-      out=$(on victus "& '$dest' '-test.run=^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' '-test.v' '-test.count=1' '-test.timeout=10m'; Remove-Item -Force '$dest'" 2>&1)
+      out=$(on "$WINDOWS_TARGET" "& '$dest' '-test.run=^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' '-test.v' '-test.count=1' '-test.timeout=10m'; Remove-Item -Force '$dest'" 2>&1)
     else
       out=$(on "$device" "chmod +x $dest && $dest -test.run '^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' -test.v -test.count=1 -test.timeout=10m; rm -f $dest" 2>&1)
     fi
@@ -890,7 +894,7 @@ test_reset_lifecycle() {
       continue
     fi
     password=""
-    [ "$device" != apple ] || password="$APPLE_PASS"
+    [ "$device" != "$MACOS_TARGET" ] || password="$SMOKE_MACOS_PASSWORD"
     # Phase 1 resets and interrupts the first pair; a reset signs the device out, so ANOTHER device of the account
     # lists machines: the old record, its name and its local address must still be there (make-before-break).
     out=$(printf '%s\n' "$password" | device_py "$device" reset_lifecycle.py reset 2>&1); status=$?
@@ -1032,7 +1036,7 @@ test_update_floor() {
   fi
 }
 
-# Runs only when SMOKE_FRESH_HOST (a Linux VM with Docker, image laneh-ubuntu24-systemd, and a signed-in `pb` user)
+# Runs only when SMOKE_FRESH_HOST (a Linux VM with Docker, image test-systemd, and a signed-in `pb` user)
 # and SMOKE_FRESH_BINARY (the linux-amd64 build under test) are set: a FRESH pair, then `pb access machine` to it
 # with no daemon restart (the private-access P0 of 2026-10-26 showed only on freshly paired machines).
 test_fresh_pair_access() {
@@ -1049,7 +1053,7 @@ test_fresh_pair_access() {
 }
 
 # team-lifecycle / team-roles need a controlled teammate profile (a second signed-in account, teammate_profile.py)
-# on the device that runs them. The --teammate device (default ubuntu24) is the fixture team's independent teammate
+# on the device that runs them. The --teammate device (default: configured teammate) is the fixture team's independent teammate
 # and runs both checks in the member role; every other device of the run runs them in the owner role, a container
 # too when its teammate profile is signed in. A run therefore always covers both roles.
 test_team_checks() {
@@ -1186,11 +1190,11 @@ printf '%-28s %-5s %7s  %s\n' TEST RESULT TIME DETAIL
 for d in "${TLIST[@]}"; do check_device "$d"; done
 # windows-lifecycle: service stop/start/restart, crash recovery, keep-awake, exec (windows_lifecycle.py). The
 # destructive reset-pair and uninstall checks run by hand: windows_lifecycle.py ... reset-pair uninstall.
-if [[ ",$TARGETS," == *,victus,* ]] && ! skipped windows-lifecycle; then
+if [[ ",$TARGETS," == *,"${WINDOWS_TARGET}",* ]] && ! skipped windows-lifecycle; then
   t0=$(now); out=$(python3 "$HERE/windows_lifecycle.py" --expect-version "$EXPECT_VERSION" --windows-install-json "$WINDOWS_INSTALL_JSON" \
     service crash availability exec 2>&1); status=$?
-  if [ "$status" = 0 ]; then record windows-lifecycle:victus PASS $(( $(now)-t0 ))
-  else record_command_failure windows-lifecycle:victus $(( $(now)-t0 )) "$out"; fi
+  if [ "$status" = 0 ]; then record "windows-lifecycle:$WINDOWS_TARGET" PASS $(( $(now)-t0 ))
+  else record_command_failure "windows-lifecycle:$WINDOWS_TARGET" $(( $(now)-t0 )) "$out"; fi
 fi
 
 # Long-running work starts first so it overlaps the short checks.
@@ -1206,7 +1210,7 @@ for t in "${TLIST[@]}"; do
   skipped transfer || test_transfer "$t"
 done
 for d in "${TLIST[@]}"; do
-  [ "$d" = victus ] && continue
+  [ "$d" = "$WINDOWS_TARGET" ] && continue
   skipped preview || test_preview "$d"
 done
 test_terminal_commands

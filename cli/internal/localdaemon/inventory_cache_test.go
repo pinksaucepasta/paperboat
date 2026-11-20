@@ -16,7 +16,7 @@ import (
 )
 
 // A daemon restarted while Paperboat is unreachable started with no machines, so `pb exec <peer>` asked the server
-// and failed after 30 s although the peer network had restored its peers (hp containers 2026-11-16). It now starts
+// and failed after 30 s although the peer network had restored its peers (Linux test machine containers 2026-11-16). It now starts
 // from the last answered list, the first answer replaces it (a removed machine does not come back), and signing out
 // removes it.
 func TestRestartWhilePaperboatIsUnreachableStartsFromTheLastAnsweredMachines(t *testing.T) {

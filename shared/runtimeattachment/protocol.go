@@ -23,7 +23,7 @@ const (
 	CapabilityTunnelEndpoints = "tunnel_endpoints"
 	// CapabilityEndpointDeltas (edges only, with CapabilityEndpoints): the edge takes its endpoint
 	// routes only from the endpoint pull, as a full snapshot or as the changes since a cursor, and
-	// the full runtime pull leaves them out (Lane W scale matrix: no full re-send per poll).
+	// the full runtime pull leaves them out (scale matrix: no full re-send per poll).
 	CapabilityEndpointDeltas = "endpoint_deltas"
 )
 const MaximumAdmissions = 4096

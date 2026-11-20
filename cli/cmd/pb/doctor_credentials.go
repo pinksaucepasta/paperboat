@@ -24,7 +24,7 @@ const (
 
 // probeDoctorCredentials reads this machine's recent diagnostics events: a steady stream of machine-control
 // requests refused with 401 meant the server no longer accepted this machine's credentials, while doctor said
-// healthy (lanep-r26b, ~28 an hour all day, 2026-10-25).
+// healthy (test-r26b, ~28 an hour all day, 2026-10-25).
 func probeDoctorCredentials(ctx context.Context) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "machine_credentials", Status: doctorpkg.StatusPass, Summary: "The Paperboat server accepts this machine's credentials."}
 	if renewalRefusedHere() {

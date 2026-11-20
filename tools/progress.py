@@ -83,7 +83,7 @@ def canary_line(state, now=None):
     if not status or not started:
         text, ok = "no result yet", False
     elif (now - started).total_seconds() > 300:
-        text, ok = f"STALE: last run {started:%H:%M} IST (the prober on oracle is not running)", False
+        text, ok = f"STALE: last run {started:%H:%M} IST (the prober on vantage-a is not running)", False
     elif status.get("red"):
         failed = ", ".join(s["step"] for s in run.get("steps", []) if not s.get("ok"))
         since = ist(status.get("red_since")) or started

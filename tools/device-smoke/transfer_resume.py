@@ -19,7 +19,7 @@ import windows_target
 import winhost
 
 FILES = 4
-FILE_SIZE = 24 << 20  # 96 MiB batch: about two minutes on the hp-dadape path; Automatic bound is 2 GB per send
+FILE_SIZE = 24 << 20  # 96 MiB batch: about two minutes on the Linux test machine-Linux peer path; Automatic bound is 2 GB per send
 SIZE = FILES * FILE_SIZE
 RESTART_AFTER = 25.0
 SEND_TIMEOUT = 600

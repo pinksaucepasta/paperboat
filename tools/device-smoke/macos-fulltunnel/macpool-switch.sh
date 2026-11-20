@@ -1,10 +1,10 @@
 #!/bin/bash
 # X-38 network switch on a macpool Mac (own machine, nobody else is affected): install BUILD, pair into the account of LPB's machine,
 # run mac-addr-switch.sh under a Mac-initiated exec to PEER, a Peer-initiated exec to the Mac, then collect the logs.
-# usage: macpool-switch.sh <N>   env: BUILD (dir with pb-darwin-arm64), LPB (runs pb on a paired Linux machine, used to mint the token), PEER (default lanex2-l2),
+# usage: macpool-switch.sh <N>   env: BUILD (dir with pb-darwin-arm64), LPB (runs pb on a paired Linux machine, used to mint the token), PEER (default test-l2),
 #        OUT (log dir), MAC_NAME (default rx38r-m). Never kill `sleep` on the runner: the workflow's keep-alive step is a sleep, killing it ends the runner.
 set -u
-N=${1:?macpool number}; H=macpool-$N; HERE=$(cd "$(dirname "$0")" && pwd); SMOKE=$HERE/..; BUILD=${BUILD:?}; LPB=${LPB:?}; PEER=${PEER:-lanex2-l2}; OUT=${OUT:-/tmp}; NAME=${MAC_NAME:-rx38r-m}
+N=${1:?macpool number}; H=macpool-$N; HERE=$(cd "$(dirname "$0")" && pwd); SMOKE=$HERE/..; BUILD=${BUILD:?}; LPB=${LPB:?}; PEER=${PEER:-test-l2}; OUT=${OUT:-/tmp}; NAME=${MAC_NAME:-rx38r-m}
 log() { echo "$(date +%T) $*"; }
 R() { ssh -o ConnectTimeout=20 $H "$@"; }
 scp -q $BUILD/pb-darwin-arm64 $H:/tmp/pb-x38r; R 'chmod 755 /tmp/pb-x38r; perl -e "alarm 240; exec @ARGV" /tmp/pb-x38r install 2>&1 | tail -1'

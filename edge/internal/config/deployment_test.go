@@ -221,9 +221,9 @@ func TestRequestBodyIdleTimeoutDefaultsToNginxSixtySeconds(t *testing.T) {
 	}
 }
 
-// A node_capacity the edge cannot serve is refused at load, not as an obscure registry error after startup.
-func TestLoadDeploymentBoundsNodeCapacity(t *testing.T) {
-	for capacity, ok := range map[int]bool{MaximumNodeCapacity: true, MaximumNodeCapacity + 1: false, 10000: false} {
+// node_capacity has no fixed ceiling (a larger box declares more); only an unset value is refused.
+func TestLoadDeploymentHasNoNodeCapacityCeiling(t *testing.T) {
+	for capacity, ok := range map[int]bool{0: false, 4096: true, 4097: true, 100000: true} {
 		value := strings.Replace(validDeploymentJSON(), `"node_capacity":128`, `"node_capacity":`+strconv.Itoa(capacity), 1)
 		if _, err := LoadDeployment(writeDeployment(t, value)); (err == nil) != ok {
 			t.Fatalf("node_capacity %d: err = %v, want accepted %v", capacity, err, ok)

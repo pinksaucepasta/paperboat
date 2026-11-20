@@ -989,6 +989,7 @@ func (c *localPeerConn) Resize(rows, cols uint16) error {
 	binary.BigEndian.PutUint16(payload[2:], cols)
 	return c.writer.write(localPeerResize, payload)
 }
+
 // CloseWrite reports a failed write as a lost daemon link like Write and Wait: an errno the caller does not know (Windows
 // names a closed socket several ways) must not veto resuming a started exec.
 func (c *localPeerConn) CloseWrite() error {

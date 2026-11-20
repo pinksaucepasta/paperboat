@@ -32,16 +32,16 @@ type WSSClientConfig struct {
 }
 
 type WSSClient struct {
-	config      WSSClientConfig
-	ctx         context.Context
-	cancel      context.CancelFunc
-	connectGate chan struct{}
-	mu          sync.Mutex
-	current     *wssClientConn
-	observed    atomic.Pointer[wssClientConn]
-	generation  int
-	fatal       error
-	fatalToken  string // the credential fatal answered (refusal)
+	config       WSSClientConfig
+	ctx          context.Context
+	cancel       context.CancelFunc
+	connectGate  chan struct{}
+	mu           sync.Mutex
+	current      *wssClientConn
+	observed     atomic.Pointer[wssClientConn]
+	generation   int
+	refusal      error
+	refusedToken string // the credential the relay refused
 }
 
 type wssClientConn struct {
@@ -98,7 +98,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	if c.ctx.Err() != nil {
 		return nil, ErrClosed
 	}
-	if err := refused(ctx, c.config.Credential, &c.fatal, &c.fatalToken); err != nil {
+	if err := refused(ctx, c.config.Credential, &c.refusal, &c.refusedToken); err != nil {
 		return nil, err
 	}
 	if old := c.current; old != nil {
@@ -111,14 +111,14 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		old.errMu.Unlock()
 		c.current = nil
 		c.observed.Store(nil)
-		if fatalCarrier(ended) {
-			c.fatal, c.fatalToken = ended, old.token
+		if rememberRefusal(ended) {
+			c.refusal, c.refusedToken = ended, old.token
 			return nil, ended
 		}
 	}
 	if c.config.TLS == nil || c.config.TLS.InsecureSkipVerify && c.config.TLS.VerifyConnection == nil && c.config.TLS.VerifyPeerCertificate == nil || len(c.config.TLS.Certificates) != 1 || c.config.Credential == nil || c.config.URL == "" {
-		c.fatal = ErrAdmission
-		return nil, c.fatal
+		c.refusal = ErrAdmission
+		return nil, c.refusal
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -136,8 +136,8 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		if errors.Is(err, ErrExpired) {
 			return nil, retainDecision(ErrExpired, err)
 		}
-		c.fatal, c.fatalToken = retainDecision(ErrAdmission, err), ""
-		return nil, c.fatal
+		c.refusal, c.refusedToken = retainDecision(ErrAdmission, err), ""
+		return nil, c.refusal
 	}
 	proxy := c.config.Proxy
 	if proxy == nil {
@@ -148,15 +148,15 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	ws, response, err := websocket.Dial(dialCtx, c.config.URL, &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{WSSSubprotocol}, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		if response != nil && response.StatusCode == http.StatusUnauthorized {
-			c.fatal, c.fatalToken = retainDecision(ErrAdmission, err), token
-			return nil, c.fatal
+			c.refusal, c.refusedToken = retainDecision(ErrAdmission, err), token
+			return nil, c.refusal
 		}
 		return nil, classifyWSS(err)
 	}
 	if ws.Subprotocol() != WSSSubprotocol {
 		_ = ws.Close(websocket.StatusPolicyViolation, "relay protocol mismatch")
-		c.fatal, c.fatalToken = ErrProtocol, token
-		return nil, c.fatal
+		c.refusal, c.refusedToken = ErrProtocol, token
+		return nil, c.refusal
 	}
 	connCtx, connCancel := context.WithCancel(c.ctx)
 	ws.SetReadLimit(MaxControl + 5)
@@ -165,9 +165,8 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		connCancel()
 		_ = ws.Close(websocket.StatusInternalError, "relay setup failed")
 		err = classifyWSS(err)
-		var fatal interface{ Fatal() bool }
-		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal, c.fatalToken = err, token
+		if rememberRefusal(err) {
+			c.refusal, c.refusedToken = err, token
 		}
 		return nil, err
 	}
@@ -268,10 +267,10 @@ func (c *WSSClient) RecvDetail() (derp.ReceivedMessage, int, error) {
 		if ended == nil {
 			ended = classifyWSS(context.Cause(cc.ctx))
 		}
-		if fatalCarrier(ended) {
+		if rememberRefusal(ended) {
 			c.mu.Lock()
-			if c.fatal == nil {
-				c.fatal, c.fatalToken = ended, cc.token
+			if c.refusal == nil {
+				c.refusal, c.refusedToken = ended, cc.token
 			}
 			c.mu.Unlock()
 		}

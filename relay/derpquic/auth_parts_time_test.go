@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,11 @@ func TestAdmitAuthPartsUsesTheGivenClock(t *testing.T) {
 	now := time.Now()
 	if err := s.admitAuthParts(p, []byte(f.token(g)), 1, now.Add(2*time.Minute)); !errors.Is(err, ErrExpired) {
 		t.Fatalf("a grant expired at the given clock was admitted: %v", err)
+	}
+	oldProcess := g
+	oldProcess.ProcessEpoch = "previous_process"
+	if err := s.admitAuthParts(p, []byte(f.token(oldProcess)), 1, now); !errors.Is(err, ErrExpired) || !strings.Contains(err.Error(), "process changed") {
+		t.Fatalf("a stale process grant needs renewal and a distinct reason, got %v", err)
 	}
 	if err := s.admitAuthParts(p, []byte(f.token(g)), 1, now); err != nil {
 		t.Fatalf("a live grant was refused: %v", err)

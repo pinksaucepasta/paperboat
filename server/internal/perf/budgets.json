@@ -35,7 +35,7 @@
    "path": "/v1/machines?limit=200",
    "max_queries": 14,
    "p50_ms": 310,
-   "reason": "200 machines with their access description; per-machine permission functions (Lane Q pagination step); the page's ids and rows are read in one repeatable-read snapshot (a machine removed between the two reads failed the list, 8fcb11a87): BEGIN, SET LOCAL and COMMIT"
+   "reason": "200 machines with their access description; per-machine permission functions (pagination step); the page's ids and rows are read in one repeatable-read snapshot (a machine removed between the two reads failed the list, 8fcb11a87): BEGIN, SET LOCAL and COMMIT"
   },
   {
    "actor": "user_perf_0001",
@@ -56,7 +56,7 @@
    "path": "/v1/machines?workspace=perf-team-001&limit=200",
    "max_queries": 20,
    "p50_ms": 3660,
-   "reason": "200 team machines: per-machine access description; set-based team access (Lane Q next)"
+   "reason": "200 team machines: per-machine access description; set-based team access (next)"
   },
   {
    "actor": "user_perf_0003",
@@ -202,7 +202,7 @@
    "path": "/v1/teams",
    "max_queries": 16,
    "p50_ms": 4220,
-   "reason": "team view embeds every member, machine and grant (6.4 MB); paginated team endpoints planned with Lane A/C"
+   "reason": "team view embeds every member, machine and grant (6.4 MB); paginated team endpoints planned with "
   },
   {
    "actor": "user_perf_0003",

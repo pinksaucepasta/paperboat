@@ -27,7 +27,7 @@ func TestSignatureIsHMACOfTimestampAndBody(t *testing.T) {
 
 func TestDestinationsOnlyOnThePublicInternet(t *testing.T) {
 	for ip, public := range map[string]bool{"8.8.8.8": true, "2606:4700::1111": true, "10.0.0.1": false, "127.0.0.1": false, "169.254.169.254": false,
-		"100.95.70.63": false, "192.168.1.1": false, "::1": false, "fd7a:115c:a1e0::1": false} {
+		"100.64.12.10": false, "192.168.1.1": false, "::1": false, "fd7a:115c:a1e0::1": false} {
 		if publicIP(net.ParseIP(ip)) != public {
 			t.Errorf("%s public=%v", ip, !public)
 		}

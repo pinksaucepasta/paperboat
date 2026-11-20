@@ -131,7 +131,7 @@ func TestOnlyTheControlHostIsTrackedWhenOneIsGiven(t *testing.T) {
 
 // A new sign-in after the previous session was revoked (pb login, pb login --api-token) brings
 // a different credential: the rejection of the old one must not hold the new one back, or the
-// daemon's refresh right after the sign-in fails (F18-06 on hp).
+// daemon's refresh right after the sign-in fails (F18-06 on Linux test machine).
 func TestARejectedCredentialDoesNotHoldBackANewOne(t *testing.T) {
 	clock := time.Unix(1_000_000, 0)
 	server := &identityServer{status: http.StatusUnauthorized}
@@ -151,7 +151,7 @@ func TestARejectedCredentialDoesNotHoldBackANewOne(t *testing.T) {
 }
 
 // A 401 whose Date is a minute or more from the local clock is a skewed clock, not a bad identity:
-// the next request goes out at once with a corrected proof (Lane X #2).
+// the next request goes out at once with a corrected proof (#2).
 func TestARefusalFromAClockSkewDoesNotHoldTheIdentityBack(t *testing.T) {
 	clock := time.Unix(1_000_000, 0)
 	server := &skewedServer{date: clock.Add(10 * time.Minute)}

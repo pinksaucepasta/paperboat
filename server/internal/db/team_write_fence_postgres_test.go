@@ -12,7 +12,7 @@ import (
 )
 
 // Forty concurrent serializable transactions that take the team write lock and then read-modify-write the
-// same row all commit (Lane W: 40 parallel exec descriptors for one machine answered 15 503s). With an
+// same row all commit (40 parallel exec descriptors for one machine answered 15 503s). With an
 // advisory lock taken by a SELECT, each waiter's snapshot predated the lock and many exhausted their
 // serialization retries; LOCK TABLE takes no snapshot.
 func TestTeamWriteLockGivesEachWaiterAFreshSnapshotOnPostgres(t *testing.T) {

@@ -90,7 +90,7 @@ func validCertificateCommand(command string) bool {
 
 // matchUserPattern is the `Match user` pattern list for a registered account: the account as registered and, for an
 // AnyCaseUser target, its lowercase, uppercase and capitalized spellings (the ones people type). shortcut: a mixed
-// spelling such as "PuJan" is not covered; OpenSSH has no case-insensitive pattern, upgrade only if one appears.
+// spelling such as "tester" is not covered; OpenSSH has no case-insensitive pattern, upgrade only if one appears.
 func matchUserPattern(target OpenSSHAliasTarget) string {
 	patterns := []string{target.User}
 	if target.AnyCaseUser {

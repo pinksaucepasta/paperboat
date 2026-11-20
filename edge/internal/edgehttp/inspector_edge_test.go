@@ -92,7 +92,7 @@ func TestInspectorEdgeAccessTraversesExactOwnerCarrier(t *testing.T) {
 	request.Header.Set(inspectorGrantHeader, "iat_test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadGateway || observed != 1 {
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "could not read the inspector response") || observed != 1 {
 		t.Fatalf("failed response=%d observed=%d", response.Code, observed)
 	}
 	if err := <-done; err != nil {

@@ -8,7 +8,7 @@ import (
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 )
 
-// lanep-r26b logged machine_control 401s all day while doctor said healthy (Lane P, 2026-10-26).
+// test-r26b logged machine_control 401s all day while doctor said healthy (2026-10-26).
 func TestDoctorCountsRecentMachineCredentialRefusals(t *testing.T) {
 	now := time.Now().UTC()
 	line := func(at time.Time, code, operation, status string) string {

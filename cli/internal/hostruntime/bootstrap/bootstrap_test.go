@@ -510,7 +510,7 @@ func TestValidateMaterialAcceptsClientCLISetup(t *testing.T) {
 	}
 }
 
-// Pairing refused at the plan's machine limit (Lane O, e5b0de26: 403 machine_limit_reached) names the
+// Pairing refused at the plan's machine limit (e5b0de26: 403 machine_limit_reached) names the
 // limit and the way out with an authored message, not "invalid machine bootstrap"; the server's own
 // text still never escapes.
 func TestCreatePairingAtTheMachineLimitNamesIt(t *testing.T) {

@@ -26,16 +26,16 @@ type ClientConfig struct {
 	GenerationDisco key.DiscoPublic
 }
 type Client struct {
-	config      ClientConfig
-	ctx         context.Context
-	cancel      context.CancelFunc
-	connectGate chan struct{}
-	mu          sync.Mutex
-	current     *clientConn
-	observed    atomic.Pointer[clientConn]
-	generation  int
-	fatal       error
-	fatalToken  string // the credential fatal answered (refusal)
+	config       ClientConfig
+	ctx          context.Context
+	cancel       context.CancelFunc
+	connectGate  chan struct{}
+	mu           sync.Mutex
+	current      *clientConn
+	observed     atomic.Pointer[clientConn]
+	generation   int
+	refusal      error
+	refusedToken string // the credential the relay refused
 }
 type clientConn struct {
 	conn            *quic.Conn
@@ -86,7 +86,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	if c.ctx.Err() != nil {
 		return nil, ErrClosed
 	}
-	if err := refused(ctx, c.config.Credential, &c.fatal, &c.fatalToken); err != nil {
+	if err := refused(ctx, c.config.Credential, &c.refusal, &c.refusedToken); err != nil {
 		return nil, err
 	}
 	if old := c.current; old != nil {
@@ -94,18 +94,17 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 			return old, nil
 		}
 		err := classify(context.Cause(old.conn.Context()))
-		var fatal interface{ Fatal() bool }
 		old.workers.Wait()
 		c.current = nil
 		c.observed.Store(nil)
-		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal, c.fatalToken = err, old.token
+		if rememberRefusal(err) {
+			c.refusal, c.refusedToken = err, old.token
 			return nil, err
 		}
 	}
 	if c.config.TLS == nil || c.config.TLS.InsecureSkipVerify && c.config.TLS.VerifyConnection == nil && c.config.TLS.VerifyPeerCertificate == nil || len(c.config.TLS.Certificates) != 1 || c.config.Credential == nil || c.config.Address == "" {
-		c.fatal = ErrAdmission
-		return nil, c.fatal
+		c.refusal = ErrAdmission
+		return nil, c.refusal
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -119,8 +118,8 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		if errors.Is(err, ErrExpired) {
 			return nil, retainDecision(ErrExpired, err)
 		}
-		c.fatal, c.fatalToken = retainDecision(ErrAdmission, err), ""
-		return nil, c.fatal
+		c.refusal, c.refusedToken = retainDecision(ErrAdmission, err), ""
+		return nil, c.refusal
 	}
 	parts, err := grantParts(token)
 	if err != nil {
@@ -132,18 +131,16 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	conn, err := quicdial.Dial(dialCtx, c.config.Address, config, quicConfig(), false)
 	if err != nil {
 		err = classify(err)
-		var fatal interface{ Fatal() bool }
-		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal, c.fatalToken = err, token
+		if rememberRefusal(err) {
+			c.refusal, c.refusedToken = err, token
 		}
 		return nil, err
 	}
 	fail := func(err error) (*clientConn, error) {
 		conn.CloseWithError(0, "relay setup failed")
 		err = classify(err)
-		var fatal interface{ Fatal() bool }
-		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal, c.fatalToken = err, token
+		if rememberRefusal(err) {
+			c.refusal, c.refusedToken = err, token
 		}
 		return nil, err
 	}

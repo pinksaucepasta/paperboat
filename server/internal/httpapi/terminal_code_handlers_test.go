@@ -263,7 +263,7 @@ func TestTerminalBrowserTicketKeepsPureRejectionsAndReportsMixedFailures(t *test
 	}
 }
 
-// Slice 7 (Lane K terminal plan): each ticket refusal has its own code, so the console can say what is wrong
+// Slice 7 (terminal plan): each ticket refusal has its own code, so the console can say what is wrong
 // instead of showing "No access" for a lost edge connection or a ticket cap.
 func TestTerminalBrowserTicketRefusalsCarryTheirOwnCode(t *testing.T) {
 	for _, tc := range []struct {

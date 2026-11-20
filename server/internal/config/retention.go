@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// ResourceBandwidthWindow is how long workspace usage history is kept.
+const ResourceBandwidthWindow = 90 * 24 * time.Hour
+
+// ResourceBandwidthExactWindow is how long it is kept as the reports arrived. Older history is merged into one row per
+// hour, resource and path. Twice the 7-day delivery window of an edge or native report, so a late replay of a report finds
+// its row and adds nothing.
+const ResourceBandwidthExactWindow = 14 * 24 * time.Hour
+
 // Retention bounds the tables that grow with traffic (PLAN 3b, storage). One place for every window; the
 // retention worker (internal/retention) deletes past them in bounded batches.
 type Retention struct {

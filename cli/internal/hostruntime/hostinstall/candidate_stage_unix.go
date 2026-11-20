@@ -39,7 +39,7 @@ var runCandidate = func(ctx context.Context, executable string, args []string, r
 	}
 	command := exec.CommandContext(ctx, executable, args...)
 	// The installing process's own (root) environment: without HOME the candidate could not
-	// save its diagnostics (pbvm1: "Local diagnostics could not be saved" on every update).
+	// save its diagnostics (Linux test VM: "Local diagnostics could not be saved" on every update).
 	command.Env = append(os.Environ(), "PAPERBOAT_INVOKING_UID="+strconv.Itoa(request.UID))
 	command.Stdin = bytes.NewReader(body)
 	var stdout cappedBuffer

@@ -21,6 +21,8 @@ import tempfile
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'tools/device-smoke'))
+from dev_targets import get_setting  # noqa: E402
 spec = importlib.util.spec_from_file_location('staging', ROOT / 'deploy/staging.py')
 staging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(staging)
@@ -291,8 +293,11 @@ def main():
     args = parser.parse_args()
     window_end = datetime.fromisoformat(args.window_end).timestamp()
     # The isolated project is mandatory even when a caller accidentally exports a production SSH target.
-    project = command(['docker', 'compose', '-f', '/home/ubuntu/pb-release-staging/compose.yaml',
-                       '--project-directory', '/home/ubuntu/pb-release-staging', 'config', '--format', 'json'])
+    staging_dir = get_setting('release_staging_dir')
+    if not staging_dir:
+        parser.error('configure release_staging_dir in the local development targets')
+    project = command(['docker', 'compose', '-f', f'{staging_dir}/compose.yaml',
+                       '--project-directory', staging_dir, 'config', '--format', 'json'])
     if json.loads(project)['name'] != 'pb-release-staging':
         parser.error('refusing a non-staging Compose project')
     if any(not getattr(args, name).startswith('paperboat-server:stg-') for name in ('old_server', 'new_server')):

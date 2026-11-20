@@ -79,7 +79,7 @@ if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
                 module.subject_flags(refused)
 
     def test_http01_address_binds_the_edge_listen_host_not_the_wildcard(self):
-        # prod 2026-11-13: the machine guard holds 127.100.0.1:80, so certbot's wildcard bind failed on oracle.
+        # prod 2026-11-13: the machine guard holds 127.100.0.1:80, so certbot's wildcard bind failed on vantage-a.
         import importlib.util
         spec = importlib.util.spec_from_file_location("edge_certificate", ROOT / "deploy/edge-ip-certificate.py")
         module = importlib.util.module_from_spec(spec)

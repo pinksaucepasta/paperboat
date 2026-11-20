@@ -1,14 +1,14 @@
 """Data-plane performance budgets per selected path, checked by perf_dataplane.py (PLAN 3b).
 
 Each entry is metric: (kind, bound) where kind 'max' fails above the bound and 'min' below it.
-A path without an entry fails the check; the 'cli' entry applies to every path. Bounds come from the first two device runs (hp,
+A path without an entry fails the check; the 'cli' entry applies to every path. Bounds come from the first two device runs (Linux test machine,
 two containers on one Docker bridge, dev-f9e28273, 2026-10-23: exec median 4.8 / 2.9 s, max
 12.6 / 3.9 s, send 57 / 68 Mbit/s, scp 61 / 40 Mbit/s, rsync 70 / 91 small files/s) with
 headroom for noise; they catch regressions. Exec latency is dominated by per-operation access sessions (PLAN 3b design note).
 """
 BUDGETS = {
     # perf_idle.py: one machine, 10 min idle, all pb processes (PR-03). Round 16 dev-3f068585 on a
-    # pbvm2 container measured 3.4% CPU, 417 wakeups/s and 6.6 MB/h on TCP 443 (control plane and
+    # Linux test VM container measured 3.4% CPU, 417 wakeups/s and 6.6 MB/h on TCP 443 (control plane and
     # edge); before the idle fixes 17-20%, ~1,680/s and 147-172 MB/h.
     # Approved budget 2026-10-26 (coordinator, PR-03): per idle machine <= 1% of one core across all pb
     # processes and <= 5 MB/h of API bytes; requests are budgeted under 'idle_server'.
@@ -26,7 +26,7 @@ BUDGETS = {
     # idle machine; 'stream_open' adds one open native stream (F21-18: at most one signed config fetch and one JWKS fetch
     # over 10 min absent changes, so revocation arrives by push). Bounds without a stated limit are the first
     # measurement (stg-d18bd114, 2026-10-26: peer config ~66, runtime observations ~60, carrier attachment ~20,
-    # machine-services ~4 per machine per 10 min) rounded down to the cadence the owner lane is moving to.
+    # machine-services ~4 per machine per 10 min) rounded down to the cadence the owner worktree is moving to.
     'request_mix': {
         '/v1/machine-services': ('max', 20),
         '/v1/runtime/carrier-attachment': ('max', 25),
@@ -41,7 +41,7 @@ BUDGETS = {
         '/v1/jwks': ('max', 1),
     },
     # Checked on every path: local commands answer from the binary and the daemon snapshot
-    # (PR-07; hp: --version 32 ms, status 960 ms before it stopped listing machines on the server).
+    # (PR-07; Linux test machine: --version 32 ms, status 960 ms before it stopped listing machines on the server).
     'cli': {
         'cli_start_ms': ('max', 50),
         'status_ms': ('max', 300),

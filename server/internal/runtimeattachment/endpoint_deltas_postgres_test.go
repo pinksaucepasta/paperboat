@@ -24,7 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 )
 
-// Lane W scale matrix: an edge with endpoint deltas gets its endpoint routes only from the endpoint
+// scale matrix: an edge with endpoint deltas gets its endpoint routes only from the endpoint
 // pull, as a full set once and then only what changed since its cursor; an idle poll carries no
 // admission, a stopped preview arrives as a removed route, a new one as an admission.
 func TestEndpointAdmissionDeltasOnPostgres(t *testing.T) {

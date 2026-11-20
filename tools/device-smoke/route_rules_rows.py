@@ -2,7 +2,7 @@
 """F8-16: header and URL rules on a tunnel route, through the real edge.
 
 A disposable enrolled machine (--machine-cmd, a command prefix such as
-`ssh pbvm4 sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 small-t1`)
+`ssh Linux test VM sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 small-t1`)
 runs an echo origin that answers with the path and headers it received and counts
 its requests, and a durable tunnel in front of it. Visitor requests come from this host with curl.
 Checks: rules set with `pb tunnel route update` reach the edge within RULE_BOUND seconds and then

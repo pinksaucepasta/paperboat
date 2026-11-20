@@ -51,7 +51,13 @@ func TestTask40ServeTerminalSharing(t *testing.T) {
 	if err != nil || net.ParseIP(host) == nil || !strings.HasPrefix(host, "100.") {
 		t.Fatal("private Tailscale listener required")
 	}
-	base, dashboard := "https://"+address, "http://100.95.70.63:3103"
+	runtimeHost := os.Getenv("PAPERBOAT_TASK40_RUNTIME_HOST")
+	dashboardHost := os.Getenv("PAPERBOAT_TASK40_DASHBOARD_HOST")
+	if net.ParseIP(runtimeHost) == nil || dashboardHost == "" {
+		t.Fatal("configure the private browser fixture runtime and dashboard hosts")
+	}
+	runtimeAddress := net.JoinHostPort(runtimeHost, "15442")
+	base, dashboard := "https://"+address, "http://"+dashboardHost
 	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +165,7 @@ func TestTask40ServeTerminalSharing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write("runtime.json", map[string]any{"issuer": base, "key_id": "task40-browser", "public_key": base64.RawURLEncoding.EncodeToString(public), "owner_token": token, "environment_id": environment, "machine_id": machine, "session_id": session, "account_id": owner.AccountID, "listen_address": "100.95.70.63:15442"})
+	write("runtime.json", map[string]any{"issuer": base, "key_id": "task40-browser", "public_key": base64.RawURLEncoding.EncodeToString(public), "owner_token": token, "environment_id": environment, "machine_id": machine, "session_id": session, "account_id": owner.AccountID, "listen_address": runtimeAddress})
 	t.Log("runtime configuration ready")
 	deadline := time.Now().Add(4 * time.Minute)
 	var runtime struct {
@@ -179,7 +185,7 @@ func TestTask40ServeTerminalSharing(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
-	if runtime.PublicHost != "100.95.70.63:15442" {
+	if runtime.PublicHost != runtimeAddress {
 		t.Fatal("unexpected runtime route")
 	}
 	roots := x509.NewCertPool()

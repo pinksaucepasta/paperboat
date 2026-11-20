@@ -21,7 +21,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -62,11 +61,9 @@ type EdgeService struct {
 	relayMetrics            *sharedmetrics.Metrics
 	ingressLimits           edgelimits.IngressLimits
 	fairUse                 config.FairUse
+	relayDemand             relayDemandBook     // what each relay's accounts offered it, for dividing an account's relay speed (relayShare)
 	workspaceGate           *bandwidthgate.Gate // whether a workspace used its included traffic (file transfers through a terminal)
 	relayPool               *bandwidthgate.Gate
-	relayCountsMu           sync.Mutex
-	relayCounts             map[string]int // relays carrying each account on more than one (relaysPerAccount)
-	relayCountsAt           time.Time
 	audit                   *audit.Writer
 	signer                  *mint.Provider
 	certificateDistribution http.Handler

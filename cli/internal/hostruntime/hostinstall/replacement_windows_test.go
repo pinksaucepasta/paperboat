@@ -44,7 +44,7 @@ func TestWindowsCapturedSourceOfAnAbsentInstallationIsNotExist(t *testing.T) {
 	}
 }
 
-// victus: after a failed update left hostd stopped, `pb install` of a good build failed with "hostd lifecycle pipe
+// Windows test machine: after a failed update left hostd stopped, `pb install` of a good build failed with "hostd lifecycle pipe
 // connection failed" and could never recover the machine. A stopped hostd has nothing to admit.
 func TestWindowsReplacementSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testing.T) {
 	layout, err := service.WindowsUserLayout("S-1-5-21-111-222-333-1001")
@@ -67,7 +67,7 @@ func TestWindowsReplacementSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testin
 	}
 }
 
-// victus 2026-11-10: after a failed update the restored hostd exited with "terminal owner unavailable": nothing
+// Windows test machine 2026-11-10: after a failed update the restored hostd exited with "terminal owner unavailable": nothing
 // started the previous version's session owner again. The installation restore, which the lifecycle runs before it
 // restores any service, prepares the restored record's own owner from the restored executable.
 func TestWindowsRestoreStartsThePreviousSessionOwner(t *testing.T) {
@@ -100,7 +100,7 @@ func TestWindowsRestoreStartsThePreviousSessionOwner(t *testing.T) {
 		t.Fatalf("session owner prepared for another installation than the restored one: %+v", got)
 	}
 	// The recovery of a pending installation journal restores through this request: an empty Home failed Validate,
-	// so the journal stayed and session-owner cleanup waited for it all day (lanex2-w, victus, 2026-11-16).
+	// so the journal stayed and session-owner cleanup waited for it all day (test-w, Windows test machine, 2026-11-16).
 	if !safeAbsolute(got.Home) || !safeAbsolute(got.Executable) || !safeAbsolute(got.StateRoot) || !safeAbsolute(got.WorkspaceRoot) {
 		t.Fatalf("restore request fails Validate's paths: %+v", got)
 	}
@@ -110,7 +110,7 @@ func TestWindowsRestoreStartsThePreviousSessionOwner(t *testing.T) {
 	}
 }
 
-// victus 2026-11-10: an update killed after it stopped the services was recovered only by `pb doctor --repair`,
+// Windows test machine 2026-11-10: an update killed after it stopped the services was recovered only by `pb doctor --repair`,
 // and its session owner stayed running: nothing recorded which version the dead installer was installing. The
 // record names it; the recovery withdraws it once and a failed withdrawal keeps the record for the next look.
 func TestWindowsRecordedCandidateIsWithdrawnOnceAfterItsInstallerDied(t *testing.T) {

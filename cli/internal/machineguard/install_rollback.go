@@ -153,7 +153,7 @@ func restoreGuardInstallation(ctx context.Context, r *guardFileRollback, stop, r
 		r.cleanup()
 	}
 	// When the files changed under us (another installer put a guard in place) the copy is kept, but the
-	// guard is never left stopped: start whatever is installed (ubuntu24, 2026-10-26: a failed update's
+	// guard is never left stopped: start whatever is installed (teammate machine, 2026-10-26: a failed update's
 	// undo stopped the guard the updater had just healed and left the host without one).
 	if restore != nil {
 		err = errors.Join(err, restore(cleanup))

@@ -9,15 +9,15 @@ gate, hook, doc or other script names it. Add a row when you add a file.
 | File | What | Called by |
 |---|---|---|
 | `gate.sh` | the regression gate (`make gate`) | `Makefile`, AGENTS.md; stubbed by `.github/tests/test_gate.py` |
-| `check-shared-imports.sh` | `shared/` imports nothing from cli or relay | `gate.sh`, `lane-test.yml` |
+| `check-shared-imports.sh` | `shared/` imports nothing from cli or relay | `gate.sh`, `test.yml` |
 | `check_domains.py`, `test_check_domains.py` | no hardcoded domains | `gate.sh`, `server-ci.yml` |
 | `check_doc_links.py`, `check_doc_envvars.py` and their `test_*` | docs link and env-var lint | `gate.sh`; links also `server-ci.yml` |
 | `check_duplicate_packages.py`, `check_migrations.py` and their `test_*` | duplicate-package guard, migration lint | `gate.sh` |
 | `check_server_deployed.py`, `test_check_server_deployed.py` | warns when a client push is ahead of the deployed server | `gate.sh`, `release.yml` |
 | `pr-checks.py`, `test_pr_checks.py` | fast and heavy PR checks | `pr-checks.yml`; the test in `server-ci.yml` |
-| `skip-audit.py`, `skip-allowlist.txt`, `skip-baseline.txt` | a test skipped in every CI step fails the run | `lane-test.yml`, `.github/tests/test_skip_audit.py` |
-| `gotest-json.py` | `go test -json` to JUnit/JSONL for the sharded runs | `lane-test.yml`, `skip-audit.py` |
-| `cli-root-tests.sh` | cli tests that need root | `lane-test.yml`, `server-ci.yml` |
+| `skip-audit.py`, `skip-allowlist.txt`, `skip-baseline.txt` | a test skipped in every CI step fails the run | `test.yml`, `.github/tests/test_skip_audit.py` |
+| `gotest-json.py` | `go test -json` to JUnit/JSONL for the sharded runs | `test.yml`, `skip-audit.py` |
+| `cli-root-tests.sh` | cli tests that need root | `test.yml`, `server-ci.yml` |
 | `hooks/pre-push`, `hooks/test_pre_push.py` | builds and vets the pushed modules on a clean checkout | `make hooks` installs it |
 
 ## Running tests and pushing
@@ -27,7 +27,7 @@ gate, hook, doc or other script names it. Add a row when you add a file.
 | `ci-test.sh` | heavy suites on GitHub Actions for the committed HEAD | manual (AGENTS.md); `.github/tests/test_ci_test.py` |
 | `remote-test.sh` | one module's tests on a spare host | manual (AGENTS.md) |
 | `push.sh`, `test_push.py` | the shared-branch push path | manual (AGENTS.md); test in `server-ci.yml` |
-| `oracle-slot.sh` | fair queue for compiles on the shared build host | `hooks/pre-push` when present; manual |
+| `build-host-slot.sh` | fair queue for compiles on the shared build host | `hooks/pre-push` when present; manual |
 | `perfdb.sh` | prints the isolated PostgreSQL DSN for the performance budgets | manual; named by `gate.sh` |
 
 ## Repository, release and live deploys
@@ -54,7 +54,7 @@ gate, hook, doc or other script names it. Add a row when you add a file.
 
 | Directory | What | Called by |
 |---|---|---|
-| `device-smoke/` | the device suite and its unit tests | `make smoke`, `cross-platform.yml`, `lane-test.yml`, `final-recheck.yml`; see its README |
+| `device-smoke/` | the device suite and its unit tests | `make smoke`, `cross-platform.yml`, `test.yml`, `final-recheck.yml`; see its README |
 | `quick-update/` | parallel feature runs after a build | `quick-update.yml`, `gate.sh` |
 | `probe/` | production canary and console probes | `server-ci.yml`, `deploy/*canary*` units, `deploy/staging.py` |
 | `e2e/` | core end-to-end (`TestE2ECore`) | `e2e.yml` |

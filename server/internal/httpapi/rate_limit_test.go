@@ -8,7 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 )
 
-// F21-14 (Lane X #15): sign-in routes are limited per client network before the handler runs;
+// F21-14 (#15): sign-in routes are limited per client network before the handler runs;
 // other routes are not.
 func TestSignInLimitAppliesToSignInRoutesOnly(t *testing.T) {
 	reached := 0

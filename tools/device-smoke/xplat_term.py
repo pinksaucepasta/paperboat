@@ -7,6 +7,7 @@ The controller drives a real pseudo-terminal with pexpect: an `ssh -tt` hop (or 
 runs `pb connect <target>`, so the client's own terminal handling is what is tested, and the target's default shell answers.
 Results: tools/device-smoke/results/xplat-term-<stamp>.json (`X-16:utf8:L>W`, `X-11:connect:L>W`).
 """
+from dev_targets import get_setting
 import hashlib
 import json
 import os
@@ -47,7 +48,7 @@ def client_argv(src, tail):
         return ['ssh', '-tt', host, 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
     # the Mac VM: its login keychain is unlocked per command, and its host key is not in known_hosts
     return ['ssh', '-tt', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR', '-o', 'BatchMode=yes',
-            'admin@100.88.169.42', fleet.mac_unlock() + 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
+            get_setting('xplat_macos_vm_ssh'), fleet.mac_unlock() + 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
 
 
 class Terminal:

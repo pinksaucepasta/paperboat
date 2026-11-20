@@ -1,5 +1,5 @@
 #!/bin/bash
-# member_container.sh HOST NAME PBBIN: a disposable systemd container NAME on HOST (image gap5-systemd, pbvm4) with PBBIN
+# member_container.sh HOST NAME PBBIN: a disposable systemd container NAME on HOST (image gap5-systemd, Linux test VM) with PBBIN
 # installed and paired as a machine of the SECOND account (the member of the shared test team): the member side of the
 # two-account team checks (team_two_account.py --member-cmd, tunnel/preview ip-rules observers).
 # The member is the console session STATE (mode 600); its API token is minted from it, lives one day and goes straight

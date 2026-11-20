@@ -1,5 +1,5 @@
 // Package ratelimit is the in-memory, per-client token bucket in front of the sign-in and
-// credential endpoints (PLAN F21-14, Lane X #15). It runs before any database work, so one client
+// credential endpoints (PLAN F21-14 #15). It runs before any database work, so one client
 // cannot use up shared capacity or hold database locks by retrying credentials; database-backed
 // limits (device authorization) and the operator per-email lockout stay as the second line.
 package ratelimit

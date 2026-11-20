@@ -80,7 +80,7 @@ func TestWindowsImageUnderRootsUsesPathBoundaries(t *testing.T) {
 		{`C:\Program Files\Paperboat\users\` + instance + `2\bin\pb.exe`, false},
 		{`C:\Program Files\Paperboat\users\` + sweepTestInstance('b') + `\bin\pb.exe`, false},
 		{`C:\Program Files\Paperboat\MachineGuard\pb.exe`, false},
-		{`C:\Users\pujan\AppData\Local\Temp\Paperboat Uninstall\x\pb.exe`, false},
+		{`C:\Users\tester\AppData\Local\Temp\Paperboat Uninstall\x\pb.exe`, false},
 		{``, false},
 	}
 	for _, tc := range cases {
@@ -190,7 +190,7 @@ func TestWindowsPayloadProcessesAreOnlyTheAccountsOwn(t *testing.T) {
 
 // The reset that follows an interrupted uninstall found a service registered without its declaration and failed
 // "remove system Paperboat runtime" every time, although the account sweep that ends the purge deletes such a
-// service by name (2026-11-19, victus).
+// service by name (2026-11-19, Windows test machine).
 func TestPurgeServiceDeclarationsLeavesAnUndeclaredServiceToTheSweep(t *testing.T) {
 	directory := t.TempDir()
 	instance := sweepTestInstance('a')

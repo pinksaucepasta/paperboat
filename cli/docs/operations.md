@@ -212,7 +212,7 @@ the generation-bound `KnownHostsCommand` are not covered by this suite.
 
 The operation suite ran in the Linux arm64 workspace; the partial desktop scenario ran
 with client and backend on retired Linux test VM amd64 under Xvfb. It does not establish a separate
-HP-to-retired Linux test VM network scenario. Windows amd64 and macOS arm64 editor combinations remain
+linux-test-to-retired Linux test VM network scenario. Windows amd64 and macOS arm64 editor combinations remain
 unqualified. Compatibility with the verified SSH operations is expected; universal
 native-editor compatibility and full editor recovery are not claimed.
 

@@ -13,7 +13,7 @@ import (
 // not dropped; it waits for the next token, so requests in between coalesce into it. A 429 holds the budget for the
 // server's Retry-After, at least one refill; a stream admission or a server-announced change waits only the
 // Retry-After itself (an announced change also borrows at most one burst ahead, then waits for tokens), as Tailscale's controlclient does (auto.go updateRoutine, direct.go
-// parseRateLimitError). Uncoupled triggers drove one machine credential past 150 calls a minute (hp 2026-10-27,
+// parseRateLimitError). Uncoupled triggers drove one machine credential past 150 calls a minute (Linux test machine 2026-10-27,
 // dev-e5cebaac and dev-b7651a0a).
 var renewalBudget = &tokenBucket{refill: 12 * time.Second, burst: 2}
 

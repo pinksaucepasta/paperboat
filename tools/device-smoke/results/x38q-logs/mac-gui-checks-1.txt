@@ -1,8 +1,0 @@
-== mp>W ping
-sample 1: path=regional_relay connect=2782.16ms
-sample 2: path=regional_relay connect=0.16ms
-sample 3: path=regional_relay connect=0.13ms
-summary: sent=3 received=3 loss=0.0% connect min/avg/max=0.13/927.49/2782.16ms
-== mp>W exec
-Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env unlock` on any of your devices
-ok

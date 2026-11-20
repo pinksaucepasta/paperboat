@@ -32,20 +32,20 @@ func TestRemovePathEntryPreservesUnrelatedEntries(t *testing.T) {
 }
 
 func TestWithCommandDirectoryUpdatesExistingPathWithoutDroppingEnvironment(t *testing.T) {
-	input := []string{"Path=C:\\Windows\\System32", "USER=pujan"}
+	input := []string{"Path=C:\\Windows\\System32", "USER=tester"}
 	got := WithCommandDirectory(input, `C:\Program Files\Paperboat\bin`)
-	want := []string{"Path=C:\\Windows\\System32;C:\\Program Files\\Paperboat\\bin", "USER=pujan"}
+	want := []string{"Path=C:\\Windows\\System32;C:\\Program Files\\Paperboat\\bin", "USER=tester"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("WithCommandDirectory = %#v, want %#v", got, want)
 	}
-	if !slices.Equal(input, []string{"Path=C:\\Windows\\System32", "USER=pujan"}) {
+	if !slices.Equal(input, []string{"Path=C:\\Windows\\System32", "USER=tester"}) {
 		t.Fatalf("WithCommandDirectory mutated input: %#v", input)
 	}
 }
 
 func TestWithCommandDirectoryAddsMissingPath(t *testing.T) {
-	got := WithCommandDirectory([]string{"USER=pujan"}, `C:\Program Files\Paperboat\bin`)
-	want := []string{"USER=pujan", `Path=C:\Program Files\Paperboat\bin`}
+	got := WithCommandDirectory([]string{"USER=tester"}, `C:\Program Files\Paperboat\bin`)
+	want := []string{"USER=tester", `Path=C:\Program Files\Paperboat\bin`}
 	if !slices.Equal(got, want) {
 		t.Fatalf("WithCommandDirectory = %#v, want %#v", got, want)
 	}

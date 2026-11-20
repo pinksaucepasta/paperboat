@@ -1,5 +1,5 @@
 """A config check that starts its repository server first stops the one an earlier killed run left, before it wipes the pid file
-(two orphaned `python3 server.py` from 2026-11-13 kept session scopes alive on pbvm3 for a week)."""
+(two orphaned `python3 server.py` from 2026-11-13 kept session scopes alive on Linux test VM for a week)."""
 import unittest
 from unittest.mock import patch
 

@@ -119,6 +119,9 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	if err := setSecret("PAPERBOAT_BACKUP_REPORT_TOKEN", &c.Secrets.BackupReportToken); err != nil {
 		return err
 	}
+	if err := setSecret("PAPERBOAT_HOST_HEALTH_TOKEN", &c.Secrets.HostHealthToken); err != nil {
+		return err
+	}
 	if value, ok := lookup("PAPERBOAT_WORKER_STALL_TIMEOUT"); ok {
 		parsed, err := time.ParseDuration(value)
 		if err != nil || parsed < time.Minute || parsed > 24*time.Hour {

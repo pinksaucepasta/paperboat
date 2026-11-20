@@ -35,19 +35,19 @@ class TraceTest(unittest.TestCase):
             if len(calls) == 3:
                 stop.set()
             return {'selected_path': 'direct'}
-        dps.sample_status('hp', stop, samples, interval=0.01, sample=sample)
+        dps.sample_status('laptop', stop, samples, interval=0.01, sample=sample)
         self.assertEqual(['direct', 'pb status failed'], [r.get('selected_path') or r['error'] for _, r in samples[:2]])
         self.assertEqual(3, len(samples))
 
     def test_the_stream_client_runs_on_the_windows_device_behind_its_ssh_login(self):
         device = winhost.WindowsDevice(target='user@win', pb_exe=r'C:\Program Files\Paperboat\pb.exe', password='')
-        local = dps.stream_argv('hp', 'echo 1', None)
-        self.assertEqual(['exec', 'hp', '--', 'sh', '-c', 'echo 1'], local[1:])
-        argv = dps.stream_argv('hp', 'i=0; echo $i', device)
+        local = dps.stream_argv('laptop', 'echo 1', None)
+        self.assertEqual(['exec', 'laptop', '--', 'sh', '-c', 'echo 1'], local[1:])
+        argv = dps.stream_argv('laptop', 'i=0; echo $i', device)
         self.assertEqual(['user@win'], [word for word in argv if word.startswith('user@')])
         encoded = argv[-1].rsplit(' ', 1)[1]
         command = __import__('base64').b64decode(encoded).decode('utf-16-le')
-        self.assertEqual("& 'C:\\Program Files\\Paperboat\\pb.exe' exec 'hp' -- sh -c 'i=0; echo $i'", command)
+        self.assertEqual("& 'C:\\Program Files\\Paperboat\\pb.exe' exec 'laptop' -- sh -c 'i=0; echo $i'", command)
 
 
 if __name__ == '__main__':

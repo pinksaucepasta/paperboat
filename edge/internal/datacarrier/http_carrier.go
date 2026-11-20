@@ -37,7 +37,6 @@ type HTTPService struct {
 	h2             *http.Server
 	h3             *http3.Server
 	accepted       chan *Server
-	admissions     chan struct{}
 	done           chan struct{}
 	rebindInterval time.Duration
 	once           sync.Once
@@ -56,13 +55,6 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 	if err := carrier.validateListener(); err != nil {
 		return nil, err
 	}
-	maximum := config.MaximumCarriers
-	if maximum == 0 {
-		maximum = DefaultMaximumCarriers
-	}
-	if maximum < 0 || maximum > 1<<16 {
-		return nil, ErrInvalidEndpoint
-	}
 	rebind := config.RebindInterval
 	if rebind == 0 {
 		rebind = DefaultRebindInterval
@@ -71,10 +63,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		return nil, ErrInvalidEndpoint
 	}
 	serviceCtx, cancel := context.WithCancel(ctx)
-	// admissions is held for each carrier's whole life: it bounds concurrent carriers, so it is
-	// sized by MaximumCarriers. (It was the accept queue depth, 16, so an edge refused every
-	// carrier past the 16th with 503 "carrier capacity reached".)
-	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, rebindInterval: rebind, accepted: make(chan *Server, carrier.QueueDepth), admissions: make(chan struct{}, maximum), done: make(chan struct{}), servers: make(map[*Server]struct{})}
+	s := &HTTPService{ctx: serviceCtx, cancel: cancel, config: carrier, onFailure: config.OnFailure, rebindInterval: rebind, accepted: make(chan *Server, carrier.QueueDepth), done: make(chan struct{}), servers: make(map[*Server]struct{})}
 	if config.TCP != nil {
 		if err := config.TCP.validateServer(); err != nil {
 			cancel()
@@ -98,7 +87,7 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		}}
 		s.h2.HTTP2 = &http.HTTP2Config{MaxConcurrentStreams: carrier.MaximumStreams}
 		go func() {
-			if err := s.h2.Serve(newHandshakeListener(listener, tlsConfig, carrier.StreamOpenLimit, maximum, s.observeFailure)); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
+			if err := s.h2.Serve(newHandshakeListener(listener, tlsConfig, carrier.StreamOpenLimit, s.observeFailure)); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
 				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})
 			}
 		}()
@@ -165,13 +154,6 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 		identity, err := bindEndpointPeer(endpoint, *state)
 		if err != nil {
 			http.Error(w, "carrier authentication failed", http.StatusForbidden)
-			return
-		}
-		select {
-		case s.admissions <- struct{}{}:
-			defer func() { <-s.admissions }()
-		default:
-			http.Error(w, "carrier capacity reached", http.StatusServiceUnavailable)
 			return
 		}
 		flusher, ok := w.(http.Flusher)

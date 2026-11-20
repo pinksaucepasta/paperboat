@@ -28,7 +28,7 @@ const (
 
 // checkWorkerHandover runs pb update's worker handover for a public preview and an engine tunnel while
 // the edge sends each a request every 50 ms on the carrier it holds the route on. Every request needs
-// an ingress decision for that carrier (pbvm4 prefix1, 2026-11-05: the next worker's attachment
+// an ingress decision for that carrier (Linux test VM prefix1, 2026-11-05: the next worker's attachment
 // withdrew the old carrier's decisions before the new carrier served the routes, and 20 preview and 16
 // tunnel requests failed for 4.6 s). After the run f.request is the new worker's.
 func checkWorkerHandover(t *testing.T, f *agentFixture, control *controlplane.EdgeService, tunnelRoute string) {
@@ -173,7 +173,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_handover','foreground','http','127.0.0.1:30
 		t.Fatal("the next worker reused the old carrier session")
 	}
 	next.Store(fresh.Binding.SessionID)
-	// pbvm1 vm1-1a6479a4-124638: the edge had the preview route on the new carrier at once and was denied
+	// Linux test VM vm1-1a6479a4-124638: the edge had the preview route on the new carrier at once and was denied
 	// there for 8 s until the server learned the carrier was up, so every request fell back to the old one.
 	phase.Store(handoverBoth)
 	step()

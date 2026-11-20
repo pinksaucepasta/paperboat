@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 )
 
-// Every way the administrator step can end names it (a Windows test VM and victus: "Paperboat could not finish the command").
+// Every way the administrator step can end names it (a Windows test VM and Windows test machine: "Paperboat could not finish the command").
 func TestElevatedInstallFailureMessageNamesTheStep(t *testing.T) {
 	remote := &elevation.RemoteError{Code: "install_runtime", Message: "private"}
 	if got := elevatedInstallFailureMessage(remote); !strings.Contains(got, "installing runtime services") {

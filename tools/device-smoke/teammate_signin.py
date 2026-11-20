@@ -7,7 +7,7 @@ already signed in is left alone.
 Usage: teammate_signin.py HOST CONTAINER USER   env: ORIGIN, STATE, PW_CHROMIUM, [PW_MODULE]
 
 Windows device (the profile is %USERPROFILE%\\.pb-smoke\\teammate; only pb.exe runs there, through winhost):
-       teammate_signin.py --windows-install-json FILE   env: VICTUS_PASS, ORIGIN, STATE, PW_CHROMIUM, [PW_MODULE]
+       teammate_signin.py --windows-install-json FILE   env: SMOKE_WINDOWS_PASSWORD, ORIGIN, STATE, PW_CHROMIUM, [PW_MODULE]
 """
 import json
 import os

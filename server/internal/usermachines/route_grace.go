@@ -11,7 +11,7 @@ import (
 
 // defaultRouteReconnectGrace is how long a descriptor request waits for a machine's runtime route that has just
 // gone: a pb update replaces the host's connector, and the route is not "applied" for the new generation until the
-// edge has taken it (pbvm4: sends and execs got machine_offline for the length of that handover while the machine
+// edge has taken it (Linux test VM: sends and execs got machine_offline for the length of that handover while the machine
 // stayed online). Headscale waits the same 10 s before it calls a node that dropped its map poll offline
 // (~/ref/headscale/hscontrol/poll.go:172-200, "wait up to 10 seconds for the node to reconnect").
 const defaultRouteReconnectGrace = 10 * time.Second

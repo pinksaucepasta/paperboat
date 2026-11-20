@@ -13,7 +13,7 @@ func TestUsageErrorShowsTheFailingCommandNotTheRootHelp(t *testing.T) {
 		want string
 	}{
 		{[]string{"access", "machine"}, "pb access machine <machine> [flags]"},
-		{[]string{"access", "machine", "hp"}, "--port int"},
+		{[]string{"access", "machine", "laptop"}, "--port int"},
 		{[]string{"edge", "bogus"}, "pb edge [flags]"},
 		{[]string{"resolve"}, "pb resolve <query> [flags]"},
 		{[]string{"approve"}, "pb approve <machine-id> [flags]"},

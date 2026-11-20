@@ -2,6 +2,7 @@ package derpquic
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -85,21 +86,34 @@ func decodeControl(b []byte) (packet, error) {
 	copy(k[:], b[:32])
 	return packet{key.NodePublicFromRaw32(mem.B(k[:])), b[32:], true}, nil
 }
+
+// sendPacket sends p as one datagram when the carrier's path MTU allows it now (quic-go's path MTU discovery grows it; losing
+// either of two fragments loses the whole packet, which doubled the loss the inner connection saw), and as fragments of
+// fragmentPayload only when it does not fit. Prior art: quic-go Conn.SendDatagram reports DatagramTooLargeError instead of fragmenting.
 func sendPacket(c *quic.Conn, sequence *atomic.Uint64, p packet) error {
 	if len(p.data) == 0 || len(p.data) > MaxPacket {
 		return ErrProtocol
 	}
 	id := sequence.Add(1)
 	k := p.peer.AppendTo(nil)
-	for off := 0; off < len(p.data); off += fragmentPayload {
-		end := min(off+fragmentPayload, len(p.data))
+	datagram := func(off, end int) []byte {
 		b := make([]byte, fragmentHeader+end-off)
 		binary.BigEndian.PutUint64(b, id)
 		copy(b[8:40], k)
 		binary.BigEndian.PutUint16(b[40:42], uint16(len(p.data)))
 		b[42] = byte(off / fragmentPayload)
 		copy(b[43:], p.data[off:end])
-		if err := c.SendDatagram(b); err != nil {
+		return b
+	}
+	if len(p.data) > fragmentPayload {
+		err := c.SendDatagram(datagram(0, len(p.data)))
+		var tooLarge *quic.DatagramTooLargeError
+		if !errors.As(err, &tooLarge) {
+			return err
+		}
+	}
+	for off := 0; off < len(p.data); off += fragmentPayload {
+		if err := c.SendDatagram(datagram(off, min(off+fragmentPayload, len(p.data)))); err != nil {
 			return err
 		}
 	}
@@ -119,7 +133,7 @@ type reassembler struct {
 }
 
 func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePublic) bool) (packet, bool, error) {
-	if len(b) < fragmentHeader+1 || len(b) > fragmentHeader+fragmentPayload {
+	if len(b) < fragmentHeader+1 || len(b) > fragmentHeader+MaxPacket {
 		return packet{}, false, ErrProtocol
 	}
 	id := binary.BigEndian.Uint64(b)
@@ -128,7 +142,10 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 	var raw [32]byte
 	copy(raw[:], b[8:40])
 	peer := key.NodePublicFromRaw32(mem.B(raw[:]))
-	if id == 0 || size < 1 || size > MaxPacket || index > 1 || index*fragmentPayload >= size || len(b)-fragmentHeader != min(fragmentPayload, size-index*fragmentPayload) {
+	part := len(b) - fragmentHeader
+	// A packet is one datagram carrying all of it (index 0), or two fragments of fragmentPayload and the rest.
+	whole := index == 0 && part == size
+	if id == 0 || size < 1 || size > MaxPacket || index > 1 || index*fragmentPayload >= size || !whole && part != min(fragmentPayload, size-index*fragmentPayload) {
 		return packet{}, false, ErrProtocol
 	}
 	if authorize != nil && !authorize(peer) {
@@ -139,6 +156,10 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 	}
 	if id > r.highest {
 		r.highest = id
+	}
+	if whole {
+		r.completed[id%128] = id
+		return packet{peer, append([]byte(nil), b[43:]...), false}, true, nil
 	}
 	if r.pending == nil {
 		r.pending = make(map[uint64]*assembly)
@@ -199,6 +220,7 @@ type budget struct {
 	burst   float64
 	at      time.Time
 	tokens  float64
+	offered uint64 // demand since the last takeOffered: the bytes offered to reserve, counted twice when the limit delayed or dropped them
 }
 
 func newBudget(bytesPerSecond float64) *budget {
@@ -242,6 +264,7 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 	cost := b.charge(size)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.offered += uint64(size)
 	if b.at.IsZero() {
 		b.tokens = b.burst
 	} else {
@@ -252,12 +275,24 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 		b.tokens -= cost
 		return 0, true
 	}
+	// The limit held this packet back: the flow wanted more than it got, which the demand reports by counting the bytes twice (so a flow
+	// held at a small share can grow it, instead of looking as small as the share it was given).
+	b.offered += uint64(size)
 	delay := time.Duration((cost - b.tokens) / b.rate * float64(time.Second))
 	if delay > maxDelay {
 		return 0, false
 	}
 	b.tokens -= cost
 	return delay, true
+}
+
+// takeOffered returns the bytes offered since the last call and starts a new window.
+func (b *budget) takeOffered() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := b.offered
+	b.offered = 0
+	return n
 }
 
 // setRate changes the refill rate and the burst; tokens already held are cut to the new burst.

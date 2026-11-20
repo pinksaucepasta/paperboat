@@ -27,7 +27,7 @@ results = {}
 IDS = {}
 TAG = uuid.uuid4().hex[:6]
 TEAM = os.environ.get('XPLAT_TEAM', '')
-MEMBER_PW = Path(os.environ.get('XPLAT_MEMBER_VAULT_PW', Path.home() / '.pbmac/xa2m/vault.pw'))
+MEMBER_PW = Path(os.environ.get('XPLAT_MEMBER_VAULT_PW', Path.home() / '.mac-vm/xa2m/vault.pw'))
 NAME = 'XS_TEAM_' + TAG
 VALUE = 'team-' + TAG
 ARGS = ['--workspace', TEAM]
@@ -81,7 +81,7 @@ def setup(owner, member, devices, member_account):
     ids = machine_ids(owner)
     IDS.update(ids)
     owner_account = json.loads(owner.pb('auth', 'status', '--json').text)['account']['id']
-    pw = fleet.Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw')).read_bytes().strip()
+    pw = fleet.Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.mac-vm/xplat2-vault.pw')).read_bytes().strip()
     for dev, secret in [(d, pw) for d in devices.values()]:
         assert dev.pb('env', 'unlock', '--password-stdin', input=secret + b'\n', timeout=120).rc == 0, '%s unlock' % dev.name
     assert member.pb('env', 'unlock', '--password-stdin', input=MEMBER_PW.read_bytes().strip() + b'\n', timeout=120).rc == 0, 'member unlock'

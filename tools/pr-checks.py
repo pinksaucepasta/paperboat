@@ -45,7 +45,7 @@ def affected(packages, paths, transitive=True):
 
 def test_packages(module, names):
     """-race tests. A database module's packages each get a fresh database from tools/pg-test-exec.sh (shared with
-    server-ci.yml, lane-test.yml and tools/remote-test.sh): packages sharing one database truncate each other's rows."""
+    server-ci.yml, test.yml and tools/remote-test.sh): packages sharing one database truncate each other's rows."""
     command = ['go', 'test', '-race', '-count=1']
     if os.environ.get('PAPERBOAT_TEST_DATABASE_DSN') and module in DATABASE_MODULES:
         command += ['-exec', str(ROOT / 'tools/pg-test-exec.sh')]

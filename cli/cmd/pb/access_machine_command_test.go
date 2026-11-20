@@ -369,7 +369,7 @@ func TestTeamMemberIsToldWhyASharedMachinePortIsNotOffered(t *testing.T) {
 	}
 }
 
-// Round 29, lanea-r1: a port with no service ended "while reading the machine from the local Paperboat
+// Round 29, test-r1: a port with no service ended "while reading the machine from the local Paperboat
 // service: DeadlineExceeded" when the daemon call hit the same deadline; it is the wait for the port.
 func TestMachineServiceWaitNamesTheWaitWhenTheDaemonCallTimesOut(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)

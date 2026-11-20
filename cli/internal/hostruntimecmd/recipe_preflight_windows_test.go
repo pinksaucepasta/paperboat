@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// A recipe install that is not elevated stops before the recipe session (victus, standard user).
+// A recipe install that is not elevated stops before the recipe session (Windows test machine, standard user).
 func TestRecipeInstallPreflightRefusesWithoutElevation(t *testing.T) {
 	old := recipeProcessElevated
 	t.Cleanup(func() { recipeProcessElevated = old })

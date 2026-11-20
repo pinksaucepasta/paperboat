@@ -8,8 +8,8 @@ class Lines(unittest.TestCase):
         return [int(n) for n in matrix.lines(data, prefix)]
 
     def test_the_first_line_behind_the_hosts_osc_3008_start_is_found(self):
-        # captured on a Windows client (N12, hp): the start marker ends with ESC \\ and no newline, the end marker follows the last line
-        data = b'prompt$ \r\n\x1b]3008;start=1;type=command;cwd=/home/anvit\x1b\\' + b''.join(b'DR%d\r\n' % i for i in range(1, 61)) + \
+        # captured on a Windows client (N12, Linux test machine): the start marker ends with ESC \\ and no newline, the end marker follows the last line
+        data = b'prompt$ \r\n\x1b]3008;start=1;type=command;cwd=/home/vantage-b\x1b\\' + b''.join(b'DR%d\r\n' % i for i in range(1, 61)) + \
             b'\x1b]3008;end=1;exit=success\x1b\\\x1b]3008;start=2;type=prompt\x1b\\'
         self.assertEqual(list(range(1, 61)), self.numbers(data))
 

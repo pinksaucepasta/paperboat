@@ -192,7 +192,7 @@ func (a *NativePrivateTCPAccess) DialMachine(ctx context.Context, machineID stri
 	route := "tcp:" + strconv.Itoa(port)
 	request := api.NativePrivateGrantRequest{OperationID: operation, ResourceKind: "machine_service", ResourceID: machineID, RouteID: route, Protocol: "tcp"}
 	grant, err := a.issue(ctx, request)
-	// A service that just started is allowed but not yet announced by its machine (Lane H: the first
+	// A service that just started is allowed but not yet announced by its machine (the first
 	// seconds after an origin starts). The server says so with 409 service_not_announced; wait for
 	// the announcement instead of failing the connection.
 	for attempt := 1; serviceNotAnnounced(err) && attempt < serviceAnnouncementAttempts; attempt++ {

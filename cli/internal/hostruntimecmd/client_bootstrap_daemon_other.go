@@ -29,7 +29,7 @@ func bootstrapLocalDaemonInstaller(cfg *config.Config) func(context.Context) err
 
 // daemonBindWindow is how long pairing waits for the installed daemon: its service cutover and start,
 // then its first refresh, which on a slow control plane uses its whole budget. A fixed 45 s ended 2 s
-// before a daemon on the shared account published its first state (lanep-r3b, 2026-10-22).
+// before a daemon on the shared account published its first state (test-r3b, 2026-10-22).
 const daemonBindWindow = 30*time.Second + localdaemon.FirstRefreshBudget
 
 // bindBootstrapDaemon completes canonical cutover only after the managed runtime

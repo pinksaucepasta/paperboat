@@ -11,7 +11,7 @@ import (
 )
 
 // claimHold is how long a released address stays reserved for its previous (uid, account, machine) before
-// any other claimant may get it (PLAN 3b multi-account hosts, Lane X 1).
+// any other claimant may get it (PLAN 3b multi-account hosts 1).
 const claimHold = 7 * 24 * time.Hour
 
 const (

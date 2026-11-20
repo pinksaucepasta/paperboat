@@ -495,12 +495,12 @@ func TestMachineAddPrintsOneShotEnrollmentCommands(t *testing.T) {
 	writeTestProfile(t, dir, configPath, srv.URL)
 
 	var output bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Victus"}, &output, &output); code != 0 {
+	if code := run(context.Background(), []string{"--config", configPath, "machine", "add", "--name", "Win-target"}, &output, &output); code != 0 {
 		t.Fatalf("exit=%d output=%q", code, output.String())
 	}
 	// One token for both platforms, in the installer's environment: never in a URL or an argument. The installer address
 	// is the same for both; the server behind it picks the script by user agent.
-	want := []string{"curl -fsSL https://install.example.test/custom | PB_TOKEN='the-token' PB_NAME='Victus' sh", "$env:PB_TOKEN='the-token'; $env:PB_NAME='Victus'; irm https://install.example.test/custom | iex", "Windows (PowerShell):"}
+	want := []string{"curl -fsSL https://install.example.test/custom | PB_TOKEN='the-token' PB_NAME='Win-target' sh", "$env:PB_TOKEN='the-token'; $env:PB_NAME='Win-target'; irm https://install.example.test/custom | iex", "Windows (PowerShell):"}
 	if creates != 1 || strings.Contains(output.String(), "?p=") || strings.Contains(output.String(), "bash") {
 		t.Fatalf("output=%q", output.String())
 	}

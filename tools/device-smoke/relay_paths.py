@@ -9,7 +9,7 @@ exec is recorded as the time to first packet. Cases:
   direct blocked, relay on  the direct path between A and B dropped (the signed endpoints are unreachable): cold exec works over the relay
 Rules are removed on every exit path.
 
-  relay_paths.py --host ubuntu@anvit --a rel-nat-a --b rel-nat-b --relay 203.0.113.10 --relay 203.0.113.11
+  relay_paths.py --host tester@staging.example.test --a rel-nat-a --b rel-nat-b --relay 203.0.113.10 --relay 203.0.113.11
 """
 import argparse, base64, json, subprocess, sys, time
 from pathlib import Path
@@ -27,14 +27,19 @@ def docker(ct):
     return f"sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {ct}"
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--a", required=True)
     parser.add_argument("--b", required=True)
     parser.add_argument("--relay", action="append", required=True, help="a relay address to block (repeat)")
     parser.add_argument("--limit", type=float, default=15.0)
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     host, checks = args.host, []
 
     def add(name, ok, detail):

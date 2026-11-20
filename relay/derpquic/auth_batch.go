@@ -45,7 +45,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 	defer p.stream.SetReadDeadline(time.Time{})
 	var merged Grant
 	digest := sha256.New()
-	expired := false
+	var expired error
 	// Parts arrive over up to the read deadline: each is verified on the clock it arrives at, and
 	// every part must still be valid when the merged grant is admitted.
 	earliest := int64(math.MaxInt64)
@@ -71,13 +71,15 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 		}
 		grant, err := s.verify(string(body), p.state(), clock())
 		if errors.Is(err, ErrExpired) {
-			expired = true
+			if expired == nil {
+				expired = err
+			}
 			continue
 		}
 		if err != nil {
 			return fmt.Errorf("verify grant: %w", err)
 		}
-		if expired {
+		if expired != nil {
 			continue
 		}
 		earliest = min(earliest, grant.ExpiresAt)
@@ -95,8 +97,11 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 		}
 	}
 	now = clock()
-	if expired || earliest <= now.Unix() {
-		return ErrExpired
+	if expired != nil {
+		return expired
+	}
+	if earliest <= now.Unix() {
+		return fmt.Errorf("grant expired while receiving relay authorization; refresh authority: %w", ErrExpired)
 	}
 	if count > 1 {
 		copy(merged.signedHash[:], digest.Sum(nil))

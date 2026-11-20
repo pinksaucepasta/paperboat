@@ -14,7 +14,7 @@ import (
 
 // A peer joining, leaving or changing keys is published by the server; the machine renews its signed
 // peer network at once instead of at the next 30 s renewal, on the running engine: a restart gave the engine
-// a new port and dropped every open session (hp 2026-10-27, a preview create broke pb preview inspect).
+// a new port and dropped every open session (Linux test machine 2026-10-27, a preview create broke pb preview inspect).
 func TestNativePeerRenewsItsNetworkWhenThePeersChange(t *testing.T) {
 	_, subscriptions, plane := eventstest.Start(t, time.Hour, machineevents.TopicPeerNetwork)
 	var refreshes, starts atomic.Int32

@@ -47,7 +47,7 @@ def sign_in(dev, token):
     """Every device is signed in with the account's token, so any of them can mint an enrollment token."""
     done = dev.pb('auth', 'status', '--json')
     if done.rc == 0 and '"signed_in":true' in done.text.replace(' ', ''):
-        # signed in as WHOM matters: a device another lane signed in would mint this fleet's enrollment tokens for that lane's account
+        # signed in as WHOM matters: a device another worktree signed in would mint this fleet's enrollment tokens for that worktree's account
         status = json.loads(done.text)
         account = status.get('data', status).get('account', {}).get('id', '')
         mine = os.environ.get('XPLAT_ACCOUNT_ID')

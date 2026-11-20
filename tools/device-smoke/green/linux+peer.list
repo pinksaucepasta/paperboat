@@ -1,0 +1,2 @@
+# Cross-device checks that have passed on the Linux pair linux+peer (peer is the second device).
+terminal-replay:linux

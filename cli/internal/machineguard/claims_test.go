@@ -46,7 +46,7 @@ func TestReleasedClaimsAreHeldThenFreed(t *testing.T) {
 	}
 }
 
-// Lane X 1: a uid whose machines come and go must never fill its cap for good.
+// 1: a uid whose machines come and go must never fill its cap for good.
 func TestClaimsOfMachinesThatCameAndWentDoNotFillTheCap(t *testing.T) {
 	book, now := newClaimBook(), time.Now()
 	for i := 0; i < 600; i++ {
@@ -71,7 +71,7 @@ func TestClaimsOfMachinesThatCameAndWentDoNotFillTheCap(t *testing.T) {
 	}
 }
 
-// Lane X 3: an empty set while claims exist is never applied (a failed or empty server answer).
+// 3: an empty set while claims exist is never applied (a failed or empty server answer).
 func TestEmptyMachineSetReleasesNothing(t *testing.T) {
 	book, now := newClaimBook(), time.Now()
 	ip, _ := book.assign(claimKey{UID: "1001", Account: "acct", Machine: "m1"}, netip.MustParseAddr("127.100.0.4"), now)

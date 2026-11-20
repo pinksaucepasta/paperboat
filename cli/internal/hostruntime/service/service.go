@@ -443,7 +443,7 @@ func (i *Installer) VerifyPublishedDefinition() error {
 
 // sameDefinition is whether a published declaration is the one want renders. The labels people read (a Windows service's
 // display name and description, a systemd unit's Description) are not compared: 252b2ada1 changed them and every install over a
-// build that published the old ones failed "invalid service definition" (victus, 2026-11-19). The executable, arguments, account
+// build that published the old ones failed "invalid service definition" (Windows test machine, 2026-11-19). The executable, arguments, account
 // and environment still are; a launchd plist has no such field and compares byte for byte.
 func sameDefinition(actual, want []byte) bool {
 	if bytes.Equal(actual, want) {

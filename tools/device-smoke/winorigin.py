@@ -1,6 +1,6 @@
 """Origin web servers on the Windows host of a port-names check (port_names.py, https_front_desk.py).
 
-The check logic stays on the controller; only a small python script (python is on every runner and on victus) runs on the
+The check logic stays on the controller; only a small python script (python is on every runner and on Windows test machine) runs on the
 device, detached, with its output in a file the controller polls. {dir} in an argument is the script's temp directory; arguments have no spaces.
 """
 import contextlib

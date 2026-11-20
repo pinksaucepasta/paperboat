@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -103,7 +104,7 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	stream, err := a.openInspectorStream(ctx, access, requestID)
 	if err != nil {
-		a.observe(ctx, err)
+		a.observe(ctx, fmt.Errorf("open inspector stream: %w", err))
 		writeErrorPage(w, http.StatusServiceUnavailable, "The inspector could not reach its owner. Wait a moment and reload the page.")
 		return
 	}
@@ -123,30 +124,32 @@ func (a *InspectorEdgeAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		out.Body = http.NoBody
 	}
 	if err := out.Write(stream); err != nil {
-		a.observe(ctx, err)
-		writeErrorPage(w, http.StatusServiceUnavailable, "The inspector could not reach its owner. Wait a moment and reload the page.")
+		a.observe(ctx, fmt.Errorf("send inspector request: %w", err))
+		writeErrorPage(w, http.StatusServiceUnavailable, "Paperboat could not send the inspector request. Wait a moment and reload the page.")
 		return
 	}
 	response, err := http.ReadResponse(bufio.NewReader(io.LimitReader(stream, inspectorEdgeReplyLimit+64<<10)), out)
 	if err != nil {
-		a.observe(ctx, err)
-		writeErrorPage(w, http.StatusBadGateway, "The inspector could not reach its owner. Wait a moment and reload the page.")
+		a.observe(ctx, fmt.Errorf("read inspector response headers: %w", err))
+		writeErrorPage(w, http.StatusBadGateway, "Paperboat could not read the inspector response. Wait a moment and reload the page.")
 		return
 	}
 	defer response.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(response.Body, inspectorEdgeReplyLimit+1))
-	if err != nil || len(payload) > inspectorEdgeReplyLimit {
-		if err == nil {
-			err = errInspectorResponseLimit
-		}
-		a.observe(ctx, err)
+	if err != nil {
+		a.observe(ctx, fmt.Errorf("read inspector response body: %w", err))
+		writeErrorPage(w, http.StatusBadGateway, "Paperboat could not read the inspector response. Wait a moment and reload the page.")
+		return
+	}
+	if len(payload) > inspectorEdgeReplyLimit {
+		a.observe(ctx, errInspectorResponseLimit)
 		writeErrorPage(w, http.StatusBadGateway, "This inspector answer is too large to show. Narrow the search and try again.")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 	if _, err := w.Write(payload); err != nil {
-		a.observe(ctx, err)
+		a.observe(ctx, fmt.Errorf("write inspector response to browser: %w", err))
 	}
 }
 
@@ -160,7 +163,10 @@ func inspectorRequestSelectors(w http.ResponseWriter, r *http.Request) (inspecto
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, inspectorEdgeRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || len(body) > inspectorEdgeRequestLimit {
+	if err != nil {
+		return inspectorSelectors{}, nil, fmt.Errorf("read inspector request body: %w", err)
+	}
+	if len(body) == 0 {
 		return inspectorSelectors{}, nil, errors.New("invalid inspector body")
 	}
 	var selectors inspectorSelectors

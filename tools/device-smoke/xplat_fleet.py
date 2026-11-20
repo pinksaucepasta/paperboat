@@ -6,7 +6,7 @@
   xplat_fleet.py down    revoke the three machines by exact id and uninstall
 
 Devices (override with env): L = Docker container XPLAT_L_CT on XPLAT_L_HOST (user XPLAT_L_USER, default tester; XPLAT_L_UID, XPLAT_L_DOCKER), M = the Mac VM's `admin` user
-(its machine `apple`, GUI session, keychain unlocked per command from ~/.pbmac/vm-login.pw), or with XPLAT_MAC_SSH=macpool-N a hosted macOS runner (machine `<prefix>-m`), W = winpool runner
+(the configured macOS machine, GUI session, keychain unlocked per command from the configured macOS fixture directory), or with XPLAT_MAC_SSH=macpool-N a hosted macOS runner (machine `<prefix>-m`), W = winpool runner
 SMOKE_WINDOWS_SSH. L and W are named `<XPLAT_PREFIX>-l|-w`. The account is the Mac user's: enrollment tokens are minted by
 the Mac's own signed-in pb, so the three machines share one account. No secret is printed.
 """
@@ -23,11 +23,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import winhost  # noqa: E402
+from dev_targets import configured_path, get_setting, load, smoke_value
 
 PREFIX = os.environ.get('XPLAT_PREFIX', 'lanex')
-L_HOST, L_CT = os.environ.get('XPLAT_L_HOST', 'hp'), os.environ.get('XPLAT_L_CT', '')  # no default container: another lane's machine is not a fallback
-M_NAME = os.environ.get('XPLAT_M_NAME', 'apple')
-MAC_SSH = str(Path.home() / '.pbmac/ssh.sh')
+L_HOST, L_CT = os.environ.get('XPLAT_L_HOST') or get_setting('xplat_linux_host'), os.environ.get('XPLAT_L_CT', '')  # no default container: another worktree's machine is not a fallback
+M_NAME = os.environ.get('XPLAT_M_NAME') or smoke_value('SMOKE_MACOS_NAME', 'macos')
+MAC_FIXTURES = configured_path(load(), 'macos_fixture_dir', Path.home() / '.config/paperboat-dev/macos')
+MAC_SSH = str(MAC_FIXTURES / 'ssh.sh')
 BUILD_DIR = Path(os.environ.get('XPLAT_BUILD_DIR', '.build/xplat'))
 
 
@@ -145,7 +147,7 @@ def linux(name=None, ct=None):
 
 
 def mac_unlock():
-    password = (Path.home() / '.pbmac/vm-login.pw').read_text().strip()
+    password = (MAC_FIXTURES / 'vm-login.pw').read_text().strip()
     return 'security unlock-keychain -p %s "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; ' % shlex.quote(password)
 
 
@@ -153,13 +155,13 @@ def mac(name=None):
     host = os.environ.get('XPLAT_MAC_SSH')  # a macpool-N runner instead of the Mac VM (its logins run in the GUI session)
     if host:
         return Unix(name or PREFIX + '-m', 'darwin', ['ssh', host], '/Users/runner', '/Users/runner/.local/bin/pb')
-    if os.environ.get('XPLAT_ALLOW_FLEET_MAC') != '1':  # an empty XPLAT_MAC_SSH once sent an X-41 run to the fleet Mac (lanex2-m)
+    if os.environ.get('XPLAT_ALLOW_FLEET_MAC') != '1':  # an empty XPLAT_MAC_SSH once sent an X-41 run to the fleet Mac (test-m)
         raise SystemExit('XPLAT_MAC_SSH is not set: refusing to use the fleet Mac VM (set XPLAT_ALLOW_FLEET_MAC=1 only for the fleet owner)')
     return Unix(name or M_NAME, 'darwin', [MAC_SSH, 'vm'], '/Users/admin', '/Users/admin/.local/bin/pb', pre=mac_unlock())
 
 
 def windows(name=None):
-    return Windows(name or os.environ.get('XPLAT_W_NAME') or PREFIX + '-w')  # XPLAT_W_NAME: a runner paired next to the fleet's Victus record
+    return Windows(name or os.environ.get('XPLAT_W_NAME') or PREFIX + '-w')  # XPLAT_W_NAME: a runner paired next to the fleet's Windows test machine record
 
 
 def fleet(keys=('L', 'M', 'W')):
@@ -186,8 +188,7 @@ def mint_token(kind, name=None, controller_dev=None):
 
 def controller():
     """The device whose own signed-in pb mints tokens and lists machines: the Mac (account of the fleet of the Mac VM) or, with
-    XPLAT_CONTROLLER=L, the Linux container (a fresh account that was signed in with an API token), or with XPLAT_CONTROLLER=hp
-    the operator account's pb on hp."""
+    XPLAT_CONTROLLER=L, the Linux container (a fresh account that was signed in with an API token), or with XPLAT_CONTROLLER set to the configured Linux name, the signed-in Linux test machine."""
     if os.environ.get('XPE_CTL_CT'):  # a Docker container of the account that is never reinstalled (a build swap of L needs one)
         saved = globals()['L_CT']
         globals()['L_CT'] = os.environ['XPE_CTL_CT']
@@ -195,8 +196,12 @@ def controller():
             return linux('ctl')
         finally:
             globals()['L_CT'] = saved
-    if os.environ.get('XPLAT_CONTROLLER') == 'hp':  # the operator account's signed-in pb on hp: the fleet is that account's
-        return Unix('hp', 'linux', ['ssh', 'hp'], '/home/anvit', '/home/anvit/.local/bin/pb')
+    linux_name = smoke_value('SMOKE_LINUX_NAME', 'linux')
+    if os.environ.get('XPLAT_CONTROLLER') == linux_name:
+        home = get_setting('xplat_linux_home')
+        if not home or not L_HOST:
+            raise SystemExit('configure the Linux test host and its home directory')
+        return Unix(linux_name, 'linux', ['ssh', L_HOST], home, f'{home}/.local/bin/pb')
     return linux() if os.environ.get('XPLAT_CONTROLLER') == 'L' else mac()
 
 

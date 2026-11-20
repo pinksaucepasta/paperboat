@@ -11,11 +11,11 @@ import (
 func TestGuardRefusesAMachineListenerRequestWithoutAccount(t *testing.T) {
 	g := &guardServer{cfg: Config{StateDir: t.TempDir()}, reserved: reservations{Names: map[string]string{}, Claims: map[string]claim{}}}
 	g.claims = &claimBook{Claims: g.reserved.Claims}
-	without := request{Operation: "acquire", Hostname: "hp.local.example.test", IP: "127.100.0.7", Port: 22}
+	without := request{Operation: "acquire", Hostname: "laptop.local.example.test", IP: "127.100.0.7", Port: 22}
 	if _, err := g.assignClaim("1001", without); !errors.Is(err, ErrListenerRefused) {
 		t.Fatalf("a request without account and machine was served: %v", err)
 	}
-	first := request{Operation: "acquire", Account: "acct", Machine: "m", Hostname: "hp.local.example.test", IP: "127.100.0.7", Port: 22}
+	first := request{Operation: "acquire", Account: "acct", Machine: "m", Hostname: "laptop.local.example.test", IP: "127.100.0.7", Port: 22}
 	if got, err := g.assignClaim("1001", first); err != nil || got.IP != "127.100.0.7" {
 		t.Fatalf("the preferred address: ip=%q err=%v", got.IP, err)
 	}

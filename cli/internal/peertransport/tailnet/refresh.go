@@ -150,7 +150,7 @@ func (a *Authority) RegisterOrRestore(ctx context.Context, client NetworkAPI, ro
 
 // Refresh renews the signed configuration now. A machine engine waits for a token of the process's renewal
 // budget first (bounded by ctx): per-operation refreshes for new grants bypassed it and ran a host at 15 a
-// minute under inspect load (hp 2026-10-27).
+// minute under inspect load (Linux test machine 2026-10-27).
 func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 	if a.budgeted() {
 		if err := renewalBudget.wait(ctx, false); err != nil {
@@ -162,7 +162,7 @@ func (a *Authority) Refresh(ctx context.Context, client NetworkAPI) error {
 
 // RefreshForAdmission renews before admitting a stream whose server-signed credential names a grant this host does
 // not hold yet (a grant just added). Like a server-announced change it never waits for the budget, only for a 429's
-// hold: it is one request per new grant, and waiting for a token let admission time out (F9-04, hp 2026-10-27).
+// hold: it is one request per new grant, and waiting for a token let admission time out (F9-04, Linux test machine 2026-10-27).
 //
 // Like Tailscale's controlclient updateRoutine, a 429 waits the server's Retry-After and retries within ctx
 // instead of refusing the stream, and every admission whose stream arrived before a renewal started shares

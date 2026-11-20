@@ -10,7 +10,7 @@
 #   edge5xx   5xx pages the edge answered itself, dispatch failures included (edge_http_5xx)
 #   server5xx support_report_groups seen since the start with HTTP status >= 500 (every server component)
 #   offline   machines enrolled STABLE_MIN (30) minutes before the deploy, online at its start and still offline
-#             SETTLE seconds after it (a lane's fresh throwaway or a machine that blips and comes back does not count;
+#             SETTLE seconds after it (a worktree's fresh throwaway or a machine that blips and comes back does not count;
 #             presence has no history, so 'still offline at the end' is what separates a blip from a stranded host)
 # Edge logs are followed from every edge container that runs in the window, the replaced one included.
 # Usage: PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production

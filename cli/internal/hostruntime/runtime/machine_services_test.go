@@ -213,7 +213,7 @@ func TestExplicitMachineServiceProbePolicyAndWithdrawal(t *testing.T) {
 
 // A port reused right after its previous listener stopped is still listed at the server while this host
 // has withdrawn it. A flow granted for it is accepted once a fresh scan sees it listening, and refused
-// when it is still not there (Lane H: access-machine read 0 bytes from a just-started origin).
+// when it is still not there (access-machine read 0 bytes from a just-started origin).
 func TestAJustStartedServiceIsAdmittedAfterAFreshScan(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"expires_at": time.Now().Add(time.Minute)}})

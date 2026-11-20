@@ -1,4 +1,0 @@
-pb: Paperboat could not finish: Windows installation timed out in the administrator step (Windows installation failed while installing runtime services. install supplied Windows runtime: install Paperboat machine guard: read the local access domain from the Paperboat server; check the network and retry: open \\.\pipe\PaperboatMachineGuard: The system cannot find the file specified.; install supplied Windows runtime: install Paperboat machine guard: read the local access domain from the Paperboat server; check the network and retry: call GET /v1/client-configuration: Get "https://api.example.test/v1/client-configuration": control request failed (Client.Timeout exceeded while awaiting headers)). Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_ef8de80c-3a0c-4c4e-845f-ee0897a135d5. Run `pb bugreport --upload` to send the details.
-rc=0  
-
-19:53:39 == old pb pair

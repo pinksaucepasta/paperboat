@@ -20,7 +20,7 @@ func FormatKnownHosts(host string, port uint16, keys []HostPublicKey) ([]byte, e
 }
 
 // FormatKnownHostsForAlias names the host as ssh looks it up under a HostKeyAlias: the alias alone, whatever the port
-// (the Windows loopback connection of a machine whose sshd is not on port 22, victus 2026-11-19).
+// (the Windows loopback connection of a machine whose sshd is not on port 22, Windows test machine 2026-11-19).
 func FormatKnownHostsForAlias(host string, port uint16, keys []HostPublicKey) ([]byte, error) {
 	return formatKnownHosts(host, port, true, keys)
 }

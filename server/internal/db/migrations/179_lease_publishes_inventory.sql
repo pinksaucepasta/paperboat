@@ -1,7 +1,7 @@
 -- +goose Up
 -- A machine's local-address lease reaches its daemon through the machine list (inventory topic). A lease the
 -- server adds after the daemon started (backfill, a pairing path that allocates late) moved no topic, so the
--- daemon kept failing to bind the address until it was restarted (prod 2026-10-25, Lane H). Gaining, moving or
+-- daemon kept failing to bind the address until it was restarted (prod 2026-10-25). Gaining, moving or
 -- losing a machine's lease now moves the inventory and peer_network topics of the machine's audience, so a
 -- late lease reaches the daemon within seconds. It happens at pairing and
 -- release only, never per list or heartbeat.

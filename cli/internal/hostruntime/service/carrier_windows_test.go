@@ -36,7 +36,7 @@ func TestWindowsCarrierDeclarationBindsAccount(t *testing.T) {
 	}
 }
 
-// Windows: the labels of a published carrier declaration are not compared (252b2ada1 changed them; victus, 2026-11-19).
+// Windows: the labels of a published carrier declaration are not compared (252b2ada1 changed them; Windows test machine, 2026-11-19).
 func TestWindowsPublishedDeclarationIgnoresItsLabels(t *testing.T) {
 	instance := "u0123456789abcdef01234567"
 	generation := "0123456789abcdef0123456789abcdef"

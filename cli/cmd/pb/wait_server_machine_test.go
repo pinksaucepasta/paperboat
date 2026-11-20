@@ -18,13 +18,13 @@ func waitTestSnapshot() localapi.Snapshot {
 
 // pb wait on a team machine: the daemon's snapshot does not list it, the server does (as for exec).
 func TestWaitResolvesATeamMachineOnTheServerAndUnknownNamesStayNotFound(t *testing.T) {
-	server := workspaceMachinesServer(t, map[string][]map[string]any{"laneo-f13-team": {{"id": "machine_pb", "alias": "laneo-pb"}}})
+	server := workspaceMachinesServer(t, map[string][]map[string]any{"test-f13-team": {{"id": "machine_pb", "alias": "test-pb"}}})
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
 	if err := client.SetWorkspace("personal"); err != nil {
 		t.Fatal(err)
 	}
-	machine, backend, err := resolveWaitMachineOn(context.Background(), client, "laneo-pb")
-	if err != nil || backend == nil || machine.ID != "machine_pb" || backend.Workspace() != "laneo-f13-team" {
+	machine, backend, err := resolveWaitMachineOn(context.Background(), client, "test-pb")
+	if err != nil || backend == nil || machine.ID != "machine_pb" || backend.Workspace() != "test-f13-team" {
 		t.Fatalf("team machine: machine=%+v backend=%v err=%v", machine, backend, err)
 	}
 	if _, _, err := resolveWaitMachineOn(context.Background(), client, "nowhere"); !errors.Is(err, resolver.ErrMachineNotFound) {
@@ -37,7 +37,7 @@ func fastServerPoll() context.Context {
 }
 
 func TestWaitOnATeamMachineReturnsWhenTheServerSeesItReady(t *testing.T) {
-	offline := api.UserMachine{ID: "machine_pb", Alias: "laneo-pb", Ownership: "team"}
+	offline := api.UserMachine{ID: "machine_pb", Alias: "test-pb", Ownership: "team"}
 	polls := 0
 	refresh := func() (api.UserMachine, error) {
 		polls++
@@ -50,14 +50,14 @@ func TestWaitOnATeamMachineReturnsWhenTheServerSeesItReady(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(fastServerPoll(), 5*time.Second)
 	defer cancel()
-	result, err := waitForServerMachineWith(ctx, "laneo-f13-team", waitTestSnapshot(), offline, "runtime", nil, refresh)
+	result, err := waitForServerMachineWith(ctx, "test-f13-team", waitTestSnapshot(), offline, "runtime", nil, refresh)
 	if err != nil || result.Outcome != "ready" || result.Machine.Generation != 4 || result.Validate() != nil || polls != 3 {
 		t.Fatalf("result=%+v err=%v polls=%d validate=%v", result, err, polls, result.Validate())
 	}
 }
 
 func TestWaitOnATeamMachineTransportUsesThePeerProbeInItsWorkspace(t *testing.T) {
-	ready := api.UserMachine{ID: "machine_pb", EnvironmentID: "environment_pb", Alias: "laneo-pb", Online: true, InstallationGeneration: 4}
+	ready := api.UserMachine{ID: "machine_pb", EnvironmentID: "environment_pb", Alias: "test-pb", Online: true, InstallationGeneration: 4}
 	var workspace string
 	prober := daemonProbeFunc(func(_ context.Context, request localapi.PeerStreamRequest) (localapi.PeerProbeResult, error) {
 		workspace = request.Workspace
@@ -65,14 +65,14 @@ func TestWaitOnATeamMachineTransportUsesThePeerProbeInItsWorkspace(t *testing.T)
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := waitForServerMachineWith(ctx, "laneo-f13-team", waitTestSnapshot(), ready, "transport", prober, nil)
-	if err != nil || result.Outcome != "ready" || result.Machine.SelectedPath != "direct" || workspace != "laneo-f13-team" || result.Validate() != nil {
+	result, err := waitForServerMachineWith(ctx, "test-f13-team", waitTestSnapshot(), ready, "transport", prober, nil)
+	if err != nil || result.Outcome != "ready" || result.Machine.SelectedPath != "direct" || workspace != "test-f13-team" || result.Validate() != nil {
 		t.Fatalf("result=%+v err=%v workspace=%q", result, err, workspace)
 	}
 }
 
 func TestWaitOnATeamMachineEndsOnRemovalAndOnTheDeadline(t *testing.T) {
-	offline := api.UserMachine{ID: "machine_pb", Alias: "laneo-pb"}
+	offline := api.UserMachine{ID: "machine_pb", Alias: "test-pb"}
 	ctx, cancel := context.WithTimeout(fastServerPoll(), 5*time.Second)
 	defer cancel()
 	removed, err := waitForServerMachineWith(ctx, "", waitTestSnapshot(), offline, "runtime", nil, func() (api.UserMachine, error) { return api.UserMachine{}, resolver.ErrMachineNotFound })

@@ -2,8 +2,8 @@
 
 The device-smoke checks keep their logic on the controller. Set PB_SMOKE_WINDOWS_PB to the pb.exe path from the
 saved `pb install --json` receipt (install_path.py prints it) and pb_path() returns a WindowsPb that
-pairing_lifecycle.command_result runs over SSH, so no check needs python3 on the device. VICTUS_PASS (never
-printed) and SMOKE_WINDOWS_SSH (default pujan@victus, as smoke.sh uses) pick the login.
+pairing_lifecycle.command_result runs over SSH, so no check needs python3 on the device. SMOKE_WINDOWS_PASSWORD (never
+printed) and SMOKE_WINDOWS_SSH pick the login from the local target configuration.
 
 Every device call sends a PowerShell script and its JSON payload on stdin behind a one-line -EncodedCommand
 bootstrap (the command line stays far below cmd.exe's 8191 characters whatever the payload size). pb runs through
@@ -29,7 +29,7 @@ import tempfile
 import time
 import uuid
 
-DEFAULT_TARGET = 'pujan@victus'
+from dev_targets import smoke_value
 MISSING = 3  # exit code of a snippet whose file does not exist
 REFUSED = 4  # exit code of EXCHANGE when nothing accepts the connection
 
@@ -67,7 +67,7 @@ READ = ("if(-not(Test-Path -LiteralPath $req.path -PathType Leaf)){exit 3}\n"
 WRITE = ("$d=Split-Path -Parent $req.path;if($d){[void](New-Item -ItemType Directory -Force -Path $d)}\n"
          "$f=New-Object IO.FileStream($req.path,$(if($req.append){[IO.FileMode]::Append}else{[IO.FileMode]::Create}))\n"
          "$b=[Convert]::FromBase64String($req.data);$f.Write($b,0,$b.Length);$f.Close()")
-# Windows OpenSSH stalls when more than a few KB arrive on a session's stdin (a 40 KB write never answered on victus),
+# Windows OpenSSH stalls when more than a few KB arrive on a session's stdin (a 40 KB write never answered on the Windows device),
 # so anything larger travels in pieces of this many bytes.
 CHUNK = 3000
 EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
@@ -401,9 +401,13 @@ class WindowsDevice:
     path_flavor = pathlib.PureWindowsPath  # tests that run the snippets in a local pwsh use PurePosixPath
 
     def __init__(self, target=None, pb_exe=None, password=None):
-        self.target = target or os.environ.get('SMOKE_WINDOWS_SSH', DEFAULT_TARGET)
+        self.target = target or smoke_value('SMOKE_WINDOWS_SSH')
         self.pb_exe = pb_exe
-        self.password = os.environ.get('VICTUS_PASS') if password is None else password
+        self.password = password
+        if password is None:
+            self.password = os.environ.get('SMOKE_WINDOWS_PASSWORD')
+            if self.password is None and target is None:
+                self.password = smoke_value('SMOKE_WINDOWS_PASSWORD')
         self._environment = {}
 
     def ssh_prefix(self, *options):
@@ -423,7 +427,7 @@ class WindowsDevice:
     def snippet(self, step, script, timeout=60, **payload):
         """Run script on the device with $req = payload; return (rc, stdout bytes, stderr bytes)."""
         # The payload goes in short lines: Windows PowerShell 5.1 stalls reading one very long line from an SSH stdin
-        # (a 36 KB file write never answered on victus).
+        # (a 36 KB file write never answered on the Windows device).
         body = _b64(json.dumps(payload).encode())
         # A blank line ends each statement PowerShell reads from stdin.
         stdin = ("$a=@'\n" + _b64(script.encode()) + '\n' + '\n'.join(body[i:i + 4000] for i in range(0, len(body), 4000))
@@ -432,14 +436,14 @@ class WindowsDevice:
             done = subprocess.run(self.ssh_command(), input=stdin.encode(), capture_output=True, timeout=timeout,
                                   env=self.ssh_environment())
         except subprocess.TimeoutExpired as error:
-            raise DeviceError('%s: the device did not answer within %ss; check that victus is reachable' %
+            raise DeviceError('%s: the device did not answer within %ss; check that the Windows device is reachable' %
                               (step, timeout)) from error
         # PowerShell reading its script from stdin can print console-mode escapes (ESC[?1h) ahead of the output.
         return done.returncode, re.sub(rb'\x1b\[[0-9;?]*[a-zA-Z]', b'', done.stdout), done.stderr
 
     def ps(self, step, script, timeout=60, ok=(0,), **payload):
         if script in READ_ONLY:
-            # A session that never answers (seen on victus for a tiny read) or whose ssh itself failed (exit 255: a banner
+            # A session that never answers (seen on the Windows device for a tiny read) or whose ssh itself failed (exit 255: a banner
             # timeout on a hosted runner killed a 20 min transfer check while it polled a job's rc file) is tried again;
             # a read changes nothing. Every attempt is bounded.
             for attempt in range(3):

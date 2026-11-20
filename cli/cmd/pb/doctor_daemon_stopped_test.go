@@ -42,7 +42,7 @@ func doctorWithoutADaemon(t *testing.T, goos string, args ...string) (int, strin
 	return code, stdout.String(), stderr.String()
 }
 
-// victus 2026-11-10: an update killed after it stopped the services left no local daemon, and plain `pb doctor`
+// Windows test machine 2026-11-10: an update killed after it stopped the services left no local daemon, and plain `pb doctor`
 // said only "Paperboat could not finish the command". Windows cannot restart the service from an ordinary command,
 // so doctor reports it as a failing check with the repair, in the shape Linux reports a stopped host service.
 func TestWindowsDoctorReportsAStoppedLocalServiceWithTheRepair(t *testing.T) {

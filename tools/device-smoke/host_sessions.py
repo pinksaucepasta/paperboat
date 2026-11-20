@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Preflight: warn when a test host holds many login sessions, fail when logind has plainly stopped retiring them.
 
-pbvm3's systemd-logind wedged on 2026-11-13 and kept one `closing` session per ssh connection: 1,450 by 2026-11-20 (uptime showed
+Linux test VM's systemd-logind wedged on 2026-11-13 and kept one `closing` session per ssh connection: 1,450 by 2026-11-20 (uptime showed
 1,233 users). Every smoke ssh adds one, so a wedged host is found the day it happens, not a week later.
 
   host_sessions.py HOST...   exit 1 when a host has more than FAIL sessions; warnings go to stderr

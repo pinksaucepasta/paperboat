@@ -88,9 +88,13 @@ func receive(conn *net.UnixConn) (message, []*os.File, error) {
 	}
 	var m message
 	defer wipeRecords([][]byte{b[:n]})
-	if flags&(syscall.MSG_TRUNC|syscall.MSG_CTRUNC) != 0 || json.Unmarshal(b[:n], &m) != nil {
+	if flags&(syscall.MSG_TRUNC|syscall.MSG_CTRUNC) != 0 {
 		closeAll(files)
-		return message{}, nil, fmt.Errorf("%w: malformed message", ErrHandover)
+		return message{}, nil, fmt.Errorf("%w: truncated message", ErrHandover)
+	}
+	if err := json.Unmarshal(b[:n], &m); err != nil {
+		closeAll(files)
+		return message{}, nil, fmt.Errorf("%w: decode message: %w", ErrHandover, err)
 	}
 	return m, files, nil
 }
@@ -167,7 +171,10 @@ func inherit(conn *net.UnixConn) (*Inheritance, error) {
 			closeAll(mapFiles(inherited))
 			wipeRecords(certs)
 			wipeRecords(m.Certs)
-			return nil, fmt.Errorf("%w: receive certificates: unexpected %q message: %v", ErrHandover, m.Op, err)
+			if err != nil {
+				return nil, fmt.Errorf("%w: receive certificates; check the serving process and retry: %w", ErrHandover, err)
+			}
+			return nil, fmt.Errorf("%w: receive certificates; check the serving process and retry", ErrHandover)
 		}
 		certs = append(certs, m.Certs...)
 		more = m.More
@@ -198,8 +205,11 @@ func (i *Inheritance) Ready(ctx context.Context) error {
 	}
 	m, files, err := receive(i.conn)
 	closeAll(files)
-	if err != nil || m.Op != "released" {
-		return fmt.Errorf("%w: the serving process did not release its sockets: %v", ErrHandover, err)
+	if err != nil {
+		return fmt.Errorf("%w: wait for socket release; check the serving process and retry: %w", ErrHandover, err)
+	}
+	if m.Op != "released" {
+		return fmt.Errorf("%w: the serving process did not release its sockets; check it and retry", ErrHandover)
 	}
 	_ = i.conn.SetDeadline(time.Time{})
 	tookOverAt.Store(time.Now().UnixNano())

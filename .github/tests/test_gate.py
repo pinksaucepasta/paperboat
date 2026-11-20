@@ -16,7 +16,9 @@ class SmokePrerequisiteTest(unittest.TestCase):
                  results=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "tools").mkdir()
+            (root / "tools/device-smoke").mkdir(parents=True)
+            shutil.copy2(GATE.parent / "device-smoke/dev_targets.py", root / "tools/device-smoke/dev_targets.py")
+            (root / "targets.json").write_text("{}")
             if results:
                 (root / "tools/device-smoke/results").mkdir(parents=True)
             (root / "console").mkdir()
@@ -72,7 +74,7 @@ esac
             if not runtime_changed:
                 scripts["git"] = scripts["git"].replace("echo cli/runtime.go", "echo .github/workflows/release.yml")
                 (root / "bin/git").write_text(scripts["git"])
-            env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}")
+            env = dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}", PB_DEV_TARGETS_FILE=str(root / "targets.json"))
             return subprocess.run(["bash", str(root / "tools/gate.sh")], env=env,
                                   capture_output=True, text=True, timeout=10)
 
@@ -106,7 +108,7 @@ esac
     def test_checkout_without_local_results_skips_device_smoke(self):
         result = self.run_gate("", results=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("skipped: no tools/device-smoke/results here", result.stdout)
+        self.assertIn("skipped: no configured local smoke receipts", result.stdout)
 
     def test_nonruntime_changes_do_not_require_device_smoke(self):
         result = self.run_gate("", runtime_changed=False)

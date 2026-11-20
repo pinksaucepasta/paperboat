@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 )
 
-// Many machines enrolling at once (a fleet rollout, a lane's test containers) exchange their enrollment credentials
+// Many machines enrolling at once (a fleet rollout, a test run's containers) exchange their enrollment credentials
 // together. The exchange touches rows no two enrollments share (its own enrollment, helper, machine and connector rows)
 // and one audit insert, so it needs no SERIALIZABLE isolation: under it the predicate locks of index pages the
 // enrollments merely sit on made a burst lose its retries and answer 503 authorization_unavailable

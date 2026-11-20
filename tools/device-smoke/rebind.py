@@ -7,7 +7,7 @@ the host masquerades A's UDP to a different port range: a NAT rebinding). Then t
 until it succeeds. PASS when the first inbound exec succeeds within --limit seconds of the return and the next three
 also succeed. The firewall and masquerade rules are removed on every exit path.
 
-  rebind.py --host ubuntu@anvit --a rel-nat-a --b rel-nat-b
+  rebind.py --host tester@staging.example.test --a rel-nat-a --b rel-nat-b
 """
 import argparse, json, subprocess, sys, time
 from pathlib import Path
@@ -33,14 +33,19 @@ def exec_into(host, src, dst, timeout=15):
     return rc == 0, time.time() - start, out[-160:]
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--a", required=True, help="the container that is rebound")
     parser.add_argument("--b", required=True, help="the peer that execs into it")
     parser.add_argument("--outage-seconds", type=int, default=120)
     parser.add_argument("--limit", type=float, default=10.0)
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     host, checks = args.host, []
 
     def add(name, ok, detail):

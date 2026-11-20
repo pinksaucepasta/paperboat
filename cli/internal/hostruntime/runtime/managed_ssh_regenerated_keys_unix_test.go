@@ -13,7 +13,7 @@ import (
 	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 )
 
-// A machine whose cloned host keys the server refused (Lane H, official 2026.10.23.5) publishes its
+// A machine whose cloned host keys the server refused (official 2026.10.23.5) publishes its
 // regenerated keys at the next tick, and does not ask again while the refused keys are unchanged.
 func TestRefusedHostKeysRepublishOnceRegenerated(t *testing.T) {
 	inUse := &clientapi.APIError{Status: http.StatusConflict, Code: managedSSHHostKeyInUseCode}

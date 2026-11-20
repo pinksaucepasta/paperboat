@@ -41,7 +41,7 @@ func publicIngressHandler(routes []config.PublicRoute, infrastructureHost, healt
 		proxy.ErrorLog = log.New(io.Discard, "", 0)
 		proxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
 			reporter.ObserveFailure(request.Context(), "upstream_request", err)
-			http.Error(writer, "upstream unavailable", http.StatusBadGateway)
+			http.Error(writer, "Paperboat could not forward the request to the service. Wait a moment and try again.", http.StatusBadGateway)
 		}
 		return proxy
 	}

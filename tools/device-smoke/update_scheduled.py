@@ -95,7 +95,7 @@ def disabled_phase(before):
 
 
 def utc_stamp(stamp):
-    """The device reports its own offset (victus is +05:30); compare in UTC like utc_minute."""
+    """The device reports its own offset (windows-test is +05:30); compare in UTC like utc_minute."""
     return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00')).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M')
 
 

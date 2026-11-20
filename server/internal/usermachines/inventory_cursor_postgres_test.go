@@ -14,7 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
-// The console pages machines by keyset cursor instead of loading every machine (Lane C, PQ-04 C1): walking the
+// The console pages machines by keyset cursor instead of loading every machine (PQ-04 C1): walking the
 // cursor lists exactly the full list, every page carries the same total, and platform, tag, state=revoked and
 // an address in q select what they name.
 func TestMachineListCursorAndFiltersOnPostgres(t *testing.T) {

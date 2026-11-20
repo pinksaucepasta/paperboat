@@ -5,10 +5,9 @@ A test account's every machine and signed-in CLI session is a peer of every othe
 containers that are never removed grow its peer-network configuration until it hits the size
 bound and native access stops for the whole account. Run after each device run.
 
-A lane passes its own throwaway prefix (--prefix laner-) and only machines whose alias starts
-with it are considered; --id <machine_id> (repeatable) narrows to exact records; --all (every throwaway pattern of every lane) is for Lane B only. Only
-machines matching AND not seen for --stale (default 2 h) are revoked, together with the CLI sessions `pb pair` created for them. Protected
-devices (ubuntu24, pbvm*, dadape, hp, apple, victus) are never touched. Dry-run by default: it
+Use --prefix for one run prefix or --id for exact machine records. --all covers every configured throwaway pattern.
+Cleanup revokes matching machines unseen for --stale (default 2 h), together with their pair-time CLI sessions.
+The local configuration protects shared test devices. Dry-run by default: it
 prints the ids it would revoke; --apply revokes them in one transaction and prints them again.
 It runs SQL on the production database through `ssh <host> docker exec psql` (operator access).
 """
@@ -17,9 +16,8 @@ import re
 import subprocess
 import sys
 
-DEFAULT_ACCOUNTS = ["user_5ae46801-d921-4983-be1c-db50ad886304"]
-THROWAWAY = r"^(lane[a-z0-9]*-|luf14|winpool-|winrel|wina-|w[0-9]+-)"
-PROTECTED = r"(ubuntu24|pbvm|dadape|^hp|apple|victus|^canary-)"
+from dev_targets import load
+THROWAWAY = r"^(worktree[a-z0-9]*-|luf14|winpool-|winrel|wina-|w[0-9]+-)"
 
 SELECT = """
 CREATE TEMP TABLE doomed ON COMMIT DROP AS
@@ -52,34 +50,41 @@ def quote(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--host", default="root@coolify", help="ssh target running the database container")
+    parser.add_argument("--host", help="ssh target running the database container")
     parser.add_argument("--account", action="append", help="test account id (repeatable); default: the shared test account")
     parser.add_argument("--stale", default="2 hours", help="revoke only machines unseen this long (PostgreSQL interval)")
     parser.add_argument("--apply", action="store_true", help="revoke; without it only list")
     scope = parser.add_mutually_exclusive_group(required=True)
-    scope.add_argument("--prefix", help="this lane's throwaway alias prefix, e.g. laner- (required for lanes)")
-    scope.add_argument("--all", action="store_true", help="every lane's throwaway machines (Lane B only)")
+    scope.add_argument("--prefix", help="the run’s throwaway alias prefix, e.g. test-")
+    scope.add_argument("--all", action="store_true", help="all configured throwaway prefixes")
     scope.add_argument("--id", action="append", help="exact machine id to revoke (repeatable); still only a throwaway, unprotected machine")
     args = parser.parse_args()
-    throwaway = THROWAWAY
+    settings = load()
+    host = args.host or settings.get('deployment_host')
+    protected = settings.get('cleanup_protected')
+    if not host or not protected:
+        parser.error("set deployment_host and cleanup_protected in the local development targets")
+    throwaway = settings.get('cleanup_throwaway', THROWAWAY)
     if args.prefix:
-        if not re.fullmatch(r"[a-z][a-z0-9]*-", args.prefix) or re.search(PROTECTED, args.prefix):
-            parser.error("--prefix must be a lane prefix like laner- (lowercase, ending in -)")
+        if not re.fullmatch(r"[a-z][a-z0-9]*-", args.prefix) or re.search(protected, args.prefix):
+            parser.error("--prefix must be a run prefix like test- (lowercase, ending in -)")
         throwaway = "^" + re.escape(args.prefix)
     for machine_id in args.id or []:
         if not re.fullmatch(r"machine_[0-9a-f-]{36}", machine_id):
             parser.error("--id must be a full machine id (machine_<uuid>)")
-    accounts = args.account or DEFAULT_ACCOUNTS
+    accounts = args.account or settings.get("cleanup_accounts", [])
+    if not accounts:
+        parser.error("set cleanup_accounts in the local development targets or pass --account")
     params = {
         "accounts": "ARRAY[" + ",".join(quote(a) for a in accounts) + "]::text[]",
-        "stale": quote(args.stale), "throwaway": quote(throwaway), "protected": quote(PROTECTED),
+        "stale": quote(args.stale), "throwaway": quote(throwaway), "protected": quote(protected),
         "ids": "ARRAY[" + ",".join(quote(i) for i in args.id or []) + "]::text[]",
     }
     sql = "\\set ON_ERROR_STOP 1\nBEGIN;\nSET LOCAL search_path TO paperboat, public;\n" + SELECT % params
     if args.apply:
         sql += REVOKE
     sql += "\\copy (SELECT id FROM doomed ORDER BY id) TO STDOUT\n" + ("COMMIT;\n" if args.apply else "ROLLBACK;\n")
-    done = subprocess.run(["ssh", args.host, "docker", "exec", "-i", "paperboat-postgres-1",
+    done = subprocess.run(["ssh", "--", host, "docker", "exec", "-i", "paperboat-postgres-1",
                            "psql", "-U", "postgres", "-d", "paperboat", "-qAt"],
                           input=sql, capture_output=True, text=True, timeout=120)
     if done.returncode != 0 or "ERROR" in done.stderr:

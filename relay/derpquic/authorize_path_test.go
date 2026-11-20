@@ -2,6 +2,7 @@ package derpquic
 
 import (
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -63,7 +64,7 @@ func TestWSSAuthorizeSeparatesNetworkLossFromAnUnframeableGrant(t *testing.T) {
 	}
 	far.Close()
 	err = cc.authorize("a-grant")
-	if !errors.Is(err, errAuthorizeTransport) {
-		t.Fatalf("a re-authentication lost with the connection gave %v on the WSS carrier, want errAuthorizeTransport", err)
+	if !errors.Is(err, errAuthorizeTransport) || !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("a re-authentication lost with the connection gave %v on the WSS carrier, want transport error wrapping closed pipe", err)
 	}
 }

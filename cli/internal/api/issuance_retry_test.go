@@ -13,7 +13,7 @@ import (
 )
 
 // A descriptor request the server refused with 503 (a serialization conflict under 40 concurrent execs,
-// Lane W / support_45f4b28f) is asked again with backoff; other refusals are final, and repeats are
+// / support_45f4b28f) is asked again with backoff; other refusals are final, and repeats are
 // bounded.
 func TestDescriptorIssuanceRetriesServiceUnavailable(t *testing.T) {
 	for _, tc := range []struct {
