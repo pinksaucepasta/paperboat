@@ -52,7 +52,7 @@ func (m *Mesh) serveForward(ctx context.Context, l *link, st *yamux.Stream) {
 		return
 	}
 	// The link outlives a directory change: the peer must be in the set as it is now, not only at the handshake.
-	if !m.peerCurrent(l.peer) {
+	if !m.PeerCurrent(l.peer) {
 		refuse(nodemesh.RefusalNotHolder)
 		return
 	}
@@ -88,12 +88,6 @@ type attestedAddr struct{ net.Addr }
 
 // AttestedVisitor marks the connection whose RemoteAddr a verified peer attested.
 func (attestedAddr) AttestedVisitor() {}
-
-// peerCurrent reports whether p is still the directory's entry for its node id (same key and process epoch).
-func (m *Mesh) peerCurrent(p nodemesh.Peer) bool {
-	cur, ok := m.peerSet().Lookup(p.NodeID)
-	return ok && cur.SPKISHA256 == p.SPKISHA256 && cur.ProcessEpoch == p.ProcessEpoch
-}
 
 // admitName is the holder's pre-ack decision for the Open's key: nil, or why this node will not serve it.
 func (m *Mesh) admitName(open nodemesh.Open) error {

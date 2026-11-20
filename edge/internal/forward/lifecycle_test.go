@@ -76,21 +76,24 @@ func TestPeerCurrentFalseWhenExpired(t *testing.T) {
 	})
 	a.src.setPeers(b.peer())
 	a.start()
-	eventually(t, "b current", func() bool { return a.mesh.PeerCurrent("b") })
-	if a.mesh.PeerCurrent("nobody") {
+	bp := b.peer()
+	eventually(t, "b current", func() bool { return a.mesh.PeerCurrent(bp) })
+	nobody := bp
+	nobody.NodeID = "nobody"
+	if a.mesh.PeerCurrent(nobody) {
 		t.Fatal("a node outside the directory is not current")
 	}
 
 	flaky.down.Store(true)
 	time.Sleep(300 * time.Millisecond) // several failed refreshes, still inside MaxPeerStale
-	if !a.mesh.PeerCurrent("b") {
+	if !a.mesh.PeerCurrent(bp) {
 		t.Fatal("the last good directory must stay trusted inside MaxPeerStale")
 	}
 	skew.Store(int64(2 * time.Second))
-	eventually(t, "b no longer current once the directory expired", func() bool { return !a.mesh.PeerCurrent("b") })
+	eventually(t, "b no longer current once the directory expired", func() bool { return !a.mesh.PeerCurrent(bp) })
 
 	flaky.down.Store(false)
-	eventually(t, "b current again", func() bool { return a.mesh.PeerCurrent("b") })
+	eventually(t, "b current again", func() bool { return a.mesh.PeerCurrent(bp) })
 }
 
 // shortLivedCertificate is a node carrier certificate that stops being valid after life.
