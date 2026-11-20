@@ -270,3 +270,54 @@ func TestObserveBodyCarriesMeshStats(t *testing.T) {
 		t.Fatal("observation of a relay without a mesh carries mesh stats")
 	}
 }
+
+// Mesh trust ends with the control plane's word: after MeshPeersStaleAfter without a lease that carried a valid
+// directory (control unreachable, or the list stays malformed) the directory is cleared, and a good lease restores it.
+func TestMeshStaleLeaseExpiresPeers(t *testing.T) {
+	api := newMeshAPI(t)
+	good := []nodemesh.Peer{meshPeer("b")}
+	api.setPeers(peersJSON(t, good...))
+	c, lease := newMeshClient(t, api)
+	c.cfg.MeshPeersStaleAfter = 300 * time.Millisecond
+	server := newMeshServer(t, api, lease, true)
+	if err := c.Observe(t.Context(), server, false); err != nil {
+		t.Fatal(err)
+	}
+	api.srv.Close() // control unreachable: observations fail
+	if err := c.Observe(t.Context(), server, false); err == nil {
+		t.Fatal("observation against a closed control plane succeeded")
+	}
+	if got := server.MeshPeers(); !slices.Equal(got, good) {
+		t.Fatalf("directory %v dropped before it was stale, want %v", got, good)
+	}
+	time.Sleep(350 * time.Millisecond)
+	if err := c.Observe(t.Context(), server, false); err == nil {
+		t.Fatal("observation against a closed control plane succeeded")
+	}
+	if got := server.MeshPeers(); len(got) != 0 {
+		t.Fatalf("stale directory %v still trusted", got)
+	}
+}
+
+// A lease that keeps carrying an invalid directory does not renew the last good one forever either.
+func TestMeshStaleMalformedLeaseExpiresPeers(t *testing.T) {
+	api := newMeshAPI(t)
+	api.setPeers(peersJSON(t, meshPeer("b")))
+	c, lease := newMeshClient(t, api)
+	c.cfg.MeshPeersStaleAfter = 300 * time.Millisecond
+	server := newMeshServer(t, api, lease, true)
+	if err := c.Observe(t.Context(), server, false); err != nil {
+		t.Fatal(err)
+	}
+	api.setPeers(json.RawMessage(`"b"`))
+	if err := c.Observe(t.Context(), server, false); err != nil || len(server.MeshPeers()) != 1 {
+		t.Fatalf("a fresh directory is kept: err %v, peers %v", err, server.MeshPeers())
+	}
+	time.Sleep(350 * time.Millisecond)
+	if err := c.Observe(t.Context(), server, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.MeshPeers(); len(got) != 0 {
+		t.Fatalf("stale directory %v still trusted", got)
+	}
+}
