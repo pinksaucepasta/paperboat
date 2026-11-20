@@ -707,6 +707,10 @@ TLIST=($DEVICES)
         self.assertIn('TestQUICCarrierStreamHoldsTheBudgetAtRealRTT', body)
         self.assertNotIn('GITHUB_ACTIONS', body)
         self.assertIn('--- PASS: TestQUICCarrierStreamHoldsTheBudgetAtRealRTT', body)
+        # PowerShell splits a bare -test.run at the dot: the Windows line passes quoted -test.flag=value words.
+        windows = [line for line in body.splitlines() if 'on victus' in line][0]
+        self.assertIn("'-test.run=^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT", windows)
+        self.assertNotRegex(windows, r" -test\.")
 
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices

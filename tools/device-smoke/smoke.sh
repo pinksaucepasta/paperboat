@@ -858,7 +858,8 @@ test_carrier_throughput() {
     esac
     rm -rf "$run"
     if [ "$device" = victus ]; then
-      out=$(on victus "& '$dest' -test.run '^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' -test.v -test.count=1 -test.timeout=10m; Remove-Item -Force '$dest'" 2>&1)
+      # PowerShell splits an unquoted -test.run at the dot ('flag provided but not defined: -test'): every flag is one quoted word.
+      out=$(on victus "& '$dest' '-test.run=^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' '-test.v' '-test.count=1' '-test.timeout=10m'; Remove-Item -Force '$dest'" 2>&1)
     else
       out=$(on "$device" "chmod +x $dest && $dest -test.run '^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' -test.v -test.count=1 -test.timeout=10m; rm -f $dest" 2>&1)
     fi
