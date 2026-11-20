@@ -92,7 +92,7 @@ type pairMemo struct {
 }
 
 func quicConfig() *quic.Config {
-	return &quic.Config{EnableDatagrams: true, HandshakeIdleTimeout: 5 * time.Second, MaxIdleTimeout: 45 * time.Second, KeepAlivePeriod: 15 * time.Second, MaxIncomingStreams: 1, MaxIncomingUniStreams: -1, InitialStreamReceiveWindow: MaxControl + 5, MaxStreamReceiveWindow: MaxControl + 5, InitialConnectionReceiveWindow: 2 * MaxControl, MaxConnectionReceiveWindow: 2 * MaxControl}
+	return &quic.Config{CongestionControl: quic.CongestionControlBBR, EnableDatagrams: true, HandshakeIdleTimeout: 5 * time.Second, MaxIdleTimeout: 45 * time.Second, KeepAlivePeriod: 15 * time.Second, MaxIncomingStreams: 1, MaxIncomingUniStreams: -1, InitialStreamReceiveWindow: MaxControl + 5, MaxStreamReceiveWindow: MaxControl + 5, InitialConnectionReceiveWindow: 2 * MaxControl, MaxConnectionReceiveWindow: 2 * MaxControl}
 }
 func NewServer(v Verifier) (*Server, error) {
 	if v.Issuer == "" || v.NodeID == "" || v.NodeGeneration == 0 || v.ProcessEpoch == "" || len(v.Keys) == 0 {

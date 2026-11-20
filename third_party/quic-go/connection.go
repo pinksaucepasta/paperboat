@@ -318,6 +318,7 @@ var newConnection = func(
 		s.conn.capabilities().ECN,
 		s.receivedPacketHandler.IgnorePacketsBelow,
 		s.perspective,
+		s.config.CongestionControl, // PAPERBOAT PATCH (BBR)
 		s.qlogger,
 		s.logger,
 	)
@@ -447,6 +448,7 @@ var newClientConnection = func(
 		s.conn.capabilities().ECN,
 		s.receivedPacketHandler.IgnorePacketsBelow,
 		s.perspective,
+		s.config.CongestionControl, // PAPERBOAT PATCH (BBR)
 		s.qlogger,
 		s.logger,
 	)

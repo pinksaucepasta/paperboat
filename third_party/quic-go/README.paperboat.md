@@ -19,3 +19,18 @@ When updating the vendored version, look for `PAPERBOAT PATCH (RFC 9406)` and ru
 long-path regression. The implementation follows RFC 9406, sections 4.2 and 4.3.
 For comparison, FreeBSD's NewReno implementation tracks the two round minima and the CSS entry baseline in
 `sys/netinet/cc/cc_newreno.c`.
+
+## PAPERBOAT PATCH (BBR)
+
+`quic.Config.CongestionControl` picks the sender per connection: `CongestionControlReno` (the zero value, NewReno with
+HyStart++), `CongestionControlCubic` (CUBIC with HyStart++) or `CongestionControlBBR`. Each end picks its own. Paperboat's
+QUIC sites set BBR: the peer QUIC session, the relay carrier and the edge data carrier.
+
+BBRv1 is Hysteria's sender (`internal/congestion/bbr`, MIT; provenance and licenses in its `NOTICE.md`). BBR needs each ACK's
+acknowledged and lost packets together, so the ACK handler fills `ackedPacketsInfo` and `lostPacketsInfo` and calls
+`OnCongestionEventEx` once per ACK frame (and once per loss-timer expiry). Reno and CUBIC ignore it.
+
+When updating the vendored version, grep `PAPERBOAT PATCH (BBR)`: `config.go`, `interface.go`, `connection.go` (two
+`NewSentPacketHandler` calls), `internal/ackhandler/sent_packet_handler.go` (constructor, `MigratedPath`, `ReceivedAck`,
+`detectLostPackets`, `OnLossDetectionTimeout`), `internal/congestion/interface.go`. Then run `internal/congestion/...`
+tests (the simulation in `bbr/sim_test.go` covers loss and a policer) and the relay benchmark.

@@ -363,7 +363,7 @@ func twoRelays(t *testing.T, plan float64) (servers []*Server, pairs [2][2]*rela
 		a, b := f.client(address, ca, ga), f.client(address, cb, gb)
 		connect(t, a)
 		connect(t, b)
-		pairs[i] = [2]*relayConn{newRelayConn(a, kb), newRelayConn(b, ka)}
+		pairs[i] = [2]*relayConn{newRelayConn(a, kb, 0), newRelayConn(b, ka, 0)}
 		t.Cleanup(func() { pairs[i][0].Close(); pairs[i][1].Close() })
 	}
 	return servers, pairs, shareLoop(t, servers, "shareaccount", plan, 3*time.Second)

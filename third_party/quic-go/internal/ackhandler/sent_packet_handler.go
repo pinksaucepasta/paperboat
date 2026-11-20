@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/internal/congestion"
+	"github.com/quic-go/quic-go/internal/congestion/bbr"
 	"github.com/quic-go/quic-go/internal/monotime"
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/qerr"
@@ -90,8 +91,13 @@ type sentPacketHandler struct {
 	bytesInFlight protocol.ByteCount
 
 	congestion congestion.SendAlgorithmWithDebugInfos
-	rttStats   *utils.RTTStats
-	connStats  *utils.ConnectionStats
+	algorithm  congestion.Algorithm // PAPERBOAT PATCH (BBR)
+
+	// PAPERBOAT PATCH (BBR): what the current ACK (or loss timer) acknowledged and declared lost, in one batch.
+	ackedPacketsInfo []congestion.AckedPacketInfo
+	lostPacketsInfo  []congestion.LostPacketInfo
+	rttStats         *utils.RTTStats
+	connStats        *utils.ConnectionStats
 
 	// The number of times a PTO has been sent without receiving an ack.
 	ptoCount uint32
@@ -117,6 +123,27 @@ var _ SentPacketHandler = &sentPacketHandler{}
 
 // clientAddressValidated indicates whether the address was validated beforehand by an address validation token.
 // If the address was validated, the amplification limit doesn't apply. It has no effect for a client.
+// PAPERBOAT PATCH (BBR): the quic.Config choice; Reno stays the default.
+func newSendAlgorithm(
+	algorithm congestion.Algorithm,
+	rttStats *utils.RTTStats,
+	connStats *utils.ConnectionStats,
+	initialMaxDatagramSize protocol.ByteCount,
+	qlogger qlogwriter.Recorder,
+) congestion.SendAlgorithmWithDebugInfos {
+	if algorithm == congestion.AlgorithmBBR {
+		return bbr.NewBbrSender(congestion.DefaultClock{}, rttStats, connStats, initialMaxDatagramSize, bbr.ProfileStandard)
+	}
+	return congestion.NewCubicSender(
+		congestion.DefaultClock{},
+		rttStats,
+		connStats,
+		initialMaxDatagramSize,
+		algorithm != congestion.AlgorithmCubic, // Reno unless Cubic is asked for
+		qlogger,
+	)
+}
+
 func NewSentPacketHandler(
 	initialPN protocol.PacketNumber,
 	initialMaxDatagramSize protocol.ByteCount,
@@ -126,17 +153,10 @@ func NewSentPacketHandler(
 	enableECN bool,
 	ignorePacketsBelow func(protocol.PacketNumber),
 	pers protocol.Perspective,
+	algorithm congestion.Algorithm, // PAPERBOAT PATCH (BBR)
 	qlogger qlogwriter.Recorder,
 	logger utils.Logger,
 ) SentPacketHandler {
-	congestion := congestion.NewCubicSender(
-		congestion.DefaultClock{},
-		rttStats,
-		connStats,
-		initialMaxDatagramSize,
-		true, // use Reno
-		qlogger,
-	)
 
 	h := &sentPacketHandler{
 		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
@@ -147,7 +167,8 @@ func NewSentPacketHandler(
 		lostPackets:                    *newLostPacketTracker(64),
 		rttStats:                       rttStats,
 		connStats:                      connStats,
-		congestion:                     congestion,
+		congestion:                     newSendAlgorithm(algorithm, rttStats, connStats, initialMaxDatagramSize, qlogger),
+		algorithm:                      algorithm,
 		ignorePacketsBelow:             ignorePacketsBelow,
 		perspective:                    pers,
 		qlogger:                        qlogger,
@@ -434,6 +455,8 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 
 	pnSpace.largestAcked = max(pnSpace.largestAcked, largestAcked)
 
+	h.ackedPacketsInfo = h.ackedPacketsInfo[:0]
+	h.lostPacketsInfo = h.lostPacketsInfo[:0]
 	h.detectLostPackets(rcvTime, encLevel)
 	if encLevel == protocol.Encryption1RTT {
 		h.detectLostPathProbes(rcvTime)
@@ -442,6 +465,7 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 	for _, p := range ackedPackets {
 		if p.includedInBytesInFlight {
 			h.congestion.OnPacketAcked(p.PacketNumber, p.Length, priorInFlight, rcvTime)
+			h.ackedPacketsInfo = append(h.ackedPacketsInfo, congestion.AckedPacketInfo{PacketNumber: p.PacketNumber, BytesAcked: p.Length})
 		}
 		if p.EncryptionLevel == protocol.Encryption1RTT {
 			acked1RTTPacket = true
@@ -450,6 +474,10 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 		if !p.isPathProbePacket {
 			putPacket(p.packet)
 		}
+	}
+
+	if ex, ok := h.congestion.(congestion.SendAlgorithmEx); ok { // PAPERBOAT PATCH (BBR)
+		ex.OnCongestionEventEx(priorInFlight, rcvTime, h.ackedPacketsInfo, h.lostPacketsInfo)
 	}
 
 	// PAPERBOAT PATCH (RFC 9406): use 1-RTT packet numbers for round boundaries.
@@ -864,6 +892,7 @@ func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protoc
 				h.queueFramesForRetransmission(p)
 				if !p.IsPathMTUProbePacket {
 					h.congestion.OnCongestionEvent(pn, p.Length, priorInFlight)
+					h.lostPacketsInfo = append(h.lostPacketsInfo, congestion.LostPacketInfo{PacketNumber: pn, BytesLost: p.Length}) // PAPERBOAT PATCH (BBR)
 				}
 				if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
 					h.ecnTracker.LostPacket(pn)
@@ -893,7 +922,12 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 			})
 		}
 		// Early retransmit or time loss detection
+		priorInFlight := h.bytesInFlight
+		h.lostPacketsInfo = h.lostPacketsInfo[:0]
 		h.detectLostPackets(now, encLevel)
+		if ex, ok := h.congestion.(congestion.SendAlgorithmEx); ok && len(h.lostPacketsInfo) > 0 { // PAPERBOAT PATCH (BBR)
+			ex.OnCongestionEventEx(priorInFlight, now, nil, h.lostPacketsInfo)
+		}
 		return nil
 	}
 
@@ -1140,13 +1174,6 @@ func (h *sentPacketHandler) MigratedPath(now monotime.Time, initialMaxDatagramSi
 	for pn := range h.appDataPackets.history.PathProbes() {
 		h.appDataPackets.history.RemovePathProbe(pn)
 	}
-	h.congestion = congestion.NewCubicSender(
-		congestion.DefaultClock{},
-		h.rttStats,
-		h.connStats,
-		initialMaxDatagramSize,
-		true, // use Reno
-		h.qlogger,
-	)
+	h.congestion = newSendAlgorithm(h.algorithm, h.rttStats, h.connStats, initialMaxDatagramSize, h.qlogger)
 	h.setLossDetectionTimer(now)
 }

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/quic-go/quic-go/internal/congestion"
 	"github.com/quic-go/quic-go/internal/handshake"
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/qlogwriter"
@@ -98,8 +99,23 @@ type ConnectionIDGenerator interface {
 	ConnectionIDLen() int
 }
 
+// PAPERBOAT PATCH (BBR): CongestionControl selects the sender's congestion controller.
+type CongestionControl = congestion.Algorithm
+
+const (
+	// CongestionControlReno is NewReno with RFC 9406 HyStart++ (the default).
+	CongestionControlReno = congestion.AlgorithmReno
+	// CongestionControlCubic is CUBIC with RFC 9406 HyStart++.
+	CongestionControlCubic = congestion.AlgorithmCubic
+	// CongestionControlBBR is BBRv1, ported from Hysteria (internal/congestion/bbr).
+	CongestionControlBBR = congestion.AlgorithmBBR
+)
+
 // Config contains all configuration data needed for a QUIC server or client.
 type Config struct {
+	// CongestionControl picks the congestion controller of every connection made with this config.
+	// Both ends choose their own; the zero value is Reno.
+	CongestionControl CongestionControl // PAPERBOAT PATCH (BBR)
 	// GetConfigForClient is called for incoming connections.
 	// If the error is not nil, the connection attempt is refused.
 	GetConfigForClient func(info *ClientInfo) (*Config, error)
