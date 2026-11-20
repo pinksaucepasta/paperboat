@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"flag"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
 
 func regionFlags(t *testing.T, args ...string) *flag.FlagSet {
@@ -47,5 +50,35 @@ func TestInstallRegionPrompt(t *testing.T) {
 				t.Fatalf("prompted %d times, want %d: %q", n, c.prompts, out.String())
 			}
 		})
+	}
+}
+
+// An upgrade keeps the stored region: the same --region passes, a different one is refused, none is fine.
+func TestUpgradeKeepsStoredRegion(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "protected")
+	cfg := selfhost.Config{Name: "n", EndpointHost: "203.0.113.10", Listen: "127.0.0.1:38443", Components: []selfhost.Component{
+		{Capability: "relay", TCPPort: 31445, QUICPort: 31446, Region: "eu-west", FailureDomain: "d", CapacityLimit: 128},
+	}}
+	if err := selfhost.Initialize(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args  []string
+		fails bool
+	}{{nil, false}, {[]string{"--region", "eu-west"}, false}, {[]string{"--region", "us-east"}, true}} {
+		fs := flag.NewFlagSet("install", flag.ContinueOnError)
+		fs.String("region", defaultRegion, "")
+		for _, n := range []string{"endpoint-host", "name", "claim-listen", "preview-domain", "tunnel-domain", "runtime-domain", "browser-access", "failure-domain"} {
+			fs.String(n, "", "")
+		}
+		fs.Bool("relay", false, "")
+		fs.Bool("edge", false, "")
+		fs.Bool("both", false, "")
+		if err := fs.Parse(c.args); err != nil {
+			t.Fatal(err)
+		}
+		if _, existing, err := existingInstallConfig(dir, fs); !existing || (err != nil) != c.fails {
+			t.Fatalf("args %v: existing %v, err %v, want fails %v", c.args, existing, err, c.fails)
+		}
 	}
 }
