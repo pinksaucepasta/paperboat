@@ -55,8 +55,10 @@ BEGIN
  AND n.public_ingress_verified_at IS NOT NULL AND(n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
  AND (NOT EXISTS(SELECT 1 FROM paperboat.selfhost_placements WHERE resource_kind=wanted_kind AND resource_id=wanted_resource)
  OR EXISTS(SELECT 1 FROM paperboat.selfhost_placements p JOIN paperboat.selfhost_installations i ON i.id=p.installation_id WHERE p.resource_kind=wanted_kind AND p.resource_id=wanted_resource AND i.node_id=n.id)))
- -- serving_rank<=4 mirrors edgeset.ServingNodesPerRegion (MaximumRegionCarriers/2); TestPublicationNodesAreTheServingNodes checks the digit.
- SELECT id FROM candidates WHERE serving_rank<=4 ORDER BY retained DESC,region_rank,id LIMIT 8;
+ -- Managed edges: only the first serving_rank<=4 of a region (edgeset.ServingNodesPerRegion = MaximumRegionCarriers/2;
+ -- TestPublicationNodesAreTheServingNodes checks the digit), as edgeset.ServingOnly does for attach. A workspace's own servers
+ -- are not limited to the serving set (attach holds carriers to up to MaximumRegionCarriers of them), so all of them stay.
+ SELECT id FROM candidates WHERE serving_rank<=4 OR NOT EXISTS(SELECT 1 FROM paperboat.managed_node_authority a WHERE a.node_id=candidates.id) ORDER BY retained DESC,region_rank,id LIMIT 8;
 END
 $function$;
 -- +goose StatementEnd
