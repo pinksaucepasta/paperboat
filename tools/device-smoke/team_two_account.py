@@ -2,12 +2,12 @@
 """F12-04 / F12-05 / F12-06 with two real accounts, run from the control host.
 
 OWNER is an enrolled machine of the team owner account (commands run over ssh); MEMBER is an enrolled machine of a
-second account (commands run through MEMBER_CMD, e.g. `sudo docker exec -u pb lane-b-pujan`). The team must exist, be
+second account (commands run through MEMBER_CMD, e.g. `sudo docker exec -u pb test-tester`). The team must exist, be
 paid, and have both accounts as active members. Everything this check creates it removes again.
 
-Usage: team_two_account.py --team TEAM --owner-ssh pbvm1 --machine MACHINE_ID \
-         --member-cmd 'sudo docker exec -u pb -e HOME=/home/pb -e XDG_RUNTIME_DIR=/run/user/1001 lane-b-pujan' \
-         --member-machine MEMBER_MACHINE_ID --suspend-cmd 'ssh root@coolify ...'
+Usage: team_two_account.py --team TEAM --owner-ssh Linux test VM --machine MACHINE_ID \
+         --member-cmd 'sudo docker exec -u pb -e HOME=/home/pb -e XDG_RUNTIME_DIR=/run/user/1001 test-tester' \
+         --member-machine MEMBER_MACHINE_ID --suspend-cmd 'ssh tester@host.example.test ...'
 --owner-ssh or --member-cmd may be `windows` (pb.exe on the Windows device as its own account) or `windows-teammate`
 (its second signed-in profile, which has no machine: skip approval and transfer); see winhost.py.
 """
@@ -314,7 +314,7 @@ def main():
 
     def resources():
         tunnel = None
-        code, value = parse(*owner_raw('tunnel', 'create', f'lane-b-f12-{int(time.time())}', '--port', '8123', '--json'))
+        code, value = parse(*owner_raw('tunnel', 'create', f'test-f12-{int(time.time())}', '--port', '8123', '--json'))
         if isinstance(value, dict):
             tunnel = (value.get('error') or {}).get('target') or (value.get('tunnel') or {}).get('id') or value.get('id')
         if not tunnel:

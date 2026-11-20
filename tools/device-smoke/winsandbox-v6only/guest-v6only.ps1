@@ -1,6 +1,6 @@
 # Runs inside a Windows Sandbox as SYSTEM (`wsb exec -r System`; the logon account is not an administrator, and pb as SYSTEM
 # cannot start its service, so pb commands run as a local administrator `pbw` through elevated one-shot tasks, see PB below).
-# Files in C:\host (mapped from the victus host staging dir):
+# Files in C:\host (mapped from the Windows host staging dir):
 #   wireguard.msi, pb.exe, x38q.conf (v6-only WireGuard client), token.txt (one-shot pb enrollment token), params.txt (KEY=VALUE).
 # Makes the guest strictly IPv6-only (no IPv4 route, outbound IPv4 blocked except the tunnel endpoint), then pairs pb and checks it.
 # Output: C:\host\out\guest.log; C:\host\out\guest.ready when the checks are done; then it waits for C:\host\cmd.ps1 files

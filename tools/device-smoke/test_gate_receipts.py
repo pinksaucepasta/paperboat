@@ -39,73 +39,73 @@ class GateReceipts(unittest.TestCase):
             'expect_version': version or self.version,
             'results': [{'id': key, 'status': value} for key, value in results.items()]}))
 
-    def evaluate(self, script=None):
-        source = script or GATE.read_text()
+    def evaluate(self):
+        source = GATE.read_text()
         owner = re.search(r"python3 - .*?<<'PY'.*?\n(.*?)\nPY", source, re.S).group(1)
         want = 'dev-' + self.git('rev-parse', '--short', 'HEAD').strip()
-        return subprocess.run(['python3', '-', want], input=owner, cwd=self.root,
+        return subprocess.run(['python3', '-', want, str(self.results), 'windows'], input=owner, cwd=self.root,
                               capture_output=True, text=True)
 
     def test_documentation_and_focused_rerun_preserve_all_checks(self):
-        self.receipt('01', {'exec:hp': 'PASS', 'terminal-new:hp': 'PASS'})
-        self.receipt('02', {'exec:hp': 'PASS', 'terminal-new:hp': 'FAIL'})
-        self.receipt('03', {'terminal-new:hp': 'PASS'})
+        self.receipt('01', {'exec:linux': 'PASS', 'terminal-new:linux': 'PASS'})
+        self.receipt('02', {'exec:linux': 'PASS', 'terminal-new:linux': 'FAIL'})
+        self.receipt('03', {'terminal-new:linux': 'PASS'})
         (self.root / 'AGENTS.md').write_text('Batch smoke; focused reruns.\n')
         self.commit('documentation')
         self.assertEqual(self.evaluate().returncode, 0)
 
     def test_focused_failure_cannot_hide_behind_older_pass(self):
-        self.receipt('01', {'exec:hp': 'PASS', 'ssh:hp': 'PASS'})
-        self.receipt('02', {'exec:hp': 'FAIL'})
+        self.receipt('01', {'exec:linux': 'PASS', 'ssh:linux': 'PASS'})
+        self.receipt('02', {'exec:linux': 'FAIL'})
         result = self.evaluate()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('exec:hp', result.stdout)
+        self.assertIn('exec:linux', result.stdout)
 
     def test_changed_runtime_cannot_reuse_old_receipt(self):
-        self.receipt('01', {'exec:hp': 'PASS'})
+        self.receipt('01', {'exec:linux': 'PASS'})
         (self.root / 'cli/source.go').write_text('package changed\n')
         self.commit('runtime changed')
         self.assertNotEqual(self.evaluate().returncode, 0)
 
     def test_partial_candidate_cannot_omit_historical_check(self):
-        self.receipt('01', {'exec:hp': 'PASS', 'ssh:hp': 'PASS'}, 'release-old')
-        self.receipt('02', {'exec:hp': 'PASS'})
+        self.receipt('01', {'exec:linux': 'PASS', 'ssh:linux': 'PASS'}, 'release-old')
+        self.receipt('02', {'exec:linux': 'PASS'})
         result = self.evaluate()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('ssh:hp', result.stdout)
+        self.assertIn('ssh:linux', result.stdout)
 
     def test_batch_requires_fresh_targeted_proof_and_retains_published_baseline(self):
-        self.receipt('01', {'exec:hp': 'PASS', 'ssh:hp': 'PASS'})
+        self.receipt('01', {'exec:linux': 'PASS', 'ssh:linux': 'PASS'})
         self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
         (self.root / 'cli/source.go').write_text('package changed\n')
         self.commit('next batch fix')
         self.assertNotEqual(self.evaluate().returncode, 0)
         version = 'dev-' + self.git('rev-parse', '--short', 'HEAD').strip()
-        self.receipt('02', {'exec:hp': 'PASS'}, version)
+        self.receipt('02', {'exec:linux': 'PASS'}, version)
         self.assertEqual(self.evaluate().returncode, 0)
-        self.receipt('03', {'exec:hp': 'FAIL'}, version)
+        self.receipt('03', {'exec:linux': 'FAIL'}, version)
         result = self.evaluate()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('exec:hp', result.stdout)
+        self.assertIn('exec:linux', result.stdout)
 
     def test_rebased_published_source_retains_its_exact_build_receipt(self):
         parent = self.git('rev-parse', 'HEAD').strip()
         (self.root / 'cli/source.go').write_text('package baseline\n')
         self.commit('qualified source')
         built = self.git('rev-parse', 'HEAD').strip()
-        self.receipt('01', {'exec:hp': 'PASS', 'ssh:hp': 'PASS'}, 'dev-' + built)
+        self.receipt('01', {'exec:linux': 'PASS', 'ssh:linux': 'PASS'}, 'dev-' + built)
         self.git('checkout', '-qb', 'published', parent)
-        (self.root / 'AGENTS.md').write_text('Incoming lane documentation.\n')
-        self.commit('incoming lane')
+        (self.root / 'AGENTS.md').write_text('Incoming worktree documentation.\n')
+        self.commit('incoming worktree')
         self.git('cherry-pick', built)
         self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
         self.assertNotEqual(self.git('rev-parse', 'HEAD').strip(), built)
         (self.root / 'cli/source.go').write_text('package candidate\n')
         self.commit('new candidate')
         current = 'dev-' + self.git('rev-parse', '--short', 'HEAD').strip()
-        self.receipt('02', {'exec:hp': 'PASS'}, current)
+        self.receipt('02', {'exec:linux': 'PASS'}, current)
         self.assertEqual(self.evaluate().returncode, 0)
-        self.receipt('03', {'ssh:hp': 'FAIL'}, current)
+        self.receipt('03', {'ssh:linux': 'FAIL'}, current)
         self.assertNotEqual(self.evaluate().returncode, 0)
 
 

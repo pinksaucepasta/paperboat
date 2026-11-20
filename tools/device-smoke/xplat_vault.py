@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """X-13: the ENV vault across OSes — a vault made on one OS opens on the others, lock and reset are honoured, no value leaks.
 
-  xplat_vault.py [--devices L,M,W] [--only lock,remove,persist,leak,reset]     (fresh-account fleet, vault password in ~/.pbmac/xplat2-vault.pw, recovery code in
-                                        ~/.pbmac/xplat2-recovery; both read inside this script, never printed)
+  xplat_vault.py [--devices L,M,W] [--only lock,remove,persist,leak,reset]     (fresh-account fleet, vault password in ~/.mac-vm/xplat2-vault.pw, recovery code in
+                                        ~/.mac-vm/xplat2-recovery; both read inside this script, never printed)
 
 Per device: lock -> the ENV is not delivered/readable; unlock with the password; lock -> unlock with the recovery code.
 Across devices: a vault reset on one device makes every other device refuse the old password and open with the new one
@@ -21,8 +21,8 @@ import xplat_fleet as fleet  # noqa: E402
 import xplat_env as env  # noqa: E402
 
 results = {}
-PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw'))
-RECOVERY = Path(os.environ.get('XPLAT_VAULT_RECOVERY', Path.home() / '.pbmac/xplat2-recovery'))
+PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.mac-vm/xplat2-vault.pw'))
+RECOVERY = Path(os.environ.get('XPLAT_VAULT_RECOVERY', Path.home() / '.mac-vm/xplat2-recovery'))
 
 SEARCH = r'''
 import os, sys
@@ -88,7 +88,7 @@ def recover_and_restore(dev):
 
 def reset_vault(dev, new_password):
     """Reset the vault (destructive for this fresh account's values) so it has `new_password` and a NEW recovery code; the files
-    ~/.pbmac/xplat2-vault.pw and xplat2-recovery follow (mode 600, never printed)."""
+    ~/.mac-vm/xplat2-vault.pw and xplat2-recovery follow (mode 600, never printed)."""
     account = fleet.json_pb(dev, 'auth', 'status')['account']['id']
     stage = dev.home + ('\\xplat-rec' if dev.os == 'windows' else '/.xplat-rec')
     new_file = stage + ('\\fresh' if dev.os == 'windows' else '/fresh')

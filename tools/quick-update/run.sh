@@ -17,7 +17,7 @@ mkdir -p ~/gap5 "$QV_OUT"
 # Host prep: a user systemd for the runner user (the daemon's user units), inotify headroom as on the VMs.
 sudo loginctl enable-linger "$(id -un)"; sudo systemctl start "user@$(id -u).service"
 sudo sysctl -q fs.inotify.max_user_instances=1024
-docker build -q -t gap5-systemd -f "$root/tools/device-smoke/ubuntu24-systemd.Dockerfile" "$root/tools/device-smoke" >/dev/null
+docker build -q -t gap5-systemd -f "$root/tools/device-smoke/test-systemd.Dockerfile" "$root/tools/device-smoke" >/dev/null
 
 # Builds: linux/amd64, from the checkout under test (QV_SRC); the harness (this directory) is the dispatched ref's.
 for pair in "baseline:$V" "candidate:$V-r1"; do

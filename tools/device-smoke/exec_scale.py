@@ -2,7 +2,7 @@
 """F21-166: 32 concurrent `pb exec` from one machine to one peer over the network, each running `sleep 20`.
 
 Run on the staging containers (never prod) from the orchestrating host:
-  exec_scale.py --host ubuntu@anvit [--count 32] [--sleep 20] [--budget 30]
+  exec_scale.py --host tester@staging.example.test [--count 32] [--sleep 20] [--budget 30]
 rel-sco-a starts COUNT execs at once to rel-sco-b (containers from control_outage.py setup); each must exit 0 within
 sleep + (budget - sleep) seconds. The result JSON has the start spread, the slowest and median times and every failure.
 
@@ -36,9 +36,12 @@ print(json.dumps(rows))
 '''
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--count", type=int, default=32)
     parser.add_argument("--sleep", type=int, default=20)
     parser.add_argument("--budget", type=float, default=30.0, help="seconds each exec may take in all")
@@ -48,6 +51,8 @@ def main():
     parser.add_argument("--target-name", default=c.NAMES["b"], help="the machine every exec runs on (a container or a Mac)")
     parser.add_argument("--server", default="", help="the control plane URL the client pb must talk to when its config names another one (staging)")
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     encoded = base64.b64encode(WORKER.encode()).decode()
     if args.client_ssh:  # the worker runs in the Mac's home, where ./.local/bin/pb is the installed pb
         rc, out = c.host_run(args.client_ssh, f"cd ~ && echo {encoded} | base64 -d > /tmp/exec_scale_worker.py && python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}{' windows' if args.windows else ''}", 430)

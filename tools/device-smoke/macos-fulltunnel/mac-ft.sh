@@ -11,9 +11,9 @@ echo "== routes under the VPN"; netstat -rn -f inet | grep -E "^(0/1|128.0/1|def
 echo "== egress"; curl -s -m 10 -o /dev/null -w "code=%{http_code} remote=%{remote_ip}\n" "${PB_API_URL:?set PB_API_URL to the API address}"
 sleep 40
 echo "== doctor under the VPN (Mac)"; $PB doctor 2>&1 | head -22 | cut -c1-200
-for p in rx38r-l lanex2-w lanex2-l2; do
+for p in rx38r-l test-w test-l2; do
   echo "== ping $p (Mac initiator)"; $PB ping $p --count 3 2>&1 | tail -3
-  echo "== exec $p (Mac initiator)"; $PB exec $p -- $([ $p = lanex2-w ] && echo cmd.exe /c echo ok-from-mac || echo echo ok-from-mac) 2>&1 | tail -2
+  echo "== exec $p (Mac initiator)"; $PB exec $p -- $([ $p = test-w ] && echo cmd.exe /c echo ok-from-mac || echo echo ok-from-mac) 2>&1 | tail -2
 done
 touch /tmp/x38r-ft.up; sleep 100
 echo "== doctor under the VPN (Mac), second look"; $PB doctor 2>&1 | head -3

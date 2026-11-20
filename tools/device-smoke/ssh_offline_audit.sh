@@ -3,7 +3,7 @@
 #
 # Managed SSH sessions started while Paperboat was unreachable appear in the workspace audit log with
 # origin 'offline' once the control plane is reachable again. Pairs two FRESH throwaway containers on HOST
-# (a Linux VM with Docker and the laneh-ubuntu24-systemd image; see fresh_pair_lib.sh) with BINARY: the target
+# (a Linux VM with Docker and the test-systemd image; see fresh_pair_lib.sh) with BINARY: the target
 # runs OpenSSH (installed BEFORE pairing so the setup user is registered), the client runs one real
 # `pb ssh <target> -- echo <marker>` while every Paperboat address is blackholed in BOTH containers
 # (the API, the tunnel edges, the relays, IPv4 and IPv6: the target's own resolution of every server-owned
@@ -23,10 +23,11 @@
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
-DB_HOST=${PB_AUDIT_DB_HOST:-root@coolify}
+DB_HOST=${PB_AUDIT_DB_HOST:-$(python3 "$(dirname "$0")/dev_targets.py" deployment_host)}
+[ -n "$DB_HOST" ] || { echo 'configure deployment_host in local development targets' >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-TARGET=laneh-soa-t-$STAMP CLIENT=laneh-soa-c-$STAMP ALIAS=laneh-soa-$STAMP
+TARGET=test-soa-t-$STAMP CLIENT=test-soa-c-$STAMP ALIAS=test-soa-$STAMP
 MACHINE_IDS= TARGET_ID= ADDRS=
 OUTAGE_SECS=150
 

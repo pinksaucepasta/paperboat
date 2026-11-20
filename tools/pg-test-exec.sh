@@ -5,7 +5,7 @@
 # The DSN names a database called lane_test on a server where the role may create databases; every package gets
 # lane_<package path>_test on the same server (the *_test name is what ValidateIsolatedTestDSN requires), dropped and
 # recreated first, so no package sees rows another left behind while go test still runs packages in parallel.
-# Used by CI (server-ci.yml, lane-test.yml) and tools/remote-test.sh. Without the variable it just runs the binary.
+# Used by CI (server-ci.yml, test.yml) and tools/remote-test.sh. Without the variable it just runs the binary.
 set -euo pipefail
 base=${PAPERBOAT_TEST_DATABASE_DSN:-}
 [ -n "$base" ] || exec "$@"

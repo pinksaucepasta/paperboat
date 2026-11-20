@@ -1,7 +1,7 @@
 #!/bin/bash
 # F18 device check (PLAN F18-10, CHECKLIST C244-C253): pb policy get/set/test/explain/versions/
 # restore/schema and pb api-token create/list/revoke against the live server, in the personal
-# workspace of an enrolled throwaway container on a docker host (pbvm2/pbvm3 harness).
+# workspace of an enrolled throwaway container on a docker host (Linux test VM/Linux test VM harness).
 # Usage: CT=<container> EMAIL=<account email> TARGET=<machine name in the account> policy_cli.sh
 #    or, on a paired machine itself (macOS): LOCAL=1 EMAIL=... TARGET=... policy_cli.sh
 # Prints PASS/FAIL per step and exits non-zero on any FAIL; never prints secrets. The personal

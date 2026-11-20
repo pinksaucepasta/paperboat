@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """F14-03 on a Unix device (a macpool Mac) reached over ssh: a failed restart and a full disk during `pb update --from`.
 
-  update_faults.py --device macpool-8 --peer anvit@hp --machine NAME --build PATH --other PATH [restart-failure] [disk-full]
+  update_faults.py --device macpool-8 --peer tester@host.example.test --machine NAME --build PATH --other PATH [restart-failure] [disk-full]
 
 --build is the newer pb on the device (the restart-failure check ends installing it) and --other is the build that was installed
 first (the disk-full check ends installing that one), so each update changes the version.
@@ -60,7 +60,7 @@ class Device:
         deadline = time.time() + seconds
         while time.time() < deadline:
             doctor = self.sh(f'{PB} doctor 2>&1 | head -n 1', 90)[1]
-            marker = 'pbmac-' + secrets.token_hex(4)
+            marker = 'mac-vm-' + secrets.token_hex(4)
             code, out = run([*SSH, self.peer, f'$HOME/.local/bin/pb exec {self.machine} -- echo {marker}'], 120)
             if 'doctor: healthy' in doctor and code == 0 and marker in out:
                 return True

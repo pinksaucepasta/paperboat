@@ -15,6 +15,7 @@ Steps, each asserted:
   3. the custom build is unaffected: `machine list` works and doctor is healthy during the floor
   4. the floor is cleared (also when a step fails): the official build works again without an update
 """
+from dev_targets import get_setting
 import argparse
 import base64
 import hashlib
@@ -212,8 +213,8 @@ def check(operator, official, custom, floor=''):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--docker-host', default='pbvm3')
-    parser.add_argument('--operator-host', default='pbvm4')
+    parser.add_argument('--docker-host', default=get_setting('update_docker_host'))
+    parser.add_argument('--operator-host', default=get_setting('update_operator_host'))
     parser.add_argument('--cred', required=True)
     parser.add_argument('--official', required=True, help='container name of the official build; with PB_SMOKE_WINDOWS_PB set, the machine name of the Windows device, which is then the official build')
     parser.add_argument('--custom', required=True, help='container name of the dev build')

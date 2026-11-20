@@ -9,9 +9,9 @@ class DomainCheckTest(unittest.TestCase):
         found = check_domains.violations({
             "cli/a.go": 'x := "https://api.pprbt.dev"\ny := "ok.example.test"\n',
             "console/b.ts": "const u = 'https://app.paperboat.cloud'",
-            "server/c_test.go": 'host := "3000.hp.ppr.boats"',
+            "server/c_test.go": 'host := "3000.test-host.ppr.boats"',
             "edge/d.go": 'h := "q.pprbt.app"',
-            "deploy/e.yml": "origin: https://oracle.newt-mermaid.ts.net",
+            "deploy/e.yml": "origin: https://tailnet-sample.ts.net",
         })
         self.assertEqual([line.split(": ")[0] for line in found],
                          ["cli/a.go:1", "console/b.ts:1", "deploy/e.yml:1", "edge/d.go:1", "server/c_test.go:1"])

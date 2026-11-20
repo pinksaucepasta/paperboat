@@ -147,7 +147,7 @@ class PinnedRelay(unittest.TestCase):
 class Reporting(unittest.TestCase):
     def cfg(self):
         key = tempfile.NamedTemporaryFile("w", delete=False); key.write("secret\n"); key.close()
-        return {"url": "http://example.test/api/probe", "vantage": "oracle", "key_file": key.name,
+        return {"url": "http://example.test/api/probe", "vantage": "vantage-a", "key_file": key.name,
                 "net_urls": ["http://a.test", "http://b.test"], "checks": [{"unit": "api_health", "kind": "http", "url": "http://x.test"}]}
 
     def test_steps_map_to_units_and_unknown_steps_are_dropped(self):
@@ -175,7 +175,7 @@ class Reporting(unittest.TestCase):
     def test_signature_matches_the_worker_formula(self):
         import hashlib, hmac
         body, sig = sr.body_and_signature(self.cfg(), [{"unit": "u", "ok": True, "ms": 1}], True, now=1700000000)
-        self.assertEqual(sig, hmac.new(b"secret", f"oracle\n1700000000000\n{body}".encode(), hashlib.sha256).hexdigest())
+        self.assertEqual(sig, hmac.new(b"secret", f"vantage-a\n1700000000000\n{body}".encode(), hashlib.sha256).hexdigest())
 
     def test_no_internet_sends_a_heartbeat_with_no_results(self):
         sent = []

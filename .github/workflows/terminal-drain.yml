@@ -8,7 +8,7 @@ name: Terminal drain
 
 on:
   push:
-    # main only: with no branch filter every lane-submit push that touched these paths started a run (2026-11-12 runner starvation).
+    # main only: with no branch filter every submit push that touched these paths started a run (2026-11-12 runner starvation).
     branches: [main]
     paths:
       - 'edge/**'
@@ -44,21 +44,21 @@ jobs:
         run: |
           echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
           echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-      # Lane test's nightly run on main writes these build caches; this job only reads them.
+      # Test's nightly run on main writes these build caches; this job only reads them.
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ${{ steps.paths.outputs.build }}
             ${{ steps.paths.outputs.mod }}
-          key: lane-test-go-cli-${{ hashFiles('go.work.sum', '*/go.sum') }}
-          restore-keys: lane-test-go-cli-
+          key: go-cache-go-cli-${{ hashFiles('go.work.sum', '*/go.sum') }}
+          restore-keys: go-cache-go-cli-
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ${{ steps.paths.outputs.build }}
             ${{ steps.paths.outputs.mod }}
-          key: lane-test-go-edge-${{ hashFiles('go.work.sum', '*/go.sum') }}
-          restore-keys: lane-test-go-edge-
+          key: go-cache-go-edge-${{ hashFiles('go.work.sum', '*/go.sum') }}
+          restore-keys: go-cache-go-edge-
       - name: build the machine side
         working-directory: cli
         run: go test -c -o "$RUNNER_TEMP/drain-machine.test" ./cmd/browserterminal-wasm

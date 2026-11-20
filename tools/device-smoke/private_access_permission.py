@@ -6,8 +6,8 @@ Two accounts, each with its own signed-in daemon: the OWNER machine (account A) 
 team that a second account B is a member of, and B's machine runs `pb access machine` against it.
 Run from any host that can ssh to both:
 
-  python3 private_access_permission.py --owner pb@pbvm2 --owner-alias pbvm2-4 \
-      --accessor pujan@ubuntu24 --team paperboat-smoke-paid
+  python3 private_access_permission.py --owner pb@Linux test VM --owner-alias Linux test VM-4 \
+      --accessor tester@host.example.test --team paperboat-smoke-paid
 
 A member reaches the ports only when the machine is shared into the team AND B's effective grant
 includes private_access AND the team setting allow_private_access is on. Phases, each asserted:

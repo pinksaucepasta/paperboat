@@ -2,7 +2,7 @@
 """F18-11 / C262 device check: machine tags from pb, run from the control host.
 
 OWNER runs pb signed in on one machine of the account (OWNER_CMD, e.g.
-`ssh pbvm3 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lanek-c`);
+`ssh Linux test VM sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 test-c`);
 TARGET is another machine of the account, by name. OWNER_CMD `windows` is pb.exe on the Windows device. In the personal workspace the check adds,
 removes and sets TARGET's tags with pb machine tag, checks pb machine list (TAGS, --tag), pb status
 and the policy file, then clears the tags again.

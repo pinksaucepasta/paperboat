@@ -18,7 +18,7 @@
 #                        directly, so an edge that dropped out of DNS or was null-routed still fails a step.
 #                        The preview step also fetches that run's own new preview through each address and reports
 #                        one step per address, edge_<address> (a fixed preview URL would make one lost preview read as every edge down)
-#   PREVIEW_ON           A (default) or B: the machine that makes the preview (anvit's vantage point has only B); each preview gets its own short-lived origin
+#   PREVIEW_ON           A (default) or B: the machine that makes the preview (database test host's vantage point has only B); each preview gets its own short-lived origin
 set -uo pipefail
 a=${CANARY_A:?} b=${CANARY_B:?} tunnel=${CANARY_TUNNEL_URL:-} port=${CANARY_PORT:-18099}
 pb=${PB:-.local/bin/pb} limit=${PROBE_STEP_TIMEOUT:-45}

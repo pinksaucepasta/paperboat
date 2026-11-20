@@ -11,6 +11,7 @@ Two fleets of the same shape, one per account (each: L = Docker container on XPL
   XPE_OWNER_CTL_CT    Docker container of a Linux pb signed in as OWNER with its token in a file (the team setting `allow_private_access`)
 Results: results/xplat-team-<stamp>.json with `X-21:<step>:A>B`. Nothing secret is printed; every grant, setting and share made is undone.
 """
+from dev_targets import get_setting
 import json
 import os
 import subprocess
@@ -34,14 +35,14 @@ OWNER_PREFIX, MEMBER_PREFIX = os.environ.get('XPLAT_PREFIX', 'xpe'), os.environ.
 
 
 def fleets():
-    """Account A (the team owner: xpe-l, xpe-w) and account F (the shared fleet's account: lanex2-l, -m, -w)."""
+    """Account A (the team owner: xpe-l, xpe-w) and account F (the shared fleet's account: test-l, -m, -w)."""
     own = {'L': fleet.linux(OWNER_PREFIX + '-l'), 'W': fleet.windows(OWNER_PREFIX + '-w')}
     saved = fleet.L_CT, os.environ.get('XPLAT_MAC_SSH'), os.environ.get('SMOKE_WINDOWS_SSH')
     try:
         fleet.L_CT = os.environ['XPE_MEMBER_L_CT']
         if os.environ.get('XPE_MEMBER_MAC_SSH'):
             os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
-        else:  # the real apple Mac
+        else:  # the real macmini Mac
             os.environ.pop('XPLAT_MAC_SSH', None)
         other = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm')}
         try:  # the other account's Windows device is only needed by pairs that use it
@@ -64,7 +65,7 @@ def as_host(dev):
     if dev.os == 'linux':
         fleet.L_CT = dev.prefix[-1]
     elif dev.os == 'darwin':
-        if dev.prefix[0] == fleet.MAC_SSH:  # the real apple Mac: no host variable
+        if dev.prefix[0] == fleet.MAC_SSH:  # the real macmini Mac: no host variable
             os.environ.pop('XPLAT_MAC_SSH', None)
         else:
             os.environ['XPLAT_MAC_SSH'] = dev.prefix[1]
@@ -408,7 +409,7 @@ def readd_members():
     args = [sys.executable, str(HERE / 'final_fixtures.py'), '--email', emails[0]]
     for email in emails[1:]:
         args += ['--member', email]
-    token = Path(os.path.expanduser('~/.pbmac/fixtures.token')).read_text().strip()
+    token = Path(os.path.expanduser('~/.mac-vm/fixtures.token')).read_text().strip()
     done = subprocess.run(args, capture_output=True, text=True, timeout=300,
                           env=dict(os.environ, FINAL_FIXTURES_URL=os.environ['XPE_FIXTURES_URL'], FINAL_FIXTURES_TOKEN=token))
     assert done.returncode == 0, 'could not put the members back: ' + done.stderr[-200:]
@@ -452,7 +453,7 @@ def t_removal(team, o, m, oid):
 
 
 def sql(statement):
-    done = subprocess.run(['ssh', 'root@coolify', "docker exec -i paperboat-postgres-1 sh -c 'psql -U \"$POSTGRES_USER\" -d \"${POSTGRES_DB:-$POSTGRES_USER}\" -v ON_ERROR_STOP=1'"],
+    done = subprocess.run(['ssh', '--', get_setting('deployment_host'), "docker exec -i paperboat-postgres-1 sh -c 'psql -U \"$POSTGRES_USER\" -d \"${POSTGRES_DB:-$POSTGRES_USER}\" -v ON_ERROR_STOP=1'"],
                           input=statement, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, 'sql: ' + done.stderr[-200:]
 

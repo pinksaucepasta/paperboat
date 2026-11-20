@@ -7,7 +7,7 @@ Public status for Paperboat, built to never show a wrong status.
 | `worker.ts`, `lib/` | one Cloudflare Worker `paperboat-status`: static assets (the Astro build in `dist/`), the `/api/*` routes (probe ingest, state, incidents, RSS, subscribe), the D1 binding and the once-a-minute cron that decides every unit (`lib/decide.ts` is the state machine) | Workers Builds from git (root `status/`); `deploy.sh` for the first deploy, secrets and vars |
 | `src/` | the page: Astro, static, light only, importing the shared `../brand` package (tokens, fonts, base styles, mark and lockup, favicons) | with the Worker |
 | `config/components.ts` | components, their units (checks or regions) and which vantage points report each | with the Worker |
-| `../tools/probe/status_report.py`, `status_run.py` | the probe: user-path checks, own-internet check, signed report; `canary.py` calls it on oracle, `deploy/paperboat-status-probe.timer` runs it on anvit | on the probe hosts |
+| `../tools/probe/status_report.py`, `status_run.py` | the probe: user-path checks, own-internet check, signed report; `canary.py` calls it on build-host, `deploy/paperboat-status-probe.timer` runs it on database-test-host | on the probe hosts |
 | `../admin/app/(panel)/status` | admin Status section, through `admin/lib/server/status-provider.ts` (the one seam to swap for a hosted provider); optional | with the admin panel |
 | `drill.py`, `drill-results/` | stop/start drill against a staging stack and its results | manual |
 

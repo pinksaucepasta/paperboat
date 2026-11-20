@@ -198,7 +198,7 @@ class RegistrationTest(unittest.TestCase):
             return 't' if statement.startswith('SELECT') else ''
         with patch.object(staging, 'remote', remote), patch.object(staging, 'sql', sql), \
                 patch.object(staging, 'read_remote_env', lambda *_: {'PAPERBOAT_ENCRYPTION_KEY': 'test-key'}), \
-                patch.object(staging, 'domain', lambda: 'stg.example.test'), patch.object(staging, 'api_url', lambda: 'https://anvit.stg.example.test:18443'):
+                patch.object(staging, 'domain', lambda: 'stg.example.test'), patch.object(staging, 'api_url', lambda: 'https://vantage-b.stg.example.test:18443'):
             function(image)
         return statements, commands
 
@@ -206,26 +206,26 @@ class RegistrationTest(unittest.TestCase):
         from cryptography import x509
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import ed25519
-        cert_pem, key_pem, pin = staging.carrier_certificate('anvit.stg.example.test')
+        cert_pem, key_pem, pin = staging.carrier_certificate('vantage-b.stg.example.test')
         cert = x509.load_pem_x509_certificate(cert_pem.encode())
         spki = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
         self.assertEqual(pin, hashlib.sha256(spki).hexdigest())
         self.assertIsInstance(cert.public_key(), ed25519.Ed25519PublicKey)
-        self.assertEqual(cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName), ['anvit.stg.example.test'])
+        self.assertEqual(cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName), ['vantage-b.stg.example.test'])
 
     def test_relay_is_registered_as_a_relay_on_a_public_range_tcp_port_and_replaces_only_its_own_install(self):
         statements, commands = self.register(staging.relay, 'paperboat-relay:stg-test')
         joined = '\n'.join(statements)
         self.assertIn("scope_id='usr_staging' AND capability='relay'", statements[0])
         self.assertIn("ARRAY['relay'],ARRAY['derp_quic','derp_wss']", joined)
-        self.assertIn(f"'anvit.stg.example.test',{staging.RELAY_TCP_PORT},{staging.RELAY_QUIC_PORT}", joined)
+        self.assertIn(f"'vantage-b.stg.example.test',{staging.RELAY_TCP_PORT},{staging.RELAY_QUIC_PORT}", joined)
         self.assertIn("'usr_staging','relay','self-hosted-only'", joined)
         self.assertNotIn('control_usage_verification_keys', joined)
         self.assertTrue(10000 <= staging.RELAY_TCP_PORT <= 59999 and 10000 <= staging.RELAY_QUIC_PORT <= 59999 and staging.RELAY_TCP_PORT != staging.RELAY_QUIC_PORT)
         run = commands[-1]
         self.assertIn(f'-p {staging.RELAY_TCP_PORT}:{staging.RELAY_TCP_PORT} ', run)
         self.assertIn(f'-wss-listen 0.0.0.0:{staging.RELAY_TCP_PORT}', run)
-        self.assertIn('-issuer https://anvit.stg.example.test:18443', run)
+        self.assertIn('-issuer https://vantage-b.stg.example.test:18443', run)
 
     def test_edge_replaces_only_its_own_install_so_a_relay_survives_it(self):
         statements, _ = self.register(staging.edge, 'paperboat-edge:stg-test')

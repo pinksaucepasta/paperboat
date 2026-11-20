@@ -1,4 +1,4 @@
-# Never-run Go tests when the skip audit started (2026-11-05, lane-test run 42006354856). Ratchet: only delete
+# Never-run Go tests when the skip audit started (2026-11-05, test run 42006354856). Ratchet: only delete
 # lines, when a test runs in a CI step or gets an allowlist line naming its job. tools/skip-audit.py fails on new ones.
 github.com/pinksaucepasta/paperboat/cli/cmd/environmentvault-wasm TestBuiltWasmInteroperatesWithNativeCode
 github.com/pinksaucepasta/paperboat/cli/cmd/pb TestCommandAPIReporterChild

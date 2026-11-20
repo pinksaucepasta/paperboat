@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """X-11: ENV delivered and used identically on each OS — `pb exec`, `pb ssh` command sessions and `pb env run`.
 
-  XPLAT_PREFIX=lanex2 XPLAT_L_CT=laneX2-l XPLAT_CONTROLLER=L SMOKE_WINDOWS_SSH=winpool-N xplat_env.py [--devices L,M,W]
+  XPLAT_PREFIX=test XPLAT_L_CT=test-l XPLAT_CONTROLLER=L SMOKE_WINDOWS_SSH=winpool-N xplat_env.py [--devices L,M,W]
 
-Runs against the fleet of a FRESH account whose ENV vault is unlocked with the password in ~/.pbmac/xplat2-vault.pw (read
+Runs against the fleet of a FRESH account whose ENV vault is unlocked with the password in ~/.mac-vm/xplat2-vault.pw (read
 inside this script, never printed). One set of variables (digits and underscores in names; values with spaces, quotes, `$`, `%`,
 backslash, emoji, several lines, 4 KiB; a PATH-like value) is set once; each target's own Python prints the sha256 of every
 value it sees, and that is compared with the sha256 of what was set. Results: tools/device-smoke/results/xplat-env-<stamp>.json.
@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import xplat_fleet as fleet  # noqa: E402
 
 results = {}
-PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw'))
+PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.mac-vm/xplat2-vault.pw'))
 VALUES = {
     'XP_1_PLAIN': 'plain',
     'XP_2_SPACES': '  leading and  inner   spaces and trailing  ',

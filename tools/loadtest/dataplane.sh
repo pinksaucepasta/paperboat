@@ -1,6 +1,6 @@
 #!/bin/bash
 # Data-plane load for the PLAN 3b scale matrix, run ON an enrolled client machine against one target machine of
-# the same test account (two throwaway containers; never other lanes' machines). Each step pushes past the host's
+# the same test account (two throwaway containers; never other worktrees' machines). Each step pushes past the host's
 # bound and records, per attempt, whether it succeeded or failed and with which message, so the matrix can say
 # whether the limit is graceful (clear error at the bound) or not (hangs, vague errors, failures below the bound).
 #

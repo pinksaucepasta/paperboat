@@ -2,7 +2,7 @@
 """`pb preview --host-header`: the origin receives the Host you name, through the real edge.
 
 A disposable enrolled machine (--machine-cmd, a command prefix such as
-`ssh pbvm4 sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 small-t1`) runs an origin that, like a
+`ssh Linux test VM sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 small-t1`) runs an origin that, like a
 dev server with a host allow-list (Vite, Django ALLOWED_HOSTS), answers 403 to any Host but ALLOWED_HOST.
 Checks: a plain preview is refused by the origin (403, the visitor's own host reaches it); the same origin behind
 `--host-header ALLOWED_HOST` answers 200 and sees that Host; a malformed value, a value with a port and a value on a unix

@@ -82,7 +82,7 @@ jobs:
 
       - name: The machines' image and the official pb (only used to mint enrollment commands)
         run: |
-          docker build -q -t laneh-ubuntu24-systemd -f tools/device-smoke/ubuntu24-systemd.Dockerfile tools/device-smoke
+          docker build -q -t test-systemd -f tools/device-smoke/test-systemd.Dockerfile tools/device-smoke
           mkdir -p "$HOME/.local/bin"
           curl -fsSL -o "$HOME/.local/bin/pb" "https://github.com/$GITHUB_REPOSITORY/releases/download/$BUILD/pb-linux-amd64"
           chmod 755 "$HOME/.local/bin/pb"

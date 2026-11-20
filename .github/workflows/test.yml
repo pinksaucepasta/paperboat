@@ -1,6 +1,6 @@
-name: Lane test
+name: Test
 
-# Heavy suites for lanes, so the shared build host only builds and runs single packages.
+# Heavy suites for worktrees, so the shared build host only builds and runs single packages.
 # Run it with tools/ci-test.sh, or push any commit to a ci/** branch (every module, the console).
 # workflow_dispatch narrows it: `modules` (space separated; default all) and `run` (go test -run).
 # The nightly run on main keeps the Go build caches warm for the ci/** branches (caches are only
@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: lane-test-${{ github.ref }}
+  group: test-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
@@ -109,15 +109,15 @@ jobs:
             ${{ steps.paths.outputs.mod }}
           # One entry per module and dependency set: the Go build cache is content addressed, so an
           # entry from an older commit still serves everything that did not change.
-          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}
+          key: go-cache-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}
           restore-keys: |
-            lane-test-go-${{ matrix.module }}-
+            go-cache-go-${{ matrix.module }}-
       - name: Check shared import boundary
         if: matrix.module == 'shared'
         run: ../tools/check-shared-imports.sh
       - run: go vet ./...
       # The same non-test checks as main's Server checks job (make check; Makefile policy-checks), so a green
-      # full-module lane run means main goes green too. Narrowed -run runs skip them to stay fast.
+      # full-module worktree run means main goes green too. Narrowed -run runs skip them to stay fast.
       - name: server policy checks and static analysis
         if: matrix.module == 'server' && inputs.run == ''
         run: |

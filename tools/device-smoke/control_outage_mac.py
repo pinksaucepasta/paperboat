@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
-SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.pbmac/ssh.sh for the apple VM (host: vm)
+SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.mac-vm/ssh.sh for the macmini VM (host: vm)
 sys.path.insert(0, str(HERE))
 import control_outage as c  # noqa: E402
 import control_outage_windows as w  # noqa: E402
@@ -130,10 +130,13 @@ def revoked_before(env, args):
     return w.write(res, "control-outage-revoked-mac", {})
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=["drill", "revoke", "revoked"])
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--server", required=True)
     parser.add_argument("--mac", required=True, help="SSH host of the Mac")
     parser.add_argument("--name", required=True, help="the Mac's machine name")
@@ -141,6 +144,8 @@ def main():
     parser.add_argument("--revoke-wait", type=int, default=180)
     parser.add_argument("--redact", action="append", default=[])
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     w.W = args.name
     env = MacEnv(args)
     sys.exit({"drill": w.drill, "revoke": w.revoke, "revoked": revoked_before}[args.phase](env, args))

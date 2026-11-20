@@ -1,15 +1,16 @@
 #!/bin/sh
-# Run one narrow compile/test command on oracle in a fair queue of N slots (default 4), under nice -n 15.
-#   oracle-slot.sh go vet ./internal/x/
-#   PB_SLOT_PRIORITY=1 oracle-slot.sh go build ./cmd/pb   # pushes and integration: served before normal jobs
+# Run one narrow compile/test command on the build host in a fair queue of N slots (default 4), under nice -n 15.
+#   build-slot.sh go vet ./internal/x/
+#   PB_SLOT_PRIORITY=1 build-slot.sh go build ./cmd/pb   # pushes and integration: served before normal jobs
 # FIFO: each caller takes a numbered ticket and runs once it is among the first N live tickets (priority
 # tickets sort first). Tickets of exited callers are pruned, so a killed job never blocks the queue.
 # Broad work (./..., several modules, -race, full packages) belongs on GitHub: tools/ci-test.sh.
 set -eu
 # Already inside a slot (e.g. lanebtest.sh run by a slotted job): run directly, so nesting never deadlocks.
-[ -n "${PB_IN_ORACLE_SLOT:-}" ] && exec nice -n 15 "$@"
-n=${PB_ORACLE_SLOTS:-4}
-dir=/tmp/pb-oracle-queue
+[ -n "${PB_IN_BUILD_SLOT:-}" ] && exec nice -n 15 "$@"
+n=${PB_BUILD_SLOTS:-4}
+dir=$(python3 "$(dirname "$0")/device-smoke/dev_targets.py" build_queue_dir)
+dir=${dir:-${TMPDIR:-/tmp}/paperboat-build-queue}
 mkdir -p "$dir"
 class=1
 [ "${PB_SLOT_PRIORITY:-}" = 1 ] && class=0
@@ -34,4 +35,4 @@ while :; do
   [ "$pos" -lt "$n" ] && break
   sleep 1
 done
-PB_IN_ORACLE_SLOT=1 nice -n 15 "$@"
+PB_IN_BUILD_SLOT=1 nice -n 15 "$@"

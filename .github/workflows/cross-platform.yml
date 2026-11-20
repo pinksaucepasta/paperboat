@@ -1,6 +1,6 @@
 name: Cross-platform
 
-# Build and test the cli, shared and Go SDK modules on macOS and Windows (Linux has its own lanes), and the
+# Build and test the cli, shared and Go SDK modules on macOS and Windows (Linux has its own workflow), and the
 # device-smoke harness's Python unit tests on every push to main (not on pull requests: its macOS and Windows
 # jobs held every hosted runner slot and kept the required PR checks queued for 7+ minutes, 2026-11-11). Windows runs without the race detector (slow
 # there); the Linux and macOS jobs carry it.
@@ -38,7 +38,7 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.shard != '' && 
 permissions:
   contents: read
 
-# Every lane pushes to main many times an hour and a run takes 30+ minutes, so runs queued behind each
+# Every worktree pushes to main many times an hour and a run takes 30+ minutes, so runs queued behind each
 # other for hours. One run per ref executes at a time and only the newest waiting push is kept (GitHub
 # replaces an older pending run); the run in progress always finishes, so a run is never starved by
 # later pushes. A hand dispatch has its own group.
@@ -108,7 +108,7 @@ jobs:
           go test -exec "$RUNNER_TEMP/win-test-exec.exe -elevated" ${RUN:+-v} -run "^($ELEVATED)\$" -timeout 15m -count "$COUNT" $PACKAGES || status=1
           exit $status
 
-  # The device harness's own unit tests (no devices, no network), as lane-test's smoke job: a harness
+  # The device harness's own unit tests (no devices, no network), as test's smoke job: a harness
   # regression fails the push that brings it, not the next device run.
   smoke:
     name: device-smoke unittest

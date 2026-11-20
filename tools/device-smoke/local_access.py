@@ -5,7 +5,7 @@ Runs from any host that can ssh to the controller. The controller drives every c
 `pb`; the target only runs a synthetic origin through `pb exec`, so it is reached the way a
 user reaches it. Prints one PASS/FAIL line per check id and exits non-zero on any failure.
 
-  python3 local_access.py --controller pb@pbvm2 --target hp [--only ID,ID]
+  python3 local_access.py --controller pb@Linux test VM --target Linux test machine [--only ID,ID]
 
 --controller windows uses winhost on the Windows device.
 --controller local runs the controller's commands on this machine (the final re-check runs it inside container A).

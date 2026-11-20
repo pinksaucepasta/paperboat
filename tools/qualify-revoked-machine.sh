@@ -19,7 +19,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mkdir -p "$repo/.build"
 work=$(mktemp -d "$repo/.build/qualify-revoked.XXXXXX")
 name=pb-revoked-$(basename "$work" | tr 'A-Z.' 'a-z-')
-machine=lanea-revoked-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+machine=test-revoked-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 step() { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 . "$repo/tools/fresh-host.sh"

@@ -4,7 +4,7 @@
 Creates a container paired to the member account (member_container.sh), runs the destructive checks inside it
 (pairing_lifecycle flags/prompts/broken, with a SIGINT and a network fault during pair; setup_recovery; reset),
 then revokes the machine and removes the container. Nothing touches a shared machine.
-Usage: destructive_suite.py HOST BUILD_ON_HOST VERSION [CONTAINER=laneh-destructive]   env: ORIGIN STATE PW_CHROMIUM [PW_MODULE]
+Usage: destructive_suite.py HOST BUILD_ON_HOST VERSION [CONTAINER=test-destructive]   env: ORIGIN STATE PW_CHROMIUM [PW_MODULE]
 """
 import json
 import os
@@ -32,7 +32,7 @@ REVOKE_SELF = ('import json;from pathlib import Path;from pairing_lifecycle impo
 
 def main():
     host, build, version = sys.argv[1:4]
-    name = sys.argv[4] if len(sys.argv) > 4 else 'laneh-destructive'
+    name = sys.argv[4] if len(sys.argv) > 4 else 'test-destructive'
     created = subprocess.run([str(HERE / 'member_container.sh'), host, name, build], capture_output=True, text=True)
     if 'True machine_' not in created.stdout:
         subprocess.run(['ssh', host, 'docker rm -f ' + name], capture_output=True)  # never leave a half-made container

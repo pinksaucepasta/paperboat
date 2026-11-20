@@ -31,7 +31,7 @@ class DaemonSelection(unittest.TestCase):
 
 class OutageRevokeFirst(unittest.TestCase):
     def run_outage(self, env, mac_answer, client_answer):
-        ssh_mac_rows.ARGS = mock.Mock(alias='apple', mac_user='admin')
+        ssh_mac_rows.ARGS = mock.Mock(alias='macmini', mac_user='admin')
         ssh_mac_rows.RESULTS.clear()
         with mock.patch.dict('os.environ', env, clear=True), \
                 mock.patch.object(ssh_mac_rows, 'cl', client_answer), mock.patch.object(ssh_mac_rows, 'rcl', client_answer), \
@@ -51,19 +51,19 @@ class OutageRevokeFirst(unittest.TestCase):
 
 class RevokeVerdict(unittest.TestCase):
     ok = ('RESULT normal pb_stderr=[] plain_stderr=[]\nRESULT seconds=2.1 alive=no plain_seconds=2.3 plain_alive=no '
-          'stderr=[pb: access to apple was revoked] plain_stderr=[pb: access to apple was revoked]')
+          'stderr=[pb: access to macmini was revoked] plain_stderr=[pb: access to macmini was revoked]')
 
     def test_both_sessions_ending_with_the_revoked_message_pass(self):
         self.assertTrue(ssh_mac_rows.revoke_verdict(self.ok)[0])
 
     def test_ssh_error_text_with_line_breaks_still_parses(self):
-        self.assertTrue(ssh_mac_rows.revoke_verdict(self.ok.replace('stderr=[pb: access to apple was revoked]', 'stderr=[pb: access to apple was revoked\r\nclient_loop: Broken pipe\n pb: x]', 1))[0])
+        self.assertTrue(ssh_mac_rows.revoke_verdict(self.ok.replace('stderr=[pb: access to macmini was revoked]', 'stderr=[pb: access to macmini was revoked\r\nclient_loop: Broken pipe\n pb: x]', 1))[0])
 
     def test_a_plain_session_that_stays_open_fails(self):
         self.assertFalse(ssh_mac_rows.revoke_verdict(self.ok.replace('plain_alive=no', 'plain_alive=yes'))[0])
 
     def test_a_missing_revoked_message_on_the_plain_session_fails(self):
-        self.assertFalse(ssh_mac_rows.revoke_verdict(self.ok.replace('plain_stderr=[pb: access to apple was revoked]', 'plain_stderr=[]'))[0])
+        self.assertFalse(ssh_mac_rows.revoke_verdict(self.ok.replace('plain_stderr=[pb: access to macmini was revoked]', 'plain_stderr=[]'))[0])
 
     def test_a_noisy_normal_exit_fails(self):
         self.assertFalse(ssh_mac_rows.revoke_verdict(self.ok.replace('pb_stderr=[]', 'pb_stderr=[oops]'))[0])

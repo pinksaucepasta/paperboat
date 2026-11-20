@@ -268,15 +268,20 @@ def write(res, stem, extra):
     return 0 if all(check["status"] == "PASS" for check in res.checks) else 1
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=["drill", "revoke", "revoked"])
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--server", required=True, help="the staging API base URL the machines are paired to")
     parser.add_argument("--outage-seconds", type=int, default=660)
     parser.add_argument("--revoke-wait", type=int, default=180)
     parser.add_argument("--redact", action="append", default=[], help="host names to replace with example.test in the result")
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     env = Env(args)
     sys.exit({"drill": drill, "revoke": revoke, "revoked": revoked}[args.phase](env, args))
 

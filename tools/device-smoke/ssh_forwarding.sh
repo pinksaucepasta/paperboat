@@ -11,7 +11,7 @@ set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
-T=lanei-sfw-t-$STAMP C=lanei-sfw-c-$STAMP ALIAS=lanei-sfw-$STAMP
+T=test-sfw-t-$STAMP C=test-sfw-c-$STAMP ALIAS=test-sfw-$STAMP
 IDS=
 finish() {
   local status=$1 detail=$2 id
@@ -27,7 +27,7 @@ set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES
   local ct=\$1 name=\$2 packages=\$3
   local X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 \$ct"
-  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock laneh-ubuntu24-systemd >/dev/null
+  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
   sleep 8
   sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
   sudo -n docker exec \$ct loginctl enable-linger pbt

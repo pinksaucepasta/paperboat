@@ -282,10 +282,13 @@ def cleanup(args):
     host_run(host, "sudo -n docker rm -f " + " ".join(NAMES.values()), 120)
 
 
+from dev_targets import get_setting
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=["setup", "drill", "revoke", "cleanup"])
-    parser.add_argument("--host", default="ubuntu@anvit")
+    parser.add_argument("--host", default=get_setting("staging_host") or None)
     parser.add_argument("--binary")
     parser.add_argument("--token-cmd")
     parser.add_argument("--server-container", default="pb-release-staging-server-1")
@@ -295,6 +298,8 @@ def main():
     parser.add_argument("--revoke-wait", type=int, default=180)
     parser.add_argument("--redact", action="append", default=[], help="host names to replace with example.test in the result")
     args = parser.parse_args()
+    if not args.host:
+        parser.error("configure staging_host in local development targets or pass --host")
     if args.phase == "setup":
         setup(args)
     elif args.phase == "drill":

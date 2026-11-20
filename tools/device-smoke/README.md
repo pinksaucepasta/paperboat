@@ -1,31 +1,46 @@
 # Device smoke
 
+Copy [targets.example.json](targets.example.json) to `~/.config/paperboat-dev/targets.json`,
+restrict access to the file to your user, and fill in your test machine names and SSH logins.
+Set `PB_DEV_TARGETS_FILE` to use a different private file. Shell environment values take
+precedence over the corresponding entries in the `smoke` object.
+
+- Set `results_dir` to an absolute path to share local receipts across worktrees. Smoke
+  and the regression gate use that directory. The default is the checkout's ignored
+  `tools/device-smoke/results/` directory.
+- `remote_hosts` maps roles to SSH destinations for remote tests and skew preflight.
+  `skew_host` optionally selects a default skew build host. If it is unset, the skew check
+  starts a disposable Linux CI runner through `pool_jump`.
+- Keep test-account IDs in `cleanup_accounts`. Use the configured test account for
+  throwaway machines and keep account credentials out of the checkout.
+
+
 ## Extra Windows machines (winpool)
 
 `winpool.sh` turns up to fourteen GitHub-hosted `windows-latest` runners into temporary Windows test machines, so
-several lanes can run Windows checks at once instead of queueing on victus.
+several worktrees can run Windows checks at once instead of queueing on windows-test.
 
 ```sh
 tools/device-smoke/winpool.sh start 2 3     # 2 machines for 3 hours (1-5); prints winpool-1, winpool-2 when SSH answers
 scp .build/$V/pb-windows-amd64.exe winpool-1:pb-new.exe
-export SMOKE_WINDOWS_SSH=winpool-1; unset VICTUS_PASS
+export SMOKE_WINDOWS_SSH=winpool-1; unset SMOKE_WINDOWS_PASSWORD
 python3 tools/device-smoke/windows_lifecycle.py --expect-version $V --windows-install-json /tmp/winpool-1.json \
-  --machine winpool-<lane>-1 --build 'C:\Users\runneradmin\pb-new.exe' install-pair doctor status
-python3 tools/device-smoke/windows_checks.py --install-json /tmp/winpool-1.json --machine winpool-<lane>-1 --peer hp --only exec-main
+  --machine winpool-<worktree>-1 --build 'C:\Users\runneradmin\pb-new.exe' install-pair doctor status
+python3 tools/device-smoke/windows_checks.py --install-json /tmp/winpool-1.json --machine winpool-<worktree>-1 --peer linux-test --only exec-main
 tools/device-smoke/winpool.sh stop 1        # or: stop (all of yours); then remove the machine records:
 tools/device-smoke/cleanup_test_account.py --prefix winpool- --stale '5 minutes'   # dry run, then --apply
 ```
 
 - Machine N is the SSH host `winpool-N` (user `runneradmin`, an administrator; key `~/.ssh/winpool_controller`).
   `winpool.sh` writes `~/.ssh/winpool.conf` and includes it from `~/.ssh/config`.
-- Name the Paperboat machine `winpool-…` so the cleanup finds it. `install-pair` mints its token on hp; nothing
+- Name the Paperboat machine `winpool-…` so the cleanup finds it. `install-pair` mints its token on linux-test; nothing
   of Paperboat is stored in GitHub.
-- Start and stop only from this controller (oracle): the start lock and the record of who started which machine
-  are local to it. `stop` acts only on machines started from your worktree; never stop another lane's.
+- Start and stop only from this controller (build-host): the start lock and the record of who started which machine
+  are local to it. `stop` acts only on machines started from your worktree; never stop another worktree's.
 - A machine is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
-- Evidence for a row ticked from a runner says so (`winpool, Windows Server 2025`); the final pass is on victus.
+- Evidence for a row ticked from a runner says so (`winpool, Windows Server 2025`); the final pass is on windows-test.
 
-Send these to victus, they cannot run on a runner:
+Send these to windows-test, they cannot run on a runner:
 
 - anything that reboots, sleeps or logs the user off (the runner and its tunnel do not come back);
 - anything that needs a signed-in desktop: tray or toast UI, a browser opened by `pb login`, per-user startup at logon;
@@ -38,23 +53,23 @@ How it is wired: the runner starts sshd on loopback with the controller's public
 `WINPOOL_CONTROLLER_PUBKEY`) and holds `ssh -N -R 127.0.0.1:2220N:127.0.0.1:22` to the jump host as user `winpool`
 (secrets `WINPOOL_TUNNEL_KEY`, `WINPOOL_TUNNEL_HOST`, `WINPOOL_TUNNEL_KNOWN_HOSTS`). On the jump host that user has
 no shell and `/etc/ssh/sshd_config.d/70-winpool.conf` allows it only those fourteen loopback listeners; the key's own `permitlisten=` options in `~winpool/.ssh/authorized_keys` must list the same fourteen ports (a port missing from either place makes `ssh -R` fail forever, 2026-11-10 slots 7-10). The controller
-reaches a machine with `ProxyJump` through its own login on the jump host (`WINPOOL_JUMP`, default `ubuntu@anvit`).
+reaches a machine with `ProxyJump` through its own login on the jump host (`WINPOOL_JUMP`, default `tester@database-test-host`).
 
-## Linux test hosts that stay up (linpool)
+## Linux test hosts that stay up (linuxpool)
 
-`linpool.sh` keeps up to twelve GitHub-hosted `ubuntu-latest` runners alive for 1-5 hours as SSH test hosts, so a
+`linuxpool.sh` keeps up to twelve GitHub-hosted `ubuntu-latest` runners alive for 1-5 hours as SSH test hosts, so a
 heavy suite does not wait for a new runner and set it up on every `tools/ci-test.sh` run. Each host has Go 1.27.4, gcc
 (for `-race`), passwordless sudo and a `postgres:17` container behind `~/.pb-test-pg-dsn`, which is what
 `tools/remote-test.sh` expects.
 
 ```sh
-tools/device-smoke/linpool.sh start 3 2     # 3 hosts for 2 hours (1-5); prints linpool-1.. when SSH answers (~2 min)
-tools/remote-test.sh linpool-1 server -run . ./internal/edgeset/   # PostgreSQL suites work; a second job reuses the host at once
-tools/device-smoke/linpool.sh stop          # all of yours (release N keeps one running for the next lane, adopt takes it)
+tools/device-smoke/linuxpool.sh start 3 2     # 3 hosts for 2 hours (1-5); prints linuxpool-1.. when SSH answers (~2 min)
+tools/remote-test.sh linuxpool-1 server -run . ./internal/edgeset/   # PostgreSQL suites work; a second job reuses the host at once
+tools/device-smoke/linuxpool.sh stop          # all of yours (release N keeps one running for the next worktree, adopt takes it)
 ```
 
-- Same design, controller key, tunnel secrets and claim records as winpool/macpool; host `linpool-N` is user `runner` on
-  the jump host's loopback port `22400+N` (1-12), written to `~/.ssh/linpool.conf`. Start and stop only from the controller.
+- Same design, controller key, tunnel secrets and claim records as winpool/macpool; host `linuxpool-N` is user `runner` on
+  the jump host's loopback port `22400+N` (1-12), written to `~/.ssh/linuxpool.conf`. Start and stop only from the controller.
 - The jump host's `winpool` tunnel account must allow ports 22401-22412 in both `70-winpool.conf` and the key's `permitlisten=`.
 - `remote-test.sh` runs one job per host at a time (host lock); start several hosts to run suites in parallel.
 - A host is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
@@ -62,13 +77,13 @@ tools/device-smoke/linpool.sh stop          # all of yours (release N keeps one 
 ## Extra macOS machines (macpool)
 
 `macpool.sh` is `winpool.sh` for macOS: up to eight GitHub-hosted `macos-latest` runners (arm64, macOS 26, 3 cores) as
-temporary Mac test machines, so lanes need not queue on the single apple VM.
+temporary Mac test machines, so worktrees need not queue on the single macos-test VM.
 
 ```sh
 tools/device-smoke/macpool.sh start 1 3     # 1 machine for 3 hours (1-5); prints macpool-1 when SSH answers
 scp .build/$V/pb-darwin-arm64 macpool-1:pb-new
-ssh macpool-1 '(umask 077; cat > tok)' < token-file     # token: pb machine add --json on hp (the token file must be owner-only)
-ssh macpool-1 './pb-new install && ~/.local/bin/pb pair --enrollment-token-file ~/tok --name macpool-<lane>-1'
+ssh macpool-1 '(umask 077; cat > tok)' < token-file     # token: pb machine add --json on linux-test (the token file must be owner-only)
+ssh macpool-1 './pb-new install && ~/.local/bin/pb pair --enrollment-token-file ~/tok --name macpool-<worktree>-1'
 tools/device-smoke/macpool.sh stop 1        # then revoke the machine record by exact id
 ```
 
@@ -80,7 +95,7 @@ tools/device-smoke/macpool.sh stop 1        # then revoke the machine record by 
   daemon itself runs as a system LaunchDaemon, so `pb exec` into the machine has no keychain.
 - Limits: 8 slots, at most 5 hours, GitHub's macOS concurrency (5 jobs at once, shared with every workflow; extra
   jobs queue, and macOS arm64 runners can queue for minutes). Nothing survives the run. No reboot, sleep or logout
-  (the tunnel dies), no LAN, no second OS user, no Spotlight/GUI-app rows. The final macOS pass stays on apple.
+  (the tunnel dies), no LAN, no second OS user, no Spotlight/GUI-app rows. The final macOS pass stays on macos-test.
 - Name the Paperboat machine `macpool-…` so the cleanup finds it (`cleanup_test_account.py --prefix macpool- --apply`).
 - Wiring: `.github/workflows/macpool.yml` (manual dispatch only) reuses the winpool secrets and variable; the jump
   host's `winpool` user also lists loopback ports 22301-22308 (`70-winpool.conf` and `permitlisten=` in its `authorized_keys`).

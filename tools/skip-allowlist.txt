@@ -1,12 +1,12 @@
-# Tests that skip in every lane-test step on purpose, and the job that runs them instead (tools/skip-audit.py).
+# Tests that skip in every test step on purpose, and the job that runs them instead (tools/skip-audit.py).
 # One line per reason: REGEX<TAB>where it runs. Matched against "package Test/sub: skip reason".
 # Keep it short and reviewed: a new line needs the job that really executes the test, not "later".
 \b(windows|darwin|macOS)\b.*\b(only|required|requires)\b|\bonly on (windows|darwin|macOS)\b	cross-platform.yml (windows-latest, macos-latest)
 TestLiveTunnelEdgeProtocols\b	deploy check on a live published tunnel (S1-09: PAPERBOAT_LIVE_EDGE_URL, run per edge)
 server/internal/app TestE2E(Serve|Proxy|Core)\b|relay/selfhost TestE2ESelfhostNode\b	e2e.yml (End-to-end core: TestE2ECore, which runs TestE2EServe and TestE2ESelfhostNode; multi job: tools/e2e/run.sh with TestE2EServe and TestE2EProxy)
 internal/hostruntime/preview TestPrivateTCPAccessOwnerHelper\b	child process: TestPrivateTCPAccessListenerClosesWhenItsOwnerProcessIsKilled re-execs the test binary to run it (go cli job)
-TestBrowserTerminalDrainMachine: .*run by edge/internal/runtime	lane-test.yml go edge drain step (child binary of TestBrowserTerminalDrainAcrossUpdates)
-TestActivationHelperTailChild: .*helper process only	lane-test.yml go cli root step (re-exec child of TestActivationHelperHoldsTheLockThroughTheActivationTail)
-TestEdgeHandoverHelperProcess: .*helper process for	lane-test.yml go edge (re-exec child of TestEdgeHandoverKeepsThePreviewAndTheHostCarrierUp)
-TestOriginProxyMatrix: .*origin_proxy_matrix\.sh	tools/device-smoke/origin_proxy_matrix.sh on a Docker host (Caddy/Traefik/nginx/Apache in containers; needs Docker, not available in lane-test steps)
+TestBrowserTerminalDrainMachine: .*run by edge/internal/runtime	test.yml go edge drain step (child binary of TestBrowserTerminalDrainAcrossUpdates)
+TestActivationHelperTailChild: .*helper process only	test.yml go cli root step (re-exec child of TestActivationHelperHoldsTheLockThroughTheActivationTail)
+TestEdgeHandoverHelperProcess: .*helper process for	test.yml go edge (re-exec child of TestEdgeHandoverKeepsThePreviewAndTheHostCarrierUp)
+TestOriginProxyMatrix: .*origin_proxy_matrix\.sh	tools/device-smoke/origin_proxy_matrix.sh on a Docker host (Caddy/Traefik/nginx/Apache in containers; needs Docker, not available in test steps)
 TestQUICCarrierStreamHoldsTheBudgetAtRealRTT: .*race instrumentation	cross-platform.yml Windows job (no race detector) on every push to main, and by hand without -race on macOS, Windows and Linux (PR-06)

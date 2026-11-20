@@ -11,12 +11,12 @@ import re
 import sys
 
 HERE = Path(__file__).resolve().parent
-DEVICES = {'hp', 'apple', 'victus', 'ubuntu24'}
+from dev_targets import configured_path, device_names, load
 BASELINE = {'version', 'doctor'}
 
 
 def listing(target):
-    return HERE / 'green' / (target + '.list')
+    return configured_path(load(), 'green_dir', HERE / 'green') / (target + '.list')
 
 
 def current(target):
@@ -26,8 +26,9 @@ def current(target):
 
 def involves_only(check, target):
     suffix = check.partition(':')[2]
-    return {part for part in suffix.split('-') if part in DEVICES} <= {target} and (
-        suffix in DEVICES or any(part in DEVICES for part in suffix.split('-')))
+    names = '|'.join(re.escape(name) for name in sorted(device_names(), key=len, reverse=True))
+    members = re.findall(r'(?<![a-z0-9])(' + names + r')(?![a-z0-9])', suffix)
+    return set(members) == {target}
 
 
 def has_runner(check, script):
@@ -51,7 +52,7 @@ def ever_passed(results, script, target):
 
 def refresh(target):
     script = (HERE / 'smoke.sh').read_text()
-    merged = sorted(set(current(target)) | ever_passed(HERE / 'results', script, target))
+    merged = sorted(set(current(target)) | ever_passed(configured_path(load(), 'results_dir', HERE / 'results'), script, target))
     listing(target).parent.mkdir(exist_ok=True)
     listing(target).write_text('# Checks that have ever passed on %s; every one must pass on a build before it becomes the base.\n' % target
                                + ''.join(check + '\n' for check in merged))

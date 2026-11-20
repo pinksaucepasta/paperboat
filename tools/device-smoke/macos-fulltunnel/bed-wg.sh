@@ -1,9 +1,9 @@
 #!/bin/bash
 # WireGuard full-tunnel endpoint with IPv4 NAT on a Linux bed host (X-38 macOS full-tunnel). Own interface, own subnet, rules tagged x38r.
-# usage: bed-wg.sh up | peer <pubkey> | down        env: BED (ssh host, default pbvm2), WGIF (x38rw), PORT (51899), NET (10.38.7)
+# usage: bed-wg.sh up | peer <pubkey> | down        env: BED (ssh host, default: configured Linux test host), WGIF (x38rw), PORT (51899), NET (10.38.7)
 # up prints the bed's public key.
 set -eu
-BED=${BED:-pbvm2}; WGIF=${WGIF:-x38rw}; PORT=${PORT:-51899}; NET=${NET:-10.38.7}
+BED=${BED:-$(python3 "$(dirname "$0")/../dev_targets.py" update_test_host)}; WGIF=${WGIF:-x38rw}; PORT=${PORT:-51899}; NET=${NET:-10.38.7}
 case ${1:-} in
 up) ssh "$BED" "set -e; sudo ip link del $WGIF 2>/dev/null || true; sudo ip link add $WGIF type wireguard; umask 077; wg genkey > /tmp/$WGIF.key
   sudo wg set $WGIF private-key /tmp/$WGIF.key listen-port $PORT; sudo ip addr add $NET.1/24 dev $WGIF; sudo ip link set $WGIF up

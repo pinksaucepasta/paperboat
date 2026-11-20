@@ -82,15 +82,22 @@ if git diff --name-only "$base" HEAD | grep -q '^cli/'; then
   fi
 fi
 
-if [ -n "$changed" ] && [ ! -d tools/device-smoke/results ]; then
+results=""
+if [ -n "$changed" ]; then
+  results=$(python3 tools/device-smoke/dev_targets.py results_dir) || exit 1
+  results=${results:-tools/device-smoke/results}
+  windows=$(python3 tools/device-smoke/dev_targets.py windows_name) || exit 1
+fi
+if [ -n "$changed" ] && [ ! -d "$results" ]; then
   step "device smoke for HEAD: skipped"
-  echo "skipped: no tools/device-smoke/results here (receipts are local, not in git); run tools/device-smoke/smoke.sh on the test devices to enforce this step"
+  echo "skipped: no configured local smoke receipts; run tools/device-smoke/smoke.sh on the test devices to enforce this step"
 elif [ -n "$changed" ]; then
   step "device smoke for HEAD: no check that ever passed may fail"
   want="dev-$(git rev-parse --short HEAD)"
-  python3 - "$want" <<'PY' || fail=1
-import glob, json, subprocess, sys
-want = sys.argv[1]
+  python3 - "$want" "$results" "${windows:-windows}" <<'PY' || fail=1
+import json, subprocess, sys
+from pathlib import Path
+want, results, windows = sys.argv[1:]
 passed, current, receipts, fresh = set(), {}, [], False
 runtime_paths = ['cli/', 'relay/', 'shared/']
 def runtime_tree(revision):
@@ -117,7 +124,7 @@ def receipt_source(version):
     # Fresh proof is still required for this candidate's exact runtime tree.
     return tree == head_tree, tree in published_trees
 
-for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
+for f in sorted(Path(results).glob('*.json')):
     try:
         d = json.load(open(f))
     except Exception:
@@ -127,8 +134,8 @@ for f in sorted(glob.glob('tools/device-smoke/results/*.json')):
         fresh = fresh or same
         receipts.append(f)
         current.update({r['id']: r['status'] for r in d.get('results') or []})
-    # Windows (victus) is after launch (PLAN.md 1.1), so its checks do not gate.
-    passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS' and not r['id'].endswith(':victus')}
+    # Windows is after launch (PLAN.md 1.1), so its checks do not gate.
+    passed |= {r['id'] for r in d.get('results') or [] if r['status'] == 'PASS' and not r['id'].endswith(':' + windows)}
 if not fresh:
     print(f"FAIL: runtime code changed but no smoke result for build {want}.")
     print(f"      Build HEAD for all devices, install it, run tools/device-smoke/smoke.sh --expect-version {want}")

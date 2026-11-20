@@ -48,7 +48,7 @@ def establish(terminal, nonce, windows):
     """Sets the session's shell variable and returns the shell's pid."""
     if windows:
         deadline = time.monotonic() + 120
-        # Not a Paperboat drop (2026-11-11, runner target, hp client): the host writes the line to the ConPTY (echoed) and cmd.exe's
+        # Not a Paperboat drop (2026-11-11, runner target, Linux test machine client): the host writes the line to the ConPTY (echoed) and cmd.exe's
         # startup discards it before its first read. Typed 0 s after first output it arrives 1/3 times with `pb connect`, 0/3 with plain
         # ssh -tt; from 5 s on, or once the prompt is on screen, 3/3 both ways. So type it again until it answers.
         while True:

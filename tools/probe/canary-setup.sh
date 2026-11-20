@@ -3,7 +3,7 @@
 # machine NAME with the given pb build. With 'origin', the machine also gets the canary origin (a user service
 # serving ~/canary-www on CANARY_PORT) and the permanent canary tunnel to it; the tunnel's URL is printed last.
 #   TOKEN_CMD  prints one fresh enrollment token for the name given as its last argument, on stdout only
-#              (it is piped into the container, never shown), e.g. 'ssh pbvm2 python3 laneh/gettoken.py'
+#              (it is piped into the container, never shown), e.g. 'ssh Linux test VM python3 laneh/gettoken.py'
 # usage: TOKEN_CMD='...' canary-setup.sh <host> <container> <machine-name> <pb-binary> [origin]
 # Updating pb later: copy the new binary to /home/pbt/pb in the container and run `./pb install` as pbt.
 set -eu

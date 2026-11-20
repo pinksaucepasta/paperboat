@@ -10,9 +10,9 @@ Env (wrappers take ONE shell-string argument, as in ssh_mac_rows.py):
   REVOKE_CLIENT_CMD  runs it on a FRESH container with pb installed and nobody signed in: it becomes the member B
   MAC_CMD            runs it on the Mac (not used for sshd here, only for logs)
   TEAM               a team A owns; MEMBER_STATE  B's console storage state; PW_CHROMIUM, PW_MODULE (playwright)
-  MAC_USER (default admin), ALIAS (default apple)
+  MAC_USER (default admin), ALIAS (default macmini)
 Steps: B signs in (approved in the browser), A invites B, B accepts, A shares the Mac into TEAM and grants B managed_ssh+exec;
-gate: right after the grant, with B never having run exec, `ssh admin@apple.<domain> echo ok` and `pb --workspace TEAM ssh apple`
+gate: right after the grant, with B never having run exec, `ssh admin@macmini.<domain> echo ok` and `pb --workspace TEAM ssh macmini`
 print ok within 5 s, B's managed config has the Mac's block and its ssh_known_hosts has its lines; then B holds a `pb ssh` AND a
 plain ssh session, A revokes, both must end within 15 s saying access was revoked; normal exits print nothing.
 Prints one JSON line; the share and the membership are undone on every exit path.
@@ -29,7 +29,7 @@ import ssh_mac_rows as m
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODE = os.environ.get('MODE', 'grant')
-ALIAS = os.environ.get('ALIAS', 'apple')
+ALIAS = os.environ.get('ALIAS', 'macmini')
 WINDOWS = '--windows' in sys.argv
 if WINDOWS:
     import ssh_windows_target
@@ -51,7 +51,7 @@ block=$(grep -c "^Host $N\$" ~/.ssh/paperboat_config); kh=$(awk -v n="$N" '$1==n
 echo "RESULT access plain_s=$([ -n "$okpl" ] && python3 -c "print(round($okpl-$t0,1))" || echo none) pb_s=$([ -n "$okp" ] && python3 -c "print(round($okp-$t0,1))" || echo none) config_block=$block known_hosts_lines=$kh last_plain=[$([ -n "$okpl" ] || cut -c1-200 <<<"$lerr")] last_pb=[$([ -n "$okp" ] || cut -c1-200 <<<"$perr")]"'''
 
 HOLD = PROLOGUE + r'''perr=$($PB $PBW ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' '); lerr=$(ssh $H 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' ')
-# the proxy names a team-shared machine on stderr ("apple (team X)"): informational, not an error
+# the proxy names a team-shared machine on stderr ("macmini (team X)"): informational, not an error
 perr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$perr"); lerr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$lerr")
 echo "RESULT normal pb_stderr=[$perr] plain_stderr=[$lerr]"
 # ten more plain exits: stderr empty (but for the team banner), exit status 0 each, with their wall time

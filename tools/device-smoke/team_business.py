@@ -16,8 +16,8 @@ checks with the receiver on the controller, forwarded through the device. S3 fix
 from the controller's ~/.f19-s3ak and ~/.f19-s3sk; they are never copied into the helper directory.
 
 Usage: team_business.py --team paperboat-smoke-paid \
-         --cmd 'ssh hp docker exec -i -u tester -e XDG_RUNTIME_DIR=/run/user/1001 -w /home/tester lanes-f19' \
-         --s3-origin 10.0.0.12:7070 --s3-list-cmd 'ssh hp docker exec -i lanes-s3'
+         --cmd 'ssh Linux test machine docker exec -i -u tester -e XDG_RUNTIME_DIR=/run/user/1001 -w /home/tester test-f19' \
+         --s3-origin 10.0.0.12:7070 --s3-list-cmd 'ssh Linux test machine docker exec -i test-s3'
 """
 import argparse
 import contextlib

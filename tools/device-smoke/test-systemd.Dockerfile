@@ -1,5 +1,5 @@
 # The disposable machines of the final re-check (fresh_pair_lib.sh start_ct): Ubuntu 24.04 with systemd, a login-capable user
-# pbt (uid 1000, passwordless sudo) and the tools the checks use inside a machine. Build: docker build -t laneh-ubuntu24-systemd -f ubuntu24-systemd.Dockerfile .
+# pbt (uid 1000, passwordless sudo) and the tools the checks use inside a machine. Build: docker build -t test-systemd -f test-systemd.Dockerfile .
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y -qq systemd systemd-sysv dbus sudo python3 curl ca-certificates iproute2 iptables procps openssh-client nftables libnss3-tools \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S3-04: run the full device smoke suite on an OFFICIAL release, Linux pair (hp + dadape).
+"""S3-04: run the full device smoke suite on an OFFICIAL release, configured Linux pair.
 
   release_run.py --version 2026.10.19.17 [--repository owner/repo] [--dry-run]
                  [-- smoke.sh options, e.g. --long-seconds 60]
@@ -7,11 +7,11 @@
 1. Downloads the release's SHA256SUMS and SHA256SUMS.sig from GitHub, verifies the signature with the release key
    embedded in cli/tools/install.sh (the key the installer trusts), requires it to name exactly --version, then
    downloads pb-linux-amd64 and pb-linux-arm64 and verifies their SHA-256 the way the installer does.
-2. Installs each binary on its device with deploy.py (hp amd64, dadape arm64): the same `pb install`
+2. Installs each binary on its device with deploy.py (one amd64 and one arm64 host): the same `pb install`
    a user runs, no identity or account change.
-3. Runs smoke.sh --targets hp,dadape --expect-version VERSION (all checks, no skip list) and prints
+3. Runs smoke.sh --targets <linux>,<peer> --expect-version VERSION (all checks, no skip list) and prints
    the result file and a CHECKLIST evidence line.
-Needs DADAPE_PASS (REMOTE_TESTING.md) and a signed-in HP/dadape pair. --dry-run stops after step 1.
+Use a signed-in Linux pair from the local target configuration. --dry-run stops after step 1.
 """
 import argparse
 import hashlib
@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEVICES = {'hp': ('linux-amd64', 'anvit@hp'), 'dadape': ('linux-arm64', 'anvit@dadape')}
+from dev_targets import configured_path, load, smoke_environment
 MAX_ASSET = 512 << 20
 INSTALLER = HERE.parents[1] / 'cli' / 'tools' / 'install.sh'
 RELEASE_KEY = re.compile(r'paperboat-release namespaces="paperboat-release" ssh-ed25519 [A-Za-z0-9+/=]+')
@@ -110,25 +110,30 @@ def main():
         print(json.dumps({'phase': 'verified', 'version': args.version, 'assets': sorted(files)}), flush=True)
         if args.dry_run:
             return 0
-        password = os.environ.get('DADAPE_PASS', '')
-        if not password:
-            raise SystemExit('export DADAPE_PASS (see REMOTE_TESTING.md)')
-        for device, (asset, target) in DEVICES.items():
-            env = dict(os.environ, DEVICE_PASSWORD=password) if device == 'dadape' else dict(os.environ)
+        settings = load()
+        smoke = smoke_environment(settings)
+        devices = [(smoke.get('SMOKE_LINUX_NAME', 'linux'), smoke.get('SMOKE_LINUX_SSH'), 'linux-amd64', ''),
+                   (smoke.get('SMOKE_PEER_NAME', 'linux-peer'), smoke.get('SMOKE_LINUX_PEER_SSH'), 'linux-arm64',
+                    smoke.get('SMOKE_LINUX_PEER_PASSWORD', ''))]
+        if not all(target for _, target, _, _ in devices):
+            parser.error('configure both Linux SSH logins in the local development targets')
+        for device, target, asset, password in devices:
+            env = dict(os.environ, DEVICE_PASSWORD=password)
             receipts = Path(directory) / ('receipts-' + device)
             subprocess.run([sys.executable, str(HERE / 'deploy.py'), '--device', device, '--ssh-target', target,
                             '--binary', str(files[asset]), '--version', args.version, '--receipts', str(receipts)],
                            check=True, env=env)
-    results = HERE / 'results'
+    results = configured_path(settings, 'results_dir', HERE / 'results')
+    targets = ','.join(device for device, *_ in devices)
     before = set(results.glob('*.json'))
-    status = subprocess.run([str(HERE / 'smoke.sh'), '--targets', 'hp,dadape', '--expect-version', args.version, *extra]).returncode
+    status = subprocess.run([str(HERE / 'smoke.sh'), '--targets', targets, '--expect-version', args.version, *extra]).returncode
     new = sorted(set(results.glob('*.json')) - before)
     if not new:
         raise SystemExit('smoke.sh wrote no result file')
     passed, failed = summary(new[-1])
-    print(json.dumps({'phase': 'result', 'file': str(new[-1].relative_to(HERE.parent.parent)), 'version': args.version,
+    print(json.dumps({'phase': 'result', 'file': str(new[-1]), 'version': args.version,
                       'passed': passed, 'failed': failed,
-                      'evidence': f"official {args.version} on hp+dadape: smoke {new[-1].name}, {passed} PASS, {len(failed)} FAIL"}))
+                      'evidence': f"official {args.version} on the configured Linux pair: smoke {new[-1].name}, {passed} PASS, {len(failed)} FAIL"}))
     return status or (1 if failed else 0)
 
 

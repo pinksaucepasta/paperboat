@@ -8,7 +8,7 @@ CASE signin-read  read what that watcher saw (out.json and log); fails on any vi
 CASE exec     EXE ARGS... (e.g. pb.exe install ..., pb.exe update ..., pb.exe pair ...) started with no console
 Each case first runs a control (plain cmd.exe with no console must open a visible window), so a blind detector fails.
 SSH runs in session 0 and cannot see the desktop, so the detector (windows_console_flash.ps1) runs through an
-interactive scheduled task of the signed-in user (victus has one; a hosted runner does when its console session is Active; set VIA_EXPLORER=1 there). Needs VICTUS_PASS, SMOKE_WINDOWS_SSH.
+interactive scheduled task of the signed-in user (Windows test machine has one; a hosted runner does when its console session is Active; set VIA_EXPLORER=1 there). Needs SMOKE_WINDOWS_PASSWORD, SMOKE_WINDOWS_SSH.
 """
 import json
 import os

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One status probe pass for a vantage point that is not the canary host (anvit, staging): its checks, plus the probe.sh steps in
+"""One status probe pass for a vantage point that is not the canary host (database test host, staging): its checks, plus the probe.sh steps in
 its config's "probe" block ({"env": {...}, "steps": "step names"}), posted to the status Worker. Run every minute by
 deploy/paperboat-status-probe.timer. The unit's EnvironmentFile sets STATUS_PROBE_CONFIG."""
 import os, subprocess, sys

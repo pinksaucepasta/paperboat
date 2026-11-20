@@ -6,11 +6,12 @@
 # A new slot that does not answer leaves the previous build running.
 # Usage: tools/console-prod.sh   (any worktree; PB_CONSOLE_PROD_HOST overrides the ssh target)
 set -eu
-host=${PB_CONSOLE_PROD_HOST:-root@coolify}
+host=${PB_CONSOLE_PROD_HOST:-$(python3 "$(dirname "$0")/device-smoke/dev_targets.py" deployment_host)}
+[ -n "$host" ] || { echo "configure the host in local development targets" >&2; exit 2; }
 dir=/opt/paperboat-console
 here=$(cd "$(dirname "$0")" && pwd)
 tree=${PB_CONSOLE_TREE:-$HOME/paperboat}
-# The commit to ship: main as fetched now. Another lane may fast-forward the shared tree between console-live's
+# The commit to ship: main as fetched now. Another worktree may fast-forward the shared tree between console-live's
 # lock and ours (11-16: 2 of 3 runs), so the build only has to contain this commit, not equal main afterwards.
 git -C "$tree" fetch -q origin main
 want=$(git -C "$tree" rev-parse FETCH_HEAD)

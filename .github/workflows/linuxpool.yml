@@ -1,15 +1,15 @@
 # Temporary Linux test hosts: each job is a hosted runner kept alive for hours, with Go, gcc and a postgres:17 service
 # container ready, whose sshd the controller reaches through a reverse SSH tunnel to our jump host's loopback
-# (tools/device-smoke/linpool.sh starts, lists and stops them; tools/remote-test.sh linpool-N runs suites on them).
+# (tools/device-smoke/linuxpool.sh starts, lists and stops them; tools/remote-test.sh linuxpool-N runs suites on them).
 # Same design as winpool.yml and macpool.yml and the same tunnel secrets. Manual dispatch only, so a fork or pull
 # request can never run it with the tunnel key.
-name: linpool
+name: linuxpool
 
 on:
   workflow_dispatch:
     inputs:
       slots:
-        description: Host numbers 1-12, comma separated (linpool.sh start picks free ones)
+        description: Host numbers 1-12, comma separated (linuxpool.sh start picks free ones)
         required: true
         default: "1"
       hours:
@@ -22,10 +22,10 @@ permissions: {} # no checkout, no token use
 
 jobs:
   host:
-    name: linpool-${{ matrix.slot }}
+    name: linuxpool-${{ matrix.slot }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ fromJSON('{"1":75,"2":135,"3":195,"4":255,"5":315}')[inputs.hours] }} # hours + 15 min, under GitHub's 6 h cap
-    concurrency: linpool-${{ matrix.slot }} # one host per tunnel port
+    concurrency: linuxpool-${{ matrix.slot }} # one host per tunnel port
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +66,7 @@ jobs:
           port=$((22400 + SLOT))
 
           # Our own sshd, not the image's: loopback only and keys only, whatever the image configures.
-          dir=$RUNNER_TEMP/linpool-sshd; mkdir -p "$dir"
+          dir=$RUNNER_TEMP/linuxpool-sshd; mkdir -p "$dir"
           ssh-keygen -q -t ed25519 -N '' -f "$dir/host_ed25519"
           cat > "$dir/sshd_config" <<CONF
           Port 2222
@@ -89,10 +89,10 @@ jobs:
             { echo "sshd would listen beyond loopback or accept passwords:"; grep -E '^(listenaddress|passwordauthentication|kbdinteractiveauthentication|port) ' <<<"$effective"; exit 1; }
           sudo /usr/sbin/sshd -f "$dir/sshd_config" # forks into the background
 
-          key=~/.ssh/linpool_tunnel; known=~/.ssh/linpool_known_hosts
+          key=~/.ssh/linuxpool_tunnel; known=~/.ssh/linuxpool_known_hosts
           (umask 077; printf '%s\n' "$TUNNEL_KEY" | tr -d '\r' > "$key")
           printf '%s\n' "$TUNNEL_KNOWN_HOSTS" > "$known"
-          stop=/tmp/linpool-stop # linpool.sh stop creates it
+          stop=/tmp/linuxpool-stop # linuxpool.sh stop creates it
           deadline=$((SECONDS + HOURS * 3600))
           running() { [ $SECONDS -lt $deadline ] && [ ! -e "$stop" ]; }
           trap 'rm -f "$key"; sudo kill "$(cat "$dir/sshd.pid")" 2>/dev/null || true' EXIT
@@ -102,7 +102,7 @@ jobs:
               -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
               -R "127.0.0.1:${port}:127.0.0.1:2222" "winpool@$TUNNEL_HOST" &
             tunnel=$!
-            echo "linpool-$SLOT is up"
+            echo "linuxpool-$SLOT is up"
             while running && kill -0 "$tunnel" 2>/dev/null; do sleep 5; done
             if kill -0 "$tunnel" 2>/dev/null; then kill "$tunnel"; else echo 'tunnel closed; again in 10 s'; sleep 10; fi
             wait "$tunnel" 2>/dev/null || true

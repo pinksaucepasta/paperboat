@@ -1,8 +1,8 @@
 #!/bin/bash
-# Windows strict IPv6-only check (X-38): a Windows Sandbox on victus reaches the world only through a WireGuard
-# tunnel to a NAT64/DNS64 bed on a Linux host (pbvm2). Replaces the hand-built bed of R-X-38-O.
-# Needs: a logged-in interactive desktop on victus (Windows Sandbox only starts there), VICTUS_PASS via vic.sh, ssh pbvm2.
-# Bed on pbvm2 (tayga NAT64 64:ff9b::/96, unbound DNS64 on fd38:0:0:1::1, wg interface x38ow) must already exist.
+# Windows strict IPv6-only check (X-38): a Windows Sandbox on the Windows device reaches the world only through a WireGuard
+# tunnel to a NAT64/DNS64 bed on a Linux host (the Linux test host). Replaces the hand-built bed of R-X-38-O.
+# Needs: a logged-in interactive desktop on the Windows device (Windows Sandbox only starts there), SMOKE_WINDOWS_PASSWORD via vic.sh, ssh the Linux test host.
+# Bed on the Linux test host (tayga NAT64 64:ff9b::/96, unbound DNS64 on fd38:0:0:1::1, wg interface x38ow) must already exist.
 # The bed needs TCP MSS clamping on the WireGuard interface (both families, -i and -o x38ow, TCPMSS --clamp-mss-to-pmtu in
 # the mangle FORWARD chain): without it HTTPS through NAT64 times out on the first full-size segment (tayga's +20 byte
 # header exceeds the tunnel MTU) and pb install fails in the machine guard phase. bed-nat.sh does that and the IPv4 NAT.
@@ -11,15 +11,21 @@
 # enrollment token; minted from the Linux peer when unset)
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-VIC=${VIC:-$HERE/vic.sh}               # ssh wrapper to victus: vic.sh '<cmd>' (supplies the password)
-BED=${BED:-pbvm2}; WGIF=${WGIF:-x38ow}; EP4=${EP4:-192.168.31.146}; DNS6=${DNS6:-fd38:0:0:1::1}
-STAGE='C:\Users\pujan\rx38q'
+VIC=${VIC:-$HERE/vic.sh}               # ssh wrapper to the Windows device: vic.sh '<cmd>' (supplies the password)
+BED=${BED:-$(python3 "$HERE/../dev_targets.py" update_test_host)}; WGIF=${WGIF:-x38ow}; EP4=${EP4:-$(python3 "$HERE/../dev_targets.py" sandbox_endpoint_ipv4)}; DNS6=${DNS6:-fd38:0:0:1::1}
+TARGETS=$HERE/../dev_targets.py
+WIN_HOME=$(python3 "$TARGETS" smoke SMOKE_WINDOWS_HOME)
+WIN_LOGIN=$(python3 "$TARGETS" smoke SMOKE_WINDOWS_SSH)
+WIN_USER=${WIN_LOGIN%@*}
+: "${WIN_HOME:?configure the Windows home path}" "${WIN_USER:?configure the Windows SSH login}"
+STAGE="$WIN_HOME/rx38q"
+STAGE=${STAGE//\//\\}
 LPB=${LPB:-'sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 rx38o-a /home/pbt/.local/bin/pb'}   # pb of the Linux peer, run on $BED
 vps() { enc=$(iconv -f utf-8 -t utf-16le | base64 -w0); "$VIC" "powershell -NoProfile -NonInteractive -EncodedCommand $enc" 2>&1 | grep -v -e '^#< CLIXML' -e '^<Objs' || true; }
-put() { SSHPASS=$("$VIC" --password) sshpass -e scp -q -o StrictHostKeyChecking=accept-new "$1" "pujan@victus:C:/Users/pujan/rx38q/share/$2"; }  # a pty line limit breaks stdin transfers
+put() { "$VIC" --scp "$1" "$WIN_HOME/rx38q/share/$2"; }  # a pty line limit breaks stdin transfers
 case ${1:-} in
 start)
-  : "${PB_EXE:?windows pb.exe}" "${WG_MSI_URL:?official wireguard-amd64 msi URL}"
+  : "${BED:?configure the Linux test host}" "${EP4:?configure the sandbox IPv4 endpoint}" "${PB_EXE:?windows pb.exe}" "${WG_MSI_URL:?official wireguard-amd64 msi URL}"
   # one-shot enrollment token for the new machine, minted by the Linux peer (pb machine add) and read from the installer
   # page it returns; never printed. TOKEN=... overrides.
   if [ -z "${TOKEN:-}" ]; then
@@ -50,7 +56,7 @@ if(-not (Get-Command wsb -ea 0)){ throw 'wsb missing: enable Windows Sandbox' }
 Invoke-WebRequest '$WG_MSI_URL' -OutFile $STAGE\\share\\wireguard.msi -UseBasicParsing
 PS
   REM="$STAGE\\share"
-  # scp through the same credentials: vic.sh wraps ssh only, so stream files with base64 over its stdin.
+  # Copy fixtures through the same configured Windows SSH login.
   for f in "$T/x38q.conf" "$T/params.txt" "$T/token.txt" "$HERE/guest-v6only.ps1"; do put "$f" "$(basename "$f")"; done
   put "$PB_EXE" pb.exe
   rm -rf "$T"
@@ -58,13 +64,13 @@ PS
 \$wsb='<Configuration><VGpu>Disable</VGpu><Networking>Default</Networking><MemoryInMB>3072</MemoryInMB><ClipboardRedirection>Disable</ClipboardRedirection><MappedFolders><MappedFolder><HostFolder>$STAGE\\share</HostFolder><SandboxFolder>C:\\host</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder></MappedFolders></Configuration>'
 Set-Content -Path $STAGE\\start.cmd -Value ('@echo off' + [Environment]::NewLine + 'wsb start --config "' + \$wsb + '" > $STAGE\\start.out 2>&1')
 Unregister-ScheduledTask rx38q-job -Confirm:\$false -ea 0
-Register-ScheduledTask rx38q-job -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\start.cmd') -Principal (New-ScheduledTaskPrincipal -UserId pujan -LogonType Interactive) | Out-Null
+Register-ScheduledTask rx38q-job -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\start.cmd') -Principal (New-ScheduledTaskPrincipal -UserId '$WIN_USER' -LogonType Interactive) | Out-Null
 Start-ScheduledTask rx38q-job; Start-Sleep 20; Get-Content $STAGE\\start.out
 # run the guest script as System in the sandbox (detached: it keeps running as the check driver)
 Set-Content $STAGE\\run.cmd '@echo off
-for /f "tokens=1" %%i in (''wsb list'') do wsb exec --id %%i -c "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\host\\guest-v6only.ps1" -r System > C:\\Users\\pujan\\rx38q\\run.out 2>&1'
+for /f "tokens=1" %%i in (''wsb list'') do wsb exec --id %%i -c "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\host\\guest-v6only.ps1" -r System > $STAGE\\run.out 2>&1'
 Unregister-ScheduledTask rx38q-job -Confirm:\$false
-Register-ScheduledTask rx38q-job -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\run.cmd') -Principal (New-ScheduledTaskPrincipal -UserId pujan -LogonType Interactive) | Out-Null
+Register-ScheduledTask rx38q-job -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\run.cmd') -Principal (New-ScheduledTaskPrincipal -UserId '$WIN_USER' -LogonType Interactive) | Out-Null
 Start-ScheduledTask rx38q-job
 PS
   ;;
@@ -90,7 +96,7 @@ PS
   vps <<PS
 Unregister-ScheduledTask rx38q-job -Confirm:\$false -ea 0
 Set-Content $STAGE\\stop.cmd 'for /f "tokens=*" %%i in (''wsb list'') do wsb stop --id %%i'
-Register-ScheduledTask rx38q-stop -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\stop.cmd') -Principal (New-ScheduledTaskPrincipal -UserId pujan -LogonType Interactive) | Out-Null
+Register-ScheduledTask rx38q-stop -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\stop.cmd') -Principal (New-ScheduledTaskPrincipal -UserId '$WIN_USER' -LogonType Interactive) | Out-Null
 Start-ScheduledTask rx38q-stop; Start-Sleep 15; Unregister-ScheduledTask rx38q-stop -Confirm:\$false
 Remove-Item -Recurse -Force $STAGE -ea 0; wsb list
 PS

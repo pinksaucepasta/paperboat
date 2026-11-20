@@ -2,7 +2,7 @@
 """F8-14: edge flood protection against a real flood, from two real source addresses.
 
 A disposable enrolled machine (--machine-cmd prefix, or --windows) runs origin_proxy_matrix/app.py behind a tunnel. Observer A is
-this host, observer B is --observer-b-cmd (e.g. `ssh ubuntu@anvit`), so the edge sees two client addresses. B floods the tunnel
+this host, observer B is --observer-b-cmd (e.g. `ssh tester@host.example.test`), so the edge sees two client addresses. B floods the tunnel
 with persistent HTTPS connections; while it floods A keeps visiting. Checks:
   - B is refused 429 `edge_rate_limited` with Retry-After once it is over its per-address limit, and gets some answers first (the burst);
   - A is served 200 every time during B's flood (one noisy address is limited, the others are not);

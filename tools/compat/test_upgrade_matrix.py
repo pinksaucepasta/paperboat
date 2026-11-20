@@ -44,7 +44,7 @@ class EdgeReplacement(unittest.TestCase):
             with self.subTest(failure=failure):
                 name = matrix.staging.EDGE_NAME
                 containers = {name: {'image': 'previous', 'running': True}}
-                info = {'Mounts': [{'Destination': '/state', 'Source': '/home/ubuntu/pb-release-staging/edge'}],
+                info = {'Mounts': [{'Destination': '/state', 'Source': '/srv/pb-release-staging/edge'}],
                         'HostConfig': {'PortBindings': {}}, 'Config': {'Cmd': ['-node-id', 'stg_node_test']}}
                 def docker(args, **kwargs):
                     action = args[1]

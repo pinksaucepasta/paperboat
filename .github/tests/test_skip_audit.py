@@ -39,7 +39,7 @@ class SkipAuditTest(unittest.TestCase):
             return subprocess.run([sys.executable, str(AUDIT), str(allow), str(base), *files], capture_output=True, text=True)
 
     def test_the_perf_budgets_before_their_ci_step_are_a_silent_skip(self):
-        # Before the lane-test perf step (F21-15) the test skipped in the only step that saw it.
+        # Before the test perf step (F21-15) the test skipped in the only step that saw it.
         result = self.run_audit({"main": events(*PERF[:2], "skip", PERF[2])})
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("SILENT SKIP %s %s: x_test.go:12: %s" % PERF, result.stdout)

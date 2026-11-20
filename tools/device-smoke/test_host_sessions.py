@@ -27,9 +27,9 @@ class HostSessions(unittest.TestCase):
         self.assertEqual(host_sessions.verdict('h', 501)[0], 'fail')
 
     def test_a_wedged_host_fails_with_the_restart_hint(self):
-        status, message = host_sessions.verdict('pbvm3', 1452)
+        status, message = host_sessions.verdict('linux-vm', 1452)
         self.assertEqual(status, 'fail')
-        self.assertIn('ssh pbvm3 sudo systemctl restart systemd-logind', message)
+        self.assertIn('ssh linux-vm sudo systemctl restart systemd-logind', message)
 
     def test_main_exit_status_and_stderr(self):
         err = io.StringIO()

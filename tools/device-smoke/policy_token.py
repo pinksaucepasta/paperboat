@@ -16,8 +16,8 @@ throwaway machine (a Linux container, or a hosted Windows runner you pair again 
 of a device you still need; a Windows TOKEN machine needs `pb login` again afterwards.
 
 Usage: policy_token.py --allowed lk-a --other lk-b \
-         --owner-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
-         --token-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-b'
+         --owner-cmd 'ssh Linux test VM sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
+         --token-cmd 'ssh Linux test VM sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-b'
 """
 import argparse
 import json

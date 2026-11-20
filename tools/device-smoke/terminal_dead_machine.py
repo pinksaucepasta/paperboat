@@ -2,8 +2,8 @@
 """F3-20: terminal operations on a revoked machine end (run on a signed-in owner machine).
 
 TARGET is a throwaway machine of the same account, given by name and exact machine ID; this check
-revokes it, so it refuses any name without a throwaway prefix (smoke-, lanek-, lanea-) or whose name
-and ID do not match `pb machine list`. Real devices (hp, apple, victus) can never be passed. It opens a terminal on TARGET, detaches, revokes TARGET by ID, then expects:
+revokes it, so it refuses any name without a throwaway prefix (smoke-, test-, test-) or whose name
+and ID do not match `pb machine list`. Real devices (Linux test machine, macmini, Windows test machine) can never be passed. It opens a terminal on TARGET, detaches, revokes TARGET by ID, then expects:
 - `pb session close` and `pb session delete` on that terminal to finish (exit 0, or a typed refusal
   naming the revoked machine) within 30 s each, never hang or ask to retry;
 - the terminal to stop being listed as open or closing within 60 s;
@@ -37,13 +37,13 @@ def pb(*args, timeout=60):
     return done.returncode, done.stdout, done.stderr
 
 
-THROWAWAY = re.compile(r'^(smoke-|lanek-|lanea-)[a-z0-9-]+$')
+THROWAWAY = re.compile(r'^(smoke-|test-|test-)[a-z0-9-]+$')
 
 
 def check_throwaway(target, machine_id):
     """Refuse anything but a throwaway machine whose name and ID match the account's list."""
     if not THROWAWAY.match(target):
-        raise SystemExit(f'refusing: {target!r} is not a throwaway machine name (smoke-, lanek-, lanea-)')
+        raise SystemExit(f'refusing: {target!r} is not a throwaway machine name (smoke-, test-, test-)')
     code, out, _ = pb('machine', 'list', '--all', '--json')
     if code != 0:
         raise SystemExit('refusing: pb machine list failed')

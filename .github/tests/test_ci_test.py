@@ -121,12 +121,12 @@ class CITestScript(unittest.TestCase):
                              (unknown, now - 90000)))
         self.assertEqual(result.returncode, 0, result.stderr)
         removed = self.deleted(calls)
-        self.assertIn(old, removed)  # another lane's, so the sweep is not limited to this lane
+        self.assertIn(old, removed)  # another worktree's, so the sweep is not limited to this worktree
         for kept in (young, queued, unknown):
             self.assertNotIn(kept, removed)
         self.assertFalse(any(young in call for call in calls if call.startswith("gh run list")), "a young branch was queried")
         self.assertEqual(len(removed), 2, calls)  # the old one and this invocation's own
-        # --depth made the shared repo shallow for every lane: the script may only list refs, never fetch
+        # --depth made the shared repo shallow for every worktree: the script may only list refs, never fetch
         self.assertFalse(any("--depth" in call or call.startswith("git fetch") for call in calls), calls)
 
 if __name__ == "__main__":

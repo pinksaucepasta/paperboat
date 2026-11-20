@@ -1,18 +1,24 @@
 #!/bin/bash
-# In-place `pb install` check on Windows (X-38): a Windows Sandbox on victus (default NAT networking) installs OLD pb.exe,
-# pairs, then runs `pb install` of NEW pb.exe over it (guest-upgrade.ps1). Needs a logged-in interactive desktop on victus.
+# In-place `pb install` check on Windows (X-38): a Windows Sandbox on the Windows device (default NAT networking) installs OLD pb.exe,
+# pairs, then runs `pb install` of NEW pb.exe over it (guest-upgrade.ps1). Needs a logged-in interactive desktop on the Windows device.
 # usage: winsandbox_upgrade.sh start|status|cmd <script.ps1> [s]|stop
 # env: OLD_EXE, NEW_EXE (windows pb.exe files), TOKEN (one-shot enrollment token, never printed), PEER_NAME (a paired machine to exec),
 #      MACHINE_NAME (name of the guest), API_URL (server URL, for cmd-captive.ps1), BOOT_SETTLE (seconds to wait after the sandbox boots before the first install, default 240), VIC (ssh wrapper, default vic.sh)
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-VIC=${VIC:-$HERE/vic.sh}; STAGE='C:\Users\pujan\rx38r'
+VIC=${VIC:-$HERE/vic.sh}; TARGETS=$HERE/../dev_targets.py
+WIN_HOME=$(python3 "$TARGETS" smoke SMOKE_WINDOWS_HOME)
+WIN_LOGIN=$(python3 "$TARGETS" smoke SMOKE_WINDOWS_SSH)
+WIN_USER=${WIN_LOGIN%@*}
+: "${WIN_HOME:?configure the Windows home path}" "${WIN_USER:?configure the Windows SSH login}"
+STAGE="$WIN_HOME/rx38r"
+STAGE=${STAGE//\//\\}
 vps() { enc=$(iconv -f utf-8 -t utf-16le | base64 -w0); "$VIC" "powershell -NoProfile -NonInteractive -EncodedCommand $enc" 2>&1 | grep -v -e '^#< CLIXML' -e '^<Objs' || true; }
-put() { SSHPASS=$("$VIC" --password) sshpass -e scp -q -o StrictHostKeyChecking=accept-new "$1" "pujan@victus:C:/Users/pujan/rx38r/share/$2"; }
+put() { "$VIC" --scp "$1" "$WIN_HOME/rx38r/share/$2"; }
 task() { # run a one-shot cmd file as the interactive user (wsb only starts in that session)
   vps <<PS
 Unregister-ScheduledTask rx38r-job -Confirm:\$false -ea 0
-Register-ScheduledTask rx38r-job -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\$1') -Principal (New-ScheduledTaskPrincipal -UserId pujan -LogonType Interactive) | Out-Null
+Register-ScheduledTask rx38r-job -Action (New-ScheduledTaskAction -Execute cmd.exe -Argument '/c $STAGE\\$1') -Principal (New-ScheduledTaskPrincipal -UserId '$WIN_USER' -LogonType Interactive) | Out-Null
 Start-ScheduledTask rx38r-job
 PS
 }
@@ -27,7 +33,7 @@ if(-not (Get-Command wsb -ea 0)){ throw 'wsb missing: enable Windows Sandbox' }
 \$wsb='<Configuration><VGpu>Disable</VGpu><Networking>Default</Networking><MemoryInMB>3072</MemoryInMB><ClipboardRedirection>Disable</ClipboardRedirection><MappedFolders><MappedFolder><HostFolder>$STAGE\\share</HostFolder><SandboxFolder>C:\\host</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder></MappedFolders></Configuration>'
 Set-Content -Path $STAGE\\start.cmd -Value ('@echo off' + [Environment]::NewLine + 'wsb start --config "' + \$wsb + '" > $STAGE\\start.out 2>&1')
 Set-Content $STAGE\\run.cmd '@echo off
-for /f "tokens=1" %%i in (''wsb list'') do wsb exec --id %%i -c "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\host\\guest-upgrade.ps1" -r System > C:\\Users\\pujan\\rx38r\\run.out 2>&1'
+for /f "tokens=1" %%i in (''wsb list'') do wsb exec --id %%i -c "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\host\\guest-upgrade.ps1" -r System > $STAGE\\run.out 2>&1'
 Set-Content $STAGE\\stop.cmd 'for /f "tokens=*" %%i in (''wsb list'') do wsb stop --id %%i'
 PS
   put "$T/params.txt" params.txt; put "$T/token.txt" token.txt; put "$HERE/guest-upgrade.ps1" guest-upgrade.ps1

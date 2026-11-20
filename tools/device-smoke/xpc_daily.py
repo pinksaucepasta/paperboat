@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-22: the daily loop on a mixed fleet (one L, one M, one W machine of ONE account), then a reboot and a network change.
 
-  xpc_daily.py [--devices L,M,W] [--skip-recovery] [--recovery-only] [--m-vm] [--victus]
+  xpc_daily.py [--devices L,M,W] [--skip-recovery] [--recovery-only] [--m-vm] [--dedicated-windows]
 
 For every ordered pair A>B: name resolution (`pb resolve`), `pb exec` (the target's own hostname comes back), ENV (one variable set
 once is seen by the target), a file sent into the target's Inbox (sha256), private TCP (xplat_access.t_access). Per machine: the console
@@ -11,6 +11,7 @@ network (`docker network disconnect/connect`): the other machines reach it again
 on all three. A hosted Mac or Windows runner cannot reboot or change networks (README, macpool/winpool), so those two
 steps run on L only. Results: results/xpc-daily-<stamp>.json (`X-22:<step>:<A>><B>`).
 """
+from dev_targets import smoke_value
 import hashlib
 import json
 import re
@@ -29,7 +30,7 @@ import xplat_send  # noqa: E402
 from xpc_tunnel import Origin, curl, kill_fixtures, port_for  # noqa: E402
 
 results = {}
-VAULT_PASSWORD = Path.home() / '.pbmac/xpc/vault.pw'
+VAULT_PASSWORD = Path.home() / '.mac-vm/xpc/vault.pw'
 VALUE = 'x22 value with $dollar "quotes" üñ \U0001F680'
 
 
@@ -162,13 +163,13 @@ def wait_online(src, target, seconds=240):
     raise AssertionError('%s was not reachable again within %ds' % (target.alias, seconds))
 
 
-def victus_device():
-    """victus's own Windows install, paired into the X account as xpc-v (the login is in REMOTE_TESTING.md, read here, never printed)."""
-    import os
-    import re
-    text = open(os.path.expanduser('~/paperboat/REMOTE_TESTING.md')).read()
-    os.environ['VICTUS_PASS'] = re.search(r'pujan@victus with pass (\S+)', text).group(1)
-    return fleet.Windows('xpc-v', target='pujan@victus')
+def dedicated_windows():
+    """The dedicated Windows test machine paired to the cross-platform account."""
+    target = smoke_value('SMOKE_WINDOWS_SSH')
+    if not target:
+        raise SystemExit('configure the Windows SSH login in local development targets')
+    os.environ['SMOKE_WINDOWS_PASSWORD'] = smoke_value('SMOKE_WINDOWS_PASSWORD')
+    return fleet.Windows('xpc-v', target=target)
 
 
 def reboot(dev):
@@ -178,11 +179,11 @@ def reboot(dev):
     elif dev.os == 'windows':
         dev.run(['shutdown', '/r', '/t', '5'], timeout=60)
     else:
-        subprocess.Popen(['bash', '-c', "~/.pbmac/ssh.sh vm 'sudo shutdown -r now' >/dev/null 2>&1"])
+        subprocess.Popen(['bash', '-c', "~/.mac-vm/ssh.sh vm 'sudo shutdown -r now' >/dev/null 2>&1"])
     time.sleep(40 if dev.os == 'windows' else 20)
 
 
-def recovery(devices, mac_vm, victus=None):
+def recovery(devices, mac_vm, windows_device=None):
     for key in ('L', 'M'):
         if key not in devices or (key == 'M' and not mac_vm):
             continue
@@ -192,12 +193,12 @@ def recovery(devices, mac_vm, victus=None):
             if other_key != key:
                 record('X-22:reboot:%s>%s' % (other_key, key), lambda: 'reachable again after %.0fs with no user action' % wait_online(src, target, 600))
                 record('X-22:reboot:%s>%s' % (key, other_key), lambda: 'the rebooted machine reaches it again (hostname %s)' % wait_online(target, src, 300))
-    if victus:
-        reboot(victus)
+    if windows_device:
+        reboot(windows_device)
         for key, src in devices.items():
-            record('X-22:reboot:%s>V' % key, lambda: 'reachable again after %.0fs with no user action' % wait_online(src, victus, 900))
-            record('X-22:reboot:V>%s' % key, lambda: 'the rebooted Windows machine reaches it again (hostname %s)' % wait_online(victus, src, 600))
-        record('X-22:doctor-after-reboot:V', lambda: t_doctor(victus))
+            record('X-22:reboot:%s>V' % key, lambda: 'reachable again after %.0fs with no user action' % wait_online(src, windows_device, 900))
+            record('X-22:reboot:V>%s' % key, lambda: 'the rebooted Windows machine reaches it again (hostname %s)' % wait_online(windows_device, src, 600))
+        record('X-22:doctor-after-reboot:V', lambda: t_doctor(windows_device))
     target = devices['L']
     subprocess.run(['ssh', fleet.L_HOST, 'docker', 'network', 'disconnect', 'bridge', fleet.L_CT], check=True, capture_output=True, timeout=60)
     time.sleep(20)
@@ -234,16 +235,16 @@ def main():
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     make = {'L': fleet.linux, 'M': fleet.mac, 'W': fleet.windows}
     devices = {k: make[k]() for k in keys}  # only the machines asked for: a stopped runner must not be dialled
-    if '--victus-only' in argv:  # the Windows reboot: victus alone, the others only watch it come back
-        victus = victus_device()
-        reboot(victus)
+    if '--dedicated-windows-only' in argv:  # the Windows reboot: windows_device alone, the others only watch it come back
+        windows_device = dedicated_windows()
+        reboot(windows_device)
         for key, src in devices.items():
-            record('X-22:reboot:%s>V' % key, lambda: 'reachable again after %.0fs with no user action' % wait_online(src, victus, 900))
-            record('X-22:reboot:V>%s' % key, lambda: 'the rebooted Windows machine reaches it again (hostname %s)' % wait_online(victus, src, 600))
-        record('X-22:doctor-after-reboot:V', lambda: t_doctor(victus))
+            record('X-22:reboot:%s>V' % key, lambda: 'reachable again after %.0fs with no user action' % wait_online(src, windows_device, 900))
+            record('X-22:reboot:V>%s' % key, lambda: 'the rebooted Windows machine reaches it again (hostname %s)' % wait_online(windows_device, src, 600))
+        record('X-22:doctor-after-reboot:V', lambda: t_doctor(windows_device))
         daily = False
         argv = argv + ['--skip-recovery']
-    daily = '--recovery-only' not in argv and '--victus-only' not in argv
+    daily = '--recovery-only' not in argv and '--dedicated-windows-only' not in argv
     if daily:
         record('X-22:env-setup', lambda: setup_env(devices) or 'vault unlocked on every machine, X22_VALUE set')
         record('X-22:inventory', lambda: t_inventory(devices))
@@ -257,7 +258,7 @@ def main():
         record('X-22:config', t_config)
     if 'L' in devices and '--skip-recovery' not in argv:
         flap_network(devices)  # first: a hosted runner expires after 5 hours
-        recovery(devices, '--m-vm' in argv, victus_device() if '--victus' in argv else None)
+        recovery(devices, '--m-vm' in argv, dedicated_windows() if '--dedicated-windows' in argv else None)
         for key, dev in devices.items():
             record('X-22:doctor-after:' + key, lambda: t_doctor(dev))
     out = HERE / 'results' / ('xpc-daily-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))

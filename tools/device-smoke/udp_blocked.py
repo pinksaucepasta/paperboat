@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exec to a target whose network blocks UDP: the edge carrier must fall back to HTTP/2 over TCP.
 
-Blocks outbound UDP on the target except DNS and 443 (an office/hotel firewall; Lane O's rule),
+Blocks outbound UDP on the target except DNS and 443 (an office/hotel firewall; the rule),
 restarts its carrier so it dials again, and requires `pb exec <target> -- true` to work within
 the budget. The block is removed at the end and also by a systemd timer after four minutes, so a
 failed fallback never strands the machine. Needs passwordless sudo and nft on the target (the

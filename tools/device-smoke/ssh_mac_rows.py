@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """F5-07..F5-13 managed-SSH checks with a Mac or Windows target and a Linux client (twins of tools/device-smoke/ssh_*.sh).
 
-TARGET is the paired Mac (alias --alias, default apple, setup user --mac-user, default admin); CLIENT is a paired Linux
+TARGET is the paired Mac (alias --alias, default macmini, setup user --mac-user, default admin); CLIENT is a paired Linux
 machine (a container) where `pb ssh <alias>` runs. Both are reached through wrappers that take ONE shell-string argument:
   MAC_CMD     runs it on the Mac (keychain unlocked); sudo there reads its password from $SUDO_PW_FILE (on the Mac)
   CLIENT_CMD  runs it on the client (needs passwordless sudo only for the outage step)
@@ -12,6 +12,7 @@ that restarts it on a timer; the pf block and the daemon SIGSTOP likewise have a
 PB_SMOKE_WINDOWS_PB, no MAC_CMD). otheruser uses a throwaway local Windows account with its own key and password.
 Prints one JSON line; exit 1 on any FAIL.
 """
+from dev_targets import get_setting
 import argparse, json, os, re, secrets, shlex, subprocess, sys, time
 
 ANCHOR = 'com.apple/pbsmoke'
@@ -400,7 +401,7 @@ def audit():
     marker = 'ssh-audit-%d' % began
     if marker not in cl('~/.local/bin/pb ssh %s -- echo %s </dev/null 2>&1' % (shlex.quote(ARGS.alias), marker)):
         return report(row, 'FAIL', 'pb ssh did not run')
-    db = os.environ.get('PB_AUDIT_DB_HOST', 'root@coolify')
+    db = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('deployment_host')
     query = ("SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), "
              "coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='%s' "
              "AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
@@ -707,7 +708,7 @@ def offline_audit():
         return report(row, 'FAIL', 'could not verify the control-plane block from the target')
     if verified[0]:
         return report(row, 'FAIL', 'control-plane verify failed: %d of %d addresses still connect' % verified)
-    db = os.environ.get('PB_AUDIT_DB_HOST', 'root@coolify')
+    db = os.environ.get('PB_AUDIT_DB_HOST') or get_setting('deployment_host')
     # Scope the read to this run: sessions start at or after the block went up (the baseline is online and
     # filtered by origin anyway). A began-anchored window would re-read a previous run's offline rows when runs
     # follow within minutes and PASS on stale data.
@@ -786,7 +787,7 @@ def main():
     global ARGS, WIN
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--only', default=','.join(STEPS))
-    p.add_argument('--alias', default='apple')
+    p.add_argument('--alias', default='macmini')
     p.add_argument('--mac-user', '--user', help='the setup user on the target (default: admin; with --windows, the login user there)')
     p.add_argument('--windows', action='store_true')
     ARGS = p.parse_args()

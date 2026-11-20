@@ -1,5 +1,5 @@
 #!/bin/sh
-# Submit a lane batch through a PR; success means GitHub merged it.
+# Submit a worktree batch through a PR; success means GitHub merged it.
 # GitHub auto-merge enforces the required checks. Never push or force-push main.
 set -eu
 base=${PB_PUSH_BASE:-main}
@@ -30,13 +30,13 @@ if [ -n "$dups" ]; then
   exit 1
 fi
 head=$(git rev-parse HEAD)
-branch="lane-submit/$base/$head"
+branch="submit/$base/$head"
 # A follow-up commit updates the requested PR without rewriting its published history.
 if [ -n "${PB_PUSH_PR:-}" ]; then
   branch=$(gh pr view "$PB_PUSH_PR" --repo "$repo" --json headRefName --jq .headRefName)
   case "$branch" in
-    lane-submit/"$base"/*) ;;
-    *) echo 'push: the requested PR must use a lane-submit branch for this base' >&2; exit 1 ;;
+    submit/"$base"/*) ;;
+    *) echo 'push: the requested PR must use a submit branch for this base' >&2; exit 1 ;;
   esac
 fi
 git push origin "HEAD:refs/heads/$branch"
@@ -44,7 +44,7 @@ url=$(gh pr list --repo "$repo" --head "$branch" --base "$base" --state all --js
 if [ -z "$url" ]; then
   url=$(gh pr create --repo "$repo" --base "$base" --head "$branch" \
     --title "$(git log -1 --format=%s)" \
-    --body "Lane batch ending at $head. Required CI checks gate the rebase merge; individual fix commits are preserved.")
+    --body "Batch ending at $head. Required CI checks gate the rebase merge; individual fix commits are preserved.")
 fi
 printf 'push: PR %s\n' "$url"
 # With a merge queue the method is the queue's: gh prints a notice (and may exit non-zero), so judge by the result.
@@ -53,8 +53,8 @@ gh pr merge "$url" --repo "$repo" --auto --match-head-commit "$head" || true
 armed=$(gh api graphql -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){state isInMergeQueue autoMergeRequest{enabledAt}}}}' \
   -F o="${repo%%/*}" -F n="${repo#*/}" -F p="$number" --jq '.data.repository.pullRequest | .state == "MERGED" or .isInMergeQueue or .autoMergeRequest != null')
 [ "$armed" = true ] || { echo "push: auto-merge is not enabled on $url; run: gh pr merge $number --auto" >&2; exit 1; }
-# The queue rebuilds every entry on the current main, so the next lane need not wait for this merge: release the lock
-# now (holding it until merged made lanes wait one after another, ~10 minutes each, 2026-11-12). Duplicate migration
+# The queue rebuilds every entry on the current main, so the next worktree need not wait for this merge: release the lock
+# now (holding it until merged made worktrees wait one after another, ~10 minutes each, 2026-11-12). Duplicate migration
 # numbers between parallel PRs are caught by the policy job on the queue's merge commit.
 exec 9>&-
 # A timeout leaves the PR intact for inspection, and never reports a pending PR as success.
