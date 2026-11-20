@@ -23,6 +23,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -390,17 +391,30 @@ func TestFleetRun(t *testing.T) {
 		edgeCtx, stopEdges := context.WithCancel(context.Background())
 		fleetEdges(edgeCtx, t, store, 3)
 		client := &http.Client{Transport: &http.Transport{MaxIdleConns: machines + 64, MaxIdleConnsPerHost: machines + 64, MaxConnsPerHost: machines + 64}}
+		// Behind the production proxy configuration (tools/loadtest/run-fleet.sh with PAPERBOAT_FLEET_PROXY=1) every machine
+		// has its own TLS connection, as a daemon in its own process does; the proxy's local CA is not in the trust store.
+		proxy := os.Getenv("PAPERBOAT_FLEET_PROXY_CONTAINER")
+		clientFor := func() *http.Client {
+			if proxy == "" {
+				return client
+			}
+			return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, ForceAttemptHTTP2: true}}
+		}
 		stats := &fleetStats{requests: map[string]int{}, failed: map[string]int{}}
 		ctx, cancel := context.WithCancel(context.Background())
 		var wg sync.WaitGroup
 		for i, m := range fleet {
-			fleetLoop(ctx, base, m, client, stats, observe, inventory, &wg)
+			fleetLoop(ctx, base, m, clientFor(), stats, observe, inventory, &wg)
 			if i%50 == 49 {
 				time.Sleep(200 * time.Millisecond) // ramp: a connection storm is not the steady state under test
 			}
 		}
 		time.Sleep(settle)
 		pg0, srv0, at := cgroupCores(t, container), processSeconds(t, pid), time.Now()
+		var proxy0 float64
+		if proxy != "" {
+			proxy0 = cgroupCores(t, proxy)
+		}
 		stats.mu.Lock()
 		before := map[string]int{}
 		total0 := 0
@@ -412,6 +426,10 @@ func TestFleetRun(t *testing.T) {
 		time.Sleep(seconds)
 		elapsed := time.Since(at).Seconds()
 		pg, srv := (cgroupCores(t, container)-pg0)/elapsed, (processSeconds(t, pid)-srv0)/elapsed
+		if proxy != "" {
+			cores := (cgroupCores(t, proxy) - proxy0) / elapsed
+			t.Logf("proxy (Caddy, production config) %.3f cores (%.2f millicores/machine) for the same window", cores, cores*1000/float64(machines))
+		}
 		stats.mu.Lock()
 		total1, failed := 0, 0
 		var lines []string
