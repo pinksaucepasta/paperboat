@@ -344,6 +344,30 @@ carriers attached; `pb send` still fails after the file-transfer descriptor (cau
 preview URLs never carry a port, so previews and tunnels cannot be served from a non-443 edge, and UDP (HTTP/3, QUIC)
 is closed on the host. `gated-deploy.py --stage` runs `deploy/staging-canary.sh` (exec both ways + ssh) first. Prior art: Google SRE canarying (stage, then a small prod slice, then all, with automatic rollback).
 
+## Production host capacity alerts
+
+On the production canary runner, add `CANARY_RESOURCE_HOSTS` to
+`~/.config/paperboat-canary.env`. List the production control plane, database,
+and every managed edge and relay host, using one entry per physical or virtual
+host. Use `local` for the runner itself and existing noninteractive SSH
+destinations for the others. The control plane and database currently share a
+host, so the current inventory is `CANARY_RESOURCE_HOSTS="root@coolify local ubuntu@anvit"`.
+The SSH user needs Python 3 and read access to the host's Linux counters.
+
+Install `paperboat-host-resources.service` and `paperboat-host-resources.timer`
+from this directory in `~/.config/systemd/user/`, then run
+`systemctl --user daemon-reload` and
+`systemctl --user enable --now paperboat-host-resources.timer`. Check
+`journalctl --user -u paperboat-host-resources.service` for sampling errors.
+
+The timer checks memory in use, CPU busy time between samples, each persistent
+local filesystem, and allocated file descriptors against the host's capacity.
+The policy in `host_resources.py` fires at 80% (warning) or 90% (critical) for
+three minutes and clears each level five percentage points below its trigger.
+Transitions go to the canary's `alerts.log` and its existing
+`CANARY_ALERT_THREAD`. Resource status is kept in `host-resources.json` in
+the canary state directory.
+
 ## Edge failover
 
 Every workspace is served by an edge set of two edges in distinct failure domains (managed pool, or
