@@ -104,7 +104,7 @@ func newForwardComponent(spec forwardSpec) (*forwardComponent, error) {
 	mesh, err := forward.New(forward.Config{
 		NodeID: spec.nodeID, Certificate: spec.certificate,
 		Peers: sources, Holders: sources, Held: spec.held, Injector: spec.public, TCPInjector: spec.public,
-		DialTimeout: d.ForwardDial(), OpenTimeout: d.ForwardOpen(), PeerInterval: d.ForwardPeers(), SeedInterval: d.ForwardSeed(), MaxStreamsPerPeer: d.ForwardMaxStreams(),
+		DialTimeout: d.ForwardDial(), OpenTimeout: d.ForwardOpen(), PeerInterval: d.ForwardPeers(), MaxPeerStale: d.ForwardPeerStale(), SeedInterval: d.ForwardSeed(), MaxStreamsPerPeer: d.ForwardMaxStreams(),
 		OnFailure: func(stage string, err error) { spec.reporter.ObserveFailure(context.Background(), stage, err) },
 		OnOutcome: func(outcome string) {
 			_ = spec.metrics.IncCounter(edgetelemetry.MetricForward, sharedmetrics.Labels{"outcome": outcome})

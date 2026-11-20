@@ -55,7 +55,7 @@ relative paths, or a missing carrier listener stop startup with a typed error.
   as raw bytes, to the node that does (TLS is terminated on the holder only; raw TCP tunnel ports are bound on
   every node and forwarded the same way). Optional: `forward_enabled` (default true; self-hosted edges never
   forward), `forward_dial_timeout` and `forward_open_timeout` (3 s each), `forward_peer_interval` (10 s),
-  `forward_seed_interval` (5 min), `forward_max_streams_per_peer` (4096). A forwarding node listens on every public
+  `forward_peer_stale_after` (50 s; at most 1 h, at least `forward_peer_interval`; how long a failing peer refresh keeps the last directory), `forward_seed_interval` (5 min), `forward_max_streams_per_peer` (4096). A forwarding node listens on every public
   TCP tunnel port its peers hold, so it needs a high file limit. Self-hosted edge containers started by `pbh` get
   `--ulimit nofile=1048576:1048576`. Managed edge hosts must set `LimitNOFILE=1048576` (systemd) or the equivalent
   container ulimit themselves; no managed deploy unit lives in this repo. The edge logs `file_limit_low` at startup

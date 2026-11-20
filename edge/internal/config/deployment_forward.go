@@ -8,10 +8,13 @@ import (
 // Defaults of the node-to-node forward (edge/internal/forward). A forward that cannot be opened in a few seconds
 // is better answered by the next holder than waited for.
 const (
-	DefaultForwardEnabled           = true
-	DefaultForwardDialTimeout       = 3 * time.Second
-	DefaultForwardOpenTimeout       = 3 * time.Second
-	DefaultForwardPeerInterval      = 10 * time.Second
+	DefaultForwardEnabled      = true
+	DefaultForwardDialTimeout  = 3 * time.Second
+	DefaultForwardOpenTimeout  = 3 * time.Second
+	DefaultForwardPeerInterval = 10 * time.Second
+	// DefaultForwardPeerStaleAfter is 5x DefaultForwardPeerInterval: the last good peer directory stays trusted for
+	// five refresh intervals while refreshes fail.
+	DefaultForwardPeerStaleAfter    = 50 * time.Second
 	DefaultForwardSeedInterval      = 5 * time.Minute
 	DefaultForwardMaxStreamsPerPeer = 4096
 )
@@ -34,6 +37,15 @@ func (d Deployment) ForwardOpen() time.Duration {
 
 func (d Deployment) ForwardPeers() time.Duration {
 	return orDefault(d.ForwardPeerInterval, DefaultForwardPeerInterval)
+}
+
+// ForwardPeerStale is zero-means-default; the default scales with a longer forward_peer_interval, because a stale
+// window shorter than one refresh would empty the peer directory on every cycle.
+func (d Deployment) ForwardPeerStale() time.Duration {
+	if d.ForwardPeerStaleAfter == 0 {
+		return max(DefaultForwardPeerStaleAfter, 5*d.ForwardPeers())
+	}
+	return d.ForwardPeerStaleAfter
 }
 
 func (d Deployment) ForwardSeed() time.Duration {
@@ -64,6 +76,8 @@ func (d Deployment) validateForward() error {
 		return errors.New("forward_open_timeout must be between 100ms and 30s")
 	case outside(d.ForwardPeerInterval, time.Second, time.Minute):
 		return errors.New("forward_peer_interval must be between 1s and 1m")
+	case d.ForwardPeerStaleAfter != 0 && (d.ForwardPeerStaleAfter < d.ForwardPeers() || d.ForwardPeerStaleAfter > time.Hour):
+		return errors.New("forward_peer_stale_after must be at least forward_peer_interval and at most 1h")
 	case outside(d.ForwardSeedInterval, 10*time.Second, time.Hour):
 		return errors.New("forward_seed_interval must be between 10s and 1h")
 	case d.ForwardMaxStreamsPerPeer < 0 || d.ForwardMaxStreamsPerPeer > 1<<20:
