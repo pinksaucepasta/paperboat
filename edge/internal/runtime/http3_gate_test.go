@@ -111,3 +111,64 @@ func TestHTTP3GatewayBoundsUnfinishedHandshakesPerAddress(t *testing.T) {
 		t.Fatalf("another address: %q, %v", body, err)
 	}
 }
+
+// HTTP/3 is never forwarded between nodes, so a node must not complete a QUIC handshake for a name another node holds:
+// the browser's failed attempt falls back to TCP, where the visitor is forwarded. A name this node serves, and the
+// infrastructure host, still get the normal response.
+func TestHTTP3RefusesNamesTheNodeDoesNotHold(t *testing.T) {
+	held := map[string]bool{"held.example.test": true, "gateway.example.test": true}
+	server, err := NewHTTP3Server("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok "+r.Host) }),
+		&tls.Config{Certificates: []tls.Certificate{gatewayCertificate(t)}}, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Admit = func(host string) bool { return held[host] }
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := server.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = server.Shutdown(context.Background()) }()
+	target := server.packet.LocalAddr().(*net.UDPAddr)
+
+	get := func(name string) (string, time.Duration, error) {
+		packet, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer packet.Close()
+		transport := &quic.Transport{Conn: packet}
+		defer transport.Close()
+		rt := &http3.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, NextProtos: []string{http3.NextProtoH3}},
+			Dial: func(ctx context.Context, _ string, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
+				return transport.Dial(ctx, target, tlsConf, conf)
+			}}
+		defer rt.Close()
+		reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer reqCancel()
+		request, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, "https://"+name+"/", nil)
+		started := time.Now()
+		response, err := rt.RoundTrip(request)
+		if err != nil {
+			return "", time.Since(started), err
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return string(body), time.Since(started), nil
+	}
+	for _, name := range []string{"held.example.test", "gateway.example.test"} {
+		if body, _, err := get(name); err != nil || body != "ok "+name {
+			t.Fatalf("%s over HTTP/3: %q, %v", name, body, err)
+		}
+	}
+	for _, name := range []string{"other.example.test", "HELD.other.example.test"} {
+		body, took, err := get(name)
+		var transportErr *quic.TransportError
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &transportErr) || !transportErr.ErrorCode.IsCryptoError() {
+			t.Fatalf("%s: handshake for a name this node does not hold must fail with a TLS alert, got %q, %v", name, body, err)
+		}
+		if took > 2*time.Second {
+			t.Fatalf("%s: refusal took %s, want it immediate", name, took)
+		}
+	}
+}

@@ -430,7 +430,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	verifier := &auth.Verifier{Issuer: deployment.CredentialIssuer, NodeID: cfg.NodeID, Keys: trust.Snapshot, Revocations: trust.Snapshot, ClockSkew: 30 * time.Second}
 	var ingressAuthority *control.IngressAuthority // set below; the preview registry asks it which route a host is admitted on
-	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }})
+	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }, AliasHosts: func() []string { return ingressAuthority.PreviewHostnames() }})
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint route registry: %w", err)
 	}
@@ -772,7 +772,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		warnIfFileLimitLow(edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1)
 		usageComponent = componentPair{first: usageWorker, second: forwarding} // starts last, stops right after the carriers
 	}
-	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
+	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, HTTP3Admit: publicTCP.ServesHTTPS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
 		return publicTCP.WrapTLSListener(listener, func(host string) bool {
 			if host == deployment.ConnectorAdvertiseHost {
 				return true

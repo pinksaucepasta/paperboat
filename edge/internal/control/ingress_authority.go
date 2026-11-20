@@ -559,11 +559,33 @@ func (a *IngressAuthority) previewDecision(hostname string) (connectorprotocol.I
 	defer a.mu.RUnlock()
 	for _, i := range a.hostIndexesLocked(hostname) {
 		d := a.decisions[i]
-		if d.Binding.Hostname == hostname && d.EdgeNodeID == a.NodeID && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt)) {
+		if d.Binding.Hostname == hostname && a.admitsPreviewLocked(d, now) {
 			return d, true
 		}
 	}
 	return connectorprotocol.IngressDecision{}, false
+}
+
+func (a *IngressAuthority) admitsPreviewLocked(d connectorprotocol.IngressDecision, now time.Time) bool {
+	return d.EdgeNodeID == a.NodeID && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt))
+}
+
+// PreviewHostnames lists the hostnames of the preview publications the held snapshot admits on this edge (the ones
+// AdmitsPreview accepts): the names a visitor may ask this node for, an account's own domain alias among them.
+func (a *IngressAuthority) PreviewHostnames() []string {
+	if a == nil {
+		return nil
+	}
+	now := time.Now()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	var hosts []string
+	for _, d := range a.decisions {
+		if d.Binding.Hostname != "" && a.admitsPreviewLocked(d, now) {
+			hosts = append(hosts, d.Binding.Hostname)
+		}
+	}
+	return hosts
 }
 
 // RequestLimited reports whether the last server snapshot lists hostname as owned by a Free account, whose requests

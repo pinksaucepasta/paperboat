@@ -329,6 +329,46 @@ VALUES($1,$2,$1,5,'http','managed',$3,NULL,'http','127.0.0.1:1','not_applicable'
 	}
 }
 
+// alias adds a preview domain (a custom-domain alias) to the preview lease previewID, in the given certificate state.
+func (f *agentFixture) alias(t *testing.T, domainID, previewID, hostname, matchType, certificateState string) {
+	t.Helper()
+	f.exec(t, `INSERT INTO preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_reference,certificate_state,caa_state,conflict_state)
+SELECT $1,$2,p.id,p.generation,$3,$4,$1,'verified',$3,'managed','cert-'||$1,$5,'ready','clear' FROM preview_leases p WHERE p.id=$6`, domainID, f.account, hostname, matchType, certificateState, previewID)
+}
+
+// TestPreviewAliasHolderSeeded: the ready custom-domain aliases of a preview (exact and one-label wildcard) are held by the
+// preview's carrier node exactly like its own hostname; an alias whose certificate is not ready, one of a preview whose
+// route its edge has not observed ready, and one of an expired preview are not.
+func TestPreviewAliasHolderSeeded(t *testing.T) {
+	f := newAgentFixture(t, "holdalias")
+	f.manage(t, f.node)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM preview_domains WHERE account_id=$1`, f.account)
+	})
+	session := f.carrier(t, f.node, "epoch_endpoint", true, "")
+	dns := dash(f.prefix)
+	ok, waiting, expired := f.prefix+"_ok", f.prefix+"_waiting", f.prefix+"_expired"
+	for _, tag := range []string{ok, waiting, expired} {
+		f.previews(t, tag, 1)
+		f.serve(t, tag, 1, f.node, "epoch_endpoint", session, tag != waiting)
+	}
+	f.exec(t, `UPDATE preview_leases SET created_at=now()-interval '2 minutes', lease_deadline=now()-interval '1 minute' WHERE id=$1`, expired+"_1")
+	exact, wild := "app-"+dns+".example.test", "wild-"+dns+".example.test"
+	f.alias(t, "exact_"+f.prefix, ok+"_1", exact, "exact", "ready")
+	f.alias(t, "wild_"+f.prefix, ok+"_1", "*."+wild, "one_label_wildcard", "ready")
+	f.alias(t, "pending_"+f.prefix, ok+"_1", "pending-"+dns+".example.test", "exact", "issuing")
+	f.alias(t, "waiting_"+f.prefix, waiting+"_1", "waiting-"+dns+".example.test", "exact", "ready")
+	f.alias(t, "expired_"+f.prefix, expired+"_1", "expired-"+dns+".example.test", "exact", "ready")
+
+	got, _ := allHolders(t, f, f.node, 0)
+	want := map[string][]string{
+		previewHost(ok, 1): {f.node}, exact: {f.node}, nodemesh.WildcardKey(wild): {f.node},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("holders = %v, want %v: ready aliases of the live preview only", got, want)
+	}
+}
+
 // TestWildcardDomainOnTLSRouteNotSeeded: a TLS-passthrough route serves its exact custom domains only (the pull's
 // domain_bindings), so a wildcard domain attached to one is not announced as a *.suffix key.
 func TestWildcardDomainOnTLSRouteNotSeeded(t *testing.T) {
