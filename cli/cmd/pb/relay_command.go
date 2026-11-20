@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,16 +17,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// relayListResult is one Paperboat relay region (no relay id: its servers are not shown) or one of the
+// owner's own relays, which keep their id and name.
 type relayListResult struct {
-	RelayID    string `json:"relay_id"`
+	RelayID    string `json:"relay_id,omitempty"`
 	Name       string `json:"name"`
 	Region     string `json:"region,omitempty"`
 	Source     string `json:"source"`
 	Status     string `json:"status"`
 	ObservedAt int64  `json:"observed_at,omitempty"`
-	// This machine's latest connect time to the relay (under an hour old); absent until measured.
-	LatencyMillis     *int64 `json:"latency_ms,omitempty"`
-	LatencyMeasuredAt int64  `json:"latency_measured_at,omitempty"`
+	// This machine's best connect time to the region's relays (under an hour old); absent until measured.
+	LatencyMillis *int64 `json:"latency_ms,omitempty"`
 }
 
 func actionRelayList(command *cobra.Command, _ []string) error {
@@ -68,7 +70,15 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("verified native relay inventory: %w", err)
 	}
-	results := relayListResults(inventory, selfhost, pool.Mode, time.Now())
+	hosted, err := client.ListHostedRelays(command.Context())
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	names := make(map[string]string, len(hosted.Items))
+	for _, region := range hosted.Items {
+		names[region.ID] = region.Name
+	}
+	results := relayListResults(inventory, selfhost, names, pool.Mode, time.Now())
 	if err := addRelayLatency(command.Context(), client, results); err != nil {
 		fmt.Fprintf(command.ErrOrStderr(), "Latency is not shown: %v\n", err)
 	}
@@ -81,7 +91,7 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 		}{Schema: "paperboat.relay-list/v1", PoolMode: pool.Mode, Relays: results})
 	}
 	writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(writer, "RELAY\tNAME\tSOURCE\tREGION\tSTATUS\tLATENCY")
+	_, _ = fmt.Fprintln(writer, "REGION\tNAME\tSOURCE\tSTATUS\tLATENCY")
 	for _, result := range results {
 		region := result.Region
 		if region == "" {
@@ -91,18 +101,21 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 		if result.LatencyMillis != nil {
 			latency = fmt.Sprintf("%d ms", *result.LatencyMillis)
 		}
-		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", result.RelayID, result.Name, result.Source, region, result.Status, latency)
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", region, result.Name, result.Source, result.Status, latency)
 	}
 	return writer.Flush()
 }
 
-func relayListResults(inventory localapi.RelayInventory, selfhost []api.SelfhostInstallation, poolMode string, now time.Time) []relayListResult {
+// relayListResults shows each Paperboat relay region once (ready while any of its relays is; names come
+// from regionNames, the region id when unknown) and each of the owner's own relays by name.
+func relayListResults(inventory localapi.RelayInventory, selfhost []api.SelfhostInstallation, regionNames map[string]string, poolMode string, now time.Time) []relayListResult {
 	metadata := make(map[string]api.SelfhostInstallation, len(selfhost))
 	for _, installation := range selfhost {
 		metadata[installation.NodeID] = installation
 	}
 	results := make([]relayListResult, 0, len(inventory.Candidates)+len(selfhost))
 	seen := make(map[string]bool, len(inventory.Candidates))
+	regions := map[string]int{}
 	nowUnix := now.Unix()
 	for _, candidate := range inventory.Candidates {
 		if !slices.Contains(candidate.Roles, "relay") || !slices.Contains(candidate.Transports, "derp_quic") {
@@ -112,22 +125,30 @@ func relayListResults(inventory localapi.RelayInventory, selfhost []api.Selfhost
 		if poolMode == "self-hosted-only" && (!isSelfhost || installation.ScopeKind == "global" || !installation.Selected) {
 			continue
 		}
-		result := relayListResult{RelayID: candidate.NodeID, Name: candidate.NodeID, Region: candidate.Region, Source: "paperboat", Status: "unavailable", ObservedAt: candidate.ObservedAt}
-		if candidate.State == "ready" && candidate.ObservedAt <= nowUnix && nowUnix-candidate.ObservedAt <= 15 && candidate.ExpiresAt > nowUnix {
-			result.Status = "reported_ready"
+		ready := candidate.State == "ready" && candidate.ObservedAt <= nowUnix && nowUnix-candidate.ObservedAt <= 15 && candidate.ExpiresAt > nowUnix
+		status := "unavailable"
+		if ready {
+			status = "reported_ready"
 		}
-		if isSelfhost {
-			result.Name = installation.Name
-			if installation.ScopeKind != "global" {
-				result.Source = "self-hosted"
-			}
-		}
-		results = append(results, result)
 		seen[candidate.NodeID] = true
+		if isSelfhost && installation.ScopeKind != "global" {
+			results = append(results, relayListResult{RelayID: candidate.NodeID, Name: installation.Name, Region: candidate.Region, Source: "self-hosted", Status: status, ObservedAt: candidate.ObservedAt})
+			continue
+		}
+		i, ok := regions[candidate.Region]
+		if !ok {
+			name := cmp.Or(regionNames[candidate.Region], candidate.Region)
+			i = len(results)
+			regions[candidate.Region] = i
+			results = append(results, relayListResult{Name: name, Region: candidate.Region, Source: "paperboat", Status: "unavailable"})
+		}
+		if ready {
+			results[i].Status, results[i].ObservedAt = status, max(results[i].ObservedAt, candidate.ObservedAt)
+		}
 	}
 	for _, installation := range selfhost {
 		if installation.Selected && installation.ScopeKind != "global" && !seen[installation.NodeID] {
-			results = append(results, relayListResult{RelayID: installation.NodeID, Name: installation.Name, Source: "self-hosted", Status: "unavailable"})
+			results = append(results, relayListResult{RelayID: installation.NodeID, Name: installation.Name, Region: installation.Region, Source: "self-hosted", Status: "unavailable"})
 		}
 	}
 	return results
@@ -147,17 +168,22 @@ func addRelayLatency(ctx context.Context, client *api.Client, results []relayLis
 	return nil
 }
 
+// setRelayLatency gives each row its region's best time: Paperboat's regions from Paperboat's relays, the
+// owner's own relays from the owner's own servers of that region.
 func setRelayLatency(results []relayListResult, items []api.MachineLatency) {
-	byNode := make(map[string]api.MachineLatency, len(items))
+	type key struct {
+		region     string
+		selfHosted bool
+	}
+	best := make(map[key]int64, len(items))
 	for _, item := range items {
 		if item.Role == "relay" {
-			byNode[item.NodeID] = item
+			best[key{item.Region, item.SelfHosted}] = item.RTTMillis
 		}
 	}
 	for i := range results {
-		if item, ok := byNode[results[i].RelayID]; ok {
-			rtt := item.RTTMillis
-			results[i].LatencyMillis, results[i].LatencyMeasuredAt = &rtt, item.MeasuredAt.Unix()
+		if rtt, ok := best[key{results[i].Region, results[i].Source == "self-hosted"}]; ok {
+			results[i].LatencyMillis = &rtt
 		}
 	}
 }

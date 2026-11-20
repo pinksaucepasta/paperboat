@@ -127,25 +127,27 @@ each one.`,
   pb relay list
   pb relay list --json`},
 	"pb relay list": {
-		Long: `List the relay candidates this computer can use: the relays from the signed network
-authority and the self-hosted relays your account has selected. In mixed pool mode both appear.
-In self-hosted-only mode only the selected self-hosted relays appear, including unavailable
-ones, and Paperboat's relays are never used instead.
+		Long: `List the relays this computer can use: Paperboat's relay regions from the signed network
+authority and the self-hosted relays your account has selected. Paperboat's relays are shown
+once per region; your own relays are listed by name. In mixed pool mode both appear. In
+self-hosted-only mode only the selected self-hosted relays appear, including unavailable
+ones, and Paperboat's regions are never used instead.
 
-STATUS is reported_ready when a signed control-plane observation of the relay is under 15
-seconds old; it is not a live connection test. LATENCY is the connect time this machine last
-measured to the relay, as its daemon reported it (measured about every 15 minutes, shown while
-under an hour old). It is "-" until a measurement exists. The numbers are for display and never
-choose a path.
+STATUS is reported_ready when a signed control-plane observation of one of the region's relays
+is under 15 seconds old; it is not a live connection test. LATENCY is the best connect time this
+machine last measured to the region's relays, as its daemon reported it (measured about every
+15 minutes, shown while under an hour old). It is "-" until a measurement exists. The numbers
+are for display and never choose a path.
 
 Sign-in and the local daemon are required. With --json the output is paperboat.relay-list/v1:
-the pool mode and the relays, each with latency_ms and latency_measured_at once measured.`,
+the pool mode and the relays, each with latency_ms once measured.`,
 		Example: `
   pb relay list
   pb relay list --json`},
 	"pb edge": {
-		Long: `Inspect the tunnel edges that serve the active workspace: edges Paperboat runs, or the
-self-hosted edges you selected. Listing an edge never grants a route admission.`,
+		Long: `Inspect the regions that serve the active workspace's tunnels and previews: Paperboat's
+regions, or the regions of the self-hosted servers you selected. Listing a region never grants
+a route admission.`,
 		Example: `
   pb edge list
   pb edge list --workspace acme --json`},

@@ -10,15 +10,15 @@ import winhost
 def main():
     before = registration()
     binary = winhost.pb_path()
-    for kind, collection, identity in [('edge', 'edges', 'id'), ('relay', 'relays', 'relay_id')]:
+    for kind, collection in [('edge', 'regions'), ('relay', 'relays')]:
         receipt = invoke(binary, kind, 'list', '--json', timeout=60)
         assert receipt['schema'] == 'paperboat.' + kind + '-list/v1'
         modes = ('managed-only', 'self-hosted-only') if kind == 'edge' else ('mixed', 'self-hosted-only')
         assert receipt['pool_mode'] in modes
         items = receipt[collection]
         assert isinstance(items, list) and items, 'no network nodes available in the active workspace'
-        ids = [item[identity] for item in items]
-        assert all(ids) and len(ids) == len(set(ids)), 'network inventory has missing or duplicate identities'
+        ids = [(item['source'], item.get('id') or item.get('region'), item['name']) for item in items]
+        assert all(all(i) for i in ids) and len(ids) == len(set(ids)), 'network inventory has missing or duplicate regions'
         assert all(item['source'] in ('paperboat', 'self-hosted') and item['status'] for item in items)
         if receipt['pool_mode'] == 'self-hosted-only':
             assert all(item['source'] == 'self-hosted' for item in items)

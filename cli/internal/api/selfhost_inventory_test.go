@@ -45,7 +45,7 @@ func TestSelfhostInventoryExhaustsPagesWithoutWorkspaceOrDisplayFilters(t *testi
 					if duplicate && i == 400 {
 						id = "install_0"
 					}
-					items = append(items, SelfhostInstallation{InstallationID: id, NodeID: "shared_physical_node", Name: fmt.Sprintf("Node %d", i), ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Capability: "relay", Ready: true})
+					items = append(items, SelfhostInstallation{InstallationID: id, NodeID: "shared_physical_node", Name: fmt.Sprintf("Node %d", i), ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Capability: "relay", Region: "selfhost", Ready: true})
 				}
 				page := SelfhostInstallationPage{Installations: items, Pagination: Pagination{Limit: 200, Offset: offset, Total: 401}, Counts: SelfhostCounts{Ready: 401, Enrolled: 401}}
 				if end < 401 {
@@ -148,5 +148,19 @@ func TestSelfhostCanceledDiscoveryReturnsNoPartialPool(t *testing.T) {
 				t.Fatalf("canceled discovery continued: items=%d requests=%d pools=%d err=%v", len(items), calls.Load(), pools.Load(), err)
 			}
 		})
+	}
+}
+
+// Every installation names the region its owner enrolled it in (the CLI groups own servers by it).
+func TestSelfhostInstallationPageRequiresARegion(t *testing.T) {
+	for region, valid := range map[string]bool{"home": true, "": false} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, `{"data":{"installations":[{"installation_id":"i","node_id":"n","name":"rack","capability":"tunnel","region":%q,"scope_kind":"account","scope_id":"a","enrollment_state":"enrolled","ready":true}],"pagination":{"limit":1,"offset":0,"total":1,"next_offset":null},"counts":{"ready":1,"enrolled":1,"pending":0}}}`, region)
+		}))
+		page, err := New(server.URL, config.Credential{AccessToken: "test"}, server.Client()).SelfhostInstallationsPage(context.Background(), 1, 0, nil)
+		server.Close()
+		if valid && (err != nil || page.Installations[0].Region != "home") || !valid && err == nil {
+			t.Fatalf("region %q: page=%+v err=%v", region, page, err)
+		}
 	}
 }

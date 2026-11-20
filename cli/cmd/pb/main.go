@@ -475,7 +475,7 @@ recovery instructions before retrying an operation that may have created resourc
 	ping.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(ping)
 	relay := &cobra.Command{Use: "relay", Short: "Inspect hosted and self-hosted relays"}
-	relayList := &cobra.Command{Use: "list", Short: "List hosted and self-hosted relays", Args: commandArgs(cobra.NoArgs), RunE: actionRelayList}
+	relayList := &cobra.Command{Use: "list", Short: "List Paperboat relay regions and self-hosted relays", Args: commandArgs(cobra.NoArgs), RunE: actionRelayList}
 	relayList.Flags().Bool("json", false, "print JSON")
 	relay.AddCommand(relayList)
 	root.AddCommand(relay)
