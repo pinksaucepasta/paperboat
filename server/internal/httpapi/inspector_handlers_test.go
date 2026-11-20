@@ -75,16 +75,21 @@ func inspectorHTTPFixture(t *testing.T, ctx context.Context, database *db.DB, no
 	teamstest.SetResourceAccess(t, database, teamID, mate, "preview", lease, "inspect", true)
 	t.Cleanup(func() {
 		c := context.Background()
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.inspector_credentials WHERE account_id IN($1,$2)`, owner, mate)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, teamID)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.teams WHERE team_id=$1`, teamID)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.preview_leases WHERE id=$1`, lease)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.operations WHERE id=$1`, operation)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.control_environments WHERE id IN (SELECT environment_id FROM paperboat.user_machines WHERE id=$1)`, machine)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
-		_, _ = database.SQL().ExecContext(c, `DELETE FROM paperboat.users WHERE id IN($1,$2)`, owner, mate)
+		del := func(q string, args ...any) {
+			if _, e := database.SQL().ExecContext(c, q, args...); e != nil {
+				t.Errorf("cleanup %q: %v", q, e)
+			}
+		}
+		del(`DELETE FROM paperboat.inspector_credentials WHERE account_id IN($1,$2)`, owner, mate)
+		del(`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, teamID)
+		del(`DELETE FROM paperboat.teams WHERE team_id=$1`, teamID)
+		del(`DELETE FROM paperboat.preview_leases WHERE id=$1`, lease)
+		del(`DELETE FROM paperboat.operations WHERE id=$1`, operation)
+		del(`DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel)
+		del(`DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
+		del(`DELETE FROM paperboat.control_environments WHERE id IN (SELECT environment_id FROM paperboat.user_machines WHERE id=$1)`, machine)
+		del(`DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		del(`DELETE FROM paperboat.users WHERE id IN($1,$2)`, owner, mate)
 	})
 	return owner, mate, lease, tunnel, route, node
 }
@@ -138,7 +143,7 @@ func TestInspectorHandlersPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() { database.Close() }) // the first cleanup runs last: later cleanups still use database
 	if os.Getenv("PAPERBOAT_TEST_SCHEMA_READY") != "1" {
 		if err = db.Migrate(ctx, database); err != nil {
 			t.Fatal(err)

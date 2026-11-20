@@ -159,8 +159,14 @@ func (f tunnelEdgeAcceptanceFixture) insertEngine(t *testing.T, database *db.DB)
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_routes WHERE id=$1`, carrierRoute)
-		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.endpoints WHERE id=$1`, f.tunnelID)
+		for _, statement := range []struct{ query, id string }{
+			{`DELETE FROM paperboat.control_routes WHERE id=$1`, carrierRoute},
+			{`DELETE FROM paperboat.endpoints WHERE id=$1`, f.tunnelID},
+		} {
+			if _, err := database.SQL().ExecContext(context.Background(), statement.query, statement.id); err != nil {
+				t.Errorf("cleanup %q: %v", statement.query, err)
+			}
+		}
 	})
 }
 
