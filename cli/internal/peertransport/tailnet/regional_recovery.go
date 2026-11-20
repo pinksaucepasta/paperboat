@@ -644,16 +644,36 @@ type regionalScore struct {
 	node          RegionalNode
 	rtt           time.Duration
 	peerTransport string
+	order         int // position in the server's candidate list
 }
 
-// rankRegional orders by measured RTT only: a relay's declared capacity never ranks or refuses it.
-func rankRegional(scores []regionalScore) {
-	sort.Slice(scores, func(i, j int) bool {
-		a, b := scores[i].rtt, scores[j].rtt
-		if a == b {
-			return scores[i].node.NodeID < scores[j].node.NodeID
+// regionRTTs maps each region to the best RTT measured to any of its nodes.
+func regionRTTs(scores []regionalScore) map[string]time.Duration {
+	best := make(map[string]time.Duration, len(scores))
+	for _, s := range scores {
+		if rtt, ok := best[s.node.Region]; !ok || s.rtt < rtt {
+			best[s.node.Region] = s.rtt
 		}
-		return a < b
+	}
+	return best
+}
+
+// rankRegional orders regions by their best measured RTT, then each region's nodes in the server's order.
+// Declared capacity never ranks or refuses a node.
+func rankRegional(scores []regionalScore) {
+	rtts := regionRTTs(scores)
+	sort.Slice(scores, func(i, j int) bool {
+		a, b := scores[i], scores[j]
+		if ra, rb := rtts[a.node.Region], rtts[b.node.Region]; ra != rb {
+			return ra < rb
+		}
+		if a.node.Region != b.node.Region {
+			return a.node.Region < b.node.Region
+		}
+		if a.order != b.order {
+			return a.order < b.order
+		}
+		return a.node.NodeID < b.node.NodeID
 	})
 }
 func (r *regionalRecovery) run(ctx context.Context) {
@@ -791,6 +811,10 @@ func (r *regionalRecovery) run(ctx context.Context) {
 				delete(retries, id)
 			}
 		}
+		position := make(map[string]int, len(nodes))
+		for i, n := range nodes {
+			position[n.NodeID] = i
+		}
 		results := make(chan regionalScore, len(shortlist))
 		failures := make(map[string]string)
 		var failureMu sync.Mutex
@@ -835,7 +859,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 						return
 					}
 				}
-				results <- regionalScore{node: n, rtt: time.Since(start), peerTransport: peerTransport}
+				results <- regionalScore{node: n, rtt: time.Since(start), peerTransport: peerTransport, order: position[n.NodeID]}
 			}(n)
 		}
 		workers.Wait()

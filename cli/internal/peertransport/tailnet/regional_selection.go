@@ -69,7 +69,9 @@ func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regio
 		return best, "selected_node_unreachable"
 	}
 	s.offered = active.node.NodeID
-	currentQuality, bestQuality := float64(active.rtt), float64(best.rtt)
+	// Hysteresis applies to the region: the active node's region against the best region.
+	rtts := regionRTTs(ranked)
+	currentQuality, bestQuality := float64(rtts[active.node.Region]), float64(rtts[best.node.Region])
 	gain := currentQuality - bestQuality
 	if best.node.NodeID == s.selected || gain < float64(10*time.Millisecond) || gain < currentQuality*0.15 {
 		s.clearCandidate()

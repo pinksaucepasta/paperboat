@@ -6,7 +6,8 @@ import (
 )
 
 func selectionScore(id, domain string, rtt time.Duration) regionalScore {
-	return regionalScore{node: RegionalNode{NodeID: id, FailureDomain: domain, CapacityLimit: 100}, rtt: rtt}
+	// Each test node is its own region, so these tests keep ranking nodes by RTT.
+	return regionalScore{node: RegionalNode{NodeID: id, Region: id, FailureDomain: domain, CapacityLimit: 100}, rtt: rtt}
 }
 
 func TestRegionalSelectionSustainedGainAndCommit(t *testing.T) {
