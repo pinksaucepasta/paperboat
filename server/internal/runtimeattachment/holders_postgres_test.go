@@ -352,7 +352,7 @@ func TestPreviewAliasHolderSeeded(t *testing.T) {
 		f.previews(t, tag, 1)
 		f.serve(t, tag, 1, f.node, "epoch_endpoint", session, tag != waiting)
 	}
-	f.exec(t, `UPDATE preview_leases SET lease_deadline=now()-interval '1 minute' WHERE id=$1`, expired+"_1")
+	f.exec(t, `UPDATE preview_leases SET created_at=now()-interval '2 minutes', lease_deadline=now()-interval '1 minute' WHERE id=$1`, expired+"_1")
 	exact, wild := "app-"+dns+".example.test", "wild-"+dns+".example.test"
 	f.alias(t, "exact_"+f.prefix, ok+"_1", exact, "exact", "ready")
 	f.alias(t, "wild_"+f.prefix, ok+"_1", "*."+wild, "one_label_wildcard", "ready")
