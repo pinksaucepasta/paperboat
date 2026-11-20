@@ -15,7 +15,9 @@ import (
 // One change in a 50-machine account wakes only the machines whose view of it changed: a preview lease change only
 // its owner machine (the host runtime that attaches it, and the observer that waits on the owner), a machine's own
 // configuration change only that machine. Every other machine's held wait stays held, so it costs no topic re-read and
-// no refetch. Audience-wide topics (inventory, machine_services, peer_network, private_routes) are not narrowed: each
+// no refetch. Prior art: NetBird computes the affected peers first and updates only them (management/server/peer.go:1605
+// ExpandAndUpdateAffected, affectedpeers.Snapshot); Headscale queues a targeted change (TargetNode) for that node alone and
+// a broadcast for all, filtering visibility when it renders (hscontrol/mapper/batcher.go:660-731). Audience-wide topics (inventory, machine_services, peer_network, private_routes) are not narrowed: each
 // machine of the audience reads them.
 func TestOneChangeInAFiftyMachineAccountWakesOnlyTheAffectedMachinesOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
