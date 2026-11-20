@@ -712,6 +712,12 @@ TLIST=($DEVICES)
         self.assertIn("'-test.run=^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT", windows)
         self.assertNotRegex(windows, r" -test\.")
 
+    def test_the_terminal_receipt_accepts_the_windows_phase_set_for_a_windows_target(self):
+        text = (HERE / 'smoke.sh').read_text()
+        body = text.split('--check all --monitor-path')[1].split('record "$id" PASS')[0]
+        self.assertIn('if sys.argv[3]=="victus": phases="input_output unicode resize colour ctrl_c exit exact_session_cleanup"', body)
+        self.assertIn('"$out" "$target" "$target"', body)
+
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
         # that are not mapped keep their own transport.

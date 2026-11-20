@@ -12,6 +12,7 @@ from machine_lifecycle import restore_all
 from pairing_lifecycle import await_external_action, command_diagnostic, invoke
 from session_cleanup import cleanup, inventory, mutate
 from terminal_lifecycle import Terminal
+import windows_target
 import winhost
 
 
@@ -23,19 +24,47 @@ def selected(pb, target, name, environment=None):
     return actual, matches[0]
 
 
+def ready(terminal, windows):
+    """Wait until the target's shell takes input. Windows: cmd.exe under ConPTY, one PowerShell line per step."""
+    if not windows:
+        terminal.expect(b'\x1b[?2004h')
+        terminal.expect(terminal.marker('READY', 'stty -echo; '))
+        return
+    token = 'PB_READY_' + uuid.uuid4().hex
+    terminal.send(windows_target.typed_marker(token) + '\r')
+    terminal.expect(token)
+
+
+def keep_state(terminal, windows, nonce):
+    """Put nonce in the shell's own environment and print it back: the state a reattach must find again."""
+    if not windows:
+        terminal.send("PB_DURABLE='" + nonce + "'; printf '\\nPB_DURABLE_%s\\n' \"$PB_DURABLE\"\r")
+    else:
+        terminal.send('set PB_DURABLE=' + nonce + '\r')
+        terminal.send(windows_target.typed_marker('PB_DURABLE_', '+$env:PB_DURABLE') + '\r')
+    terminal.expect('PB_DURABLE_' + nonce)
+
+
+def show_state(terminal, windows, nonce):
+    if not windows:
+        terminal.send("printf '\\nPB_REATTACHED_%s\\n' \"$PB_DURABLE\"\r")
+    else:
+        terminal.send(windows_target.typed_marker('PB_REATTACHED_', '+$env:PB_DURABLE') + '\r')
+    terminal.expect('PB_REATTACHED_' + nonce)
+
+
 def qualify(pb, target, check):
     name = 'smoke-session-' + uuid.uuid4().hex[:12]
     renamed = name + '-renamed'
     clients = []
     terminal = None
+    windows = windows_target.is_windows(pb, target)
     try:
         terminal = Terminal(winhost.terminal_argv(pb, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(pb))
         clients.append(terminal)
-        terminal.expect(b'\x1b[?2004h')
-        terminal.expect(terminal.marker('READY', 'stty -echo; '))
+        ready(terminal, windows)
         nonce = uuid.uuid4().hex
-        terminal.send("PB_DURABLE='" + nonce + "'; printf '\\nPB_DURABLE_%s\\n' \"$PB_DURABLE\"\r")
-        terminal.expect('PB_DURABLE_' + nonce)
+        keep_state(terminal, windows, nonce)
         environment, session = selected(pb, target, name)
         identifier = session['id']
         if check == 'manage':
@@ -48,11 +77,11 @@ def qualify(pb, target, check):
         terminal.close()
         terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']), env=winhost.terminal_env(pb))
         clients.append(terminal)
-        terminal.expect(b'\x1b[?2004h')
+        if not windows:
+            terminal.expect(b'\x1b[?2004h')
         if check in ('replay', 'cross'):
             terminal.expect('PB_DURABLE_' + nonce, timeout=15)
-        terminal.send("printf '\\nPB_REATTACHED_%s\\n' \"$PB_DURABLE\"\r")
-        terminal.expect('PB_REATTACHED_' + nonce)
+        show_state(terminal, windows, nonce)
         if check == 'cross':
             terminal.close()
             with tempfile.TemporaryDirectory(prefix='paperboat-terminal-cross-') as directory:

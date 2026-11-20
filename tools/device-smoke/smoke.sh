@@ -594,8 +594,11 @@ test_terminal_main_pairs() {
 import json,sys
 receipt=json.loads(sys.argv[1])
 assert receipt["status"]=="PASS" and receipt["check"]=="terminal-all" and receipt["target"]==sys.argv[2]
-assert set(receipt["phases"])==set("input_output unicode resize colour ctrl_c ctrl_z large_paste vim less htop ctrl_d exact_session_cleanup".split())
-' "$out" "$target" 2>/dev/null; then
+# A Windows target (cmd.exe) has no job control, editor, pager or monitor: terminal_lifecycle.windows_phases is its set.
+phases="input_output unicode resize colour ctrl_c ctrl_z large_paste vim less htop ctrl_d exact_session_cleanup"
+if sys.argv[3]=="victus": phases="input_output unicode resize colour ctrl_c exit exact_session_cleanup"
+assert set(receipt["phases"])==set(phases.split())
+' "$out" "$target" "$target" 2>/dev/null; then
         record "$id" PASS $(( $(now)-t0 ))
       else
         record_command_failure "$id" $(( $(now)-t0 )) "$out"
