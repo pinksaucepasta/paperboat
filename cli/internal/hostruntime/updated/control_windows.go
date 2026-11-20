@@ -244,6 +244,17 @@ func handleWindowsControl(ctx context.Context, connection net.Conn, invoke func(
 	return request.Operation == "install" && response.Pending && invokeErr == nil, nil
 }
 
+func (c *windowsController) observeSignedRelease(ctx context.Context, response ControlResponse) (ControlResponse, error) {
+	c.checkMu.Lock()
+	result, err := c.scheduler.ObserveCheck(ctx, func(ctx context.Context) (autoupdate.Result, error) {
+		workerResult, resolveErr := resolveRelease(ctx, c.activeVersion, c.resolve)
+		return autoupdate.Result{Version: workerResult.Version}, resolveErr
+	})
+	c.checkMu.Unlock()
+	response.Version, response.Updated, response.Observation = result.Version, false, c.scheduler.Snapshot()
+	return response, err
+}
+
 func (c *windowsController) invoke(ctx context.Context, request ControlRequest) (ControlResponse, error) {
 	return c.invokeWithAutomatic(ctx, request, false)
 }
@@ -288,7 +299,8 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	if !installed.Committed {
 		switch request.Operation {
 		case "check":
-			return response, ErrInstallationPending
+			// Reading signed release metadata does not touch the uncommitted installation (see checkWhileEnrollmentPending).
+			return c.observeSignedRelease(ctx, response)
 		case "download", "install":
 			return response, nil
 		case "settings":
@@ -414,14 +426,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		// A manual check is read-only. Calling Scheduler.CheckNow here used the
 		// automatic activation callback and could stage, stop services, and roll
 		// back a release merely because the user asked what version was current.
-		c.checkMu.Lock()
-		result, err := c.scheduler.ObserveCheck(ctx, func(ctx context.Context) (autoupdate.Result, error) {
-			workerResult, resolveErr := resolveRelease(ctx, c.activeVersion, c.resolve)
-			return autoupdate.Result{Version: workerResult.Version}, resolveErr
-		})
-		c.checkMu.Unlock()
-		response.Version, response.Updated, response.Observation = result.Version, false, c.scheduler.Snapshot()
-		return response, err
+		return c.observeSignedRelease(ctx, response)
 	case "download", "install":
 		if c.config.RepositoryURL == "" {
 			return response, ErrWindowsActivationUnavailable

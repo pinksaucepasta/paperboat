@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"io"
 	"net"
@@ -32,6 +33,19 @@ type updateApprovalControlFixture struct {
 	done     chan struct{}
 	mu       sync.Mutex
 	requests []updated.ControlRequest
+	pending  bool // answer as an install whose enrollment is not committed; guarded by mu
+}
+
+func (f *updateApprovalControlFixture) setPending() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pending = true
+}
+
+func (f *updateApprovalControlFixture) isPending() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pending
 }
 
 func startUpdateApprovalControlFixture(t *testing.T) *updateApprovalControlFixture {
@@ -88,6 +102,8 @@ func (f *updateApprovalControlFixture) handle(connection *net.UnixConn) {
 	if decodeErr != nil {
 		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "invalid_request", ErrorMessage: "invalid local test request"}
 	} else if request.Operation == "check" {
+		response.Pending = f.isPending()
+	} else if f.isPending() {
 		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "installation_pending"}
 	} else if request.Operation == "download" {
 		response.Candidate = &workerupdate.PreparedCandidate{
@@ -250,42 +266,48 @@ func TestUpdateApprovalFlowStagesAndInstallsOnlyTheReviewedCandidate(t *testing.
 	})
 }
 
-func TestUpdateCheckOnUnpairedInstallShowsHowToPair(t *testing.T) {
+// Updating is fetching the signed public release, not an account feature: a check works before the machine is paired
+// (prior art: `tailscale update` needs no login, ~/ref/tailscale/cmd/tailscale/cli/update.go).
+func TestUpdateCheckWorksOnAnUnpairedInstall(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = "2026.09.01.1"
 	fixture := startUpdateApprovalControlFixture(t)
+	fixture.setPending()
 	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
 		deps.socket = func() (string, error) { return fixture.socket, nil }
 	})
-
-	for _, mode := range []string{"human", "json"} {
-		t.Run(mode, func(t *testing.T) {
-			args := []string{"update", "check"}
-			if mode == "json" {
-				args = append(args, "--json")
-			}
-			var stdout, stderr bytes.Buffer
-			if code := run(ctx, args, &stdout, &stderr); code == 0 {
-				t.Fatal("an unpaired check claimed to have verified a release")
-			}
-			message := stderr.String()
-			if mode == "json" {
-				var output struct {
-					Error struct {
-						Code    string `json:"code"`
-						Message string `json:"message"`
-					} `json:"error"`
-				}
-				if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-					t.Fatal(err)
-				}
-				if output.Error.Code != "machine_not_paired" {
-					t.Fatalf("unpaired error code = %q", output.Error.Code)
-				}
-				message = output.Error.Message
-			}
-			if !strings.Contains(message, "not paired") || !strings.Contains(message, "pb pair") {
-				t.Fatalf("missing pairing instructions in %q", message)
-			}
-		})
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"update", "check", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("unpaired check failed: %d %q %q", code, stdout.String(), stderr.String())
 	}
-	requireUpdateRequests(t, fixture, expectedUpdateRequest("check", ""), expectedUpdateRequest("check", ""))
+	var envelope struct {
+		Data updateCheckResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil || envelope.Data.LatestVersion != updateApprovalCandidateVersion || !envelope.Data.UpdateAvailable || !envelope.Data.Verified {
+		t.Fatalf("unpaired check result %+v (%v)", envelope, err)
+	}
+	requireUpdateRequests(t, fixture, expectedUpdateRequest("check", ""))
+}
+
+// Installing replaces the slot the pending enrollment commit verifies, so it still waits for pairing, and says so.
+func TestUpdateInstallOnAnUnpairedInstallSaysItIsNotPaired(t *testing.T) {
+	fixture := startUpdateApprovalControlFixture(t)
+	fixture.setPending()
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return fixture.socket, nil }
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run(ctx, []string{"update", "--json"}, &stdout, &stderr); code == 0 {
+		t.Fatal("an unpaired install was updated")
+	}
+	var output struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil || output.Error.Code != "machine_not_paired" || !strings.Contains(output.Error.Message, "pb pair") {
+		t.Fatalf("unpaired update error %+v (%v) %q", output, err, stdout.String())
+	}
 }

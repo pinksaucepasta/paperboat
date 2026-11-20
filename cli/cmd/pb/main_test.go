@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -480,23 +479,6 @@ func TestSignedUpdateAvailableNeverOffersDowngrade(t *testing.T) {
 	}
 	if _, err := signedUpdateAvailable("2026.08.22.28", "latest"); err == nil {
 		t.Fatal("malformed signed version was accepted")
-	}
-}
-
-func TestUpdateCheckMissingUpdaterOnUnpairedInstallShowsHowToPair(t *testing.T) {
-	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", t.TempDir())
-	socket := filepath.Join(t.TempDir(), "missing-updater.sock")
-	if runtime.GOOS == "windows" {
-		socket = `\\.\pipe\PaperboatMissingUpdater-` + strconv.Itoa(os.Getpid())
-	}
-	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
-		deps.socket = func() (string, error) { return socket, nil }
-	})
-
-	var stdout, stderr bytes.Buffer
-	code := run(ctx, []string{"update", "check"}, &stdout, &stderr)
-	if code == 0 || !strings.Contains(stderr.String(), "not paired") || !strings.Contains(stderr.String(), "pb pair") {
-		t.Fatalf("exit=%d output=%q", code, stderr.String())
 	}
 }
 

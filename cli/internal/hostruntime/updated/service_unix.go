@@ -429,7 +429,9 @@ func (s *Service) Check(ctx context.Context) (workerupdate.Result, error) {
 	if s == nil || s.currentManager() == nil {
 		return workerupdate.Result{}, ErrInvalidConfig
 	}
-	if err := s.requireCommittedSource(); err != nil {
+	if err := s.requireCommittedSource(); errors.Is(err, ErrInstallationPending) {
+		return s.observeSignedRelease(ctx)
+	} else if err != nil {
 		return workerupdate.Result{}, err
 	}
 	lock, err := unixActivationLock(s.config.StateRoot)
@@ -446,10 +448,14 @@ func (s *Service) Check(ctx context.Context) (workerupdate.Result, error) {
 		return workerupdate.Result{}, err
 	}
 	s.reevaluateActivePolicy(ctx)
-	// A check only resolves and verifies the signed release metadata. It must
-	// never call Manager.Check, which performs the full activation transaction
-	// (including the health-monitoring hold) and made `pb update check` appear
-	// hung while also unexpectedly installing an update.
+	return s.observeSignedRelease(ctx)
+}
+
+// observeSignedRelease only resolves and verifies the signed release metadata. It must
+// never call Manager.Check, which performs the full activation transaction
+// (including the health-monitoring hold) and made `pb update check` appear
+// hung while also unexpectedly installing an update.
+func (s *Service) observeSignedRelease(ctx context.Context) (workerupdate.Result, error) {
 	result, err := s.scheduler.ObserveCheck(ctx, func(ctx context.Context) (autoupdate.Result, error) {
 		workerResult, resolveErr := resolveRelease(ctx, s.currentManager().ActiveVersion(), s.source.Resolve)
 		return autoupdate.Result{Version: workerResult.Version}, resolveErr

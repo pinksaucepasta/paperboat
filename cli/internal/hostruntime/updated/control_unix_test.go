@@ -373,14 +373,19 @@ func TestControlPendingInstallationBecomesCommittedWithoutRestart(t *testing.T) 
 	if err != nil || !response.Pending || response.Version != "" || response.Transaction.ActiveVersion != "" || response.Transaction.ActiveDigest != "" || response.Transaction.ActiveLength != 0 || response.UpdaterVersion != buildinfo.Version {
 		t.Fatal("readiness source reported as committed", err)
 	}
-	for _, operation := range []string{"check", "download", "install"} {
+	for _, operation := range []string{"download", "install"} {
 		_, err = service.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: operation, ApprovalID: strings.Repeat("a", 64)})
 		if !errors.Is(err, ErrInstallationPending) {
 			t.Fatal("pending native source admitted release operation", operation, err)
 		}
 	}
-	if _, err = service.Check(ctx); !errors.Is(err, ErrInstallationPending) {
-		t.Fatal("direct check bypassed enrollment gate", err)
+	// A check only reads signed public metadata: it reaches the (unreachable) test repository instead of the gate.
+	response, err = service.controlRequestWithRequest(ctx, ControlRequest{Schema: ControlProtocolV1, Operation: "check"})
+	if err == nil || errors.Is(err, ErrInstallationPending) || !response.Pending || response.UpdaterVersion != buildinfo.Version {
+		t.Fatal("pending install check was fenced or did not reach the release metadata", response, err)
+	}
+	if _, err = service.Check(ctx); err == nil || errors.Is(err, ErrInstallationPending) {
+		t.Fatal("direct check stayed behind the enrollment gate", err)
 	}
 	if _, err = service.Download(ctx); !errors.Is(err, ErrInstallationPending) {
 		t.Fatal("direct download bypassed enrollment gate", err)

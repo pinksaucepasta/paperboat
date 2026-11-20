@@ -258,12 +258,12 @@ func TestWindowsUninstallFailureCrossProcessOwnershipAndRecovery(t *testing.T) {
 		}
 	})
 	defer restoreObserver()
-	old := tunnelClientForCommand
-	defer func() { tunnelClientForCommand = old }()
 	for index, failure := range []error{local, remote} {
-		tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) { return nil, failure }
+		ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+			deps.client = func(*cobra.Command) (*api.Client, error) { return nil, failure }
+		})
 		var out, stderr bytes.Buffer
-		if code := runWithReporter(t.Context(), []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &out, &stderr, nil); code != 1 || stderr.Len() != 0 {
+		if code := runWithReporter(ctx, []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &out, &stderr, nil); code != 1 || stderr.Len() != 0 {
 			t.Fatal("final command failure contract lost")
 		}
 		decoder := json.NewDecoder(&out)
