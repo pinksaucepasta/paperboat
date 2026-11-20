@@ -16,16 +16,29 @@ func migrationUp(t *testing.T, f *pairFixture, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var up []string
+	// One statement per exec, as goose runs a NO TRANSACTION file: a DO block that commits per batch cannot run
+	// inside the implicit transaction of a multi-statement exec.
+	var stmt []string
+	block := false
 	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.HasPrefix(line, "-- +goose Down") {
-			break
-		}
-		if !strings.HasPrefix(line, "-- +goose") {
-			up = append(up, line)
+		switch {
+		case strings.HasPrefix(line, "-- +goose Down"):
+			return
+		case strings.HasPrefix(line, "-- +goose StatementBegin"):
+			block = true
+		case strings.HasPrefix(line, "-- +goose StatementEnd"):
+			block = false
+			f.exec(strings.Join(stmt, "\n"))
+			stmt = nil
+		case strings.HasPrefix(line, "-- +goose"):
+		default:
+			stmt = append(stmt, line)
+			if !block && strings.HasSuffix(strings.TrimSpace(line), ";") {
+				f.exec(strings.Join(stmt, "\n"))
+				stmt = nil
+			}
 		}
 	}
-	f.exec(strings.Join(up, "\n"))
 }
 
 // A pair's regions fix the tunnel pool: the fixup migration adds a sibling server of the pair's region that was enrolled
