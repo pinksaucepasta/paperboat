@@ -30,6 +30,7 @@
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. The containers are removed on every exit path; their
 # machines belong to the run's throwaway account, which the caller deletes. Enrollment tokens stay in files.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 MODE=${1:?exec|revoke|history|reinstall|continuity|failures|scheduled} HOST=${2:?host} PREVIOUS=${3:-} WRONG=${4:-}
 : "${FRESH_MINT:?the pb of the fresh throwaway account (see final_recheck.py)}"
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -99,7 +100,7 @@ fi
 
 if [ "$MODE" = reinstall ]; then
   [ -f "$PREVIOUS" ] || finish FAIL "the build $PREVIOUS is not a file"
-  scp -q "$PREVIOUS" "$HOST:/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
+  stage_binary "$PREVIOUS" "$HOST" "/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
   out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -uo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
@@ -127,8 +128,8 @@ fi
 if [ "$MODE" = continuity ] || [ "$MODE" = failures ]; then
   CAND=$PREVIOUS
   [ -f "$CAND" ] || finish FAIL "the candidate build $CAND is not a file"
-  scp -q "$CAND" "$HOST:/tmp/$T-cand"
-  if [ "$MODE" = failures ]; then [ -f "$WRONG" ] || finish FAIL "the wrong-platform binary $WRONG is not a file"; scp -q "$WRONG" "$HOST:/tmp/$T-wrong"; fi
+  stage_binary "$CAND" "$HOST" "/tmp/$T-cand"
+  if [ "$MODE" = failures ]; then [ -f "$WRONG" ] || finish FAIL "the wrong-platform binary $WRONG is not a file"; stage_binary "$WRONG" "$HOST" "/tmp/$T-wrong"; fi
   out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T ALIAS=$ALIAS MODE=$MODE"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
@@ -154,7 +155,7 @@ fi
 
 # history: the target starts on the previous official release, the peer on the official Latest.
 DEV=$WRONG  # history: the optional build to update to
-[ -z "$DEV" ] || scp -q "$DEV" "$HOST:/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
+[ -z "$DEV" ] || stage_binary "$DEV" "$HOST" "/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
 out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS PREVIOUS=$PREVIOUS DEVFILE=${DEV:+/tmp/$T-dev}"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"

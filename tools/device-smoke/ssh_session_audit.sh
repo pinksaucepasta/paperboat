@@ -12,6 +12,7 @@
 # Prints one JSON line {"check":"ssh-session-audit","status":"PASS"|"FAIL",...}. Machines are revoked by exact id and
 # containers removed on every exit path; the enrollment token stays in files.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
 DB_HOST=${PB_AUDIT_DB_HOST:-root@coolify}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -30,7 +31,7 @@ finish() {
   exit $?
 }
 
-scp -q "$BIN" "$HOST:/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
+stage_binary "$BIN" "$HOST" "/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
 out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 start_ct $TARGET

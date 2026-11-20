@@ -12,6 +12,7 @@
 # Prints one JSON line {"check":"transfer-modes","status":"PASS"|"FAIL",...}; machines are revoked by exact id and
 # containers removed on every exit path.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
@@ -29,7 +30,7 @@ finish() {
   exit $?
 }
 
-scp -q "$BIN" "$HOST:/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
+stage_binary "$BIN" "$HOST" "/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
 out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 fresh $TARGET $ALIAS

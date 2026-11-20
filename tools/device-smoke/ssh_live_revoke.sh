@@ -17,6 +17,7 @@
 # Prints one JSON line {"check":"ssh-live-revoke",...}; machines revoked by exact id, containers removed on exit,
 # team share/membership undone.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary} MODE=${3:-cli}
 case $MODE in cli | grant | team) ;; *) echo "usage: $0 HOST BINARY [cli|grant|team]" >&2; exit 2 ;; esac
 if [ "$MODE" != cli ]; then
@@ -49,7 +50,7 @@ diag() { # the member's and the target's own account of a failed dial, then exec
     echo -n 'SSH-AFTER-EXEC: '; ssh "$HOST" "timeout 60 $pbc ssh $ALIAS -- echo ok" 2>&1 | tail -1 | cut -c1-160
   } | tr '\n' ' ' | cut -c1-1800
 }
-scp -q "$BIN" "$HOST:/tmp/$T-pb" || finish FAIL "could not copy the build to $HOST"
+stage_binary "$BIN" "$HOST" "/tmp/$T-pb" || finish FAIL "could not copy the build to $HOST"
 mk() { # mk CONTAINER PACKAGES: a fresh systemd container with the build installed for user pbt
   ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail

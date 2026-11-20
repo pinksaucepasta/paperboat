@@ -7,6 +7,7 @@
 # env: ORIGIN, STATE, PW_CHROMIUM, PW_MODULE (as mint_api_token.mjs). Prints one JSON line {"name","machine_id"}.
 # Teardown: ssh HOST sudo docker rm -f NAME, then cleanup_test_account.py --prefix <name prefix> --id <machine_id> --apply.
 set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 host=$1 name=$2 bin=$3
 here=$(cd "$(dirname "$0")" && pwd)
 ct() { ssh -n "$host" "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt $name $*"; }
@@ -15,7 +16,7 @@ sudo -n docker run -d --name $name --hostname $name --privileged --cgroupns=host
 sleep 8
 sudo -n docker exec $name loginctl enable-linger pbt
 sudo -n docker exec $name systemctl start user@1000.service"
-scp -q "$bin" "$host:/tmp/$name.pb"
+stage_binary "$bin" "$host" "/tmp/$name.pb"
 ssh -n "$host" "sudo -n docker cp /tmp/$name.pb $name:/home/pbt/pb && rm -f /tmp/$name.pb && sudo -n docker exec $name sh -c 'chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb'"
 ct ./pb install --json >/dev/null
 pbx=/home/pbt/.local/bin/pb

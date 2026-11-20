@@ -8,6 +8,7 @@
 # refused. The routes are removed again before the containers go.
 # Prints one JSON line {"check":"ssh-control-outage",...}; machines revoked by exact id, containers removed on exit.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
@@ -21,7 +22,7 @@ finish() {
   [ "$status" = PASS ]
   exit $?
 }
-scp -q "$BIN" "$HOST:/tmp/$T-pb" || finish FAIL "could not copy the build to $HOST"
+stage_binary "$BIN" "$HOST" "/tmp/$T-pb" || finish FAIL "could not copy the build to $HOST"
 out=$(ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES

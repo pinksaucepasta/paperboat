@@ -7,6 +7,7 @@
 # FRESH_MINT (a pb on HOST signed in to a throwaway account) enrolls there instead of HOST's own pb; CLEANUP_ACCOUNT is
 # then that account's id for the revocation.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
 HERE=$(cd "$(dirname "$0")" && pwd)
 STAMP=$(date +%s)
@@ -20,7 +21,7 @@ finish() {
   [ "$status" = PASS ]
   exit $?
 }
-scp -q "$BIN" "$HOST:/tmp/$T-pb" || finish FAIL "could not copy the build to $HOST"
+stage_binary "$BIN" "$HOST" "/tmp/$T-pb" || finish FAIL "could not copy the build to $HOST"
 out=$(ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES
