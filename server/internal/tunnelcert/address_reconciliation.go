@@ -21,7 +21,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
-const maxDesiredAddressRecords = 4
+// maxDesiredAddressRecords bounds one hostname's addresses: the wildcard names list every ready managed edge (at most 8 nodes, IPv4 and IPv6 each).
+const maxDesiredAddressRecords = 16
 
 type AddressRecordProvider interface {
 	ListAddressRecords(context.Context, string, string) ([]AddressRecord, error)
@@ -264,7 +265,8 @@ const (
 	resolverWaitDetail     = "authoritative address results have not converged"
 )
 
-const maxPublishPasses = 8
+// maxPublishPasses covers replacing every record of a full set (one provider mutation per pass) plus the readback passes.
+const maxPublishPasses = 40
 
 // WaitingForDNS reports whether err only means that DNS has not caught up with records the provider
 // holds yet (a normal state for about one TTL after every change), as opposed to a failure.
