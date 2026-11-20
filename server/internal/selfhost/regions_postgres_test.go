@@ -115,7 +115,9 @@ func TestCreateRegionDerivesSlugs(t *testing.T) {
 	// Paperboat's region ids are never reused as an owner's slug.
 	managed := "berlin-dc-" + strings.ToLower(f.stamp[:8])
 	f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Berlin',true)`, managed)
-	t.Cleanup(func() { f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, managed) })
+	t.Cleanup(func() {
+		_, _ = f.store.SQL().Exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, managed)
+	})
 	if r := create(strings.ReplaceAll(managed, "-", " ")); r.ID != managed+"-2" {
 		t.Fatalf("slug of a managed region: %+v", r)
 	}
@@ -183,7 +185,7 @@ func TestCreateRegionRefusesDuplicateNames(t *testing.T) {
 
 func TestCreateRegionBoundsAndLimit(t *testing.T) {
 	f := newPairFixture(t)
-	for _, bad := range []string{"", "  ", strings.Repeat("x", 49), "bad\x00name", "tab\t"} {
+	for _, bad := range []string{"", "  ", strings.Repeat("x", 49), "bad\x00name", "tab\tin"} {
 		if _, err := f.service.CreateRegion(f.ctx, f.owner, f.personal, bad); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("name %q: %v", bad, err)
 		}
@@ -219,8 +221,11 @@ func TestRegionListUnionsStoredAndImplicitRegions(t *testing.T) {
 	if got["zeta-empty"].Machines != 0 || got["zeta-empty"].Name != "Zeta empty" || len(got) != 3 {
 		t.Fatalf("stored empty region: %+v", got)
 	}
-	// A server that runs two components counts once; a node that stopped reporting counts but is not ready.
-	f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,decode(md5($1||'k')||md5($1||'kk'),'hex'),decode(md5($1||'h')||md5($1||'hh'),'hex'),'fixture','Relay of n1','relay','account',$3,$1,true)`, "relay_n1_"+f.stamp, f.n1, f.owner)
+	// A machine that runs two components (two nodes, one installation key) counts once; a node that stopped reporting
+	// counts but is not ready.
+	relayNode := f.node("n1relay", f.own1, 0)
+	f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete)
+ SELECT $1,$2,installation_public_key,decode(md5($1||'h')||md5($1||'hh'),'hex'),'fixture','Relay of n1','relay','account',$3,$1,true FROM paperboat.selfhost_installations WHERE id=$4`, "relay_n1_"+f.stamp, relayNode, f.owner, f.s1)
 	f.exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now()-interval '1 hour' WHERE id=$1`, f.n1b)
 	got = f.regions(f.owner, f.personal)
 	if got[f.own1].Machines != 2 || got[f.own1].Ready != 1 {
@@ -381,7 +386,9 @@ func TestDeleteTeamRegionHeldByAMembersPersonalPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.exec(`DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, f.member) })
+	t.Cleanup(func() {
+		_, _ = f.store.SQL().Exec(`DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, f.member)
+	})
 	// A member's personal pair that names the team's region, via the team's servers it may use.
 	f.exec(`INSERT INTO paperboat.workspace_edge_sets(scope_kind,scope_id,mode,regions) VALUES('account',$1,'self-hosted-only',ARRAY[$2])`, f.member, lab.ID)
 	if err = f.service.DeleteRegion(f.ctx, f.admin, f.teamScope, lab.ID); !errors.Is(err, ErrRegionInUse) {

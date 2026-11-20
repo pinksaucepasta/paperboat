@@ -55,20 +55,20 @@ type Region struct {
 	ID string `json:"id"`
 	// Name is the display name, or the slug while the region is implicit and unnamed.
 	Name string `json:"name"`
-	// Machines is the number of distinct servers (nodes) of the scope that are enrolled in the region; a server that
-	// runs both a relay and an edge counts once.
+	// Machines is the number of distinct machines of the scope enrolled in the region; a machine that runs both a
+	// relay and an edge (two components, two nodes) counts once.
 	Machines int `json:"machines"`
-	// Ready is how many of those servers are ready now (a server is ready when any of its components is).
+	// Ready is how many of those machines are ready now (a machine is ready when any of its components is).
 	Ready int `json:"ready"`
 }
 
-// regionNodesSQL (args: scope kind, scope id) is the distinct non-retired servers of the scope with their region and
-// readiness; managed nodes never count.
-const regionNodesSQL = `SELECT coalesce(n.region,'') AS region, n.id AS node_id, bool_or(` + installationReadySQL + `) AS ready, bool_or(i.claim_complete) AS complete
+// regionNodesSQL (args: scope kind, scope id) is the distinct machines of the scope (one installation key, however many
+// components, each with its own node) per region with their readiness, over non-retired nodes; managed nodes never count.
+const regionNodesSQL = `SELECT coalesce(n.region,'') AS region, i.installation_public_key AS machine, bool_or(` + installationReadySQL + `) AS ready, bool_or(i.claim_complete) AS complete
  FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
  WHERE i.scope_kind=$1 AND i.scope_id=$2 AND i.state='active' AND n.state<>'retired' AND coalesce(n.region,'')<>''
   AND NOT EXISTS(SELECT 1 FROM paperboat.managed_node_authority m WHERE m.node_id=n.id)
- GROUP BY n.region, n.id`
+ GROUP BY n.region, i.installation_public_key`
 
 const listRegionsSQL = `WITH nodes AS (` + regionNodesSQL + `), counts AS (
  SELECT region AS slug, count(*)::int AS machines, (count(*) FILTER (WHERE ready))::int AS ready FROM nodes WHERE complete GROUP BY region
