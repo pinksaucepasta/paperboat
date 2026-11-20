@@ -7,7 +7,11 @@
 // Files shell has no machine picked (its Inbox filename filter needs one), so it has no case. For each case:
 // hold the server's render (every control-plane read waits on a promise: no sleeping), push the target on the
 // client, enter state on the SHELL (the live tree stays interactive throughout), release, and assert the server
-// page has the same state. The machine route is never prefetched, so its push always renders the live fallback.
+// page has the same state. The server releases a held render by itself after ~3 s, so everything between the
+// push and the release stays event-driven and scoped to the shell's own tree (whole-page quiescence can outlast
+// the hold on a cold profile). Case routes stay unprefetched: a fresh prefetch entry would render at once
+// instead of suspending, so every push shows a shell. The machine route is never prefetched, so its push always
+// renders the live fallback.
 // The run starts with failing reads, so only static shells cache and every push suspends.
 // It runs the BUILT console (`NEXT_DIST_DIR=<dir> bun run build`, then this) against a fixture control plane, so no
 // WorkOS sign-in and no live account is needed.
@@ -195,6 +199,25 @@ try {
       null,
       { timeout, polling: 250 },
     )
+  // Ready when the shell's own tree stops gaining hydrated elements: the shell is small and hydrates
+  // as one, so this resolves as soon as its controls take input. Whole-page quiescence would also wait
+  // on the chrome around the shell and can outlast the server's ~3 s hold on a cold profile; hidden
+  // prerendered copies in the DOM are skipped by checking what is actually drawn.
+  const shellReady = (timeout) =>
+    page.waitForFunction(
+      () => {
+        const root = [...document.querySelectorAll(".shell-delay")].find((el) => el.getClientRects().length > 0)
+        if (!root) return false
+        const n = [root, ...root.querySelectorAll("button, input, select, textarea, a")].filter((el) =>
+          Object.keys(el).some((k) => k.startsWith("__react")),
+        ).length
+        const last = root.__shellReadyCount ?? -1
+        root.__shellReadyCount = n
+        return n > 0 && n === last
+      },
+      null,
+      { timeout, polling: 100 },
+    )
   // Warm the browser's JS cache once, unheld: a cold profile hydrates slower than the fixture
   // can hold a render, so the first held shell would swap before it is interactive.
   await page.goto(`${ORIGIN}/account`, { waitUntil: "commit" })
@@ -206,31 +229,46 @@ try {
   await settled(60000)
   for (const [name, path, enter, survived, workspace, entered, shell = shellDelay] of cases) {
     if (process.env.ONLY && !name.includes(process.env.ONLY)) continue
-    try {
-      await context.addCookies([{ name: "pb-workspace", value: workspace ?? "personal", url: ORIGIN }])
+    // A cold server or a loaded host can stall a navigation past the server's ~3 s hold, leaving no
+    // shell to enter on: one fresh re-push with a new hold recovers, the page being warm by then. A
+    // genuinely broken shell fails every attempt the same way, so the check still fails without the fix.
+    for (let attempt = 0; ; attempt++) {
       let release
-      world.hold = new Promise((resolve) => (release = resolve))
-      // A client navigation: the live tree renders the cached static shell at once and stays
-      // interactive while the held server render streams in.
-      await page.evaluate((to) => window.next.router.push(to), path)
-      await shell.wait(page)
-      // The shell streams before it hydrates.
-      await settled(20000)
-      await page.waitForTimeout(400) // the shell shows itself after .shell-delay's 300 ms
-      await enter(page)
-      // Typing before the shell hydrates is silently lost; once more once it settles.
-      if ((await shell.showing(page)) && !(await entered(page).catch(() => false))) {
-        await settled(20000)
+      try {
+        await context.addCookies([{ name: "pb-workspace", value: workspace ?? "personal", url: ORIGIN }])
+        world.hold = new Promise((resolve) => (release = resolve))
+        // A client navigation: the live tree renders the cached static shell at once and stays
+        // interactive while the held server render streams in.
+        await page.evaluate((to) => window.next.router.push(to), path)
+        await shell.wait(page)
+        // The shell streams before it hydrates: wait only on the shell's own tree, not the whole page.
+        // Playwright's actions wait for visibility themselves (the shell reveals itself 300 ms in),
+        // so no fixed sleep; the entered check below retries if a type landed before hydration.
+        await shellReady(20000)
         await enter(page)
+        // Typing before the shell hydrates is silently lost; once more once it settles.
+        if ((await shell.showing(page)) && !(await entered(page).catch(() => false))) {
+          await shellReady(20000)
+          await enter(page)
+        }
+        if (!(await shell.showing(page))) throw new Error("the server page had already replaced the shell: the state was not entered on the shell")
+        release()
+        await shell.loaded(page)
+        await page.waitForTimeout(300)
+        if (!(await survived(page))) throw new Error("the state entered on the shell was lost when the server page replaced it")
+        results.push([true, name])
+        break
+      } catch (error) {
+        // Unblock whatever the failed attempt left hanging before trying again (releasing twice is a no-op).
+        try {
+          release()
+        } catch {}
+        if (attempt > 0) {
+          results.push([false, `${name}  (${String(error.message ?? error).split("\n")[0]})`])
+          break
+        }
+        // The case never started (nothing entered yet): try once more instead of failing the run.
       }
-      if (!(await shell.showing(page))) throw new Error("the server page had already replaced the shell: the state was not entered on the shell")
-      release()
-      await shell.loaded(page)
-      await page.waitForTimeout(300)
-      if (!(await survived(page))) throw new Error("the state entered on the shell was lost when the server page replaced it")
-      results.push([true, name])
-    } catch (error) {
-      results.push([false, `${name}  (${String(error.message ?? error).split("\n")[0]})`])
     }
   }
   if (errors.length) results.push([false, `page errors: ${errors.join(" | ")}`])
