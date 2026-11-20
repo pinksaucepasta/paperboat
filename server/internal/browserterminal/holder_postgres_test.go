@@ -107,7 +107,7 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 	proof := previewattachment.MachineProof{UserID: f.account, MachineID: machine, OperationID: "operation_holder", InstallationGeneration: 1}
 	request := runtimewire.Request{OperationID: proof.OperationID, ProcessID: "process_holder", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
 	held := map[string]bool{}
-	for range 2 {
+	for pass := range 2 {
 		answer, err := carriers.Attach(ctx, proof, request)
 		if err != nil {
 			t.Fatal(err)
@@ -116,7 +116,11 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 		if answer.Backup != nil {
 			admitted = append(admitted, *answer.Backup)
 		}
+		// The second attach is the one that applies the route to the edge that observed first.
 		for _, carrier := range admitted {
+			if pass == 1 {
+				break
+			}
 			node := carrier.Binding.EdgeNodeID
 			edge := previewattachment.PreviewEdgeIdentity{NodeID: node, ProcessEpoch: carrier.Binding.EdgeProcessEpoch}
 			if err := carriers.Observe(ctx, edge, []runtimewire.Observation{{RouteID: route, SessionID: carrier.Binding.SessionID, AttachmentGeneration: carrier.AttachmentGeneration, Ready: true}}); err != nil {
