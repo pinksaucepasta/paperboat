@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const defaultSocketPath = `\\.\pipe\PaperboatHostService`
@@ -90,7 +91,7 @@ func (c *Client) call(ctx context.Context, request Request) (Response, error) {
 	}
 	_ = connection.SetDeadline(deadline)
 	body, err := json.Marshal(request)
-	if err != nil || len(body)+1 > windowsHostServiceMaxRequestSize {
+	if err != nil || len(body)+1 > connectorprotocol.MaximumSnapshotBytes {
 		return Response{}, errors.Join(ErrInvalidRequest, err)
 	}
 	body = append(body, '\n')
