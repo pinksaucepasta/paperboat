@@ -55,8 +55,12 @@ func DecodeVaultScope(s VaultScopeState) (environmente2ee.VaultScope, error) {
 }
 
 func (c *Client) vaultDataRequest(ctx context.Context, method, path string, body, out any) error {
+	return c.vaultDataRequestLimited(ctx, method, path, body, out, 0)
+}
+
+func (c *Client) vaultDataRequestLimited(ctx context.Context, method, path string, body, out any, maxResponseBytes int64) error {
 	var headers http.Header
-	if err := c.doRequestMeta(ctx, method, path, body, out, environmentNoStoreRequestHeaders(nil), true, &headers); err != nil {
+	if err := c.doRequestMetaLimited(ctx, method, path, body, out, environmentNoStoreRequestHeaders(nil), true, &headers, maxResponseBytes); err != nil {
 		return err
 	}
 	return validateEnvironmentNoStore(headers)

@@ -3,10 +3,12 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type environmentVaultRecordsAPI interface {
@@ -28,7 +30,7 @@ func writeVaultRecordResult(w http.ResponseWriter, r *http.Request, out any, err
 	writeVaultScopeResult(w, r, out, err)
 }
 func vaultRecordQuery(w http.ResponseWriter, r *http.Request) (environment.VaultRecordsQuery, bool) {
-	q := environment.VaultRecordsQuery{Limit: 200}
+	q := environment.VaultRecordsQuery{Limit: connectorprotocol.MaximumVaultRecordsPageSize}
 	values := r.URL.Query()
 	for key, v := range values {
 		if len(v) != 1 {
@@ -58,8 +60,8 @@ func vaultRecordQuery(w http.ResponseWriter, r *http.Request) (environment.Vault
 	}
 	if values.Has("limit") {
 		n, err := strconv.Atoi(values.Get("limit"))
-		if err != nil || n < 1 || n > 200 {
-			writeError(w, r, 400, "invalid_record_query", "Record page limit must be between 1 and 200.")
+		if err != nil || n < 1 || n > connectorprotocol.MaximumVaultRecordsPageSize {
+			writeError(w, r, 400, "invalid_record_query", fmt.Sprintf("Record page limit must be between 1 and %d.", connectorprotocol.MaximumVaultRecordsPageSize))
 			return q, false
 		}
 		q.Limit = n

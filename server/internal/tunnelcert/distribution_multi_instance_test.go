@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -146,5 +147,141 @@ func replayRefusedOnAnotherInstance(t *testing.T, nonces ProofNonceReserver) {
 	}
 	if _, err := second.ResolveDistributionNode(context.Background(), signedDistributionRequest(t, CertificateDistributionPullPath, "edge_01", epoch, now.Add(-time.Second), nonce, body, private)); err == nil {
 		t.Fatal("a replayed proof was accepted by another instance")
+	}
+}
+
+func distributionBudgetTestDatabase(t *testing.T) (context.Context, *db.DB) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL required")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	t.Cleanup(cancel)
+	if err := db.Migrate(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	return ctx, database
+}
+
+func TestDistributionPendingBudgetAcrossEpochsOnPostgres(t *testing.T) {
+	ctx, database := distributionBudgetTestDatabase(t)
+	store, err := NewSQLDistributionActionStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := fmt.Sprintf("edge_budget_%d", time.Now().UnixNano())
+	defer func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM paperboat.tunnel_certificate_distribution_actions WHERE edge_node_id IN ($1,$2)`, node, node+"_other")
+	}()
+	makeAction := func(i int, node, epoch string) DistributionAction {
+		return DistributionAction{Key: distributionStoreKey(fmt.Sprintf("%s_%d", node, i)), Message: DistributionMessage{
+			Action: "stage", EdgeNodeID: node, EdgeProcessEpoch: epoch, AccountID: fmt.Sprintf("account_%d", i), ExpiresAt: time.Now().Add(time.Minute),
+		}}
+	}
+
+	const budget = 256
+	const ownerBudget = 64
+	for i := range ownerBudget + 1 {
+		action := makeAction(i, node+"_other", "epoch_old")
+		action.Message.AccountID = "account_full"
+		_, err := store.Put(ctx, action)
+		if i < ownerBudget && err != nil || i == ownerBudget && !errors.Is(err, ErrDistributionTransportFailed) {
+			t.Fatalf("owner action %d: %v", i, err)
+		}
+	}
+	first := makeAction(0, node, "epoch_old")
+	for i := range budget - 1 {
+		if _, err := store.Put(ctx, makeAction(i, node, "epoch_old")); err != nil {
+			t.Fatalf("action %d: %v", i, err)
+		}
+	}
+	if _, err := store.Put(ctx, first); err != nil {
+		t.Fatalf("idempotent retry at capacity: %v", err)
+	}
+	// Two replicas compete for the last slot with different process epochs.
+	last := makeAction(budget-1, node, "epoch_old")
+	next := makeAction(budget, node, "epoch_new")
+	second, err := NewSQLDistributionActionStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := second.Put(ctx, next)
+		result <- err
+	}()
+	_, lastErr := store.Put(ctx, last)
+	nextErr := <-result
+	switch {
+	case lastErr == nil && errors.Is(nextErr, ErrDistributionTransportFailed):
+	case nextErr == nil && errors.Is(lastErr, ErrDistributionTransportFailed):
+		next = last
+	default:
+		t.Fatalf("expected one slot across epochs: old=%v, new=%v", lastErr, nextErr)
+	}
+	if _, err := store.Put(ctx, next); !errors.Is(err, ErrDistributionTransportFailed) {
+		t.Fatalf("retry bypassed the node budget: %v", err)
+	}
+
+	if _, err := store.Put(ctx, makeAction(budget, node+"_other", "epoch_new")); err != nil {
+		t.Fatalf("another node inherited the first node's budget: %v", err)
+	}
+	if ok, err := store.Complete(ctx, first.Key, "ready", "", time.Now()); !ok || err != nil {
+		t.Fatalf("acknowledge pending action: %v", err)
+	}
+	if _, err := store.Put(ctx, next); err != nil {
+		t.Fatalf("ack did not free a slot across epochs: %v", err)
+	}
+}
+
+type testExactLeafIssuer struct{ testIssuer }
+
+func (i *testExactLeafIssuer) IssueLeaf(ctx context.Context, request IssueRequest) (CertificateBundle, error) {
+	return i.Issue(ctx, request)
+}
+
+func TestExactLeafIssuanceBudgetFollowsVerifiedDomainOnPostgres(t *testing.T) {
+	ctx, database := distributionBudgetTestDatabase(t)
+	admission, err := NewSQLIssuanceLock(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := &testExactLeafIssuer{testIssuer{err: ErrIssuerUnavailable}}
+	coordinator, _, _, _ := coordinatorForTest(t, issuer)
+	now := time.Now().UTC().Truncate(time.Minute)
+	coordinator.config.Now = func() time.Time { return now }
+	coordinator.config.AdmitExactLeaf = admission.AdmitExactLeaf
+	coordinator.config.Delegated = nil
+	domain := testDomain("*.example.test", StrategyOnDemandLeaf)
+	domain.ID = fmt.Sprintf("dom_budget_%d", now.UnixNano())
+	defer func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM paperboat.auth_rate_limits WHERE bucket_key IN ($1,$2)`,
+			"certificate-leaf:"+domain.ID, "certificate-leaf:"+domain.ID+"_other")
+	}()
+
+	for i := range 16 {
+		domain.LeafHostname = fmt.Sprintf("leaf-%d.example.test", i)
+		if _, err := coordinator.Ensure(ctx, domain); !errors.Is(err, ErrIssuerUnavailable) {
+			t.Fatalf("issue leaf %d: %v", i, err)
+		}
+	}
+	domain.LeafHostname = "next.example.test"
+	domain.EdgeTargets = []EdgeTarget{{NodeID: "edge_new", ProcessEpoch: "epoch-new", Generation: 1}}
+	if _, err := coordinator.Ensure(ctx, domain); !errors.Is(err, ErrIssuerRateLimited) || len(issuer.seen) != 16 {
+		t.Fatalf("changing edge bypassed the issuance budget: issuer calls=%d, err=%v", len(issuer.seen), err)
+	}
+	other := domain
+	other.ID += "_other"
+	if _, err := coordinator.Ensure(ctx, other); !errors.Is(err, ErrIssuerUnavailable) || len(issuer.seen) != 17 {
+		t.Fatalf("another domain inherited the issuance budget: issuer calls=%d, err=%v", len(issuer.seen), err)
 	}
 }

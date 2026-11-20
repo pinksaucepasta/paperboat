@@ -44,6 +44,23 @@ type DistributionActionStore interface {
 // distributionResultRetention bounds the result ledger; a coordinator retry rebuilds anything older.
 const distributionResultRetention = time.Hour
 
+// Pending actions are transient. Keep capacity available for other owners on a shared edge.
+const (
+	distributionPendingPerNode        = 256
+	distributionPendingPerOwnerOnNode = 64
+)
+
+func ownerDistributionWork(action string) bool {
+	return action == "stage" || action == "activate"
+}
+
+func distributionBudgetError(nodePending, ownerPending int, action string) error {
+	if nodePending >= distributionPendingPerNode || ownerDistributionWork(action) && ownerPending >= distributionPendingPerOwnerOnNode {
+		return fmt.Errorf("%w: edge certificate distribution queue is full", ErrDistributionTransportFailed)
+	}
+	return nil
+}
+
 func distributionStoreKey(messageKey string) string {
 	sum := sha256.Sum256([]byte(messageKey))
 	return hex.EncodeToString(sum[:])
@@ -77,21 +94,47 @@ func (s sqlDistributionActionStore) Put(ctx context.Context, a DistributionActio
 	if err != nil {
 		return DistributionAction{}, err
 	}
-	if _, err = s.db.Pool().Exec(ctx, `INSERT INTO paperboat.tunnel_certificate_distribution_actions
+	var stored DistributionAction
+	err = s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		// Serialize admission for the authenticated edge across all process epochs and replicas.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 218))`, a.Message.EdgeNodeID); err != nil {
+			return err
+		}
+		// Lock the row before testing expiry so an in-flight acknowledgement cannot be overwritten.
+		existing, err := scanDistributionAction(tx.QueryRow(ctx, `WITH existing AS MATERIALIZED (
+ SELECT * FROM paperboat.tunnel_certificate_distribution_actions WHERE action_key=$1 FOR UPDATE
+)
+SELECT `+distributionActionColumns+` FROM existing
+WHERE status <> 'failed' OR (status IS NULL AND expires_at > statement_timestamp())`, a.Key))
+		if err == nil {
+			stored = existing
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		var nodePending, ownerPending int
+		err = tx.QueryRow(ctx, `SELECT count(*),
+ count(*) FILTER (WHERE message->>'account_id'=$2 AND message->>'action' IN ('stage','activate'))
+ FROM paperboat.tunnel_certificate_distribution_actions
+ WHERE edge_node_id=$1 AND status IS NULL AND expires_at > statement_timestamp()`,
+			a.Message.EdgeNodeID, a.Message.AccountID).Scan(&nodePending, &ownerPending)
+		if err != nil {
+			return err
+		}
+		if err := distributionBudgetError(nodePending, ownerPending, a.Message.Action); err != nil {
+			return err
+		}
+		stored, err = scanDistributionAction(tx.QueryRow(ctx, `INSERT INTO paperboat.tunnel_certificate_distribution_actions
  (action_key, edge_node_id, edge_process_epoch, message, master_key_reference, sealed_certificate, sealed_private_key, expires_at)
  VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
  ON CONFLICT (action_key) DO UPDATE SET message=excluded.message, master_key_reference=excluded.master_key_reference,
    sealed_certificate=excluded.sealed_certificate, sealed_private_key=excluded.sealed_private_key,
    expires_at=excluded.expires_at, status=NULL, code=NULL, completed_at=NULL
- WHERE tunnel_certificate_distribution_actions.status='failed'
-   OR (tunnel_certificate_distribution_actions.status IS NULL AND tunnel_certificate_distribution_actions.expires_at <= now())`,
-		a.Key, a.Message.EdgeNodeID, a.Message.EdgeProcessEpoch, message, a.MasterKeyReference, a.SealedCertificate, a.SealedPrivateKey, a.Message.ExpiresAt); err != nil {
-		return DistributionAction{}, err
-	}
-	stored, found, err := s.Get(ctx, a.Key)
-	if err == nil && !found {
-		err = fmt.Errorf("%w: distribution action vanished after insert", ErrDistributionTransportFailed)
-	}
+ RETURNING `+distributionActionColumns,
+			a.Key, a.Message.EdgeNodeID, a.Message.EdgeProcessEpoch, message, a.MasterKeyReference, a.SealedCertificate, a.SealedPrivateKey, a.Message.ExpiresAt))
+		return err
+	})
 	return stored, err
 }
 
@@ -149,8 +192,21 @@ func NewMemoryDistributionActionStore() *MemoryDistributionActionStore {
 func (m *MemoryDistributionActionStore) Put(_ context.Context, a DistributionAction) (DistributionAction, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if existing, ok := m.actions[a.Key]; ok && existing.Status != "failed" && (existing.Status != "" || existing.Message.ExpiresAt.After(time.Now())) {
+	now := time.Now()
+	if existing, ok := m.actions[a.Key]; ok && existing.Status != "failed" && (existing.Status != "" || existing.Message.ExpiresAt.After(now)) {
 		return existing, nil
+	}
+	var nodePending, ownerPending int
+	for _, existing := range m.actions {
+		if existing.Status == "" && existing.Message.EdgeNodeID == a.Message.EdgeNodeID && existing.Message.ExpiresAt.After(now) {
+			nodePending++
+			if existing.Message.AccountID == a.Message.AccountID && ownerDistributionWork(existing.Message.Action) {
+				ownerPending++
+			}
+		}
+	}
+	if err := distributionBudgetError(nodePending, ownerPending, a.Message.Action); err != nil {
+		return DistributionAction{}, err
 	}
 	m.actions[a.Key] = a
 	return a, nil

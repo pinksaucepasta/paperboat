@@ -30,15 +30,6 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		var req InspectRequest
-		if err := decode(w, r, &req); err != nil {
-			return
-		}
-		nonce, err := encoding.DecodeString(req.Nonce)
-		if err != nil || len(nonce) < 16 || len(nonce) > 64 {
-			http.Error(w, "invalid inspection nonce", 400)
-			return
-		}
 		lock, err := lockState(dir)
 		if err != nil {
 			if observe != nil {
@@ -62,6 +53,16 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		}
 		if s.Claim == nil && time.Now().Unix() >= s.ExpiresAt {
 			http.Error(w, "code expired", http.StatusGone)
+			return
+		}
+		// Read the body only after the bearer is verified (decode bounds it).
+		var req InspectRequest
+		if err := decode(w, r, &req, maxInspectBodyBytes); err != nil {
+			return
+		}
+		nonce, err := encoding.DecodeString(req.Nonce)
+		if err != nil || len(nonce) < 16 || len(nonce) > 64 {
+			http.Error(w, "invalid inspection nonce", 400)
 			return
 		}
 
@@ -104,10 +105,6 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		var req ClaimRequest
-		if err := decode(w, r, &req); err != nil {
-			return
-		}
 		lock, err := lockState(dir)
 		if err != nil {
 			if observe != nil {
@@ -127,6 +124,11 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		}
 		if !authorized(r, s) {
 			http.Error(w, "code invalid", http.StatusUnauthorized)
+			return
+		}
+		// Read the body only after the bearer is verified (decode bounds it).
+		var req ClaimRequest
+		if err := decode(w, r, &req, connectorprotocol.MaximumSnapshotBytes); err != nil {
 			return
 		}
 		req.ControlURL = strings.TrimRight(req.ControlURL, "/")
@@ -196,8 +198,11 @@ func authorized(r *http.Request, s state) bool {
 	expected, err := encoding.DecodeString(s.SecretHash)
 	return err == nil && subtle.ConstantTimeCompare(hash[:], expected) == 1
 }
-func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, connectorprotocol.MaximumSnapshotBytes)
+// maxInspectBodyBytes bounds InspectRequest, which carries only a 16-64 byte nonce.
+const maxInspectBodyBytes = 4 << 10
+
+func decode(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	defer r.Body.Close()
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,11 @@ import (
 
 func vaultRecordFixture(t *testing.T, c VaultLayerCoordinate, account, id string, revision, epoch uint64, deleted bool, writerGeneration ...uint64) string {
 	t.Helper()
+	return sizedVaultRecordFixture(t, c, account, id, revision, epoch, deleted, 32, writerGeneration...)
+}
+
+func sizedVaultRecordFixture(t *testing.T, c VaultLayerCoordinate, account, id string, revision, epoch uint64, deleted bool, size int, writerGeneration ...uint64) string {
+	t.Helper()
 	claims := vaultRecordClaims{Domain: "paperboat.environment.record", Version: 1, Issuer: "https://control.example", WorkspaceID: c.WorkspaceID, OwnerKind: c.OwnerKind, OwnerID: c.OwnerID, MachineID: c.MachineID, KeyEpoch: epoch, RecordID: id, Revision: revision, Deleted: deleted, WriterAccount: account, WriterVaultGeneration: 1, Nonce: bytes.Repeat([]byte{7}, 12)}
 	if len(writerGeneration) == 1 {
 		claims.WriterVaultGeneration = writerGeneration[0]
@@ -27,7 +33,7 @@ func vaultRecordFixture(t *testing.T, c VaultLayerCoordinate, account, id string
 	if err != nil {
 		t.Fatal(err)
 	}
-	ciphertext := bytes.Repeat([]byte{19}, 32)
+	ciphertext := bytes.Repeat([]byte{19}, size)
 	msg, _ := EncodeCanonical([]any{"paperboat.environment.record-signature", uint64(1), header, ciphertext})
 	raw, err := EncodeCanonical(vaultRecordEnvelope{Claims: header, Ciphertext: ciphertext, Signature: ed25519.Sign(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{11}, 32)), msg)})
 	if err != nil {
@@ -208,7 +214,7 @@ func TestPostgresVaultRecordsCASAtomicSnapshotAndDeletion(t *testing.T) {
 }
 
 // Tombstones of removed variables stay as current heads, so the record count of a scope has no cap of its own.
-func TestPostgresVaultRecordsBeyondFormerCountCap(t *testing.T) {
+func TestPostgresVaultRecordsCurrentInventoryAndHistoryBudgets(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL required")
@@ -248,14 +254,60 @@ func TestPostgresVaultRecordsBeyondFormerCountCap(t *testing.T) {
 	if _, err := service.PutVaultScope(ctx, account, "personal", "personal", account, "", VaultScopePut{OperationID: "many_anchor_" + account, Envelope: b64Vault(anchorRaw)}); err != nil {
 		t.Fatal(err)
 	}
-	const batches = 33 // 33 x 128 = 4224 record IDs, above the former 4096
-	for b := 0; b < batches; b++ {
-		in := VaultRecordsPut{OperationID: fmt.Sprintf("many_%d_%s", b, account)}
-		for i := 0; i < MaximumVaultRecordBatch; i++ {
-			in.Records = append(in.Records, VaultRecordMutation{Envelope: vaultRecordFixture(t, c, account, fmt.Sprintf("%064x", b*MaximumVaultRecordBatch+i+1), 1, 1, true)})
+	firstID := fmt.Sprintf("%064x", 1)
+	if _, err := service.PutVaultRecords(ctx, account, c, VaultRecordsPut{
+		OperationID: "first_" + account,
+		Records:     []VaultRecordMutation{{Envelope: vaultRecordFixture(t, c, account, firstID, 1, 1, true)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed a large, authenticated current inventory at one watermark. The public
+	// writes below prove admission and pruning without replaying every seed batch.
+	var ids, documents []string
+	var envelopes [][]byte
+	for held := 0; held <= MaximumVaultRecordHistoryBytes; {
+		id := fmt.Sprintf("%064x", len(ids)+2)
+		raw, err := base64.RawURLEncoding.DecodeString(vaultRecordFixture(t, c, account, id, 1, 1, true))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		documents = append(documents, fmt.Sprintf("sha256:%x", sha256.Sum256(raw)))
+		envelopes = append(envelopes, raw)
+		held += len(raw)
+	}
+	writer := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{11}, 32)).Public().(ed25519.PublicKey)
+	if _, err := store.Pool().Exec(ctx, `INSERT INTO paperboat.environment_vault_record_versions
+ (workspace_id,owner_kind,owner_id,machine_id,key_epoch,record_id,revision,deleted,sequence,document_id,envelope,ciphertext_bytes,writer_public)
+ SELECT $1,$2,$3,$4,1,record_id,1,true,1,document_id,envelope,32,$5
+ FROM unnest($6::text[],$7::text[],$8::bytea[]) AS seed(record_id,document_id,envelope)`,
+		c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID, []byte(writer), ids, documents, envelopes); err != nil {
+		t.Fatal(err)
+	}
+
+	// Superseded large values still exhaust history and force stale snapshots to refresh.
+	const liveRecords = 8
+	for revision := uint64(1); revision <= 20; revision++ {
+		in := VaultRecordsPut{OperationID: fmt.Sprintf("history_%d_%s", revision, account)}
+		for i := range liveRecords {
+			id := fmt.Sprintf("%064x", len(ids)+i+2)
+			in.Records = append(in.Records, VaultRecordMutation{
+				ExpectedRevision: revision - 1,
+				Envelope:         sizedVaultRecordFixture(t, c, account, id, revision, 1, false, 30000),
+			})
 		}
 		if _, err := service.PutVaultRecords(ctx, account, c, in); err != nil {
-			t.Fatalf("batch %d (%d record IDs held): %v", b, b*MaximumVaultRecordBatch, err)
+			t.Fatalf("write live revision %d: %v", revision, err)
 		}
 	}
+	through := uint64(2)
+	if _, err := service.ListVaultRecords(ctx, account, c, VaultRecordsQuery{Limit: 1, ThroughSequence: &through}); !errors.Is(err, ErrVaultRecordCursorExpired) {
+		t.Fatalf("snapshot with pruned history: %v", err)
+	}
+	id := fmt.Sprintf("%064x", len(ids)+2)
+	if record, err := service.GetVaultRecord(ctx, account, c, id); err != nil || record.Revision != 20 {
+		t.Fatalf("current revision = %d, err = %v", record.Revision, err)
+	}
+
 }

@@ -168,7 +168,7 @@ func TestPostgresRecordingsArchive(t *testing.T) {
 	if err := f.s.PruneArchive(f.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(bucket.deleted) != 3 || !strings.HasSuffix(bucket.deleted[2], "paperboat/v1/recordings/"+recID+"/000002.seg") || archivedOf(t, f, recID) != 0 {
+	if len(bucket.deleted) != 3 || !strings.HasSuffix(bucket.deleted[0], "paperboat/v1/recordings/"+recID+"/000002.seg") || archivedOf(t, f, recID) != 0 {
 		t.Fatalf("deleted %v, archived %d", bucket.deleted, archivedOf(t, f, recID))
 	}
 	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{Source: recording.SourceBucket}); !errors.Is(err, ErrNotArchived) {
@@ -258,5 +258,71 @@ func TestPostgresRecordingsArchiveReplayRefusedPastByteBound(t *testing.T) {
 	}
 	if len(out.Segments) != 0 {
 		t.Fatalf("refused archive replay returned %d URLs, want none", len(out.Segments))
+	}
+}
+
+// A machine that claims far more archived segments than it ever had must not stall retention: an ended recording is
+// pruned only up to its own segment count, a recording still open at most pruneBudget per pass, and every pass shrinks
+// the count so the recordings behind it are reached.
+func TestPostgresRecordingsPruneArchiveBoundedByInventory(t *testing.T) {
+	f := newFixture(t)
+	f.paid()
+	if err := f.policy(`{"rules": [{"src": ["user:` + f.member + `@example.test"], "dst": ["machine:prod"], "allow": ["recording_view"]}]}`); err != nil {
+		t.Fatal(err)
+	}
+	k1, _ := newKey(t, f.team, 1, nil)
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
+		t.Fatal(err)
+	}
+	apply := func(kind string, r recording.Report) {
+		t.Helper()
+		if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error { return ApplyReportTx(ctx, tx, f.prod, kind, r) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	create := func(session string, segments, archived int, end bool, age string) string {
+		t.Helper()
+		id := "rec_" + uuid.NewString()
+		apply(recording.KindStarted, recording.Report{RecordingID: id, SessionID: session, Trigger: recording.TriggerRule, KeyGeneration: 1, Accounts: []string{f.member}, StartedAt: now})
+		if end {
+			apply(recording.KindStopped, recording.Report{RecordingID: id, Reason: recording.ReasonSessionEnded, Bytes: 1, Segments: int64(segments), EndedAt: now})
+		}
+		if err := f.s.Archived(f.ctx, f.prod, id, archived); err != nil {
+			t.Fatal(err)
+		}
+		f.exec(`UPDATE paperboat.session_recordings SET started_at = now() - $2::interval WHERE id = $1`, id, age)
+		return id
+	}
+	inflated := create("sess_inflated", 2, 900000, true, "63 days") // ended with 2 segments, claims 900000
+	open := create("sess_open", 0, 2500, false, "62 days")          // still open: no inventory, only the pass budget
+	behind := create("sess_behind", 3, 3, true, "61 days")
+	f.s.cfg.BucketRetentionDays = 60
+	bucket := &fakeBucket{prefix: "paperboat"}
+	f.s.SetBuckets(bucket)
+	f.exec(`INSERT INTO paperboat.team_buckets(team_id,endpoint,region,bucket,prefix,access_key_id,secret,checked_at)
+ VALUES($1,'https://s3.example.test','us-east-1','team-bucket','paperboat','AKIAEXAMPLE',decode('00','hex'),now())`, f.team)
+
+	pass := func(wantDeleted int, want map[string]int) {
+		t.Helper()
+		bucket.deleted = nil
+		if err := f.s.PruneArchive(f.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if len(bucket.deleted) != wantDeleted {
+			t.Fatalf("pass deleted %d objects, want %d", len(bucket.deleted), wantDeleted)
+		}
+		for id, n := range want {
+			if got := archivedOf(t, f, id); got != n {
+				t.Fatalf("archived of %s = %d, want %d", id, got, n)
+			}
+		}
+	}
+	// The inflated count is clipped to the 2 real segments and the open recording takes the rest of the budget.
+	pass(2+998, map[string]int{inflated: 0, open: 1502, behind: 3})
+	pass(1000, map[string]int{open: 502, behind: 3})
+	pass(502+3, map[string]int{open: 0, behind: 0})
+	if err := f.s.Archived(f.ctx, f.prod, behind, maxArchivedSegments+1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a count past the object key space was accepted: %v", err)
 	}
 }

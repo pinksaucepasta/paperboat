@@ -355,7 +355,9 @@ type Config struct {
 	Operations  OperationCompleter
 	// WorkspaceCertificates supplies the wildcard certificate of a workspace
 	// domain to the tunnel and preview hostnames under it.
-	WorkspaceCertificates  WorkspaceCertificateSource
+	WorkspaceCertificates WorkspaceCertificateSource
+	// AdmitExactLeaf charges new exact-leaf issuance to the verified owner, before any CA work.
+	AdmitExactLeaf         func(context.Context, Domain, time.Time) error
 	MasterKeyReference     string
 	IssuerName             string
 	OwnerID                string
@@ -870,6 +872,11 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 			return Result{}, err
 		}
 		reused = true
+	}
+	if !reused && domain.Strategy == StrategyOnDemandLeaf && domain.LeafHostname != "" && c.config.AdmitExactLeaf != nil {
+		if err := c.config.AdmitExactLeaf(ctx, domain, now); err != nil {
+			return Result{}, err
+		}
 	}
 	challenge := DNSChallenge{}
 	var challengePtr *DNSChallenge

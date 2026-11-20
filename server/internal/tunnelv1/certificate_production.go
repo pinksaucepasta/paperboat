@@ -149,6 +149,7 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 		Distributor:            distributor,
 		Operations:             operations,
 		WorkspaceCertificates:  config.WorkspaceCertificates,
+		AdmitExactLeaf:         locks.AdmitExactLeaf,
 		MasterKeyReference:     config.MasterKeyReference,
 		IssuerName:             config.IssuerName,
 		OwnerID:                config.OwnerID,

@@ -27,6 +27,10 @@ type VaultRecordState struct {
 	Envelope     string `json:"envelope"`
 }
 
+func (s VaultRecordState) SnapshotBytes() int {
+	return len(s.Envelope) + len(s.WriterPublic) + len(s.DocumentID) + connectorprotocol.VaultRecordSnapshotOverhead
+}
+
 func (s VaultRecordState) Decode() (env.VaultRecord, error) {
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(s.Envelope)
 	if err != nil {
@@ -96,7 +100,7 @@ func (c *Client) VaultRecordsPage(ctx context.Context, coordinate VaultLayerCoor
 	if err := scoped.SetWorkspace(coordinate.WorkspaceID); err != nil {
 		return VaultRecordsPage{}, err
 	}
-	q := url.Values{"machine_id": {coordinate.MachineID}, "after_sequence": {strconv.FormatUint(after, 10)}, "limit": {"200"}}
+	q := url.Values{"machine_id": {coordinate.MachineID}, "after_sequence": {strconv.FormatUint(after, 10)}, "limit": {strconv.Itoa(connectorprotocol.MaximumVaultRecordsPageSize)}}
 	if through > 0 || cursor != "" {
 		q.Set("through_sequence", strconv.FormatUint(through, 10))
 	}
@@ -104,7 +108,7 @@ func (c *Client) VaultRecordsPage(ctx context.Context, coordinate VaultLayerCoor
 		q.Set("cursor", cursor)
 	}
 	var out VaultRecordsPage
-	err := scoped.vaultDataRequest(ctx, http.MethodGet, vaultRecordsPath(coordinate)+"?"+q.Encode(), nil, &out)
+	err := scoped.vaultDataRequestLimited(ctx, http.MethodGet, vaultRecordsPath(coordinate)+"?"+q.Encode(), nil, &out, connectorprotocol.MaximumVaultRecordsPageWireBytes)
 	return out, err
 }
 
@@ -126,7 +130,7 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 		if page == 0 {
 			out.Sequence = next.Sequence
 		}
-		if next.Sequence != out.Sequence || next.AfterSequence != after || next.Sequence < after || len(next.Records) > 200 {
+		if next.Sequence != out.Sequence || next.AfterSequence != after || next.Sequence < after || len(next.Records) > connectorprotocol.MaximumVaultRecordsPageSize {
 			return VaultRecordsResult{}, errors.New("invalid ENV record pagination")
 		}
 		for _, r := range next.Records {
@@ -134,7 +138,7 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 				return VaultRecordsResult{}, errors.New("inconsistent ENV record snapshot")
 			}
 			seen[r.RecordID] = true
-			total += len(r.Envelope) + len(r.WriterPublic) + len(r.DocumentID) + 512
+			total += r.SnapshotBytes()
 			if total > connectorprotocol.MaximumSnapshotBytes {
 				return VaultRecordsResult{}, errors.New("ENV record snapshot exceeded the size bound")
 			}
@@ -143,7 +147,7 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 		if next.NextCursor == "" {
 			return out, nil
 		}
-		if len(next.Records) == 0 || cursors[next.NextCursor] {
+		if len(next.Records) == 0 || cursors[next.NextCursor] || len(next.NextCursor) > 4096 {
 			return VaultRecordsResult{}, errors.New("ENV record cursor did not advance")
 		}
 		cursors[next.NextCursor] = true

@@ -158,7 +158,7 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 		if err != nil {
 			return nil, err
 		}
-		if next.Sequence != through || next.AfterSequence != after || len(next.Records) > 200 {
+		if next.Sequence != through || next.AfterSequence != after || len(next.Records) > connectorprotocol.MaximumVaultRecordsPageSize {
 			return nil, ErrInvalidSnapshot
 		}
 		for _, record := range next.Records {
@@ -166,7 +166,7 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 				return nil, ErrInvalidSnapshot
 			}
 			ids[record.RecordID] = true
-			total += len(record.Envelope) + len(record.WriterPublic) + len(record.DocumentID) + 512
+			total += record.SnapshotBytes()
 			if total > connectorprotocol.MaximumSnapshotBytes {
 				return nil, ErrInvalidSnapshot
 			}
