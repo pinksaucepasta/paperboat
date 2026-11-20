@@ -450,9 +450,9 @@ func TestDistributionHubExpiresAndWipesPendingActions(t *testing.T) {
 	}
 }
 
-// The hub keeps no total pending cap: expiry and Purge bound the queue.
+// The hub has no fleet-wide cap. Every node has its own pending budget.
 func TestDistributionHubAcceptsMoreThan4096PendingActions(t *testing.T) {
-	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
@@ -467,7 +467,7 @@ func TestDistributionHubAcceptsMoreThan4096PendingActions(t *testing.T) {
 		request := DistributionRequest{Certificate: StoredCertificate{
 			ID: fmt.Sprintf("certificate_%05d", index), AccountID: "account_01", TunnelID: "tunnel_01", DomainID: "domain_01", Hostname: "preview.example.test",
 			DomainGeneration: 1, CertificateGeneration: 1, Fingerprint: [32]byte{1}, Issuer: "test", NotBefore: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
-		}, Bundle: CertificateBundle{CertificatePEM: []byte("certificate"), PrivateKeyPEM: []byte("private-key")}, Target: DistributionTarget{NodeID: "edge_01", ProcessEpoch: "epoch_0001", Generation: 1}}
+		}, Bundle: CertificateBundle{CertificatePEM: []byte("certificate"), PrivateKeyPEM: []byte("private-key")}, Target: DistributionTarget{NodeID: fmt.Sprintf("edge_%02d", index/64), ProcessEpoch: "epoch_0001", Generation: 1}}
 		if _, err := hub.enqueue(context.Background(), "stage", request); err != nil {
 			t.Fatalf("enqueue %d: %v", index, err)
 		}
@@ -484,7 +484,7 @@ func allZeroBytes(value []byte) bool {
 }
 
 func TestDistributionHubPagesPendingMessagesWithStableCursor(t *testing.T) {
-	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
@@ -497,7 +497,7 @@ func TestDistributionHubPagesPendingMessagesWithStableCursor(t *testing.T) {
 	}
 	for index := 0; index < maxDistributionMessages+1; index++ {
 		request := DistributionRequest{Certificate: StoredCertificate{
-			ID: fmt.Sprintf("certificate_%03d", index), AccountID: "account_01", TunnelID: "tunnel_01", DomainID: "domain_01", Hostname: "preview.example.test",
+			ID: fmt.Sprintf("certificate_%03d", index), AccountID: fmt.Sprintf("account_%02d", index/64), TunnelID: "tunnel_01", DomainID: "domain_01", Hostname: "preview.example.test",
 			DomainGeneration: 1, CertificateGeneration: uint64(index + 1), Fingerprint: [32]byte{byte(index + 1)}, Issuer: "test", NotBefore: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
 		}, Target: DistributionTarget{NodeID: "edge_01", ProcessEpoch: "epoch_0001", Generation: uint64(index + 1)}}
 		if _, err := hub.enqueue(context.Background(), "stage", request); err != nil {
