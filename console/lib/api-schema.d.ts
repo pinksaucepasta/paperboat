@@ -13194,8 +13194,8 @@ export interface components {
              * @description The node's load: the worst of its sustained CPU and its connections against its own limit, from its latest report; absent when it reported nothing in the last 2 minutes.
              */
             load_percent?: number;
-            /** @description False while the wildcard DNS sync holds the ready node out of the published names because it is overloaded; absent for nodes the sync does not manage. */
-            in_dns?: boolean;
+            /** @description False while the load rule holds the ready node out because it is overloaded: an edge is left out of the wildcard DNS names, a relay out of the relay candidate list; absent for nodes the rule does not manage. */
+            in_rotation?: boolean;
             /** @description The node's public ingress addresses passed the verify-ingress probe. */
             ingress_verified: boolean;
         };
