@@ -9,9 +9,9 @@ import (
 )
 
 // One load rule for both kinds of managed node: an overloaded edge leaves the wildcard DNS names (edge_wildcard_dns.go)
-// and an overloaded relay leaves the relay candidate list (peersessions relayNodes reads paperboat.node_load_out).
-// Clients rank relays by measured round trip only, so the server cannot steer them by ordering; it can only leave a
-// relay out. Decisions are stored in paperboat.node_load_out so a worker leader change keeps the hysteresis.
+// and an overloaded relay leaves the relay candidate list (peersessions relayNodes reads paperboat.node_load_out, and
+// within a region lists the least loaded relay first, which is the one the client uses). Decisions are stored in
+// paperboat.node_load_out so a worker leader change keeps the hysteresis.
 
 var (
 	edgeRoles  = []string{"edge"}

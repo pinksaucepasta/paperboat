@@ -45,10 +45,12 @@ A node whose load (`load_percent` in the admin panel: the worst of its sustained
 own limit) reaches `PAPERBOAT_NODE_CAPACITY_LOAD_OUT_PERCENT` (85) is left out of the names and comes back only
 below `PAPERBOAT_NODE_CAPACITY_LOAD_IN_PERCENT` (70); a region always keeps its least loaded ready node, and a
 node with no recent report is never dropped. The admin panel shows such a node as paused for load (`in_rotation`
-false). The same rule, thresholds and stored state apply to managed relays: a relay at or above the load-out
-threshold is left out of the relay candidate list (account configuration and peer-relay grants, within about 5 s,
-the candidate cache TTL) and returns below the load-in threshold; the last ready relay of a region is never left out,
-and a self-hosted owner's own relays are never touched. Clients rank the remaining relays by measured round trip.
+false). The same rule, thresholds and stored state apply to managed relays. Balancing happens inside a region: the
+client picks the region by round trip and then uses the first relay the server lists in it, so within a region the
+list is ordered least loaded first (a relay with no recent report last). A relay at or above the load-out threshold is
+left out of the list altogether (account configuration and peer-relay grants, within about 5 s, the candidate cache
+TTL) and returns below the load-in threshold; the last ready relay of a region is never left out, and a self-hosted
+owner's own relays are never touched.
 The relay decision runs on the worker leader every 10 s whether or not `PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS`
 is on. Log lines:
 `edge_wildcard_dns_published` (hostname, addresses), `edge_wildcard_dns_conflict` (hostname, error),

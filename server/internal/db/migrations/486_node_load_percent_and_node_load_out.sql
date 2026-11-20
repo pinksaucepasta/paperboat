@@ -1,5 +1,5 @@
 -- +goose Up
--- One load figure per node, shared by the relay candidate list, the wildcard DNS sync and the admin panel: the worst of
+-- One load figure per node, shared by the relay candidate order and list, the wildcard DNS sync and the admin panel: the worst of
 -- the node's sustained CPU and its connections as a share of its own declared limit, from its latest self-report
 -- (node_capacity). NULL when the node reported nothing in the last 2 minutes: unknown is never treated as overloaded.
 SET LOCAL lock_timeout = '5s';
