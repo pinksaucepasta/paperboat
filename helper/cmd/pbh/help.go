@@ -33,7 +33,9 @@ var commandHelp = map[string]string{
 	"install": `Install a local Paperboat node (--relay, --edge or --both) as the paperboat-selfhost systemd service.
 Installation assigns no account or team: claim the node in Dashboard → Network → Add self-hosted
 node with the address and code printed here (pbh selfhost code prints a new one). Re-running the
-same command upgrades in place and keeps data. Needs root (it re-runs itself with sudo) unless
+same command upgrades in place and keeps data. A new install asks for its region on a terminal (or take
+--region): the region is where users see this server; add more servers with the same region to spread
+load and replace machines without downtime. An upgrade keeps the stored region. Needs root (it re-runs itself with sudo) unless
 --no-service is given.
 Examples:
   pbh install --both --endpoint-host edge.example.com`,

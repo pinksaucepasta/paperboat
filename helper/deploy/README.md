@@ -148,6 +148,9 @@ Shutdown drains and removes only containers labelled for that installation and
 keeps its protected state. A foreign container with a colliding name is refused.
 No Docker daemon network configuration is changed when Docker is already present.
 
+A new install asks "Region name for this server" on a terminal; `--region <name>` answers it ahead of time and
+a non-terminal run uses `selfhost`. Users see the region, not the server: servers enrolled with the same region
+back each other up, spread load, and let a machine be replaced without downtime.
 Re-run the installer to upgrade images. Existing roles, custom ports, domains,
 region, name, TLS paths, claim and private identity are read from the protected
 installation; they do not need to be repeated. Conflicting settings flags are
