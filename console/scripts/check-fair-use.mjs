@@ -60,7 +60,7 @@ const api = createServer((request, response) => {
     announcements: { banner: null, notices: [], unread: 0 },
   }
   const data = answers[path]
-  response.writeHead(data ? 200 : 404, { "content-type": "application/json" })
+  response.writeHead(data ? 200 : 404, { "content-type": "application/json", "cache-control": "no-store" })
   response.end(JSON.stringify(data ? { data } : { error: { code: "not_found", message: "stub" } }))
 })
 await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve))
@@ -97,12 +97,14 @@ try {
       const panel = await page.waitForSelector("[data-fair-use]", { timeout: 60_000 }).catch(() => null)
       check(`${name}/${s}: the usage page shows the public-traffic panel`, Boolean(panel), panel ? "" : `${(await page.innerText("body").catch(() => "")).replace(/\s+/g, " ").slice(0, 200)} | ${problems.slice(0, 8).join(" | ")}`)
       if (!panel) { failed++; await context.close(); continue }
+      let waitError = ""
       const homeCard = async (viewName, state) => {
         const home = await context.newPage()
         await home.goto(`${origin}/`, { timeout: 120_000 })
         const el = await home.waitForSelector("[data-fair-use-card]", { timeout: 60_000 }).catch(() => null)
         if (!el) { await home.close(); return { title: "", text: "", clipped: true } }
-        await home.waitForFunction(() => document.querySelector("[data-fair-use-card] [title^=Relay]") !== null && !document.querySelector("[data-fair-use-card] [class*=animate-pulse]"), null, { timeout: 30_000 }).catch(() => {})
+        // Selector waits (a page function may be blocked by the app's CSP); a wait that fails is reported, never skipped.
+        waitError = await home.locator('[data-fair-use-card] [title^="Relay"]').first().waitFor({ timeout: 60_000 }).then(() => home.locator("[data-fair-use-card] [class*=animate-pulse]").first().waitFor({ state: "detached", timeout: 30_000 })).then(() => "", (e) => String(e.message).split("\n")[0].slice(0, 100))
         const out = await el.evaluate((node) => {
           const card = node.parentElement
           const clipped = [...card.querySelectorAll("*")].some((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible" && e.clientWidth > 0)
@@ -114,7 +116,7 @@ try {
         await home.close()
         return out
       }
-      if (s !== "own") await page.waitForFunction(() => document.querySelector("[data-fair-use] [title^=Relay]") !== null, null, { timeout: 60_000 }).catch(() => {})
+      const panelWait = s === "own" ? "" : await page.locator('[data-fair-use] [title^="Relay"]').first().waitFor({ timeout: 60_000 }).then(() => "", (e) => String(e.message).split("\n")[0].slice(0, 100))
       const text = ((await panel?.innerText()) ?? "").replace(/\s+/g, " ")
       // The same text with a space between every element's text (innerText drops it between flex items): headline, rows and legend.
       const spaced = await panel?.evaluate((node) => {
@@ -138,11 +140,11 @@ try {
         const legend = new RegExp(`Relay ${re(used * 0.6)} Edge ${re(used * 0.4)} `)
         check(`${name}/${s}: legend shows relay and edge hosted traffic only (self-hosted never counts)`, legend.test(spaced) && !/\b7\.?\d* GB/.test(spaced), spaced.slice(0, 120))
         const bars = await panel.$$eval("[role=meter] > div", (d) => d.map((e) => ({ w: parseFloat(e.style.width), c: e.className })))
-        check(`${name}/${s}: the bar is split relay/edge 60/40 of the used share`, bars.length === 2 && /relay/.test(bars[0].c) && /edge/.test(bars[1].c) && Math.abs(bars[0].w / (bars[0].w + bars[1].w) - 0.6) < 0.01 && Math.abs(bars[0].w + bars[1].w - Math.min(100, used)) < 0.5, `${JSON.stringify(bars)} | ${trace.join(" | ")}`)
+        check(`${name}/${s}: the bar is split relay/edge 60/40 of the used share`, bars.length === 2 && /relay/.test(bars[0].c) && /edge/.test(bars[1].c) && Math.abs(bars[0].w / (bars[0].w + bars[1].w) - 0.6) < 0.01 && Math.abs(bars[0].w + bars[1].w - Math.min(100, used)) < 0.5, `${JSON.stringify(bars)} | wait: ${panelWait || "ok"} | ${trace.join(" | ")}`)
         check(`${name}/${s}: it says when the period resets`, /Resets [A-Za-z0-9 ]+/.test(text))
         const card = await homeCard(name, s)
         check(`${name}/${s}: home card is titled Hosted allowance`, card.title === "Hosted allowance", card.title)
-        check(`${name}/${s}: home card shows <used> of <total>, Resets <date>, legend, nothing truncated`, new RegExp(`${re(used)} of 100 GB Resets .+ Relay ${re(used * 0.6)} Edge ${re(used * 0.4)}$`).test(card.text) && !card.clipped, `${card.text}${card.clipped ? " (clipped)" : ""}`)
+        check(`${name}/${s}: home card shows <used> of <total>, Resets <date>, legend, nothing truncated`, new RegExp(`${re(used)} of 100 GB Resets .+ Relay ${re(used * 0.6)} Edge ${re(used * 0.4)}$`).test(card.text) && !card.clipped, `${card.text}${card.clipped ? " (clipped)" : ""} | wait: ${waitError || "ok"}`)
         if (s === "throttled") {
           check(`${name}/${s}: it says slowed to 1 Mbit/s until the reset date`, /Slowed to 1 Mbit\/s until/.test(spaced) && /Slowed to 1 Mbit\/s until/.test(card.text) && !/left/.test(card.text), `${spaced.slice(0, 40)} | ${card.text.slice(0, 40)}`)
           const links = (await panel.$$eval("a", (a) => a.map((e) => `${e.textContent.trim()}:${e.getAttribute("href")}`))).join(" ")
