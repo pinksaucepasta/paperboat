@@ -9,16 +9,17 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
-// Edges do not forward, and a machine holds a carrier to every ready node of its two regions (at most
-// runtimewire.MaximumRegionCarriers), so a visitor may land on any managed edge: the preview and runtime wildcard
-// names list every ready, non-draining managed edge, and the server keeps them so. A draining node leaves the
-// set at once; visitors holding its address still reach a carrier until the record's TTL passes (nodedrain.MoveGrace).
-// Prior art: headscale's DERP map is rebuilt from the live node list on every change (hscontrol/derp/derp.go).
+// Edges do not forward, so a visitor who resolves a published node must find a carrier there. The preview and runtime
+// wildcard names list the serving managed edges (edgeset.ServingNodes: the first few live nodes of each enabled
+// region by id), which are exactly the nodes a machine of any workspace holds carriers to inside its two regions. A
+// draining node leaves the set at once; visitors holding its address still reach a carrier until the record's TTL
+// passes (nodedrain.MoveGrace). Prior art: headscale's DERP map is rebuilt from the live node list on every change
+// (hscontrol/derp/derp.go).
 const (
-	edgeWildcardMaxNodes = 8 // runtimewire.MaximumRegionCarriers
 	edgeWildcardRefresh  = 5 * time.Minute
 	edgeWildcardValidity = 10 * time.Minute
 )
@@ -45,6 +46,8 @@ type edgeWildcards struct {
 	log   *slog.Logger
 	// outPercent and inPercent are config.NodeCapacity.LoadOutPercent / LoadInPercent.
 	outPercent, inPercent float64
+	// maxNodes is config.NodeCapacity.EdgeWildcardMaxNodes; truncatedAt is the ready count last logged as cut by it.
+	maxNodes, truncatedAt int
 	// reconciled is each name's last successfully published set; a name is published again only when its set
 	// changes or after edgeWildcardRefresh, so the provider is not rewritten every tick.
 	reconciled map[string]wildcardPublication
@@ -56,7 +59,7 @@ func newEdgeWildcards(database *db.DB, cfg config.Config, public, runtime wildca
 		return nil
 	}
 	return &edgeWildcards{db: database, log: slog.Default(), now: time.Now,
-		outPercent: cfg.NodeCapacity.LoadOutPercent, inPercent: cfg.NodeCapacity.LoadInPercent,
+		outPercent: cfg.NodeCapacity.LoadOutPercent, inPercent: cfg.NodeCapacity.LoadInPercent, maxNodes: cfg.NodeCapacity.EdgeWildcardMaxNodes,
 		names: []wildcardName{{"*." + cfg.Preview.BaseDomain, public}, {"*." + cfg.RuntimeBaseDomain, runtime}}}
 }
 
@@ -66,18 +69,18 @@ type wildcardNode struct {
 	addresses []string
 }
 
-// readyEdges lists the managed edges that serve: ready, not draining, fresh heartbeat, unexpired registration, in an
-// enabled region, ingress verified. The ingress probe checks every address it records (IPv4 and IPv6), so an IPv6
-// address here has been reached.
+// readyEdges lists the serving managed edges (edgeset.ServingNodes: ready, not draining, fresh heartbeat, unexpired
+// registration, enabled region) whose ingress is verified. The ingress probe checks every address it records (IPv4
+// and IPv6), so an IPv6 address here has been reached. Nodes come round-robin across regions (every region's first
+// node, then every region's second, ...), so the cap on the answer cuts the last of each region's rank, never a
+// region; ties of a rank go by region.
 func (w *edgeWildcards) readyEdges(ctx context.Context) ([]wildcardNode, error) {
 	rows, err := w.db.Pool().Query(ctx, `SELECT n.id,m.region_id,coalesce(host(n.public_ingress_ipv4),''),coalesce(host(n.public_ingress_ipv6),''),paperboat.node_load_percent(n.id)
 FROM paperboat.control_tunnel_nodes n
-JOIN paperboat.managed_node_authority m ON m.node_id=n.id AND m.retired_at IS NULL
-JOIN paperboat.operator_regions r ON r.id=m.region_id AND r.enabled
-WHERE n.state='ready' AND n.ready AND n.drain_deadline IS NULL AND n.roles @> ARRAY['edge']::text[]
- AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now()
- AND n.public_ingress_verified_at IS NOT NULL AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
-ORDER BY n.id LIMIT $1`, edgeWildcardMaxNodes)
+JOIN `+edgeset.ServingNodes+` s ON s.id=n.id
+JOIN paperboat.managed_node_authority m ON m.node_id=n.id
+WHERE n.public_ingress_verified_at IS NOT NULL AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
+ORDER BY s.rank,m.region_id,n.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +104,20 @@ ORDER BY n.id LIMIT $1`, edgeWildcardMaxNodes)
 		}
 		nodes = append(nodes, n)
 	}
-	return nodes, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	total := len(nodes)
+	if total > w.maxNodes {
+		nodes = nodes[:w.maxNodes]
+		if w.truncatedAt != total {
+			w.log.WarnContext(ctx, "edge_wildcard_dns_truncated", "ready", total, "published", w.maxNodes, "detail", "raise node_capacity.edge_wildcard_max_nodes")
+		}
+		w.truncatedAt = total
+	} else {
+		w.truncatedAt = 0
+	}
+	return nodes, nil
 }
 
 // Sync publishes every wildcard name whose set changed (or is due for a refresh). It never publishes an empty

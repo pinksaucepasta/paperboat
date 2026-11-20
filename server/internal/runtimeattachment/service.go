@@ -206,7 +206,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 		}
 		// pick reads up to limit live edges, the machine's preferred first, then the workspace's primary region before
 		// its backup, that satisfy eligible. A machine holds a carrier to every one of them: edges do not forward, so a
-		// visitor may land on any node of the pair's regions.
+		// visitor may land on any serving node of the pair's regions (edgeset.ServingNodes).
 		pick := func(eligible string, limit int, terminal bool) ([]edgeRow, error) {
 			rows, err := tx.Query(ctx, edgeSelectQuery(eligible), proof.UserID, activeNode, proof.MachineID, request.InstallationGeneration, request.WorkerGeneration, teamID)
 			if err != nil {
@@ -836,7 +836,9 @@ ORDER BY g.tunnel_id`, proof.MachineID, proof.UserID)
 }
 
 // edgeSelectQuery reads up to 32 live edges for a machine, its preferred ones first, then its workspace's primary
-// region before the backup, then spread by machine so one region's nodes share a fleet. It locks no node row: every edge
+// region before the backup, then spread by machine so one region's nodes share a fleet. Managed edges are limited to the
+// serving set (edgeset.ServingNodes), the same nodes the wildcard DNS names publish, so a visitor never lands on a node
+// this machine holds no carrier to; the order only decides which carrier is first. It locks no node row: every edge
 // heartbeats its row every few seconds, and a serializable transaction that locks (FOR SHARE) a row changed after its
 // snapshot fails with 40001, so attaches lost to heartbeats (13 of the 70 serialization failures in 30 min on prod,
 // 2026-11-20). A node that drains or goes offline right after it is chosen is the case of an edge failing after an
@@ -851,7 +853,7 @@ LEFT JOIN workspace_edge_sets ws ON ws.scope_kind=CASE WHEN $6::text IS NULL THE
 WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
 AND n.capacity_observed_at>now()-interval '30 seconds'
-AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND ` + eligible + `
+AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND ` + eligible + ` AND ` + edgeset.ServingOnly + `
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
 ORDER BY CASE WHEN n.id=p.primary_node_id AND n.process_epoch=p.primary_process_epoch THEN 0
