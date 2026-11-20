@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -18,19 +17,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
-// A grant the relay would refuse (here: more than its 256 memberships in one grant, as until_revoked
-// session rights produced on prod) makes only that relay unusable: with every relay refused the
+// A grant the CLI refuses (here: a membership its configuration does not give) makes only that relay unusable: with every relay refused the
 // engine starts direct-only instead of failing the runtime and with it pairing ("relay
 // authorization rejected", a test VM 2026-10-26). An explicitly requested relay still reports it.
 func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 	a, cfg, signer, _ := networkTestAuthority(t)
 	now := time.Now().Unix()
-	base := cfg.Peers[0].Scopes[0]
-	for i := range peernetwork.MaxGrantMemberships + 4 {
-		scope := base
-		scope.ResourceID = fmt.Sprintf("grant_%03d", i)
-		cfg.Peers[0].Scopes = append(cfg.Peers[0].Scopes, scope)
-	}
 	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
 		t.Fatal(err)
 	}
@@ -42,17 +34,21 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
 		t.Fatal(err)
 	}
-	grant := func(n RegionalNode, scopes int) string {
+	grant := func(n RegionalNode, extra bool) string {
 		g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch}
-		g.Memberships = grantMemberships(cfg.Peers[0].Scopes[:scopes]...)
+		g.Memberships = grantMemberships(cfg.Peers[0].Scopes...)
+		if extra { // a membership the configuration does not give
+			stranger := cfg.Peers[0].Scopes[0]
+			stranger.ResourceID = "not_in_configuration"
+			g.Memberships = append(g.Memberships, grantScope(stranger))
+		}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(g)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
 	}
-	all := len(cfg.Peers[0].Scopes)
-	// The shared grant check (the relay's own) already refuses it: no grant applies, the call says so.
-	if err := a.ApplyRelayGrants(t.Context(), []string{grant(first, all)}); !errors.Is(err, ErrAuthority) {
+	// No grant applies, the call says so.
+	if err := a.ApplyRelayGrants(t.Context(), []string{grant(first, true)}); !errors.Is(err, ErrAuthority) {
 		t.Fatalf("a grant relays refuse was applied: %v", err)
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
