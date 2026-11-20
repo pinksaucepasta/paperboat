@@ -220,7 +220,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			var waits []string
 			client.Waiting = func(message string) { waits = append(waits, message) }
 			client.DestinationName = "macl"
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			// The waits are skipped (retryWait above), so this only bounds a hang: 3 s was passed on a loaded macOS runner
+			// (CI: 8.85 s for the lease-lost case, "file transfer interrupted" when the deadline ended the send).
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			batch, err := client.SendBatch(ctx, manifest.BatchID, "", []Source{item})
 			if denied {

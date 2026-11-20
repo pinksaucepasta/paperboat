@@ -141,3 +141,37 @@ func TestNativeTransferCompletedCancellationReturnsConflictAndPreservesTheRecord
 		t.Fatalf("record after the refused cancel = %+v (err=%v)", current, err)
 	}
 }
+
+// A sender whose upload the receiver canceled is told so when it asks for the offset: its PATCH is answered 499 (which it
+// retries), and a HEAD that still answered 204 let it retry for its whole recovery window (device check transfer-manage).
+func TestNativeTransferHeadOfACanceledTransferIsATerminalConflict(t *testing.T) {
+	handler, _ := fileTransferTestHandler(t)
+	data := []byte("canceled upload")
+	created, err := handler.config.Service.Create(t.Context(), filetransfer.CreateRequest{BatchID: "head_canceled", SourceMachineID: "machine_client", DestinationMachineID: "machine_host", InitiatingUserID: "user_1", SessionID: "ses_1", Files: []filetransfer.File{{Basename: "canceled.txt", Size: int64(len(data)), SHA256: transferDigest(data)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	head := func() *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, transferRequest(http.MethodHead, "http://helper.test/v1/file-transfers/"+id+"/content", nil))
+		return response
+	}
+	if response := head(); response.Code != http.StatusNoContent {
+		t.Fatalf("an active transfer's HEAD status=%d", response.Code)
+	}
+	if err := handler.config.Service.Cancel(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	response := head()
+	if response.Code != http.StatusConflict {
+		t.Fatalf("a canceled transfer's HEAD status=%d body=%s, want 409", response.Code, response.Body.String())
+	}
+	var body struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Code != "state_conflict" || body.Retryable {
+		t.Fatalf("error=%s", response.Body.String())
+	}
+}

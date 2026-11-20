@@ -415,6 +415,13 @@ func (h *FileTransferHandler) serveContent(writer http.ResponseWriter, request *
 	etag := `"sha256:` + transfer.SHA256 + `"`
 	switch request.Method {
 	case http.MethodHead:
+		// A canceled transfer has no offset to resume from: a sender whose PATCH was answered "canceled" (499, which it
+		// retries, as a dying peer stream answers the same) asks here, and must be told it is over, not that it may go on
+		// (a send canceled by the receiver kept retrying for its whole 32 minute recovery window).
+		if transfer.State == "canceled" {
+			writeFileTransferError(request.Context(), "delivery", writer, requestID, &filetransfer.Error{Code: filetransfer.StateConflict})
+			return
+		}
 		writer.Header().Set(HeaderUploadOffset, strconv.FormatInt(transfer.CommittedOffset, 10))
 		writer.Header().Set(HeaderUploadLength, strconv.FormatInt(transfer.Size, 10))
 		writer.Header().Set(HeaderUploadDigest, "sha256="+transfer.SHA256)
