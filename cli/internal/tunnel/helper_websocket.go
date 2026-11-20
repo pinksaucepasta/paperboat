@@ -475,11 +475,22 @@ func (c *helperTerminalConn) queueWrite(queue chan helperWrite, write helperWrit
 	case <-c.done:
 		return c.terminalError()
 	}
+	return c.writeOutcome(write.result)
+}
+
+// writeOutcome is a queued write's result. writeLoop answers a write before the link can end, so a result that is
+// there wins over a closed link: a Resize that completed just before stream_end must not report EOF.
+func (c *helperTerminalConn) writeOutcome(result <-chan error) error {
 	select {
-	case err := <-write.result:
+	case err := <-result:
 		return err
 	case <-c.done:
-		return c.terminalError()
+		select {
+		case err := <-result:
+			return err
+		default:
+			return c.terminalError()
+		}
 	}
 }
 
