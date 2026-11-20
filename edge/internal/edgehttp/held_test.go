@@ -1,10 +1,12 @@
 package edgehttp
 
 import (
+	"context"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
@@ -54,4 +56,59 @@ func TestHeldAnnouncesPreviewAndRuntimeHostnamesWithAttachedCarriers(t *testing.
 	if (*PreviewCarrierRouteMatcher)(nil).Held() != nil || (*CompositeRouteMatcher)(nil).Held() != nil || (*DataCarrierRouteRegistry)(nil).HeldHosts(nil) != nil {
 		t.Fatal("nil owners must hold nothing")
 	}
+}
+
+// A one-label wildcard route with an attached carrier is announced as its *.suffix key; a wildcard whose suffix is not
+// a valid name, and a pattern hostname, are not.
+func TestHeldEmitsValidatedWildcardOnly(t *testing.T) {
+	cases := []struct {
+		name  string
+		match string
+		host  string
+		// suffix is the WildcardSuffix of a one-label wildcard rule.
+		suffix string
+		want   []string
+	}{
+		{name: "one-label wildcard", match: route.MatchOneLabelWildcard, suffix: "Example.test", want: []string{"*.example.test"}},
+		{name: "multi-label star suffix", match: route.MatchOneLabelWildcard, suffix: "*.example.test"},
+		{name: "empty suffix", match: route.MatchOneLabelWildcard},
+		{name: "star inside an exact hostname", match: route.MatchExact, host: "a.*.example.test"},
+		{name: "question mark in an exact hostname", match: route.MatchExact, host: "a?.example.test"},
+		{name: "exact hostname", match: route.MatchExact, host: "App.Example.test", want: []string{"app.example.test"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := replicaRule()
+			rule.Generation = 1
+			rule.PathPrefix = "/"
+			rule.MatchType = tc.match
+			rule.Hostname = tc.host
+			rule.WildcardSuffix = tc.suffix
+			if got := heldForRule(t, rule); !slices.Equal(got, tc.want) {
+				t.Fatalf("held %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// heldForRule attaches a ready carrier for rule and returns the keys the registry announces for the assignment.
+func heldForRule(t *testing.T, rule route.RouteRule) []string {
+	t.Helper()
+	carrier, connector := testEdgePreviewCarrierPair(t, replicaIdentity("host_pinned", "connector_pinned", "session_pinned", 3))
+	t.Cleanup(func() {
+		connector.Close()
+		carrier.Close()
+	})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.AttachReplica(carrier, "key", "thumb", replicaState(rule, 3, rule.AssignmentID, "region_01", time.Millisecond, 2)); err != nil {
+		t.Fatal(err)
+	}
+	routes := route.NewRegistry("preview.example.test", "runtime.example.test")
+	if err := routes.ApplyGeneration(context.Background(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, 0); err != nil {
+		t.Fatal(err)
+	}
+	return registry.HeldHosts(routes)
 }
