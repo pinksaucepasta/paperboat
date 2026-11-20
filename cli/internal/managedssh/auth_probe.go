@@ -53,27 +53,39 @@ func ProbeSSHAuthentication(ctx context.Context, stream io.ReadWriteCloser, addr
 			return ErrKnownHosts
 		},
 	}
-	type result struct {
-		connection ssh.Conn
-		err        error
-	}
-	results := make(chan result, 1)
+	results := make(chan sshProbeResult, 1)
 	go func() {
 		connection, _, _, handshakeErr := ssh.NewClientConn(sshProbeConn{ReadWriteCloser: stream}, address, config)
-		results <- result{connection: connection, err: handshakeErr}
+		results <- sshProbeResult{connection: connection, err: handshakeErr}
 	}()
+	return awaitSSHProbe(ctx, stream, results)
+}
+
+type sshProbeResult struct {
+	connection ssh.Conn
+	err        error
+}
+
+// awaitSSHProbe reports the handshake's outcome. A handshake that already finished wins over a done ctx: both can be
+// ready together and a random pick reported a successful authentication as an SSH authentication failure.
+func awaitSSHProbe(ctx context.Context, stream io.Closer, results <-chan sshProbeResult) error {
+	var outcome sshProbeResult
 	select {
-	case outcome := <-results:
-		if outcome.connection != nil {
-			outcome.err = errors.Join(outcome.err, outcome.connection.Close())
-		}
-		if outcome.err != nil {
-			return sshAuthenticationError(outcome.err)
-		}
-		return nil
+	case outcome = <-results:
 	case <-ctx.Done():
-		return sshAuthenticationError(errors.Join(managedSSHContextError(ctx), stream.Close()))
+		select {
+		case outcome = <-results:
+		default:
+			return sshAuthenticationError(errors.Join(managedSSHContextError(ctx), stream.Close()))
+		}
 	}
+	if outcome.connection != nil {
+		outcome.err = errors.Join(outcome.err, outcome.connection.Close())
+	}
+	if outcome.err != nil {
+		return sshAuthenticationError(outcome.err)
+	}
+	return nil
 }
 
 type sshProbeConn struct{ io.ReadWriteCloser }

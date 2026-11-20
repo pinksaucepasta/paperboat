@@ -133,3 +133,23 @@ func TestProbeSSHAuthenticationNamesAHostKeyOutsideTheActiveSet(t *testing.T) {
 		t.Fatalf("host key outside the active set: %v", err)
 	}
 }
+
+// A handshake that finished when the ctx was canceled is a successful probe: both are ready and a random pick
+// reported the authentication as failed.
+func TestAwaitSSHProbeKeepsAFinishedHandshakeWhenTheContextIsDone(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := range 200 { // a select with both cases ready picks one at random
+		results := make(chan sshProbeResult, 1)
+		results <- sshProbeResult{}
+		if err := awaitSSHProbe(ctx, client, results); err != nil {
+			t.Fatalf("draw %d: a finished handshake reported %v", i, err)
+		}
+	}
+	if err := awaitSSHProbe(ctx, client, make(chan sshProbeResult, 1)); !errors.Is(err, context.Canceled) || !errors.Is(err, ErrSSHAuthentication) {
+		t.Fatalf("no handshake and a canceled ctx reported %v", err)
+	}
+}
