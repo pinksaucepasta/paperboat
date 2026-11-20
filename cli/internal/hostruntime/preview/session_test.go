@@ -601,7 +601,7 @@ func TestSessionParentDeathStopsAndRevokes(t *testing.T) {
 	client.mu.Unlock()
 }
 
-func TestSessionExpiryRevokesOnceAfterRenewalRetriesReachDeadline(t *testing.T) {
+func TestSessionExpiryLeavesLeaseForServerAfterRenewalRetriesReachDeadline(t *testing.T) {
 	client := &sessionLeaseClient{renewErr: sessionTemporaryError{}}
 	carrier := &sessionCarrier{closed: make(chan struct{}), run: func(ctx context.Context, lease Lease, ready func(Lease) error) error {
 		if err := ready(sessionReadyLease(lease)); err != nil {
@@ -626,8 +626,8 @@ func TestSessionExpiryRevokesOnceAfterRenewalRetriesReachDeadline(t *testing.T) 
 		t.Fatalf("expiry wait error = %v", err)
 	}
 	client.mu.Lock()
-	if len(client.stopLeases) != 1 {
-		t.Fatalf("stop calls = %d", len(client.stopLeases))
+	if len(client.stopLeases) != 0 {
+		t.Fatalf("stop calls = %d, want server-owned expiry", len(client.stopLeases))
 	}
 	if len(client.renewKeys) < 2 || client.renewKeys[0] == "" {
 		t.Fatalf("renew retry keys = %#v", client.renewKeys)
@@ -637,16 +637,13 @@ func TestSessionExpiryRevokesOnceAfterRenewalRetriesReachDeadline(t *testing.T) 
 			t.Fatalf("renew retry changed idempotency key: %#v", client.renewKeys)
 		}
 	}
-	if client.stopKeys[0] == "" {
-		t.Fatalf("stop idempotency key is empty: %#v", client.stopKeys)
-	}
 	client.mu.Unlock()
 	if err := session.Stop(context.Background()); !errors.Is(err, ErrLeaseExpired) {
 		t.Fatalf("idempotent stop error = %v", err)
 	}
 	client.mu.Lock()
-	if len(client.stopKeys) != 1 || client.stopKeys[0] == client.renewKeys[0] {
-		t.Fatalf("stop key reuse = %#v renew=%#v", client.stopKeys, client.renewKeys)
+	if len(client.stopKeys) != 0 {
+		t.Fatal("stopping an expired session issued a server stop")
 	}
 	client.mu.Unlock()
 }

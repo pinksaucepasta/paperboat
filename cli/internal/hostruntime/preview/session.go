@@ -540,7 +540,9 @@ func (s *Session) run() {
 	carrierCloseErr := s.closeCarrier(carrierCloseCtx)
 	cancelCarrierClose()
 	var leaseStopErr error
-	if s.config.LeaseLifecycle == LeaseLifecycleOwned && !s.leaseOutlivesSession() {
+	// The server owns expiration. A host clock ahead of the server would turn
+	// natural expiry into an explicit stop if we sent one here.
+	if s.config.LeaseLifecycle == LeaseLifecycleOwned && !s.leaseOutlivesSession() && !errors.Is(renewErr, ErrLeaseExpired) {
 		leaseStopCtx, cancelLeaseStop := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
 		leaseStopErr = stopLease(leaseStopCtx, s.config.LeaseClient, s.currentLease(), s.stopIdempotencyKey)
 		cancelLeaseStop()
