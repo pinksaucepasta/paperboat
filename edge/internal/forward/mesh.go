@@ -72,7 +72,10 @@ type Config struct {
 	TCPInjector TCPInjector
 
 	DialTimeout, OpenTimeout, PeerInterval, SeedInterval time.Duration
-	MaxStreamsPerPeer                                    int
+	// HeldInterval is how often the node's holdings are diffed into the watch streams (default 250 ms); tests lengthen it
+	// to keep the peers' maps stale on purpose.
+	HeldInterval      time.Duration
+	MaxStreamsPerPeer int
 
 	// Dial opens the TCP connection to a peer (default net.Dialer); tests replace it.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
@@ -132,6 +135,9 @@ func New(cfg Config) (*Mesh, error) {
 	}
 	if cfg.SeedInterval <= 0 {
 		cfg.SeedInterval = 5 * time.Minute
+	}
+	if cfg.HeldInterval <= 0 {
+		cfg.HeldInterval = heldInterval
 	}
 	if cfg.MaxStreamsPerPeer <= 0 {
 		cfg.MaxStreamsPerPeer = 4096

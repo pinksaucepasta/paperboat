@@ -23,6 +23,14 @@ type trio struct {
 	holder, page ca
 }
 
+// stale keeps the nodes' watch deltas from ever being sent (the first snapshot at link-up still is), so a test can
+// move a name and watch the forwarders act on maps that have not caught up.
+func stale(nodes ...*node) {
+	for _, n := range nodes {
+		n.cfg = func(cfg *forward.Config) { cfg.HeldInterval = time.Hour }
+	}
+}
+
 func newTrio(t *testing.T) trio { return trio{holder: newCA(t, "holder"), page: newCA(t, "page")} }
 
 func (c trio) node(t *testing.T, id string) *node {
@@ -78,11 +86,13 @@ func TestForwardHolderMovedMidRequest(t *testing.T) {
 	h1, h2, f := c.node(t, "edge-a"), c.node(t, "edge-b"), c.node(t, "edge-c")
 	h1.held.put(appName)
 	h2.held.put(appName)
+	stale(h1, h2, f)
 	cluster(h1, h2, f)
 	eventually(t, "f to list both holders", func() bool { return holdersOf(f, appName) == "edge-a,edge-b" })
 
 	// The name leaves h1 while f's map still lists it: h1 answers not_holder and f moves on to h2.
 	h1.held.drop(appName)
+	time.Sleep(20 * time.Millisecond)
 	status, body, _, err := visit(t, f, appName, c.holder.pool)
 	if err != nil || status != 200 || !strings.Contains(body, "holder=edge-b") {
 		t.Fatalf("visit after the move: %d %q %v", status, body, err)
@@ -141,6 +151,7 @@ func TestForwardLoopPrevention(t *testing.T) {
 	a, b := c.node(t, "edge-a"), c.node(t, "edge-b")
 	a.held.put(appName)
 	b.held.put(appName)
+	stale(a, b)
 	cluster(a, b)
 	eventually(t, "a to list b", func() bool { return holdersOf(a, appName) == "edge-b" })
 	eventually(t, "b to list a", func() bool { return holdersOf(b, appName) == "edge-a" })
@@ -149,6 +160,7 @@ func TestForwardLoopPrevention(t *testing.T) {
 	// once; b refuses (not_holder) and never forwards it back.
 	a.held.drop(appName)
 	b.held.drop(appName)
+	time.Sleep(20 * time.Millisecond)
 	status, body, _, err := visit(t, a, appName, c.page.pool)
 	if err != nil || status != 503 {
 		t.Fatalf("visit at a: %d %q %v", status, body, err)
@@ -157,10 +169,12 @@ func TestForwardLoopPrevention(t *testing.T) {
 		t.Fatalf("exactly one stream a->b expected: a=%+v b=%+v", sa, sb)
 	}
 
-	// A visitor injected on b is never forwarded again, even though b's map lists a, which holds the name again:
-	// b does not hold it, so the visitor gets b's not-found page.
+	// A visitor injected on b is never forwarded again, even though b's map still lists a and a holds the name
+	// again: b does not hold it, so the visitor gets b's not-found page (forwarded to a it would get a 200).
 	a.held.put(appName)
-	eventually(t, "b to list a", func() bool { return holdersOf(b, appName) == "edge-a" })
+	if holdersOf(b, appName) != "edge-a" {
+		t.Fatalf("b's map should still list a: %q", holdersOf(b, appName))
+	}
 	server, client := tcpPair(t)
 	defer client.Close()
 	before := b.mesh.Stats()

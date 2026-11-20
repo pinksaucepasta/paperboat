@@ -39,9 +39,12 @@ func (m *Mesh) refreshHeld() {
 	m.held.Store(&heldSnapshot{set: set, hash: digest})
 }
 
+// heldRecent is how fresh a read of the holdings is taken to be for a forward's check.
+const heldRecent = 5 * time.Millisecond
+
 func (m *Mesh) heldLoop(ctx context.Context) {
 	ticks := 0
-	for sleep(ctx, heldInterval) {
+	for sleep(ctx, m.cfg.HeldInterval) {
 		m.refreshHeld()
 		if ticks++; ticks%40 == 0 {
 			m.dir.Sweep()
@@ -49,12 +52,12 @@ func (m *Mesh) heldLoop(ctx context.Context) {
 	}
 }
 
-// holds reports whether this node serves key. It re-reads its holdings at most every 50 ms, so a name that just
-// attached is served at once and one that just left is refused at once (the 250 ms watch tick has not told the
-// peers yet).
+// holds reports whether this node serves key. It re-reads its holdings at most every 5 ms (so a burst of forwards
+// costs one read), which makes a name that just attached served at once and one that just left refused at once: the
+// watch tick has not told the peers yet.
 func (m *Mesh) holds(key string) bool {
 	m.heldMu.Lock()
-	recent := time.Since(m.heldAt) < 50*time.Millisecond
+	recent := time.Since(m.heldAt) < heldRecent
 	m.heldMu.Unlock()
 	if !recent {
 		m.refreshHeld()
@@ -82,7 +85,7 @@ func (m *Mesh) sendWatch(ctx context.Context, l *link) {
 		err = writeWatch(st, nodemesh.WatchEnd, nil, false)
 	}
 	for err == nil {
-		if !sleep(ctx, heldInterval) {
+		if !sleep(ctx, m.cfg.HeldInterval) {
 			return
 		}
 		select {
