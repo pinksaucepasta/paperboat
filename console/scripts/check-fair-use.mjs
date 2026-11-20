@@ -23,7 +23,7 @@ const billing = () => {
     id: "personal:usr_1", state: "active", seats_bought: 1, members: 1, can_manage: true, cancel_at_period_end: false, seats_used: 1,
     usage_bytes: used, allowance_bytes: state === "team" ? 400 * GB : 100 * GB,
     ...(state === "team" ? { allowance_seats: 4, allowance_per_seat_bytes: 100 * GB } : {}), allowance_period_start: new Date(Date.now() - 21 * 86400_000).toISOString(), allowance_period_end: ends,
-    relay_mbit: 100,
+    relay_mbit: 100, sso_addon: false, scim_addon: false,
     topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], granted: false, throttled: state === "throttled", throttle_lifted: false, throttle_mbit: 1,
     limits: state === "own"
       ? { machines: { used: 1, limit: 100 }, publications: { used: 0, limit: null, self_hosted: true }, browser_terminals: { used: 0, limit: 10 }, public_tcp: { used: 0, limit: null, self_hosted: true } }
