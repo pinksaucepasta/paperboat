@@ -66,14 +66,14 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		for i, d := range decisions {
 			expires[i] = d.ExpiresAt
 		}
-		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
+		writeEdgeSnapshot(w, r, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
 		return
 	}
 	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "throttled": throttled, "blocked": blocked, "ip_rules": ipRules, "offline": offline}
 	if s.http01 != nil {
 		snapshotBody["http01_responses"] = responses
 	}
-	writeEdgeJSON(w, http.StatusOK, snapshotBody)
+	writeEdgeSnapshot(w, r, snapshotBody)
 }
 
 // ingressProjection is the database work behind one desired-state answer: the node's decisions, the throttles

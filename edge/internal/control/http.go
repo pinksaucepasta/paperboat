@@ -480,14 +480,14 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 }
 
 func (c *HTTPClient) Revocations(ctx context.Context) ([]byte, error) {
-	return c.trustDocument(ctx, "/v1/trust/revocations")
+	return c.trustDocument(ctx, "/v1/trust/revocations", connectorprotocol.MaximumSnapshotBytes)
 }
 
 func (c *HTTPClient) JWKS(ctx context.Context) ([]byte, error) {
-	return c.trustDocument(ctx, "/v1/trust/jwks")
+	return c.trustDocument(ctx, "/v1/trust/jwks", maxControlDocument)
 }
 
-func (c *HTTPClient) trustDocument(ctx context.Context, path string) (data []byte, resultErr error) {
+func (c *HTTPClient) trustDocument(ctx context.Context, path string, maximum int64) (data []byte, resultErr error) {
 	ctx, finish := c.startRequest(ctx, "dependency_health")
 	defer func() { finish(resultErr) }()
 	endpoint := c.base.ResolveReference(&url.URL{Path: path})
@@ -512,11 +512,11 @@ func (c *HTTPClient) trustDocument(ctx context.Context, path string) (data []byt
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, responseFailure(ctx, path, response, maxControlDocument)
 	}
-	data, err = io.ReadAll(io.LimitReader(response.Body, maxControlDocument+1))
+	data, err = io.ReadAll(io.LimitReader(response.Body, maximum+1))
 	if err != nil {
 		return nil, &RequestFailure{Path: path, Category: "transport", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: err}
 	}
-	if len(data) == 0 || len(data) > maxControlDocument {
+	if len(data) == 0 || int64(len(data)) > maximum {
 		return nil, ErrControlUnavailable
 	}
 	return data, nil

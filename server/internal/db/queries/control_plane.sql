@@ -300,20 +300,17 @@ SELECT revoked.jti FROM (
   SELECT m.helper_file_session_id AS jti, m.revoked_at FROM user_machine_access_sessions m
   WHERE m.revoked_at IS NOT NULL AND m.expires_at > sqlc.arg(now) AND m.helper_file_session_id IS NOT NULL
 ) revoked
-ORDER BY revoked.revoked_at, revoked.jti
-LIMIT sqlc.arg(row_limit);
+ORDER BY revoked.revoked_at, revoked.jti;
 
 -- name: ListRevokedConnectorGenerations :many
 SELECT machine_id, connector_id, generation FROM control_connector_generations
 WHERE state IN ('revoked','replaced')
-ORDER BY updated_at, machine_id, connector_id
-LIMIT sqlc.arg(row_limit);
+ORDER BY updated_at, machine_id, connector_id;
 
 -- name: ListRevokedControlEnvironments :many
 SELECT id FROM control_environments
 WHERE desired_state = 'revoked'
-ORDER BY updated_at, id
-LIMIT sqlc.arg(row_limit);
+ORDER BY updated_at, id;
 
 -- name: RevokeControlSigningKey :one
 INSERT INTO control_signing_key_revocations (key_id, reason, revoked_at, actor_user_id)
@@ -332,8 +329,7 @@ SELECT * FROM control_signing_key_revocation_operations WHERE operation_key = $1
 
 -- name: ListRevokedControlSigningKeyIDs :many
 SELECT key_id FROM control_signing_key_revocations
-ORDER BY revoked_at, key_id
-LIMIT sqlc.arg(row_limit);
+ORDER BY revoked_at, key_id;
 
 -- name: GetControlConfigCredentialByOperation :one
 SELECT * FROM control_config_credentials WHERE operation_key = $1;
