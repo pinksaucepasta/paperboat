@@ -15,16 +15,21 @@ import (
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/handover"
+	"github.com/pinksaucepasta/paperboat/edge/internal/quicgate"
 )
 
+// visitorPendingHandshakes is how many unfinished QUIC handshakes one visitor address may hold (a per-client bound, not a node cap).
+const visitorPendingHandshakes = 16
+
 type HTTP3Server struct {
-	Reporter *reporting.Reporter
-	address  string
-	server   *http3.Server
-	mu       sync.Mutex
-	packet   net.PacketConn
-	done     chan error
-	closed   bool
+	Reporter  *reporting.Reporter
+	address   string
+	server    *http3.Server
+	mu        sync.Mutex
+	packet    net.PacketConn
+	transport *quic.Transport
+	done      chan error
+	closed    bool
 	// stopped is closed by Shutdown; it ends a wait for UDPReady.
 	stopped chan struct{}
 }
@@ -55,7 +60,20 @@ func (s *HTTP3Server) Start(ctx context.Context) error {
 	}
 	s.server.Handler = httpDiagnosticHandler(ctx, s.Reporter, s.server.Handler)
 	s.server.Logger = slog.New(slog.NewTextHandler(httpDiagnosticWriter{ctx: ctx, reporter: s.Reporter}, nil))
-	s.packet, s.done = packet, make(chan error, 1)
+	// Visitors: a fresh address pays no Retry round trip; one with an unfinished handshake must prove itself, and no
+	// address holds more than visitorPendingHandshakes unfinished (quicgate).
+	s.server.ConnContext = func(ctx context.Context, c *quic.Conn) context.Context {
+		go func() {
+			select {
+			case <-c.HandshakeComplete():
+			case <-c.Context().Done():
+			}
+			quicgate.Settle(ctx)
+		}()
+		return ctx
+	}
+	transport := quicgate.NewTransport(packet, visitorPendingHandshakes, false)
+	s.packet, s.transport, s.done = packet, transport, make(chan error, 1)
 	stopped := s.stopped
 	go func() {
 		// An inheriting process reads UDP only after the process it replaces has exited.
@@ -66,7 +84,11 @@ func (s *HTTP3Server) Start(ctx context.Context) error {
 			close(s.done)
 			return
 		}
-		err := s.server.Serve(packet)
+		// ConfigureTLSConfig and an early listener are what http3.Server.Serve itself would set up.
+		listener, err := transport.ListenEarly(http3.ConfigureTLSConfig(s.server.TLSConfig), s.server.QUICConfig)
+		if err == nil {
+			err = s.server.ServeListener(listener)
+		}
 		if errors.Is(err, net.ErrClosed) {
 			err = nil
 		}
@@ -84,7 +106,7 @@ func (s *HTTP3Server) Shutdown(ctx context.Context) error {
 	}
 	s.closed = true
 	close(s.stopped)
-	server, packet, done := s.server, s.packet, s.done
+	server, packet, transport, done := s.server, s.packet, s.transport, s.done
 	s.mu.Unlock()
 	if packet == nil {
 		return nil
@@ -94,6 +116,9 @@ func (s *HTTP3Server) Shutdown(ctx context.Context) error {
 		_ = server.Close()
 	}
 	_ = packet.Close()
+	if transport != nil {
+		_ = transport.Close()
+	}
 	select {
 	case serveErr := <-done:
 		return errors.Join(err, serveErr)

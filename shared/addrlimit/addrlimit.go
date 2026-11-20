@@ -98,6 +98,18 @@ func Key(address string) string {
 	return ip.Mask(net.CIDRMask(64, 128)).String()
 }
 
+// Active is how many connections the address holds right now (admitted and not yet released).
+func (l *Limiter) Active(address string) int {
+	key := Key(address)
+	shard := &l.shards[maphash.String(l.seed, key)%shardCount]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	if state := shard.keys[key]; state != nil {
+		return state.active
+	}
+	return 0
+}
+
 // Admit takes one open (and one upgrade for a WebSocket) for the address; release ends it. A
 // refusal leaves the address's counters as they were.
 func (l *Limiter) Admit(address string, upgrade bool) (release func(), ok bool) {
