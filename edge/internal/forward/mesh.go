@@ -255,16 +255,11 @@ func (m *Mesh) outcome(name string) {
 
 func (m *Mesh) peerSet() nodemesh.PeerSet { return *m.peers.Load() }
 
-// PeerCurrent reports whether nodeID is in the current peer set (and, when a link to it is up, still under the pin
-// the link was made with). It is false once the set expired or the peer left it.
-func (m *Mesh) PeerCurrent(nodeID string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cur, ok := m.peerSet().Lookup(nodeID)
-	if l := m.links[nodeID]; ok && l != nil {
-		return peerMatches(cur, l.peer)
-	}
-	return ok
+// PeerCurrent reports whether peer, the peer a link authenticated, is still the directory's entry for its node id
+// under the same pin and address (see peerMatches). It is false once the set expired or the peer left it.
+func (m *Mesh) PeerCurrent(peer nodemesh.Peer) bool {
+	cur, ok := m.peerSet().Lookup(peer.NodeID)
+	return ok && peerMatches(cur, peer)
 }
 
 // peerMatches reports whether a link made with peer is still valid against the current directory entry cur: the
