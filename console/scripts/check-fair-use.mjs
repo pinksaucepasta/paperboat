@@ -14,15 +14,17 @@ const freePort = () => new Promise((resolve) => { const s = net().listen(0, "127
 const GB = 1e9
 let state = "under"
 // The console rejects any answer that does not follow the OpenAPI shapes, so every stubbed route does.
+// One period for the whole run: the usage query is keyed by its start, so a start that moved on every answer would never settle.
+const PERIOD_START = new Date(Date.now() - 21 * 86400_000).toISOString()
+const PERIOD_END = new Date(Date.now() + 9 * 86400_000).toISOString()
 const PAGE = { limit: 200, offset: 0, total: 0, next_offset: null }
 const USED = { under: 40 * GB, nearly: 85 * GB, throttled: 104 * GB, own: 3 * GB, team: 150 * GB }
 const billing = () => {
   const used = USED[state]
-  const ends = new Date(Date.now() + 9 * 86400_000).toISOString()
   return {
     id: "personal:usr_1", state: "active", seats_bought: 1, members: 1, can_manage: true, cancel_at_period_end: false, seats_used: 1,
     usage_bytes: used, allowance_bytes: state === "team" ? 400 * GB : 100 * GB,
-    ...(state === "team" ? { allowance_seats: 4, allowance_per_seat_bytes: 100 * GB } : {}), allowance_period_start: new Date(Date.now() - 21 * 86400_000).toISOString(), allowance_period_end: ends,
+    ...(state === "team" ? { allowance_seats: 4, allowance_per_seat_bytes: 100 * GB } : {}), allowance_period_start: PERIOD_START, allowance_period_end: PERIOD_END,
     relay_mbit: 100, sso_addon: false, scim_addon: false,
     topup_bytes_remaining: 0, topup_bytes_purchased: 0, topups: [], granted: false, throttled: state === "throttled", throttle_lifted: false, throttle_mbit: 1,
     limits: state === "own"
@@ -86,6 +88,10 @@ try {
       const page = await context.newPage()
       const problems = []
       page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`))
+      const trace = []
+      const t0 = Date.now()
+      page.on("console", (m) => m.type() === "error" && trace.push(`console ${m.text().slice(0, 120)}`))
+      page.on("response", (r) => /\/usage\b/.test(r.url()) && trace.push(`${Date.now() - t0}ms ${r.status()} ${new URL(r.url()).search.slice(0, 50)}`))
       page.on("response", async (r) => r.status() >= 400 && problems.push(`${r.status()} ${new URL(r.url()).pathname} ${(await r.text().catch(() => "")).slice(0, 160)}`))
       await page.goto(`${origin}/usage`, { timeout: 120_000 })
       const panel = await page.waitForSelector("[data-fair-use]", { timeout: 60_000 }).catch(() => null)
@@ -132,7 +138,7 @@ try {
         const legend = new RegExp(`Relay ${re(used * 0.6)} Edge ${re(used * 0.4)} `)
         check(`${name}/${s}: legend shows relay and edge hosted traffic only (self-hosted never counts)`, legend.test(spaced) && !/\b7\.?\d* GB/.test(spaced), spaced.slice(0, 120))
         const bars = await panel.$$eval("[role=meter] > div", (d) => d.map((e) => ({ w: parseFloat(e.style.width), c: e.className })))
-        check(`${name}/${s}: the bar is split relay/edge 60/40 of the used share`, bars.length === 2 && /relay/.test(bars[0].c) && /edge/.test(bars[1].c) && Math.abs(bars[0].w / (bars[0].w + bars[1].w) - 0.6) < 0.01 && Math.abs(bars[0].w + bars[1].w - Math.min(100, used)) < 0.5, JSON.stringify(bars))
+        check(`${name}/${s}: the bar is split relay/edge 60/40 of the used share`, bars.length === 2 && /relay/.test(bars[0].c) && /edge/.test(bars[1].c) && Math.abs(bars[0].w / (bars[0].w + bars[1].w) - 0.6) < 0.01 && Math.abs(bars[0].w + bars[1].w - Math.min(100, used)) < 0.5, `${JSON.stringify(bars)} | ${trace.join(" | ")}`)
         check(`${name}/${s}: it says when the period resets`, /Resets [A-Za-z0-9 ]+/.test(text))
         const card = await homeCard(name, s)
         check(`${name}/${s}: home card is titled Hosted allowance`, card.title === "Hosted allowance", card.title)
