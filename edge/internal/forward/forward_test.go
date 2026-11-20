@@ -530,3 +530,32 @@ func TestForwardTCPKeyReachesTCPInjector(t *testing.T) {
 		t.Fatalf("forward to a holder without a TCP injector: %v", err)
 	}
 }
+
+// A preview alias (an account's own domain admitted on a preview route) is a holder key like the route's name: the
+// holder announces it, a visitor who reaches another node on the alias is forwarded, and the holder admits the forwarded
+// connection exactly as it admits a direct visitor on that name.
+func TestForwardPreviewAliasFromNonHolder(t *testing.T) {
+	const alias = "app.account.example.test"
+	c := newTrio(t)
+	newAliasNode := func(id string) *node {
+		return newNode(t, id, c.holder.issue(t, alias), c.page.issue(t, "*.example.test"))
+	}
+	a, b := newAliasNode("edge-a"), newAliasNode("edge-b")
+	b.held.put(alias) // what edgehttp's Held announces for an alias of a route with a live carrier
+	cluster(a, b)
+	eventually(t, "a to learn b's alias", func() bool { return holdersOf(a, alias) == "edge-b" })
+
+	status, body, local, err := visit(t, a, alias, c.holder.pool)
+	if err != nil || status != 200 {
+		t.Fatalf("visit on the alias through a: status %d err %v (a verified chain only the holder has)", status, err)
+	}
+	if !strings.Contains(body, "holder=edge-b") || !strings.Contains(body, "host="+alias) || !strings.Contains(body, "remote="+local) {
+		t.Fatalf("holder did not serve the forwarded alias visitor: %q", body)
+	}
+	if _, direct, _, err := visit(t, b, alias, c.holder.pool); err != nil || !strings.Contains(direct, "holder=edge-b") || !strings.Contains(direct, "host="+alias) {
+		t.Fatalf("a direct visitor on the alias is served the same way: %q %v", direct, err)
+	}
+	if a.hits.Load() != 0 || b.hits.Load() != 2 {
+		t.Fatalf("hits a=%d b=%d", a.hits.Load(), b.hits.Load())
+	}
+}

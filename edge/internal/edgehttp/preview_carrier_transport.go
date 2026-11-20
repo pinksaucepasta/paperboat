@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 )
 
 var (
@@ -81,12 +82,16 @@ type DataCarrierPreviewRegistryConfig struct {
 	// a self-hosted edge publishes a preview under the account's own domain while its carrier attaches
 	// under the platform name. Empty when the host is not admitted.
 	HostRoute func(host string) string
+	// AliasHosts lists the public hostnames HostRoute admits (an alias of a preview, held under the route's name):
+	// HeldHosts announces each one whose route has a live carrier here, like the route's own name.
+	AliasHosts func() []string
 }
 
 type DataCarrierPreviewRegistry struct {
 	baseDomain   string
 	processEpoch string
 	hostRoute    func(host string) string
+	aliasHosts   func() []string
 	done         chan struct{}
 	closeOnce    sync.Once
 	mu           sync.RWMutex
@@ -122,7 +127,7 @@ func NewDataCarrierPreviewRegistry(config DataCarrierPreviewRegistryConfig) (*Da
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
 	return &DataCarrierPreviewRegistry{
-		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, hostRoute: config.HostRoute,
+		baseDomain: baseDomain, processEpoch: config.ProcessEpoch, hostRoute: config.HostRoute, aliasHosts: config.AliasHosts,
 		done: make(chan struct{}), byRoute: make(map[string]*dataCarrierPreviewRouteEntry),
 		byHost: make(map[string]*dataCarrierPreviewRouteEntry), standby: make(map[string][]*dataCarrierPreviewRouteEntry),
 	}, nil
@@ -379,26 +384,47 @@ func (r *DataCarrierPreviewRegistry) acquire(host string) (DataCarrierPreviewRou
 }
 
 // HeldHosts lists the hostnames whose carrier is attached here and still live: what this node serves, which a node
-// mesh announces to its peers (a visitor who reaches another node is forwarded here).
+// mesh announces to its peers (a visitor who reaches another node is forwarded here). A preview alias the server
+// admitted on a route with a live carrier here is held exactly like the route's own name.
 func (r *DataCarrierPreviewRegistry) HeldHosts() []string {
 	if r == nil {
 		return nil
+	}
+	var aliases []string
+	if r.aliasHosts != nil {
+		aliases = r.aliasHosts()
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	hosts := make([]string, 0, len(r.byHost))
 	for host, entry := range r.byHost {
-		route := entry.route
-		if route.Server == nil || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != runtimewire.RouteKind {
-			continue
+		if heldPreviewEntry(entry) {
+			hosts = append(hosts, host)
 		}
-		select {
-		case <-route.Server.Done():
-		default:
+	}
+	for _, alias := range aliases {
+		host := normalizePreviewCarrierHost(alias)
+		if r.byHost[host] != nil || nodemesh.ValidKey(host) != nil {
+			continue // its own name (counted above) or one the wire cannot carry
+		}
+		if entry, ok := r.lookupHostLocked(host); ok && heldPreviewEntry(entry) {
 			hosts = append(hosts, host)
 		}
 	}
 	return hosts
+}
+
+func heldPreviewEntry(entry *dataCarrierPreviewRouteEntry) bool {
+	route := entry.route
+	if route.Server == nil || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != runtimewire.RouteKind {
+		return false
+	}
+	select {
+	case <-route.Server.Done():
+		return false
+	default:
+		return true
+	}
 }
 
 func (r *DataCarrierPreviewRegistry) Lookup(host string) (DataCarrierPreviewRoute, bool) {

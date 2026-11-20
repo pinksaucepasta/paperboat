@@ -430,7 +430,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	verifier := &auth.Verifier{Issuer: deployment.CredentialIssuer, NodeID: cfg.NodeID, Keys: trust.Snapshot, Revocations: trust.Snapshot, ClockSkew: 30 * time.Second}
 	var ingressAuthority *control.IngressAuthority // set below; the preview registry asks it which route a host is admitted on
-	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }})
+	previewRoutes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: deployment.PreviewBaseDomain, ProcessEpoch: processEpoch, HostRoute: func(host string) string { return ingressAuthority.PreviewRouteID(host) }, AliasHosts: func() []string { return ingressAuthority.PreviewHostnames() }})
 	if err != nil {
 		return nil, fmt.Errorf("create endpoint route registry: %w", err)
 	}
