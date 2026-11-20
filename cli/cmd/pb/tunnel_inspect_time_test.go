@@ -16,7 +16,7 @@ func TestTunnelInspectUsesViewerTimezone(t *testing.T) {
 	for _, mode := range []string{"list", "detail", "json"} {
 		t.Run(mode, func(t *testing.T) {
 			client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
-			inspectorTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+			daemon := inspectorTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 				if mode == "detail" {
 					var page struct {
 						Records []json.RawMessage `json:"records"`
@@ -29,7 +29,7 @@ func TestTunnelInspectUsesViewerTimezone(t *testing.T) {
 					_, _ = fmt.Fprint(w, inspectorTestPage)
 				}
 			})
-			wireInspectorTestClients(client)
+			ctx := wireInspectorTestClients(daemon, client)
 			args := []string{"inspect", "tun_01"}
 			if mode == "detail" {
 				args = append(args, "--id", "cap_01")
@@ -37,7 +37,7 @@ func TestTunnelInspectUsesViewerTimezone(t *testing.T) {
 			if mode == "json" {
 				args = append(args, "--json")
 			}
-			output, err := runInspectorCommand(t, tunnelCobraCommandV1, args...)
+			output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, args...)
 			if err != nil {
 				t.Fatal(err)
 			}

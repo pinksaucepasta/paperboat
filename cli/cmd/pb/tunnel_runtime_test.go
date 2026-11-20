@@ -9,20 +9,19 @@ import (
 )
 
 func TestEnsureTunnelHostRuntimeRepairsOnceThenRequiresReadiness(t *testing.T) {
-	oldProbe, oldRepair := tunnelHostRuntimeProbe, tunnelHostRuntimeRepair
-	t.Cleanup(func() { tunnelHostRuntimeProbe, tunnelHostRuntimeRepair = oldProbe, oldRepair })
+	deps := defaultTunnelDependencies()
 	var probes, repairs atomic.Int32
-	tunnelHostRuntimeProbe = func(context.Context, string) error {
+	deps.probeHost = func(context.Context, string) error {
 		if probes.Add(1) >= 2 {
 			return nil
 		}
 		return errors.New("stopped")
 	}
-	tunnelHostRuntimeRepair = func(context.Context) error {
+	deps.repairHost = func(context.Context) error {
 		repairs.Add(1)
 		return nil
 	}
-	if err := ensureTunnelHostRuntime(t.Context(), filepath.Join(t.TempDir(), "state")); err != nil {
+	if err := ensureTunnelHostRuntime(deps.context(t.Context()), filepath.Join(t.TempDir(), "state")); err != nil {
 		t.Fatal(err)
 	}
 	if probes.Load() != 2 || repairs.Load() != 1 {
@@ -31,15 +30,14 @@ func TestEnsureTunnelHostRuntimeRepairsOnceThenRequiresReadiness(t *testing.T) {
 }
 
 func TestEnsureTunnelHostRuntimeDoesNotElevateWhenReady(t *testing.T) {
-	oldProbe, oldRepair := tunnelHostRuntimeProbe, tunnelHostRuntimeRepair
-	t.Cleanup(func() { tunnelHostRuntimeProbe, tunnelHostRuntimeRepair = oldProbe, oldRepair })
+	deps := defaultTunnelDependencies()
 	var repairs atomic.Int32
-	tunnelHostRuntimeProbe = func(context.Context, string) error { return nil }
-	tunnelHostRuntimeRepair = func(context.Context) error {
+	deps.probeHost = func(context.Context, string) error { return nil }
+	deps.repairHost = func(context.Context) error {
 		repairs.Add(1)
 		return errors.New("must not run")
 	}
-	if err := ensureTunnelHostRuntime(t.Context(), filepath.Join(t.TempDir(), "state")); err != nil {
+	if err := ensureTunnelHostRuntime(deps.context(t.Context()), filepath.Join(t.TempDir(), "state")); err != nil {
 		t.Fatal(err)
 	}
 	if repairs.Load() != 0 {
@@ -48,12 +46,11 @@ func TestEnsureTunnelHostRuntimeDoesNotElevateWhenReady(t *testing.T) {
 }
 
 func TestEnsureTunnelHostRuntimeFailsClosedOnRepairError(t *testing.T) {
-	oldProbe, oldRepair := tunnelHostRuntimeProbe, tunnelHostRuntimeRepair
-	t.Cleanup(func() { tunnelHostRuntimeProbe, tunnelHostRuntimeRepair = oldProbe, oldRepair })
+	deps := defaultTunnelDependencies()
 	want := errors.New("repair denied")
-	tunnelHostRuntimeProbe = func(context.Context, string) error { return errors.New("stopped") }
-	tunnelHostRuntimeRepair = func(context.Context) error { return want }
-	if err := ensureTunnelHostRuntime(t.Context(), filepath.Join(t.TempDir(), "state")); !errors.Is(err, want) {
+	deps.probeHost = func(context.Context, string) error { return errors.New("stopped") }
+	deps.repairHost = func(context.Context) error { return want }
+	if err := ensureTunnelHostRuntime(deps.context(t.Context()), filepath.Join(t.TempDir(), "state")); !errors.Is(err, want) {
 		t.Fatalf("error=%v", err)
 	}
 }

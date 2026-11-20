@@ -197,18 +197,11 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 	defer server.Close()
 
 	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
 	carrier := &cliPreviewCarrier{ready: make(chan struct{})}
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
 
@@ -220,7 +213,7 @@ func TestPreviewForegroundPublishesCanonicalResourceOnlyAfterReadiness(t *testin
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"3000", "--json"})
 	result := make(chan error, 1)
-	go func() { result <- command.ExecuteContext(ctx) }()
+	go func() { result <- command.ExecuteContext(context.WithValue(ctx, previewDependenciesKey{}, deps)) }()
 	select {
 	case <-carrier.ready:
 	case <-time.After(30 * time.Second):
@@ -303,26 +296,16 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	}
 	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
 	carrier := &productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1)}
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	previousOwnerClient := previewOwnerSessionClientForCommand
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-		previewOwnerSessionClientForCommand = previousOwnerClient
-		_ = ownerManager.Close()
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(_ context.Context, _ preview.LeaseTarget, _, ownerID string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(_ context.Context, _ preview.LeaseTarget, _, ownerID string) (preview.Carrier, error) {
 		if ownerID != "" {
 			t.Fatalf("production carrier received a CLI-generated owner ID %q", ownerID)
 		}
 		return carrier, nil
 	}
-	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	command := previewCobraCommandV1()
@@ -331,7 +314,7 @@ func TestPreviewForegroundProductionOwnerLeaseBindsCreateAndReleasesOnExit(t *te
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"3000"})
 	done := make(chan error, 1)
-	go func() { done <- command.ExecuteContext(ctx) }()
+	go func() { done <- command.ExecuteContext(context.WithValue(ctx, previewDependenciesKey{}, deps)) }()
 	var ownerID string
 	select {
 	case ownerID = <-carrier.owner:
@@ -406,22 +389,18 @@ func TestPreviewBackgroundReturnsAfterReadyAndLeavesOwnershipWithDaemon(t *testi
 	}
 	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
 	carrier := &backgroundOwnerLeaseCarrier{productionOwnerLeaseCarrier: productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1)}}
-	previousClient, previousMachine, previousCarrier, previousOwnerClient := previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand
-	t.Cleanup(func() {
-		previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand = previousClient, previousMachine, previousCarrier, previousOwnerClient
-		_ = ownerManager.Close()
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
-	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
 	command := previewCobraCommandV1()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"3000", "--background"})
-	if err := command.ExecuteContext(context.Background()); err != nil {
+	if err := command.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps)); err != nil {
 		t.Fatal(err)
 	}
 	if ownerHandler.count(http.MethodPost) != 1 || ownerHandler.count(http.MethodDelete) != 0 {
@@ -465,28 +444,18 @@ func TestPreviewBackgroundStartupFailureCancelsAndReleasesDaemonOwnership(t *tes
 	}
 	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
 	carrier := &productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1)}
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	previousOwnerClient := previewOwnerSessionClientForCommand
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-		previewOwnerSessionClientForCommand = previousOwnerClient
-		_ = ownerManager.Close()
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
-	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
 	command := previewCobraCommandV1()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"3000", "--background", "--ttl", "30m"})
-	if err := command.ExecuteContext(context.Background()); err == nil {
+	if err := command.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps)); err == nil {
 		t.Fatal("preview create unexpectedly succeeded")
 	}
 	if ownerHandler.count(http.MethodPost) != 1 || ownerHandler.count(http.MethodDelete) != 1 {
@@ -527,29 +496,19 @@ func TestPreviewWithoutARunningAppPublishesAndSaysSo(t *testing.T) {
 	}
 	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
 	carrier := &backgroundOwnerLeaseCarrier{productionOwnerLeaseCarrier: productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1), originErr: errors.New("connection refused")}}
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	previousOwnerClient := previewOwnerSessionClientForCommand
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-		previewOwnerSessionClientForCommand = previousOwnerClient
-		_ = ownerManager.Close()
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
-	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
 	command := previewCobraCommandV1()
 	command.SetOut(io.Discard)
 	var progress bytes.Buffer
 	command.SetErr(&progress)
 	command.SetArgs([]string{"3000", "--background", "--ttl", "30m"})
-	if err := command.ExecuteContext(context.Background()); err != nil {
+	if err := command.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps)); err != nil {
 		t.Fatalf("preview without a running app = %v", err)
 	}
 	if !strings.Contains(progress.String(), "Nothing answers on port 3000 yet; the preview shows 'App not responding' until your app starts.") {
@@ -597,29 +556,21 @@ func TestPreviewForegroundProductionOwnerLeaseHeartbeatFailureCancels(t *testing
 	}
 	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
 	carrier := &productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1)}
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	previousOwnerClient := previewOwnerSessionClientForCommand
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-		previewOwnerSessionClientForCommand = previousOwnerClient
-		_ = ownerManager.Close()
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return apiClient, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
-	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
 	command := previewCobraCommandV1()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{"3000"})
 	started := make(chan error, 1)
-	go func() { started <- command.ExecuteContext(context.Background()) }()
+	go func() {
+		started <- command.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps))
+	}()
 	select {
 	case <-carrier.ready:
 	case <-time.After(30 * time.Second):
@@ -661,16 +612,15 @@ func TestPreviewListAndStopUseCanonicalLeaseClient(t *testing.T) {
 	})
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	previous := previewClientForCommand
-	t.Cleanup(func() { previewClientForCommand = previous })
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
 
 	list := previewCobraCommandV1()
 	var listOutput bytes.Buffer
 	list.SetOut(&listOutput)
 	list.SetErr(io.Discard)
 	list.SetArgs([]string{"list", "--json"})
-	if err := list.ExecuteContext(context.Background()); err != nil {
+	if err := list.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps)); err != nil {
 		t.Fatal(err)
 	}
 	var page api.PreviewLeasePage
@@ -683,7 +633,7 @@ func TestPreviewListAndStopUseCanonicalLeaseClient(t *testing.T) {
 	stop.SetOut(&stopOutput)
 	stop.SetErr(io.Discard)
 	stop.SetArgs([]string{"stop", "prv_cli_2", "--json"})
-	if err := stop.ExecuteContext(context.Background()); err != nil {
+	if err := stop.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps)); err != nil {
 		t.Fatal(err)
 	}
 	var stopped api.PreviewLease
@@ -705,15 +655,14 @@ func TestPreviewListShowsActiveUnlessAll(t *testing.T) {
 	})
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	previous := previewClientForCommand
-	t.Cleanup(func() { previewClientForCommand = previous })
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
 	for _, args := range [][]string{{"list", "--json"}, {"list", "--all", "--json"}, {"list", "--state", "stopped", "--json"}} {
 		list := previewCobraCommandV1()
 		list.SetOut(io.Discard)
 		list.SetErr(io.Discard)
 		list.SetArgs(args)
-		if err := list.ExecuteContext(context.Background()); err != nil {
+		if err := list.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps)); err != nil {
 			t.Fatal(args, err)
 		}
 	}
@@ -1016,24 +965,17 @@ func TestPreviewReadinessProgressFailureClosesCarrierAndKeepsCauses(t *testing.T
 	progressErr := errors.New("PRIVATE_PROGRESS_WRITER_FAILURE")
 	closeErr := errors.New("PRIVATE_CARRIER_CLOSE_FAILURE")
 	carrier := &previewEarlyCloseCarrier{cliPreviewCarrier: cliPreviewCarrier{ready: make(chan struct{})}, closeErr: closeErr}
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) {
 		return api.New("http://127.0.0.1", config.Credential{}, nil), nil
 	}
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
 
 	command := previewCobraCommandV1()
-	command.SetContext(context.Background())
+	command.SetContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps))
 	command.SetOut(io.Discard)
 	command.SetErr(&previewDomainFailWriter{err: progressErr})
 	err := runPreviewWithDomains(command, preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, false, time.Minute, false, false, nil)
@@ -1075,9 +1017,8 @@ func TestPreviewStopCompletionReadsTheDaemonCache(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 	t.Setenv("TMPDIR", runtimeRoot)
-	previous := previewClientForCommand
-	t.Cleanup(func() { previewClientForCommand = previous })
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { t.Fatal("completion called the server"); return nil, nil }
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { t.Fatal("completion called the server"); return nil, nil }
 	paths, err := currentLocalDaemonPaths()
 	if err != nil {
 		t.Fatal(err)
@@ -1107,7 +1048,7 @@ func TestPreviewStopCompletionReadsTheDaemonCache(t *testing.T) {
 	waitForCommandSocket(t, paths.SocketPath)
 
 	command := &cobra.Command{}
-	command.SetContext(context.Background())
+	command.SetContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps))
 	if values, _ := previewStopCompletion(command, nil, "prv_cli"); len(values) != 1 || values[0] != "prv_cli_3\tready" {
 		t.Fatalf("completion = %q", values)
 	}

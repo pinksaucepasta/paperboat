@@ -30,14 +30,14 @@ func ipRulesCommand(kind string) *cobra.Command {
 					return invocationError(fmt.Errorf("%q is not an IP address or CIDR", entry))
 				}
 			}
-			client, err := tunnelClientForCommand(command)
+			client, err := tunnelDependenciesOf(command.Context()).client(command)
 			if err != nil {
 				return err
 			}
 			var id string
 			resource := kind + "s"
 			if kind == "tunnel" {
-				if id, err = resolveTunnelSelectorForCommand(command.Context(), client, args[0]); err != nil {
+				if id, err = tunnelDependenciesOf(command.Context()).resolve(command.Context(), client, args[0]); err != nil {
 					return err
 				}
 			} else {

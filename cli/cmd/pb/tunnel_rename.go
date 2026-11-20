@@ -30,7 +30,7 @@ func patchTunnel(command *cobra.Command, selector string, patch api.TunnelPatchI
 	if err != nil {
 		return api.TunnelMutation{}, err
 	}
-	id, err := resolveTunnelSelectorForCommand(ctx, client, selector)
+	id, err := tunnelDependenciesOf(ctx).resolve(ctx, client, selector)
 	if err != nil {
 		return api.TunnelMutation{}, err
 	}
@@ -38,7 +38,7 @@ func patchTunnel(command *cobra.Command, selector string, patch api.TunnelPatchI
 	if err != nil {
 		return api.TunnelMutation{}, err
 	}
-	key, err := tunnelKey()
+	key, err := tunnelKey(ctx)
 	if err != nil {
 		return api.TunnelMutation{}, err
 	}

@@ -151,22 +151,19 @@ func TestPreviewManagedPublicationRetainsOwnerBeyondThirtySeconds(t *testing.T) 
 		t.Fatal(err)
 	}
 	client := api.New(apiServer.URL, config.Credential{AccessToken: "client_token"}, apiServer.Client())
-	oldClient, oldMachine, oldCarrier, oldOwner := previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand
-	t.Cleanup(func() {
-		previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand = oldClient, oldMachine, oldCarrier, oldOwner
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
-	previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+	deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
 	command := previewCobraCommandV1()
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
 	command.SetArgs([]string{origin.URL, "--background", "--ttl", "5m", "--json"})
 	started := time.Now()
-	err = command.ExecuteContext(t.Context())
+	err = command.ExecuteContext(context.WithValue(t.Context(), previewDependenciesKey{}, deps))
 	authority.mu.Lock()
 	renewals, stops, lease := authority.renewals, authority.stops, authority.lease
 	authority.mu.Unlock()

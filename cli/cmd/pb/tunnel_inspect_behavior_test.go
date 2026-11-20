@@ -37,9 +37,9 @@ func TestTunnelInspectIssuesAsUserAndLists(t *testing.T) {
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
 	var grant string
-	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, inspectorTestPage))
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	daemon := inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, inspectorTestPage))
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,13 +63,13 @@ func TestTunnelInspectMarksAReplayAndJSONCarriesIt(t *testing.T) {
 	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
 	var grant string
-	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, page))
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	daemon := inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, page))
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err != nil || !strings.Contains(output, "replay of cap_00") {
 		t.Fatalf("a replay is not marked: err=%v output=%q", err, output)
 	}
-	output, err = runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01", "--json")
+	output, err = runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01", "--json")
 	if err != nil || !strings.Contains(output, `"replay_of":"cap_00"`) {
 		t.Fatalf("json drops replay_of: err=%v output=%q", err, output)
 	}
@@ -82,9 +82,9 @@ func TestTunnelInspectListsStartTimesInTheViewersTimeZone(t *testing.T) {
 	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
 	var grant string
-	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, inspectorTestPage))
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	daemon := inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, inspectorTestPage))
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err != nil || !strings.Contains(output, "2026-09-08T05:30:00+05:30") {
 		t.Fatalf("start time is not in the viewer's zone: err=%v output=%q", err, output)
 	}
@@ -93,7 +93,7 @@ func TestTunnelInspectListsStartTimesInTheViewersTimeZone(t *testing.T) {
 func TestTunnelInspectRetriesOnceWithFreshIssuance(t *testing.T) {
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
-	inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
+	daemon := inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
 		if hits.Add(1) == 1 {
 			writer.WriteHeader(http.StatusForbidden)
 			_, _ = fmt.Fprint(writer, `{"schema":"paperboat.inspector/v1","kind":"error","code":"inspector_forbidden"}`)
@@ -105,8 +105,8 @@ func TestTunnelInspectRetriesOnceWithFreshIssuance(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(writer, inspectorTestPage)
 	})
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,13 +124,13 @@ func TestTunnelInspectRetriesOnceWithFreshIssuance(t *testing.T) {
 func TestTunnelInspectSurfacesDoubleDenial(t *testing.T) {
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
-	inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
+	daemon := inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
 		hits.Add(1)
 		writer.WriteHeader(http.StatusForbidden)
 		_, _ = fmt.Fprint(writer, `{"schema":"paperboat.inspector/v1","kind":"error","code":"inspector_forbidden"}`)
 	})
-	wireInspectorTestClients(client)
-	_, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	ctx := wireInspectorTestClients(daemon, client)
+	_, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("err = %v, want denial", err)
 	}
@@ -141,11 +141,11 @@ func TestTunnelInspectSurfacesDoubleDenial(t *testing.T) {
 
 func TestTunnelInspectIssuanceDeniedContactsNoDaemon(t *testing.T) {
 	client, _ := newInspectorTestServer(t, http.StatusForbidden, inspectorTestRouteJSON)
-	inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
+	daemon := inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
 		t.Error("denied issuance must not contact the daemon")
 	})
-	wireInspectorTestClients(client)
-	_, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	ctx := wireInspectorTestClients(daemon, client)
+	_, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err == nil {
 		t.Fatal("denied issuance succeeded")
 	}
@@ -156,20 +156,20 @@ func TestTunnelInspectRequiresRouteFlagForSeveralRoutes(t *testing.T) {
 	second = strings.Replace(second, `"web"`, `"alt"`, 1)
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON+","+second)
 	var hits atomic.Int32
-	inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
+	daemon := inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
 		hits.Add(1)
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(writer, `{"schema":"paperboat.inspector/v1","kind":"capture_page","resource_id":"tun_01","records":[],"next_cursor":""}`)
 	})
-	wireInspectorTestClients(client)
-	_, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	ctx := wireInspectorTestClients(daemon, client)
+	_, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err == nil || !strings.Contains(err.Error(), "--route") {
 		t.Fatalf("err = %v, want --route guidance", err)
 	}
 	if hits.Load() != 0 || len(fixture.issued) != 0 {
 		t.Fatalf("ambiguous target contacted daemon (%d) or issued (%d)", hits.Load(), len(fixture.issued))
 	}
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01", "--route", "rte_02", "--json")
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01", "--route", "rte_02", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,12 +184,12 @@ func TestTunnelInspectRequiresRouteFlagForSeveralRoutes(t *testing.T) {
 
 func TestTunnelReplayShowsSideEffects(t *testing.T) {
 	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
-	inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
+	daemon := inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(writer, `{"schema":"paperboat.inspector/v1","kind":"replay","operation_id":"replay_abc","capture_id":"cap_01","resource_id":"rte_01","method":"POST","url":"https://app.example.test/api","request_body_state":"complete","response_status":200,"response_body_state":"complete","replay_record_id":"cap_02","side_effects":"may repeat","started_at":"2026-09-08T00:00:00Z","finished_at":"2026-09-08T00:00:01Z","error_code":"none"}`)
 	})
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "replay", "tun_01", "cap_01", "--idempotency-key", "key_01", "--route", "rte_01")
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "replay", "tun_01", "cap_01", "--idempotency-key", "key_01", "--route", "rte_01")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestTunnelReplayShowsSideEffects(t *testing.T) {
 func TestPreviewAliasExposesSameInspectorControls(t *testing.T) {
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
-	inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
+	daemon := inspectorTestDaemon(t, func(writer http.ResponseWriter, request *http.Request) {
 		hits.Add(1)
 		query := request.URL.Query()
 		if query.Get("resource") != "preview_01" || query.Get("route") != "preview_01" {
@@ -212,13 +212,13 @@ func TestPreviewAliasExposesSameInspectorControls(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(writer, `{"schema":"paperboat.inspector/v1","kind":"capture_page","resource_id":"preview_01","records":[],"next_cursor":""}`)
 	})
-	wireInspectorTestClients(client)
+	ctx := wireInspectorTestClients(daemon, client)
 	preview := previewCobraCommandV1()
 	var output strings.Builder
 	preview.SetOut(&output)
 	preview.SetErr(&output)
 	preview.SetArgs([]string{"inspect", "preview_01"})
-	if err := preview.Execute(); err != nil {
+	if err := preview.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "No captures") {
@@ -242,7 +242,7 @@ func TestPreviewAndTunnelCommandTrees(t *testing.T) {
 func TestTunnelReplayTransportFailurePreservesGeneratedRecoveryKey(t *testing.T) {
 	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
-	inspectorTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+	daemon := inspectorTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
@@ -251,8 +251,8 @@ func TestTunnelReplayTransportFailurePreservesGeneratedRecoveryKey(t *testing.T)
 		}
 		_ = conn.Close()
 	})
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "replay", "tun_01", "cap_01", "--route", "rte_01", "--json")
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "replay", "tun_01", "cap_01", "--route", "rte_01", "--json")
 	var result struct {
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -276,9 +276,9 @@ func TestTunnelInspectListWithCaptureNeverEnabledShowsNoCaptures(t *testing.T) {
 	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32
 	var grant string
-	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusNotFound, `{"schema":"paperboat.inspector/v1","kind":"error","code":"inspector_not_enabled"}`))
-	wireInspectorTestClients(client)
-	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	daemon := inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusNotFound, `{"schema":"paperboat.inspector/v1","kind":"error","code":"inspector_not_enabled"}`))
+	ctx := wireInspectorTestClients(daemon, client)
+	output, err := runInspectorCommand(t, ctx, tunnelCobraCommandV1, "inspect", "tun_01")
 	if err != nil || !strings.Contains(output, "No captures retained") || !strings.Contains(output, "Enable capture first") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}

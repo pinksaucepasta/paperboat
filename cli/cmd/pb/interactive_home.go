@@ -153,7 +153,7 @@ func actionHomePreviews(command *cobra.Command) error {
 }
 
 func actionHomePreviewList(command *cobra.Command) error {
-	client, err := previewClientForCommand(command)
+	client, err := previewDependenciesOf(command).client(command)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func actionHomePreviewList(command *cobra.Command) error {
 }
 
 func actionHomeTunnelList(command *cobra.Command) error {
-	client, err := tunnelClientForCommand(command)
+	client, err := tunnelDependenciesOf(command.Context()).client(command)
 	if err != nil {
 		return err
 	}

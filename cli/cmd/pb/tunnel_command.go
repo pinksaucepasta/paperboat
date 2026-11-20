@@ -20,7 +20,7 @@ func tunnelCobraCommandV1() *cobra.Command {
 			if jsonOutputRequested(command) {
 				return invocationError(errors.New("tunnel --json requires a subcommand or --ephemeral target"))
 			}
-			if previewInteractiveTerminal(command) {
+			if previewDependenciesOf(command).isTerminal(command) {
 				return actionHomeTunnelList(command)
 			}
 			return command.Help()

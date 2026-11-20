@@ -65,18 +65,11 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 	defer server.Close()
 
 	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	previousClient := previewClientForCommand
-	previousMachine := previewMachineID
-	previousCarrier := newPreviewCarrier
-	t.Cleanup(func() {
-		previewClientForCommand = previousClient
-		previewMachineID = previousMachine
-		newPreviewCarrier = previousCarrier
-	})
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
 	carrier := &cliPreviewCarrier{ready: make(chan struct{})}
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return carrier, nil
 	}
 
@@ -89,7 +82,7 @@ func TestPreviewCommandDomainsUsesCanonicalRequestAndSafeProjection(t *testing.T
 	command.SetErr(&errorOutput)
 	command.SetArgs([]string{"3000", "--domain", "BÜCHER.Example.", "--domain", "APP.Example.com.", "--json"})
 	result := make(chan error, 1)
-	go func() { result <- command.ExecuteContext(ctx) }()
+	go func() { result <- command.ExecuteContext(context.WithValue(ctx, previewDependenciesKey{}, deps)) }()
 
 	select {
 	case <-carrier.ready:
@@ -311,13 +304,10 @@ func TestPreviewDomainJSONOutputFailureStopsSession(t *testing.T) {
 	})
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "test-token"}, server.Client())
-	oldClient, oldMachine, oldCarrier := previewClientForCommand, previewMachineID, newPreviewCarrier
-	defer func() {
-		previewClientForCommand, previewMachineID, newPreviewCarrier = oldClient, oldMachine, oldCarrier
-	}()
-	previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	previewMachineID = func() (string, error) { return "machine_cli", nil }
-	newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+	deps := defaultPreviewDependencies()
+	deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
+	deps.machineID = func() (string, error) { return "machine_cli", nil }
+	deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 		return &cliPreviewCarrier{ready: make(chan struct{})}, nil
 	}
 	sentinel := errors.New("domain output failed")
@@ -328,7 +318,7 @@ func TestPreviewDomainJSONOutputFailureStopsSession(t *testing.T) {
 	command.SetArgs([]string{"3000", "--domain", "app.example.com", "--json"})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	err := command.ExecuteContext(ctx)
+	err := command.ExecuteContext(context.WithValue(ctx, previewDependenciesKey{}, deps))
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("output failure was lost: %v", err)
 	}

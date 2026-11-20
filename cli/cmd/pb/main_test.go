@@ -485,16 +485,16 @@ func TestSignedUpdateAvailableNeverOffersDowngrade(t *testing.T) {
 
 func TestUpdateCheckMissingUpdaterOnUnpairedInstallShowsHowToPair(t *testing.T) {
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", t.TempDir())
-	oldSocket := updateControlSocketForCommand
-	t.Cleanup(func() { updateControlSocketForCommand = oldSocket })
 	socket := filepath.Join(t.TempDir(), "missing-updater.sock")
 	if runtime.GOOS == "windows" {
 		socket = `\\.\pipe\PaperboatMissingUpdater-` + strconv.Itoa(os.Getpid())
 	}
-	updateControlSocketForCommand = func() (string, error) { return socket, nil }
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return socket, nil }
+	})
 
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"update", "check"}, &stdout, &stderr)
+	code := run(ctx, []string{"update", "check"}, &stdout, &stderr)
 	if code == 0 || !strings.Contains(stderr.String(), "not paired") || !strings.Contains(stderr.String(), "pb pair") {
 		t.Fatalf("exit=%d output=%q", code, stderr.String())
 	}
@@ -502,19 +502,17 @@ func TestUpdateCheckMissingUpdaterOnUnpairedInstallShowsHowToPair(t *testing.T) 
 
 func TestUpdateRequiresManagedUpdater(t *testing.T) {
 	oldVersion := buildinfo.Version
-	oldSocket := updateControlSocketForCommand
-	defer func() {
-		buildinfo.Version = oldVersion
-		updateControlSocketForCommand = oldSocket
-	}()
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
 	buildinfo.Version = "2026.08.18.1"
-	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
+	})
 	command, _, err := newRootCommand().Find([]string{"update"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	command.SetContext(context.Background())
+	command.SetContext(ctx)
 	command.SetOut(&output)
 	command.SetErr(&output)
 	if err := actionUpdate(command, nil); err == nil {
@@ -865,12 +863,12 @@ func TestUpdateFromAFileThatCouldNotBeInspectedKeepsItsLocalFailure(t *testing.T
 	}
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
-	previous := inspectUpdateCandidate
-	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
-		return installsource.Source{}, fs.ErrPermission
-	}
-	defer func() { inspectUpdateCandidate = previous }()
-	err = installStagedUpdateSource(command, context.Background(), notABuild, false)
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.inspect = func(context.Context, string) (installsource.Source, error) {
+			return installsource.Source{}, fs.ErrPermission
+		}
+	})
+	err = installStagedUpdateSource(command, ctx, notABuild, false)
 	if result := classifyCLIJSONError(err); !errors.Is(err, fs.ErrPermission) || result.Code == "update_source_unreadable" || result.Category != "local_io" {
 		t.Fatalf("a permission failure was classified %+v (%v)", result, err)
 	}
@@ -887,12 +885,12 @@ func TestUpdateFromAFileThatIsNotAPaperboatBuildIsRefusedClearly(t *testing.T) {
 	}
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
-	previous := inspectUpdateCandidate
-	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
-		return installsource.Source{}, installsource.ErrInput
-	}
-	defer func() { inspectUpdateCandidate = previous }()
-	err = installStagedUpdateSource(command, context.Background(), notABuild, false)
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.inspect = func(context.Context, string) (installsource.Source, error) {
+			return installsource.Source{}, installsource.ErrInput
+		}
+	})
+	err = installStagedUpdateSource(command, ctx, notABuild, false)
 	result := classifyCLIJSONError(err)
 	if result.Code != "update_source_unreadable" || !strings.Contains(result.Message, "not a Paperboat executable") || strings.Contains(result.Message, "exec format") {
 		t.Fatalf("a file that is not a build was classified %+v (%v)", result, err)

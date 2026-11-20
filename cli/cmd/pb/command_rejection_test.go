@@ -272,16 +272,14 @@ func TestCommandAPIReporterChild(t *testing.T) {
 	}
 	restore := errorreport.Install(reporter)
 	defer restore()
-	old := tunnelClientForCommand
-	tunnelClientForCommand = func(command *cobra.Command) (*api.Client, error) {
-		client := api.New(os.Getenv("PB_COMMAND_REPORTER_CONTROL"), config.Credential{}, nil)
-		_, err := client.Me(command.Context())
-		return client, err
-	}
-	defer func() { tunnelClientForCommand = old }()
-	oldSelector := resolveTunnelSelectorForCommand
-	resolveTunnelSelectorForCommand = func(context.Context, *api.Client, string) (string, error) { return "tun_test", nil }
-	defer func() { resolveTunnelSelectorForCommand = oldSelector }()
+	ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+		deps.client = func(command *cobra.Command) (*api.Client, error) {
+			client := api.New(os.Getenv("PB_COMMAND_REPORTER_CONTROL"), config.Credential{}, nil)
+			_, err := client.Me(command.Context())
+			return client, err
+		}
+		deps.resolve = func(context.Context, *api.Client, string) (string, error) { return "tun_test", nil }
+	})
 	finalFaults := 0
 	restoreObserver := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) {
 		if fault.Stage == "command" && fault.Code == "unexpected_cli_failure" {
@@ -291,7 +289,7 @@ func TestCommandAPIReporterChild(t *testing.T) {
 	defer restoreObserver()
 	reference := os.Getenv("PB_COMMAND_REPORTER_REF")
 	var stdout, stderr bytes.Buffer
-	code := runWithReporter(supportref.WithContext(t.Context(), reference), []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &stdout, &stderr, reporter)
+	code := runWithReporter(supportref.WithContext(ctx, reference), []string{"--no-customization", "tunnel", "status", "tun_test", "--json"}, &stdout, &stderr, reporter)
 	reporter.Flush(t.Context())
 	if code != 1 || finalFaults != 1 || stderr.Len() != 0 {
 		t.Fatalf("final command status=%d final_faults=%d stderr_bytes=%d", code, finalFaults, stderr.Len())

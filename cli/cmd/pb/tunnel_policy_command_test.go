@@ -37,20 +37,19 @@ func (f *fakeLazyPolicyClient) DeleteLazyPolicy(_ context.Context, _ string, gen
 
 func runLazyPolicyCommand(t *testing.T, fake *fakeLazyPolicyClient, command *cobra.Command, args ...string) string {
 	t.Helper()
-	previous, previousMachine := lazyPolicyClientForCommand, lazyPolicyMachineID
-	lazyPolicyClientForCommand = func(*cobra.Command) (lazyPolicyClient, error) { return fake, nil }
-	lazyPolicyMachineID = func(_ *cobra.Command, requested string) (string, error) {
-		if requested == "laptop" {
-			return "machine_laptop_id", nil
+	ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+		deps.policyClient = func(*cobra.Command) (lazyPolicyClient, error) { return fake, nil }
+		deps.policyMachine = func(_ *cobra.Command, requested string) (string, error) {
+			if requested == "laptop" {
+				return "machine_laptop_id", nil
+			}
+			return requested, nil
 		}
-		return requested, nil
-	}
-	t.Cleanup(func() { lazyPolicyClientForCommand, lazyPolicyMachineID = previous, previousMachine })
+	})
 	var output bytes.Buffer
 	command.SetOut(&output)
 	command.SetArgs(args)
-	command.SetContext(context.Background())
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	return output.String()

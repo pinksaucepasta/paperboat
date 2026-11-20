@@ -71,7 +71,7 @@ func actionUpdateSettings(command *cobra.Command, _ []string) error {
 
 	ctx, cancel := context.WithTimeout(command.Context(), 10*time.Second)
 	defer cancel()
-	client, err := newUpdateControlClient(10 * time.Second)
+	client, err := newUpdateControlClient(ctx, 10*time.Second)
 	if err != nil {
 		return err
 	}

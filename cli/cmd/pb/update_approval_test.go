@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -111,13 +110,9 @@ func (f *updateApprovalControlFixture) recordedRequests() []updated.ControlReque
 
 func runUpdateApprovalCommand(t *testing.T, fixture *updateApprovalControlFixture, args []string, input string, terminal bool) (string, string, error) {
 	t.Helper()
-	previousSocket := updateControlSocketForCommand
-	previousTerminal := updateInputIsTerminal
-	updateControlSocketForCommand = func() (string, error) { return fixture.socket, nil }
-	updateInputIsTerminal = func(*cobra.Command) bool { return terminal }
-	t.Cleanup(func() {
-		updateControlSocketForCommand = previousSocket
-		updateInputIsTerminal = previousTerminal
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return fixture.socket, nil }
+		deps.inputIsTerminal = func(*cobra.Command) bool { return terminal }
 	})
 
 	root := newRootCommand()
@@ -126,7 +121,7 @@ func runUpdateApprovalCommand(t *testing.T, fixture *updateApprovalControlFixtur
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
-	err := root.ExecuteContext(context.Background())
+	err := root.ExecuteContext(ctx)
 	return stdout.String(), stderr.String(), err
 }
 
@@ -257,9 +252,9 @@ func TestUpdateApprovalFlowStagesAndInstallsOnlyTheReviewedCandidate(t *testing.
 
 func TestUpdateCheckOnUnpairedInstallShowsHowToPair(t *testing.T) {
 	fixture := startUpdateApprovalControlFixture(t)
-	previousSocket := updateControlSocketForCommand
-	updateControlSocketForCommand = func() (string, error) { return fixture.socket, nil }
-	t.Cleanup(func() { updateControlSocketForCommand = previousSocket })
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return fixture.socket, nil }
+	})
 
 	for _, mode := range []string{"human", "json"} {
 		t.Run(mode, func(t *testing.T) {
@@ -268,7 +263,7 @@ func TestUpdateCheckOnUnpairedInstallShowsHowToPair(t *testing.T) {
 				args = append(args, "--json")
 			}
 			var stdout, stderr bytes.Buffer
-			if code := run(context.Background(), args, &stdout, &stderr); code == 0 {
+			if code := run(ctx, args, &stdout, &stderr); code == 0 {
 				t.Fatal("an unpaired check claimed to have verified a release")
 			}
 			message := stderr.String()

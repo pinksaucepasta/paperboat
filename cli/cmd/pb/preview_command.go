@@ -87,7 +87,7 @@ func configureEphemeralLaunchFlags(command *cobra.Command) {
 
 func previewTargetArgs(command *cobra.Command, args []string) error {
 	jsonOutput, _ := command.Flags().GetBool("json")
-	if len(args) == 0 && !jsonOutput && previewInteractiveTerminal(command) {
+	if len(args) == 0 && !jsonOutput && previewDependenciesOf(command).isTerminal(command) {
 		return nil
 	}
 	if len(args) != 1 {
@@ -152,7 +152,8 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			return previewFailure("preview output failed", err)
 		}
 	}
-	machineID, err := previewMachineID()
+	deps := previewDependenciesOf(command)
+	machineID, err := deps.machineID()
 	if err != nil {
 		return previewFailure(ErrPreviewMachineNotConfigured.Error(), ErrPreviewMachineNotConfigured, err)
 	}
@@ -161,11 +162,11 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 	// The production observer intentionally receives an empty owner ID. Hostd
 	// mints the local owner-session ID and returns it over the loopback lease
 	// boundary; injected test carriers retain the generated fallback below.
-	carrier, err := newPreviewCarrier(foregroundCtx, target, machineID, "")
+	carrier, err := deps.carrier(foregroundCtx, target, machineID, "")
 	if err != nil {
 		return closePreviewCarrier(command.Context(), carrier, err)
 	}
-	client, err := previewClientForCommand(command)
+	client, err := deps.client(command)
 	if err != nil {
 		return closePreviewCarrier(command.Context(), carrier, err)
 	}
@@ -248,7 +249,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 	}
 	if needsOwnerLease {
 		ownerSessionKind = preview.OwnerSessionLocalLease
-		ownerLeaseClient, err = previewOwnerSessionClientForCommand()
+		ownerLeaseClient, err = deps.owner()
 		if err != nil {
 			return closePreviewCarrier(command.Context(), carrier, previewFailure(ErrPreviewOwnerSessionUnavailable.Error(), ErrPreviewOwnerSessionUnavailable, err))
 		}
@@ -274,7 +275,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			go func() {
 				// pb update replaces the worker that holds this lease; reattach
 				// to the new one instead of ending a running preview or tunnel.
-				err := preview.KeepAliveReattaching(heartbeatContext, client, lease, previewOwnerSessionClientForCommand, func(next *preview.LocalOwnerSessionClient, updated preview.OwnerSessionLease) {
+				err := preview.KeepAliveReattaching(heartbeatContext, client, lease, deps.owner, func(next *preview.LocalOwnerSessionClient, updated preview.OwnerSessionLease) {
 					ownerLeaseMu.Lock()
 					ownerLeaseClient, ownerLease = next, updated
 					ownerLeaseMu.Unlock()
@@ -372,7 +373,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 		}
 		return previewFailure("preview could not be started", err)
 	}
-	if !background && !jsonOutput && previewInteractiveTerminal(command) {
+	if !background && !jsonOutput && previewDependenciesOf(command).isTerminal(command) {
 		ended := make(chan error, 1)
 		go func() { ended <- foreground.Wait(); close(ended) }()
 		transfer := func(ctx context.Context, ttl time.Duration) (time.Time, error) {
@@ -410,7 +411,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			retainOwnerLease = true
 			return updated.ExpiresAt, nil
 		}
-		outcome, consoleErr := runPreviewConsoleForCommand(command, foreground.Lease, target, accessMode, domains, client, ended, transfer)
+		outcome, consoleErr := previewDependenciesOf(command).console(command, foreground.Lease, target, accessMode, domains, client, ended, transfer)
 		// A canceled UI may not have received a successful handoff response.
 		// Only a displayed successful action relinquishes foreground ownership.
 		if outcome.action != "background" {
@@ -492,7 +493,7 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 }
 
 func runPreviewStatusCobra(command *cobra.Command, args []string) error {
-	client, err := previewClientForCommand(command)
+	client, err := previewDependenciesOf(command).client(command)
 	if err != nil {
 		return err
 	}
@@ -512,7 +513,7 @@ func previewAllFlag(command *cobra.Command) {
 }
 
 func runPreviewListCobra(command *cobra.Command, _ []string) error {
-	client, err := previewClientForCommand(command)
+	client, err := previewDependenciesOf(command).client(command)
 	if err != nil {
 		return err
 	}
@@ -544,7 +545,7 @@ func runPreviewListCobra(command *cobra.Command, _ []string) error {
 }
 
 func runPreviewStopCobra(command *cobra.Command, args []string) error {
-	client, err := previewClientForCommand(command)
+	client, err := previewDependenciesOf(command).client(command)
 	if err != nil {
 		return err
 	}

@@ -79,13 +79,11 @@ func tunnelCreateHumanOutput(result tunnelCreateOutput, origin string) string {
 	return output.String()
 }
 
-var promptTunnelCreateName = prompt.Text
-
 func tunnelCreateNameArgs(command *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		return nil
 	}
-	if len(args) == 0 && !jsonOutputRequested(command) && previewInteractiveTerminal(command) {
+	if len(args) == 0 && !jsonOutputRequested(command) && previewDependenciesOf(command).isTerminal(command) {
 		return nil
 	}
 	return invocationError(errors.New("tunnel create requires one name; use `pb tunnel create NAME --port PORT`"))
@@ -105,7 +103,7 @@ func tunnelCreateCommand() *cobra.Command {
 				return err
 			}
 			input, _ := command.InOrStdin().(*os.File)
-			name, err := promptTunnelCreateName(prompt.TextOptions{Context: command.Context(), Title: "Create a durable tunnel", Description: "Choose a name for this tunnel. It keeps running after this command exits.", Placeholder: "my-app", Stdin: input, Output: command.ErrOrStderr(), Validate: validateTunnelCreateName})
+			name, err := tunnelDependenciesOf(command.Context()).promptName(prompt.TextOptions{Context: command.Context(), Title: "Create a durable tunnel", Description: "Choose a name for this tunnel. It keeps running after this command exits.", Placeholder: "my-app", Stdin: input, Output: command.ErrOrStderr(), Validate: validateTunnelCreateName})
 			if interactiveCanceled(err) {
 				return nil
 			}
@@ -178,7 +176,7 @@ func tunnelCreateCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		workflow, err := beginTunnelCreateWorkflowForCommand(ctx, tunnelCreateWorkflowRequest{Name: name, RequestDigest: requestDigest, DomainCount: len(domains), ExpiresAt: expires})
+		workflow, err := tunnelDependenciesOf(ctx).beginWorkflow(ctx, tunnelCreateWorkflowRequest{Name: name, RequestDigest: requestDigest, DomainCount: len(domains), ExpiresAt: expires})
 		if err != nil {
 			return fmt.Errorf("begin tunnel create recovery workflow: %w", err)
 		}
