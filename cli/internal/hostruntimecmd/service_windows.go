@@ -360,6 +360,11 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 		if err := validateSuppliedWindowsRequest(request); err != nil {
 			return err
 		}
+		if loadErr == nil {
+			if request.Source, err = hostinstall.ReplaceBundleSource(previous.Source, previous.EnrollmentPending, request.Source); err != nil {
+				return err
+			}
+		}
 	}
 	var snapshot suppliedWindowsInstallation
 	if loadErr == nil && !previous.EnrollmentPending {

@@ -52,7 +52,11 @@ func (c *Client) ReconcileAuthorizedKeys(ctx context.Context, keys []string, pri
 	}
 	requestKeys := make([]string, len(keys))
 	copy(requestKeys, keys)
-	response, err := c.call(ctx, Request{Schema: ProtocolV1, Operation: "reconcile_ssh_authorized_keys", AuthorizedKeys: &requestKeys, SSHPrincipal: principal, SSHRevoked: revoked})
+	request := Request{Schema: ProtocolV1, Operation: "reconcile_ssh_authorized_keys", AuthorizedKeys: &requestKeys, SSHPrincipal: principal, SSHRevoked: revoked}
+	if body, marshalErr := json.Marshal(request); marshalErr == nil && len(body)+1 > windowsHostServiceMaxRequestSize {
+		return c.reconcileRevokedInChunks(ctx, keys, principal, revoked)
+	}
+	response, err := c.call(ctx, request)
 	if err != nil {
 		return false, err
 	}

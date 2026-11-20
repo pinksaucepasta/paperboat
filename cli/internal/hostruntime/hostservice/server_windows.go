@@ -49,6 +49,11 @@ type Request struct {
 	AuthorizedKeys *[]string                 `json:"authorized_keys,omitempty"`
 	SSHPrincipal   string                    `json:"ssh_principal,omitempty"`
 	SSHRevoked     []string                  `json:"ssh_revoked_key_ids,omitempty"`
+	// A revocation list larger than one request is sent as a transfer (revoked_transfer_windows.go).
+	TransferID  string `json:"transfer_id,omitempty"`
+	ChunkIndex  int    `json:"chunk_index,omitempty"`
+	TotalCount  int    `json:"total_count,omitempty"`
+	TotalDigest string `json:"total_digest,omitempty"`
 }
 type Response struct {
 	Schema                   string    `json:"schema"`
@@ -111,6 +116,8 @@ type Server struct {
 	config Config
 	mu     sync.Mutex
 	state  State
+	// revoked is the revocation transfer being staged, if any; guarded by mu.
+	revoked *revokedTransfer
 }
 
 func New(config Config) (*Server, error) {
@@ -241,17 +248,16 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 		response.UpdateVersion = version
 		return s.respond(connection, response)
 	}
+	if response, ok := s.revokedTransferRequest(requestCtx, request); ok {
+		return s.respond(connection, response)
+	}
 	if request.Operation == "reconcile_ssh_authorized_keys" {
 		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
 		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...), request.SSHPrincipal, append([]string(nil), request.SSHRevoked...))
 		if reconcileErr != nil {
-			if !allErrorLeavesMatch(reconcileErr, func(leaf error) bool {
-				return leaf == windowsopenssh.ErrQualificationEnrollment || normalRequestLeaf(leaf)
-			}) {
-				errorreport.Current().CaptureFailure(requestCtx, "paperboatd", "ssh", "peer_authority", "managed_ssh_failed", failAt("peer_authority", "managed_ssh_failed", reconcileErr))
-			}
+			observeReconcileFailure(requestCtx, reconcileErr)
 			return s.respond(connection, s.errorResponse("ssh_authorized_keys_reconcile_failed"))
 		}
 		response := s.errorResponse("")
@@ -282,6 +288,14 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 	result := s.state
 	s.mu.Unlock()
 	return s.respond(connection, s.response(result))
+}
+
+func observeReconcileFailure(ctx context.Context, err error) {
+	if !allErrorLeavesMatch(err, func(leaf error) bool {
+		return leaf == windowsopenssh.ErrQualificationEnrollment || normalRequestLeaf(leaf)
+	}) {
+		errorreport.Current().CaptureFailure(ctx, "paperboatd", "ssh", "peer_authority", "managed_ssh_failed", failAt("peer_authority", "managed_ssh_failed", err))
+	}
 }
 
 func (s *Server) apply(ctx context.Context, mode string, version int64) error {
