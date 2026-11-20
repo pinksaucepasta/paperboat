@@ -228,7 +228,7 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 }
 
 // relayFairUse puts the speeds in a Paperboat-operated relay's lease (read after the commit and outside the transaction: cached,
-// bounded, fail-safe). An account's speed is the fast speed, or its plan's slower speed once any workspace it belongs to used its
+// bounded, fail-safe). An account's speed is its plan's fast speed (Free 10, paid 100 Mbit/s), or its plan's slower speed once any workspace it belongs to used its
 // pool (edge and relay traffic together) this month, and it is ONE bucket across relays: the connected account's speed is divided by the number of relays it is on, so
 // the shares add up to the account's speed (the total across relays never exceeds it; an idle relay's share is not handed to the busy
 // one until the account is seen on one relay only, within the cache interval below). A customer-owned relay gets none, so it is never
@@ -240,7 +240,7 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 	if customerOwned, err := s.customerOwnedNode(ctx, nodeID); err != nil || customerOwned {
 		return err
 	}
-	out.AccountMbit = s.fairUse.RelayMbit
+	out.AccountMbit = s.fairUse.RelayMbitFree // an account the plan lookup did not list: Free's speed
 	accounts := make([]string, 0, len(set.list))
 	listed := map[string]bool{}
 	for _, subject := range set.list {
@@ -253,12 +253,10 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 	if s.relayPool != nil {
 		slow = s.relayPool.DeniedAmong(ctx, accounts, now, relayPoolFreshLookups)
 	}
-	paid := map[string]bool{}
-	if len(slow) > 0 {
-		var err error
-		if paid, err = bandwidthgate.PaidAccounts(ctx, s.store, slow); err != nil {
-			slow = nil // fail-safe: a failed plan lookup leaves the accounts at the fast speed this round
-		}
+	// One plan lookup for every listed account: paid ones run at the paid speed, or the paid slow speed once their pool is used up.
+	paid, err := bandwidthgate.PaidAccounts(ctx, s.store, accounts)
+	if err != nil {
+		paid, slow = nil, nil // fail-safe: a failed plan lookup leaves the accounts at the Free speed this round
 	}
 	isSlow := make(map[string]bool, len(slow))
 	for _, account := range slow {
@@ -266,7 +264,10 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 	}
 	relays := s.relaysPerAccount(ctx, now)
 	for _, account := range accounts {
-		mbit := s.fairUse.RelayMbit
+		mbit := s.fairUse.RelayMbitFree
+		if paid[account] {
+			mbit = s.fairUse.RelayMbitPaid
+		}
 		if isSlow[account] {
 			// the plan's slow speed, the same one the account's edge traffic runs at (one pool, one slow speed)
 			mbit = float64(s.fairUse.EdgeFreeBytesPerSecond) * 8 / 1e6
@@ -275,7 +276,7 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, set relay
 			}
 		}
 		count := max(relays[account], 1)
-		if mbit != s.fairUse.RelayMbit || count > 1 {
+		if mbit != s.fairUse.RelayMbitFree || count > 1 {
 			out.AccountSpeeds = append(out.AccountSpeeds, relayAccountSpeed{Account: account, Mbit: max(mbit/float64(count), minRelayAccountMbit)})
 		}
 	}

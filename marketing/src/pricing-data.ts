@@ -16,7 +16,8 @@ export const featureGroups: { title: string; rows: { feature: string; cells: [Pl
   {
     title: "Limits",
     rows: [
-      { feature: `Edge and relay bandwidth, combined (relays up to ${speeds.relay})`, cells: [bandwidthCell(0), bandwidthCell(1), bandwidthCell(2)] },
+      { feature: `Edge and relay bandwidth, combined`, cells: [bandwidthCell(0), bandwidthCell(1), bandwidthCell(2)] },
+      { feature: "Relay speed while the allowance lasts", cells: [speeds.relay[0], speeds.relay[1], speeds.relay[2]] },
       { feature: "Browser terminals", cells: ["Never slowed", "Never slowed", "Never slowed"] },
       { feature: "Your own edges and relays", cells: ["Unlimited", "Unlimited", "Unlimited"] },
       { feature: "Direct traffic between your machines", cells: ["Unlimited", "Unlimited", "Unlimited"] },

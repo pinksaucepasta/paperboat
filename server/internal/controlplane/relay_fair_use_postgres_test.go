@@ -13,14 +13,14 @@ import (
 
 // A Paperboat-operated relay's lease carries the account speed and names the connected accounts whose workspace pool (edge and relay
 // traffic together) is used up this month, each with its plan's slower speed (Free 512 kbit/s, paid 1 Mbit/s); a customer-owned relay
-// gets neither, and nothing is listed without the gate.
+// gets neither. Without the gate a Free account runs at the default 10 Mbit/s and a paid one is listed at 100.
 func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := t.Context()
 	x := fmt.Sprint(time.Now().UnixNano())
 	free12, paid60, paid120, light := "relay_fu_f12_"+x, "relay_fu_p60_"+x, "relay_fu_p120_"+x, "relay_fu_light_"+x
-	both := "relay_fu_both_" + x
-	users := []string{free12, paid60, paid120, light, both}
+	both, teamer, team := "relay_fu_both_"+x, "relay_fu_team_"+x, "relay_fu_teamid_"+x
+	users := []string{free12, paid60, paid120, light, both, teamer}
 	node, node2, own, epoch := "relay_fu_node_"+x, "relay_fu_node2_"+x, "relay_fu_own_"+x, "relay_fu_epoch_"+x
 	exec := func(q string, args ...any) {
 		t.Helper()
@@ -35,6 +35,9 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 			_, _ = store.SQL().ExecContext(bg, `DELETE FROM billing_workspaces WHERE id='personal:'||$1`, u)
 			_, _ = store.SQL().ExecContext(bg, `DELETE FROM users WHERE id=$1`, u)
 		}
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM team_members WHERE team_id=$1`, team)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM billing_workspaces WHERE team_id=$1`, team)
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM teams WHERE team_id=$1`, team)
 		_, _ = store.SQL().ExecContext(bg, `DELETE FROM selfhost_installations WHERE node_id=$1`, own)
 		_, _ = store.SQL().ExecContext(bg, `DELETE FROM control_tunnel_nodes WHERE id IN ($1,$2,$3)`, node, node2, own)
 		_, _ = store.SQL().ExecContext(bg, `DELETE FROM relay_subject_sets WHERE node_id IN ($1,$2,$3)`, node, node2, own)
@@ -45,6 +48,10 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	for _, user := range []string{paid60, paid120} {
 		exec(`INSERT INTO billing_workspaces(id,user_id,state,product_code,quantity,period_start,period_end) VALUES('personal:'||$1,$1,'active','pro-month',1,now()-interval '1 hour',now()+interval '1 hour')`, user)
 	}
+	// A member of a paid team is on a paid plan too.
+	exec(`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, teamer)
+	exec(`INSERT INTO billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, team)
+	exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, teamer)
 	// A free personal workspace is a row too (state free): its usage period references it.
 	for _, user := range []string{free12, light} {
 		exec(`INSERT INTO billing_workspaces(id,user_id) VALUES('personal:'||$1,$1)`, user)
@@ -78,8 +85,13 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	fair := config.Default().Billing.FairUse
 	plain := NewEdgeService(store, "relay-observe-test-credential-0123456789")
 	plain.SetFairUse(fair)
-	if out := observe(plain, node, users[:4]...); out.AccountMbit != 10 || len(out.AccountSpeeds) != 0 {
-		t.Fatalf("without the gate: speed %v, slow %v; want 10 and none", out.AccountMbit, out.AccountSpeeds)
+	ungated := map[string]float64{}
+	out := observe(plain, node, users[0], users[1], users[2], users[3], teamer)
+	for _, a := range out.AccountSpeeds {
+		ungated[a.Account] = a.Mbit
+	}
+	if out.AccountMbit != 10 || len(ungated) != 3 || ungated[paid60] != 100 || ungated[paid120] != 100 || ungated[teamer] != 100 {
+		t.Fatalf("without the gate: default %v, listed %v; want Free's 10, the two Pro accounts and the Team member at 100", out.AccountMbit, ungated)
 	}
 	gated := NewEdgeService(store, "relay-observe-test-credential-0123456789")
 	gated.SetFairUse(fair)
@@ -90,8 +102,8 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	for _, a := range observe(gated, node, users[:4]...).AccountSpeeds {
 		got[a.Account] = a.Mbit
 	}
-	if len(got) != 2 || got[free12] != 0.512 || got[paid120] != 1 {
-		t.Fatalf("slow accounts = %v, want %s at 0.512 (7 of 5 GB, Free pool) and %s at 1 (120 of 100 GB, paid pool); %s is under its plan's amount", got, free12, paid120, paid60)
+	if len(got) != 3 || got[free12] != 0.512 || got[paid120] != 1 || got[paid60] != 100 {
+		t.Fatalf("listed accounts = %v, want %s at 0.512 (7 of 5 GB, Free pool), %s at 1 (120 of 100 GB, paid pool) and %s at 100 (paid, under its pool); Free %s is at the default", got, free12, paid120, paid60, light)
 	}
 	if out := observe(gated, own, users[:4]...); out.AccountMbit != 0 || len(out.AccountSpeeds) != 0 {
 		t.Fatalf("a customer-owned relay was given limits: %+v", out)

@@ -86,8 +86,8 @@ export const bandwidthCell = (i: number) =>
 export const speeds = {
   /** Once the plan's bandwidth is used: Free, Pro, Team. */
   after: ["512 kbit/s", "1 Mbit/s", "1 Mbit/s"],
-  /** Relayed traffic before that, every plan. */
-  relay: "10 Mbit/s",
+  /** Relayed traffic before that: Free, Pro, Team. */
+  relay: ["10 Mbit/s", "100 Mbit/s", "100 Mbit/s"],
 } as const
 
 /** Extra bandwidth (PLAN 1.3): bought in 100 GB units for a paid workspace, used after the plan's own allowance. */

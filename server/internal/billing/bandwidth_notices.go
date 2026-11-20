@@ -41,6 +41,14 @@ func (s *WorkspaceService) throttleMbit(paid bool) float64 {
 	return float64(s.throttle.EdgeFreeBytesPerSecond) * 8 / 1e6
 }
 
+// relayMbit is one account's relay speed in Mbit/s while the pool is not used up: Free's, or a paid plan's.
+func (s *WorkspaceService) relayMbit(paid bool) float64 {
+	if paid {
+		return s.throttle.RelayMbitPaid
+	}
+	return s.throttle.RelayMbitFree
+}
+
 // speed words a speed for people: "512 kbit/s", "1 Mbit/s".
 func speed(mbit float64) string {
 	if mbit < 1 {

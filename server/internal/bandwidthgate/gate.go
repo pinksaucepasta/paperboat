@@ -58,10 +58,10 @@ func New(store *db.DB) *Gate {
 	return g
 }
 
-// accountPaid is whether account $1 is on a paid plan: its personal workspace has a paid period, or it is an active member of a
+// accountPaid is whether account a.id is on a paid plan: its personal workspace has a paid period, or it is an active member of a
 // team with a paid entitlement (the plan whose slow speed applies to its relayed traffic).
-const accountPaid = `(EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=$1 AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())
- OR EXISTS(SELECT 1 FROM paperboat.team_members m WHERE m.account_id=$1 AND m.active AND paperboat.team_paid_entitled(m.team_id)))`
+const accountPaid = `(EXISTS(SELECT 1 FROM paperboat.billing_workspaces w WHERE w.user_id=a.id AND w.team_id IS NULL AND w.product_code IS NOT NULL AND paperboat.billing_workspace_paid_until(w)>now())
+ OR EXISTS(SELECT 1 FROM paperboat.team_members m WHERE m.account_id=a.id AND m.active AND paperboat.team_paid_entitled(m.team_id)))`
 
 // NewRelayPool is a gate with the same cache and fail-safe rules whose question is another: has any workspace the account belongs to
 // (its personal workspace, an active team) used its pool this period? Edge and relay traffic share one pool per workspace, but a relay
@@ -76,17 +76,22 @@ func NewRelayPool(store *db.DB) *Gate {
 	return g
 }
 
-// PaidAccounts is the subset of accounts on a paid plan (see accountPaid).
+// PaidAccounts is the subset of accounts on a paid plan (see accountPaid), in one query.
 func PaidAccounts(ctx context.Context, store *db.DB, accounts []string) (map[string]bool, error) {
 	paid := map[string]bool{}
-	for _, account := range accounts {
-		var is bool
-		if err := store.SQL().QueryRowContext(ctx, `SELECT `+accountPaid, account).Scan(&is); err != nil {
+	rows, err := store.SQL().QueryContext(ctx, `SELECT a.id FROM unnest($1::text[]) AS a(id) WHERE `+accountPaid, accounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		paid[account] = is
+		paid[id] = true
 	}
-	return paid, nil
+	return paid, rows.Err()
 }
 
 // SetLookupTimeout changes how long one lookup may take before the gate fails open; tests
@@ -274,7 +279,7 @@ func (g *Gate) lookupExhausted(ctx context.Context, key string, at time.Time, ag
  SELECT 'personal:'||$1::text AS id
  UNION
  SELECT 'team:'||m.team_id FROM team_members m JOIN teams t ON t.team_id=m.team_id
- WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL AND NOT t.suspended
+ WHERE m.account_id=a.id AND m.active AND t.deleted_at IS NULL AND NOT t.suspended
 )`
 	if strings.HasPrefix(key, "personal:") || strings.HasPrefix(key, "team:") {
 		workspaces = `WITH ws AS (SELECT $1::text AS id)`

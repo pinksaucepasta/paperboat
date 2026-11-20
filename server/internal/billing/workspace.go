@@ -56,7 +56,7 @@ type Workspace struct {
 	// in the team workspace (AllowanceBytes is the product).
 	AllowanceSeats        int   `json:"allowance_seats,omitempty"`
 	AllowancePerSeatBytes int64 `json:"allowance_per_seat_bytes,omitempty"`
-	// One pool counts edge and relay traffic together. Until it is used up one account runs at RelayMbit on a Paperboat relay and edges
+	// One pool counts edge and relay traffic together. Until it is used up one account runs at RelayMbit (the plan's: Free 10, paid 100) on a Paperboat relay and edges
 	// run at full speed; once it is, both run at ThrottleMbit.
 	RelayMbit float64 `json:"relay_mbit"`
 	// SeatsGranted is an operator's override of the team's seats, replacing what it bought.

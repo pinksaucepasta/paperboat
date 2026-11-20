@@ -10,7 +10,8 @@ import { faq, featureGroups, planNames } from "../pricing-data"
 import { breadcrumbSchema, faqSchema } from "../schema"
 
 const speedRows = [
-  [`Our edges and relays, combined (relays up to ${speeds.relay})`, `${plans[0].bandwidth}/mo, then ${speeds.after[0]}`, `${plans[1].bandwidth}/mo, then ${speeds.after[1]}`],
+  [`Our edges and relays, combined`, `${plans[0].bandwidth}/mo, then ${speeds.after[0]}`, `${plans[1].bandwidth}/mo, then ${speeds.after[1]}`],
+  ["Relay speed while the allowance lasts", speeds.relay[0], speeds.relay[1]],
   ["Browser terminals", "Never slowed", "Never slowed"],
   ["Your own edges and relays", "Unlimited", "Unlimited"],
   ["Direct traffic between your machines", "Unlimited", "Unlimited"],

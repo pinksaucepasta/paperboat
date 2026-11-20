@@ -49,11 +49,11 @@ export const legalDraft = Object.values(company).some((value) => value.startsWit
 export const fairUse = {
   free: { allowance: plans[0].bandwidth, slow: speeds.after[0] },
   paid: { allowance: plans[1].bandwidth, slow: speeds.after[1] },
-  relaySpeed: speeds.relay,
+  relaySpeed: { free: speeds.relay[0], paid: speeds.relay[1] },
   /** Typing and output in browser terminals do not count toward the allowance and are capped at this speed per workspace; console uploads count (user decision 2026-11-19). */
   terminalSpeed: "10 Mbit/s",
 }
 
-const inBytes: Record<string, string> = { "512 kbit/s": "about 64 KB/s", "1 Mbit/s": "about 125 KB/s", "10 Mbit/s": "about 1.25 MB/s" }
+const inBytes: Record<string, string> = { "512 kbit/s": "about 64 KB/s", "1 Mbit/s": "about 125 KB/s", "10 Mbit/s": "about 1.25 MB/s", "100 Mbit/s": "about 12.5 MB/s" }
 /** "512 kbit/s (about 64 KB/s)": a speed with its bytes figure, for readers who think in file sizes. */
 export const withBytes = (speed: string) => (inBytes[speed] ? `${speed} (${inBytes[speed]})` : speed)

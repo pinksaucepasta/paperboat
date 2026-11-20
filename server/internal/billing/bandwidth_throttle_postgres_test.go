@@ -101,8 +101,8 @@ func TestBandwidthThrottleTransitionLiftAndResetPostgres(t *testing.T) {
 	if err != nil || !overview.Throttled || overview.ThrottleLifted || overview.AllowanceBytes == nil || *overview.AllowanceBytes != 100 || overview.UsageBytes != 105 {
 		t.Fatalf("overview = %+v (%v), want throttled, 100 allowance, 105 observed", overview, err)
 	}
-	// One pool: relays run at 10 Mbit/s until it is used up, then, like edges, at the plan's 1 Mbit/s.
-	if overview.RelayMbit != 10 || overview.ThrottleMbit != 1 {
+	// One pool: relays run at the paid plan's 100 Mbit/s until it is used up, then, like edges, at the plan's 1 Mbit/s.
+	if overview.RelayMbit != 100 || overview.ThrottleMbit != 1 {
 		t.Fatalf("speeds = relay %v Mbit/s before the pool is used up, %v after", overview.RelayMbit, overview.ThrottleMbit)
 	}
 

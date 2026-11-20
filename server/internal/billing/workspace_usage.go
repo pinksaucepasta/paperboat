@@ -27,7 +27,7 @@ func (s *WorkspaceService) usageOverviewTx(ctx context.Context, tx *db.Tx, w *Wo
 	}
 	w.AllowancePeriodStart = window.budget
 	w.AllowancePeriodEnd = policy.end
-	w.RelayMbit = s.throttle.RelayMbit
+	w.RelayMbit = s.relayMbit(window.paid)
 	if policy.seats > 0 {
 		// A paid team's pool is the per-seat amount times its seats, shared by the team.
 		w.AllowanceSeats, w.AllowancePerSeatBytes = int(policy.seats), s.throttle.TeamPerSeatBytes

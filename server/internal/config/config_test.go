@@ -551,3 +551,15 @@ func TestBrowserLoginOriginMustBeWrittenAsABrowserSendsIt(t *testing.T) {
 		t.Fatalf("a non-default port refused: %v", err)
 	}
 }
+
+// Relay speed per account is one setting per plan: Free 10 Mbit/s, paid (Pro, Team) 100; paid may not be slower than Free.
+func TestFairUseRelaySpeedPerPlan(t *testing.T) {
+	fair := Default().Billing.FairUse
+	if fair.RelayMbitFree != 10 || fair.RelayMbitPaid != 100 || !fair.valid() {
+		t.Fatalf("defaults: free %v, paid %v, valid %v; want 10, 100, true", fair.RelayMbitFree, fair.RelayMbitPaid, fair.valid())
+	}
+	fair.RelayMbitPaid = 5
+	if fair.valid() {
+		t.Fatal("a paid relay speed below Free's was accepted")
+	}
+}
