@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -61,6 +62,10 @@ VALUES($1,'default','1.0',$2,$3,$3='ready',$4,$11,$1,ARRAY[$5]::text[],ARRAY['`+
 	if managed {
 		h := sha256.Sum256([]byte("runtime:" + id))
 		f.exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, id, region, h[:])
+	}
+	// A managed relay reports its serving certificate pin in its observation (the mesh reads it there).
+	if role == "relay" && managed {
+		f.exec(`UPDATE paperboat.control_tunnel_nodes SET observation=jsonb_build_object('serving_spki_sha256',$2::text) WHERE id=$1`, id, pin(id))
 	}
 	if mutate != "" {
 		f.exec(`UPDATE paperboat.control_tunnel_nodes SET `+mutate+` WHERE id=$1`, id)
@@ -185,7 +190,7 @@ func TestRelayLeaseCarriesMeshPeers(t *testing.T) {
 	ready := f.node("ready", "relay", "ready", true, f.region, 5*time.Second, "endpoint_quic_port=9444")
 	draining := f.node("drain", "relay", "draining", true, f.region, 0, "drain_deadline=now()+interval '30 seconds'")
 	f.node("stale", "relay", "ready", true, f.region, 3*time.Minute, "")
-	f.node("nopin", "relay", "ready", true, f.region, 0, "tls_spki_sha256=NULL")
+	f.node("nopin", "relay", "ready", true, f.region, 0, "observation='{}'::jsonb")
 	f.node("edge", "edge", "ready", true, f.region, 0, "")
 	f.node("selfhosted", "relay", "ready", false, "", 0, "")
 	f.node("off", "relay", "ready", true, f.region+"_off", 0, "")
@@ -211,5 +216,63 @@ func TestRelayLeaseCarriesMeshPeers(t *testing.T) {
 	lease, err = s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: own, Generation: 1, ProcessEpoch: "epoch_own", Ready: true})
 	if err != nil || len(lease.MeshPeers) != 0 {
 		t.Fatalf("self-hosted relay mesh peers=%+v err=%v, want none", lease.MeshPeers, err)
+	}
+	// A self-hosted relay that reports a pin is still never a managed relay's peer.
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET observation=jsonb_build_object('serving_spki_sha256',$2::text) WHERE id=$1`, own, pin(own))
+	lease, err = s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: self, Generation: 1, ProcessEpoch: "epoch_self", Ready: true})
+	if _, listed := peerIDs(lease.MeshPeers)[own]; err != nil || listed {
+		t.Fatalf("managed relay mesh peers %+v err=%v, want the self-hosted relay left out", lease.MeshPeers, err)
+	}
+	// A rotated pin replaces the reported one in the peers other relays get.
+	rotated := nodemesh.PinFromDigest(sha256Bytes("rotated"))
+	if _, err := s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: ready, Generation: 1, ProcessEpoch: "epoch_ready", Ready: true, ServingSPKISHA256: rotated}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: self, Generation: 1, ProcessEpoch: "epoch_self", Ready: true})
+	if err != nil || peerIDs(lease.MeshPeers)[ready].SPKISHA256 != rotated {
+		t.Fatalf("mesh peers after rotation %+v err=%v, want the ready relay's new pin", lease.MeshPeers, err)
+	}
+	// A start that reports no pin keeps the stored one.
+	if _, err := s.StartRelayNode(t.Context(), relayNodeStart{NodeID: ready, ExpectedGeneration: 1, ProcessEpoch: "epoch_ready2"}); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	f.query(&stored, `SELECT observation->>'serving_spki_sha256' FROM paperboat.control_tunnel_nodes WHERE id=$1`, ready)
+	if stored != rotated {
+		t.Fatalf("stored pin after a start without one = %q, want %q", stored, rotated)
+	}
+}
+
+func TestRelayObserveStoresServingPin(t *testing.T) {
+	f := newMeshFixture(t, "servingpin")
+	relay := f.node("r", "relay", "ready", true, f.region, 0, "observation='{}'::jsonb")
+	s := NewEdgeService(f.store, "unused")
+	observe := func(reported string) error {
+		_, err := s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: relay, Generation: 1, ProcessEpoch: "epoch_r", Ready: true, ServingSPKISHA256: reported})
+		return err
+	}
+	stored := func() string {
+		var got string
+		f.query(&got, `SELECT coalesce(observation->>'serving_spki_sha256','') FROM paperboat.control_tunnel_nodes WHERE id=$1`, relay)
+		return got
+	}
+	if err := observe("sha256:" + strings.Repeat("zz", 32)); !errors.Is(err, ErrInvalidUsageReport) {
+		t.Fatalf("malformed serving pin: err %v, want invalid usage", err)
+	}
+	if got := stored(); got != "" {
+		t.Fatalf("a rejected serving pin was stored: %q", got)
+	}
+	// The pin is stored in canonical lower-case form, and an observation without one keeps it.
+	if err := observe(strings.ToUpper(pin(relay))); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); got != pin(relay) {
+		t.Fatalf("stored serving pin %q, want %q", got, pin(relay))
+	}
+	if err := observe(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); got != pin(relay) {
+		t.Fatalf("observation without a pin changed the stored pin to %q", got)
 	}
 }

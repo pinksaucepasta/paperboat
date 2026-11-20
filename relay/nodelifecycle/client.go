@@ -54,6 +54,8 @@ type Config struct {
 	Trust *jwks.Trust
 	// Version is the relay's software release, reported with each observation.
 	Version string
+	// ServingSPKISHA256 is the "sha256:" + hex pin of the relay's serving certificate, sent with start and observe so peer relays can pin it.
+	ServingSPKISHA256 string
 }
 
 // AccountSpeed is an account the relay holds to less than the default speed.
@@ -274,6 +276,14 @@ func (c *Client) save(s diskState) error {
 	return nil
 }
 
+// withServingPin adds the serving certificate pin to a start or observe body; a relay without one sends none.
+func (c *Client) withServingPin(body map[string]any) map[string]any {
+	if c.cfg.ServingSPKISHA256 != "" {
+		body["serving_spki_sha256"] = c.cfg.ServingSPKISHA256
+	}
+	return body
+}
+
 func (c *Client) Start(ctx context.Context) (Lease, error) {
 	if c.lock == nil {
 		if err := os.MkdirAll(filepath.Dir(c.cfg.StatePath), 0700); err != nil {
@@ -311,7 +321,7 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 			return Lease{}, err
 		}
 	}
-	out, err := c.post(ctx, "/v1/relay/nodes/start", map[string]any{"node_id": s.NodeID, "expected_generation": s.Generation, "process_epoch": s.PendingEpoch})
+	out, err := c.post(ctx, "/v1/relay/nodes/start", c.withServingPin(map[string]any{"node_id": s.NodeID, "expected_generation": s.Generation, "process_epoch": s.PendingEpoch}))
 	if err != nil {
 		return Lease{}, err
 	}
@@ -364,7 +374,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	subjects := server.AuthoritySubjects()
 	digest := subjectsDigest(subjects)
-	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest}
+	body := c.withServingPin(map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest})
 	body["metrics"] = c.metrics(stats)
 	if mesh, ok := server.MeshStats(); ok {
 		body["mesh"] = mesh

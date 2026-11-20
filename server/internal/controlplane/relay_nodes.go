@@ -31,6 +31,7 @@ type relayNodeStart struct {
 	NodeID             string `json:"node_id"`
 	ExpectedGeneration int64  `json:"expected_generation"`
 	ProcessEpoch       string `json:"process_epoch"`
+	ServingSPKISHA256  string `json:"serving_spki_sha256,omitempty"`
 }
 type relaySubject struct {
 	AccountID  string `json:"account_id"`
@@ -67,6 +68,8 @@ type relayNodeObservation struct {
 	AccountDemand map[string]relayshare.Demand `json:"account_demand,omitempty"`
 	// Mesh is the relay's relay-to-relay forwarding counters; optional, stored with the node's latest observation.
 	Mesh *nodemesh.Stats `json:"mesh,omitempty"`
+	// ServingSPKISHA256 is the "sha256:" + hex pin of the relay's serving certificate; optional, kept in the node's stored observation.
+	ServingSPKISHA256 string `json:"serving_spki_sha256,omitempty"`
 }
 
 // relayAccountSpeed is one account a relay holds to less than the default speed.
@@ -131,12 +134,46 @@ func relayServiceForNode(ctx context.Context, tx *sql.Tx, node string) (*relaySe
 
 func relayIdentifier(s string) bool { return len(s) > 0 && len(s) <= 256 }
 
+// relayServingPin is the canonical form of the serving certificate pin a relay reports ("" when it reports none); ok is false
+// for a malformed one.
+func relayServingPin(pin string) (canonical string, ok bool) {
+	if pin == "" {
+		return "", true
+	}
+	raw, err := nodemesh.ParsePin(pin)
+	if err != nil {
+		return "", false
+	}
+	return nodemesh.PinFromDigest(raw), true
+}
+
+// relayStoredObservation is the fragment a relay report merges into the node's stored observation: the mesh counters (nil
+// leaves none) and the serving pin (empty leaves the stored pin as it is).
+func relayStoredObservation(mesh *nodemesh.Stats, servingPin string) ([]byte, error) {
+	fragment := map[string]any{}
+	if mesh != nil {
+		fragment["mesh"] = mesh
+	}
+	if servingPin != "" {
+		fragment["serving_spki_sha256"] = servingPin
+	}
+	return json.Marshal(fragment)
+}
+
 // StartRelayNode activates an existing operator-authorized registry entry. This
 // API cannot create nodes or change region, account policy, endpoints or keys.
 func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (relayNodeLeaseDocument, error) {
 	var out relayNodeLeaseDocument
 	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.ExpectedGeneration < 1 || in.ExpectedGeneration >= int64(^uint64(0)>>1)-1 {
 		return out, invalidUsage("relay_nodes.go:79")
+	}
+	servingPin, ok := relayServingPin(in.ServingSPKISHA256)
+	if !ok {
+		return out, invalidUsage("relay_nodes.go:serving_spki_sha256")
+	}
+	fragment, err := relayStoredObservation(nil, servingPin)
+	if err != nil {
+		return out, err
 	}
 	tx, err := s.store.SQL().BeginTx(ctx, nil)
 	if err != nil {
@@ -184,7 +221,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		}
 		gen = max(gen, in.ExpectedGeneration)
 		expires := now.Add(relayRegistryLease)
-		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state='registered',ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=NULL,updated_at=$3,version=version+1 WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1)
+		_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=$5,process_epoch=$2,state='registered',ready=false,capacity_used=0,capacity_observed_at=$3,last_heartbeat_at=$3,registry_expires_at=$4,drain_deadline=NULL,updated_at=$3,version=version+1,observation=coalesce(observation,'{}'::jsonb)||$6::jsonb WHERE id=$1`, in.NodeID, in.ProcessEpoch, now, expires, gen+1, fragment)
 		if err != nil {
 			return out, err
 		}
@@ -205,6 +242,11 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.Generation < 1 || in.CapacityUsed < 0 || (in.SubjectsDigest != "" && !validRelaySubjectsDigest(in.SubjectsDigest)) {
 		return out, invalidUsage("relay_nodes.go:139")
 	}
+	servingPin, ok := relayServingPin(in.ServingSPKISHA256)
+	if !ok {
+		return out, invalidUsage("relay_nodes.go:serving_spki_sha256")
+	}
+	in.ServingSPKISHA256 = servingPin
 	in.Metrics = usableMetrics(ctx, in.NodeID, in.Metrics)
 	if in.Mesh != nil && (in.Mesh.Links < 0 || in.Mesh.Names < 0) {
 		return out, invalidUsage("relay_nodes.go:mesh")
@@ -367,11 +409,10 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 		return out, set, required, invalidUsage("relay_nodes.go:169")
 	}
 	// The mesh counters ride in the node's stored observation (operatorinfra.Node.Forward reads them); a relay that sends none clears them.
-	observation := []byte(`{}`)
-	if in.Mesh != nil {
-		if observation, err = json.Marshal(map[string]any{"mesh": in.Mesh}); err != nil {
-			return out, set, required, err
-		}
+	// The serving pin stays unless the relay reports another: the update below only replaces the mesh counters.
+	observation, err := relayStoredObservation(in.Mesh, in.ServingSPKISHA256)
+	if err != nil {
+		return out, set, required, err
 	}
 	expires = now.Add(relayRegistryLease)
 	operatorDraining := state == "draining"
@@ -498,12 +539,12 @@ func (s *EdgeService) customerOwnedNode(ctx context.Context, nodeID string) (boo
 // serving certificate pin and a QUIC endpoint. Nothing for a node that is not a managed one (a customer-owned relay), and a
 // managed relay never lists a customer-owned one: the populations are never mixed.
 func relayMeshPeers(ctx context.Context, tx *sql.Tx, node string, now time.Time) ([]nodemesh.Peer, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT n.id, coalesce(n.region,m.region_id), n.endpoint_host, n.endpoint_quic_port, n.tls_spki_sha256, n.process_epoch, n.drain_deadline IS NOT NULL
+	rows, err := tx.QueryContext(ctx, `SELECT n.id, coalesce(n.region,m.region_id), n.endpoint_host, n.endpoint_quic_port, n.observation->>'serving_spki_sha256', n.process_epoch, n.drain_deadline IS NOT NULL
 FROM paperboat.control_tunnel_nodes n
 JOIN paperboat.managed_node_authority m ON m.node_id=n.id AND m.retired_at IS NULL
 JOIN paperboat.operator_regions region ON region.id=m.region_id AND region.enabled
 WHERE n.roles @> ARRAY['relay']::text[] AND n.transports @> ARRAY['derp_quic']::text[] AND n.state IN ('ready','draining') AND n.id<>$1
- AND n.last_heartbeat_at>$2::timestamptz-make_interval(secs=>$3) AND octet_length(n.tls_spki_sha256)=32
+ AND n.last_heartbeat_at>$2::timestamptz-make_interval(secs=>$3) AND n.observation->>'serving_spki_sha256' ~ '^sha256:[0-9a-f]{64}$'
  AND n.endpoint_host IS NOT NULL AND n.endpoint_quic_port IS NOT NULL
  AND EXISTS(SELECT 1 FROM paperboat.managed_node_authority self WHERE self.node_id=$1 AND self.retired_at IS NULL)
 ORDER BY n.id LIMIT $4`, node, now, meshFreshness.Seconds(), nodemesh.MaxPeers)
@@ -514,12 +555,12 @@ ORDER BY n.id LIMIT $4`, node, now, meshFreshness.Seconds(), nodemesh.MaxPeers)
 	var peers []nodemesh.Peer
 	for rows.Next() {
 		var p nodemesh.Peer
-		var digest []byte
+		var pin string
 		var port int
-		if err := rows.Scan(&p.NodeID, &p.Region, &p.Host, &port, &digest, &p.ProcessEpoch, &p.Draining); err != nil {
+		if err := rows.Scan(&p.NodeID, &p.Region, &p.Host, &port, &pin, &p.ProcessEpoch, &p.Draining); err != nil {
 			return nil, err
 		}
-		p.Port, p.SPKISHA256 = uint16(port), nodemesh.PinFromDigest(digest)
+		p.Port, p.SPKISHA256 = uint16(port), pin
 		// A row the wire cannot carry is left out, not allowed to fail the lease.
 		if p.Validate() == nil {
 			peers = append(peers, p)
