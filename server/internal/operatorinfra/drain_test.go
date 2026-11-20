@@ -128,3 +128,29 @@ func TestOperatorDrainMoveWakesAttachedMachines(t *testing.T) {
 		t.Fatalf("drain-move of a retired node: %v", err)
 	}
 }
+
+// Draining or retiring an enabled region's last serving edge is refused: the wildcard names would drop the region.
+func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
+	s, store, admin, node, _ := drainFixture(t)
+	ctx := context.Background()
+	serve := func(id string) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',public_ingress_ipv4='203.0.113.7',public_ingress_verified_at=now() WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serve(node.ID)
+	for _, action := range []string{"drain", "drain-move", "retire"} {
+		if _, err := s.MutateNode(ctx, admin, action+"-last-"+node.ID, NodeMutation{Action: action, NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("%s of the last serving edge: %v", action, err)
+		}
+	}
+	second, err := s.MutateNode(ctx, admin, "enroll-second-"+node.ID, NodeMutation{Action: "enroll", NodeID: node.ID + "_b", RegionID: node.RegionID, EdgePool: "managed:" + node.RegionID, FailureDomain: "zone-b", EndpointHost: "edge-b.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve(second.Node.ID)
+	if _, err = s.MutateNode(ctx, admin, "drain-with-replacement-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); err != nil {
+		t.Fatalf("drain with another serving edge in the region: %v", err)
+	}
+}

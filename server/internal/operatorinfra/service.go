@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodedrain"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
@@ -358,7 +359,10 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return ErrInvalid
 			}
 			var regionEnabled bool
-			err := tx.QueryRow(ctx, `SELECT r.enabled FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=$1 AND m.revision=$2 AND m.retired_at IS NULL FOR UPDATE OF m`, in.NodeID, in.Revision).Scan(&regionEnabled)
+			var region string
+			// FOR UPDATE OF r serializes every drain, resume and retire of one region, so two operators cannot each
+			// take out one of the region's last two serving edges.
+			err := tx.QueryRow(ctx, `SELECT r.enabled,r.id FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=$1 AND m.revision=$2 AND m.retired_at IS NULL FOR UPDATE OF m,r`, in.NodeID, in.Revision).Scan(&regionEnabled, &region)
 			if err == pgx.ErrNoRows {
 				return ErrConflict
 			} else if err != nil {
@@ -366,6 +370,18 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			}
 			if in.Action == "resume" && !regionEnabled {
 				return ErrConflict
+			}
+			if in.Action != "resume" && regionEnabled {
+				// An enabled region keeps a serving edge: taking out its last one would drop the region from the
+				// wildcard DNS names and every pair that uses it. Bring a replacement up first, or disable the region.
+				var last bool
+				err = tx.QueryRow(ctx, `SELECT $1 IN (SELECT id FROM `+edgeset.ServingNodes+` s) AND NOT EXISTS(SELECT 1 FROM `+edgeset.ServingNodes+` s JOIN managed_node_authority m ON m.node_id=s.id WHERE m.region_id=$2 AND s.id<>$1)`, in.NodeID, region).Scan(&last)
+				if err != nil {
+					return err
+				}
+				if last {
+					return ErrConflict
+				}
 			}
 			switch in.Action {
 			case "drain", "drain-move":
