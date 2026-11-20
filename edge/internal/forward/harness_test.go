@@ -34,6 +34,10 @@ func (authority) Snapshot(context.Context) ([]connectorprotocol.IngressDecision,
 	return nil, nil
 }
 
+func (authority) SnapshotForHost(context.Context, string) ([]connectorprotocol.IngressDecision, error) {
+	return nil, nil
+}
+
 func (authority) ResolveDecision(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 }
