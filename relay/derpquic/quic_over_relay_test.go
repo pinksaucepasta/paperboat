@@ -270,7 +270,7 @@ func TestQUICBulkThroughRelayGetsMostOfTheAccountSpeed(t *testing.T) {
 
 // A QUIC transfer over a path with a 500 ms round trip still gets most of the account speed. quic-go's HyStart used to leave slow start
 // after 16 ms of delay jitter, at about 69 KB of congestion window, and then grew the window by one packet per round trip: 1.4 Mbit/s
-// whatever the plan (third_party/quic-go/README.paperboat.md). With the patch a 5 Mbit/s account gets about 4.2 Mbit/s.
+// whatever the plan (the fork's README.paperboat.md). With the patch a 5 Mbit/s account gets about 4.2 Mbit/s.
 func TestQUICBulkOverALongPathGetsMostOfTheAccountSpeed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("takes about 25 s")

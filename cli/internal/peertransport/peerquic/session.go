@@ -466,7 +466,6 @@ func quicConfig(sessionConfig SessionConfig) *quic.Config {
 		connectionWindow, maxConnectionWindow = 6 << 20, 64 << 20
 	)
 	return &quic.Config{
-		CongestionControl:              quic.CongestionControlBBR,
 		HandshakeIdleTimeout:           handshakeTimeout(sessionConfig),
 		MaxIdleTimeout:                 sessionConfig.MaxIdleTimeout,
 		KeepAlivePeriod:                sessionConfig.KeepAlivePeriod,

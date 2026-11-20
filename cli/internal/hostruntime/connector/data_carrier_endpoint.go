@@ -307,7 +307,7 @@ var (
 // The edge opens every stream of a carrier, so the incoming-stream credit here is the carrier's stream
 // count (the edge grants its side the same: streams + queue + 1); 16 let only 16 be open at once.
 func defaultQUICConfig() *quic.Config {
-	return &quic.Config{CongestionControl: quic.CongestionControlBBR, MaxIdleTimeout: quicMaxIdleTimeout, KeepAlivePeriod: quicKeepAlivePeriod, MaxIncomingStreams: int64(defaultDataCarrierStreams + defaultDataCarrierQueue + 1), MaxIncomingUniStreams: 0}
+	return &quic.Config{MaxIdleTimeout: quicMaxIdleTimeout, KeepAlivePeriod: quicKeepAlivePeriod, MaxIncomingStreams: int64(defaultDataCarrierStreams + defaultDataCarrierQueue + 1), MaxIncomingUniStreams: 0}
 }
 
 type quicDataCarrierSession struct {
