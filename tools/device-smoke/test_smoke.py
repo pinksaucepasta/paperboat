@@ -1238,6 +1238,39 @@ class RemoteTimeout(unittest.TestCase):
                 self.assertEqual(remote_timeout.timeout_words('ssh host'), words)
 
 
+class TransferFixtures(unittest.TestCase):
+    def test_multi_file_send_uses_an_incompressible_50_mib_fixture(self):
+        import hashlib
+        import zlib
+        import transfer_lifecycle
+
+        def send(_binary, _command, *args, timeout):
+            files = [pathlib.Path(name) for name in args[:-3]]
+            large, = [path for path in files if path.name.endswith('-large.bin')]
+            data = large.read_bytes()
+            self.assertEqual(50 << 20, len(data))
+            self.assertGreater(len(zlib.compress(data, level=1)), len(data) * 0.99)
+            digests.update((path.name, hashlib.sha256(path.read_bytes()).hexdigest()) for path in files)
+            return {'transfers': [{} for _ in files]}
+
+        def remote(_binary, _command, _target, _separator, _python, _flag, script):
+            if 'PB_MULTI_FILE_VERIFIED' in script:
+                self.assertTrue(digests)
+                self.assertIn(repr(digests), script)
+                return b'PB_MULTI_FILE_VERIFIED\n', b''
+            return b'', b''
+
+        digests = {}
+        with (patch.object(sys, 'argv', ['transfer_lifecycle.py', 'fixture-target']),
+              patch.object(transfer_lifecycle, 'registration', return_value={}),
+              patch.object(transfer_lifecycle.winhost, 'device', return_value=None),
+              patch.object(transfer_lifecycle.windows_target, 'is_windows', return_value=False),
+              patch.object(transfer_lifecycle, 'invoke', side_effect=send),
+              patch.object(transfer_lifecycle, 'run', side_effect=remote),
+              patch('builtins.print')):
+            transfer_lifecycle.main()
+
+
 class UpdateSurvivalMarkers(unittest.TestCase):
     def test_typed_shell_markers_are_split_so_the_echo_cannot_match(self):
         import re
