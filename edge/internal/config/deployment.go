@@ -55,7 +55,6 @@ type Deployment struct {
 	RuntimeBaseDomain string        `json:"runtime_base_domain"`
 	TrustedProxyCIDRs []string      `json:"trusted_proxy_cidrs"`
 	PublicRoutes      []PublicRoute `json:"public_routes,omitempty"`
-	NodeCapacity      uint32        `json:"node_capacity"`
 	ControlInterval   time.Duration `json:"control_interval"`
 	ControlTimeout    time.Duration `json:"control_timeout"`
 	MaxBodyBytes      int64         `json:"max_body_bytes"`
@@ -215,7 +214,7 @@ func (d Deployment) validate() error {
 	if d.RequestBodyIdleTimeout != 0 && (d.RequestBodyIdleTimeout < time.Second || d.RequestBodyIdleTimeout > time.Hour) {
 		return errors.New("request_body_idle_timeout must be between 1s and 1h")
 	}
-	if d.NodeCapacity == 0 || d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
+	if d.ControlInterval <= 0 || d.ControlInterval > time.Minute || d.ControlTimeout <= 0 || d.ControlTimeout > 30*time.Second || d.MaxBodyBytes < 1 || d.MaxHeaderBytes < 1024 || d.MaxHeaderBytes > maximumGatewayHeaderBytes {
 		return errors.New("deployment bounds are invalid")
 	}
 	return nil

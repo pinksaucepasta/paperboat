@@ -38,7 +38,7 @@ func TestForwardPublicTCPValidatesAuthorityAndPreservesHalfClose(t *testing.T) {
 
 	identity := replicaIdentity("host_pinned", "connector_pinned", "session_pinned", 3)
 	carrier, connector := testEdgePreviewCarrierPair(t, identity)
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestForwardPublicTCPRejectsInvalidTargetBeforeOpeningCarrier(t *testing.T) 
 	defer accepted.Close()
 	identity := replicaIdentity("host_pinned", "connector_pinned", "session_pinned", 3)
 	carrier, connector := testEdgePreviewCarrierPair(t, identity)
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestForwardPublicTCPOnAnEngineCarrierSendsNoDecisionPreface(t *testing.T) {
 	}
 	identity := replicaIdentity("host_pinned", "connector_pinned", "session_pinned", 3)
 	carrier, connector := testEdgePreviewCarrierPair(t, identity)
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

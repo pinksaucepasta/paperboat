@@ -162,7 +162,7 @@ func TestTask26CrossRepositoryRestrictedBrowserHTTP2(t *testing.T) {
 	}
 	defer server.Close()
 	waitFile(d.ReadyPath)
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_0001", MaximumRoutes: 1})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_0001"})
 	if err != nil {
 		t.Fatal(err)
 	}

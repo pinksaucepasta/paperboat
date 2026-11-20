@@ -93,7 +93,7 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", Capacity: 1, CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
+	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {

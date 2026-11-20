@@ -120,7 +120,7 @@ func engineRouteThroughRealEdge(t *testing.T, routesFirst bool) {
 	defer runtimeRoutes.Close()
 	// As in production (main.go): the durable route registry has an ingress authority, which
 	// issues the public decision for the engine route.
-	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 8,
+	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{
 		IngressAuthority: func(_ context.Context, rule route.RouteRule) (connectorprotocol.IngressDecision, error) {
 			return engineRoutePublicDecision(rule, identity, node, epoch), nil
 		}})
@@ -130,7 +130,7 @@ func engineRouteThroughRealEdge(t *testing.T, routesFirst bool) {
 	defer routes.Close()
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
-		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
+		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durable, nil,
 		routes, nil, nil, nil, nil,
 		&edgeruntime.RuntimeCarrierWorker{Expected: runtimeExpected, Routes: runtimeRoutes},

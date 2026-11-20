@@ -51,12 +51,12 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			defer registry.Close()
 			ingress := &tlsAuthorityFixture{}
 			ingress.set(decision)
 			// The logical route matcher does not know this customer alias.
-			shared, err := NewSharedTLSListener(raw, ingress, registry, func(string) bool { return false }, 4, "")
+			shared, err := NewSharedTLSListener(raw, ingress, registry, func(string) bool { return false }, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +143,7 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			defer registry.Close()
 			authority := &sharedTLSOutageAuthority{}
 			_, httpDecision := browserTestMatch()
@@ -153,7 +153,7 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 				authority.set(httpDecision)
 			}
 			authority.unavailable.Store(true)
-			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, ListenHost: "127.0.0.1", InfrastructureHostname: "infrastructure.test", Authority: authority, Routes: registry, MaximumConnections: 4, PreviewHTTPSAuthority: func(context.Context, string) error { return control.ErrBrowserDenied }})
+			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", InfrastructureHostname: "infrastructure.test", Authority: authority, Routes: registry, PreviewHTTPSAuthority: func(context.Context, string) error { return control.ErrBrowserDenied }})
 			if err != nil {
 				raw.Close()
 				t.Fatal(err)
@@ -218,9 +218,9 @@ func TestSharedTLSReservedIPNoSNIRequiresHTTPSBinding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			defer registry.Close()
-			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, ListenHost: "127.0.0.1", InfrastructureHostname: "93.184.216.35", Authority: &tlsAuthorityFixture{}, Routes: registry, MaximumConnections: 4})
+			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", InfrastructureHostname: "93.184.216.35", Authority: &tlsAuthorityFixture{}, Routes: registry})
 			if err != nil {
 				raw.Close()
 				t.Fatal(err)
@@ -304,11 +304,11 @@ func testSharedTLSAdmittedCarrierAuthority(t *testing.T, mode string) {
 			t.Fatal(err)
 		}
 	}
-	durable, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	durable, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer durable.Close()
 	authority := &sharedTLSOutageAuthority{}
 	matcher := NewPreviewCarrierRouteMatcher(registry)
-	shared := newSharedTLSListener(raw, authority, durable, matcher.HasHTTPSHostname, make(chan struct{}, 4), "infrastructure.test", matcher.HasAdmittedHTTPSHostname, nil, nil)
+	shared := newSharedTLSListener(raw, authority, durable, matcher.HasHTTPSHostname, "infrastructure.test", matcher.HasAdmittedHTTPSHostname, nil, nil)
 	assertSharedTLSCarrierAuthority(t, raw, shared, authority, clientTLS, serverTLS, value.ExpiresAt,
 		mode != "unadmitted" && mode != "public", func() error {
 			return registry.Detach(value.RouteID, identity, value.Revision)
@@ -436,7 +436,7 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			defer routes.Close()
 			previewHTTPSAuthority := func(ctx context.Context, hostname string) error {
 				return matcher.AuthorizePublicHTTPS(ctx, hostname, func(ctx context.Context, admission DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error) {
@@ -452,7 +452,7 @@ func TestSharedTLSColdPreviewRefreshesExactAuthority(t *testing.T) {
 					return decision, err
 				})
 			}
-			shared := newSharedTLSListener(raw, authority, routes, matcher.HasHTTPSHostname, make(chan struct{}, 4), "", nil, previewHTTPSAuthority, nil)
+			shared := newSharedTLSListener(raw, authority, routes, matcher.HasHTTPSHostname, "", nil, previewHTTPSAuthority, nil)
 			clientTLS, serverTLS, _, _, _ := task24Certificates(t, host)
 			clientTLS.ServerName = host
 			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })}
@@ -511,7 +511,7 @@ func TestSharedTLSRestrictedDurableCarrierAuthority(t *testing.T) {
 			if err = rules.ApplyGeneration(t.Context(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, 0); err != nil {
 				t.Fatal(err)
 			}
-			durable, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			durable, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -534,7 +534,7 @@ func TestSharedTLSRestrictedDurableCarrierAuthority(t *testing.T) {
 			authority := &sharedTLSOutageAuthority{}
 			// Restricted routes have no public forwarding grant; use the same
 			// admitted-carrier owner as production assembly.
-			shared := newSharedTLSListener(raw, authority, durable, rules.HasHTTPSHostname, make(chan struct{}, 4), "infrastructure.test", func(host string) bool { return durable.HasAdmittedHTTPSHostname(host, rules) }, nil, nil)
+			shared := newSharedTLSListener(raw, authority, durable, rules.HasHTTPSHostname, "infrastructure.test", func(host string) bool { return durable.HasAdmittedHTTPSHostname(host, rules) }, nil, nil)
 			assertSharedTLSCarrierAuthority(t, raw, shared, authority, clientTLS, serverTLS, time.Time{}, mode == "private" || mode == "team", func() error { return durable.Detach(carrier) })
 		})
 	}
@@ -558,11 +558,11 @@ func TestSharedTLSTakenDownRouteCompletesTLSAndUnknownNameDoesNot(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	authority := &takedownAuthority{denied: map[string]bool{match.Host: true}}
 	// The route matcher knows the managed hostname; the snapshot has no decision for it.
-	shared, err := NewSharedTLSListener(raw, authority, registry, func(host string) bool { return host == match.Host }, 4, "")
+	shared, err := NewSharedTLSListener(raw, authority, registry, func(host string) bool { return host == match.Host }, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,11 +605,11 @@ func TestSharedTLSOwnerOfflinePreviewWithNoCarrierReachesTheHTTPSHandler(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	authority := &ownerOfflineAuthority{host: match.Host}
 	authority.asleep.Store(true)
-	shared, err := NewSharedTLSListener(raw, authority, registry, func(string) bool { return false }, 4, "")
+	shared, err := NewSharedTLSListener(raw, authority, registry, func(string) bool { return false }, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,9 +650,9 @@ func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
-	shared, err := NewSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, 4, "")
+	shared, err := NewSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -690,9 +690,9 @@ func TestSharedTLSUnknownNameIsTheDeniedPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
-	shared, err := NewSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, 4, "")
+	shared, err := NewSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,11 +762,11 @@ func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			defer registry.Close()
 			var checks atomic.Int32
 			admitted := func(string) bool { return tc.admitAtCheck > 0 && int(checks.Add(1)) >= tc.admitAtCheck }
-			shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", admitted, nil, nil)
+			shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "", admitted, nil, nil)
 			shared.ServeUnknownNamesWithPage(serverTLS)
 			shared.routeGrace = func() time.Duration { return tc.grace }
 			shared.holdableName = func(string) bool { return true }
@@ -821,10 +821,10 @@ func TestSharedTLSPublicPreviewDecisionAfterTakeoverIsServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	authority := &lateDecisionAuthority{host: match.Host, after: 4}
-	shared := newSharedTLSListener(raw, authority, registry, func(string) bool { return true }, make(chan struct{}, 4), "", func(string) bool { return false },
+	shared := newSharedTLSListener(raw, authority, registry, func(string) bool { return true }, "", func(string) bool { return false },
 		func(context.Context, string) error { return nil }, nil)
 	shared.ServeUnknownNamesWithPage(serverTLS)
 	shared.routeGrace = func() time.Duration { return time.Minute }

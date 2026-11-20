@@ -40,7 +40,7 @@ func BenchmarkAcquireWithManyRules(b *testing.B) {
 			for i := range rules {
 				rules[i] = matcherRule(fmt.Sprintf("rule-%d", i), fmt.Sprintf("host-%d.example.test", i), MatchExact, "/", 100)
 			}
-			registry := NewGenerationRegistry(n)
+			registry := NewGenerationRegistry()
 			if err := registry.StageGeneration(1, rules); err != nil {
 				b.Fatal(err)
 			}

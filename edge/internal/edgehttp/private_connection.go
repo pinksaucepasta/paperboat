@@ -25,7 +25,6 @@ type privateConnectionEntry struct {
 type PrivateAccessConnectionRegistry struct {
 	mu      sync.Mutex
 	next    uint64
-	maximum int
 	entries map[string]privateConnectionEntry
 	closed  bool
 	now     func() time.Time
@@ -34,11 +33,8 @@ type PrivateAccessConnectionRegistry struct {
 	Revalidate func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
 
-func NewPrivateAccessConnectionRegistry(maximum int) (*PrivateAccessConnectionRegistry, error) {
-	if maximum < 1 {
-		return nil, ErrPrivateConnectionInvalid
-	}
-	return &PrivateAccessConnectionRegistry{maximum: maximum, entries: make(map[string]privateConnectionEntry), now: func() time.Time { return time.Now().UTC() }}, nil
+func NewPrivateAccessConnectionRegistry() *PrivateAccessConnectionRegistry {
+	return &PrivateAccessConnectionRegistry{entries: make(map[string]privateConnectionEntry), now: func() time.Time { return time.Now().UTC() }}
 }
 func (r *PrivateAccessConnectionRegistry) Register(address string, request connectorprotocol.PrivateAccessRequest, expires time.Time) (uint64, error) {
 	if r == nil || net.ParseIP(hostOnly(address)) == nil || request.Validate(r.now()) != nil || !expires.Equal(request.ExpiresAt) || !expires.After(r.now()) {
@@ -46,8 +42,7 @@ func (r *PrivateAccessConnectionRegistry) Register(address string, request conne
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, replacing := r.entries[address]
-	if r.closed || !replacing && len(r.entries) >= r.maximum {
+	if r.closed {
 		return 0, ErrPrivateConnectionInvalid
 	}
 	r.next++

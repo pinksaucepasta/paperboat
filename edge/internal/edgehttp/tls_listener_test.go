@@ -38,7 +38,7 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 	address := probe.Addr().String()
 	identity := replicaIdentity("host_pinned", "connector_pinned", "session_pinned", 3)
 	carrier, connector := testEdgePreviewCarrierPair(t, identity)
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 	var httpsConflict atomic.Bool
 	manager, err := NewSharedTLSListener(probe, authority, registry, func(host string) bool {
 		return host == "web.customer.test" || host == decisions[0].Binding.Hostname && httpsConflict.Load()
-	}, 4096, "")
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestTLSListenerTwoOriginsCertificatesAndRemoval(t *testing.T) {
 }
 
 func TestTLSListenerRejectsConflictingTenantHostname(t *testing.T) {
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	d := publicTCPDecision(time.Now().UTC(), 443)
 	d.Binding.Protocol = "tls"
@@ -268,7 +268,7 @@ func TestTLSListenerRejectsConflictingTenantHostname(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		listener, err := NewSharedTLSListener(raw, authority, registry, func(string) bool { return conflictHTTPS }, 4, "")
+		listener, err := NewSharedTLSListener(raw, authority, registry, func(string) bool { return conflictHTTPS }, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,64 +279,6 @@ func TestTLSListenerRejectsConflictingTenantHostname(t *testing.T) {
 			t.Fatal("conflicting TLS mode/tenant accepted")
 		}
 		listener.Close()
-	}
-}
-
-func TestTLSListenerAdmissionAndInterruptedCleanup(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := probe.Addr().String()
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
-	defer registry.Close()
-	authority := &tlsAuthorityFixture{}
-	d := publicTCPDecision(time.Now().UTC(), 443)
-	d.Binding.Protocol = "tls"
-	d.Binding.ListenerID = "listener_tls_443"
-	authority.set(d)
-
-	manager, err := NewSharedTLSListener(probe, authority, registry, func(string) bool { return false }, 1, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close()
-
-	slow, err := net.Dial("tcp", address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer slow.Close()
-	until := time.Now().Add(time.Second)
-	for len(manager.slots) != 1 {
-		if time.Now().After(until) {
-			t.Fatal("inspection not admitted")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	denied, err := net.Dial("tcp", address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer denied.Close()
-	_ = denied.SetReadDeadline(time.Now().Add(time.Second))
-	var b [1]byte
-	if _, err = denied.Read(b[:]); err == nil {
-		t.Fatal("excess connection accepted")
-	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
-		t.Fatal("excess connection not rejected promptly")
-	}
-
-	closed := make(chan struct{})
-	go func() { manager.Close(); close(closed) }()
-	select {
-	case <-closed:
-	case <-time.After(time.Second):
-		t.Fatal("shared listener cleanup timed out")
-	}
-
-	if len(manager.slots) != 0 {
-		t.Fatal("inspection admission leaked after cancellation")
 	}
 }
 
@@ -352,16 +294,15 @@ func (g gatedListener) Accept() (net.Conn, error) {
 	return g.Listener.Accept()
 }
 
-// Audit T3: a long-lived TLS passthrough stream runs in its own bounded pool and gives its accept
-// slot back, so it cannot starve new HTTPS connections; a full passthrough pool refuses only the
-// excess passthrough connection.
-func TestTLSPassthroughStreamReleasesItsAcceptSlot(t *testing.T) {
+// Audit T3: a long-lived TLS passthrough stream cannot starve new HTTPS connections, because the listener holds
+// no node-wide slot for either.
+func TestTLSPassthroughStreamsAreForwardedWithoutALimit(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	address := probe.Addr().String()
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	authority := &tlsAuthorityFixture{}
 	d := publicTCPDecision(time.Now().UTC(), 443)
@@ -370,7 +311,7 @@ func TestTLSPassthroughStreamReleasesItsAcceptSlot(t *testing.T) {
 	authority.set(d)
 
 	gate := gatedListener{Listener: probe, open: make(chan struct{})}
-	manager := newSharedTLSListener(gate, authority, registry, func(string) bool { return false }, make(chan struct{}, 1), "", nil, nil, nil)
+	manager := newSharedTLSListener(gate, authority, registry, func(string) bool { return false }, "", nil, nil, nil)
 	defer manager.Close()
 	forwarded := make(chan struct{}, 4)
 	manager.forward = func(ctx context.Context, conn net.Conn, _ connectorprotocol.IngressDecision, _ func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error {
@@ -389,123 +330,22 @@ func TestTLSPassthroughStreamReleasesItsAcceptSlot(t *testing.T) {
 		go func() { _ = tls.Client(conn, &tls.Config{ServerName: d.Binding.Hostname}).Handshake() }()
 		return conn
 	}
-	held := hello()
-	defer held.Close()
-	select {
-	case <-forwarded:
-	case <-time.After(2 * time.Second):
-		t.Fatal("passthrough stream not forwarded")
-	}
-	until := time.Now().Add(time.Second)
-	for len(manager.slots) != 0 {
-		if time.Now().After(until) {
-			t.Fatal("held passthrough stream keeps its accept slot")
+	// Long-lived passthrough streams are not counted against any pool: all of them are forwarded.
+	for range 3 {
+		conn := hello()
+		defer conn.Close()
+		select {
+		case <-forwarded:
+		case <-time.After(2 * time.Second):
+			t.Fatal("passthrough stream not forwarded")
 		}
-		time.Sleep(time.Millisecond)
 	}
-	if len(manager.passthrough) != 1 {
-		t.Fatalf("passthrough pool holds %d streams", len(manager.passthrough))
-	}
-
-	excess := hello()
-	defer excess.Close()
-	_ = excess.SetReadDeadline(time.Now().Add(2 * time.Second))
-	var b [1]byte
-	if _, err = excess.Read(b[:]); err == nil {
-		t.Fatal("excess passthrough connection served")
-	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
-		t.Fatal("excess passthrough connection not refused promptly")
-	}
-	select {
-	case <-forwarded:
-		t.Fatal("excess passthrough connection forwarded beyond the pool")
-	default:
-	}
-
 	closed := make(chan struct{})
 	go func() { manager.Close(); close(closed) }()
 	select {
 	case <-closed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("shared listener cleanup timed out")
-	}
-	if len(manager.passthrough) != 0 || len(manager.slots) != 0 {
-		t.Fatal("passthrough admission leaked after close")
-	}
-}
-
-// An HTTPS connection handed to the HTTP server keeps a slot of its own pool until it closes, so
-// established connections are capped too; closing one admits the next.
-func TestSharedTLSHTTPSConnectionsAreCapped(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := probe.Addr().String()
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
-	defer registry.Close()
-	https := func(string) bool { return true }
-	manager := newSharedTLSListener(probe, &tlsAuthorityFixture{}, registry, https, make(chan struct{}, 1), "", https, nil, nil)
-	defer manager.Close()
-	accepted := make(chan net.Conn, 4)
-	go func() {
-		for {
-			conn, err := manager.Accept()
-			if err != nil {
-				return
-			}
-			accepted <- conn
-		}
-	}()
-	hello := func() net.Conn {
-		t.Helper()
-		conn, err := net.Dial("tcp", address)
-		if err != nil {
-			t.Fatal(err)
-		}
-		go func() { _ = tls.Client(conn, &tls.Config{ServerName: "app.example.test"}).Handshake() }()
-		return conn
-	}
-	first := hello()
-	defer first.Close()
-	var held net.Conn
-	select {
-	case held = <-accepted:
-	case <-time.After(30 * time.Second):
-		t.Fatal("first HTTPS connection not handed off")
-	}
-	// The first connection's dispatch slot is freed just after its hand-off; wait for that, so the excess one reaches
-	// dispatch (and the name cap) instead of meeting a slot that is still full.
-	for deadline := time.Now().Add(30 * time.Second); len(manager.slots) != 0; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatal("the first HTTPS connection's dispatch slot was not freed at hand-off")
-		}
-	}
-	excess := hello()
-	defer excess.Close()
-	_ = excess.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := excess.Read(make([]byte, 1)); err == nil {
-		t.Fatal("excess HTTPS connection served")
-	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
-		t.Fatal("excess HTTPS connection held instead of refused")
-	}
-	// The refusal is seen only after the dispatch slot is free: a retry sent on seeing it must not meet a full slot.
-	if n := len(manager.slots); n != 0 {
-		t.Fatalf("a refused connection was closed with its dispatch slot still held (%d held)", n)
-	}
-	select {
-	case <-accepted:
-		t.Fatal("excess HTTPS connection handed off beyond the cap")
-	default:
-	}
-	_ = held.Close()
-	next := hello()
-	defer next.Close()
-	select {
-	case conn := <-accepted:
-		_ = conn.Close()
-	case <-time.After(2 * time.Second):
-		t.Fatal("closing a connection did not free its slot")
 	}
 }
 
@@ -537,11 +377,11 @@ func TestSharedTLSCloseLetsAnAcceptedConnectionFinishItsDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	address := probe.Addr().String()
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	https := func(string) bool { return true }
 	authority := &slowSnapshotAuthority{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	manager := newSharedTLSListener(probe, authority, registry, https, make(chan struct{}, 1), "", https, nil, nil)
+	manager := newSharedTLSListener(probe, authority, registry, https, "", https, nil, nil)
 	accepted := make(chan net.Conn, 1)
 	go func() {
 		if conn, err := manager.Accept(); err == nil {

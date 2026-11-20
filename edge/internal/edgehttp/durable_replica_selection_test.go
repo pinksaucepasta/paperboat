@@ -12,7 +12,7 @@ import (
 )
 
 func TestDurableReplicaSelectionEligibilityLatencyAndDeterministicTie(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 8})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestDurableReplicaSelectionEligibilityLatencyAndDeterministicTie(t *testing
 }
 
 func TestDurableReplicaOldSessionCleanupCannotRemoveReplacement(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestDurableReplicaOldSessionCleanupCannotRemoveReplacement(t *testing.T) {
 }
 
 func TestDurableReplicaExactAssignmentSelectsOnlyAuthorizedConnector(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestDurableReplicaPublicRequestUsesSelectedReplicaDecision(t *testing.T) {
 		d.ConnectorID, d.SessionID, d.ProcessGeneration, d.ConfigGeneration, d.AssignmentGeneration = r.ConnectorID, r.ConnectorSessionID, r.ConnectorProcessGeneration, r.ConfigGeneration, r.AssignmentGeneration
 		return d, nil
 	}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4, IngressAuthority: authority})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressAuthority: authority})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestDurableReplicaPublicRequestUsesSelectedReplicaDecision(t *testing.T) {
 func TestDurableReplicaSkipsDrainingAndRetriesFailedOpen(t *testing.T) {
 	rule := replicaRule()
 	rule.AccessMode = "public"
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestDurableReplicaSkipsDrainingAndRetriesFailedOpen(t *testing.T) {
 // active rule still names the older generation while the carrier already reports the newer one. That is served,
 // never a 502; a carrier older than the rule is not.
 func TestDurableReplicaServesAnOlderRuleFromACarrierOnANewerRouteGeneration(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

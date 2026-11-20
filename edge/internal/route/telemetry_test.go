@@ -43,8 +43,8 @@ func (r *recordingRouteTelemetry) types() []LifecycleType {
 func TestGenerationRegistryTelemetryOrderingStaleSafetyAndForcedDrain(t *testing.T) {
 	sink := &recordingRouteTelemetry{}
 	at := time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC)
-	registry, err := NewGenerationRegistryWithOptions(8, GenerationRegistryOptions{
-		TelemetrySink: sink, TelemetryClock: func() time.Time { return at }, MaximumStreams: 8,
+	registry, err := NewGenerationRegistryWithOptions(GenerationRegistryOptions{
+		TelemetrySink: sink, TelemetryClock: func() time.Time { return at },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,32 +107,33 @@ func TestGenerationRegistryTelemetryOrderingStaleSafetyAndForcedDrain(t *testing
 	}
 }
 
-func TestGenerationRegistryStreamOverloadAndReleaseTelemetry(t *testing.T) {
+func TestGenerationRegistryStreamAcquireAndReleaseTelemetry(t *testing.T) {
 	sink := &recordingRouteTelemetry{}
-	registry, err := NewGenerationRegistryWithOptions(8, GenerationRegistryOptions{TelemetrySink: sink, MaximumStreams: 1})
+	registry, err := NewGenerationRegistryWithOptions(GenerationRegistryOptions{TelemetrySink: sink})
 	if err != nil {
 		t.Fatal(err)
 	}
 	activateMatcher(t, registry, 1, []RouteRule{matcherRule("route_1", "app.example.test", MatchExact, "/", 1)})
-	lease, _, err := registry.Acquire(context.Background(), "app.example.test", "/")
-	if err != nil {
-		t.Fatal(err)
+	// A route holds any number of concurrent streams: there is no stream limit to overload.
+	var leases []*StreamLease
+	for range 20000 {
+		lease, _, err := registry.Acquire(context.Background(), "app.example.test", "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		leases = append(leases, lease)
 	}
-	if _, _, err := registry.Acquire(context.Background(), "app.example.test", "/"); !errors.Is(err, ErrStreamOverloaded) {
-		t.Fatalf("overload error = %v", err)
+	for _, lease := range leases {
+		_ = lease.Close()
 	}
-	_ = lease.Close()
-	types := sink.types()
-	wantTail := []LifecycleType{LifecycleStreamAcquired, LifecycleStreamOverloaded, LifecycleStreamReleased}
-	if len(types) < len(wantTail) || !equalLifecycleTypes(types[len(types)-len(wantTail):], wantTail) {
-		t.Fatalf("stream lifecycle = %v", types)
+	acquired := 0
+	for _, kind := range sink.types() {
+		if kind == LifecycleStreamAcquired {
+			acquired++
+		}
 	}
-	sink.mu.Lock()
-	overload := sink.records[len(sink.records)-2]
-	release := sink.records[len(sink.records)-1]
-	sink.mu.Unlock()
-	if overload.ActiveStreams != 1 || overload.MaximumStreams != 1 || release.ActiveStreams != 0 {
-		t.Fatalf("stream telemetry counts: overload=%+v release=%+v", overload, release)
+	if acquired != len(leases) {
+		t.Fatalf("%d stream_acquired events for %d streams", acquired, len(leases))
 	}
 	if err := registry.StageGeneration(2, []RouteRule{matcherRule("route_2", "app.example.test", MatchExact, "/", 1)}); err != nil {
 		t.Fatal(err)
@@ -143,7 +144,7 @@ func TestGenerationRegistryStreamOverloadAndReleaseTelemetry(t *testing.T) {
 	if err := registry.ActivateGeneration(context.Background(), 2, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	types = sink.types()
+	types := sink.types()
 	wantDrainTail := []LifecycleType{LifecycleStageAccepted, LifecycleGenerationReady, LifecycleActivated, LifecycleDrainStarted, LifecycleDrainCompleted}
 	if len(types) < len(wantDrainTail) || !equalLifecycleTypes(types[len(types)-len(wantDrainTail):], wantDrainTail) {
 		t.Fatalf("completed drain lifecycle = %v", types)
@@ -159,7 +160,7 @@ func TestGenerationRegistryTelemetryFailureAndPanicNeverCorruptRouting(t *testin
 		{"panic", &recordingRouteTelemetry{panic: true}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			registry, err := NewGenerationRegistryWithOptions(8, GenerationRegistryOptions{TelemetrySink: test.sink})
+			registry, err := NewGenerationRegistryWithOptions(GenerationRegistryOptions{TelemetrySink: test.sink})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,8 +191,8 @@ func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := NewGenerationRegistryWithOptions(8, GenerationRegistryOptions{
-		TelemetrySink: sink, TelemetryClock: func() time.Time { return at }, MaximumStreams: 1,
+	registry, err := NewGenerationRegistryWithOptions(GenerationRegistryOptions{
+		TelemetrySink: sink, TelemetryClock: func() time.Time { return at },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -208,9 +209,6 @@ func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := registry.Acquire(context.Background(), "customer-secret.example.com", "/"); !errors.Is(err, ErrStreamOverloaded) {
-		t.Fatalf("overload error = %v", err)
-	}
 	_ = lease.Close()
 	if registry.TelemetryDrops() != 0 {
 		t.Fatalf("core telemetry drops = %d", registry.TelemetryDrops())
@@ -224,8 +222,8 @@ func TestCoreTelemetrySinkHealthMetricsRedactionAndSafeIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventSnapshot := events.Snapshot()
-	if len(eventSnapshot) != 6 {
-		t.Fatalf("event count = %d, want 6", len(eventSnapshot))
+	if len(eventSnapshot) != 5 {
+		t.Fatalf("event count = %d, want 5", len(eventSnapshot))
 	}
 	eventJSON := make([]string, 0, len(eventSnapshot))
 	for _, event := range eventSnapshot {
@@ -259,30 +257,4 @@ func equalLifecycleTypes(left, right []LifecycleType) bool {
 		}
 	}
 	return true
-}
-
-func TestCoreTelemetrySinkGenerationReplacementClearsOverload(t *testing.T) {
-	healthTracker, _ := edgetelemetry.NewHealthTracker(time.Now)
-	events, _ := sharedtelemetry.NewEventLog(32)
-	defer events.Close()
-	sink, _ := NewCoreTelemetrySink(healthTracker, edgetelemetry.NewMetrics(), events)
-	for generation := uint64(1); generation <= 32; generation++ {
-		for _, kind := range []LifecycleType{LifecycleActivated, LifecycleStreamOverloaded} {
-			if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: kind, Generation: generation, MaximumStreams: 1, ActiveStreams: 1, CorrelationID: "correlation_test"}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: LifecycleStreamReleased, Generation: generation - 1, MaximumStreams: 1, CorrelationID: "correlation_test"}); err != nil {
-			t.Fatal(err)
-		}
-		if healthTracker.Snapshot().Dimensions.Route.Status != health.StatusDegraded {
-			t.Fatal("old release recovered current overloaded route")
-		}
-	}
-	if err := sink.RecordRouteTelemetry(RouteTelemetryRecord{At: time.Now(), Type: LifecycleActivated, Generation: 33, CorrelationID: "correlation_test"}); err != nil {
-		t.Fatal(err)
-	}
-	if sink.overloaded || healthTracker.Snapshot().Dimensions.Route.Status != health.StatusReady {
-		t.Fatal("replacement retained old exhaustion")
-	}
 }

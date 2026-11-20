@@ -48,7 +48,7 @@ relative paths, or a missing carrier listener stop startup with a typed error.
   neither.
 - **Names:** `connector_advertise_host`, `preview_base_domain`, `tunnel_base_domain`,
   `runtime_base_domain`.
-- **Limits:** `node_capacity`, `max_body_bytes` (default 100 MiB), `max_header_bytes`
+- **Limits:** `max_body_bytes` (default 100 MiB), `max_header_bytes`
   (default 32 KiB, at most 128 KiB), `control_interval`, `control_timeout`, and the optional
   `preview_carrier_interval`, `public_tcp_idle_timeout`, `request_body_idle_timeout`.
 - **Proxies and fixed routes:** `trusted_proxy_cidrs` and `public_routes` (host, optional path

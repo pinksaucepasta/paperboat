@@ -27,13 +27,13 @@ func (f routeSourceFunc) DesiredRoutes(ctx context.Context, nodeID string) ([]co
 	return f(ctx, nodeID)
 }
 
-func testNodeRegistration(t *testing.T, nodeID, epoch string, capacity uint32) control.NodeRegistration {
+func testNodeRegistration(t *testing.T, nodeID, epoch string) control.NodeRegistration {
 	t.Helper()
 	trust, err := control.NewProcessCarrierServerTrust(nodeID, epoch, "edge.example.test", time.Now().UTC(), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return control.NodeRegistration{NodeID: nodeID, ProcessEpoch: epoch, Capacity: capacity, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
+	return control.NodeRegistration{NodeID: nodeID, ProcessEpoch: epoch, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
 }
 
 type routeObserver struct {
@@ -181,11 +181,11 @@ func (s *usageSink) ReportUsage(context.Context, control.UsageReport) (control.U
 func TestNodeWorkerReportsReadyAndDrain(t *testing.T) {
 	state := node.New("edge")
 	state.MarkReady()
-	manager, _ := node.NewManager(state, 2)
+	manager, _ := node.NewManager(state)
 	fake := testedge.New()
 	pulse := make(chan time.Time, 1)
 	now := time.Unix(10, 0)
-	worker := &NodeWorker{Manager: manager, Sink: fake, Registration: testNodeRegistration(t, "edge", "process", 2), Pulse: pulse, Now: func() time.Time { return now }}
+	worker := &NodeWorker{Manager: manager, Sink: fake, Registration: testNodeRegistration(t, "edge", "process"), Pulse: pulse, Now: func() time.Time { return now }}
 	if err := worker.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -220,10 +220,10 @@ func TestNodeWorkerHeartbeatCarriesErrorPageReferencesOnce(t *testing.T) {
 	telemetry.TakeErrorPages()
 	state := node.New("edge")
 	state.MarkReady()
-	manager, _ := node.NewManager(state, 2)
+	manager, _ := node.NewManager(state)
 	sink := &observedHeartbeats{NodeSink: testedge.New()}
 	pulse := make(chan time.Time)
-	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process", 2), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) }}
+	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process"), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) }}
 	if err := worker.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -251,11 +251,11 @@ func TestNodeWorkerHeartbeatCarriesErrorPageReferencesOnce(t *testing.T) {
 func TestNodeWorkerHeartbeatCarriesTheNodeMetricsReport(t *testing.T) {
 	state := node.New("edge")
 	state.MarkReady()
-	manager, _ := node.NewManager(state, 2)
+	manager, _ := node.NewManager(state)
 	sink := &observedHeartbeats{NodeSink: testedge.New()}
 	pulse := make(chan time.Time)
 	var sampled atomic.Int32
-	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process", 2), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) },
+	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process"), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) },
 		Metrics: func(at time.Time) *nodemetrics.Report {
 			sampled.Add(1)
 			return &nodemetrics.Report{Version: "dev-edge", CPUPercent: 12.5, RSSBytes: 64 << 20, BytesIn: 100, BytesOut: 200}
@@ -308,10 +308,10 @@ func TestWorkersStopWhenPulseCloses(t *testing.T) {
 
 	state := node.New("edge")
 	state.MarkReady()
-	manager, _ := node.NewManager(state, 1)
+	manager, _ := node.NewManager(state)
 	nodePulse := make(chan time.Time)
 	fake := testedge.New()
-	nodeWorker := &NodeWorker{Manager: manager, Sink: fake, Registration: testNodeRegistration(t, "edge", "p", 1), Pulse: nodePulse}
+	nodeWorker := &NodeWorker{Manager: manager, Sink: fake, Registration: testNodeRegistration(t, "edge", "p"), Pulse: nodePulse}
 	if err := nodeWorker.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}

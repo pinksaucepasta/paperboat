@@ -62,7 +62,7 @@ func testIngressLimits(byteRate rate.Limit) *IngressLimits {
 // Section 5 of the edge abuse plan: popularity is not abuse. Any number of concurrent streams and
 // opens of one publication are admitted; they share one byte pacer per publication and account.
 func TestIngressNeverRefusesStreamsAndSharesPacers(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20)})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1 << 20)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,32 +95,28 @@ func TestIngressNeverRefusesStreamsAndSharesPacers(t *testing.T) {
 	}
 }
 
-// A full table of keys with open streams gives a new key its own pacer, never a refusal.
-func TestIngressFullTableStillAdmits(t *testing.T) {
+// The pacer table has no fixed size: it holds every key with an open stream (idle keys are dropped by expireIdle).
+func TestIngressTableHoldsEveryKeyInUse(t *testing.T) {
 	limits, err := newIngressLimits(testIngressLimits(1 << 20))
 	if err != nil {
 		t.Fatal(err)
 	}
 	decision := publicTCPDecision(time.Now().UTC(), 4001)
-	for i := 0; i < maximumIngressLimitEntries; i++ {
+	const keys = 5000
+	for i := 0; i < keys; i++ {
 		decision.Binding.AccountID = fmt.Sprintf("account_%d", i)
-		limits.acquire(decision, nil)
+		if lease := limits.acquire(decision, nil); lease == nil || lease.publication == nil {
+			t.Fatalf("key %d not admitted", i)
+		}
 	}
-	if n := len(limits.publications) + len(limits.accounts); n != maximumIngressLimitEntries {
-		t.Fatalf("table size %d", n)
-	}
-	decision.Binding.AccountID = "account_new"
-	if lease := limits.acquire(decision, nil); lease == nil || lease.publication == nil {
-		t.Fatal("new key not admitted on a full table")
-	}
-	if n := len(limits.publications) + len(limits.accounts); n != maximumIngressLimitEntries {
-		t.Fatalf("table grew past its bound: %d", n)
+	if len(limits.accounts) != keys {
+		t.Fatalf("account table holds %d of %d keys in use", len(limits.accounts), keys)
 	}
 }
 
 func TestIngressPacingCancellationMetersSuccessfulPartialBytesAndReleases(t *testing.T) {
 	recorder := &ingressUsageRecorder{}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1), Usage: recorder})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1), Usage: recorder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +152,7 @@ func TestIngressPacingCancellationMetersSuccessfulPartialBytesAndReleases(t *tes
 
 func TestIngressMeterRecordsBytesReturnedWithError(t *testing.T) {
 	recorder := &ingressUsageRecorder{}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +178,7 @@ var _ interface{ CloseWrite() error } = (*ingressMemoryStream)(nil)
 var _ IngressUsage = (*ingressUsageRecorder)(nil)
 
 func TestIngressOutlivesAuthorityWindowUntilDisconnectedAndReleasesCapacity(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20)})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1 << 20)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +298,7 @@ type failingIngressClose struct{ net.Conn }
 func (s failingIngressClose) Close() error { return errors.Join(s.Conn.Close(), syscall.EIO) }
 
 func TestIngressRetainsTransferAndCleanupCauses(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20), Usage: &failingIngressUsage{}})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1 << 20), Usage: &failingIngressUsage{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +338,7 @@ func TestIngressRetainsTransferAndCleanupCauses(t *testing.T) {
 // Audit T11: the server's configured set replaces the defaults on new and current keys alike,
 // and an invalid set changes nothing.
 func TestServerIngressLimitsApplyToCurrentKeys(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +371,7 @@ func TestServerIngressLimitsApplyToCurrentKeys(t *testing.T) {
 // An edge that has not heard from the server enforces no byte pacing (it enforces only what it is told); the server's answer
 // sets the limits, and the zero set it sends a customer-owned edge removes them again.
 func TestEdgeWithoutAnswerPacesNothingAndTheZeroSetRemovesLimits(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +418,7 @@ func TestEdgeLogsTheIngressLimitsItApplies(t *testing.T) {
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
 	defer slog.SetDefault(previous)
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +444,7 @@ func TestEdgeLogsTheIngressLimitsItApplies(t *testing.T) {
 func TestRegistryThrottleSlowsALiveStreamAndLeavesOthersAlone(t *testing.T) {
 	limits := testIngressLimits(1 << 30)
 	limits.Publication.ByteBurst, limits.Account.ByteBurst = 1<<20, 1<<20
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4, IngressLimits: limits})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: limits})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +538,7 @@ func throttledRegistry(t *testing.T, entries []connectorprotocol.IngressThrottle
 	t.Helper()
 	limits := testIngressLimits(1 << 30)
 	limits.Publication.ByteBurst, limits.Account.ByteBurst = 1<<20, 1<<20
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 16, IngressLimits: limits})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: limits})
 	if err != nil {
 		t.Fatal(err)
 	}

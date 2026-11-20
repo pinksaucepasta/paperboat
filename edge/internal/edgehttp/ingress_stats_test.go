@@ -8,7 +8,7 @@ import (
 // A route served by two carriers is one attached route: diagnostics compares this count with the
 // distinct routes in the registry, so summing per carrier made /readyz report route_drift forever.
 func TestIngressStatsCountsDistinctRoutesAcrossCarriers(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 8})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

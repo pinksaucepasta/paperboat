@@ -51,7 +51,7 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 	admission := testPreviewCarrierAdmission(decision, accessMode)
 	identity := admission.Identity
 
-	expected, e := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch, MaximumAdmissions: 1})
+	expected, e := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -85,7 +85,7 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 		t.Fatal(e)
 	}
 	recorder := &ingressUsageRecorder{}
-	metering, e := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
+	metering, e := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -403,7 +403,6 @@ type edgeNodeRegistration struct {
 	Artifact     string `json:"artifact"`
 	Protocol     string `json:"protocol"`
 	ProcessEpoch string `json:"process_epoch"`
-	Capacity     uint32 `json:"capacity"`
 	Endpoint     struct {
 		Host     string `json:"host"`
 		TCPPort  uint16 `json:"tcp_port"`
@@ -519,7 +518,7 @@ type edgeUsageRequest struct {
 const controlTunnelNodeStaleAfter = 2 * time.Minute
 
 func (s *EdgeService) RegisterNode(ctx context.Context, r edgeNodeRegistration) error {
-	if r.NodeID == "" || r.EdgePool == "" || r.Protocol == "" || r.ProcessEpoch == "" || r.Capacity == 0 || r.Endpoint.Host == "" || r.Endpoint.TCPPort == 0 || r.Endpoint.QUICPort == 0 {
+	if r.NodeID == "" || r.EdgePool == "" || r.Protocol == "" || r.ProcessEpoch == "" || r.Endpoint.Host == "" || r.Endpoint.TCPPort == 0 || r.Endpoint.QUICPort == 0 {
 		return invalidUsage("edge.go:636")
 	}
 	// Carrier fields are optional so an edge that omits them still re-registers (it keeps the carrier identity
@@ -533,7 +532,7 @@ func (s *EdgeService) RegisterNode(ctx context.Context, r edgeNodeRegistration) 
 			return err
 		}
 	}
-	capacity, _ := json.Marshal(map[string]any{"connectors": r.Capacity, "artifact": r.Artifact})
+	capacity, _ := json.Marshal(map[string]any{"artifact": r.Artifact})
 	now := sql.NullTime{Time: s.clock().UTC(), Valid: true}
 	_, err := s.store.Queries().RegisterControlTunnelNode(ctx, dbsqlc.RegisterControlTunnelNodeParams{
 		ID: r.NodeID, EdgePool: r.EdgePool,

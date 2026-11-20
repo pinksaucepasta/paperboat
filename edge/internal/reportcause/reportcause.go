@@ -43,7 +43,7 @@ func init() {
 			"route_reconcile":          {Operation: "control_reconcile", Stage: "reconcile", Name: "%s_route_reconcile_failed", Code: "control_reconcile_failed"},
 			"route_group_probe":        {Operation: "control_reconcile", Stage: "route_probe", Name: "%s_route_group_unavailable", Code: "route_group_unavailable"},
 		},
-		Codes:  []string{"stage_accepted", "stage_rejected", "generation_ready", "activated", "drain_started", "drain_completed", "drain_forced", "stale_generation_rejected", "stream_acquired", "stream_overloaded", "stream_released", "control_trust_failed", "carrier_handler_failed", "usage_delivery_failed", "node_heartbeat_failed", "http_server_failed", "runtime_admission_failed", "runtime_observation_failed", "preview_admission_failed", "preview_observation_failed", "certificate_distribution_failed", "upstream_request_failed", "service_shutdown_failed", "control_reconcile_failed", "route_group_unavailable"},
+		Codes:  []string{"stage_accepted", "stage_rejected", "generation_ready", "activated", "drain_started", "drain_completed", "drain_forced", "stale_generation_rejected", "stream_acquired", "stream_released", "control_trust_failed", "carrier_handler_failed", "usage_delivery_failed", "node_heartbeat_failed", "http_server_failed", "runtime_admission_failed", "runtime_observation_failed", "preview_admission_failed", "preview_observation_failed", "certificate_distribution_failed", "upstream_request_failed", "service_shutdown_failed", "control_reconcile_failed", "route_group_unavailable"},
 		Causes: []string{"trust_snapshot_invalid", "capacity_exhausted", "control_invalid", "control_unavailable", "node_observation_stale", "route_invalid", "route_state_stale", "route_unavailable", "authority_expired", "authority_rejected", "authorization_rejected", "configuration_invalid", "state_conflict", "authority_unavailable"},
 		Stages: map[string]string{
 			"control_trust":            "%s_control_trust_failed",
@@ -124,9 +124,6 @@ func classify(err error) (string, int) {
 	}
 	if reporting.SameError(err, route.ErrGenerationStale) || reporting.SameError(err, route.ErrGenerationConflict) {
 		return "route_state_stale", 81
-	}
-	if reporting.SameError(err, route.ErrStreamOverloaded) {
-		return "capacity_exhausted", 80
 	}
 	if reporting.SameError(err, route.ErrGenerationClosed) || reporting.SameError(err, route.ErrGenerationNotReady) {
 		return "route_unavailable", 79

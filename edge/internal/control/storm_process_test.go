@@ -64,7 +64,7 @@ func TestControlStormParticipant(t *testing.T) {
 			}
 			registration := NodeRegistration{
 				NodeID: nodeID, EdgePool: "default", Artifact: "paperboat-control-storm",
-				Protocol: "1.0", ProcessEpoch: "tunnel_client_epoch", Capacity: 128,
+				Protocol: "1.0", ProcessEpoch: "tunnel_client_epoch",
 				Endpoint:                ConnectorEndpoint{Host: "127.0.0.1", TCPPort: uint16(20000 + index), QUICPort: uint16(30000 + index)},
 				CarrierEndpoint:         ConnectorEndpoint{Host: "edge.example.test", TCPPort: uint16(40000 + index), QUICPort: uint16(50000 + index)},
 				CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM,

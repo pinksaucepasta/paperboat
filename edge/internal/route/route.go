@@ -82,7 +82,7 @@ func NewRegistry(previewBaseDomain, runtimeBaseDomain string) *Registry {
 }
 
 func NewRegistryWithOptions(previewBaseDomain, runtimeBaseDomain string, options GenerationRegistryOptions) (*Registry, error) {
-	matcher, err := NewGenerationRegistryWithOptions(0, options)
+	matcher, err := NewGenerationRegistryWithOptions(options)
 	if err != nil {
 		return nil, err
 	}

@@ -209,7 +209,6 @@ func TestEdgeStartupSendsNoControlRequestTheServerRefuses(t *testing.T) {
 		"tunnel_base_domain":           "tunnels.example.test",
 		"runtime_base_domain":          "runtime.example.test",
 		"trusted_proxy_cidrs":          []string{"127.0.0.1/32"},
-		"node_capacity":                8,
 		"control_interval":             time.Second,
 		"control_timeout":              5 * time.Second,
 	}

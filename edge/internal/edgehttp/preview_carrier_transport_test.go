@@ -21,7 +21,7 @@ import (
 )
 
 func TestDataCarrierPreviewRegistryFencesReplacementGeneration(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDataCarrierPreviewRegistryFencesReplacementGeneration(t *testing.T) {
 }
 
 func TestPreviewCarrierRouteMatcherFencesReplacementAndPolicyOwnership(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func testPreviewRouteReplacementRetry(t *testing.T, duringOpen bool) {
 	oldAccepted := make(chan struct{})
 	oldClosed := make(chan struct{})
 	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{
-		BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4,
+		BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1053,7 +1053,7 @@ func TestDataCarrierPreviewTransportSkipsInterimContinueAndReturnsTheFinalRespon
 // A host restart keeps the worker generation but opens a new carrier session. The server's higher
 // attachment generation lets it replace the old carrier at once instead of waiting for it to close.
 func TestDataCarrierPreviewRegistryRestartedSessionReplacesTheOldCarrier(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1132,7 +1132,7 @@ func TestUploadOverTheCapMidStreamIs413(t *testing.T) {
 // generation) on a second live connection. That is not stale: the newer connection takes the route, the route
 // keeps serving, and a genuinely older generation is still refused.
 func TestDataCarrierPreviewRegistryRedialOfTheSameRegistrationIsNotStale(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1175,7 +1175,7 @@ func TestDataCarrierPreviewRegistryRedialOfTheSameRegistrationIsNotStale(t *test
 // When the serving connection of a redialed registration dies and the replaced one is still live, the route is
 // served by it at once, not left unserved until the next pull attaches it again.
 func TestDataCarrierPreviewRegistryPromotesTheLiveStandbyWhenTheServingConnectionDies(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1213,7 +1213,7 @@ func TestDataCarrierPreviewRegistryPromotesTheLiveStandbyWhenTheServingConnectio
 
 // A standby whose host sent a goaway is leaving: it is not promoted, the route waits for the next pull.
 func TestDataCarrierPreviewRegistryDoesNotPromoteADrainingStandby(t *testing.T) {
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
 	if err != nil {
 		t.Fatal(err)
 	}

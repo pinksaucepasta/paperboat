@@ -21,7 +21,6 @@
   "runtime_base_domain": "runtime.example.test",
   "trusted_proxy_cidrs": [],
   "public_routes": [],
-  "node_capacity": 128,
   "control_interval": 5000000000,
   "control_timeout": 5000000000,
   "max_body_bytes": 104857600,
