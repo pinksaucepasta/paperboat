@@ -2,11 +2,16 @@ package derpquic
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"tailscale.com/types/key"
 )
 
@@ -139,4 +144,128 @@ func TestBudgetBoundAndRecovery(t *testing.T) {
 	if sent > carrierBytesPerSecond+budgetBurstBytes || sent < carrierBytesPerSecond {
 		t.Fatalf("one second forwarded %d bytes", sent)
 	}
+}
+
+func wholeDatagram(id uint64, k key.NodePublic, data []byte) []byte {
+	b := fragment(id, k, data[:1], 0)[:fragmentHeader]
+	binary.BigEndian.PutUint16(b[40:42], uint16(len(data)))
+	return append(b, data...)
+}
+
+func TestReassemblyWholePacketInOneDatagram(t *testing.T) {
+	var r reassembler
+	k := key.NewNode().Public()
+	now := time.Now()
+	data := bytes.Repeat([]byte{7}, 1312)
+	p, ok, e := r.accept(wholeDatagram(1, k, data), now, nil)
+	if e != nil || !ok || p.peer != k || !bytes.Equal(p.data, data) || len(r.pending) != 0 {
+		t.Fatalf("whole datagram: %v %v", ok, e)
+	}
+	if _, ok, e := r.accept(wholeDatagram(1, k, data), now, nil); e != nil || ok {
+		t.Fatal("whole datagram replay was accepted")
+	}
+	// The second part can never be the whole packet, and a whole packet is at most MaxPacket.
+	bad := wholeDatagram(2, k, data)
+	bad[42] = 1
+	if _, _, e := r.accept(bad, now, nil); !errors.Is(e, ErrProtocol) {
+		t.Fatalf("whole datagram as index 1: %v", e)
+	}
+	if _, ok, e := r.accept(wholeDatagram(3, k, make([]byte, MaxPacket)), now, nil); e != nil || !ok {
+		t.Fatalf("MaxPacket whole datagram: %v %v", ok, e)
+	}
+}
+
+// carrierPair is a loopback QUIC carrier; the client's sendPacket output arrives as the server's raw datagrams.
+func carrierPair(t *testing.T, disablePMTUD bool) (client *quic.Conn, datagrams <-chan []byte) {
+	t.Helper()
+	cert := certificate(t)
+	roots := x509.NewCertPool()
+	roots.AddCert(cert.Leaf)
+	ln, err := quic.ListenAddr("127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{ALPN}}, quicConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	cfg := quicConfig()
+	cfg.DisablePathMTUDiscovery = disablePMTUD
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err = quic.DialAddr(ctx, ln.Addr().String(), &tls.Config{RootCAs: roots, ServerName: "localhost", NextProtos: []string{ALPN}}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.CloseWithError(0, "") })
+	server, err := ln.Accept(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make(chan []byte, 256)
+	go func() {
+		for {
+			b, err := server.ReceiveDatagram(context.Background())
+			if err != nil {
+				return
+			}
+			out <- b
+		}
+	}()
+	return client, out
+}
+
+// received collects the datagrams of one packet (one or two) and checks they reassemble to data.
+func received(t *testing.T, datagrams <-chan []byte, k key.NodePublic, data []byte) (count int) {
+	t.Helper()
+	var r reassembler
+	for {
+		select {
+		case b := <-datagrams:
+			count++
+			p, ok, err := r.accept(b, time.Now(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok {
+				if p.peer != k || !bytes.Equal(p.data, data) {
+					t.Fatal("packet changed in transit")
+				}
+				return count
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("packet not received")
+		}
+	}
+}
+
+func TestSendPacketFragmentsOnlyWhenItDoesNotFit(t *testing.T) {
+	k := key.NewNode().Public()
+	data := bytes.Repeat([]byte{9}, 1312)
+	t.Run("does not fit", func(t *testing.T) {
+		// Without path MTU discovery the carrier stays at its initial packet size, below 1312 + header.
+		conn, datagrams := carrierPair(t, true)
+		var seq atomic.Uint64
+		if err := sendPacket(conn, &seq, packet{peer: k, data: data}); err != nil {
+			t.Fatal(err)
+		}
+		if n := received(t, datagrams, k, data); n != 2 {
+			t.Fatalf("a packet that does not fit one datagram arrived as %d datagrams, want 2", n)
+		}
+	})
+	t.Run("fits", func(t *testing.T) {
+		// quic-go grows the path MTU on loopback to its maximum; once it did, the packet is one datagram.
+		conn, datagrams := carrierPair(t, false)
+		var seq atomic.Uint64
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if err := sendPacket(conn, &seq, packet{peer: k, data: data}); err != nil {
+				t.Fatal(err)
+			}
+			if n := received(t, datagrams, k, data); n == 1 {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("path MTU discovery never let a 1312-byte packet go in one datagram")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 }
