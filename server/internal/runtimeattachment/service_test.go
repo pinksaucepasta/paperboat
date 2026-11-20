@@ -573,14 +573,13 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if err := database.SQL().QueryRowContext(ctx, `SELECT primary_node_id,secondary_node_id FROM machine_edge_placements WHERE machine_id=$1`, machine).Scan(&primary, &secondary); err != nil || primary != backupNode || secondary != node {
 		t.Fatalf("stored placement primary=%q secondary=%q error=%v", primary, secondary, err)
 	}
-	// Capacity only stops new selection; it must not retire a valid carrier
-	// before a replacement is ready.
+	// An edge has no capacity limit: one reporting itself at its declared size is still selected.
 	exec(`UPDATE control_tunnel_nodes SET capacity_used=capacity_limit WHERE id=$1`, backupNode)
 	capacityRequest := request
 	capacityRequest.EdgePreference = nil
 	retained, err := service.Attach(ctx, proof, capacityRequest)
-	if err != nil || retained.Binding.EdgeNodeID != node || retained.ActiveEdgeNodeID != backupNode {
-		t.Fatalf("capacity replaced working carrier: primary=%q active=%q err=%v", retained.Binding.EdgeNodeID, retained.ActiveEdgeNodeID, err)
+	if err != nil || retained.Binding.EdgeNodeID != backupNode || retained.ActiveEdgeNodeID != backupNode {
+		t.Fatalf("an edge at its declared size was not selected: primary=%q active=%q err=%v", retained.Binding.EdgeNodeID, retained.ActiveEdgeNodeID, err)
 	}
 	exec(`UPDATE control_tunnel_nodes SET capacity_used=0 WHERE id=$1`, backupNode)
 	// A managed runtime hostname cannot use a customer's edge, even when that
