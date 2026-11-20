@@ -38,7 +38,9 @@ func TestSegmentRoundTripAndTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(file, []byte("llo")) {
+	// A marker no base64 (the header's sealed key) or random ciphertext byte string reproduces: it holds non-ASCII bytes
+	// and is 8 bytes long. A 3-byte "llo" matched the sealed key's base64 about once in 2,000 runs (CI, Linux).
+	if bytes.Contains(file, []byte("héllo <")) {
 		t.Fatal("segment holds plaintext")
 	}
 	header, err := ParseSegmentHeader(file)
