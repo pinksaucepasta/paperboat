@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -365,5 +367,101 @@ func TestReconcileLeavesMachinesAloneAndARevokeCommitsOnPostgres(t *testing.T) {
 	}
 	if took := time.Since(start); took > 2*time.Second {
 		t.Fatalf("reconcile and revoke took %v, want under 2 s", took)
+	}
+}
+
+// sweepLists reports whether each sweep form (quick and full) lists the fixture's workspace.
+func (f *nearestFixture) sweepLists() map[string]bool {
+	f.t.Helper()
+	out := map[string]bool{}
+	for name, query := range map[string]string{"quick": quickScopesSQL, "full": fullScopesSQL} {
+		rows, err := f.db.Pool().Query(f.ctx, query, "", "", 100000, Size, time.Now(), fmt.Sprintf("%d seconds", int(ReplaceAfter.Seconds())))
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		for rows.Next() {
+			var kind, id, owner string
+			if err := rows.Scan(&kind, &id, &owner); err != nil {
+				f.t.Fatal(err)
+			}
+			if kind == "account" && id == f.account {
+				out[name] = true
+			}
+		}
+		rows.Close()
+	}
+	return out
+}
+
+// settled makes a workspace with a machine, three regions of one node each, and a stored pair of two of them; it returns
+// the node of the pair's first region and the third region's node.
+func settledPair(t *testing.T) (f *nearestFixture, drained, spare string) {
+	f = newNearestFixture(t)
+	a, b, c := f.node("a"), f.node("b"), f.node("c")
+	f.machine("m", map[string]int{}, "1 hour")
+	pair := f.pair()
+	if len(pair) != 2 {
+		t.Fatalf("pair=%v", pair)
+	}
+	drained = strings.TrimPrefix(pair[0], "region_")
+	for _, node := range []string{a, b, c} {
+		if region(node) != pair[0] && region(node) != pair[1] {
+			spare = node
+		}
+	}
+	if sweeps := f.sweepLists(); len(sweeps) != 0 {
+		t.Fatalf("a settled workspace is listed: %v", sweeps)
+	}
+	return f, drained, spare
+}
+
+func (f *nearestFixture) drain(node, deadline string) {
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()+$2::interval,last_heartbeat_at=now() WHERE id=$1`, node, deadline)
+}
+
+// A region whose only node is drained past its deadline is replaced at the next sweep, not after ten minutes of silence
+// (a draining edge still heartbeats).
+func TestReconcileReplacesRegionWhoseOnlyNodeIsDrainedPastDeadline(t *testing.T) {
+	f, drained, spare := settledPair(t)
+	f.drain(drained, "-1 second")
+	for name, listed := range map[string]bool{"quick": f.sweepLists()["quick"], "full": f.sweepLists()["full"]} {
+		if !listed {
+			t.Fatalf("the %s sweep skips a workspace whose only node in a region is drained past its deadline", name)
+		}
+	}
+	got := f.pair()
+	if len(got) != 2 || slices.Contains(got, region(drained)) || !slices.Contains(got, region(spare)) {
+		t.Fatalf("pair=%v, want the drained region %s replaced by %s", got, region(drained), region(spare))
+	}
+	if sweeps := f.sweepLists(); len(sweeps) != 0 {
+		t.Fatalf("the sweep still lists the workspace after the replacement: %v", sweeps)
+	}
+}
+
+// Drain lets existing connections finish: the region keeps its place until the node's deadline.
+func TestReconcileKeepsRegionWhileDrainingNodeFinishes(t *testing.T) {
+	f, drained, _ := settledPair(t)
+	before := f.pair()
+	f.drain(drained, "10 minutes")
+	if sweeps := f.sweepLists(); len(sweeps) != 0 {
+		t.Fatalf("the sweep lists a workspace whose draining node still has time: %v", sweeps)
+	}
+	if got := f.pair(); !slices.Equal(got, before) {
+		t.Fatalf("pair moved while the node drains: %v -> %v", before, got)
+	}
+}
+
+// A region with another ready node keeps its place when one node is drained past its deadline.
+func TestReconcileKeepsRegionWithAnotherReadyNode(t *testing.T) {
+	f, drained, _ := settledPair(t)
+	before := f.pair()
+	other := f.node("a2")
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, other, region(drained))
+	f.drain(drained, "-1 second")
+	if sweeps := f.sweepLists(); len(sweeps) != 0 {
+		t.Fatalf("the sweep lists a workspace whose region has another ready node: %v", sweeps)
+	}
+	if got := f.pair(); !slices.Equal(got, before) {
+		t.Fatalf("pair moved although %s has a ready node: %v -> %v", region(drained), before, got)
 	}
 }
