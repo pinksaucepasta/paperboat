@@ -46,6 +46,16 @@ def split(weight, count):
     return [(seconds, sorted(pkgs)) for seconds, pkgs in shards if pkgs]  # shards[0] keeps its overhead in the seconds
 
 
+def split_even(weight, count):
+    """split() without the first-shard overhead: for runs that have no go build or go vet in one of them."""
+    shards_ = [[0, []] for _ in range(count)]
+    for pkg in sorted(weight, key=lambda p: (-weight[p], p)):
+        lightest = min(shards_, key=lambda s: s[0])
+        lightest[0] += weight[pkg]
+        lightest[1].append(pkg)
+    return [(seconds, sorted(pkgs)) for seconds, pkgs in shards_ if pkgs]
+
+
 def gh(*args):
     return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout
 
