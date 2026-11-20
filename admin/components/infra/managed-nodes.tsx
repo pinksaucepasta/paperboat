@@ -190,6 +190,18 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
   return <RowMenu label={node.id} actions={actions} data-node-actions={node.id} />
 }
 
+/** Mesh links, with the failed forwards (unreachable + holder_miss) beside them, muted while there are none. */
+function MeshCell({ forward }: { forward: Node["forward"] }) {
+  if (!forward) return "-"
+  const failed = forward.unreachable + forward.holder_miss
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <Mono>{forward.links}</Mono>
+      <span className={failed === 0 ? "text-muted-foreground" : "text-destructive"}><Mono>{failed} failed</Mono></span>
+    </span>
+  )
+}
+
 export function ManagedNodes() {
   const admin = useOperator()?.role === "admin"
   const filters = useMemo(() => ({}), [])
@@ -213,6 +225,8 @@ export function ManagedNodes() {
           { header: "Roles", cell: (n) => n.roles.join(", ") },
           { header: "Protocol", cell: (n) => <Mono>{n.protocol_version}</Mono> },
           { header: "State", cell: (n) => <StatusBadge state={n.ready ? n.state : "stale"} /> },
+          { header: "Forwarded", cell: (n) => (n.forward ? <Mono>{n.forward.forwarded}</Mono> : "-") },
+          { header: "Mesh", cell: (n) => <MeshCell forward={n.forward} /> },
           { header: "Seen", cell: (n) => (n.observed_at ? <Time iso={n.observed_at} relative /> : "Waiting") },
           { header: "", className: "w-12", cell: (n) => <NodeActions node={n} regions={regions} admin={admin} /> },
         ]}
