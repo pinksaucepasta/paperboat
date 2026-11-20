@@ -1165,10 +1165,17 @@ func (p *Policy) admitAddress(w http.ResponseWriter, r *http.Request) (func(), b
 	return release, ok
 }
 
+// attestedLocal marks the local address of a connection whose RemoteAddr a verified peer node attested (a forwarded
+// visitor, forward.serveForward): its client address is that RemoteAddr, never what the visitor's headers say.
+type attestedLocal interface{ AttestedVisitor() }
+
 func (p *Policy) clientIP(r *http.Request) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		remoteHost = r.RemoteAddr
+	}
+	if _, forwarded := r.Context().Value(http.LocalAddrContextKey).(attestedLocal); forwarded {
+		return remoteHost
 	}
 	remote := net.ParseIP(remoteHost)
 	if remote == nil || !p.trusted(remote) {

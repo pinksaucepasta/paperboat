@@ -1,14 +1,17 @@
 package edgehttp
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/forward"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // Forwarder passes a visitor this node cannot serve to the node that can (forward.Mesh).
@@ -97,4 +100,146 @@ func serveBrandedPage(conn net.Conn, config *tls.Config, handler http.HandlerFun
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: handler}
 	server.SetKeepAlivesEnabled(false)
 	_ = server.Serve(&oneConnListener{conn: tls.Server(conn, config)})
+}
+
+// hostAdmission is the listener's decision about a TLS server name: what the authority snapshot says and which path
+// serves it. dispatch acts on it; Admit only asks whether it serves.
+type hostAdmission struct {
+	decisions           []connectorprotocol.IngressDecision
+	https               bool
+	infrastructureHTTPS bool
+	authorizedHTTPS     bool
+	selected            *connectorprotocol.IngressDecision // the TLS passthrough decision, when that is the path
+}
+
+// resolveHost decides how host is served from the current authority; false means it is denied (the connection is
+// dropped). It takes no connection and waits for nothing, so dispatch and Admit share it.
+func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
+	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
+	decisions, err := l.authority.Snapshot(ctx)
+	cancel()
+	https := l.httpsHostname(host)
+	infrastructureHTTPS := host == l.infrastructureHostname && https
+	if err != nil {
+		l.observe("public_tcp_reconcile", err)
+		// This exact installation name is reserved for HTTPS by server authority.
+		// Keep health/installation verification usable during control outages;
+		// dynamic route names must never fall back when authority is unavailable.
+		if !infrastructureHTTPS {
+			return hostAdmission{}, false
+		}
+		decisions = nil
+	}
+	// Customer aliases need ingress authority even when the route matcher names
+	// a different host. Configuration membership cannot grant TLS ownership;
+	// only live server-admitted runtime/private carriers supply that exception.
+	authorizedHTTPS := l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)
+	for _, decision := range decisions {
+		if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
+			if decision.Validate(time.Now().UTC()) != nil {
+				return hostAdmission{}, false
+			}
+			authorizedHTTPS = true
+		}
+	}
+	// A route an operator took down still gets TLS: the HTTP layer answers it with the takedown page
+	// (451 or 403) rather than a dead connection.
+	if !authorizedHTTPS && https {
+		if taken, ok := l.authority.(interface{ Withheld(string) bool }); ok && taken.Withheld(host) {
+			authorizedHTTPS = true
+		}
+	}
+	// A preview whose owner machine is asleep gets TLS for its "machine offline" page. Its carrier is gone, so the
+	// route matcher no longer names it (https is false): the server's offline list is the authority for the name.
+	if !authorizedHTTPS {
+		if offline, ok := l.authority.(interface{ OwnerOffline(string) bool }); ok && offline.OwnerOffline(host) {
+			authorizedHTTPS = true
+		}
+	}
+	// The locally admitted public preview may become ready after the cached
+	// complete snapshot was fetched. Refresh its exact authority before any TLS
+	// writes, then inspect the entire current snapshot for protocol conflicts.
+	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
+		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
+		defer stop()
+		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
+			decisions, err = l.authority.Snapshot(refresh)
+			if err != nil {
+				return hostAdmission{}, false
+			}
+			for _, decision := range decisions {
+				if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
+					if decision.Validate(time.Now().UTC()) != nil {
+						return hostAdmission{}, false
+					}
+					authorizedHTTPS = true
+				}
+			}
+		}
+	}
+	var selected *connectorprotocol.IngressDecision
+	for _, d := range decisions {
+		if d.Binding.Protocol != "tls" || d.Binding.Hostname != host {
+			continue
+		}
+		// Invalid/expired TLS authority is a denial, never an HTTPS fallback.
+		if https || authorizedHTTPS || selected != nil || d.Binding.PublicPort != 443 || d.Binding.ListenerID != "listener_tls_443" || d.Validate(time.Now().UTC()) != nil {
+			return hostAdmission{}, false
+		}
+		current := d
+		selected = &current
+	}
+	return hostAdmission{decisions: decisions, https: https, infrastructureHTTPS: infrastructureHTTPS, authorizedHTTPS: authorizedHTTPS, selected: selected}, true
+}
+
+// ServerName is the SNI of a visitor's ClientHello, by the listener's own inspection.
+func (l *SharedTLSListener) ServerName(hello []byte) (string, error) {
+	_, info, err := inspectClientHello(l.ctx, &helloBytesConn{r: bytes.NewReader(hello)}, l.infrastructureHostname, false)
+	return info.host, err
+}
+
+// Admit reports whether this listener serves host now, by dispatch's own authority decision, before any visitor is
+// acknowledged (a hold for a route that is not yet attached is not waited for: the forwarder tries another node).
+func (l *SharedTLSListener) Admit(host string) error {
+	adm, ok := l.resolveHost(host)
+	if !ok || !(adm.selected != nil || adm.authorizedHTTPS || adm.infrastructureHTTPS) {
+		return errNotServed
+	}
+	return nil
+}
+
+var errNotServed = errors.New("this node does not serve the name")
+
+// helloBytesConn feeds a captured ClientHello to inspectClientHello; it never writes or blocks.
+type helloBytesConn struct{ r *bytes.Reader }
+
+func (c *helloBytesConn) Read(p []byte) (int, error)     { return c.r.Read(p) }
+func (*helloBytesConn) Write([]byte) (int, error)        { return 0, io.ErrClosedPipe }
+func (*helloBytesConn) Close() error                     { return nil }
+func (*helloBytesConn) CloseWrite() error                { return nil }
+func (*helloBytesConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (*helloBytesConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (*helloBytesConn) SetDeadline(time.Time) error      { return nil }
+func (*helloBytesConn) SetReadDeadline(time.Time) error  { return nil }
+func (*helloBytesConn) SetWriteDeadline(time.Time) error { return nil }
+
+// ServerName and Admit on PublicTCPListeners serve the shared TLS listener; without one the node serves nothing.
+func (p *PublicTCPListeners) ServerName(hello []byte) (string, error) {
+	if shared := p.shared(); shared != nil {
+		return shared.ServerName(hello)
+	}
+	return "", errNotServed
+}
+
+func (p *PublicTCPListeners) Admit(host string) error {
+	if shared := p.shared(); shared != nil {
+		return shared.Admit(host)
+	}
+	return errNotServed
+}
+
+func (p *PublicTCPListeners) shared() *SharedTLSListener {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.sharedTLS
 }

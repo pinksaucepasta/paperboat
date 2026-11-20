@@ -56,6 +56,7 @@ type replayTLSConn struct {
 	net.Conn
 	reader         io.Reader
 	hostname       string
+	hello          []byte // the bytes inspected, replayed first by reader
 	sharedListener bool
 	release        func() // frees the shared listener's HTTPS slot once, on Close
 	releaseOnce    sync.Once
@@ -68,6 +69,9 @@ func (c *replayTLSConn) Close() error {
 	}
 	return err
 }
+
+// ClientHello is the visitor's ClientHello as read: a forwarder sends it to the holder before the holder acks.
+func (c *replayTLSConn) ClientHello() []byte { return c.hello }
 
 func (c *replayTLSConn) Read(p []byte) (int, error) { return c.reader.Read(p) }
 func (c *replayTLSConn) CloseWrite() error {
@@ -134,7 +138,7 @@ func inspectClientHello(ctx context.Context, connection net.Conn, infrastructure
 	if link {
 		hostname = ""
 	}
-	return &replayTLSConn{Conn: connection, hostname: hostname, reader: io.MultiReader(bytes.NewReader(capture.inspected.Bytes()), connection)}, helloInfo{host: hostname, link: link}, nil
+	return &replayTLSConn{Conn: connection, hostname: hostname, hello: capture.inspected.Bytes(), reader: io.MultiReader(bytes.NewReader(capture.inspected.Bytes()), connection)}, helloInfo{host: hostname, link: link}, nil
 }
 
 func validSNIHostname(host string) bool {

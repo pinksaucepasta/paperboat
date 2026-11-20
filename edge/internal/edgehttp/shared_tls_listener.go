@@ -247,80 +247,11 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 			releaseName()
 		}
 	}()
-	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
-	decisions, err := l.authority.Snapshot(ctx)
-	cancel()
-	https := l.httpsHostname(host)
-	infrastructureHTTPS := host == l.infrastructureHostname && https
-	if err != nil {
-		l.observe("public_tcp_reconcile", err)
-		// This exact installation name is reserved for HTTPS by server authority.
-		// Keep health/installation verification usable during control outages;
-		// dynamic route names must never fall back when authority is unavailable.
-		if !infrastructureHTTPS {
-			return
-		}
-		decisions = nil
+	adm, ok := l.resolveHost(host)
+	if !ok {
+		return
 	}
-	// Customer aliases need ingress authority even when the route matcher names
-	// a different host. Configuration membership cannot grant TLS ownership;
-	// only live server-admitted runtime/private carriers supply that exception.
-	authorizedHTTPS := l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)
-	for _, decision := range decisions {
-		if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
-			if decision.Validate(time.Now().UTC()) != nil {
-				return
-			}
-			authorizedHTTPS = true
-		}
-	}
-	// A route an operator took down still gets TLS: the HTTP layer answers it with the takedown page
-	// (451 or 403) rather than a dead connection.
-	if !authorizedHTTPS && https {
-		if taken, ok := l.authority.(interface{ Withheld(string) bool }); ok && taken.Withheld(host) {
-			authorizedHTTPS = true
-		}
-	}
-	// A preview whose owner machine is asleep gets TLS for its "machine offline" page. Its carrier is gone, so the
-	// route matcher no longer names it (https is false): the server's offline list is the authority for the name.
-	if !authorizedHTTPS {
-		if offline, ok := l.authority.(interface{ OwnerOffline(string) bool }); ok && offline.OwnerOffline(host) {
-			authorizedHTTPS = true
-		}
-	}
-	// The locally admitted public preview may become ready after the cached
-	// complete snapshot was fetched. Refresh its exact authority before any TLS
-	// writes, then inspect the entire current snapshot for protocol conflicts.
-	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
-		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
-		defer stop()
-		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
-			decisions, err = l.authority.Snapshot(refresh)
-			if err != nil {
-				return
-			}
-			for _, decision := range decisions {
-				if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
-					if decision.Validate(time.Now().UTC()) != nil {
-						return
-					}
-					authorizedHTTPS = true
-				}
-			}
-		}
-	}
-	var selected *connectorprotocol.IngressDecision
-	for _, d := range decisions {
-		if d.Binding.Protocol != "tls" || d.Binding.Hostname != host {
-			continue
-		}
-		// Invalid/expired TLS authority is a denial, never an HTTPS fallback.
-		if https || authorizedHTTPS || selected != nil || d.Binding.PublicPort != 443 || d.Binding.ListenerID != "listener_tls_443" || d.Validate(time.Now().UTC()) != nil {
-			return
-		}
-		current := d
-		selected = &current
-	}
+	decisions, https, infrastructureHTTPS, authorizedHTTPS, selected := adm.decisions, adm.https, adm.infrastructureHTTPS, adm.authorizedHTTPS, adm.selected
 	if selected != nil {
 		owned = false
 		decision := *selected
