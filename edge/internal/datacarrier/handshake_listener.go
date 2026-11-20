@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 )
 
 var errCarrierTLSHandshake = errors.New("data carrier TLS handshake failed")
@@ -25,11 +27,17 @@ type handshakeListener struct {
 	ready    chan net.Conn
 	done     chan struct{}
 	failed   chan error
+	pending  *addrlimit.Limiter // unauthenticated handshakes in flight per address
 	stopOnce sync.Once
 }
 
+// pendingHandshakesPerAddress bounds one address's unfinished TLS handshakes. It bounds an address, not the
+// node: a peer that opens sockets and stalls pins at most this many; others handshake normally. Prior art:
+// Tailscale's derper gives each client a handshake deadline (derp/derpserver), cloudflared a HandshakeIdleTimeout.
+const pendingHandshakesPerAddress = 16
+
 func newHandshakeListener(inner net.Listener, config *tls.Config, timeout time.Duration, observe func(error)) *handshakeListener {
-	l := &handshakeListener{Listener: inner, config: config.Clone(), timeout: timeout, observe: observe, ready: make(chan net.Conn), done: make(chan struct{}), failed: make(chan error, 1)}
+	l := &handshakeListener{Listener: inner, config: config.Clone(), timeout: timeout, observe: observe, ready: make(chan net.Conn), done: make(chan struct{}), failed: make(chan error, 1), pending: addrlimit.NewInFlight(pendingHandshakesPerAddress)}
 	go l.acceptLoop()
 	return l
 }
@@ -41,11 +49,16 @@ func (l *handshakeListener) acceptLoop() {
 			l.failed <- err
 			return
 		}
-		go l.handshake(raw) // each handshake ends at the timeout
+		release, ok := l.pending.Admit(remoteIP(raw), false)
+		if !ok {
+			_ = raw.Close()
+			continue
+		}
+		go l.handshake(raw, release) // each handshake ends at the timeout
 	}
 }
 
-func (l *handshakeListener) handshake(raw net.Conn) {
+func (l *handshakeListener) handshake(raw net.Conn, release func()) {
 	counted := &readCountingConn{Conn: raw}
 	// A refused handshake leaves no peer state on the connection, so the check's own state is kept.
 	config, seen := l.config, tls.ConnectionState{}
@@ -57,6 +70,7 @@ func (l *handshakeListener) handshake(raw net.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), l.timeout)
 	err := connection.HandshakeContext(ctx)
 	cancel()
+	release()
 	if err != nil {
 		_ = raw.Close()
 		if counted.read.Load() > 0 {
