@@ -1282,8 +1282,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Paperboat's edge regions
-         * @description Returns a bounded, cursor-paged observation of Paperboat's edge regions visible to this account, ordered by id, independent of its tunnel pool mode. A region is ready when any of its nodes is ready, else draining when any is draining, else unavailable. Nodes are never listed. Status does not guarantee admission for a particular tunnel route.
+         * List Paperboat's regions
+         * @description Returns a bounded, cursor-paged list (ordered by region id) of Paperboat's enabled regions that have an edge the account may use, independent of its tunnel pool mode. Users see regions only: no node, host or heartbeat. Status does not guarantee admission for a particular tunnel route.
          */
         get: operations["get_v1_edges"];
         put?: never;
@@ -1303,12 +1303,12 @@ export interface paths {
         };
         /**
          * Read a workspace's primary and backup region
-         * @description Returns the two regions that serve the workspace's previews and tunnels: both Paperboat's or both the workspace's own. The pair is the workspace's stored region set, assigned when a machine first attaches or the periodic reconcile runs; status folds the heartbeats of the region's nodes.
+         * @description Returns the two regions that serve the workspace's previews and tunnels: both Paperboat's or both its own servers. The pair is the workspace's stored pair, assigned when a machine first attaches or the periodic reconcile runs. Which machines of a region serve the workspace is the server's choice; a machine holds a carrier to every ready node of both regions.
          */
         get: operations["get_v1_edges_pair"];
         /**
          * Choose a workspace's primary and backup region
-         * @description Pass kind managed with region ids from GET /v1/edges, or kind self_hosted with regions of the workspace's own tunnel servers. The change goes through the tunnel pool policy and the workspace region set, and the workspace's machines are told to look again. Switching between Paperboat's edges and your own servers is refused with 409 previews_running (details.count, and details.items: the first 50 running things as {kind: preview|tunnel, id, name}) while the workspace has running previews or tunnels. Only the owner or an admin of a team can change its pair.
+         * @description Pass kind managed with two region ids from GET /v1/edges, or kind self_hosted with two regions of your own servers (the region you named when enrolling them). The change goes through the tunnel pool policy and the workspace pair, and the workspace's machines are told to look again; every own server of the two regions joins the pool. Switching between Paperboat's regions and your own servers is refused with 409 previews_running (details.count, and details.items: the first 50 running things as {kind: preview|tunnel, id, name}) while the workspace has running previews or tunnels. A region that is not available to the workspace right now is refused with 400 invalid_request naming the region. Only the owner or an admin of a team can change its pair.
          */
         put: operations["put_v1_edges_pair"];
         post?: never;
@@ -1326,8 +1326,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Paperboat's relay regions
-         * @description Returns a bounded, cursor-paged observation of Paperboat's relay regions visible to this account, ordered by id. Nodes are never listed. Status folds the heartbeats of the region's nodes and does not guarantee a particular connection will be relayed.
+         * List the relay regions an account's machines can use
+         * @description Returns a bounded, cursor-paged list (ordered by region id) of the regions of the relay nodes this account's pool policy lets its machines use: Paperboat's and the account's own self-hosted ones (a self-hosted-only policy lists only the chosen ones). Status comes from the nodes' heartbeats and does not guarantee a particular connection will be relayed.
          */
         get: operations["get_v1_relays"];
         put?: never;
@@ -6135,7 +6135,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Drain a managed node */
+        /**
+         * Drain a managed node
+         * @description Stops new connections; carriers already attached finish within the drain grace (10 minutes).
+         */
         post: operations["drain_admin_node"];
         delete?: never;
         options?: never;
@@ -6152,7 +6155,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Drain a managed node and move its machines now */
+        /**
+         * Drain a managed node and move its machines now
+         * @description Stops new connections and wakes every machine attached to the node so it re-attaches now; existing carriers end after a short grace (90 s).
+         */
         post: operations["drain_move_admin_node"];
         delete?: never;
         options?: never;
@@ -6555,7 +6561,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Drain an owned server */
+        /**
+         * Drain one of your own servers
+         * @description Stops new connections to the installation's node. With move=true its machines are also woken to re-attach now and existing connections end after 90 seconds; otherwise they finish within 10 minutes. Servers of the same region keep serving.
+         */
         post: operations["post_v1_selfhost_installations_installation_id_drain"];
         delete?: never;
         options?: never;
@@ -6572,7 +6581,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resume a draining owned server */
+        /**
+         * Resume a drained server of your own
+         * @description Returns a drained node to service; it becomes ready again on its next heartbeat.
+         */
         post: operations["post_v1_selfhost_installations_installation_id_resume"];
         delete?: never;
         options?: never;
@@ -9600,6 +9612,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/operations/host-health/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the latest host capacity or canary state
+         * @description Accepts at most 49152 request-body bytes and a payload of at most 32768. This route uses only its dedicated bearer and never accepts browser staff authority or CSRF.
+         */
+        post: operations["post_host_health_report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/host-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the latest host capacity and canary reports */
+        get: operations["get_admin_host_health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9865,8 +9914,6 @@ export interface components {
             /** @description Verified endpoint hostname currently registered for this installation; may be empty until registration is complete. */
             endpoint_host: string;
             name: string;
-            /** @description The region the owner named for this server; servers of one region back each other up. */
-            region: string;
             /** @enum {string} */
             capability: "relay" | "tunnel";
             ready: boolean;
@@ -9892,6 +9939,8 @@ export interface components {
             update_required?: string;
             /** @description The node's latest update request; absent when Update was never pressed. */
             update?: components["schemas"]["SelfhostUpdateStatus"];
+            /** @description The region the owner named when enrolling the server (default selfhost). Servers of one region back each other up, and a workspace's pair names regions. */
+            region: string;
         };
         SelfhostPolicy: {
             /**
@@ -13140,12 +13189,15 @@ export interface components {
              * @description Machines holding a live carrier attachment on the node; 0 means safe to retire.
              */
             carriers: number;
-            /** @description Whether the node's public ingress was verified; a node is published to DNS only when it was. */
-            ingress_verified: boolean;
-            /** @description The worst of the node's CPU, connection and host figures, 0 to 100; absent when it has no recent report. */
+            /**
+             * Format: double
+             * @description The node's load: the worst of its sustained CPU and its connections against its own limit, from its latest report; absent when it reported nothing in the last 2 minutes.
+             */
             load_percent?: number;
-            /** @description False while the wildcard DNS sync holds the node out for load; absent for nodes the sync does not manage. */
+            /** @description False while the wildcard DNS sync holds the ready node out of the published names because it is overloaded; absent for nodes the sync does not manage. */
             in_dns?: boolean;
+            /** @description The node's public ingress addresses passed the verify-ingress probe. */
+            ingress_verified: boolean;
         };
         OperatorNodePage: {
             items: components["schemas"]["OperatorNode"][];
@@ -13910,16 +13962,16 @@ export interface components {
             /** Format: date-time */
             decided_at?: string;
         };
-        /** @description The best connect time this machine measured to a region's edges or relays. Display data: it never selects a path or confers access. */
+        /** @description The best connect time this machine measured to the edges or relays of one region (per role). Display data: it never selects a path or confers access. */
         MachineNetworkLatencyItem: {
             region: string;
+            /** @description Paperboat's display name for a managed region; the region id for a customer's own. */
             name: string;
             /** @enum {string} */
             role: "edge" | "relay";
+            /** @description Present (true) for a customer's own region. */
             self_hosted?: boolean;
             rtt_ms: number;
-            /** Format: date-time */
-            measured_at: string;
         };
         MachineNetworkLatencyList: {
             items: components["schemas"]["MachineNetworkLatencyItem"][];
@@ -18163,7 +18215,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Account-visible hosted edge inventory. */
+            /** @description Paperboat's regions. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18172,9 +18224,14 @@ export interface operations {
                     "application/json": {
                         data: {
                             items: {
+                                /** @description The region id. */
                                 id: string;
+                                /** @description Paperboat's display name for the region. */
                                 name: string;
-                                /** @enum {string} */
+                                /**
+                                 * @description Ready if any node of the region is ready, else draining if any is, else unavailable. An observation, not a promise that a particular route is admitted.
+                                 * @enum {string}
+                                 */
                                 status: "ready" | "draining" | "unavailable";
                             }[];
                             next_cursor?: string;
@@ -18202,7 +18259,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The workspace's edge pair. */
+            /** @description The workspace's region pair. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18210,16 +18267,22 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: {
-                            /** @enum {string} */
+                            /**
+                             * @description Both regions are Paperboat's, or both the workspace's own.
+                             * @enum {string}
+                             */
                             kind: "managed" | "self_hosted";
                             primary: {
-                                /** @description A region id: one of Paperboat's (as listed by GET /v1/edges) or the region a self-hosted server was enrolled into. */
+                                /** @description The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server). */
                                 id: string;
-                                /** @description The region's display name; a self-hosted region's id. */
+                                /** @description Paperboat's display name for a managed region; the region id for the workspace's own. */
                                 name: string;
-                                /** @enum {string} */
+                                /**
+                                 * @description Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable.
+                                 * @enum {string}
+                                 */
                                 status: "ready" | "draining" | "unavailable";
-                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to this region in the last hour. Absent without a fresh measurement. */
+                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement. */
                                 best_rtt_ms?: number;
                                 /**
                                  * Format: date-time
@@ -18229,13 +18292,16 @@ export interface operations {
                             };
                             /** @description Absent while only one region can serve the workspace. */
                             fallback?: {
-                                /** @description A region id: one of Paperboat's (as listed by GET /v1/edges) or the region a self-hosted server was enrolled into. */
+                                /** @description The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server). */
                                 id: string;
-                                /** @description The region's display name; a self-hosted region's id. */
+                                /** @description Paperboat's display name for a managed region; the region id for the workspace's own. */
                                 name: string;
-                                /** @enum {string} */
+                                /**
+                                 * @description Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable.
+                                 * @enum {string}
+                                 */
                                 status: "ready" | "draining" | "unavailable";
-                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to this region in the last hour. Absent without a fresh measurement. */
+                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement. */
                                 best_rtt_ms?: number;
                                 /**
                                  * Format: date-time
@@ -18283,7 +18349,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The new pair. */
+            /** @description The workspace's region pair. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18291,16 +18357,22 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: {
-                            /** @enum {string} */
+                            /**
+                             * @description Both regions are Paperboat's, or both the workspace's own.
+                             * @enum {string}
+                             */
                             kind: "managed" | "self_hosted";
                             primary: {
-                                /** @description A region id: one of Paperboat's (as listed by GET /v1/edges) or the region a self-hosted server was enrolled into. */
+                                /** @description The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server). */
                                 id: string;
-                                /** @description The region's display name; a self-hosted region's id. */
+                                /** @description Paperboat's display name for a managed region; the region id for the workspace's own. */
                                 name: string;
-                                /** @enum {string} */
+                                /**
+                                 * @description Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable.
+                                 * @enum {string}
+                                 */
                                 status: "ready" | "draining" | "unavailable";
-                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to this region in the last hour. Absent without a fresh measurement. */
+                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement. */
                                 best_rtt_ms?: number;
                                 /**
                                  * Format: date-time
@@ -18310,13 +18382,16 @@ export interface operations {
                             };
                             /** @description Absent while only one region can serve the workspace. */
                             fallback?: {
-                                /** @description A region id: one of Paperboat's (as listed by GET /v1/edges) or the region a self-hosted server was enrolled into. */
+                                /** @description The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server). */
                                 id: string;
-                                /** @description The region's display name; a self-hosted region's id. */
+                                /** @description Paperboat's display name for a managed region; the region id for the workspace's own. */
                                 name: string;
-                                /** @enum {string} */
+                                /**
+                                 * @description Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable.
+                                 * @enum {string}
+                                 */
                                 status: "ready" | "draining" | "unavailable";
-                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to this region in the last hour. Absent without a fresh measurement. */
+                                /** @description Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement. */
                                 best_rtt_ms?: number;
                                 /**
                                  * Format: date-time
@@ -18328,7 +18403,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The regions are the same, unknown to this workspace, or a region is not available right now. */
+            /** @description The ids are the same, unknown to this workspace, of different kinds, or an edge is not available right now. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18363,7 +18438,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Relays the account can use. */
+            /** @description Relay regions the account can use. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18372,9 +18447,14 @@ export interface operations {
                     "application/json": {
                         data: {
                             items: {
+                                /** @description The region id. */
                                 id: string;
+                                /** @description Paperboat's display name for a managed region; the region id for the account's own. */
                                 name: string;
-                                /** @enum {string} */
+                                /**
+                                 * @description Ready if any node of the region is ready, else draining if any is, else unavailable. An observation, not a promise that a particular route is admitted.
+                                 * @enum {string}
+                                 */
                                 status: "ready" | "draining" | "unavailable";
                             }[];
                             next_cursor?: string;
@@ -30517,7 +30597,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Draining node, its machines told to move, or exact idempotent replay. */
+            /** @description Draining node or exact idempotent replay. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -31310,13 +31390,12 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description true also moves the machines attached to this server now. */
-                    move: boolean;
+                    move?: boolean;
                 };
             };
         };
         responses: {
-            /** @description The installation, draining. */
+            /** @description The installation in a data envelope. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -31331,7 +31410,6 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -31350,7 +31428,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The installation, taking work again. */
+            /** @description The installation in a data envelope. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -31365,7 +31443,6 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };
@@ -38817,6 +38894,80 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    post_host_health_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    source: "hosts" | "canary";
+                    payload: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The latest report of that source was replaced. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            status: "recorded";
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_admin_host_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest report of each source; a source that never reported is absent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            reports: {
+                                /** @enum {string} */
+                                source: "hosts" | "canary";
+                                payload: {
+                                    [key: string]: unknown;
+                                };
+                                /** Format: date-time */
+                                reported_at: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }
