@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,7 +52,14 @@ func TestPlatformCertificateTargetsRequireEdgeRoleOnPostgres(t *testing.T) {
 		{"team", []string{"edge"}, true, false, false, "team"},
 	}
 	ids := make([]string, 0, len(fixtures))
+	region := prefix + "region"
+	if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Fixture region',true)`, region); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
+		if _, err := database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_regions WHERE id=$1`, region); err != nil {
+			t.Error(err)
+		}
 		if _, err := database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.selfhost_installations WHERE node_id=ANY($1::text[])`, ids); err != nil {
 			t.Error(err)
 		}
@@ -66,7 +74,7 @@ func TestPlatformCertificateTargetsRequireEdgeRoleOnPostgres(t *testing.T) {
 		if fixture.stale {
 			heartbeat = now.Add(-2 * time.Minute)
 		}
-		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,roles,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1',$2,'ready',$3,$4,1,$5,CASE WHEN cardinality($5::text[])>0 THEN 'test' END,CASE WHEN cardinality($5::text[])>0 THEN 'domain' END,CASE WHEN cardinality($5::text[])>0 THEN ARRAY['http2','http3']::text[] ELSE '{}'::text[] END,100,0,$4,CASE WHEN cardinality($5::text[])>0 THEN $4::timestamptz+interval '1 hour' END)`, id, "epoch_"+id, fixture.ready, heartbeat, fixture.roles); err != nil {
+		if _, err := database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,version,roles,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at) VALUES($1,'default','v1',$2,'ready',$3,$4,1,$5,CASE WHEN cardinality($5::text[])>0 THEN $6 END,CASE WHEN cardinality($5::text[])>0 THEN 'domain' END,CASE WHEN cardinality($5::text[])>0 THEN ARRAY['http2','http3']::text[] ELSE '{}'::text[] END,100,0,$4,CASE WHEN cardinality($5::text[])>0 THEN $4::timestamptz+interval '1 hour' END)`, id, "epoch_"+id, fixture.ready, heartbeat, fixture.roles, region); err != nil {
 			t.Fatal(err)
 		}
 		if fixture.scope != "" {
@@ -101,12 +109,16 @@ func TestPlatformCertificateTargetsRequireEdgeRoleOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	visible := map[string]bool{}
+	// The inventory lists regions, never nodes: the fixture region appears (its global and managed edges are ready),
+	// and no node id does, customer-owned ones included.
+	visible := map[string]string{}
 	for _, edge := range page.Items {
-		visible[edge.ID] = true
+		if strings.HasPrefix(edge.ID, prefix) {
+			visible[edge.ID] = edge.Status
+		}
 	}
-	if !visible[prefix+"global"] || visible[prefix+"account"] || visible[prefix+"team"] {
-		t.Fatal("global edge inventory must exclude customer-owned installations")
+	if visible[region] != "ready" || len(visible) != 1 {
+		t.Fatalf("global edge inventory must list the fixture region only: %v", visible)
 	}
 
 }

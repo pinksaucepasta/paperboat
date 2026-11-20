@@ -26,14 +26,15 @@ const Refresh = 10 * time.Minute
 
 var ErrInvalid = errors.New("invalid machine latency report")
 
-// Item is one listed measurement with the node's public inventory fields.
+// Item is the best measurement a machine has to one region and role: its edges (or relays) in that region, the nearest
+// of them. Users see regions only, so no node id appears; Name is Paperboat's display name for a managed region and the
+// region id for a customer's own (SelfHosted).
 type Item struct {
-	NodeID     string    `json:"node_id"`
-	Role       string    `json:"role"`
-	Region     string    `json:"region"`
-	SelfHosted bool      `json:"self_hosted"` // run by a customer; Paperboat's own pbh nodes have global scope and are not
-	RTTMillis  int       `json:"rtt_ms"`
-	MeasuredAt time.Time `json:"measured_at"`
+	Region     string `json:"region"`
+	Name       string `json:"name"`
+	Role       string `json:"role"`
+	RTTMillis  int    `json:"rtt_ms"`
+	SelfHosted bool   `json:"self_hosted,omitempty"` // run by a customer; Paperboat's own pbh nodes have global scope and are not
 }
 
 // RelaySample is one relay measurement reported by a machine's daemon.
@@ -101,13 +102,16 @@ ON CONFLICT(machine_id,node_id) DO UPDATE SET role='relay',rtt_ms=EXCLUDED.rtt_m
 	return tx.Commit()
 }
 
-// List returns a machine's fresh measurements, edges first, fastest first inside each role.
+// List returns a machine's fresh measurements as the best RTT per (region, role), edges first, fastest first inside
+// each role.
 func List(ctx context.Context, database *sql.DB, machineID string, now time.Time) ([]Item, error) {
-	rows, err := database.QueryContext(ctx, `SELECT l.node_id,l.role,coalesce(n.region,''),
-  EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=l.node_id AND i.scope_kind<>'global'),l.rtt_ms,l.measured_at
-FROM machine_node_latency l JOIN control_tunnel_nodes n ON n.id=l.node_id
+	rows, err := database.QueryContext(ctx, `SELECT n.region,
+  CASE WHEN bool_or(EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id AND i.scope_kind<>'global')) THEN n.region ELSE coalesce(max(r.display_name),n.region) END,
+  l.role,min(l.rtt_ms),bool_or(EXISTS(SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id AND i.scope_kind<>'global'))
+FROM machine_node_latency l JOIN control_tunnel_nodes n ON n.id=l.node_id AND n.region IS NOT NULL
+LEFT JOIN operator_regions r ON r.id=n.region
 WHERE l.machine_id=$1 AND l.measured_at>$2::timestamptz-make_interval(secs=>$3::float8)
-ORDER BY l.role,l.rtt_ms,l.node_id LIMIT $4`, machineID, now, Fresh.Seconds(), MaxItems)
+GROUP BY n.region,l.role ORDER BY l.role,min(l.rtt_ms),n.region LIMIT $4`, machineID, now, Fresh.Seconds(), MaxItems)
 	if err != nil {
 		return nil, err
 	}
@@ -115,10 +119,9 @@ ORDER BY l.role,l.rtt_ms,l.node_id LIMIT $4`, machineID, now, Fresh.Seconds(), M
 	items := []Item{}
 	for rows.Next() {
 		var item Item
-		if err := rows.Scan(&item.NodeID, &item.Role, &item.Region, &item.SelfHosted, &item.RTTMillis, &item.MeasuredAt); err != nil {
+		if err := rows.Scan(&item.Region, &item.Name, &item.Role, &item.RTTMillis, &item.SelfHosted); err != nil {
 			return nil, err
 		}
-		item.MeasuredAt = item.MeasuredAt.UTC()
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {

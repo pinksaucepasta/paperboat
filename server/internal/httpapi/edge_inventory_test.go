@@ -23,7 +23,7 @@ type edgeInventoryStub struct {
 
 func (s *edgeInventoryStub) ListHostedEdges(_ context.Context, account, after string, limit int) (controlplane.HostedEdgePage, error) {
 	s.account, s.after, s.limit = account, after, limit
-	return controlplane.HostedEdgePage{Items: []controlplane.HostedEdge{{ID: "edge_1", Region: "fsn1", Status: "ready"}}, ObservedAt: time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)}, s.err
+	return controlplane.HostedEdgePage{Items: []controlplane.HostedEdge{{ID: "frankfurt", Name: "Frankfurt", Status: "ready"}}, ObservedAt: time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)}, s.err
 }
 
 func TestHostedEdgeListBindsAccountAndReturnsPublicFields(t *testing.T) {
@@ -39,7 +39,7 @@ func TestHostedEdgeListBindsAccountAndReturnsPublicFields(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(response.Body.String(), "credential") || !strings.Contains(response.Body.String(), "edge_1") {
+	if strings.Contains(response.Body.String(), "credential") || !strings.Contains(response.Body.String(), `{"id":"frankfurt","name":"Frankfurt","status":"ready"}`) || strings.Contains(response.Body.String(), "endpoint_host") {
 		t.Fatalf("unexpected edge response: %s", response.Body.String())
 	}
 }
@@ -48,7 +48,7 @@ type relayInventoryStub struct{ account, after string }
 
 func (s *relayInventoryStub) ListHostedRelays(_ context.Context, account, after string, _ int) (controlplane.HostedRelayPage, error) {
 	s.account, s.after = account, after
-	return controlplane.HostedRelayPage{Items: []controlplane.HostedRelay{{ID: "relay_1", Region: "fsn1", Status: "ready", SelfHosted: true, Name: "mine"}}}, nil
+	return controlplane.HostedRelayPage{Items: []controlplane.HostedRelay{{ID: "mumbai", Name: "Mumbai", Status: "ready"}}}, nil
 }
 
 func TestHostedRelayListBindsAccountAndReturnsRelays(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHostedRelayListBindsAccountAndReturnsRelays(t *testing.T) {
 	response := httptest.NewRecorder()
 	hostedRelayList(stub).ServeHTTP(response, request)
 	if response.Code != http.StatusOK || stub.account != "acct_1" || stub.after != "relay_0" ||
-		!strings.Contains(response.Body.String(), `"self_hosted":true`) || !strings.Contains(response.Body.String(), "relay_1") {
+		!strings.Contains(response.Body.String(), `{"id":"mumbai","name":"Mumbai","status":"ready"}`) {
 		t.Fatalf("code=%d account=%q body=%s", response.Code, stub.account, response.Body.String())
 	}
 	response = httptest.NewRecorder()
