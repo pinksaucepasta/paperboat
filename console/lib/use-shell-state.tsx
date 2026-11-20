@@ -24,7 +24,8 @@ function noteCaret() {
     caret = null // focus moved off the fields (a link, a button): nothing to restore
     return
   }
-  // Fields are found again by a stable id, name or placeholder (React's generated ids differ per copy).
+  const label = el.getAttribute("aria-label")
+  // Fields are found again by a stable id, name, placeholder or aria-label (React's generated ids differ per copy).
   const selector =
     el.id && !/^base-ui-|_r_/.test(el.id)
       ? `#${CSS.escape(el.id)}`
@@ -32,7 +33,9 @@ function noteCaret() {
         ? `[name="${CSS.escape(el.name)}"]`
         : el.placeholder
           ? `[placeholder="${CSS.escape(el.placeholder)}"]`
-          : null
+          : label
+            ? `[aria-label="${CSS.escape(label)}"]`
+            : null
   caret = selector ? { selector, start: el.selectionStart, end: el.selectionEnd, el } : null
 }
 
