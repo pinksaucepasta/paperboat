@@ -831,6 +831,45 @@ test_local_access_settings() {
   done
 }
 
+# carrier-throughput:DEVICE: the carrier's PR-06 budget on real hardware. The connector's own test (one QUIC stream at 50 ms
+# RTT, sender + delay line + receiver on the device) is cross-built, copied over and run with GITHUB_ACTIONS unset, so it
+# asserts the full 150 Mbit/s that shared CI runners only floor. Not a container device: it shares its host's cores.
+test_carrier_throughput() {
+  skipped carrier-throughput && return
+  local device id t0 out goos=linux dest ext="" run
+  for device in "${TLIST[@]}"; do
+    id="carrier-throughput:$device"
+    skipped "$id" && continue
+    if ct_of "$device" >/dev/null; then record "$id" SKIP 0 "container device: judged on its real host"; continue; fi
+    t0=$(now)
+    case "$device" in apple) goos=darwin ;; victus) goos=windows; ext=.exe ;; *) goos=linux; ext="" ;; esac
+    run=$(mktemp -d); dest=/tmp/$RUN_ID-carrier$ext
+    [ "$device" != victus ] || dest='C:/Users/Pujan/smoke-carrier.exe'
+    if ! (cd "$HERE/../../cli" && CGO_ENABLED=0 GOOS=$goos GOARCH=$([ "$goos" = darwin ] && echo arm64 || echo amd64) \
+        go test -c -o "$run/carrier$ext" ./internal/hostruntime/connector) 2>"$run/build.log"; then
+      record "$id" FAIL $(( $(now)-t0 )) "test binary did not build: $(tail -c 200 "$run/build.log")"; rm -rf "$run"; continue
+    fi
+    case "$device" in
+      apple) SSHPASS="$APPLE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "${APPLE_OPTS[@]}" "$run/carrier" "$APPLE_LOGIN:$dest" ;;
+      victus) SSHPASS="$VICTUS_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$run/carrier$ext" "pujan@victus:$dest" ;;
+      hp) scp -q "${SSH_OPTS[@]}" "$run/carrier" "anvit@hp:$dest" ;;
+      ubuntu24) scp -q "${SSH_OPTS[@]}" "$run/carrier" "pujan@ubuntu24:$dest" ;;
+      dadape) SSHPASS="$DADAPE_PASS" sshpass -e scp -q "${SSH_OPTS[@]}" "$run/carrier" "anvit@dadape:$dest" ;;
+    esac
+    rm -rf "$run"
+    if [ "$device" = victus ]; then
+      out=$(on victus "& '$dest' -test.run '^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' -test.v -test.count=1 -test.timeout=10m; Remove-Item -Force '$dest'" 2>&1)
+    else
+      out=$(on "$device" "chmod +x $dest && $dest -test.run '^TestQUICCarrierStreamHoldsTheBudgetAtRealRTT\$' -test.v -test.count=1 -test.timeout=10m; rm -f $dest" 2>&1)
+    fi
+    if grep -q -- '--- PASS: TestQUICCarrierStreamHoldsTheBudgetAtRealRTT' <<<"$out"; then
+      record "$id" PASS $(( $(now)-t0 ))
+    else
+      record "$id" FAIL $(( $(now)-t0 )) "$(grep -E 'one QUIC stream|connection [0-9]|SKIP|FAIL' <<<"$out" | tail -n 4 | tr '\n' ' ' | tail -c 300)"
+    fi
+  done
+}
+
 test_reset_lifecycle() {
   skipped reset-lifecycle && return
   local device id out status t0 password
@@ -1194,6 +1233,7 @@ test_device_application tunnel-manage tunnel_manage.py
 test_device_application tunnel-public-protocols tunnel_public_protocols.py
 test_device_application approve-refusals approve_refusals.py
 test_tunnel_domain
+test_carrier_throughput
 test_device_application config-sync config_sync.py
 test_device_application config-survival config_survival.py
 test_reset_lifecycle

@@ -699,6 +699,15 @@ TLIST=($DEVICES)
         self.assertNotIn('on "$source" "python3', text)
         self.assertNotRegex(text, r'\bon "\$(source|device)" "python3')
 
+    def test_the_carrier_budget_is_asserted_on_real_devices_with_the_ci_floor_off(self):
+        # The Go test floors the budget only when GITHUB_ACTIONS=true; this check runs it on each device without that.
+        text = (HERE / 'smoke.sh').read_text()
+        self.assertIn('test_carrier_throughput\n', text)
+        body = text.split('test_carrier_throughput() {')[1].split('\ntest_reset_lifecycle() {')[0]
+        self.assertIn('TestQUICCarrierStreamHoldsTheBudgetAtRealRTT', body)
+        self.assertNotIn('GITHUB_ACTIONS', body)
+        self.assertIn('--- PASS: TestQUICCarrierStreamHoldsTheBudgetAtRealRTT', body)
+
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
         # that are not mapped keep their own transport.
