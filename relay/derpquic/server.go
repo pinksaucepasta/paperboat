@@ -457,9 +457,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		old.close(code, "relay registration superseded")
 	}
 	if merging {
-		if g, err = mergeGrants(p.grant, g); err != nil {
-			return err
-		}
+		g = mergeGrants(p.grant, g)
 	}
 	if p.key.IsZero() {
 		s.accepted.Add(1)
