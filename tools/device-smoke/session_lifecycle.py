@@ -37,6 +37,7 @@ def ready(terminal, windows):
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         return
+    terminal.wait_raw()
     token = uuid.uuid4().hex
     terminal.send(cmd_say('READY', token))
     terminal.expect('PB_READY_' + token, timeout=60)
@@ -84,7 +85,9 @@ def qualify(pb, target, check):
         terminal.close()
         terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']), env=winhost.terminal_env(pb))
         clients.append(terminal)
-        if not windows:
+        if windows:
+            terminal.wait_raw()
+        else:
             terminal.expect(b'\x1b[?2004h')
         if check in ('replay', 'cross'):
             terminal.expect('PB_DURABLE_' + nonce, timeout=15)

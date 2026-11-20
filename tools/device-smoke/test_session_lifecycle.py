@@ -6,7 +6,7 @@ import session_lifecycle
 
 class Typed:
     def __init__(self):
-        self.sent, self.expected, self.timeouts = [], [], []
+        self.sent, self.expected, self.timeouts, self.raw = [], [], [], 0
 
     def send(self, data):
         self.sent.append(data)
@@ -14,6 +14,10 @@ class Typed:
     def expect(self, text, timeout=None):
         self.expected.append(text)
         self.timeouts.append(timeout)
+
+    def wait_raw(self):
+        self.raw += 1
+        self.sent.append('<raw>')
 
     def marker(self, label, prefix=''):
         self.send(prefix + "printf '\\nPB_" + label + "_%s\\n' 'x'\r")
@@ -34,6 +38,7 @@ class SessionLifecycleShell(unittest.TestCase):
         for foreign in ('stty', 'printf', '$PB_DURABLE', "PB_DURABLE='", 'powershell'):
             self.assertNotIn(foreign, typed)
         self.assertIn('set PB_DURABLE=abc123\r', typed)
+        self.assertTrue(typed.startswith('<raw>'), 'nothing is typed before ssh has put the pty in raw mode')
         # The caret keeps the echoed command line from matching the marker the line prints; %VAR% expands when it runs.
         self.assertIn('echo PB_^DURABLE_%PB_DURABLE%\r', typed)
         self.assertIn('echo PB_^REATTACHED_%PB_DURABLE%\r', typed)

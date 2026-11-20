@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import time
 import unittest
 
 from terminal_lifecycle import Terminal, applications, windows_phases
@@ -69,6 +70,22 @@ class TerminalCapabilities(unittest.TestCase):
                     self.assertEqual(0, terminal.wait_exit())
                 finally:
                     terminal.close()
+
+    def test_wait_raw_returns_once_the_program_leaves_line_mode_and_fails_if_it_never_does(self):
+        # A program started on the pty is in line mode (echo on, CR becomes LF) until it sets raw, as ssh -tt does late.
+        late = Terminal([sys.executable, '-c', "import time,tty; time.sleep(0.4); tty.setraw(0); time.sleep(5)"])
+        try:
+            started = time.monotonic()
+            late.wait_raw(timeout=10)
+            self.assertGreaterEqual(time.monotonic() - started, 0.3)
+        finally:
+            late.close()
+        never = Terminal([sys.executable, '-c', "import time; time.sleep(5)"])
+        try:
+            with self.assertRaisesRegex(RuntimeError, 'raw mode'):
+                never.wait_raw(timeout=0.5)
+        finally:
+            never.close()
 
     @unittest.skipUnless(hasattr(os, 'waitid'), 'non-reaping child-exit observation is required')
     def test_exit_receipt_keeps_output_after_the_child_has_already_exited(self):

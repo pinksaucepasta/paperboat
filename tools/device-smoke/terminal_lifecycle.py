@@ -156,6 +156,16 @@ class Terminal:
                 self.output.extend(chunk)
                 quiet_since = time.monotonic()
 
+    def wait_raw(self, timeout=60):
+        """Wait until the program on the pty (ssh -tt) has put it in raw mode. Input sent earlier meets the pty's own line
+        discipline: it is echoed here and its CR becomes LF, which a Windows shell does not take as Enter."""
+        deadline = time.monotonic() + timeout
+        while termios.tcgetattr(self.fd)[3] & (termios.ICANON | termios.ECHO):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('terminal did not enter raw mode within %d s' % timeout)
+            if select.select([self.fd], [], [], 0.05)[0]:
+                self.drain()
+
     def marker(self, label, prefix=''):
         suffix = uuid.uuid4().hex
         token = 'PB_' + label + '_' + suffix
