@@ -413,28 +413,29 @@ func (s *Server) acceptRaw(ctx context.Context) (StreamLink, error) {
 		raw, err := s.session.AcceptStream(ctx)
 		result <- openResult{stream: raw, err: err}
 	}()
-	select {
-	case accepted := <-result:
-		if accepted.err != nil {
-			s.releasePermit()
-			if s.closed() {
-				return nil, ErrCarrierClosed
-			}
-			return nil, accepted.err
-		}
-		if err := ctx.Err(); err != nil {
-			_ = accepted.stream.Close()
-			s.releasePermit()
-			return nil, err
-		}
-		return accepted.stream, nil
-	case <-s.done:
+	accepted, err := awaitOpen(ctx, s.done, result)
+	if err != nil {
 		go s.finishCanceledAccept(result)
-		return nil, ErrCarrierClosed
-	case <-ctx.Done():
-		go s.finishCanceledAccept(result)
-		return nil, ctx.Err()
+		return nil, err
 	}
+	if accepted.err != nil {
+		s.releasePermit()
+		if s.closed() {
+			return nil, ErrCarrierClosed
+		}
+		return nil, accepted.err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = accepted.stream.Close()
+		s.releasePermit()
+		return nil, err
+	}
+	if s.closed() {
+		_ = accepted.stream.Close()
+		s.releasePermit()
+		return nil, ErrCarrierClosed
+	}
+	return accepted.stream, nil
 }
 
 // acceptInboundRaw does not reserve stream capacity while waiting for a peer
@@ -450,13 +451,10 @@ func (s *Server) acceptInboundRaw(ctx context.Context) (StreamLink, error) {
 		raw, err := s.session.AcceptStream(ctx)
 		result <- openResult{stream: raw, err: err}
 	}()
-	var accepted openResult
-	select {
-	case accepted = <-result:
-	case <-s.done:
-		return nil, ErrCarrierClosed
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	accepted, err := awaitOpen(ctx, s.done, result)
+	if err != nil {
+		go closeLateStream(result)
+		return nil, err
 	}
 	if accepted.err != nil {
 		if s.closed() {
@@ -467,6 +465,10 @@ func (s *Server) acceptInboundRaw(ctx context.Context) (StreamLink, error) {
 	if err := ctx.Err(); err != nil {
 		_ = accepted.stream.Close()
 		return nil, err
+	}
+	if s.closed() {
+		_ = accepted.stream.Close()
+		return nil, ErrCarrierClosed
 	}
 	select {
 	case s.permits <- struct{}{}:
@@ -529,34 +531,66 @@ func (s *Server) openRaw(ctx context.Context) (StreamLink, error) {
 		raw, err := s.session.OpenStream(ctx)
 		result <- openResult{stream: raw, err: err}
 	}()
-	select {
-	case opened := <-result:
-		<-s.openings
-		if opened.err != nil {
-			s.releasePermit()
-			if s.closed() {
-				return nil, ErrCarrierClosed
-			}
-			return nil, opened.err
-		}
-		if err := ctx.Err(); err != nil {
-			_ = opened.stream.Close()
-			s.releasePermit()
-			return nil, err
-		}
-		return opened.stream, nil
-	case <-s.done:
+	opened, err := awaitOpen(ctx, s.done, result)
+	if err != nil {
 		go s.finishCanceledOpen(result)
-		return nil, ErrCarrierClosed
-	case <-ctx.Done():
-		go s.finishCanceledOpen(result)
-		return nil, ctx.Err()
+		return nil, err
 	}
+	<-s.openings
+	if opened.err != nil {
+		s.releasePermit()
+		if s.closed() {
+			return nil, ErrCarrierClosed
+		}
+		return nil, opened.err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = opened.stream.Close()
+		s.releasePermit()
+		return nil, err
+	}
+	if s.closed() {
+		_ = opened.stream.Close()
+		s.releasePermit()
+		return nil, ErrCarrierClosed
+	}
+	return opened.stream, nil
 }
 
 type openResult struct {
 	stream StreamLink
 	err    error
+}
+
+// awaitOpen waits for the result of an open or accept. A result that is already there wins over a closed carrier or a cancelled
+// context: select picks at random among ready cases, so a stream that was won would be closed or kept by a coin flip. With no
+// result it reports ErrCarrierClosed (done) or ctx.Err(); the caller then finishes the open in the background.
+func awaitOpen(ctx context.Context, done <-chan struct{}, result <-chan openResult) (openResult, error) {
+	select {
+	case opened := <-result:
+		return opened, nil
+	case <-done:
+		select {
+		case opened := <-result:
+			return opened, nil
+		default:
+			return openResult{}, ErrCarrierClosed
+		}
+	case <-ctx.Done():
+		select {
+		case opened := <-result:
+			return opened, nil
+		default:
+			return openResult{}, ctx.Err()
+		}
+	}
+}
+
+// closeLateStream closes the stream an abandoned accept delivers later, so a peer stream is reset instead of left in a buffer nobody reads.
+func closeLateStream(result <-chan openResult) {
+	if opened := <-result; opened.err == nil && opened.stream != nil {
+		_ = opened.stream.Close()
+	}
 }
 
 func (s *Server) finishCanceledOpen(result <-chan openResult) {
@@ -924,29 +958,30 @@ func (c *Client) openRaw(ctx context.Context) (StreamLink, error) {
 		raw, err := c.session.OpenStream(ctx)
 		result <- openResult{stream: raw, err: err}
 	}()
-	select {
-	case opened := <-result:
-		<-c.openings
-		if opened.err != nil {
-			c.releasePermit()
-			if c.closed() {
-				return nil, ErrCarrierClosed
-			}
-			return nil, opened.err
-		}
-		if err := ctx.Err(); err != nil {
-			_ = opened.stream.Close()
-			c.releasePermit()
-			return nil, err
-		}
-		return opened.stream, nil
-	case <-c.done:
+	opened, err := awaitOpen(ctx, c.done, result)
+	if err != nil {
 		go c.finishCanceledOpen(result)
-		return nil, ErrCarrierClosed
-	case <-ctx.Done():
-		go c.finishCanceledOpen(result)
-		return nil, ctx.Err()
+		return nil, err
 	}
+	<-c.openings
+	if opened.err != nil {
+		c.releasePermit()
+		if c.closed() {
+			return nil, ErrCarrierClosed
+		}
+		return nil, opened.err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = opened.stream.Close()
+		c.releasePermit()
+		return nil, err
+	}
+	if c.closed() {
+		_ = opened.stream.Close()
+		c.releasePermit()
+		return nil, ErrCarrierClosed
+	}
+	return opened.stream, nil
 }
 
 func (c *Client) finishCanceledOpen(result <-chan openResult) {
@@ -1096,14 +1131,12 @@ func (s *yamuxSession) AcceptStream(ctx context.Context) (StreamLink, error) {
 		stream, err := s.session.AcceptStream()
 		result <- openResult{stream: stream, err: err}
 	}()
-	select {
-	case opened := <-result:
-		return opened.stream, opened.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-s.session.CloseChan():
-		return nil, ErrCarrierClosed
+	opened, err := awaitOpen(ctx, s.session.CloseChan(), result)
+	if err != nil {
+		go closeLateStream(result)
+		return nil, err
 	}
+	return opened.stream, opened.err
 }
 
 func (s *yamuxSession) Ping(ctx context.Context) error {
@@ -1119,9 +1152,19 @@ func (s *yamuxSession) Ping(ctx context.Context) error {
 	case err := <-result:
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+		return pingOr(result, ctx.Err())
 	case <-s.session.CloseChan():
-		return ErrCarrierClosed
+		return pingOr(result, ErrCarrierClosed)
+	}
+}
+
+// pingOr is the ping's own result when it is already there (a ping that succeeded stays a success), else err.
+func pingOr(result <-chan error, err error) error {
+	select {
+	case pinged := <-result:
+		return pinged
+	default:
+		return err
 	}
 }
 
