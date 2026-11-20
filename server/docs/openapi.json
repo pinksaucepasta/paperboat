@@ -49350,6 +49350,7 @@
                 "worker_workspace_domains",
                 "worker_node_capacity",
                 "worker_node_update_notices",
+                "worker_release_expiry_notices",
                 "worker_fleet_snapshot",
                 "worker_presence"
               ]
