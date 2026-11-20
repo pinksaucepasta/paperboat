@@ -287,11 +287,14 @@ type QUICListener struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	listener *quic.Listener
-	config   Config
-	endpoint EndpointConfig
-	done     chan struct{}
-	once     sync.Once
-	closeErr error
+	// transport and packet are closed with the listener; the transport carries the address gate (quic_pending.go).
+	transport *quic.Transport
+	packet    net.PacketConn
+	config    Config
+	endpoint  EndpointConfig
+	done      chan struct{}
+	once      sync.Once
+	closeErr  error
 }
 
 func ListenQUIC(ctx context.Context, endpoint EndpointConfig, config Config) (*QUICListener, error) {
@@ -312,12 +315,23 @@ func ListenQUIC(ctx context.Context, endpoint EndpointConfig, config Config) (*Q
 	if strings.TrimSpace(endpoint.Address) == "" {
 		return nil, ErrInvalidEndpoint
 	}
-	listener, err := quic.ListenAddr(endpoint.Address, tlsConfig, endpointQUICConfig(config))
+	udpAddr, err := net.ResolveUDPAddr("udp", endpoint.Address)
 	if err != nil {
 		return nil, carrierFailure{sentinel: ErrInvalidEndpoint, cause: err}
 	}
+	packet, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return nil, carrierFailure{sentinel: ErrInvalidEndpoint, cause: err}
+	}
+	transport := newQUICTransport(packet)
+	listener, err := transport.Listen(tlsConfig, endpointQUICConfig(config))
+	if err != nil {
+		_ = transport.Close()
+		_ = packet.Close()
+		return nil, carrierFailure{sentinel: ErrInvalidEndpoint, cause: err}
+	}
 	listenerContext, cancel := context.WithCancel(ctx)
-	result := &QUICListener{ctx: listenerContext, cancel: cancel, listener: listener, endpoint: endpoint, config: config, done: make(chan struct{})}
+	result := &QUICListener{ctx: listenerContext, cancel: cancel, listener: listener, transport: transport, packet: packet, endpoint: endpoint, config: config, done: make(chan struct{})}
 	go result.watch()
 	return result, nil
 }
@@ -367,6 +381,7 @@ func (l *QUICListener) Accept(ctx context.Context) (*Server, error) {
 		_ = session.Close()
 		return nil, err
 	}
+	settleQUICHandshake(connection.Context())
 	return server, nil
 }
 
@@ -385,6 +400,8 @@ func (l *QUICListener) Close() error {
 		close(l.done)
 		l.cancel()
 		l.closeErr = l.listener.Close()
+		_ = l.transport.Close() // closes established connections, as a single-use listener did
+		_ = l.packet.Close()
 	})
 	return l.closeErr
 }
