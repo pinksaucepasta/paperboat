@@ -242,7 +242,7 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 		return s.respond(connection, response)
 	}
 	if request.Operation == "reconcile_ssh_authorized_keys" {
-		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || len(request.SSHRevoked) > wire.MaxRevokedKeyIDs || s.config.AuthorizedKeys == nil {
+		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
 		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...), request.SSHPrincipal, append([]string(nil), request.SSHRevoked...))
