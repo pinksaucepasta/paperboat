@@ -188,24 +188,34 @@ def init():
 
 
 def ensure_dns(prod):
-    """Regional and shared public wildcard A records; never per-publication DNS."""
+    """Regional and shared public wildcard A and AAAA records; never per-publication DNS. The AAAA record is written
+    only when the host has a global IPv6 address."""
     address = ssh(HOST, "curl -s -m10 https://api.ipify.org").strip()
+    address6 = ssh(HOST, "curl -6 -s -m10 https://api6.ipify.org || true").strip()
+    try:
+        import ipaddress
+        address6 = str(ipaddress.IPv6Address(address6)) if ipaddress.IPv6Address(address6).is_global else ""
+    except ValueError:
+        address6 = ""
     zone, name = prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], f"{REGION}.{domain()}"
     def api(method, path, body=None):
         request = urllib.request.Request("https://api.cloudflare.com/client/v4" + path, method=method, headers={
             "Authorization": "Bearer " + prod[DNS_ENV], "Content-Type": "application/json"}, data=json.dumps(body).encode() if body else None)
         return json.load(urllib.request.urlopen(request, timeout=20))["result"]
     names = [name, f"*.{PUBLIC_LABEL}.{domain()}"]
-    for name in names:
-        have = api("GET", f"/zones/{zone}/dns_records?type=A&name={name}")
-        if have and have[0]["content"] == address and not have[0]["proxied"]:
-            continue
-        record = {"type": "A", "name": name, "content": address, "ttl": 60, "proxied": False}
-        if have:
-            api("PUT", f"/zones/{zone}/dns_records/{have[0]['id']}", record)
-        else:
-            api("POST", f"/zones/{zone}/dns_records", record)
-    return {name: address for name in names}
+    published = {}
+    for kind, value in (("A", address), ("AAAA", address6)):
+        for name in names if value else []:
+            have = api("GET", f"/zones/{zone}/dns_records?type={kind}&name={name}")
+            published[f"{kind} {name}"] = value
+            if have and have[0]["content"] == value and not have[0]["proxied"]:
+                continue
+            record = {"type": kind, "name": name, "content": value, "ttl": 60, "proxied": False}
+            if have:
+                api("PUT", f"/zones/{zone}/dns_records/{have[0]['id']}", record)
+            else:
+                api("POST", f"/zones/{zone}/dns_records", record)
+    return published
 
 
 def dns():

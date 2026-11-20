@@ -502,7 +502,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, fmt.Errorf("parse public listener port %q: want 1-65535", publicListenPort)
 	}
 	if publicListenHost == "" {
-		publicListenHost = "0.0.0.0"
+		publicListenHost = "::" // both address families; 0.0.0.0 would leave IPv6 clients out
 	}
 	publicPreviewAuthority := func(ctx context.Context, r edgehttp.DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error) {
 		return ingressAuthority.ResolvePreview(ctx, r.PreviewID, r.Hostname, r.Revision, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.Identity.AccountID, TunnelID: r.Identity.TunnelID, ConnectorID: r.Identity.ConnectorID, SessionID: r.Identity.SessionID, ProcessGeneration: r.Identity.ProcessGeneration, Generation: r.Identity.Generation, RouteID: r.RouteID, RequestID: "preview-authority", Kind: "http"})

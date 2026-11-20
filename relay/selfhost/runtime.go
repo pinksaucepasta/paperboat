@@ -140,9 +140,11 @@ func writeFile(path string, b []byte) error {
 	return err
 }
 
+// listenAddress is the address a runtime component listens on: the installation's listen host, or every address
+// of both families ("::" accepts IPv4 too on a dual-stack host; Go falls back to IPv4 where IPv6 is off).
 func listenAddress(host string, port int) string {
 	if host == "" {
-		host = "0.0.0.0"
+		host = "::"
 	}
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }

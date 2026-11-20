@@ -213,7 +213,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.String("name", "", "installation name")
 	fs.String("region", "selfhost", "selection region")
 	fs.String("failure-domain", "", "independent failure domain (defaults to endpoint host)")
-	fs.String("claim-listen", "0.0.0.0:8443", "local claim HTTPS listen address")
+	fs.String("claim-listen", "[::]:8443", "local claim HTTPS listen address; its host is also where the relay and edge listen ([::] is IPv4 and IPv6, 0.0.0.0 IPv4 only)")
 	fs.String("preview-domain", "", "preview base domain")
 	fs.String("tunnel-domain", "", "durable tunnel base domain")
 	fs.String("runtime-domain", "", "runtime base domain")
