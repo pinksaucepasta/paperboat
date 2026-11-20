@@ -265,14 +265,14 @@ type Billing struct {
 // plans' allowance (PersonalAllowanceBytes for Free, the products' allowance_bytes for Pro, TeamPerSeatBytes times seats for a team).
 type FairUse struct {
 	// EdgeFreeBytesPerSecond and EdgeBytesPerSecond are the slow speed of a Free, and of a Pro or Team, workspace across all its
-	// Paperboat edges together and, as the account's speed, across the relays it uses. The edges each get a share (controlplane: rate
-	// divided by the edges carrying the workspace); so do the relays.
+	// Paperboat edges together; the edges each get a share (controlplane: rate divided by the edges carrying the workspace). On
+	// relays it is the account's speed on each relay (not divided).
 	EdgeFreeBytesPerSecond int64 `json:"edge_free_bytes_per_second"`
 	EdgeBytesPerSecond     int64 `json:"edge_bytes_per_second"`
 	// TeamPerSeatBytes is a paid team's pool per seat and month: the pool is this times its seats, shared by the team.
 	TeamPerSeatBytes int64 `json:"team_per_seat_bytes"`
 	// RelayMbitFree and RelayMbitPaid are one account's speed through Paperboat's relays while its workspace pool is not used up, on a
-	// Free and on a paid (Pro, Team) plan (shared across the relays it is on). User decision 2026-11-20: Free 10, paid 100.
+	// Free and on a paid (Pro, Team) plan, applied in full by every relay it is on. User decision 2026-11-20: Free 10, paid 100, not divided by relays.
 	RelayMbitFree float64 `json:"relay_mbit_free"`
 	RelayMbitPaid float64 `json:"relay_mbit_paid"`
 	// TerminalMbit is the anti-abuse cap on all browser-terminal traffic of one workspace together (one shared bucket, however many

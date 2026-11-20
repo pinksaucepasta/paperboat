@@ -199,6 +199,7 @@ type budget struct {
 	burst   float64
 	at      time.Time
 	tokens  float64
+	offered uint64 // demand since the last takeOffered: the bytes offered to reserve, counted twice when the limit delayed or dropped them
 }
 
 func newBudget(bytesPerSecond float64) *budget {
@@ -242,6 +243,7 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 	cost := b.charge(size)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.offered += uint64(size)
 	if b.at.IsZero() {
 		b.tokens = b.burst
 	} else {
@@ -252,12 +254,24 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 		b.tokens -= cost
 		return 0, true
 	}
+	// The limit held this packet back: the flow wanted more than it got, which the demand reports by counting the bytes twice (so a flow
+	// held at a small share can grow it, instead of looking as small as the share it was given).
+	b.offered += uint64(size)
 	delay := time.Duration((cost - b.tokens) / b.rate * float64(time.Second))
 	if delay > maxDelay {
 		return 0, false
 	}
 	b.tokens -= cost
 	return delay, true
+}
+
+// takeOffered returns the bytes offered since the last call and starts a new window.
+func (b *budget) takeOffered() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := b.offered
+	b.offered = 0
+	return n
 }
 
 // setRate changes the refill rate and the burst; tokens already held are cut to the new burst.

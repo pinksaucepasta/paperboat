@@ -70,17 +70,21 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 	period(paid120, 100_000_000_000, 120_000_000_000, true) // out of its 100 GB pool
 	period(light, 5_000_000_000, 1_000_000_000, false)
 
-	observe := func(service *EdgeService, id string, accounts ...string) relayNodeLeaseDocument {
+	observeDemand := func(service *EdgeService, id string, demand map[string]float64, accounts ...string) relayNodeLeaseDocument {
 		t.Helper()
 		subjects := []relaySubject{}
 		for i, u := range accounts {
 			subjects = append(subjects, relaySubject{AccountID: u, EndpointID: fmt.Sprintf("endpoint_%d", i), Generation: 0})
 		}
-		out, err := service.ObserveRelayNode(ctx, relayNodeObservation{NodeID: id, Generation: 1, ProcessEpoch: epoch, Ready: true, Subjects: subjects, SubjectsDigest: relaySubjectsDigest(subjects)})
+		out, err := service.ObserveRelayNode(ctx, relayNodeObservation{NodeID: id, Generation: 1, ProcessEpoch: epoch, Ready: true, Subjects: subjects, SubjectsDigest: relaySubjectsDigest(subjects), AccountDemand: demand})
 		if err != nil {
 			t.Fatalf("observation failed: %v", err)
 		}
 		return out
+	}
+	observe := func(service *EdgeService, id string, accounts ...string) relayNodeLeaseDocument {
+		t.Helper()
+		return observeDemand(service, id, nil, accounts...)
 	}
 	fair := config.Default().Billing.FairUse
 	plain := NewEdgeService(store, "relay-observe-test-credential-0123456789")
@@ -109,20 +113,27 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 		t.Fatalf("a customer-owned relay was given limits: %+v", out)
 	}
 
-	// An account's speed is ONE bucket across relays: an account on two relays gets half of its speed on each (the fast speed, or its plan's
-	// slower one), so the shares add up to it; the customer-owned relay does not count as one of them.
+	// An account's speed is ONE bucket across relays, divided by the demand the relays report: the busy relay gets nearly all of it, the
+	// idle one its floor, and the shares add up to the speed (Free's 10, its slower tiers); the customer-owned relay is no carrier.
 	shared := NewEdgeService(store, "relay-observe-test-credential-0123456789")
 	shared.SetFairUse(fair)
 	shared.SetRelayPoolGate(gate)
-	observe(shared, node2, both, paid120)
-	observe(shared, own, both)
-	shared.relayCountsAt = time.Time{} // the relay counts are cached for a few seconds; read them again
-	first := observe(shared, node, append(users[:4:4], both)...)
+	observeDemand(shared, own, map[string]float64{both: 1e6}, both)
+	busy := map[string]float64{both: 1e6, paid120: 1e5}
+	observeDemand(shared, node2, busy, both, paid120)
+	idle := observeDemand(shared, node, map[string]float64{both: 0}, append(users[:4:4], both)...)
 	speeds := map[string]float64{}
-	for _, a := range first.AccountSpeeds {
+	for _, a := range idle.AccountSpeeds {
 		speeds[a.Account] = a.Mbit
 	}
-	if speeds[both] != 5 || speeds[paid120] != 0.5 || speeds[free12] != 0.512 {
-		t.Fatalf("shares = %v, want %s at 5 (Free's 10 Mbit/s over two relays), %s at 0.5 (its 1 Mbit/s tier over two relays), %s at 0.512 (one relay)", speeds, both, paid120, free12)
+	if speeds[both] != 0.5 || speeds[paid120] != 0.064 || speeds[free12] != 0.512 || speeds[paid60] != 100 {
+		t.Fatalf("idle relay's shares = %v, want %s at its floor 0.5 (5%% of Free's 10), %s at 0.064, %s at 0.512 (one relay), %s at 100", speeds, both, paid120, free12, paid60)
+	}
+	speeds = map[string]float64{}
+	for _, a := range observeDemand(shared, node2, busy, both, paid120).AccountSpeeds {
+		speeds[a.Account] = a.Mbit
+	}
+	if speeds[both] != 9.5 || speeds[paid120] != 1 {
+		t.Fatalf("busy relay's shares = %v, want %s at 9.5 (the idle relay holds its 0.5 floor) and %s at 1 (the other relay does not carry it, it reported no demand for it)", speeds, both, paid120)
 	}
 }

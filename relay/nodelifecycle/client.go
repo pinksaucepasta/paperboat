@@ -116,6 +116,7 @@ type Client struct {
 	// observation sends only the digest while the set is unchanged (~400 KB every 3 s at 4,096
 	// connections otherwise).
 	sentSubjects string
+	demandAt     time.Time // start of the window the next observation reports account demand for
 	sampler      *nodemetrics.Sampler
 }
 
@@ -359,6 +360,17 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	digest := subjectsDigest(subjects)
 	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest}
 	body["metrics"] = c.metrics(stats)
+	// What each connected account offered this relay since the last observation (bytes per second): the control plane divides an
+	// account's speed among its relays by it. The first observation only opens the window.
+	taken, now := server.TakeAccountDemand(), time.Now()
+	if elapsed := now.Sub(c.demandAt).Seconds(); !c.demandAt.IsZero() && elapsed > 0 {
+		demand := make(map[string]float64, len(taken))
+		for account, n := range taken {
+			demand[account] = float64(n) / elapsed
+		}
+		body["account_demand"] = demand
+	}
+	c.demandAt = now
 	full := digest != c.sentSubjects
 	if full {
 		body["subjects"] = append([]derpquic.AuthoritySubject{}, subjects...)

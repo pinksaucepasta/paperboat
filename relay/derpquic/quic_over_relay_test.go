@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"github.com/quic-go/quic-go"
 	"tailscale.com/derp"
 	"tailscale.com/types/key"
@@ -126,6 +127,12 @@ func quicThroughput(t *testing.T, mbit float64, duration time.Duration) (goodput
 	ra, rb := newRelayConn(a, kb), newRelayConn(b, ka)
 	defer ra.Close()
 	defer rb.Close()
+	return quicBulk(t, ra, rb, relayAddr{}, duration), s.Snapshot().Dropped
+}
+
+// quicBulk runs a QUIC bulk upload from ra's side to rb's over two packet conns for the given duration and returns the goodput in Mbit/s.
+func quicBulk(t *testing.T, ra, rb net.PacketConn, dial net.Addr, duration time.Duration) float64 {
+	t.Helper()
 	innerCert := certificate(t)
 	server := &quic.Transport{Conn: rb}
 	defer server.Close()
@@ -157,7 +164,7 @@ func quicThroughput(t *testing.T, mbit float64, duration time.Duration) (goodput
 	defer client.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), duration+20*time.Second)
 	defer cancel()
-	connection, err := client.Dial(ctx, relayAddr{}, &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"bulk"}}, &quic.Config{MaxIdleTimeout: 20 * time.Second})
+	connection, err := client.Dial(ctx, dial, &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"bulk"}}, &quic.Config{MaxIdleTimeout: 20 * time.Second})
 	if err != nil {
 		t.Fatalf("inner QUIC handshake through the relay: %v", err)
 	}
@@ -179,7 +186,7 @@ func quicThroughput(t *testing.T, mbit float64, duration time.Duration) (goodput
 	time.Sleep(duration)
 	elapsed := time.Since(started).Seconds()
 	_ = io.Discard
-	return float64(received.Load()) * 8 / 1e6 / elapsed, s.Snapshot().Dropped
+	return float64(received.Load()) * 8 / 1e6 / elapsed
 }
 
 // A QUIC transfer through the relay gets most of its account's speed. The account budget used to charge every datagram at least a full
@@ -219,5 +226,103 @@ func TestQUICBulkMeasure(t *testing.T) {
 		}
 		goodput, dropped := quicThroughput(t, mbit, time.Duration(seconds)*time.Second)
 		t.Logf("MEASURE cap %6.1f Mbit/s: QUIC goodput %7.2f Mbit/s (%.0f%% of the cap), relay dropped %d datagrams", mbit, goodput, 100*goodput/max(mbit, 1e-9), dropped)
+	}
+}
+
+// shareLoop is the control plane's part in a test: every interval it reads what the account offered each relay, divides the plan speed
+// among them with relayshare.Share (as the control plane does for each observation) and sets every relay's share.
+func shareLoop(t *testing.T, servers []*Server, account string, plan float64, interval time.Duration) (stop func()) {
+	t.Helper()
+	step := func(dt float64) {
+		demand := map[string]float64{}
+		for i, s := range servers {
+			demand[strconv.Itoa(i)] = float64(s.TakeAccountDemand()[account]) / dt
+		}
+		for i, s := range servers {
+			if err := s.SetAccountSpeeds(map[string]float64{account: relayshare.Share(plan, demand[strconv.Itoa(i)], demand)}); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	step(1) // no demand yet: an even split before the first flow starts
+	done, finished := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(finished)
+		last := time.Now()
+		for ticker := time.NewTicker(interval); ; {
+			select {
+			case now := <-ticker.C:
+				step(now.Sub(last).Seconds())
+				last = now
+			case <-done:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	return func() { close(done); <-finished }
+}
+
+// twoRelays starts two relays holding one account at the plan speed, with the share loop dividing it, and a connected peer pair of the
+// account on each; it returns the servers and the pairs' packet conns.
+func twoRelays(t *testing.T, plan float64) (servers []*Server, pairs [2][2]*relayConn, stop func()) {
+	t.Helper()
+	f := newFixture(t)
+	for i := range pairs {
+		s, address, _ := f.start("127.0.0.1:0")
+		if err := s.SetAccountSpeed(plan); err != nil {
+			t.Fatal(err)
+		}
+		servers = append(servers, s)
+		ka, kb := key.NewNode().Public(), key.NewNode().Public()
+		ca, cb := certificate(t), certificate(t)
+		ga, gb := f.grant(ka, ca, "share-a"), f.grant(kb, cb, "share-b")
+		ga.AccountID, gb.AccountID = "shareaccount", "shareaccount"
+		pairScopes(&ga, &gb)
+		a, b := f.client(address, ca, ga), f.client(address, cb, gb)
+		connect(t, a)
+		connect(t, b)
+		pairs[i] = [2]*relayConn{newRelayConn(a, kb), newRelayConn(b, ka)}
+		t.Cleanup(func() { pairs[i][0].Close(); pairs[i][1].Close() })
+	}
+	return servers, pairs, shareLoop(t, servers, "shareaccount", plan, 500*time.Millisecond)
+}
+
+// An account's speed is one budget across its relays, divided by demand: a single flow on one of two relays gets at least 90% of the plan
+// speed at the relay (the idle relay holds only its floor) and nearly all of it as QUIC goodput, and two flows on two relays together
+// stay within the plan speed.
+func TestAccountSpeedIsSharedAcrossRelaysByDemand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes about 30 s")
+	}
+	const plan = 10.0
+	duration := 12 * time.Second
+
+	servers, pairs, stop := twoRelays(t, plan)
+	var single float64
+	done := make(chan struct{})
+	go func() { defer close(done); single = quicBulk(t, pairs[0][0], pairs[0][1], relayAddr{}, duration) }()
+	time.Sleep(duration / 2)
+	atFlow, atIdle := servers[0].AccountMbit("shareaccount"), servers[1].AccountMbit("shareaccount")
+	<-done
+	stop()
+	t.Logf("one flow on relay 1: QUIC goodput %.2f Mbit/s; relay 1 held at %.2f, the idle relay 2 at %.2f of %.0f", single, atFlow, atIdle, plan)
+	if atFlow < 0.9*plan || atFlow+atIdle > plan*1.001 || single < 0.8*plan {
+		t.Fatalf("one flow got relay speed %.2f (+%.2f idle) and %.2f Mbit/s goodput of a %.0f Mbit/s account: want at least 90%% at the relay, the shares within the plan, at least 80%% as goodput", atFlow, atIdle, single, plan)
+	}
+
+	servers, pairs, stop = twoRelays(t, plan)
+	var both [2]float64
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		both[1] = quicBulk(t, pairs[1][0], pairs[1][1], relayAddr{}, duration)
+	}()
+	both[0] = quicBulk(t, pairs[0][0], pairs[0][1], relayAddr{}, duration)
+	<-done
+	stop()
+	t.Logf("two flows on two relays: %.2f + %.2f = %.2f Mbit/s of %.0f", both[0], both[1], both[0]+both[1], plan)
+	if sum := both[0] + both[1]; sum > 1.05*plan || sum < 0.6*plan {
+		t.Fatalf("two flows together got %.2f Mbit/s of a %.0f Mbit/s account: want at most 105%% and, as a sanity floor, at least 60%%", sum, plan)
 	}
 }
