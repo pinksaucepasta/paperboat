@@ -3,7 +3,7 @@ import shutil
 import sys
 import unittest
 
-from terminal_lifecycle import Terminal, applications
+from terminal_lifecycle import Terminal, applications, windows_phases
 
 
 @unittest.skipUnless(all(shutil.which(name) for name in ['bash', 'vim', 'less']),
@@ -22,6 +22,33 @@ class FullscreenApplications(unittest.TestCase):
             self.assertEqual(0, terminal.wait_exit(timeout=120))
         finally:
             terminal.close()
+
+
+class WindowsInterrupt(unittest.TestCase):
+    def test_recovery_input_is_sent_after_cmd_returns(self):
+        class Console:
+            awaiting_prompt = False
+
+            def send(self, data):
+                if self.awaiting_prompt:
+                    raise AssertionError('typed while the foreground process was handling Ctrl-C')
+                if data == b'\x03':
+                    self.awaiting_prompt = True
+
+            def expect(self, token, timeout=45):
+                if token == 'PB_CTRL_C_PROMPT>':
+                    self.awaiting_prompt = False
+
+            def resize(self, rows, columns):
+                pass
+
+            def settle(self):
+                pass
+
+            def wait_exit(self):
+                return 0
+
+        windows_phases(Console(), 'main', 'off')
 
 
 class TerminalCapabilities(unittest.TestCase):

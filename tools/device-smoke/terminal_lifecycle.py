@@ -354,11 +354,16 @@ def windows_phases(terminal, check, status_bar, cwd_leaf=None):
                 raise RuntimeError('terminal size did not follow the local resize within 20 s')
     terminal.send(windows_target.colour_line() + '\r')
     terminal.expect(b'\x1b[31mPB_COLOUR')  # ConPTY writes the reset in its own form
+    terminal.send('prompt PB_CTRL_C_PROMPT$G\r')
+    terminal.expect('PB_CTRL_C_PROMPT>')
     ready = 'PB_FOREGROUND_' + uuid.uuid4().hex
     terminal.send(windows_target.foreground_line(ready, 60) + '\r')
     terminal.expect(ready)
     terminal.send(b'\x03')
-    terminal.expect(say('INTERRUPTED'))  # within 45 s: the fixture uninterrupted would sleep 60
+    # Ctrl-C can flush console input while PowerShell unwinds. Wait for cmd to
+    # resume before typing the marker. If Ctrl-C failed, the fixture sleeps 60 s.
+    terminal.expect('PB_CTRL_C_PROMPT>')
+    terminal.expect(say('INTERRUPTED'))
     terminal.expect(say('DONE'))
     terminal.settle()
     terminal.send('exit\r')
