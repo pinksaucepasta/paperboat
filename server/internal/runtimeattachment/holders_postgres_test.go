@@ -329,6 +329,41 @@ VALUES($1,$2,$1,5,'http','managed',$3,NULL,'http','127.0.0.1:1','not_applicable'
 	}
 }
 
+// TestWildcardDomainOnTLSRouteNotSeeded: a TLS-passthrough route serves its exact custom domains only (the pull's
+// domain_bindings), so a wildcard domain attached to one is not announced as a *.suffix key.
+func TestWildcardDomainOnTLSRouteNotSeeded(t *testing.T) {
+	f := newAgentFixture(t, "holdtlswild")
+	f.manage(t, f.node)
+	session := f.carrier(t, f.node, "epoch_endpoint", true, "")
+	tunnel, label := "tunnel_"+f.prefix, uuid.NewString()
+	stable := label + ".tunnels.example.test"
+	exactDomain, wildSuffix := "tls-"+f.prefix+".example.test", "wild-"+f.prefix+".example.test"
+	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
+		tunnel, f.account, "endpoint_"+label, "https://"+stable, f.machine)
+	route := "route_" + f.prefix
+	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,match_hostname,wildcard_suffix,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at,public_tcp_listener_id,public_tcp_port,preserve_host)
+VALUES($1,$2,$1,5,'tls','managed',$3,NULL,'tcp','127.0.0.1:1','not_applicable',1,'active',$4,$4,now(),now(),'listener_tls_443',443,false)`, route, tunnel, stable, f.account)
+	f.exec(t, `INSERT INTO endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, f.account, f.machine)
+	for id, domain := range map[string][2]string{"domain_exact_" + f.prefix: {exactDomain, "exact"}, "domain_wild_" + f.prefix: {"*." + wildSuffix, "one_label_wildcard"}} {
+		f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,$6,$1,'verified',$5,'none','not_applicable','ready','clear')`, id, f.account, tunnel, route, domain[0], domain[1])
+	}
+	f.exec(t, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) SELECT $1,$2,$3,protocol,id FROM tunnel_routes WHERE id=$1`, route, tunnel, stable)
+	f.exec(t, `INSERT INTO endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,generation,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_endpoint',$4,1,true,now())`, route, tunnel, f.node, session)
+	holders, _, err := f.service.Holders(f.ctx, f.node, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, h := range holders {
+		names = append(names, h.Name)
+	}
+	want := []string{stable, exactDomain}
+	sort.Strings(want)
+	if fmt.Sprint(names) != fmt.Sprint(want) {
+		t.Fatalf("keys %v, want %v: the exact hostname and exact domain, and no *.suffix key for a wildcard domain on a TLS route", names, want)
+	}
+}
+
 // explain logs the executed plan of one holder query (a failing page names where its time went).
 func (f *agentFixture) explain(t *testing.T, query string, args ...any) {
 	t.Helper()

@@ -276,3 +276,24 @@ func TestRelayObserveStoresServingPin(t *testing.T) {
 		t.Fatalf("observation without a pin changed the stored pin to %q", got)
 	}
 }
+
+// TestRelayMeshPeersOmitsRepeatedPin: a managed relay that reports another relay's pin makes both unlisted, so the
+// directory every relay receives stays free of a repeated pin (a relay refuses such a directory whole).
+func TestRelayMeshPeersOmitsRepeatedPin(t *testing.T) {
+	f := newMeshFixture(t, "duppin")
+	self := f.node("self", "relay", "ready", true, f.region, 0, "")
+	honest := f.node("honest", "relay", "ready", true, f.region, 0, "")
+	other := f.node("other", "relay", "ready", true, f.region, 0, "")
+	s := NewEdgeService(f.store, "unused")
+	lease, err := s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: self, Generation: 1, ProcessEpoch: "epoch_self", Ready: true})
+	if err != nil || len(lease.MeshPeers) != 2 {
+		t.Fatalf("mesh peers %+v err=%v, want both relays", lease.MeshPeers, err)
+	}
+	if _, err := s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: other, Generation: 1, ProcessEpoch: "epoch_other", Ready: true, ServingSPKISHA256: pin(honest)}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err = s.ObserveRelayNode(t.Context(), relayNodeObservation{NodeID: self, Generation: 1, ProcessEpoch: "epoch_self", Ready: true})
+	if err != nil || len(lease.MeshPeers) != 0 {
+		t.Fatalf("mesh peers %+v err=%v, want neither relay listed under the repeated pin", lease.MeshPeers, err)
+	}
+}

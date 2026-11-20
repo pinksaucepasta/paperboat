@@ -124,3 +124,36 @@ func TestMeshLinkEndsAtCertExpiry(t *testing.T) {
 		t.Fatalf("the link ended %v before its peer's certificate expired", time.Until(notAfter))
 	}
 }
+
+// TestPeerCurrentRefusesChangedIdentity: a peer a link authenticated stays current only while the directory still lists
+// it under the same pin, address and process epoch; any change (or an unlisted node) makes an Open from that link refused.
+func TestPeerCurrentRefusesChangedIdentity(t *testing.T) {
+	tr := newTrio(t)
+	a, b, other := tr.node(t, "a"), tr.node(t, "b"), tr.node(t, "other")
+	a.cfg = func(c *forward.Config) { c.PeerInterval = time.Hour } // the quiet changes below must not be refreshed away
+	bp := b.peer()
+	bp.ProcessEpoch = "epoch-1"
+	a.src.setPeers(bp)
+	a.start()
+	eventually(t, "b current", func() bool { return a.mesh.PeerCurrent(bp) })
+
+	listed := func(mutate func(*nodemesh.Peer)) bool {
+		cur := bp
+		mutate(&cur)
+		a.mesh.SetPeersQuietly([]nodemesh.Peer{cur})
+		return a.mesh.PeerCurrent(bp)
+	}
+	for name, mutate := range map[string]func(*nodemesh.Peer){
+		"pin rotated":   func(p *nodemesh.Peer) { p.SPKISHA256 = other.pin },
+		"epoch changed": func(p *nodemesh.Peer) { p.ProcessEpoch = "epoch-2" },
+		"host changed":  func(p *nodemesh.Peer) { p.Host = "192.0.2.1" },
+		"port changed":  func(p *nodemesh.Peer) { p.Port++ },
+	} {
+		if listed(mutate) {
+			t.Fatalf("%s: the old link's peer must not be current", name)
+		}
+	}
+	if !listed(func(*nodemesh.Peer) {}) {
+		t.Fatal("an unchanged directory entry must stay current")
+	}
+}

@@ -54,9 +54,10 @@ SELECT names.key COLLATE "C", x.edge_node_id` + endpointCols + `
   SELECT '*.'||tr.wildcard_suffix WHERE tr.match_type='one_label_wildcard' AND r.protocol<>'tcp'
   UNION ALL
   -- the custom domains the route is also served under (ingressprojection engineTunnelIngressSQL's second publication);
-  -- a wildcard domain's hostname is already its "*.suffix" key
+  -- a wildcard domain's hostname is already its "*.suffix" key; a TLS-passthrough route serves exact domains only
+  -- (control_plane.sql's domain_bindings), so a wildcard domain on one is not a name this node holds
   SELECT d.hostname FROM tunnel_domains d WHERE tr.protocol IN ('http','tls') AND d.route_id=tr.id AND d.tunnel_id=tr.tunnel_id
-   AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type IN ('exact','one_label_wildcard')
+   AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND (d.match_type='exact' OR tr.protocol='http' AND d.match_type='one_label_wildcard')
    AND (tr.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))) names
  WHERE x.desired='active' AND r.protocol<>'private_tcp' AND (r.protocol<>'tcp' OR tr.public_tcp_port IS NOT NULL)` + endpointLive
 }
