@@ -187,43 +187,41 @@ ON CONFLICT (node_id) DO UPDATE SET cpu_sustained_percent=excluded.cpu_sustained
 
 func loadOf(v float64) *float64 { return &v }
 
-func ids(nodes []wildcardNode) []string {
-	var out []string
-	for _, n := range nodes {
-		out = append(out, n.id)
-	}
-	return out
-}
-
-func TestWildcardLoadHysteresis(t *testing.T) {
-	steady := wildcardNode{id: "b", region: "r", load: loadOf(10)}
-	state := map[string]bool{}
-	for _, step := range []struct {
+func TestSelectByLoadTable(t *testing.T) {
+	node := func(id, region string, load *float64) loadNode { return loadNode{id: id, region: region, load: load} }
+	steady := node("b", "r", loadOf(10))
+	for _, tc := range []struct {
+		name string
+		prev bool // the previous decision for node a
 		load *float64
-		in   bool
-	}{{loadOf(84), true}, {loadOf(85), false}, {loadOf(75), false}, {loadOf(70), false}, {loadOf(69), true}, {loadOf(84), true}, {nil, true}} {
-		var kept []wildcardNode
-		kept, state = selectWildcardNodes([]wildcardNode{{id: "a", region: "r", load: step.load}, steady}, state, 85, 70)
-		if got := slices.Contains(ids(kept), "a"); got != step.in {
-			t.Fatalf("load %v: node in the set = %v, want %v", step.load, got, step.in)
+		out  bool
+	}{
+		{"84 stays in", false, loadOf(84), false},
+		{"85 goes out", false, loadOf(85), true},
+		{"75 stays out", true, loadOf(75), true},
+		{"70 stays out", true, loadOf(70), true},
+		{"69 comes back", true, loadOf(69), false},
+		{"84 does not flap back out", false, loadOf(84), false},
+		{"unknown load stays in", false, nil, false},
+		{"unknown load of a node that was out comes back", true, nil, false},
+	} {
+		got := selectByLoad([]loadNode{node("a", "r", tc.load), steady}, map[string]bool{"a": tc.prev}, 85, 70)
+		if got["a"] != tc.out || got["b"] {
+			t.Errorf("%s: decisions %v, want a out=%v and b in", tc.name, got, tc.out)
 		}
-		if !slices.Contains(ids(kept), "b") {
-			t.Fatalf("load %v: the steady node left the set", step.load)
-		}
 	}
-}
-
-func TestWildcardNeverEmptiesARegion(t *testing.T) {
-	nodes := []wildcardNode{
-		{id: "a", region: "r1", load: loadOf(90)}, {id: "b", region: "r1", load: loadOf(95)}, {id: "c", region: "r1", load: loadOf(90)},
-		{id: "d", region: "r2", load: loadOf(10)}, {id: "e", region: "r2", load: loadOf(99)},
+	// A region is never left empty: the least loaded node of r1 (tie by input order) stays; r2 is decided on its own.
+	nodes := []loadNode{
+		node("a", "r1", loadOf(90)), node("b", "r1", loadOf(95)), node("c", "r1", loadOf(90)),
+		node("d", "r2", loadOf(10)), node("e", "r2", loadOf(99)),
 	}
-	kept, state := selectWildcardNodes(nodes, map[string]bool{}, 85, 70)
-	if !slices.Equal(ids(kept), []string{"a", "d"}) {
-		t.Fatalf("kept %v: want the least loaded of r1 (tie by id) and the unaffected r2 node", ids(kept))
+	got := selectByLoad(nodes, map[string]bool{}, 85, 70)
+	if got["a"] || !got["b"] || !got["c"] || got["d"] || !got["e"] {
+		t.Fatalf("regions: decisions %v", got)
 	}
-	if state["a"] || !state["b"] || !state["c"] || state["d"] || !state["e"] {
-		t.Fatalf("decisions %v", state)
+	// The same rule on relays: a single relay of a region stays however loaded it is.
+	if got = selectByLoad([]loadNode{node("r1", "x", loadOf(100))}, map[string]bool{"r1": true}, 85, 70); got["r1"] {
+		t.Fatalf("the last relay of a region was left out: %v", got)
 	}
 }
 
@@ -236,7 +234,7 @@ func TestWildcardLoadStatePersistsAcrossWorkers(t *testing.T) {
 	f.sync()
 	f.want("203.0.113.1")
 	var out bool
-	if err := f.store.SQL().QueryRow(`SELECT out_for_load FROM paperboat.edge_wildcard_nodes WHERE node_id=$1`, b).Scan(&out); err != nil || !out {
+	if err := f.store.SQL().QueryRow(`SELECT out_for_load FROM paperboat.node_load_out WHERE node_id=$1`, b).Scan(&out); err != nil || !out {
 		t.Fatalf("stored decision for the overloaded node: %v %v", out, err)
 	}
 	// A new worker (a leader change) starts with no memory: 75 % is between the thresholds, so the stored decision holds.
@@ -257,7 +255,7 @@ func TestWildcardLoadStatePersistsAcrossWorkers(t *testing.T) {
 	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false WHERE id=$1`, b)
 	f.sync()
 	var rows int
-	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.edge_wildcard_nodes WHERE node_id=$1`, b).Scan(&rows); err != nil || rows != 0 {
+	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.node_load_out WHERE node_id=$1`, b).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("a drained node kept its decision: %d %v", rows, err)
 	}
 }
@@ -291,5 +289,100 @@ func TestNodeLoadPercentUsesTheWorstReportedFigure(t *testing.T) {
 	f.setLoad(id, 99, 90, 3*time.Minute)
 	if load() != nil {
 		t.Fatal("a report older than two minutes still counts")
+	}
+}
+
+// relay adds a ready managed relay named name to region with the given sustained CPU (a negative cpu: no report).
+func (f *wildcardFixture) relay(name, region string, cpu float64) string {
+	id := f.node(name, "", "", region, "roles=ARRAY['relay','peer_relay']")
+	if cpu >= 0 {
+		f.setRelayLoad(id, cpu)
+	}
+	return id
+}
+
+func (f *wildcardFixture) setRelayLoad(id string, cpu float64) {
+	f.t.Helper()
+	f.exec(`INSERT INTO paperboat.node_capacity(node_id,role,process_epoch,cpu_sustained_percent,reported_at) VALUES($1,'relay','epoch',$2,now())
+ON CONFLICT (node_id) DO UPDATE SET cpu_sustained_percent=excluded.cpu_sustained_percent,reported_at=excluded.reported_at`, id, cpu)
+	f.t.Cleanup(func() { f.exec(`DELETE FROM paperboat.node_capacity WHERE node_id=$1`, id) })
+}
+
+func (f *wildcardFixture) relayLoad() *relayLoad {
+	cfg := config.Config{}
+	cfg.NodeCapacity = config.Default().NodeCapacity
+	return newRelayLoad(f.store, cfg)
+}
+
+// outNodes lists the nodes the relay load rule currently holds out.
+func (f *wildcardFixture) outNodes() []string {
+	f.t.Helper()
+	rows, err := f.store.SQL().Query(`SELECT node_id FROM paperboat.node_load_out WHERE out_for_load AND node_id LIKE '%'||$1 ORDER BY node_id`, f.stamp)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			f.t.Fatal(err)
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+func TestRelayLoadNeverLeavesARegionEmpty(t *testing.T) {
+	f := newWildcardFixture(t)
+	on := "wc_on_" + f.stamp
+	a, b, c := f.relay("a", on, 90), f.relay("b", on, 95), f.relay("c", on, 88)
+	solo := f.relay("solo", "wc_off_"+f.stamp, 99) // a disabled region: not decided on at all
+	if err := f.relayLoad().Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.outNodes(); !slices.Equal(got, []string{a, b}) {
+		t.Fatalf("held out %v, want %v: all three are above 85, the least loaded (%s) stays", got, []string{a, b}, c)
+	}
+	var rows int
+	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.node_load_out WHERE node_id=$1`, solo).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("a relay in a disabled region was decided on: %d %v", rows, err)
+	}
+}
+
+func TestRelayLoadStatePersistsAcrossWorkers(t *testing.T) {
+	f := newWildcardFixture(t)
+	on := "wc_on_" + f.stamp
+	f.relay("a", on, 10)
+	b := f.relay("b", on, 90)
+	selfHosted := f.node("own", "", "", "", "roles=ARRAY['relay']") // no managed authority row
+	f.setRelayLoad(selfHosted, 99)
+	sync := func() {
+		f.t.Helper()
+		if err := f.relayLoad().Sync(context.Background()); err != nil { // a new worker each time: no memory
+			f.t.Fatal(err)
+		}
+	}
+	sync()
+	if got := f.outNodes(); !slices.Equal(got, []string{b}) {
+		t.Fatalf("held out %v, want only %s (a self-hosted owner's relay never takes part)", got, b)
+	}
+	f.setRelayLoad(b, 75) // between the thresholds: the stored decision holds
+	sync()
+	if got := f.outNodes(); !slices.Equal(got, []string{b}) {
+		t.Fatalf("at 75 held out %v, want %s still out", got, b)
+	}
+	f.setRelayLoad(b, 60)
+	sync()
+	if got := f.outNodes(); len(got) != 0 {
+		t.Fatalf("at 60 held out %v, want none", got)
+	}
+	f.setRelayLoad(b, 90)
+	sync()
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false WHERE id=$1`, b)
+	sync() // a node that leaves the ready set forgets its decision
+	var rows int
+	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.node_load_out WHERE node_id=$1`, b).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("a drained relay kept its decision: %d %v", rows, err)
 	}
 }

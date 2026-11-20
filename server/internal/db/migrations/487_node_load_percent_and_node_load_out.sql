@@ -1,5 +1,5 @@
 -- +goose Up
--- One load figure per node, shared by relay candidate ordering, the wildcard DNS sync and the admin panel: the worst of
+-- One load figure per node, shared by the relay candidate order and list, the wildcard DNS sync and the admin panel: the worst of
 -- the node's sustained CPU and its connections as a share of its own declared limit, from its latest self-report
 -- (node_capacity). NULL when the node reported nothing in the last 2 minutes: unknown is never treated as overloaded.
 SET LOCAL lock_timeout = '5s';
@@ -15,14 +15,15 @@ CREATE FUNCTION paperboat.node_load_percent(wanted_node text) RETURNS real
 $$;
 -- +goose StatementEnd
 
--- Which ready edges the wildcard DNS sync holds out of the published names because they are overloaded. One row per
--- node the sync has decided on; the decision is stored so a worker leader change does not reset the hysteresis.
-CREATE TABLE paperboat.edge_wildcard_nodes (
+-- Which ready managed nodes are held out of rotation because they are overloaded: an edge leaves the wildcard DNS
+-- names, a relay leaves the relay candidate list. One row per node the load rule has decided on; the decision is stored
+-- so a worker leader change does not reset the hysteresis.
+CREATE TABLE paperboat.node_load_out (
     node_id text PRIMARY KEY REFERENCES paperboat.control_tunnel_nodes(id) ON DELETE CASCADE,
     out_for_load boolean NOT NULL,
     changed_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- +goose Down
-DROP TABLE paperboat.edge_wildcard_nodes;
+DROP TABLE paperboat.node_load_out;
 DROP FUNCTION paperboat.node_load_percent(text);

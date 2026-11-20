@@ -13194,8 +13194,8 @@ export interface components {
              * @description The node's load: the worst of its sustained CPU and its connections against its own limit, from its latest report; absent when it reported nothing in the last 2 minutes.
              */
             load_percent?: number;
-            /** @description False while the wildcard DNS sync holds the ready node out of the published names because it is overloaded; absent for nodes the sync does not manage. */
-            in_dns?: boolean;
+            /** @description False while the load rule holds the ready node out because it is overloaded: an edge is left out of the wildcard DNS names, a relay out of the relay candidate list; absent for nodes the rule does not manage. */
+            in_rotation?: boolean;
             /** @description The node's public ingress addresses passed the verify-ingress probe. */
             ingress_verified: boolean;
         };
@@ -29978,7 +29978,7 @@ export interface operations {
                 instance?: string;
                 period?: "1h" | "6h" | "24h" | "7d";
                 /** @description Fixed mounted worker name; accepted only for paperboat.worker.state and paperboat.worker.progress_age_seconds. Historical interval aggregates are not current worker health. */
-                worker?: "worker_breakglass" | "worker_machines" | "worker_config_warnings" | "worker_config_revocation" | "worker_preview_leases" | "worker_tunnel_expiry" | "worker_team_retention" | "worker_recipe_machines" | "worker_transactional_mail" | "worker_team_entitlements" | "worker_team_billing" | "worker_team_inbox" | "worker_stale_nodes" | "worker_edge_dns" | "worker_diagnostic_uploads" | "worker_certificates" | "worker_platform_certificates" | "worker_selfhost_ingress" | "worker_account_deletion" | "worker_peer_endpoints" | "worker_audit_streams" | "worker_team_identity" | "worker_edge_sets" | "worker_mint_withdrawals" | "worker_machine_events" | "worker_peer_policy" | "worker_operational_health" | "worker_workspace_domains" | "worker_node_capacity" | "worker_node_update_notices" | "worker_fleet_snapshot" | "worker_presence";
+                worker?: "worker_breakglass" | "worker_machines" | "worker_config_warnings" | "worker_config_revocation" | "worker_preview_leases" | "worker_tunnel_expiry" | "worker_team_retention" | "worker_recipe_machines" | "worker_transactional_mail" | "worker_team_entitlements" | "worker_team_billing" | "worker_team_inbox" | "worker_stale_nodes" | "worker_edge_dns" | "worker_diagnostic_uploads" | "worker_certificates" | "worker_platform_certificates" | "worker_selfhost_ingress" | "worker_account_deletion" | "worker_peer_endpoints" | "worker_audit_streams" | "worker_team_identity" | "worker_edge_sets" | "worker_mint_withdrawals" | "worker_machine_events" | "worker_peer_policy" | "worker_operational_health" | "worker_workspace_domains" | "worker_node_capacity" | "worker_node_load" | "worker_node_update_notices" | "worker_fleet_snapshot" | "worker_presence";
             };
             header?: never;
             path?: never;

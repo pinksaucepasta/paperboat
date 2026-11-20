@@ -43,7 +43,7 @@ type edgeWildcards struct {
 	names []wildcardName
 	now   func() time.Time
 	log   *slog.Logger
-	// outPercent and inPercent are config.NodeCapacity.DNSLoadOutPercent / DNSLoadInPercent.
+	// outPercent and inPercent are config.NodeCapacity.LoadOutPercent / LoadInPercent.
 	outPercent, inPercent float64
 	// reconciled is each name's last successfully published set; a name is published again only when its set
 	// changes or after edgeWildcardRefresh, so the provider is not rewritten every tick.
@@ -56,15 +56,14 @@ func newEdgeWildcards(database *db.DB, cfg config.Config, public, runtime wildca
 		return nil
 	}
 	return &edgeWildcards{db: database, log: slog.Default(), now: time.Now,
-		outPercent: cfg.NodeCapacity.DNSLoadOutPercent, inPercent: cfg.NodeCapacity.DNSLoadInPercent,
+		outPercent: cfg.NodeCapacity.LoadOutPercent, inPercent: cfg.NodeCapacity.LoadInPercent,
 		names: []wildcardName{{"*." + cfg.Preview.BaseDomain, public}, {"*." + cfg.RuntimeBaseDomain, runtime}}}
 }
 
 // wildcardNode is one ready managed edge: its verified public ingress addresses, region and load (nil: unknown).
 type wildcardNode struct {
-	id, region string
-	addresses  []string
-	load       *float64
+	loadNode
+	addresses []string
 }
 
 // readyEdges lists the managed edges that serve: ready, not draining, fresh heartbeat, unexpired registration, in an
@@ -105,96 +104,6 @@ ORDER BY n.id LIMIT $1`, edgeWildcardMaxNodes)
 	return nodes, rows.Err()
 }
 
-// selectWildcardNodes drops overloaded nodes from the published set, with hysteresis. A node whose load reaches
-// outPercent leaves; once out it returns only when its load is below inPercent, so nothing between the two flaps.
-// A node with unknown load is never dropped. A region is never left empty: when all its ready nodes are out, the
-// least loaded one (ties by id) stays. out is each node's previous decision; the result is the kept nodes (in input
-// order) and the new decision for every node given.
-// Prior art: Route 53 health-checked records leave an unhealthy record out of an answer but answer with all of them
-// when every record of the set is unhealthy (fail open, never an empty answer); tailscale net/netcheck/netcheck.go
-// lines 1495-1511 keeps the current preferred DERP region unless another is clearly better (hysteresis).
-func selectWildcardNodes(nodes []wildcardNode, out map[string]bool, outPercent, inPercent float64) ([]wildcardNode, map[string]bool) {
-	state := make(map[string]bool, len(nodes))
-	inRegion := map[string]int{}
-	for _, n := range nodes {
-		threshold := outPercent
-		if out[n.id] {
-			threshold = inPercent
-		}
-		state[n.id] = n.load != nil && *n.load >= threshold
-		if !state[n.id] {
-			inRegion[n.region]++
-		}
-	}
-	least := map[string]*wildcardNode{}
-	for i, n := range nodes {
-		if inRegion[n.region] > 0 {
-			continue
-		}
-		if best := least[n.region]; best == nil || *n.load < *best.load {
-			least[n.region] = &nodes[i]
-		}
-	}
-	for _, n := range least {
-		state[n.id] = false
-	}
-	var kept []wildcardNode
-	for _, n := range nodes {
-		if !state[n.id] {
-			kept = append(kept, n)
-		}
-	}
-	return kept, state
-}
-
-// loadWildcardState reads the stored decisions (node id -> held out for load).
-func (w *edgeWildcards) loadWildcardState(ctx context.Context) (map[string]bool, error) {
-	rows, err := w.db.Pool().Query(ctx, `SELECT node_id,out_for_load FROM paperboat.edge_wildcard_nodes`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	state := map[string]bool{}
-	for rows.Next() {
-		var id string
-		var out bool
-		if err = rows.Scan(&id, &out); err != nil {
-			return nil, err
-		}
-		state[id] = out
-	}
-	return state, rows.Err()
-}
-
-// storeWildcardState writes the decisions that changed and forgets nodes that are no longer ready, so a node that
-// comes back later starts fresh.
-func (w *edgeWildcards) storeWildcardState(ctx context.Context, before, after map[string]bool) error {
-	var ids []string
-	var outs []bool
-	for id, out := range after {
-		if was, ok := before[id]; !ok || was != out {
-			ids, outs = append(ids, id), append(outs, out)
-		}
-	}
-	if len(ids) > 0 {
-		if _, err := w.db.Pool().Exec(ctx, `INSERT INTO paperboat.edge_wildcard_nodes(node_id,out_for_load,changed_at) SELECT id,out,now() FROM unnest($1::text[],$2::boolean[]) AS t(id,out)
-ON CONFLICT (node_id) DO UPDATE SET out_for_load=excluded.out_for_load,changed_at=now()`, ids, outs); err != nil {
-			return err
-		}
-	}
-	var gone []string
-	for id := range before {
-		if _, ok := after[id]; !ok {
-			gone = append(gone, id)
-		}
-	}
-	if len(gone) > 0 {
-		_, err := w.db.Pool().Exec(ctx, `DELETE FROM paperboat.edge_wildcard_nodes WHERE node_id=ANY($1::text[])`, gone)
-		return err
-	}
-	return nil
-}
-
 // Sync publishes every wildcard name whose set changed (or is due for a refresh). It never publishes an empty
 // set: with no ready edge the old records stay, which beats resolving to nothing. A name's failure does not stop the others.
 func (w *edgeWildcards) Sync(ctx context.Context) error {
@@ -206,17 +115,23 @@ func (w *edgeWildcards) Sync(ctx context.Context) error {
 		w.log.WarnContext(ctx, "edge_wildcard_dns_empty", "detail", "no ready managed edge; keeping the published records")
 		return nil
 	}
-	before, err := w.loadWildcardState(ctx)
+	before, err := loadNodeLoadOut(ctx, w.db, edgeRoles)
 	if err != nil {
 		return err
 	}
-	kept, after := selectWildcardNodes(nodes, before, w.outPercent, w.inPercent)
-	if err = w.storeWildcardState(ctx, before, after); err != nil {
+	loads := make([]loadNode, len(nodes))
+	for i, n := range nodes {
+		loads[i] = n.loadNode
+	}
+	after := selectByLoad(loads, before, w.outPercent, w.inPercent)
+	if err = storeNodeLoadOut(ctx, w.db, before, after); err != nil {
 		return err
 	}
 	var addresses []string
-	for _, n := range kept {
-		addresses = append(addresses, n.addresses...)
+	for _, n := range nodes {
+		if !after[n.id] {
+			addresses = append(addresses, n.addresses...)
+		}
 	}
 	at, key := w.now().UTC(), strings.Join(addresses, ",")
 	var firstErr error

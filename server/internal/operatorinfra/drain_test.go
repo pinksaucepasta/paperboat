@@ -37,9 +37,9 @@ func drainFixture(t *testing.T) (s *Service, store *db.DB, admin string, node No
 	machine = "drain_m_" + x
 	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, env, user)
-	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1)`, machine, user, env)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,public_identity_key) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,rpad($1,40,'k'))`, machine, user, env)
 	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080)`, route, env)
-	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',coalesce(m.public_identity_key, 'fixture-key'),1,'session_00000000-0000-4000-8000-000000000001','session_00000000-0000-4000-8000-000000000001','{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, enrolled.Node.ID, machine)
+	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',m.public_identity_key,1,'session_'||gen_random_uuid(),'session_'||gen_random_uuid(),'{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, enrolled.Node.ID, machine)
 	t.Cleanup(func() {
 		bg := context.Background()
 		store.SQL().ExecContext(bg, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
@@ -65,12 +65,12 @@ func TestOperatorNodeListShowsCarriers(t *testing.T) {
 	if err != nil || len(page.Items) != 1 || page.Items[0].Carriers != 1 {
 		t.Fatalf("listed carriers: %+v err=%v", page.Items, err)
 	}
-	if item := page.Items[0]; item.LoadPercent != nil || item.InDNS != nil || item.IngressVerified {
-		t.Fatalf("a node that reported nothing shows load %v in_dns %v ingress_verified %v", item.LoadPercent, item.InDNS, item.IngressVerified)
+	if item := page.Items[0]; item.LoadPercent != nil || item.InRotation != nil || item.IngressVerified {
+		t.Fatalf("a node that reported nothing shows load %v in_rotation %v ingress_verified %v", item.LoadPercent, item.InRotation, item.IngressVerified)
 	}
 	for _, query := range []string{
 		`INSERT INTO paperboat.node_capacity(node_id,role,process_epoch,cpu_sustained_percent,reported_at) VALUES($1,'edge','epoch',42,now())`,
-		`INSERT INTO paperboat.edge_wildcard_nodes(node_id,out_for_load) VALUES($1,true)`,
+		`INSERT INTO paperboat.node_load_out(node_id,out_for_load) VALUES($1,true)`,
 		`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id=$1`,
 	} {
 		if _, err = store.SQL().ExecContext(ctx, query, node.ID); err != nil {
@@ -84,8 +84,8 @@ func TestOperatorNodeListShowsCarriers(t *testing.T) {
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("listed: %+v err=%v", page.Items, err)
 	}
-	if item := page.Items[0]; item.LoadPercent == nil || *item.LoadPercent != 42 || item.InDNS == nil || *item.InDNS || !item.IngressVerified {
-		t.Fatalf("load %v in_dns %v ingress_verified %v, want 42, false, true", item.LoadPercent, item.InDNS, item.IngressVerified)
+	if item := page.Items[0]; item.LoadPercent == nil || *item.LoadPercent != 42 || item.InRotation == nil || *item.InRotation || !item.IngressVerified {
+		t.Fatalf("load %v in_rotation %v ingress_verified %v, want 42, false, true", item.LoadPercent, item.InRotation, item.IngressVerified)
 	}
 	drained, err := s.MutateNode(ctx, admin, "drain-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"})
 	if err != nil || drained.Node.Carriers != 1 || drained.Node.State != "draining" {
