@@ -240,7 +240,7 @@ heavy-merge-group split. Native merge limits do not amortize CI across PRs. Prio
 Measured 2026-11-12: one `pb exec` over a 290 ms path took ~12 dependent round trips. Fixed 2026-11-16 (1f9007a39): the per-exec
 network refresh (2-5 round trips) is gone. Fixed 2026-11-16 (FIX-EXECRTT): exec runs on one stream whose credential, preface, hello and
 start go out in one flight, and the peer association lingers 5 s after its last user; 290 ms path 2.57 s -> 1.05-1.3 s
-(tools/device-smoke/results/20261116T-execrtt.json). Left: the daemon's per-exec descriptor fetch from the server
+(private smoke receipt 20261116T-execrtt.json). Left: the daemon's per-exec descriptor fetch from the server
 (`MachineExecDescriptor`, one control-server round trip per exec).
 
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it).
@@ -265,7 +265,7 @@ Tailscale control plane. Dropping Tailscale itself is a rewrite; dropping the fo
 | DERP carrier factory (~350) | Keep. Upstream relays are TCP only; Tailscale documents DERP head-of-line blocking and TCP meltdown under load/loss and moved to UDP peer relays. Our fallback, QUIC datagrams (`relay/derpquic`), is the better design there |
 
 Also: the derpquic relay drops on its 64-slot per-peer queue (`server.go` select/default); a loaded loopback
-benchmark lost up to 1.5 %. Tune before measuring under loss (two victus VMs, forced relay, `tc netem` 1/3/5 %
+benchmark lost up to 1.5 %. Tune before measuring under loss (two windows-test VMs, forced relay, `tc netem` 1/3/5 %
 loss + 100 ms: transfer rate, terminal echo, network switch). `cli/upstream/PATCHES.md` names fork commit
 ac1095ce while both go.mod files pin 2d32e5f0.
 
@@ -313,7 +313,7 @@ the useful set for tunnels and custom domains.
   one client (`tools/probe/status_report.py`), and the admin panel reaches incidents and maintenance through one server-side interface
   (`admin/lib/server/status-provider.ts`); a hosted provider (incident.io, Atlassian Statuspage) means one new adapter there plus publishing
   component states from `status/lib/tick.ts`.
-- **Shared contracts not merged yet** (skipped on purpose by the dedup lane; code health only, no user-visible gain):
+- **Shared contracts not merged yet** (skipped on purpose by the dedup worktree; code health only, no user-visible gain):
   release index (move release policy to `shared/`, validate at the release gate and in the client), terminal attach
   descriptor (an optional field becomes required; client and server deploy together), tunnel config snapshot
   (hash-relevant field tags and two diverging validators must become one). Also still to check: inspector, tunnel view

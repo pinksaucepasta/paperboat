@@ -1,8 +1,8 @@
 # TUF repository publisher
 
-The initial public root is signed offline on apple and committed at
+The initial public root is signed offline on macos-test and committed at
 `cli/internal/hostruntime/bootstrap/trusted-root.json`. Its private root key stays
-on apple. Publication jobs never create or load an offline private key.
+on macos-test. Publication jobs never create or load an offline private key.
 
 Set `PAPERBOAT_TUF_ONLINE_KEY` through the job secret environment: unpadded standard
 base64 of the 32-byte Ed25519 seed. The root must authorize this same key, at
