@@ -35,7 +35,7 @@ func TestLatestReportReplacesThePreviousOneAndBadReportsAreRefusedPostgres(t *te
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Pool().Exec(ctx, `DELETE FROM host_health_reports`); err != nil {
