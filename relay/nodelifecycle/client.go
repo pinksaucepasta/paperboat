@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
@@ -82,6 +83,9 @@ type Lease struct {
 	// JWKS is the issuer trust document (keys plus withdrawn_key_ids); the relay trusts exactly its keys,
 	// so a rotation or withdrawal applies within one observation.
 	JWKS json.RawMessage `json:"jwks,omitempty"`
+	// MeshPeers are the other Paperboat-managed relays this one links to (pins are the SPKI of each relay's serving
+	// certificate). Absent means no mesh. A list that fails validation keeps the last good one; it never fences the relay.
+	MeshPeers []nodemesh.Peer `json:"mesh_peers,omitempty"`
 }
 
 // PoolHandover is one account moving off this relay: its carriers close at CloseAt (Unix seconds).
@@ -361,6 +365,9 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	digest := subjectsDigest(subjects)
 	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest}
 	body["metrics"] = c.metrics(stats)
+	if mesh, ok := server.MeshStats(); ok {
+		body["mesh"] = mesh
+	}
 	// What each connected account offered this relay since the last observation (bytes per second): the control plane divides an
 	// account's speed among its relays by it. The first observation only opens the window.
 	taken, now := server.TakeAccountDemand(), time.Now()
@@ -411,6 +418,9 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		if server.SetPoolHandover(list) != nil {
 			return ErrControl
 		}
+	}
+	if err := server.SetMeshPeers(out.MeshPeers); err != nil {
+		slog.Warn("relay mesh directory refused; keeping the last one", "error", err)
 	}
 	if out.SubjectsRequired {
 		// The control plane lost or never had this set: send it in full next time, and keep the speed list, which such an

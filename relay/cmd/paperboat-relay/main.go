@@ -157,6 +157,13 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err = server.SetConnectionLimit(int(lease.CapacityLimit)); err != nil {
 		return err
 	}
+	mesh, err := derpquic.NewMesh(derpquic.MeshConfig{Cert: pair})
+	if err != nil {
+		return serviceFailure{error: err, definition: "service_build"}
+	}
+	if err = server.SetMesh(mesh); err != nil {
+		return err
+	}
 	server.SetKeyRefresher(func() error {
 		refresh, stop := context.WithTimeout(context.WithoutCancel(processCtx), 5*time.Second)
 		defer stop()
