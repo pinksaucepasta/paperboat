@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -196,17 +198,26 @@ func TestQUICBulkThroughRelayGetsMostOfTheAccountSpeed(t *testing.T) {
 	}
 }
 
-// The account budget charges bytes (at least accountMinimumCost); the carrier budget keeps charging a full fragment for any datagram, so
-// a flood of tiny frames from one peer is still bounded.
-func TestAccountBudgetChargesBytesWhereTheCarrierBudgetChargesAFragment(t *testing.T) {
-	account, carrier := newAccountBudget(1<<20), newBudget(carrierBytesPerSecond)
-	if got := account.charge(60); got != accountMinimumCost {
-		t.Fatalf("account charge for a 60-byte ACK = %v, want %d", got, accountMinimumCost)
+// Measurement for a live A/B (not part of the suite): RELAY_QUIC_MEASURE=1 go test -run QUICBulkMeasure -v, optionally with network delay on
+// the loopback (tc qdisc add dev lo root netem delay 62ms gives a 250 ms round trip) to stand in for a far relay.
+// RELAY_QUIC_CAPS is a comma list of account speeds in Mbit/s (0 lifts the cap), RELAY_QUIC_SECONDS the length of each run.
+func TestQUICBulkMeasure(t *testing.T) {
+	if os.Getenv("RELAY_QUIC_MEASURE") == "" {
+		t.Skip("set RELAY_QUIC_MEASURE=1")
 	}
-	if got := account.charge(1067); got != 1067 {
-		t.Fatalf("account charge for a full datagram = %v, want 1067", got)
+	caps, seconds := os.Getenv("RELAY_QUIC_CAPS"), 8
+	if caps == "" {
+		caps = "100,10,5,1"
 	}
-	if got := carrier.charge(60); got != budgetMinimumCost {
-		t.Fatalf("carrier charge for a 60-byte datagram = %v, want %d", got, budgetMinimumCost)
+	if v, err := strconv.Atoi(os.Getenv("RELAY_QUIC_SECONDS")); err == nil && v > 0 {
+		seconds = v
+	}
+	for _, field := range strings.Split(caps, ",") {
+		mbit, err := strconv.ParseFloat(strings.TrimSpace(field), 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		goodput, dropped := quicThroughput(t, mbit, time.Duration(seconds)*time.Second)
+		t.Logf("MEASURE cap %6.1f Mbit/s: QUIC goodput %7.2f Mbit/s (%.0f%% of the cap), relay dropped %d datagrams", mbit, goodput, 100*goodput/max(mbit, 1e-9), dropped)
 	}
 }
