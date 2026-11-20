@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +23,10 @@ import (
 const visitorPendingHandshakes = 16
 
 type HTTP3Server struct {
-	Reporter  *reporting.Reporter
+	Reporter *reporting.Reporter
+	// Admit says whether this node answers the TLS server name itself. A handshake for a name it refuses fails at once
+	// (the client falls back to TCP, where a visitor for a name another node holds is forwarded to it); nil admits all.
+	Admit     func(host string) bool
 	address   string
 	server    *http3.Server
 	mu        sync.Mutex
@@ -85,7 +89,7 @@ func (s *HTTP3Server) Start(ctx context.Context) error {
 			return
 		}
 		// ConfigureTLSConfig and an early listener are what http3.Server.Serve itself would set up.
-		listener, err := transport.ListenEarly(http3.ConfigureTLSConfig(s.server.TLSConfig), s.server.QUICConfig)
+		listener, err := transport.ListenEarly(http3.ConfigureTLSConfig(s.admittedTLSConfig()), s.server.QUICConfig)
 		if err == nil {
 			err = s.server.ServeListener(listener)
 		}
@@ -96,6 +100,29 @@ func (s *HTTP3Server) Start(ctx context.Context) error {
 		close(s.done)
 	}()
 	return nil
+}
+
+// errHTTP3NameNotServed refuses the handshake of a name this node does not serve.
+var errHTTP3NameNotServed = errors.New("this node does not serve the name over HTTP/3")
+
+// admittedTLSConfig is the server TLS config with the Admit gate in front of its ClientHello selection.
+func (s *HTTP3Server) admittedTLSConfig() *tls.Config {
+	config := s.server.TLSConfig
+	if s.Admit == nil {
+		return config
+	}
+	config = config.Clone()
+	next := config.GetConfigForClient
+	config.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		if !s.Admit(strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))) {
+			return nil, errHTTP3NameNotServed
+		}
+		if next != nil {
+			return next(hello)
+		}
+		return nil, nil
+	}
+	return config
 }
 
 func (s *HTTP3Server) Shutdown(ctx context.Context) error {

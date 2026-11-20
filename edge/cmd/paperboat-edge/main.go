@@ -772,7 +772,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		warnIfFileLimitLow(edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1)
 		usageComponent = componentPair{first: usageWorker, second: forwarding} // starts last, stops right after the carriers
 	}
-	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
+	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, HTTP3Admit: publicTCP.ServesHTTPS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
 		return publicTCP.WrapTLSListener(listener, func(host string) bool {
 			if host == deployment.ConnectorAdvertiseHost {
 				return true

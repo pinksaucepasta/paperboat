@@ -558,4 +558,8 @@ func TestForwardPreviewAliasFromNonHolder(t *testing.T) {
 	if a.hits.Load() != 0 || b.hits.Load() != 2 {
 		t.Fatalf("hits a=%d b=%d", a.hits.Load(), b.hits.Load())
 	}
+	// HTTP/3 is gated by the same decision: only the holder answers the alias over QUIC.
+	if a.public.ServesHTTPS(alias) || !b.public.ServesHTTPS(alias) {
+		t.Fatalf("HTTPS served here: a=%v b=%v, want only the holder", a.public.ServesHTTPS(alias), b.public.ServesHTTPS(alias))
+	}
 }

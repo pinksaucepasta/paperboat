@@ -212,6 +212,13 @@ func (l *SharedTLSListener) Admit(host string) error {
 	return nil
 }
 
+// ServesHTTPS reports whether dispatch would terminate TLS for host here: the name is admitted by an attached carrier
+// or a current ingress decision, or it is the infrastructure name (a TLS-passthrough name is not: it never terminates).
+func (l *SharedTLSListener) ServesHTTPS(host string) bool {
+	adm, ok := l.resolveHost(host)
+	return ok && (adm.authorizedHTTPS || adm.infrastructureHTTPS)
+}
+
 var errNotServed = errors.New("this node does not serve the name")
 
 // helloBytesConn feeds a captured ClientHello to inspectClientHello; it never writes or blocks.

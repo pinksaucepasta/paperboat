@@ -37,6 +37,7 @@ type AssemblySpec struct {
 	GatewayAddress        string
 	GatewayHandler        http.Handler
 	GatewayTLS            *tls.Config
+	HTTP3Admit            func(host string) bool // the names this node serves itself; HTTP/3 refuses others (nil admits all)
 	GatewayMaxHeaderBytes int
 	GatewayWrapListener   func(net.Listener) (net.Listener, error)
 	PrivateAddress        string
@@ -82,6 +83,7 @@ func NewAssembly(spec AssemblySpec) (*Assembly, error) {
 		return nil, fmt.Errorf("assembly HTTP/3 ingress: %w", err)
 	}
 	http3Server.Reporter = spec.Reporter
+	http3Server.Admit = spec.HTTP3Admit
 	dataPlane, err := NewDataPlane(DataPlaneSpec{
 		Persistence:     spec.Persistence,
 		Control:         spec.Control,
