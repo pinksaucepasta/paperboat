@@ -54,7 +54,7 @@ func drainWorker(t *testing.T, sink control.NodeSink, drain *drainRecorder) (*No
 	t.Helper()
 	state := node.New("edge")
 	state.MarkReady()
-	manager, _ := node.NewManager(state, 2)
+	manager, _ := node.NewManager(state)
 	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process", 2), Drain: drain.Drain}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); worker.drains.Wait() })
