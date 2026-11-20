@@ -14,6 +14,10 @@ const (
 	// forceSeedGap is the shortest time between two forced refreshes, so unknown names cannot make the node hammer
 	// the server.
 	forceSeedGap = time.Second
+	// maxForcedSeedPages bounds a request-time refresh: a visitor waits on it inside the forward's opening deadline
+	// (2x dial+open timeout), and each page may cost up to 2*dial+open, so only a few pages fit. The periodic loop
+	// still pages through everything.
+	maxForcedSeedPages = 8
 )
 
 // seedLoop refreshes the holder map from the server (anti-entropy for what the watches miss) once the peer
@@ -33,18 +37,27 @@ func (m *Mesh) seedLoop(ctx context.Context) {
 }
 
 // refreshSeed pages through the server's holder snapshot. A forced refresh (a forward found no holder that
-// would take the visitor) is skipped when one finished within forceSeedGap.
+// would take the visitor) never waits for a refresh already in flight, is skipped when one finished within
+// forceSeedGap, and reads at most maxForcedSeedPages pages.
 func (m *Mesh) refreshSeed(ctx context.Context, forced bool) {
 	if m.peerSet().Len() == 0 {
 		return
 	}
-	m.seedMu.Lock()
+	pages := maxSeedPages
+	if forced {
+		if !m.seedMu.TryLock() {
+			return
+		}
+		pages = maxForcedSeedPages
+	} else {
+		m.seedMu.Lock()
+	}
 	defer m.seedMu.Unlock()
 	if forced && time.Since(m.seededAt) < forceSeedGap {
 		return
 	}
 	page, err := "", error(nil)
-	for range maxSeedPages {
+	for range pages {
 		var resp nodemesh.HoldersResponse
 		rctx, cancel := context.WithTimeout(ctx, 2*m.cfg.DialTimeout+m.cfg.OpenTimeout)
 		resp, err = m.cfg.Holders.Holders(rctx, page, nodemesh.MaxHolderPage)

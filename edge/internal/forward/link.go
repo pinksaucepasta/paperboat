@@ -3,6 +3,7 @@ package forward
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -22,8 +23,14 @@ type link struct {
 	remote  net.Addr
 	dialer  string // node id that dialled the link
 	started time.Time
-	active  atomic.Int64 // inbound forwarded visitors
+	// notAfter is when the peer's certificate expires; the link ends then and the dial loop reconnects (zero: none).
+	notAfter time.Time
+	active   atomic.Int64 // inbound forwarded visitors
 }
+
+// errLinkRefused: install did not keep the link (the mesh stopped, or the peer left the directory or changed while
+// the handshake ran).
+var errLinkRefused = errors.New("link not installed: mesh stopped or peer no longer in the directory")
 
 func (m *Mesh) liveLink(id string) *link {
 	m.mu.Lock()
@@ -43,6 +50,8 @@ func (m *Mesh) connect(ctx context.Context, p nodemesh.Peer) (*link, error) {
 }
 
 func (m *Mesh) dial(ctx context.Context, p nodemesh.Peer) (*link, error) {
+	ctx, done := m.track(ctx, &pendingHandshake{peer: p, dial: true})
+	defer done()
 	conf, err := nodemesh.ClientTLS(m.cfg.Certificate, nodemesh.EdgeForwardALPN, p)
 	if err != nil {
 		return nil, err
@@ -72,8 +81,11 @@ func (m *Mesh) dial(ctx context.Context, p nodemesh.Peer) (*link, error) {
 		_ = sess.Close()
 		return nil, fmt.Errorf("peer %s refused the link: %w", p.NodeID, err)
 	}
-	l := &link{peer: p, sess: sess, remote: raw.RemoteAddr(), dialer: m.cfg.NodeID, started: time.Now()}
-	won, _ := m.install(l)
+	l := &link{peer: p, sess: sess, remote: raw.RemoteAddr(), dialer: m.cfg.NodeID, started: time.Now(), notAfter: certEnd(conn)}
+	won, installed := m.install(l)
+	if !installed && won == l {
+		return nil, errLinkRefused
+	}
 	return won, nil
 }
 
@@ -112,7 +124,25 @@ func (m *Mesh) Accept(conn net.Conn) error {
 }
 
 func (m *Mesh) accept(ctx context.Context, raw net.Conn) error {
-	conn := tls.Server(raw, nodemesh.ServerTLS(m.cfg.Certificate, nodemesh.EdgeForwardALPN, m.peerSet))
+	h := &pendingHandshake{}
+	ctx, done := m.track(ctx, h)
+	defer done()
+	conf := nodemesh.ServerTLS(m.cfg.Certificate, nodemesh.EdgeForwardALPN, m.peerSet)
+	verify := conf.VerifyPeerCertificate
+	conf.VerifyPeerCertificate = func(raw [][]byte, chains [][]*x509.Certificate) error {
+		if err := verify(raw, chains); err != nil {
+			return err
+		}
+		leaf, err := x509.ParseCertificate(raw[0]) // verify parsed it already
+		if err != nil {
+			return nodemesh.ErrPeerUnknown
+		}
+		m.mu.Lock()
+		h.pin = nodemesh.SPKIPin(leaf)
+		m.mu.Unlock()
+		return nil
+	}
+	conn := tls.Server(raw, conf)
 	hctx, cancel := context.WithTimeout(ctx, m.cfg.DialTimeout)
 	defer cancel()
 	if err := conn.HandshakeContext(hctx); err != nil {
@@ -126,17 +156,24 @@ func (m *Mesh) accept(ctx context.Context, raw net.Conn) error {
 	if err != nil {
 		return err
 	}
-	l := &link{peer: peer, sess: sess, remote: raw.RemoteAddr(), dialer: peer.NodeID, started: time.Now()}
+	l := &link{peer: peer, sess: sess, remote: raw.RemoteAddr(), dialer: peer.NodeID, started: time.Now(), notAfter: certEnd(conn)}
 	if _, installed := m.install(l); !installed {
-		return errors.New("link to this peer already exists")
+		return errors.New("link not installed: peer already linked, no longer in the directory, or mesh stopped")
 	}
 	return nil
 }
 
-// install makes l the link to its peer. When both nodes dialled at once, the link the lower node id dialled wins on
+// install makes l the link to its peer, if the peer is still in the current directory with the pin, address and
+// process epoch l was made with: the check runs under the lock applyPeers also takes, so a handshake that began
+// before a peer was removed or rekeyed cannot install after. When both nodes dialled at once, the link the lower node id dialled wins on
 // both sides, so the two nodes keep the same session.
 func (m *Mesh) install(l *link) (*link, bool) {
 	m.mu.Lock()
+	if cur, ok := m.peerSet().Lookup(l.peer.NodeID); !ok || !peerMatches(cur, l.peer) {
+		m.mu.Unlock()
+		_ = l.sess.Close()
+		return l, false
+	}
 	old := m.links[l.peer.NodeID]
 	if old != nil && !old.sess.IsClosed() {
 		lower := min(m.cfg.NodeID, l.peer.NodeID)
@@ -164,6 +201,9 @@ func (m *Mesh) install(l *link) (*link, bool) {
 // runLink serves one link until it closes: its inbound streams and its outbound watch.
 func (m *Mesh) runLink(ctx context.Context, l *link) {
 	defer m.linkDown(l)
+	if !l.notAfter.IsZero() { // a link never outlives its peer's certificate
+		defer time.AfterFunc(time.Until(l.notAfter), func() { _ = l.sess.Close() }).Stop()
+	}
 	var streams sync.WaitGroup
 	streams.Go(func() { m.sendWatch(ctx, l) })
 	for {
@@ -179,12 +219,11 @@ func (m *Mesh) runLink(ctx context.Context, l *link) {
 
 func (m *Mesh) linkDown(l *link) {
 	m.mu.Lock()
-	current := m.links[l.peer.NodeID] == l
-	if current {
+	defer m.mu.Unlock()
+	// Only the current link withdraws the peer's names, and under the lock: a replacement installs (and starts its
+	// watch) only after this returns, so its snapshot cannot be wiped by the old link's teardown.
+	if m.links[l.peer.NodeID] == l {
 		delete(m.links, l.peer.NodeID)
-	}
-	m.mu.Unlock()
-	if current {
 		m.dir.DropPeer(l.peer.NodeID)
 	}
 }

@@ -170,8 +170,8 @@ func (m *Mesh) serveStream(ctx context.Context, l *link, st *yamux.Stream) {
 	}
 }
 
-// serveWatch applies the peer's holdings to the directory until the stream or link ends. A peer that sends a
-// malformed frame, or claims more names than a node can hold, loses its link.
+// serveWatch applies the peer's holdings to the directory until the stream or link ends, and then ends the link. A
+// peer that sends a malformed frame, or claims more names than a node can hold, loses its link.
 func (m *Mesh) serveWatch(l *link, st *yamux.Stream) {
 	for {
 		var w nodemesh.Watch
@@ -183,5 +183,7 @@ func (m *Mesh) serveWatch(l *link, st *yamux.Stream) {
 			return
 		}
 	}
-	_ = st.Close()
+	// The watch ended (EOF or error) while the session may be up: the peer sends no more deltas, so what it held
+	// would stay "complete" and mask the server seed for good. Close the session; the reconnect refloods.
+	_ = l.sess.Close()
 }

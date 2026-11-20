@@ -73,6 +73,10 @@ type Config struct {
 	TCPInjector TCPInjector
 
 	DialTimeout, OpenTimeout, PeerInterval, SeedInterval time.Duration
+	// MaxPeerStale is how long the last good peer directory stays trusted while refreshes fail (default 5x PeerInterval);
+	// past it the set is emptied, so links close and a retired or rekeyed peer cannot keep forwarding through a
+	// control-plane outage. The next good refresh restores it.
+	MaxPeerStale time.Duration
 	// HeldInterval is how often the node's holdings are diffed into the watch streams (default 250 ms); tests lengthen it
 	// to keep the peers' maps stale on purpose.
 	HeldInterval      time.Duration
@@ -102,6 +106,9 @@ type Mesh struct {
 	wg    sync.WaitGroup
 	links map[string]*link
 	loops map[string]*dialLoop
+	// pending are the handshakes in flight; applyPeers cuts those of a peer that left or changed.
+	pending   map[*pendingHandshake]struct{}
+	peersOKAt time.Time // last successful peer refresh
 
 	held   atomic.Pointer[heldSnapshot]
 	heldMu sync.Mutex
@@ -134,6 +141,9 @@ func New(cfg Config) (*Mesh, error) {
 	if cfg.PeerInterval <= 0 {
 		cfg.PeerInterval = 10 * time.Second
 	}
+	if cfg.MaxPeerStale <= 0 {
+		cfg.MaxPeerStale = 5 * cfg.PeerInterval
+	}
 	if cfg.SeedInterval <= 0 {
 		cfg.SeedInterval = 5 * time.Minute
 	}
@@ -149,7 +159,7 @@ func New(cfg Config) (*Mesh, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	m := &Mesh{cfg: cfg, dir: NewDirectory(2*cfg.SeedInterval, cfg.Now), handshakes: make(chan struct{}, maxPendingHandshakes), peersReady: make(chan struct{}), links: map[string]*link{}, loops: map[string]*dialLoop{}, reported: map[string]bool{}}
+	m := &Mesh{cfg: cfg, dir: NewDirectory(2*cfg.SeedInterval, cfg.Now), handshakes: make(chan struct{}, maxPendingHandshakes), peersReady: make(chan struct{}), links: map[string]*link{}, pending: map[*pendingHandshake]struct{}{}, loops: map[string]*dialLoop{}, reported: map[string]bool{}}
 	empty, _ := nodemesh.NewPeerSet(nil)
 	m.peers.Store(&empty)
 	return m, nil
@@ -245,6 +255,25 @@ func (m *Mesh) outcome(name string) {
 
 func (m *Mesh) peerSet() nodemesh.PeerSet { return *m.peers.Load() }
 
+// PeerCurrent reports whether nodeID is in the current peer set (and, when a link to it is up, still under the pin
+// the link was made with). It is false once the set expired or the peer left it.
+func (m *Mesh) PeerCurrent(nodeID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.peerSet().Lookup(nodeID)
+	if l := m.links[nodeID]; ok && l != nil {
+		return peerMatches(cur, l.peer)
+	}
+	return ok
+}
+
+// peerMatches reports whether a link made with peer is still valid against the current directory entry cur: the
+// same pin and address, and the same process epoch when the directory names one.
+func peerMatches(cur, peer nodemesh.Peer) bool {
+	return cur.SPKISHA256 == peer.SPKISHA256 && cur.Host == peer.Host && cur.Port == peer.Port &&
+		(cur.ProcessEpoch == "" || cur.ProcessEpoch == peer.ProcessEpoch)
+}
+
 func sleep(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -283,18 +312,35 @@ func (m *Mesh) refreshPeers(ctx context.Context) {
 			if answer.Region != "" { // an answer without a region keeps the last one
 				m.dir.SetRegion(answer.Region)
 			}
+			m.mu.Lock()
+			m.peersOKAt = m.cfg.Now()
+			m.mu.Unlock()
 			m.applyPeers(ctx, set)
 			m.readyOnce.Do(func() { close(m.peersReady) })
 			return
 		}
 	}
 	m.report(StageLookup, "peer directory", err)
+	m.expirePeers(ctx)
+}
+
+// expirePeers empties the peer set once the last good refresh is older than MaxPeerStale: the applyPeers path then
+// closes the links and loops and the directory withdraws the peers' names. A later good refresh restores them.
+func (m *Mesh) expirePeers(ctx context.Context) {
+	m.mu.Lock()
+	stale := m.cfg.Now().Sub(m.peersOKAt) > m.cfg.MaxPeerStale
+	m.mu.Unlock()
+	if stale && m.peerSet().Len() > 0 {
+		empty, _ := nodemesh.NewPeerSet(nil)
+		m.applyPeers(ctx, empty)
+	}
 }
 
 func (m *Mesh) applyPeers(ctx context.Context, set nodemesh.PeerSet) {
 	m.peers.Store(&set)
 	m.dir.SetPeers(set.Peers())
 	var stale []*link
+	var cut []context.CancelFunc
 	m.mu.Lock()
 	for id, loop := range m.loops {
 		if p, ok := set.Lookup(id); !ok || p != loop.peer {
@@ -303,8 +349,13 @@ func (m *Mesh) applyPeers(ctx context.Context, set nodemesh.PeerSet) {
 		}
 	}
 	for id, l := range m.links {
-		if p, ok := set.Lookup(id); !ok || p.SPKISHA256 != l.peer.SPKISHA256 || p.Host != l.peer.Host || p.Port != l.peer.Port {
+		if p, ok := set.Lookup(id); !ok || !peerMatches(p, l.peer) {
 			stale = append(stale, l)
+		}
+	}
+	for h := range m.pending {
+		if h.stale(set) {
+			cut = append(cut, h.cancel)
 		}
 	}
 	for _, p := range set.Peers() {
@@ -316,6 +367,9 @@ func (m *Mesh) applyPeers(ctx context.Context, set nodemesh.PeerSet) {
 		m.wg.Go(func() { m.dialLoop(lctx, p) })
 	}
 	m.mu.Unlock()
+	for _, cancel := range cut {
+		cancel()
+	}
 	for _, l := range stale {
 		_ = l.sess.Close()
 	}
