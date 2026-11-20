@@ -29,6 +29,11 @@ type EnrollRequest struct {
 	Address string `json:"address"`
 	Code    string `json:"code"`
 	Scope   Scope  `json:"scope"`
+	// ExpectRegion and ExpectCapability ("relay" or "tunnel") make the claim refuse a machine that was not installed
+	// for what the owner is adding: the installer carried a region and a role, and the dialog checks it got them.
+	// Both are optional; when given, the machine must advertise exactly one component and it must match.
+	ExpectRegion     string `json:"expect_region,omitempty"`
+	ExpectCapability string `json:"expect_capability,omitempty"`
 }
 type Component struct {
 	Capability     string `json:"capability"`
@@ -239,6 +244,9 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	if e != nil {
 		return nil, e
 	}
+	if (in.ExpectRegion != "" && !validRegion(in.ExpectRegion)) || (in.ExpectCapability != "" && in.ExpectCapability != "relay" && in.ExpectCapability != "tunnel") {
+		return nil, ErrInvalid
+	}
 	pin, secret, e := parseCode(in.Code)
 	if e != nil {
 		return nil, e
@@ -293,6 +301,9 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 			}
 		}
 	}
+	if e = checkEnrollExpectation(in, inspection); e != nil {
+		return nil, e
+	}
 	components, claimID, e := s.reserve(ctx, actor, scope, inspection, pin)
 	if e != nil {
 		return nil, e
@@ -342,7 +353,7 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 	if e = lockTeamWrite(ctx, tx, actor, scope); e != nil {
 		return nil, "", e
 	}
-	if _, e = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1))`, scope.Kind+":"+scope.ID); e != nil {
+	if e = lockScope(ctx, tx, scope); e != nil {
 		return nil, "", e
 	}
 	var existing int
@@ -381,6 +392,15 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 			}
 			if e = tx.QueryRowContext(ctx, `SELECT 1 FROM paperboat.control_tunnel_nodes WHERE id=$1 AND tls_spki_sha256=$2 AND endpoint_host=$3 AND endpoint_tcp_port=$4 AND endpoint_quic_port=$5`, r.NodeID, pin, i.EndpointHost, c.TCPPort, c.QUICPort).Scan(&r.NodeGeneration); e != nil {
 				return nil, "", ErrUsed
+			}
+			// The stored region is what the owner sees and what pairs name: a machine that now reports another one
+			// is added again (removed first), never silently kept in the old region.
+			var stored string
+			if e = tx.QueryRowContext(ctx, `SELECT coalesce(region,'') FROM paperboat.control_tunnel_nodes WHERE id=$1`, r.NodeID).Scan(&stored); e != nil {
+				return nil, "", e
+			}
+			if stored != c.Region {
+				return nil, "", invalidRegion("This machine is already added in region %s but now reports region %s: remove it from its region first, then add it again.", stored, c.Region)
 			}
 			if c.Capability == "tunnel" {
 				if e = tx.QueryRowContext(ctx, `SELECT key_id FROM paperboat.control_usage_verification_keys WHERE edge_node_id=$1 AND public_key=$2 AND revoked_at IS NULL LIMIT 1`, r.NodeID, mustPublicKey(c.UsagePublicKey)).Scan(&r.UsageKeyID); e != nil {
@@ -445,4 +465,52 @@ func validComponent(c Component) bool {
 		return false
 	}
 	return validRegion(c.Region) && validLabel(c.FailureDomain, 128)
+}
+
+// enrollRole is the name a user knows a capability by, and the pbh install flag that makes one.
+func enrollRole(capability string) string {
+	if capability == "tunnel" {
+		return "edge"
+	}
+	return "relay"
+}
+
+// withArticle is a role name in a sentence ("an edge", "a relay").
+func withArticle(role string) string {
+	if role == "edge" {
+		return "an edge"
+	}
+	return "a " + role
+}
+
+// checkEnrollExpectation refuses a machine that is not what the claim expected, before anything is reserved: it must
+// advertise exactly one component, and that component must have the expected region and role. A machine that runs both
+// roles is refused as well (the dialog adds one role; the other would be enrolled unasked). The messages name regions
+// and roles the machine itself reported, nothing else about it.
+func checkEnrollExpectation(in EnrollRequest, i Inspection) error {
+	if in.ExpectRegion == "" && in.ExpectCapability == "" {
+		return nil
+	}
+	if len(i.Components) != 1 {
+		flags := ""
+		if in.ExpectCapability != "" {
+			flags += " --" + enrollRole(in.ExpectCapability)
+		}
+		if in.ExpectRegion != "" {
+			flags += " --region " + in.ExpectRegion
+		}
+		return invalidRegion("This machine runs both a relay and an edge, but only one is being added: run pbh install%s on it again.", flags)
+	}
+	c := i.Components[0]
+	if in.ExpectRegion != "" && c.Region != in.ExpectRegion {
+		return invalidRegion("This machine was installed for region %s, not %s: run pbh install --region %s on it again.", c.Region, in.ExpectRegion, in.ExpectRegion)
+	}
+	if in.ExpectCapability != "" && c.Capability != in.ExpectCapability {
+		region := c.Region
+		if in.ExpectRegion != "" {
+			region = in.ExpectRegion
+		}
+		return invalidRegion("This machine was installed as %s, not %s: run pbh install --%s --region %s on it again.", withArticle(enrollRole(c.Capability)), withArticle(enrollRole(in.ExpectCapability)), enrollRole(in.ExpectCapability), region)
+	}
+	return nil
 }

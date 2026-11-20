@@ -10,6 +10,9 @@ const (
 	installationReadySQL = `coalesce(i.claim_complete AND ` + nodeLiveSQL + ` AND(i.capability='relay' OR n.public_ingress_verified_at IS NOT NULL),false)`
 )
 
+// installationDrainSQL is two columns of node n: whether it is draining, and when it leaves service (NULL otherwise).
+const installationDrainSQL = `n.state='draining',CASE WHEN n.state='draining' THEN n.drain_deadline END`
+
 // InstallationReadySQL is the readiness definition for other packages (the operator Fleet counts): installation i
 // joined to its node n.
 const InstallationReadySQL = installationReadySQL

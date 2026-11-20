@@ -24,14 +24,18 @@ type Installation struct {
 	EndpointHost   string `json:"endpoint_host"`
 	// Region is the region the owner named when enrolling the server (default "selfhost"); servers of one region
 	// back each other up, and a workspace's pair names regions.
-	Region          string `json:"region"`
-	Name            string `json:"name"`
-	Capability      string `json:"capability"`
-	Ready           bool   `json:"ready"`
-	ScopeKind       string `json:"scope_kind"`
-	ScopeID         string `json:"scope_id"`
-	TrustNotice     string `json:"trust_notice"`
-	EnrollmentState string `json:"enrollment_state"`
+	Region     string `json:"region"`
+	Name       string `json:"name"`
+	Capability string `json:"capability"`
+	Ready      bool   `json:"ready"`
+	// Draining is whether the server's node is drained (taking no new work); DrainDeadline is when it leaves service
+	// (absent while it is not draining). Ready is false while draining.
+	Draining        bool       `json:"draining"`
+	DrainDeadline   *time.Time `json:"drain_deadline,omitempty"`
+	ScopeKind       string     `json:"scope_kind"`
+	ScopeID         string     `json:"scope_id"`
+	TrustNotice     string     `json:"trust_notice"`
+	EnrollmentState string     `json:"enrollment_state"`
 	// LastHeartbeat is when the server's node last reported in; absent before its first report.
 	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
 	// Version is the release the node last reported; empty before its first report.
@@ -102,7 +106,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 			return nil, err
 		}
 	}
-	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR (i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
+	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at,`+installationDrainSQL+` FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR (i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +114,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 	for rows.Next() {
 		var i Installation
 		var complete bool
-		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat); err != nil {
+		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat, &i.Draining, &i.DrainDeadline); err != nil {
 			return nil, withDatabaseCleanupFailure("list_installations", err, rows.Close())
 		}
 		i.EnrollmentState = "pending"

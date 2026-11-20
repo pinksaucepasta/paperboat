@@ -51,6 +51,7 @@ func (o InventoryOptions) normalized() (InventoryOptions, error) {
 
 const installationInventorySQL = `WITH visible AS (
  SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,coalesce(n.region,'') AS region,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,i.created_at,n.last_heartbeat_at,
+ n.state='draining' AS draining,CASE WHEN n.state='draining' THEN n.drain_deadline END AS drain_deadline,
  coalesce(c.version,'') AS version,
  u.id AS update_id,u.target_version AS update_target,u.state AS update_state,u.detail AS update_detail,u.support_reference AS update_reference,u.updated_at AS update_at,
  ` + installationReadySQL + ` AS ready
@@ -103,7 +104,7 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 	if err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,region,name,capability,scope_kind,scope_id,claim_complete,ready,created_at,last_heartbeat_at,version,update_id,update_target,update_state,update_detail,update_reference,update_at FROM filtered WHERE `+keyed+` ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, append([]any{options.Limit + 1, options.Offset}, after[:argc]...)...)...)
+	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,region,name,capability,scope_kind,scope_id,claim_complete,ready,created_at,last_heartbeat_at,draining,drain_deadline,version,update_id,update_target,update_state,update_detail,update_reference,update_at FROM filtered WHERE `+keyed+` ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, append([]any{options.Limit + 1, options.Offset}, after[:argc]...)...)...)
 	if err != nil {
 		return out, err
 	}
@@ -114,7 +115,7 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 		var at time.Time
 		var updateID, target, state, detail, reference sql.NullString
 		var updated sql.NullTime
-		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &at, &i.LastHeartbeat, &i.Version,
+		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &at, &i.LastHeartbeat, &i.Draining, &i.DrainDeadline, &i.Version,
 			&updateID, &target, &state, &detail, &reference, &updated); err != nil {
 			return out, errors.Join(err, rows.Close())
 		}
@@ -167,8 +168,8 @@ func (s *Service) GetInstallation(ctx context.Context, actor, id string, operato
 	}
 	var complete bool
 	err := s.database.SQL().QueryRowContext(ctx, `SELECT i.id,i.node_id,coalesce(n.endpoint_host,''),coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,
- `+installationReadySQL+`,n.last_heartbeat_at
- FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat)
+ `+installationReadySQL+`,n.last_heartbeat_at,`+installationDrainSQL+`
+ FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat, &i.Draining, &i.DrainDeadline)
 	if err == sql.ErrNoRows {
 		return i, ErrInstallationNotFound
 	}
