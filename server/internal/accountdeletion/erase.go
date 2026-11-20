@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
+	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
@@ -110,37 +111,9 @@ var eraseSteps = []struct{ name, query string }{
 // eraseTx performs the whole deletion. It returns OwnedTeamsError before changing anything when the
 // account owns a team with other members; any other error rolls the whole deletion back.
 func (s *Service) eraseTx(ctx context.Context, tx *db.Tx, userID string, locked []string) error {
-	if err := db.LockTeamsFor(ctx, tx, true, locked...); err != nil {
-		return fmt.Errorf("account deletion: lock teams: %w", err)
-	}
-	subject, email, err := lockActiveUserTx(ctx, tx, userID)
+	subject, email, deletedTeams, err := planTx(ctx, tx, userID, locked)
 	if err != nil {
 		return err
-	}
-	current, err := accountTeams(ctx, tx, userID)
-	if err != nil {
-		return fmt.Errorf("account deletion: list teams: %w", err)
-	}
-	for _, team := range current {
-		if !slices.Contains(locked, team) {
-			return errTeamsChanged
-		}
-	}
-	owned, err := ownedTeamsTx(ctx, tx, userID)
-	if err != nil {
-		return err
-	}
-	var blocking []TeamBlock
-	var deletedTeams []string
-	for _, t := range owned {
-		if t.Members > 1 {
-			blocking = append(blocking, t)
-		} else {
-			deletedTeams = append(deletedTeams, t.Slug)
-		}
-	}
-	if len(blocking) > 0 {
-		return &OwnedTeamsError{Teams: blocking}
 	}
 	if err := s.leaveTeamsTx(ctx, tx, userID, deletedTeams); err != nil {
 		return err
@@ -165,6 +138,84 @@ func (s *Service) eraseTx(ctx context.Context, tx *db.Tx, userID string, locked 
 		return fmt.Errorf("account deletion: mark user deleted: %w", err)
 	}
 	return nil
+}
+
+// planTx locks what the deletion writes (the account's teams, then the account row) and decides it: the single-member
+// teams the account owns are deleted with it; a team it owns with other members blocks it (OwnedTeamsError).
+func planTx(ctx context.Context, tx *db.Tx, userID string, locked []string) (subject, email string, deletedTeams []string, err error) {
+	if err := db.LockTeamsFor(ctx, tx, true, locked...); err != nil {
+		return "", "", nil, fmt.Errorf("account deletion: lock teams: %w", err)
+	}
+	subject, email, err = lockActiveUserTx(ctx, tx, userID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	current, err := accountTeams(ctx, tx, userID)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("account deletion: list teams: %w", err)
+	}
+	for _, team := range current {
+		if !slices.Contains(locked, team) {
+			return "", "", nil, errTeamsChanged
+		}
+	}
+	owned, err := ownedTeamsTx(ctx, tx, userID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	var blocking []TeamBlock
+	for _, t := range owned {
+		if t.Members > 1 {
+			blocking = append(blocking, t)
+		} else {
+			deletedTeams = append(deletedTeams, t.Slug)
+		}
+	}
+	if len(blocking) > 0 {
+		return "", "", nil, &OwnedTeamsError{Teams: blocking}
+	}
+	return subject, email, deletedTeams, nil
+}
+
+// peerSteps are the erase steps that write the account's peer identity rows: revoking its CLI sessions bumps every
+// machine they reached, and the identities themselves are deleted. The account's machines' configuration requests
+// update those rows all the time, so erasePeerStateFirst runs these steps before the serializable erase.
+var peerSteps = []string{"CLI client sessions", "peer network identities"}
+
+// erasePeerStateFirst runs the deletion's writes of peer identity rows in a short READ COMMITTED transaction before the
+// serializable erase: there they lost every retry to the machines' configuration requests (40001), here they wait for
+// the writers' row locks. It ends the deleted teams' machines' CLI sessions and peer authority (their enrollers may be
+// other accounts, whose identities those bump), then the account's peerSteps. Invariants:
+//   - only a deletion that would go ahead does anything: planTx, the same function the erase calls, under the same
+//     locks (account ENV session lock, team locks, account row lock) on committed state; otherwise nothing happens here
+//     and the erase reports the error. The erase re-checks all of it and stays the authority;
+//   - every active CLI session ends and every identity row goes: the UPDATE and DELETE re-check their rows; anything
+//     created after this step is handled by the erase's own steps (the same queries);
+//   - the identity bumps are increments on locked rows, with no read-then-write.
+//
+// If the erase then fails, the account's sessions and peer identities stay ended: the safe side for an account its
+// owner asked to delete, and the retry completes the deletion.
+func (s *Service) erasePeerStateFirst(ctx context.Context, userID string, locked []string) error {
+	return s.db.InReadCommittedTxUnderSessionLock(ctx, userID, environment.VaultAccountLockSeed, func(ctx context.Context, tx *db.Tx) error {
+		_, _, deletedTeams, err := planTx(ctx, tx, userID, locked)
+		if err != nil {
+			return nil
+		}
+		for _, team := range deletedTeams {
+			if err := teams.RevokeTeamMachinesPeerCredentialsTx(ctx, tx, team, ""); err != nil {
+				return fmt.Errorf("account deletion: revoke team machines' peer credentials: %w", err)
+			}
+		}
+		for _, step := range eraseSteps {
+			if !slices.Contains(peerSteps, step.name) {
+				continue
+			}
+			if _, err := tx.Exec(ctx, step.query, userID); err != nil {
+				return fmt.Errorf("account deletion: remove %s: %w", step.name, err)
+			}
+		}
+		return nil
+	})
 }
 
 // errTeamsChanged means the account joined a team after its teams were read; the deletion is retried.

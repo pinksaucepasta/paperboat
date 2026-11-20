@@ -198,6 +198,14 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 	return out, err
 }
 func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRequest) (Team, error) {
+	if r.Action == "delete" {
+		err := s.revokePeerCredentialsFirst(ctx, account, team, r.ExpectedGeneration, "", func(ctx context.Context, tx *db.Tx, _ Team, actor Member) error {
+			return deleteTeamAllowedTx(ctx, tx, team, actor, r.Confirmation)
+		})
+		if err != nil {
+			return Team{}, err
+		}
+	}
 	return s.mutate(ctx, account, team, r.OperationID, r.Action, r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, actor Member) error {
 		target, found := member(t, r.AccountID)
 		switch r.Action {
@@ -279,24 +287,33 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 			_, err := tx.Exec(ctx, `UPDATE teams SET owner_account=$2 WHERE team_id=$1`, team, r.AccountID)
 			return err
 		case "delete":
-			if actor.Role != "owner" {
-				return ErrForbidden
-			}
-			if r.Confirmation != team {
-				return ErrInvalid
-			}
-			var billingActive bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspaces w WHERE w.team_id=$1 AND ((w.provider_subscription_id IS NOT NULL AND w.state NOT IN ('canceled','incomplete_expired') AND NOT w.cancel_at_period_end) OR EXISTS(SELECT 1 FROM billing_workspace_operations o WHERE o.workspace_id=w.id AND o.kind='checkout' AND (o.state IN ('pending','uncertain') OR (o.state='succeeded' AND w.provider_subscription_id IS NULL)))))`, team).Scan(&billingActive); err != nil {
+			if err := deleteTeamAllowedTx(ctx, tx, team, actor, r.Confirmation); err != nil {
 				return err
-			}
-			if billingActive {
-				return ErrBillingActive
 			}
 			return DeleteTeamTx(ctx, tx, team)
 		default:
 			return ErrInvalid
 		}
 	})
+}
+
+// deleteTeamAllowedTx is the delete action's rule: the owner deletes the team, confirming its id, once no
+// subscription or checkout is live.
+func deleteTeamAllowedTx(ctx context.Context, tx *db.Tx, team string, actor Member, confirmation string) error {
+	if actor.Role != "owner" {
+		return ErrForbidden
+	}
+	if confirmation != team {
+		return ErrInvalid
+	}
+	var billingActive bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspaces w WHERE w.team_id=$1 AND ((w.provider_subscription_id IS NOT NULL AND w.state NOT IN ('canceled','incomplete_expired') AND NOT w.cancel_at_period_end) OR EXISTS(SELECT 1 FROM billing_workspace_operations o WHERE o.workspace_id=w.id AND o.kind='checkout' AND (o.state IN ('pending','uncertain') OR (o.state='succeeded' AND w.provider_subscription_id IS NULL)))))`, team).Scan(&billingActive); err != nil {
+		return err
+	}
+	if billingActive {
+		return ErrBillingActive
+	}
+	return nil
 }
 
 // DeleteTeamTx soft-deletes a team and revokes everything it grants, inside the caller's transaction

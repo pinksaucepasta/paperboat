@@ -179,6 +179,18 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			kind = "machine_request"
 		}
 	}
+	if r.Action == "remove" {
+		err := s.revokePeerCredentialsFirst(ctx, account, team, r.ExpectedGeneration, r.MachineID, func(ctx context.Context, tx *db.Tx, _ Team, actor Member) error {
+			_, ownerTeam, err := machineOwnerTx(ctx, tx, r.MachineID)
+			if err != nil {
+				return err
+			}
+			return removeMachineAllowed(actor, team, ownerTeam, r)
+		})
+		if err != nil {
+			return Team{}, err
+		}
+	}
 	return s.mutate(ctx, account, team, r.OperationID, kind, r.ExpectedGeneration, r, func(ctx context.Context, tx *db.Tx, t Team, actor Member) error {
 		owner, ownerTeam, err := machineOwnerTx(ctx, tx, r.MachineID)
 		if errors.Is(err, ErrNotFound) && r.Action == "unshare" {
@@ -275,11 +287,8 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 		case "transfer_to_personal":
 			return transferToPersonalTx(ctx, tx, t, team, owner, ownerTeam, actor, r)
 		case "remove":
-			if ownerTeam != team || !Allowed(actor.Role, PermissionSettingsManage) {
-				return ErrForbidden
-			}
-			if r.Confirmation != r.MachineID {
-				return ErrInvalid
+			if err = removeMachineAllowed(actor, team, ownerTeam, r); err != nil {
+				return err
 			}
 			if err = unbindMachineTx(ctx, tx, team, r.MachineID); err != nil {
 				return err
@@ -289,6 +298,17 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			return ErrInvalid
 		}
 	})
+}
+
+// removeMachineAllowed is the remove action's rule: a settings manager removes a machine the team owns, confirming its id.
+func removeMachineAllowed(actor Member, team, ownerTeam string, r MachineRequest) error {
+	if ownerTeam != team || !Allowed(actor.Role, PermissionSettingsManage) {
+		return ErrForbidden
+	}
+	if r.Confirmation != r.MachineID {
+		return ErrInvalid
+	}
+	return nil
 }
 
 // transferToPersonalTx is the mirror of transfer_to_team: the team-owned machine goes back to the

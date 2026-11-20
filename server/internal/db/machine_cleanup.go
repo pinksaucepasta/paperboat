@@ -9,6 +9,25 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
+// RevokeMachinePeerCredentialsTx ends a machine's CLI sessions and peer authority (its own and those sessions'
+// certificates). Both bump the peer identities of the owner's other machines through triggers
+// (advance_peer_network_for_cli_session, advance_peer_network_for_certificate), rows their configuration requests
+// update all the time, so removals run this first at READ COMMITTED, where the bumps wait for those writers instead of
+// aborting; CleanupMachineMachineTx then finds nothing left of it to write. The caller holds the machine row lock.
+func RevokeMachinePeerCredentialsTx(ctx context.Context, tx *Tx, userID, userMachineID string, now time.Time) error {
+	revocationTime := sql.NullTime{Time: now, Valid: true}
+	if _, err := tx.Queries().RevokeCLIClientSessionsForUserMachine(ctx, dbsqlc.RevokeCLIClientSessionsForUserMachineParams{
+		RevocationTime: revocationTime, RevocationCause: sql.NullString{String: "machine_removed", Valid: true},
+		TargetMachineID: sql.NullString{String: userMachineID, Valid: true}, TargetUserID: userID,
+	}); err != nil {
+		return err
+	}
+	_, err := tx.Queries().RevokeUserMachinePeerAuthority(ctx, dbsqlc.RevokeUserMachinePeerAuthorityParams{
+		TargetMachineID: userMachineID, TargetUserID: userID, RevocationTime: revocationTime,
+	})
+	return err
+}
+
 // CleanupMachineMachineTx fences machine credentials and state in the owning
 // deletion transaction. Personal and team lifecycle paths share this cleanup.
 func CleanupMachineMachineTx(ctx context.Context, tx *Tx, userID, userMachineID string, now time.Time) error {

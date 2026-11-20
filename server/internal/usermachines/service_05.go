@@ -1005,16 +1005,6 @@ func (s *Service) revokeMachinePeerCredentials(ctx context.Context, userID, user
 		if err != nil {
 			return err
 		}
-		now := sql.NullTime{Time: s.now().UTC(), Valid: true}
-		if _, err := tx.Queries().RevokeCLIClientSessionsForUserMachine(ctx, dbsqlc.RevokeCLIClientSessionsForUserMachineParams{
-			RevocationTime: now, RevocationCause: sql.NullString{String: "machine_removed", Valid: true},
-			TargetMachineID: sql.NullString{String: machine.ID, Valid: true}, TargetUserID: machine.UserID,
-		}); err != nil {
-			return err
-		}
-		_, err = tx.Queries().RevokeUserMachinePeerAuthority(ctx, dbsqlc.RevokeUserMachinePeerAuthorityParams{
-			TargetMachineID: machine.ID, TargetUserID: machine.UserID, RevocationTime: now,
-		})
-		return err
+		return db.RevokeMachinePeerCredentialsTx(ctx, tx, machine.UserID, machine.ID, s.now().UTC())
 	})
 }

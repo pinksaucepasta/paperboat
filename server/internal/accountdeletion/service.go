@@ -95,6 +95,9 @@ func (s *Service) Delete(ctx context.Context, user auth.User, signedInAt time.Ti
 		if err != nil {
 			return fmt.Errorf("account deletion: list teams: %w", err)
 		}
+		if err := s.erasePeerStateFirst(ctx, user.ID, locked); err != nil {
+			return err
+		}
 		err = s.db.InTxUnderSessionLock(ctx, user.ID, environment.VaultAccountLockSeed, func(ctx context.Context, tx *db.Tx) error {
 			return s.eraseTx(ctx, tx, user.ID, locked)
 		})
