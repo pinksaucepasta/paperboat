@@ -3,7 +3,9 @@ package forward_test
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"testing"
