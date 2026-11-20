@@ -52,8 +52,12 @@ func (m *Mesh) serveForward(ctx context.Context, l *link, st *yamux.Stream) {
 		return
 	}
 	// The link outlives a directory change: the peer must be in the set as it is now, not only at the handshake.
-	if !m.peerCurrent(l.peer) || !m.admitName(open) {
+	if !m.peerCurrent(l.peer) {
 		refuse(nodemesh.RefusalNotHolder)
+		return
+	}
+	if err := m.admitName(open); err != nil {
+		refuse(refusalFor(err))
 		return
 	}
 	if l.active.Add(1) > int64(m.cfg.MaxStreamsPerPeer) {
@@ -91,18 +95,25 @@ func (m *Mesh) peerCurrent(p nodemesh.Peer) bool {
 	return ok && cur.SPKISHA256 == p.SPKISHA256 && cur.ProcessEpoch == p.ProcessEpoch
 }
 
-// admitName is the holder's pre-ack decision for the Open's key.
-func (m *Mesh) admitName(open nodemesh.Open) bool {
+// admitName is the holder's pre-ack decision for the Open's key: nil, or why this node will not serve it.
+func (m *Mesh) admitName(open nodemesh.Open) error {
 	if _, tcp := nodemesh.ParseTCPKey(open.Name); tcp {
-		return m.holds(open.Name)
+		if !m.holds(open.Name) {
+			return errNotHeld
+		}
+		return nil
 	}
 	a, ok := m.cfg.Injector.(admitter)
 	if !ok || len(open.Hello) == 0 {
-		return false
+		return errNotHeld
 	}
-	sni, err := a.ServerName(open.Hello)
-	return err == nil && sni == open.Name && a.Admit(open.Name) == nil
+	if sni, err := a.ServerName(open.Hello); err != nil || sni != open.Name {
+		return errNotHeld
+	}
+	return a.Admit(open.Name)
 }
+
+var errNotHeld = errors.New("this node does not hold the name")
 
 // attestedVisitor validates the visitor address a peer claims: a unicast address that is neither this link's nor the
 // forwarder's own (those name the nodes, never a visitor). IPv4-mapped addresses are normalised.

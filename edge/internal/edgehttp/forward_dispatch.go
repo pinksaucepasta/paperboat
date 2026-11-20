@@ -201,6 +201,9 @@ func (l *SharedTLSListener) ServerName(hello []byte) (string, error) {
 // Admit reports whether this listener serves host now, by dispatch's own authority decision, before any visitor is
 // acknowledged (a hold for a route that is not yet attached is not waited for: the forwarder tries another node).
 func (l *SharedTLSListener) Admit(host string) error {
+	if l.ctx.Err() != nil {
+		return forward.ErrDraining // as Inject: an ended listener is draining, not a holder that lost the name
+	}
 	adm, ok := l.resolveHost(host)
 	if !ok || !(adm.selected != nil || adm.authorizedHTTPS || adm.infrastructureHTTPS) {
 		return errNotServed
