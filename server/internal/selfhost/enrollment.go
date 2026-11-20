@@ -324,6 +324,10 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	if _, e = s.database.SQL().ExecContext(ctx, `UPDATE paperboat.selfhost_installations SET claim_complete=true WHERE claim_id=$1 AND scope_kind=$2 AND scope_id=$3 AND state='active'`, claimID, scope.Kind, scope.ID); e != nil {
 		return nil, e
 	}
+	// A server enrolled into one of the workspace's pair regions serves it from now on.
+	if _, e = s.database.SQL().ExecContext(ctx, syncTunnelPoolSQL, scope.Kind, scope.ID); e != nil {
+		return nil, e
+	}
 	return s.ListScoped(ctx, actor, scope, operator)
 }
 func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Inspection, pin []byte) (registered []RegisteredComponent, resultClaimID string, returnErr error) {
