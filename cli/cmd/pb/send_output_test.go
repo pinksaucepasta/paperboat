@@ -148,8 +148,8 @@ func TestSendProgressWaitingMessageStartsOnAFreshLineAfterTheRedrawnOne(t *testi
 	p, clock := newFakeSend(&out, true, false, 1<<20)
 	clock.at = clock.at.Add(time.Second)
 	p.writeProgress(false)
-	p.waiting("Waiting for hp to finish another transfer.")
-	if got := out.String(); !strings.Contains(got, "\nWaiting for hp to finish another transfer.\n") {
+	p.waiting("Waiting for laptop to finish another transfer.")
+	if got := out.String(); !strings.Contains(got, "\nWaiting for laptop to finish another transfer.\n") {
 		t.Fatalf("waiting message shares the progress line: %q", got)
 	}
 }
