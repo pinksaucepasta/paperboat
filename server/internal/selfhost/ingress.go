@@ -60,22 +60,24 @@ func publicIngressIP(ip netip.Addr) bool {
 }
 
 // VerifyIngress probes only the installation's registered public hostname on
-// HTTPS 443. The server certificate must be the node's enrolled identity
-// (tls_spki_sha256), so no publicly trusted certificate is needed. Resolution is
-// pinned before dialing, redirects/proxies are disabled, and every advertised
-// address must prove possession of this node's credential.
+// HTTPS 443. A customer installation's certificate must be the node's enrolled identity
+// (tls_spki_sha256), so no publicly trusted certificate is needed; a managed (global)
+// installation serves the operator's publicly trusted certificate, which renews, so it is
+// checked against the WebPKI roots for the hostname. Resolution is pinned before dialing,
+// redirects/proxies are disabled, and every advertised address must prove possession of
+// this node's credential.
 func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	var node, host, epoch string
+	var node, host, epoch, scopeKind string
 	var pin []byte
-	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch,n.tls_spki_sha256 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch, &pin); err != nil {
+	if err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,n.endpoint_host,n.process_epoch,n.tls_spki_sha256,i.scope_kind FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND i.capability='tunnel' AND (i.expires_at IS NULL OR i.expires_at>now()) AND `+nodeLiveSQL, id).Scan(&node, &host, &epoch, &pin, &scopeKind); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrIngress
 		}
 		return err
 	}
-	if len(pin) != sha256.Size {
+	if scopeKind != "global" && len(pin) != sha256.Size {
 		return ErrIngress
 	}
 	credential, err := s.RuntimeCredential(ctx, node)
@@ -85,7 +87,7 @@ func (s *Service) VerifyIngress(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP, func(_ string, ip netip.Addr) *http.Transport { return pinnedIngressTransport(pin, ip) })
+	v4, v6, err := probeIngress(ctx, host, node, credential, s.ingressIP, func(host string, ip netip.Addr) *http.Transport { return ingressTransportFor(scopeKind, pin, host, ip) })
 	if err != nil {
 		return err
 	}
@@ -317,6 +319,15 @@ func (s *Service) observeIngressIteration(ctx context.Context, err error) {
 		faultCtx := supportreport.WithFailureIdentity(ctx, "", "", reference)
 		supportreport.CaptureFromContext(faultCtx, component, operation, "worker_recovery", "worker_recovered", nil)
 	}
+}
+
+// ingressTransportFor: managed (global) edges present a renewing public certificate, so they are verified by
+// WebPKI trust for host; every customer scope is pinned to the identity its node enrolled.
+func ingressTransportFor(scopeKind string, pin []byte, host string, ip netip.Addr) *http.Transport {
+	if scopeKind == "global" {
+		return publicIngressTransport(host, ip)
+	}
+	return pinnedIngressTransport(pin, ip)
 }
 
 // pinnedIngressTransport dials ip:443 and accepts only the node's enrolled certificate (PinnedTransport).

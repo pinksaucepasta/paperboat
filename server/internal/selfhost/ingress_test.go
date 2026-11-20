@@ -62,6 +62,47 @@ func pinnedProbe(t *testing.T, serverURL string, pin []byte) error {
 	return err
 }
 
+// Managed (global) edges serve the operator's publicly trusted certificate, not the enrolled identity: they are
+// verified by public trust, never by the pin. Customer scopes stay pinned, so a publicly trusted certificate
+// that is not the enrolled identity is refused for them.
+func TestIngressTransportTrustFollowsTheInstallationScope(t *testing.T) {
+	server := httptest.NewUnstartedServer(challengeHandler("node_a", "secret"))
+	server.EnableHTTP2 = false
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	spki := sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)
+	wrong := sha256.Sum256([]byte("another identity"))
+	probe := func(scope string, pin []byte, trusted bool) error {
+		_, _, err := probeIngress(t.Context(), "127.0.0.1", "node_a", "secret", func(netip.Addr) bool { return true }, func(host string, ip netip.Addr) *http.Transport {
+			transport := ingressTransportFor(scope, pin, host, ip)
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			}
+			if trusted {
+				transport.TLSClientConfig.RootCAs = roots
+			}
+			return transport
+		})
+		return err
+	}
+	if err := probe("global", wrong[:], true); err != nil {
+		t.Fatalf("a managed edge with a publicly trusted certificate was refused: %v", err)
+	}
+	if err := probe("global", wrong[:], false); err == nil {
+		t.Fatal("a managed edge with an untrusted certificate was accepted")
+	}
+	for _, scope := range []string{"account", "team"} {
+		if err := probe(scope, wrong[:], true); err == nil {
+			t.Fatalf("%s scope accepted a certificate that is not the enrolled identity", scope)
+		}
+		if err := probe(scope, spki[:], false); err != nil {
+			t.Fatalf("%s scope refused its enrolled identity: %v", scope, err)
+		}
+	}
+}
+
 func challengeHandler(node, credential string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		challenge := r.URL.Query().Get("challenge")
