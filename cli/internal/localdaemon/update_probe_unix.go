@@ -161,7 +161,7 @@ func readServiceEnvironment(platform, home, path string, uid int) (map[string]st
 		}
 		values = declaration.Environment
 	} else {
-		options, err := unit.Deserialize(bytes.NewReader(body))
+		options, err := unit.DeserializeOptions(bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}

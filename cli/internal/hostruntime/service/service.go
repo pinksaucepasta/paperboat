@@ -465,8 +465,8 @@ func sameJSONDefinition(actual, want []byte) bool {
 }
 
 func sameUnitDefinition(actual, want []byte) bool {
-	left, leftErr := unit.Deserialize(bytes.NewReader(actual))
-	right, rightErr := unit.Deserialize(bytes.NewReader(want))
+	left, leftErr := unit.DeserializeOptions(bytes.NewReader(actual))
+	right, rightErr := unit.DeserializeOptions(bytes.NewReader(want))
 	if leftErr != nil || rightErr != nil || len(left) == 0 || len(right) == 0 {
 		return false
 	}
