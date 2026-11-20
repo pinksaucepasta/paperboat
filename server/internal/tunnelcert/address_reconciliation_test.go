@@ -659,3 +659,90 @@ func TestAddressPublishRecordsAFailureAfterItsBudgetExpiredOnPostgres(t *testing
 		t.Fatalf("state after the failed attempt = %q, %v; want failed", state, err)
 	}
 }
+
+// replacementFixture is a wildcard-style hostname whose provider holds seeded records.
+func replacementFixture(t *testing.T, seeded ...string) (*AddressReconciler, *fakeAddressProvider, DesiredAddressPublication) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run address publication PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	host, owner := "swap-"+suffix+".example.test", "edge_wildcard:swap-"+suffix+".example.test"
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
+	})
+	provider := &fakeAddressProvider{}
+	for i, address := range seeded {
+		provider.records = append(provider.records, AddressRecord{Hostname: host, Address: address, Owner: owner, Generation: 1, ProviderID: fmt.Sprintf("seed_%d", i)})
+	}
+	reconciler, err := NewAddressReconciler(database, provider, &fakeAddressResolver{err: &net.DNSError{IsNotFound: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	return reconciler, provider, DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: 1, ReadinessVersion: "ready_1", ObservedAt: now, ValidUntil: now.Add(time.Minute)}
+}
+
+func providerAddresses(provider *fakeAddressProvider) []string {
+	addresses := []string{}
+	for _, record := range provider.records {
+		addresses = append(addresses, record.Address)
+	}
+	sort.Strings(addresses)
+	return addresses
+}
+
+func reconcilePass(t *testing.T, reconciler *AddressReconciler, desired DesiredAddressPublication) {
+	t.Helper()
+	if err := reconciler.Reconcile(context.Background(), desired); !isAddressErrorKind(err, AddressPublicationPending) {
+		t.Fatalf("a changing pass must end pending on readback: %v", err)
+	}
+}
+
+func TestReconcileCreatesTheReplacementBeforeDeletingTheOldAddress(t *testing.T) {
+	reconciler, provider, desired := replacementFixture(t, "8.8.8.8")
+	desired.Addresses = []string{"8.8.4.4"}
+	reconcilePass(t, reconciler, desired)
+	if got := providerAddresses(provider); strings.Join(got, ",") != "8.8.4.4,8.8.8.8" || provider.deletes != 0 {
+		t.Fatalf("after the first pass both addresses must serve: %v deletes=%d", got, provider.deletes)
+	}
+	reconcilePass(t, reconciler, desired)
+	if got := providerAddresses(provider); strings.Join(got, ",") != "8.8.4.4" || provider.creates != 1 || provider.deletes != 1 {
+		t.Fatalf("after the second pass only the new address remains: %v creates=%d deletes=%d", got, provider.creates, provider.deletes)
+	}
+}
+
+func TestReconcileShrinkingSetStillDeletes(t *testing.T) {
+	reconciler, provider, desired := replacementFixture(t, "8.8.8.8", "8.8.4.4")
+	desired.Addresses = []string{"8.8.8.8"}
+	reconcilePass(t, reconciler, desired)
+	if got := providerAddresses(provider); strings.Join(got, ",") != "8.8.8.8" || provider.creates != 0 || provider.deletes != 1 {
+		t.Fatalf("a shrinking set must delete without creating: %v creates=%d deletes=%d", got, provider.creates, provider.deletes)
+	}
+}
+
+func TestReconcileNeverLeavesTheProviderEmptyWhileAnAddressIsMissing(t *testing.T) {
+	reconciler, provider, desired := replacementFixture(t, "8.8.8.8", "8.8.4.4")
+	desired.Addresses = []string{"1.1.1.1"}
+	for pass := 0; pass < 3; pass++ {
+		reconcilePass(t, reconciler, desired)
+		if len(provider.records) == 0 {
+			t.Fatalf("pass %d left the provider with no record", pass+1)
+		}
+	}
+	if got := providerAddresses(provider); strings.Join(got, ",") != "1.1.1.1" || provider.creates != 1 || provider.deletes != 2 {
+		t.Fatalf("final records %v creates=%d deletes=%d", got, provider.creates, provider.deletes)
+	}
+}
