@@ -11,7 +11,6 @@ const MaximumVaultRecordBytes = 34943
 const MaximumVaultRecordBatch = 128
 const MaximumVaultRecordLiveBytes = 256 << 10
 const MaximumVaultRecordHistoryBytes = 4 << 20
-const MaximumVaultRecordIDs = 4096
 
 var ErrVaultRecordCursorExpired = errors.New("encrypted ENV record cursor expired; fetch a new snapshot")
 
