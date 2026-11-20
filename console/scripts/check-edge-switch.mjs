@@ -1,9 +1,9 @@
-// Browser check for Network > Edges > Change: switching between Paperboat's edges and your own servers while
-// previews and tunnels run. The server API is stubbed (no account or server needed), so the
+// Browser check for Network > Edges > Change: switching between Paperboat's regions and your own regions while
+// previews and tunnels run, plus the Drain / Drain and move / Resume menu of your own servers. The server API is stubbed (no account or server needed), so the
 // check shows what the dialog does with the 409 `previews_running` answer and the three follow-ups: the refusal
-// lists what runs by name, "Stop these and switch" stays disabled until "switch edges" is typed, confirming
+// lists what runs by name, "Stop these and switch" stays disabled until "switch regions" is typed, confirming
 // stops each (preview ended, tunnel paused) before asking again, and the dialog then shows the
-// cutover view with each tunnel hostname's DNS state.
+// cutover view with each tunnel hostname's DNS state. Users see regions only: no operator column, host or node.
 //   ORIGIN=<console origin, e.g. http://localhost:3199> CHROME=<Chromium> [PW_MODULE=<playwright-core index.mjs>] node check-edge-switch.mjs
 // The console only needs any session cookie (proxy.ts); every /api/v1 call is answered here.
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
@@ -17,10 +17,10 @@ const log = (ok, step, detail = "") => {
 }
 
 const now = "2026-11-18T12:00:00Z"
-const edge = (id, site) => ({ id, kind: "managed", region: "fsn1", site, status: "ready", endpoint_host: `${id}.example.test` })
-const own = (id, name) => ({
-  installation_id: id, node_id: `node_${id}`, endpoint_host: `${id}.example.test`, name, capability: "tunnel", ready: true,
-  scope_kind: "account", scope_id: "user", trust_notice: "", enrollment_state: "enrolled",
+const region = (id, name) => ({ id, name, status: "ready" })
+const own = (id, name, region) => ({
+  installation_id: id, node_id: `node_${id}`, endpoint_host: `${id}.example.test`, name, region, capability: "tunnel",
+  ready: !state.draining, scope_kind: "account", scope_id: "user", trust_notice: "", enrollment_state: "enrolled",
 })
 const state = {
   kind: "managed",
@@ -30,6 +30,9 @@ const state = {
   ],
   stopped: [],
   asked: 0,
+  saved: undefined,
+  draining: false,
+  posts: [],
 }
 const tunnel = (desired) => ({
   schema: "paperboat.preview-tunnel/v1", kind: "tunnel", id: "tn1", account_id: "user", name: "api tunnel", desired_state: desired,
@@ -50,23 +53,29 @@ await context.route("**/api/v1/**", async (route) => {
   const path = url.pathname.replace("/api/v1/", "")
   const method = request.method()
   if (path === "edges/pair" && method === "GET")
-    return ok(route, state.kind === "managed" ? { primary: edge("m1", "Falkenstein"), fallback: edge("m2", "Helsinki") } : { primary: { ...edge("s1", "Server A"), kind: "self_hosted", id: "s1" }, fallback: { ...edge("s2", "Server B"), kind: "self_hosted", id: "s2" } })
+    return ok(route, state.kind === "managed" ? { kind: "managed", primary: region("fsn1", "Falkenstein"), fallback: region("hel1", "Helsinki") } : { kind: "self_hosted", primary: region("home", "home"), fallback: region("lab", "lab") })
   if (path === "edges/pair" && method === "PUT") {
     state.asked++
+    state.saved = request.postData()
     if (state.stopped.length < state.live.length)
       return route.fulfill({
         status: 409, contentType: "application/json",
         body: JSON.stringify({ error: { code: "previews_running", message: "Stop this workspace's running previews and tunnels first.", details: { count: state.live.length, items: state.live } } }),
       })
     state.kind = "self_hosted"
-    return ok(route, { primary: { ...edge("s1", "Server A"), kind: "self_hosted" }, fallback: { ...edge("s2", "Server B"), kind: "self_hosted" } })
+    return ok(route, { kind: "self_hosted", primary: region("home", "home"), fallback: region("lab", "lab") })
   }
   if (path === "workspaces") return ok(route, { items: [{ id: "personal", name: "Personal", kind: "personal", role: "owner" }] })
-  if (path === "relays") return ok(route, { items: [], total: 0, observed_at: now })
-  if (path === "edges") return ok(route, { items: [edge("m1", "Falkenstein"), edge("m2", "Helsinki")], total: 2 })
+  if (path === "relays") return ok(route, { items: [region("fsn1", "Falkenstein")], observed_at: now })
+  if (path === "edges") return ok(route, { items: [region("fsn1", "Falkenstein"), region("hel1", "Helsinki")], observed_at: now })
+  if (path.startsWith("selfhost/installations/") && method === "POST") {
+    state.posts.push(`${path.split("/").pop()} ${request.postData()}`)
+    state.draining = path.endsWith("/drain") || (state.draining && !path.endsWith("/resume"))
+    return ok(route, own("s1", "Server A", "home"))
+  }
   if (path === "selfhost/installations") {
-    const tunnels = [own("s1", "Server A"), own("s2", "Server B")]
-    const items = url.searchParams.get("capability") === "tunnel" ? tunnels : []
+    const tunnels = [own("s1", "Server A", "home"), own("s2", "Server B", "lab")]
+    const items = url.searchParams.get("capability") === "relay" ? [] : tunnels
     return ok(route, { installations: items, pagination: { limit: 50, offset: 0, total: items.length, next_offset: null }, counts: { ready: items.length, enrolled: items.length, pending: 0 } })
   }
   if (path.startsWith("selfhost/pools/")) return ok(route, { mode: path.endsWith("tunnel") ? "managed-only" : "mixed", installation_ids: [] })
@@ -85,36 +94,38 @@ try {
   await page.goto(`${origin}/network`, { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "Change" }).first().click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByRole("heading", { name: "Change edges" }).waitFor()
-  log(true, "Change edges opens on the Network page")
+  await dialog.getByRole("heading", { name: "Change regions" }).waitFor()
+  log(true, "Change regions opens on the Network page")
+  log((await page.getByRole("columnheader", { name: "Operator" }).count()) === 0, "no Operator column: regions only")
+  log((await page.getByText("fsn1.example.test").count()) === 0, "no Paperboat endpoint host on the page")
 
   // Pick two of the workspace's own servers.
   const pick = async (id, label) => {
     await dialog.locator(`#${id}`).click()
     await page.getByRole("option", { name: new RegExp(label) }).first().click()
   }
-  await pick("edge-primary", "Server A")
-  await pick("edge-fallback", "Server B")
+  await pick("edge-primary", "home")
+  await pick("edge-fallback", "lab")
   await dialog.getByRole("button", { name: "Save" }).click()
 
   await dialog.getByText("have to stop before you switch").waitFor()
-  const list = dialog.getByRole("list", { name: "Running on the current edges" })
+  const list = dialog.getByRole("list", { name: "Running on the current regions" })
   const items = (await list.locator("li").allInnerTexts()).map((text) => text.replace(/\s+/g, " "))
   log(items.length === 2 && items.some((t) => t.includes("Preview") && t.includes("calm-otter.preview.example.test") && t.includes("ends")), "preview named by its address", items[0])
   log(items.some((t) => t.includes("Tunnel") && t.includes("api tunnel") && t.includes("is paused")), "tunnel named, and said to pause")
 
   const confirm = dialog.getByRole("button", { name: "Stop these and switch" })
   log(await confirm.isDisabled(), "Stop these and switch is disabled until the confirmation is typed")
-  await dialog.getByLabel(/Type switch edges/).fill("switch edge")
+  await dialog.getByLabel(/Type switch regions/).fill("switch region")
   log(await confirm.isDisabled(), "a partly typed confirmation does not enable it")
-  await dialog.getByLabel(/Type switch edges/).fill("switch edges")
+  await dialog.getByLabel(/Type switch regions/).fill("switch regions")
   log(await confirm.isEnabled(), "the typed confirmation enables it")
   await page.screenshot({ path: process.env.SHOT_REFUSAL ?? "/tmp/edge-switch-refusal.png" })
   await confirm.click()
 
-  await page.getByRole("heading", { name: "Edges changed" }).waitFor()
+  await page.getByRole("heading", { name: "Regions changed" }).waitFor()
   log(state.stopped.slice().sort().join() === "preview,tunnel", "preview ended and tunnel paused before the switch", state.stopped.join())
-  const cutover = dialog.getByRole("list", { name: "Domains on the new edges" })
+  const cutover = dialog.getByRole("list", { name: "Domains on the new regions" })
   await cutover.waitFor()
   const row = (await cutover.locator("li").first().innerText()).replace(/\s+/g, " ")
   log(row.includes("api.myapp.example.test") && row.includes("api tunnel") && row.includes("Waiting for DNS"), "each hostname shows its DNS state until the new target verifies", row)
@@ -122,9 +133,35 @@ try {
   log(await dialog.getByText(/need a custom domain/).isVisible(), "tells that own servers need a custom domain")
   log(await dialog.getByText(/old record’s cache expires/).isVisible(), "explains the DNS wait")
   await page.screenshot({ path: process.env.SHOT_DONE ?? "/tmp/edge-switch-done.png" })
+  log(state.saved === JSON.stringify({ kind: "self_hosted", primary_region: "home", fallback_region: "lab" }), "the pair is saved as kind and two region ids", state.saved)
   await dialog.getByRole("button", { name: "Done" }).click()
   await dialog.waitFor({ state: "detached" })
   log(true, "Done closes the dialog")
+
+  // Your own servers keep names and addresses, grouped under their region, with Drain / Drain and move / Resume.
+  const ownRow = page.getByRole("row", { name: /Server A/ })
+  await ownRow.getByRole("cell", { name: "home" }).waitFor()
+  log(true, "own server row shows its region")
+  const open = () => page.getByRole("button", { name: "Actions for Server A" }).click()
+  await open()
+  log((await page.getByRole("menuitem", { name: "Resume" }).count()) === 0, "no Resume while the server serves")
+  await page.getByRole("menuitem", { name: "Drain", exact: true }).click()
+  const alert = page.getByRole("alertdialog")
+  await alert.getByText("New connections stop; existing ones finish. Servers in the same region keep serving.").waitFor()
+  await alert.getByRole("button", { name: "Drain", exact: true }).click()
+  await alert.waitFor({ state: "detached" })
+  log(state.posts.at(-1) === 'drain {"move":false}', "Drain asks the server without move", state.posts.join())
+  await open()
+  log(await page.getByRole("menuitem", { name: "Resume" }).isVisible(), "a draining server offers Resume")
+  await page.getByRole("menuitem", { name: "Drain and move", exact: true }).click()
+  await alert.getByText(/Existing connections move to your other servers in this region now/).waitFor()
+  await alert.getByRole("button", { name: "Drain and move", exact: true }).click()
+  await alert.waitFor({ state: "detached" })
+  log(state.posts.at(-1) === 'drain {"move":true}', "Drain and move asks the server with move", state.posts.join())
+  await open()
+  await page.getByRole("menuitem", { name: "Resume" }).click()
+  await page.waitForTimeout(500)
+  log(state.posts.at(-1) === "resume {}" && !state.draining, "Resume takes the server back", state.posts.join())
 } catch (error) {
   log(false, "check ran to the end", String(error).split("\n")[0])
   await page.screenshot({ path: "/tmp/edge-switch-failure.png" }).catch(() => {})

@@ -12,12 +12,12 @@ import { Input } from "@/components/ui/input"
 import { useShellState } from "@/lib/use-shell-state"
 
 /*
- * Changing between Paperboat's edges and your own servers strands what runs on the old ones, so the
+ * Changing between Paperboat's regions and your own strands what runs on the old ones, so the
  * server refuses while previews or tunnels run (409 previews_running) and names them. These are the dialog's two follow-ups: list what is running and stop it after a typed
- * confirmation, then, once the edges changed, say what to start again and how the domains are doing.
+ * confirmation, then, once the regions changed, say what to start again and how the domains are doing.
  */
 
-export const CONFIRM_SWITCH = "switch edges"
+export const CONFIRM_SWITCH = "switch regions"
 
 const verb = { preview: "ends", tunnel: "is paused" } as const
 const noun = { preview: "Preview", tunnel: "Tunnel" } as const
@@ -25,7 +25,7 @@ const noun = { preview: "Preview", tunnel: "Tunnel" } as const
 /** What the server named as running: each with what stopping does to it. */
 function LiveList({ items, count }: { items: LiveItem[]; count: number }) {
   return (
-    <ul className="flex flex-col gap-1.5 text-sm" aria-label="Running on the current edges">
+    <ul className="flex flex-col gap-1.5 text-sm" aria-label="Running on the current regions">
       {items.map((item) => (
         <li key={`${item.kind}:${item.id}`} className="flex items-baseline gap-2">
           <span className="w-16 shrink-0 text-muted-foreground">{noun[item.kind]}</span>
@@ -64,7 +64,7 @@ export function StopAndSwitch({
         if (confirmed && !pending) onConfirm()
       }}
     >
-      <p className="text-sm">These are running on the current edges and have to stop before you switch:</p>
+      <p className="text-sm">These are running on the current regions and have to stop before you switch:</p>
       <LiveList items={items} count={count} />
       <p className="text-sm text-muted-foreground">
         Tunnels are paused, not deleted. After the switch, create the previews again and resume the tunnels.
@@ -92,8 +92,8 @@ export function StopAndSwitch({
 const listed = 10
 
 /**
- * After the edges changed: what to start again, and per hostname of the workspace's tunnels whether its DNS
- * and certificate have caught up with the new edges (the server re-points them and checks again by itself).
+ * After the regions changed: what to start again, and per hostname of the workspace's tunnels whether its DNS
+ * and certificate have caught up with the new regions (the server re-points them and checks again by itself).
  */
 export function SwitchedEdges({
   workspace,
@@ -124,8 +124,8 @@ export function SwitchedEdges({
       )}
       {rows.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">Your domains on the new edges</p>
-          <ul className="flex flex-col gap-1.5" aria-label="Domains on the new edges">
+          <p className="text-sm font-medium">Your domains on the new regions</p>
+          <ul className="flex flex-col gap-1.5" aria-label="Domains on the new regions">
             {rows.map((row) => (
               <li key={row.id} className="flex items-center gap-2 text-sm">
                 <span className="min-w-0 truncate font-medium">{row.hostname}</span>
@@ -138,9 +138,9 @@ export function SwitchedEdges({
           </ul>
           {!settled && (
             <p className="text-sm text-muted-foreground">
-              Paperboat points them at the new edges and checks again on its own. Until DNS catches up they won’t load:
-              a change reaches visitors once the old record’s cache expires, usually within minutes, longer where a
-              resolver or your DNS provider caches it.
+              Paperboat points them at the new regions and checks again on its own. Until DNS catches up they won’t
+              load: a change reaches visitors once the old record’s cache expires, usually within minutes, longer where
+              a resolver or your DNS provider caches it.
             </p>
           )}
         </div>

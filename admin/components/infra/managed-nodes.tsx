@@ -7,6 +7,7 @@ import { DataTable } from "@/components/data-table"
 import { Mono, StatusBadge } from "@/components/filters"
 import { SelectField, TextField } from "@/components/fields"
 import { Time } from "@/components/time"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { operatorAction, useOperator, type Data } from "@/lib/api"
 import { useAllPages, useCursorList } from "@/lib/paging"
@@ -109,7 +110,8 @@ function nodeKind(n: Node): string {
 
 function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; admin: boolean }) {
   const path = (action: string) => `/v1/admin/nodes/${encodeURIComponent(node.id)}/${action}`
-  const simple = (action: string, label: string, title: string, description: string, destructive = false): RowAction => ({
+  /** `confirm`: the operator types the node id first (destructive actions, and drains that cut live connections). */
+  const simple = (action: string, label: string, title: string, description: string, destructive = false, confirm = destructive): RowAction => ({
     key: action,
     label,
     destructive,
@@ -120,7 +122,7 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
         description={description}
         target={node.id}
         destructive={destructive}
-        confirmWord={destructive ? node.id : undefined}
+        confirmWord={confirm ? node.id : undefined}
         submitLabel={label}
         run={(h) => operatorAction("POST", path(action), h, { revision: node.revision })}
       />
@@ -165,7 +167,8 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
       ),
     },
     ...(node.ready ? [simple("verify-ingress", "Verify ingress", `Verify public ingress of ${node.id}`, "Probes the node’s public address and records the result.")] : []),
-    simple("drain", "Drain", `Drain ${node.id}`, "It stops taking new work; held connections finish."),
+    simple("drain", "Drain", `Drain ${node.id}`, "It stops taking new connections; existing ones finish. Other nodes of its region keep serving.", false, true),
+    simple("drain-move", "Drain and move", `Drain ${node.id} and move`, "It stops taking new connections and every machine attached to it re-attaches now, to the other nodes of its region or the backup region. Relay clients are moved off within 90 seconds.", false, true),
     simple("resume", "Resume", `Resume ${node.id}`, "It takes work again once it reports fresh observations."),
     {
       key: "rotate",
@@ -185,7 +188,7 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
         />
       ),
     },
-    simple("retire", "Retire", `Retire ${node.id}`, "Removes the node from the fleet for good.", true),
+    simple("retire", "Retire", `Retire ${node.id}`, node.carriers > 0 ? `${node.carriers} machine${node.carriers === 1 ? " is" : "s are"} still attached to it and will lose it now. Drain it and wait for 0 carriers first. Removes the node from the fleet for good.` : "Removes the node from the fleet for good.", true),
   ]
   return <RowMenu label={node.id} actions={actions} data-node-actions={node.id} />
 }
@@ -196,6 +199,8 @@ export function ManagedNodes() {
   const list = useCursorList<Nodes>("/v1/admin/nodes", filters)
   const regionList = useAllPages<Regions["items"][number]>("/v1/admin/regions", (page) => (page as unknown as Regions).items)
   const regions = (regionList.data?.items ?? []).filter((r) => r.enabled).map((r) => r.id)
+  // The display name users see for a region; the id when the list is not loaded.
+  const regionName = new Map((regionList.data?.items ?? []).map((r) => [r.id, r.display_name]))
   return (
     <div className="flex flex-col gap-3">
       {admin && <div className="flex justify-end"><EnrolManagedNode regions={regions} /></div>}
@@ -209,10 +214,21 @@ export function ManagedNodes() {
         empty="No managed nodes yet."
         columns={[
           { header: "Node", cell: (n) => <span className="font-medium">{n.id}</span> },
-          { header: "Region", cell: (n) => n.region_id },
+          { header: "Region", cell: (n) => regionName.get(n.region_id) ?? n.region_id },
           { header: "Roles", cell: (n) => n.roles.join(", ") },
           { header: "Protocol", cell: (n) => <Mono>{n.protocol_version}</Mono> },
-          { header: "State", cell: (n) => <StatusBadge state={n.ready ? n.state : "stale"} /> },
+          {
+            header: "State",
+            cell: (n) => (
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <StatusBadge state={n.ready ? n.state : "stale"} />
+                {n.state === "ready" && n.in_dns === false && <Badge variant="outline" className="font-normal text-muted-foreground">Paused for load</Badge>}
+              </span>
+            ),
+          },
+          { header: "Carriers", cell: (n) => n.carriers },
+          { header: "Load", cell: (n) => (n.load_percent === undefined ? <span className="text-muted-foreground">-</span> : `${Math.round(n.load_percent)}%`) },
+          { header: "Ingress verified", cell: (n) => (n.ingress_verified ? "Yes" : <span className="text-muted-foreground">No</span>) },
           { header: "Seen", cell: (n) => (n.observed_at ? <Time iso={n.observed_at} relative /> : "Waiting") },
           { header: "", className: "w-12", cell: (n) => <NodeActions node={n} regions={regions} admin={admin} /> },
         ]}
