@@ -13,8 +13,9 @@ const freePort = () => new Promise((resolve) => { const s = net().listen(0, "127
 
 const GB = 1e9
 let state = "under"
+const USED = { under: 40 * GB, nearly: 85 * GB, throttled: 104 * GB, own: 3 * GB, team: 150 * GB }
 const billing = () => {
-  const used = { under: 40 * GB, nearly: 85 * GB, throttled: 104 * GB, own: 3 * GB, team: 150 * GB }[state]
+  const used = USED[state]
   const ends = new Date(Date.now() + 9 * 86400_000).toISOString()
   return {
     id: "personal:usr_1", state: "active", seats_bought: 1, members: 1, can_manage: true, cancel_at_period_end: false, seats_used: 1,
@@ -29,7 +30,16 @@ const billing = () => {
 }
 const usage = () => ({
   start: new Date(Date.now() - 86400_000).toISOString(), end: new Date().toISOString(), updated_at: new Date().toISOString(),
-  coverage: { edge: true, native: true, note: "" }, totals: { upload_bytes: 0, download_bytes: 0, by_path: [] }, resources: [], series: [],
+  coverage: { edge: true, native: true, note: "" },
+  // Hosted traffic 0.6 relay + 0.4 edge of what the pool says is used (see `billing`), plus a self-hosted path that must not show.
+  totals: {
+    upload_bytes: 0, download_bytes: 0,
+    by_path: [
+      { mode: "relay", hosting: "managed", upload_bytes: 0.3 * USED[state], download_bytes: 0.3 * USED[state] },
+      { mode: "edge", hosting: "managed", upload_bytes: 0.2 * USED[state], download_bytes: 0.2 * USED[state] },
+      { mode: "relay", hosting: "self_hosted", upload_bytes: 7 * GB, download_bytes: 0 },
+    ],
+  }, resources: [], series: [],
   pagination: { limit: 200, next_cursor: "" },
 })
 const api = createServer((request, response) => {
@@ -68,9 +78,28 @@ try {
       const context = await browser.newContext({ viewport: { width, height: 900 } })
       await context.addCookies([{ name: "pb-dev-session", value: "stub", url: origin }])
       const page = await context.newPage()
+      const problems = []
+      page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`))
+      page.on("console", (m) => m.type() === "error" && problems.push(`console: ${m.text()}`))
       await page.goto(`${origin}/usage`, { timeout: 120_000 })
       const panel = await page.waitForSelector("[data-fair-use]", { timeout: 60_000 }).catch(() => null)
-      check(`${name}/${s}: the usage page shows the public-traffic panel`, Boolean(panel))
+      check(`${name}/${s}: the usage page shows the public-traffic panel`, Boolean(panel), panel ? "" : `${(await page.innerText("body").catch(() => "")).replace(/\s+/g, " ").slice(0, 200)} | ${problems.slice(0, 3).join(" | ")}`)
+      if (!panel) { failed++; await context.close(); continue }
+      const homeCard = async (viewName, state) => {
+        const home = await context.newPage()
+        await home.goto(`${origin}/`, { timeout: 120_000 })
+        const el = await home.waitForSelector("[data-fair-use-card]", { timeout: 60_000 }).catch(() => null)
+        if (!el) { await home.close(); return { title: "", text: "", clipped: true } }
+        await home.waitForFunction(() => document.querySelector("[data-fair-use-card] [title^=Relay]") !== null && !document.querySelector("[data-fair-use-card] [class*=animate-pulse]"), null, { timeout: 30_000 }).catch(() => {})
+        const out = await el.evaluate((node) => {
+          const card = node.parentElement
+          const clipped = [...card.querySelectorAll("*")].some((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible" && e.clientWidth > 0)
+          return { title: card.firstElementChild.innerText.trim(), text: card.innerText.replace(/\s+/g, " "), clipped }
+        })
+        if (process.env.SHOTS) await home.screenshot({ path: `${process.env.SHOTS}/home-${viewName}-${state}.png` })
+        await home.close()
+        return out
+      }
       const text = ((await panel?.innerText()) ?? "").replace(/\s+/g, " ")
       const text0 = text
       check(`${name}/${s}: no asterisks`, !/\*/.test(text0))
@@ -80,18 +109,30 @@ try {
         check(`${name}/${s}: it says Unlimited (your own edges) and that nothing is counted`, /Unlimited \(your own edges\)/.test(text) && /never counted or limited by Paperboat/.test(text), text.slice(0, 90))
         check(`${name}/${s}: no upsell, no banner`, (await panel.$$eval("a", (a) => a.length)) === 0 && !(await page.$("[data-quota-banner]")))
       } else {
-        const used = { under: "40", nearly: "85", throttled: "104" }[s]
-        check(`${name}/${s}: it shows what is used of the included amount`, new RegExp(`${used}\\.?\\d* GB of 100 GB included`).test(text), text.slice(0, 90))
+        const used = { under: 40, nearly: 85, throttled: 104 }[s]
+        const re = (gb) => `${Math.round(gb)}\\.?\\d* GB`
+        check(`${name}/${s}: it shows what is used of the amount`, new RegExp(`${re(used)} of 100 GB`).test(text), text.slice(0, 90))
         check(`${name}/${s}: it says plainly what happens after: reduced speed, billing date, never cut off or billed extra`, /100 GB a month of traffic included/.test(text) && /Edges and relays share it: previews, tunnels and relayed connections count\. Files you upload through a console terminal count too; typing and terminal output do not, and are never slowed by it/.test(text) && /speed is reduced to 1 Mbit\/s until your next billing date\. Never cut off, never billed extra\./.test(text) && /Until then relayed connections run at up to 100 Mbit\/s and edges at full speed\./.test(text) && /Run your own edge or relay \(free, open source\): no limits\./.test(text))
+        // Hosted allowance: "<X> left" (or the slowed state in its place), a bar split relay/edge, "<used> of <total>", "Resets <date>", legend.
+        const legend = new RegExp(`Relay ${re(used * 0.6)} Edge ${re(used * 0.4)} `)
+        check(`${name}/${s}: legend shows relay and edge hosted traffic only (self-hosted never counts)`, legend.test(text) && !/\b7\.?\d* GB/.test(text), text.slice(0, 120))
+        const bars = await panel.$$eval("[role=meter] > div", (d) => d.map((e) => ({ w: parseFloat(e.style.width), c: e.className })))
+        check(`${name}/${s}: the bar is split relay/edge 60/40 of the used share`, bars.length === 2 && /relay/.test(bars[0].c) && /edge/.test(bars[1].c) && Math.abs(bars[0].w / (bars[0].w + bars[1].w) - 0.6) < 0.01 && Math.abs(bars[0].w + bars[1].w - Math.min(100, used)) < 0.5, JSON.stringify(bars))
+        check(`${name}/${s}: it says when the period resets`, /Resets [A-Za-z0-9 ]+/.test(text))
+        const card = await homeCard(name, s)
+        check(`${name}/${s}: home card is titled Hosted allowance`, card.title === "Hosted allowance", card.title)
+        check(`${name}/${s}: home card shows <used> of <total>, Resets <date>, legend, nothing truncated`, new RegExp(`${re(used)} of 100 GB Resets .+ Relay ${re(used * 0.6)} Edge ${re(used * 0.4)}$`).test(card.text) && !card.clipped, `${card.text}${card.clipped ? " (clipped)" : ""}`)
         if (s === "throttled") {
-          check(`${name}/${s}: it says reduced to 1 Mbit/s until the reset date`, /Reduced to 1 Mbit\/s until/.test(text), text.slice(0, 90))
+          check(`${name}/${s}: it says slowed to 1 Mbit/s until the reset date`, /Slowed to 1 Mbit\/s until/.test(text) && /Slowed to 1 Mbit\/s until/.test(card.text) && !/left/.test(card.text), `${text.slice(0, 40)} | ${card.text.slice(0, 40)}`)
           const links = (await panel.$$eval("a", (a) => a.map((e) => `${e.textContent.trim()}:${e.getAttribute("href")}`))).join(" ")
           check(`${name}/${s}: it offers add bandwidth and change plan`, /Add bandwidth:\/billing/.test(links) && /Change plan:\/billing/.test(links), links)
           const banner = await page.waitForSelector("[data-quota-banner]", { timeout: 30_000 }).catch(() => null)
           const bannerText = ((await banner?.innerText()) ?? "").replace(/\s+/g, " ")
-          check(`${name}/${s}: the banner is calm: reduced, never cut off`, /reduced to 1 Mbit\/s/.test(bannerText) && /Never cut off, never billed extra/.test(bannerText) && !/paused|stopped|exhausted|\*/i.test(bannerText), bannerText.slice(0, 80))
+          check(`${name}/${s}: the banner is calm: slowed, never cut off`, /Slowed to 1 Mbit\/s until/.test(bannerText) && /Never cut off, never billed extra/.test(bannerText) && !/paused|stopped|exhausted|\*/i.test(bannerText), bannerText.slice(0, 80))
         } else {
-          check(`${name}/${s}: full speed, no banner`, /Full speed/.test(text) && !(await page.$("[data-quota-banner]")))
+          const left = { under: 60, nearly: 15 }[s]
+          check(`${name}/${s}: it says what is left, no banner`, new RegExp(`^${re(left)} left`).test(text) && !(await page.$("[data-quota-banner]")), text.slice(0, 40))
+          check(`${name}/${s}: home card says what is left`, new RegExp(`^Hosted allowance ${re(left)} left`).test(card.text), card.text.slice(0, 50))
           const links = await panel.$$eval("a", (a) => a.length)
           check(`${name}/${s}: ${s === "nearly" ? "past 80% it offers add bandwidth" : "no upsell below 80%"}`, s === "nearly" ? links === 2 : links === 0, `${links} links`)
         }
