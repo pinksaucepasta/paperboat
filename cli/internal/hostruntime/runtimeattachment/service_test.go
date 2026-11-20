@@ -76,9 +76,9 @@ func TestUnlistedReadyCarrierStaysUpWhilePairHasRoom(t *testing.T) {
 		held          int
 		retired       bool
 	}{
-		{ready: true, wanted: true, held: 3, retired: false},
-		{ready: true, wanted: false, held: 3, retired: false}, // edge cut from control: server stopped listing it
-		{ready: true, wanted: false, held: 4, retired: true},  // placement moved on to another set
+		{ready: true, wanted: true, held: maxHeldCarriers, retired: false},
+		{ready: true, wanted: false, held: maxHeldCarriers, retired: false},    // edge cut from control: server stopped listing it
+		{ready: true, wanted: false, held: maxHeldCarriers + 1, retired: true}, // a replacement node joined the answer
 		{ready: false, wanted: true, held: 1, retired: true},
 		{ready: false, wanted: false, held: 1, retired: true},
 	} {
@@ -340,6 +340,8 @@ type runtimeCarrierHarness struct {
 	edges chan edgeDial
 	// actives receives each active edge node the host asks the control plane for.
 	actives chan string
+	// update changes the attachment answer the control plane gives from now on.
+	update func(func(*admission))
 }
 
 type edgeDial struct {
@@ -385,6 +387,11 @@ func startRuntimeCarrier(t *testing.T, ctx context.Context, options runtimeCarri
 		}
 		return &http.Response{StatusCode: options.status(), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
 	})
+	h.update = func(change func(*admission)) {
+		mu.Lock()
+		defer mu.Unlock()
+		change(&document)
+	}
 	service := newRuntimeAttachmentTestService(t, transport)
 	service.config.Wake = options.wake
 	h.service = service
@@ -1118,20 +1125,21 @@ func TestPacerRunsARoundAtOnceWhenAnEventWakesIt(t *testing.T) {
 	}
 }
 
-// A self-hosted-only workspace is admitted a managed edge for terminals next to its own servers: every admitted
-// carrier is held, and only the edges the server names may carry terminals (an answer naming none allows all).
+// A self-hosted-only workspace is admitted managed edges for terminals (up to two, in two managed regions, so one
+// region down moves the terminal to the other) next to its own servers: every admitted carrier is held, and only
+// the edges the server names may carry terminals (an answer naming none allows all).
 func TestAdmissionNamesTheCarriersThatMayCarryTerminals(t *testing.T) {
 	at := func(node string) admissionBinding { return admissionBinding{Binding: binding{EdgeNodeID: node}} }
-	a := admission{Binding: binding{EdgeNodeID: "managed"}, Backup: &admissionBinding{Binding: binding{EdgeNodeID: "own-1"}}, More: []admissionBinding{at("own-2")}, TerminalEdgeNodeIDs: []string{"managed"}}
+	a := admission{Binding: binding{EdgeNodeID: "managed-1"}, Backup: &admissionBinding{Binding: binding{EdgeNodeID: "managed-2"}}, More: []admissionBinding{at("own-1"), at("own-2")}, TerminalEdgeNodeIDs: []string{"managed-1", "managed-2"}}
 	var got []string
 	for _, c := range a.carriers() {
 		got = append(got, c.Binding.EdgeNodeID)
 	}
-	if len(got) != 3 || got[0] != "managed" || got[1] != "own-1" || got[2] != "own-2" {
+	if len(got) != 4 || got[0] != "managed-1" || got[1] != "managed-2" || got[2] != "own-1" || got[3] != "own-2" {
 		t.Fatalf("carriers = %v", got)
 	}
-	if !a.terminalCapable("managed") || a.terminalCapable("own-1") || a.terminalCapable("own-2") {
-		t.Fatal("only the managed edge may carry terminals")
+	if !a.terminalCapable("managed-1") || !a.terminalCapable("managed-2") || a.terminalCapable("own-1") || a.terminalCapable("own-2") {
+		t.Fatal("exactly the two managed edges may carry terminals")
 	}
 	if !(admission{}).terminalCapable("any") {
 		t.Fatal("an answer without the list allows every carrier")

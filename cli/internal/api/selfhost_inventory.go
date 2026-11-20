@@ -28,6 +28,7 @@ type SelfhostInstallation struct {
 	NodeID          string `json:"node_id"`
 	Name            string `json:"name"`
 	Capability      string `json:"capability"`
+	Region          string `json:"region"`
 	Ready           bool   `json:"ready"`
 }
 
@@ -105,7 +106,7 @@ func (c *Client) SelfhostInstallationsPage(ctx context.Context, limit, offset in
 }
 
 func validSelfhostInstallation(item SelfhostInstallation) bool {
-	return item.InstallationID != "" && item.NodeID != "" && item.Name != "" && item.ScopeID != "" && (item.ScopeKind == "account" || item.ScopeKind == "team" || item.ScopeKind == "global") && (item.EnrollmentState == "pending" || item.EnrollmentState == "enrolled") && !(item.EnrollmentState == "pending" && item.Ready) && (item.Capability == "relay" || item.Capability == "tunnel")
+	return item.InstallationID != "" && item.NodeID != "" && item.Name != "" && item.Region != "" && item.ScopeID != "" && (item.ScopeKind == "account" || item.ScopeKind == "team" || item.ScopeKind == "global") && (item.EnrollmentState == "pending" || item.EnrollmentState == "enrolled") && !(item.EnrollmentState == "pending" && item.Ready) && (item.Capability == "relay" || item.Capability == "tunnel")
 }
 
 // SelfhostInventory lets pool-policy consumers discover every authorized installation, rather than

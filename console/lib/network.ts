@@ -6,7 +6,7 @@ import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
 import { pauseTunnelById, stopPreview } from "@/lib/tunnels"
 
 /*
- * Self-hosted relays and tunnel servers (`/v1/selfhost/...`). A node is installed on a Linux
+ * Self-hosted relays and tunnel servers (`/v1/selfhost/...`), each in a region the owner names (servers of one region back each other up). A node is installed on a Linux
  * server (`curl -fsSL <installer>/selfhost | sh`), prints a claim address and a
  * one-time code, and is paired here to your personal workspace or a team. A node running both
  * components appears as two installations with the same node ID. Pools say which nodes to use:
@@ -117,6 +117,16 @@ export const requestUpdate = (installation: Installation) =>
 export const updating = (installation: Installation) =>
   Boolean(installation.update && !["succeeded", "rolled_back", "failed"].includes(installation.update.state))
 
+/**
+ * Drain: the server takes no new connections and the ones it holds finish; servers of the same region keep
+ * serving. `move` also sends the machines attached to it elsewhere now. Resume takes it back into service.
+ */
+export const drainInstallation = (installation: Installation, move: boolean) =>
+  write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}/drain`, "POST", { move })
+
+export const resumeInstallation = (installation: Installation) =>
+  write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}/resume`, "POST", {})
+
 /** Tunnel servers: checks the node's public ingress answers before it's used for publications. */
 export const verifyIngress = (installation: Installation) =>
   write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}/verify-ingress`, "POST", {})
@@ -130,7 +140,7 @@ export const savePool = (capability: Capability, scope: ReturnType<typeof scopeO
 }
 
 /** One server, with the installations it runs (relay, tunnel server, or both). */
-export type Node = { id: string; name: string; host: string; installations: Installation[] }
+export type Node = { id: string; name: string; host: string; region: string; installations: Installation[] }
 
 export function groupNodes(installations: Installation[]): Node[] {
   const nodes = new Map<string, Node>()
@@ -139,24 +149,26 @@ export function groupNodes(installations: Installation[]): Node[] {
       id: installation.node_id,
       name: installation.name,
       host: installation.endpoint_host,
+      region: installation.region,
       installations: [],
     }
     node.installations.push(installation)
     nodes.set(installation.node_id, node)
   }
-  return [...nodes.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return [...nodes.values()].sort((a, b) => a.region.localeCompare(b.region) || a.name.localeCompare(b.name))
 }
 
 /** The installer for a node, run on the server. */
 export const installCommand = (installerBaseUrl: string, components: "relay" | "tunnel" | "both") =>
   `curl -fsSL ${installerBaseUrl}/selfhost | sh -s -- --${components === "tunnel" ? "edge" : components}`
 
-/** One of a workspace's two edges: a Paperboat edge or one of your tunnel servers. */
-export type PairEdge = Data<"/v1/edges/pair">["primary"]
+/** One of a workspace's two regions: one of Paperboat's, or one of your own (the region you named when pairing servers). */
+export type PairRegion = Data<"/v1/edges/pair">["primary"]
 export type EdgePair = Data<"/v1/edges/pair">
+export type PairKind = EdgePair["kind"]
 
 /**
- * The workspace's edge pair (where its tunnels and previews are served); null while none is
+ * The workspace's pair of regions (where its tunnels and previews are served); null while none is
  * assigned (404 edge_pair_unassigned). Machines pick between the two by what they measure.
  */
 export const edgePairQuery = (workspace: string) =>
@@ -173,11 +185,14 @@ export const edgePairQuery = (workspace: string) =>
     refetchInterval: 30_000,
   })
 
-/** Sets the pair; both ids are Paperboat edges or both your tunnel servers (installation ids). */
-export const saveEdgePair = (workspace: string, primaryId: string, fallbackId: string) =>
+/** What to save: both regions are Paperboat's (`managed`) or both are your own (`self_hosted`). */
+export type PairChoice = { kind: PairKind; primaryRegion: string; fallbackRegion: string }
+
+export const saveEdgePair = (workspace: string, choice: PairChoice) =>
   write<EdgePair>(`edges/pair?${new URLSearchParams({ workspace })}`, "PUT", {
-    primary_id: primaryId,
-    fallback_id: fallbackId,
+    kind: choice.kind,
+    primary_region: choice.primaryRegion,
+    fallback_region: choice.fallbackRegion,
   })
 
 /** A preview or tunnel still running on the current edges: what blocks a switch (409 previews_running). */
@@ -205,11 +220,11 @@ async function stopLive(items: LiveItem[]) {
  * most 50 at a time, so a larger workspace takes a few rounds; the stopped items come back so the dialog can
  * say what to start again.
  */
-export async function switchEdgesStoppingLive(workspace: string, primaryId: string, fallbackId: string) {
+export async function switchEdgesStoppingLive(workspace: string, choice: PairChoice) {
   const stopped: LiveItem[] = []
   for (let round = 0; ; round++) {
     try {
-      return { pair: await saveEdgePair(workspace, primaryId, fallbackId), stopped }
+      return { pair: await saveEdgePair(workspace, choice), stopped }
     } catch (error) {
       const live = liveOf(error)
       if (!live || live.items.length === 0 || round >= 10) throw error

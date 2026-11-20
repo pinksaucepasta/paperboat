@@ -184,6 +184,10 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 		}
 	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/verify-ingress"):
 		e = h.Service.VerifyIngressScoped(r.Context(), actor, r.PathValue("installationID"), operator)
+	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/drain"):
+		out, e = h.drainOrResume(w, r, actor, operator, true)
+	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/resume"):
+		out, e = h.drainOrResume(w, r, actor, operator, false)
 	case r.Method == "DELETE" && r.PathValue("installationID") != "":
 		e = h.Service.RemoveScoped(r.Context(), actor, r.PathValue("installationID"), operator)
 	case r.Method == "GET" && r.PathValue("capability") != "":
@@ -206,6 +210,24 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 		return
 	}
 	selfhostJSON(w, 200, map[string]any{"data": out})
+}
+
+// drainOrResume reads {"move":bool} (drain) or {} (resume) and returns the installation.
+func (h *SelfhostHandlers) drainOrResume(w http.ResponseWriter, r *http.Request, actor string, operator, drain bool) (any, error) {
+	b, err := selfhostRead(w, r)
+	var in struct {
+		Move bool `json:"move"`
+	}
+	if err == nil {
+		err = selfhostDecode(b, &in)
+	}
+	if err != nil || (!drain && in.Move) {
+		return nil, selfhost.ErrInvalid
+	}
+	if drain {
+		return h.Service.DrainScoped(r.Context(), actor, r.PathValue("installationID"), operator, in.Move)
+	}
+	return h.Service.ResumeScoped(r.Context(), actor, r.PathValue("installationID"), operator)
 }
 
 func selfhostInventoryOptions(r *http.Request) (selfhost.InventoryOptions, error) {

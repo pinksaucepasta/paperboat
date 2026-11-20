@@ -140,7 +140,7 @@ func TestHeartbeatStoresForwardStatsAndRelayObserveStoresMesh(t *testing.T) {
 	edge := f.node("e", "edge", "ready", true, f.region, 0, "")
 	s := NewEdgeService(f.store, "unused")
 	want := nodemesh.Stats{Links: 2, Names: 7, Forwarded: 11, Accepted: 5, HolderMiss: 1, Unreachable: 2, LoopRefused: 3, BytesIn: 100, BytesOut: 200}
-	if err := s.Heartbeat(t.Context(), edgeNodeObservation{NodeID: edge, ProcessEpoch: "epoch_e", Ready: true, At: time.Now(), Forward: &want}); err != nil {
+	if _, err := s.Heartbeat(t.Context(), edgeNodeObservation{NodeID: edge, ProcessEpoch: "epoch_e", Ready: true, At: time.Now(), Forward: &want}); err != nil {
 		t.Fatal(err)
 	}
 	var stored string
@@ -148,10 +148,10 @@ func TestHeartbeatStoresForwardStatsAndRelayObserveStoresMesh(t *testing.T) {
 	if stored != "11/7" {
 		t.Fatalf("stored forward = %q, want 11/7", stored)
 	}
-	if err := s.Heartbeat(t.Context(), edgeNodeObservation{NodeID: edge, ProcessEpoch: "epoch_e", Ready: true, At: time.Now(), Forward: &nodemesh.Stats{Links: -1}}); err == nil {
+	if _, err := s.Heartbeat(t.Context(), edgeNodeObservation{NodeID: edge, ProcessEpoch: "epoch_e", Ready: true, At: time.Now(), Forward: &nodemesh.Stats{Links: -1}}); err == nil {
 		t.Fatal("negative link count accepted")
 	}
-	if err := s.Heartbeat(t.Context(), edgeNodeObservation{NodeID: edge, ProcessEpoch: "epoch_e", Ready: true, At: time.Now()}); err != nil {
+	if _, err := s.Heartbeat(t.Context(), edgeNodeObservation{NodeID: edge, ProcessEpoch: "epoch_e", Ready: true, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	var has bool

@@ -11,10 +11,11 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
-// ResolveTargetsTx returns the complete DNS address set for at most two selected
-// self-hosted edges. Observed ingress addresses, rather than operator claims,
+// ResolveTargetsTx returns the complete DNS address set for the selected
+// self-hosted edges (every ready node of the workspace's pair regions, at most runtimewire.MaximumRegionCarriers). Observed ingress addresses, rather than operator claims,
 // own public DNS. The resource lock fences this selection against mode changes.
 func ResolveTargetsTx(ctx context.Context, tx *db.Tx, kind, id, endpoint string) ([]string, error) {
 	var mode string
@@ -136,8 +137,8 @@ func DomainRecordType(target, hostname, provider string) string {
 }
 
 // WorkspaceTargetsTx is where a workspace domain's names point: managedName (a name under the platform
-// wildcard) for a managed workspace, or the observed ingress addresses of at most two of the workspace's
-// eligible self-hosted edges in distinct failure domains.
+// wildcard) for a managed workspace, or the observed ingress addresses of every ready node of the workspace's pair
+// regions (at most runtimewire.MaximumRegionCarriers): edges do not forward, so a visitor may land on any of them.
 func WorkspaceTargetsTx(ctx context.Context, tx *db.Tx, account string, team sql.NullString, managedName string) ([]string, error) {
 	var mode string
 	if err := tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,$2)`, account, team).Scan(&mode); err != nil {
@@ -146,13 +147,12 @@ func WorkspaceTargetsTx(ctx context.Context, tx *db.Tx, account string, team sql
 	if mode == "managed-only" {
 		return []string{managedName}, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT v4,v6 FROM (SELECT DISTINCT ON (n.failure_domain) n.failure_domain,n.id,
- coalesce(host(n.public_ingress_ipv4),'') v4,coalesce(host(n.public_ingress_ipv6),'') v6
+	rows, err := tx.Query(ctx, `SELECT coalesce(host(n.public_ingress_ipv4),'') v4,coalesce(host(n.public_ingress_ipv6),'') v6
  FROM paperboat.control_tunnel_nodes n
  WHERE paperboat.node_workspace_edge_eligible(n.id,$1,$2) AND n.ready AND n.state='ready' AND n.drain_deadline IS NULL
    AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND n.roles @> ARRAY['edge']::text[]
    AND n.public_ingress_verified_at IS NOT NULL AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
- ORDER BY n.failure_domain,n.id) pick ORDER BY id LIMIT 2`, account, team)
+ ORDER BY n.id LIMIT $3`, account, team, runtimewire.MaximumRegionCarriers)
 	if err != nil {
 		return nil, err
 	}

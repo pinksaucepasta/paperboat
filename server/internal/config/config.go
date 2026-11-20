@@ -441,7 +441,10 @@ type Certificates struct {
 	ChallengeZone       string `json:"challenge_zone"`
 	// DNSWriteBase, when set, confines every Cloudflare write to TXT records at or under this name
 	// (a staging server sharing a token with a production zone).
-	DNSWriteBase                    string        `json:"dns_write_base"`
+	DNSWriteBase string `json:"dns_write_base"`
+	// ManageEdgeWildcards makes the server publish the preview and runtime wildcard names (A/AAAA of every ready,
+	// non-draining managed edge). A hand-made wildcard record makes the first publication conflict until it is deleted.
+	ManageEdgeWildcards             bool          `json:"manage_edge_wildcards"`
 	CAAResolver                     string        `json:"caa_resolver"`
 	DistributionCredentialReference string        `json:"distribution_credential_reference"`
 	OwnerID                         string        `json:"owner_id"`

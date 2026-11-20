@@ -401,7 +401,7 @@ export async function approveUpdate(workspace: string, machineId: string, target
   })
 }
 
-/** An edge serving the account's previews and tunnels. Self-hosted edges are not listed yet. */
+/** One of Paperboat's edge regions (previews and tunnels). Nodes are never listed: users see regions. */
 export type Edge = Data<"/v1/edges">["items"][number]
 
 export const edgesQuery = queryOptions({
@@ -410,7 +410,7 @@ export const edgesQuery = queryOptions({
   staleTime: 60_000,
 })
 
-/** A relay the account's machines can use (Paperboat's or its own), with its heartbeat status. */
+/** One of Paperboat's relay regions. The account's own relays are its installations. */
 export type Relay = Data<"/v1/relays">["items"][number]
 
 export const relaysQuery = queryOptions({
@@ -419,7 +419,7 @@ export const relaysQuery = queryOptions({
   staleTime: 60_000,
 })
 
-/** How long this machine took to reach an edge or relay, as the machine measured it. Display only. */
+/** How long this machine took to reach a region's edges or relays (best of the region), as the machine measured it. Display only. */
 export type NodeLatency = Data<"/v1/machines/{machine_id}/network-latency">["items"][number]
 
 export const machineLatencyQuery = (machineId: string) =>

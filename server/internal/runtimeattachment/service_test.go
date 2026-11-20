@@ -235,10 +235,14 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	service := &Service{DB: database}
 	proof := previewattachment.MachineProof{UserID: account, MachineID: machine, OperationID: "operation_runtime", InstallationGeneration: 1}
 	request := runtimewire.Request{OperationID: proof.OperationID, ProcessID: "process_runtime", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
+	// The placement pins node as primary: the attach otherwise orders the edges by a per-machine hash.
+	exec(`INSERT INTO machine_edge_placements(machine_id,account_id,installation_generation,worker_generation,primary_node_id,primary_process_epoch,secondary_node_id,secondary_process_epoch,observed_at) VALUES($1,$2,1,1,$3,'epoch_runtime',$4,'epoch_backup',now())`, machine, account, node, backupNode)
 	edge := previewattachment.PreviewEdgeIdentity{NodeID: node, ProcessEpoch: "epoch_runtime"}
 	a, err := service.Attach(ctx, proof, request)
-	if err == nil && (a.Backup == nil || a.Backup.Binding.EdgeNodeID != backupNode) {
-		t.Fatal("independent standby admission missing")
+	// The primary is whichever of the two edges hashes first for this machine: the answer holds exactly these two.
+	if err == nil && (a.Backup == nil || len(a.More) != 0 || a.Binding.EdgeNodeID == a.Backup.Binding.EdgeNodeID ||
+		(a.Binding.EdgeNodeID != node && a.Binding.EdgeNodeID != backupNode) || (a.Backup.Binding.EdgeNodeID != node && a.Backup.Binding.EdgeNodeID != backupNode)) {
+		t.Fatalf("independent standby admission missing: primary=%q backup=%v more=%d", a.Binding.EdgeNodeID, a.Backup, len(a.More))
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +331,8 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if strings.Contains(string(raw), "127.0.0.1") || strings.Contains(string(raw), `"target"`) {
 		t.Fatal("edge received local origin")
 	}
-	observation := runtimewire.Observation{RouteID: route, AttachmentGeneration: a.AttachmentGeneration, SessionID: a.Binding.SessionID, Ready: true}
+	onNode, onBackup := carrierOn(t, a, node), carrierOn(t, a, backupNode)
+	observation := runtimewire.Observation{RouteID: route, AttachmentGeneration: onNode.AttachmentGeneration, SessionID: onNode.Binding.SessionID, Ready: true}
 	if err = service.Observe(ctx, edge, []runtimewire.Observation{observation}); err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +371,7 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if err != nil || len(backupAdmissions) != 1 || backupAdmissions[0].Binding.EdgeNodeID != backupNode {
 		t.Fatalf("backup pull count=%d error=%v", len(backupAdmissions), err)
 	}
-	backupObservation := runtimewire.Observation{RouteID: route, AttachmentGeneration: a.Backup.AttachmentGeneration, SessionID: a.Backup.Binding.SessionID, Ready: true}
+	backupObservation := runtimewire.Observation{RouteID: route, AttachmentGeneration: onBackup.AttachmentGeneration, SessionID: onBackup.Binding.SessionID, Ready: true}
 	if err = service.Observe(ctx, backupEdge, []runtimewire.Observation{backupObservation}); err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +397,7 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	for _, value := range []string{a.Binding.SessionID, previewSessionID} {
 		assertCanonicalCarrierSession(t, value)
 	}
-	if a.Binding.SessionID == previewSessionID || a.Binding.TunnelID != route || a.Binding.ConnectorID != machine {
+	if onNode.Binding.SessionID == previewSessionID || onNode.Binding.TunnelID != route || onNode.Binding.ConnectorID != machine {
 		t.Fatal("carrier identity lost route/principal/receiver isolation")
 	}
 	renewed, err := service.Attach(ctx, proof, request)
@@ -436,6 +441,8 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 		t.Fatal("same-worker process replacement accepted")
 	}
 	exec(`UPDATE control_tunnel_nodes SET process_epoch='epoch_replacement' WHERE id=$1`, node)
+	// The pin only holds for the node's current epoch (edgeSelectQuery): keep it on node's replacement.
+	exec(`UPDATE machine_edge_placements SET primary_process_epoch='epoch_replacement' WHERE machine_id=$1`, machine)
 	ready(false)
 	replacement, err := service.Attach(ctx, proof, request)
 	if err != nil {
@@ -649,6 +656,22 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 	if err != nil || restored.Binding.EdgeNodeID != node || restored.Hostname != machine+".runtime.example.test" {
 		t.Fatalf("managed runtime restoration=%#v error=%v", restored, err)
 	}
+}
+
+// carrierOn returns the attach answer's carrier on the edge node, whichever slot (primary, Backup, More) holds it.
+func carrierOn(t *testing.T, a runtimewire.HostAdmission, nodeID string) runtimewire.Admission {
+	t.Helper()
+	candidates := append([]runtimewire.Admission{a.Admission}, a.More...)
+	if a.Backup != nil {
+		candidates = append(candidates, *a.Backup)
+	}
+	for _, c := range candidates {
+		if c.Binding.EdgeNodeID == nodeID {
+			return c
+		}
+	}
+	t.Fatalf("attach answer has no carrier on edge %s", nodeID)
+	return runtimewire.Admission{}
 }
 
 func assertCanonicalCarrierSession(t *testing.T, value string) {

@@ -154,12 +154,7 @@ func eligible(c *RegionalCandidates, role, transport string, regions map[string]
 		seen[n.NodeID] = true
 		out = append(out, n)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Region != out[j].Region {
-			return out[i].Region < out[j].Region
-		}
-		return out[i].NodeID < out[j].NodeID
-	})
+	// The server's order (region, load, id) is kept: it is the node preference within a region.
 	redundancy := RedundancyNone
 	if len(out) == 1 {
 		redundancy = RedundancyReduced

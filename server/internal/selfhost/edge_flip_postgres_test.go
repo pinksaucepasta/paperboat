@@ -47,9 +47,14 @@ func TestEdgeFlipRepointsDomainsAndNamesLiveResourcesOnPostgres(t *testing.T) {
 	machine := testutil.PublicationMachine(t, store.SQL(), owner)
 	installation := scopedInstallationFixture(t, store, "edge-flip-test-key", owner, "tunnel")
 	m1, m2 := "flip_m1_"+stamp, "flip_m2_"+stamp
+	// Each managed node is a region of its own (the pair names two regions).
+	r1, r2 := "flip_r1_"+stamp, "flip_r2_"+stamp
+	for _, id := range []string{r1, r2} {
+		exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Flip '||$1,true)`, id)
+	}
 	for _, id := range []string{m1, m2} {
 		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at)
-VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',$1||'.example.test','edge.example.test',27443,27444,'sha256:'||repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
+VALUES($1,'default','1.0','epoch','ready',true,now(),CASE WHEN $1=$2 THEN $3 ELSE $4 END,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',$1||'.example.test','edge.example.test',27443,27444,'sha256:'||repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, m1, r1, r2)
 	}
 	tunnel, route, preview := "flip_t_"+stamp, "flip_r_"+stamp, "flip_p_"+stamp
 	tunnelEndpoint, previewLabel := testutil.EndpointID("flip:"+stamp), testutil.EndpointLabel("flip-preview:"+stamp)
@@ -76,6 +81,7 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 			store.SQL().ExecContext(context.Background(), q, owner)
 		}
 		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id IN ($1,$2)`, m1, m2)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_regions WHERE id IN ($1,$2)`, r1, r2)
 	})
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,'api tunnel','active',$3,$4,$5,'actor')`, tunnel, owner, tunnelEndpoint, "https://"+managedTunnelTarget, machine)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, tunnel)
@@ -143,7 +149,7 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 	if _, err = service.SetPlacement(ctx, owner, "tunnel", tunnel, &installation.InstallationID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SetEdgePair(ctx, owner, Scope{Kind: "account", ID: owner}, m1, m2); err != nil {
+	if _, err = service.SetEdgePair(ctx, owner, Scope{Kind: "account", ID: owner}, "managed", r1, r2); err != nil {
 		t.Fatal(err)
 	}
 	var placements int
@@ -157,7 +163,7 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),'fsn1',$1,ARRAY['edge'],ARR
 		t.Fatalf("preview domain after the flip to managed: target=%q type=%s gen %d", target, typ, generation)
 	}
 	// A pair that keeps the mode changes no domain.
-	if _, err = service.SetEdgePair(ctx, owner, Scope{Kind: "account", ID: owner}, m2, m1); err != nil {
+	if _, err = service.SetEdgePair(ctx, owner, Scope{Kind: "account", ID: owner}, "managed", r2, r1); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, generation := domain("tunnel_domains", "flip_td_"+stamp); generation != 3 {

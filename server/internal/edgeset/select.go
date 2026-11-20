@@ -1,6 +1,11 @@
-// Package edgeset assigns each workspace its set of edges: the Paperboat-managed pool or the
-// workspace's own selected servers, never a mix. Placement consults the stored set; the set only
-// changes when a member is gone for good or the workspace changes its mode.
+// Package edgeset assigns each workspace its edge pair: two regions (a primary and a backup) of the
+// Paperboat-managed pool, or two regions of the workspace's own servers, never a mix. A region is a
+// place users name ("Frankfurt"); which of its machines serve a workspace is the server's business,
+// so replacing a machine never changes the pair. Placement consults the stored regions; they only
+// change when a region is gone for good or the workspace changes its mode.
+//
+// Prior art: tailscale tailcfg.DERPRegion (tailcfg/derpmap.go) is a region with several Nodes the
+// client does not choose between; headscale (hscontrol/derp/derp.go) merges regions of node lists.
 package edgeset
 
 import (
@@ -11,79 +16,58 @@ import (
 )
 
 const (
-	// Size is how many edges serve a workspace at once.
+	// Size is how many regions serve a workspace at once: the primary and the backup.
 	Size = 2
-	// ReplaceAfter is how long a member may be silent before it is replaced; a restart or a short
-	// network cut keeps its place.
+	// ReplaceAfter is how long a region may be without a live node before it is replaced; a restart or a
+	// short network cut keeps its place.
 	ReplaceAfter = 10 * time.Minute
 	// LatencyFresh is how old a machine's edge measurement may be and still place a workspace; older
 	// samples are ignored. Machines repeat their samples on every attachment, so a day is generous.
 	LatencyFresh = 24 * time.Hour
 )
 
-// Candidate is an edge that may serve a workspace right now.
-type Candidate struct {
-	NodeID        string
-	FailureDomain string
-}
-
-// choose keeps the members of current that are still retained, then fills the remaining places
-// from usable candidates: edges in failure domains the set does not use yet first. Inside that,
-// edges the workspace's machines measured come first, lowest median RTT first (rtt: node id to
-// milliseconds, empty when there is no fresh sample); the rest, and ties, go by highest rendezvous
-// score, so a workspace without samples lands on a stable, evenly spread pair.
-func choose(scope string, current []string, retained map[string]bool, rtt map[string]int, usable []Candidate, size int) []string {
+// choose keeps the regions of current that are still retained, then fills the remaining places from
+// the usable regions: regions the workspace's machines measured come first, lowest median RTT first
+// (rtt: region to milliseconds, empty when there is no fresh sample); the rest, and ties, go by highest
+// rendezvous score, so a workspace without samples lands on a stable, evenly spread pair.
+func choose(scope string, current []string, retained map[string]bool, rtt map[string]int, usable []string, size int) []string {
 	chosen := make([]string, 0, size)
-	domains := map[string]bool{}
 	taken := map[string]bool{}
-	domainOf := map[string]string{}
-	for _, candidate := range usable {
-		domainOf[candidate.NodeID] = candidate.FailureDomain
-	}
-	for _, id := range current {
-		if retained[id] && !taken[id] && len(chosen) < size {
-			chosen = append(chosen, id)
-			taken[id] = true
-			if domain, ok := domainOf[id]; ok && domain != "" {
-				domains[domain] = true
-			}
+	for _, region := range current {
+		if retained[region] && !taken[region] && len(chosen) < size {
+			chosen = append(chosen, region)
+			taken[region] = true
 		}
 	}
-	ranked := append([]Candidate(nil), usable...)
+	ranked := append([]string(nil), usable...)
 	sort.Slice(ranked, func(i, j int) bool {
-		ri, iok := rtt[ranked[i].NodeID]
-		rj, jok := rtt[ranked[j].NodeID]
+		ri, iok := rtt[ranked[i]]
+		rj, jok := rtt[ranked[j]]
 		if iok != jok {
 			return iok
 		}
 		if iok && ri != rj {
 			return ri < rj
 		}
-		si, sj := score(scope, ranked[i].NodeID), score(scope, ranked[j].NodeID)
+		si, sj := score(scope, ranked[i]), score(scope, ranked[j])
 		if si != sj {
 			return si > sj
 		}
-		return ranked[i].NodeID < ranked[j].NodeID
+		return ranked[i] < ranked[j]
 	})
-	for _, distinct := range []bool{true, false} {
-		for _, candidate := range ranked {
-			if len(chosen) >= size {
-				return chosen
-			}
-			if taken[candidate.NodeID] || distinct && candidate.FailureDomain != "" && domains[candidate.FailureDomain] {
-				continue
-			}
-			chosen = append(chosen, candidate.NodeID)
-			taken[candidate.NodeID] = true
-			if candidate.FailureDomain != "" {
-				domains[candidate.FailureDomain] = true
-			}
+	for _, region := range ranked {
+		if len(chosen) >= size {
+			break
+		}
+		if !taken[region] {
+			chosen = append(chosen, region)
+			taken[region] = true
 		}
 	}
 	return chosen
 }
 
-func score(scope, node string) uint64 {
-	digest := sha256.Sum256([]byte(scope + "\x00" + node))
+func score(scope, region string) uint64 {
+	digest := sha256.Sum256([]byte(scope + "\x00" + region))
 	return binary.BigEndian.Uint64(digest[:8])
 }

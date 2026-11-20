@@ -2058,6 +2058,13 @@ type NodeCapacityDaily struct {
 	ConnectionsMax int32
 }
 
+type NodeLoadOut struct {
+	NodeID        string
+	OutForLoad    bool
+	ChangedAt     time.Time
+	OverThreshold bool
+}
+
 type Operation struct {
 	ID              string
 	AccountID       string
@@ -3775,6 +3782,7 @@ type WorkspaceEdgeSet struct {
 	NodeIds    []string
 	Generation int64
 	AssignedAt time.Time
+	Regions    []string
 }
 
 type WorkspacePolicy struct {

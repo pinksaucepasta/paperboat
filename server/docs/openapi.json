@@ -871,7 +871,8 @@
           "scope_kind",
           "scope_id",
           "enrollment_state",
-          "endpoint_host"
+          "endpoint_host",
+          "region"
         ],
         "properties": {
           "installation_id": {
@@ -939,6 +940,10 @@
           "update": {
             "$ref": "#/components/schemas/SelfhostUpdateStatus",
             "description": "The node's latest update request; absent when Update was never pressed."
+          },
+          "region": {
+            "type": "string",
+            "description": "The region the owner named when enrolling the server (default selfhost). Servers of one region back each other up, and a workspace's pair names regions."
           }
         }
       },
@@ -13592,7 +13597,9 @@
           "node_generation",
           "registry_expires_at",
           "ready",
-          "protocol_version"
+          "protocol_version",
+          "carriers",
+          "ingress_verified"
         ],
         "properties": {
           "id": {
@@ -13658,6 +13665,24 @@
           },
           "protocol_version": {
             "type": "string"
+          },
+          "carriers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Machines holding a live carrier attachment on the node; 0 means safe to retire."
+          },
+          "load_percent": {
+            "type": "number",
+            "format": "double",
+            "description": "The node's load: the worst of its sustained CPU and its connections against its own limit, from its latest report; absent when it reported nothing in the last 2 minutes."
+          },
+          "in_rotation": {
+            "type": "boolean",
+            "description": "False while the load rule holds the ready node out because it is overloaded: an edge is left out of the wildcard DNS names, a relay out of the relay candidate list; absent for nodes the rule does not manage."
+          },
+          "ingress_verified": {
+            "type": "boolean",
+            "description": "The node's public ingress addresses passed the verify-ingress probe."
           },
           "forward": {
             "type": "object",
@@ -16542,17 +16567,19 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "node_id",
-          "role",
           "region",
-          "self_hosted",
-          "rtt_ms",
-          "measured_at"
+          "name",
+          "role",
+          "rtt_ms"
         ],
-        "description": "The connect time this machine measured to one edge or relay it can use. Display data: it never selects a path or confers access.",
+        "description": "The best connect time this machine measured to the edges or relays of one region (per role). Display data: it never selects a path or confers access.",
         "properties": {
-          "node_id": {
+          "region": {
             "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Paperboat's display name for a managed region; the region id for a customer's own."
           },
           "role": {
             "type": "string",
@@ -16561,20 +16588,14 @@
               "relay"
             ]
           },
-          "region": {
-            "type": "string"
-          },
           "self_hosted": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Present (true) for a customer's own region."
           },
           "rtt_ms": {
             "type": "integer",
             "minimum": 0,
             "maximum": 10000
-          },
-          "measured_at": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -27100,8 +27121,8 @@
     },
     "/v1/edges": {
       "get": {
-        "summary": "List account-visible hosted tunnel edges",
-        "description": "Returns a bounded, cursor-paged observation of hosted edge nodes visible to this account, independent of its tunnel pool mode. A self-hosted-only policy still prevents hosted route placement. Status does not guarantee admission for a particular tunnel route.",
+        "summary": "List Paperboat's regions",
+        "description": "Returns a bounded, cursor-paged list (ordered by region id) of Paperboat's enabled regions that have an edge the account may use, independent of its tunnel pool mode. Users see regions only: no node, host or heartbeat. Status does not guarantee admission for a particular tunnel route.",
         "security": [
           {
             "cookieSession": []
@@ -27137,7 +27158,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Account-visible hosted edge inventory.",
+            "description": "Paperboat's regions.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27159,24 +27180,17 @@
                             "type": "object",
                             "required": [
                               "id",
-                              "region",
-                              "site",
-                              "endpoint_host",
+                              "name",
                               "status"
                             ],
                             "properties": {
                               "id": {
-                                "type": "string"
-                              },
-                              "region": {
-                                "type": "string"
-                              },
-                              "site": {
                                 "type": "string",
-                                "description": "The city or site the edge runs in."
+                                "description": "The region id."
                               },
-                              "endpoint_host": {
-                                "type": "string"
+                              "name": {
+                                "type": "string",
+                                "description": "Paperboat's display name for the region."
                               },
                               "status": {
                                 "type": "string",
@@ -27184,11 +27198,8 @@
                                   "ready",
                                   "draining",
                                   "unavailable"
-                                ]
-                              },
-                              "last_heartbeat_at": {
-                                "type": "string",
-                                "format": "date-time"
+                                ],
+                                "description": "Ready if any node of the region is ready, else draining if any is, else unavailable. An observation, not a promise that a particular route is admitted."
                               }
                             }
                           }
@@ -27225,8 +27236,8 @@
     },
     "/v1/edges/pair": {
       "get": {
-        "summary": "Read a workspace's primary and fallback edge",
-        "description": "Returns the two edges that serve the workspace's previews and tunnels: both Paperboat's or both its own servers. The pair is the workspace's stored edge set, assigned when a machine first attaches or the periodic reconcile runs; status is an observation from the node's heartbeat.",
+        "summary": "Read a workspace's primary and backup region",
+        "description": "Returns the two regions that serve the workspace's previews and tunnels: both Paperboat's or both its own servers. The pair is the workspace's stored pair, assigned when a machine first attaches or the periodic reconcile runs. Which machines of a region serve the workspace is the server's choice; a machine holds a carrier to every ready node of both regions.",
         "security": [
           {
             "cookieSession": []
@@ -27252,7 +27263,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The workspace's edge pair.",
+            "description": "The workspace's region pair.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27264,43 +27275,33 @@
                     "data": {
                       "type": "object",
                       "required": [
+                        "kind",
                         "primary"
                       ],
                       "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "managed",
+                            "self_hosted"
+                          ],
+                          "description": "Both regions are Paperboat's, or both the workspace's own."
+                        },
                         "primary": {
                           "type": "object",
                           "required": [
                             "id",
-                            "kind",
-                            "region",
-                            "site",
+                            "name",
                             "status"
                           ],
                           "properties": {
                             "id": {
                               "type": "string",
-                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
-                            },
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "managed",
-                                "self_hosted"
-                              ]
-                            },
-                            "region": {
-                              "type": "string"
-                            },
-                            "site": {
-                              "type": "string",
-                              "description": "The city or site the edge runs in; a self-hosted server's name."
+                              "description": "The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server)."
                             },
                             "name": {
                               "type": "string",
-                              "description": "A self-hosted server's name."
-                            },
-                            "endpoint_host": {
-                              "type": "string"
+                              "description": "Paperboat's display name for a managed region; the region id for the workspace's own."
                             },
                             "status": {
                               "type": "string",
@@ -27308,16 +27309,13 @@
                                 "ready",
                                 "draining",
                                 "unavailable"
-                              ]
-                            },
-                            "last_heartbeat_at": {
-                              "type": "string",
-                              "format": "date-time"
+                              ],
+                              "description": "Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable."
                             },
                             "best_rtt_ms": {
                               "type": "integer",
                               "minimum": 0,
-                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement."
                             },
                             "measured_at": {
                               "type": "string",
@@ -27330,36 +27328,17 @@
                           "type": "object",
                           "required": [
                             "id",
-                            "kind",
-                            "region",
-                            "site",
+                            "name",
                             "status"
                           ],
                           "properties": {
                             "id": {
                               "type": "string",
-                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
-                            },
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "managed",
-                                "self_hosted"
-                              ]
-                            },
-                            "region": {
-                              "type": "string"
-                            },
-                            "site": {
-                              "type": "string",
-                              "description": "The city or site the edge runs in; a self-hosted server's name."
+                              "description": "The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server)."
                             },
                             "name": {
                               "type": "string",
-                              "description": "A self-hosted server's name."
-                            },
-                            "endpoint_host": {
-                              "type": "string"
+                              "description": "Paperboat's display name for a managed region; the region id for the workspace's own."
                             },
                             "status": {
                               "type": "string",
@@ -27367,16 +27346,13 @@
                                 "ready",
                                 "draining",
                                 "unavailable"
-                              ]
-                            },
-                            "last_heartbeat_at": {
-                              "type": "string",
-                              "format": "date-time"
+                              ],
+                              "description": "Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable."
                             },
                             "best_rtt_ms": {
                               "type": "integer",
                               "minimum": 0,
-                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement."
                             },
                             "measured_at": {
                               "type": "string",
@@ -27384,7 +27360,7 @@
                               "description": "When best_rtt_ms was measured."
                             }
                           },
-                          "description": "Absent while only one edge can serve the workspace."
+                          "description": "Absent while only one region can serve the workspace."
                         }
                       }
                     }
@@ -27403,7 +27379,7 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
-            "description": "No edge can serve the workspace yet (code edge_pair_unassigned).",
+            "description": "No region can serve the workspace yet (code edge_pair_unassigned).",
             "content": {
               "application/json": {
                 "schema": {
@@ -27419,8 +27395,8 @@
         "operationId": "get_v1_edges_pair"
       },
       "put": {
-        "summary": "Choose a workspace's primary and fallback edge",
-        "description": "Pass ids from GET /v1/edges (Paperboat edges) or self-hosted tunnel installation ids; both must be of the same kind. The change goes through the tunnel pool policy and the workspace edge set, and the workspace's machines are told to look again. Switching between Paperboat's edges and your own servers is refused with 409 previews_running (details.count, and details.items: the first 50 running things as {kind: preview|tunnel, id, name}) while the workspace has running previews or tunnels. Only the owner or an admin of a team can change its pair.",
+        "summary": "Choose a workspace's primary and backup region",
+        "description": "Pass kind managed with two region ids from GET /v1/edges, or kind self_hosted with two regions of your own servers (the region you named when enrolling them). The change goes through the tunnel pool policy and the workspace pair, and the workspace's machines are told to look again; every own server of the two regions joins the pool. Switching between Paperboat's regions and your own servers is refused with 409 previews_running (details.count, and details.items: the first 50 running things as {kind: preview|tunnel, id, name}) while the workspace has running previews or tunnels. A region that is not available to the workspace right now is refused with 400 invalid_request naming the region. Only the owner or an admin of a team can change its pair.",
         "security": [
           {
             "bearerAccess": []
@@ -27453,17 +27429,25 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "primary_id",
-                  "fallback_id"
+                  "kind",
+                  "primary_region",
+                  "fallback_region"
                 ],
                 "properties": {
-                  "primary_id": {
+                  "kind": {
                     "type": "string",
-                    "maxLength": 128
+                    "enum": [
+                      "managed",
+                      "self_hosted"
+                    ]
                   },
-                  "fallback_id": {
+                  "primary_region": {
                     "type": "string",
-                    "maxLength": 128
+                    "maxLength": 63
+                  },
+                  "fallback_region": {
+                    "type": "string",
+                    "maxLength": 63
                   }
                 }
               }
@@ -27472,7 +27456,7 @@
         },
         "responses": {
           "200": {
-            "description": "The new pair.",
+            "description": "The workspace's region pair.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27484,43 +27468,33 @@
                     "data": {
                       "type": "object",
                       "required": [
+                        "kind",
                         "primary"
                       ],
                       "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "managed",
+                            "self_hosted"
+                          ],
+                          "description": "Both regions are Paperboat's, or both the workspace's own."
+                        },
                         "primary": {
                           "type": "object",
                           "required": [
                             "id",
-                            "kind",
-                            "region",
-                            "site",
+                            "name",
                             "status"
                           ],
                           "properties": {
                             "id": {
                               "type": "string",
-                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
-                            },
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "managed",
-                                "self_hosted"
-                              ]
-                            },
-                            "region": {
-                              "type": "string"
-                            },
-                            "site": {
-                              "type": "string",
-                              "description": "The city or site the edge runs in; a self-hosted server's name."
+                              "description": "The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server)."
                             },
                             "name": {
                               "type": "string",
-                              "description": "A self-hosted server's name."
-                            },
-                            "endpoint_host": {
-                              "type": "string"
+                              "description": "Paperboat's display name for a managed region; the region id for the workspace's own."
                             },
                             "status": {
                               "type": "string",
@@ -27528,16 +27502,13 @@
                                 "ready",
                                 "draining",
                                 "unavailable"
-                              ]
-                            },
-                            "last_heartbeat_at": {
-                              "type": "string",
-                              "format": "date-time"
+                              ],
+                              "description": "Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable."
                             },
                             "best_rtt_ms": {
                               "type": "integer",
                               "minimum": 0,
-                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement."
                             },
                             "measured_at": {
                               "type": "string",
@@ -27550,36 +27521,17 @@
                           "type": "object",
                           "required": [
                             "id",
-                            "kind",
-                            "region",
-                            "site",
+                            "name",
                             "status"
                           ],
                           "properties": {
                             "id": {
                               "type": "string",
-                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
-                            },
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "managed",
-                                "self_hosted"
-                              ]
-                            },
-                            "region": {
-                              "type": "string"
-                            },
-                            "site": {
-                              "type": "string",
-                              "description": "The city or site the edge runs in; a self-hosted server's name."
+                              "description": "The region id (as listed by GET /v1/edges for Paperboat's regions; the region the owner named when enrolling a self-hosted server)."
                             },
                             "name": {
                               "type": "string",
-                              "description": "A self-hosted server's name."
-                            },
-                            "endpoint_host": {
-                              "type": "string"
+                              "description": "Paperboat's display name for a managed region; the region id for the workspace's own."
                             },
                             "status": {
                               "type": "string",
@@ -27587,16 +27539,13 @@
                                 "ready",
                                 "draining",
                                 "unavailable"
-                              ]
-                            },
-                            "last_heartbeat_at": {
-                              "type": "string",
-                              "format": "date-time"
+                              ],
+                              "description": "Folded over the workspace's nodes of this region: ready if any is, else draining if any is, else unavailable."
                             },
                             "best_rtt_ms": {
                               "type": "integer",
                               "minimum": 0,
-                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to a node of this region in the last hour. Absent without a fresh measurement."
                             },
                             "measured_at": {
                               "type": "string",
@@ -27604,7 +27553,7 @@
                               "description": "When best_rtt_ms was measured."
                             }
                           },
-                          "description": "Absent while only one edge can serve the workspace."
+                          "description": "Absent while only one region can serve the workspace."
                         }
                       }
                     }
@@ -27648,8 +27597,8 @@
     },
     "/v1/relays": {
       "get": {
-        "summary": "List the relays an account's machines can use",
-        "description": "Returns a bounded, cursor-paged observation of the relay nodes this account's pool policy lets its machines use: Paperboat's and the account's own self-hosted ones (a self-hosted-only policy lists only the chosen ones). Status comes from the node's heartbeat and does not guarantee a particular connection will be relayed.",
+        "summary": "List the relay regions an account's machines can use",
+        "description": "Returns a bounded, cursor-paged list (ordered by region id) of the regions of the relay nodes this account's pool policy lets its machines use: Paperboat's and the account's own self-hosted ones (a self-hosted-only policy lists only the chosen ones). Status comes from the nodes' heartbeats and does not guarantee a particular connection will be relayed.",
         "security": [
           {
             "cookieSession": []
@@ -27685,7 +27634,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Relays the account can use.",
+            "description": "Relay regions the account can use.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27707,21 +27656,17 @@
                             "type": "object",
                             "required": [
                               "id",
-                              "region",
-                              "site",
-                              "status",
-                              "self_hosted"
+                              "name",
+                              "status"
                             ],
                             "properties": {
                               "id": {
-                                "type": "string"
-                              },
-                              "region": {
-                                "type": "string"
-                              },
-                              "site": {
                                 "type": "string",
-                                "description": "The city or site the relay runs in; a self-hosted relay's name."
+                                "description": "The region id."
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "Paperboat's display name for a managed region; the region id for the account's own."
                               },
                               "status": {
                                 "type": "string",
@@ -27729,28 +27674,8 @@
                                   "ready",
                                   "draining",
                                   "unavailable"
-                                ]
-                              },
-                              "last_heartbeat_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "name": {
-                                "type": "string",
-                                "description": "A self-hosted relay's name."
-                              },
-                              "self_hosted": {
-                                "type": "boolean"
-                              },
-                              "best_rtt_ms": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this relay in the last hour. Absent without a fresh measurement."
-                              },
-                              "measured_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "description": "When best_rtt_ms was measured."
+                                ],
+                                "description": "Ready if any node of the region is ready, else draining if any is, else unavailable. An observation, not a promise that a particular route is admitted."
                               }
                             }
                           }
@@ -49400,6 +49325,7 @@
                 "worker_operational_health",
                 "worker_workspace_domains",
                 "worker_node_capacity",
+                "worker_node_load",
                 "worker_node_update_notices",
                 "worker_release_expiry_notices",
                 "worker_fleet_snapshot",
@@ -50812,7 +50738,108 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "Stops new connections; carriers already attached finish within the drain grace (10 minutes)."
+      }
+    },
+    "/v1/admin/nodes/{node_id}/drain-move": {
+      "post": {
+        "operationId": "drain_move_admin_node",
+        "summary": "Drain a managed node and move its machines now",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "description": "Opaque incident, ticket, or change reference; do not send prose or secrets.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draining node or exact idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorNodeMutationResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Stops new connections and wakes every machine attached to the node so it re-attaches now; existing carriers end after a short grace (90 s)."
       }
     },
     "/v1/admin/nodes/{node_id}/resume": {
@@ -52323,6 +52350,163 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/selfhost/installations/{installationID}/drain": {
+      "post": {
+        "operationId": "post_v1_selfhost_installations_installation_id_drain",
+        "summary": "Drain one of your own servers",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "installationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The installation in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostInstallation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Stops new connections to the installation's node. With move=true its machines are also woken to re-attach now and existing connections end after 90 seconds; otherwise they finish within 10 minutes. Servers of the same region keep serving.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "move": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/selfhost/installations/{installationID}/resume": {
+      "post": {
+        "operationId": "post_v1_selfhost_installations_installation_id_resume",
+        "summary": "Resume a drained server of your own",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "installationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The installation in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostInstallation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Returns a drained node to service; it becomes ready again on its next heartbeat.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
           }
         }
       }

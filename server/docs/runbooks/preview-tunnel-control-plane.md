@@ -31,10 +31,64 @@ hostnames.
 
 Managed tunnel, preview and runtime hostnames are covered by DNS-only wildcards (`*.pprbt.app`, `*.runtime.pprbt.dev`)
 that list every managed edge; the server publishes no per-hostname records for them, and a custom domain's CNAME
-points at the resource's own managed name. Edges do not forward, so a route is reported ready once any live edge
-serves it; an edge that lags answers its share of visitors wrongly until it converges (an address move still waits
-for every live edge to serve the new name). When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
-the wildcards are static, so until you do, about half of new connections go to the dead edge.
+points at the resource's own managed name. Edges do not forward, and a machine holds a carrier to every ready node of
+its workspace's two regions, so a visitor may land on any edge. A route is reported ready once any live edge serves it;
+an edge that lags answers its share of visitors wrongly until it converges (an address move still waits for every live
+edge to serve the new name).
+
+With `PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS=true` the server keeps both wildcards itself (owner
+`edge_wildcard:<name>`, every 10 s on the worker leader): the A/AAAA records are the verified public ingress addresses
+of every managed edge that is `ready`, not draining, has a heartbeat under 15 s, is registered and sits in an enabled
+region. A node that dies, is drained or retired leaves the set on the next tick; a node that becomes ready (and has
+passed `verify-ingress`) joins it. The server never publishes an empty set: with no ready edge it logs
+`edge_wildcard_dns_empty` and leaves the old records. Nothing to remove by hand any more.
+
+A node whose load (`load_percent` in the admin panel: the worst of its sustained CPU and its connections against its
+own limit) reaches `PAPERBOAT_NODE_CAPACITY_LOAD_OUT_PERCENT` (85) is left out of the names and comes back only
+below `PAPERBOAT_NODE_CAPACITY_LOAD_IN_PERCENT` (70); a region always keeps its least loaded ready node, and a
+node with no recent report is never dropped. The admin panel shows such a node as paused for load (`in_rotation`
+false). The same rule, thresholds and stored state apply to managed relays. Balancing happens inside a region: the
+client picks the region by round trip and then uses the first relay the server lists in it, so within a region the
+list is ordered least loaded first (a relay with no recent report last). A relay at or above the load-out threshold is
+left out of the list altogether (account configuration and peer-relay grants, within about 5 s, the candidate cache
+TTL) and returns below the load-in threshold; the last ready relay of a region is never left out, and a self-hosted
+owner's own relays are never touched.
+The relay decision runs on the worker leader every 10 s whether or not `PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS`
+is on. Log lines:
+`edge_wildcard_dns_published` (hostname, addresses), `edge_wildcard_dns_conflict` (hostname, error),
+`edge_wildcard_dns_empty`.
+
+## Turning on the wildcard DNS sync (one time)
+
+The sync refuses to touch A/AAAA records it did not create (it reports a conflict and changes nothing), so the
+hand-made records for the two wildcard names must be deleted. Enable first, then delete, so the gap is seconds (the
+worker publishes within its 10 s loop) and not a redeploy.
+
+1. Deploy the server with `PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS=true` (default false). It starts logging
+   `edge_wildcard_dns_conflict` every 10 s for the two names: expected until step 3.
+2. Admin panel, Infrastructure, Nodes: every managed edge shows State `ready` and Ingress verified (run Verify ingress
+   on any that does not); the Load column fills in within a minute.
+3. In the DNS provider zone of each name (the public zone for the preview wildcard under the preview base domain, the
+   runtime zone for the runtime wildcard under the runtime base domain; the zone ids are the server's
+   `PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID` and `PAPERBOAT_CERTIFICATES_DNS_ZONE_ID`) delete every A and AAAA
+   record whose name is exactly the wildcard (`*.<base domain>`). Keep everything else.
+4. Within 30 s: `dig +short A x.<preview base domain>` and `dig +short A x.<runtime base domain>` return one address
+   per ready managed edge, the server log shows `edge_wildcard_dns_published`, and there are no further conflicts.
+5. Rollback: set the flag to false and redeploy, then re-create the hand-made records. The sync leaves the records it
+   created in place until it is removed: delete those by hand first.
+
+## Move a region to a bigger machine
+
+Enrol the new node into the same region, so the region briefly has two nodes, and swap without a gap:
+
+1. Enrol the new machine in the region (`POST /v1/admin/nodes/{node_id}/enroll`) and wait until it is `ready`.
+2. `verify-ingress` on the new node; it joins the wildcards on the next tick and machines attach to it.
+3. **Drain** the old node (`drain`, or `drain-move` to push its machines off now, see operator-admin.md). It leaves the
+   wildcards at once.
+4. Watch `carriers` on the old node (`GET /v1/admin/nodes`) fall to 0.
+5. **Retire** the old node and remove the machine.
+
+Do not retire first: with one node in the region the region has no edge until the new one is ready.
 
 ## Public TCP tunnel ports on the edges
 

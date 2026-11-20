@@ -1044,7 +1044,9 @@ func New(opts Options) (*App, error) {
 		// Every process writes the presence touches of its own held waits, one statement per flush.
 		observedWorker(supportService, "worker_presence", periodicPreviewTunnelWorker(metering.PresenceFlushEvery, runtimeRepository.FlushPresence), progress),
 		// Each server process records its own CPU and memory for the operator capacity page.
-		observedWorker(supportService, "worker_node_capacity", periodicPreviewTunnelWorker(30*time.Second, serverCapacityRecorder(store, opts.Config.Reporting.Instance)), progress))
+		observedWorker(supportService, "worker_node_capacity", periodicPreviewTunnelWorker(30*time.Second, serverCapacityRecorder(store, opts.Config.Reporting.Instance)), progress),
+		// Managed relays above the load-out percent leave the relay candidate list; whatever the wildcard DNS flag says.
+		observedWorker(supportService, "worker_node_load", periodicPreviewTunnelWorker(10*time.Second, newRelayLoad(store, opts.Config).Sync), progress))
 	sweeps := 0
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(edgeset.SweepEvery, func(ctx context.Context) error {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)

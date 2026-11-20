@@ -81,7 +81,8 @@ const viewerFormatters = new Map<string, Intl.DateTimeFormat>()
 function inViewer(viewer: Viewer, options: Intl.DateTimeFormatOptions, key: string): Intl.DateTimeFormat {
   const id = `${viewer.locale}|${viewer.zone}|${key}`
   let format = viewerFormatters.get(id)
-  if (!format) viewerFormatters.set(id, (format = new Intl.DateTimeFormat(viewer.locale, { ...options, timeZone: viewer.zone })))
+  if (!format)
+    viewerFormatters.set(id, (format = new Intl.DateTimeFormat(viewer.locale, { ...options, timeZone: viewer.zone })))
   return format
 }
 
@@ -155,14 +156,4 @@ const platforms: Record<string, string> = {
 
 export function formatPlatform(platform: string): string {
   return platforms[platform.toLowerCase()] ?? platform
-}
-
-/** A region code as a place name: `in-mumbai` → Mumbai, `us-east` → Us East. */
-export function placeName(region: string): string {
-  const parts = region.toLowerCase().split(/[-_]/).filter(Boolean)
-  // A country prefix goes, unless what remains is only a direction ("us-east" stays "Us East").
-  const compass = /^(north|south|east|west|central)$/
-  if (parts.length > 1 && /^[a-z]{2}$/.test(parts[0]) && !(parts.length === 2 && compass.test(parts[1]))) parts.shift()
-  if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) parts.pop()
-  return parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") || region
 }

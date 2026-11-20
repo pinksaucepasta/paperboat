@@ -104,7 +104,7 @@ func setPlacementTx(ctx context.Context, tx *db.Tx, actor, kind, table, id strin
 		_, err = tx.Exec(ctx, `DELETE FROM paperboat.selfhost_placements WHERE resource_kind=$1 AND resource_id=$2`, kind, id)
 	} else {
 		var node, v4, v6 string
-		err = tx.QueryRow(ctx, `SELECT i.node_id,n.endpoint_host,coalesce(host(n.public_ingress_ipv4),''),coalesce(host(n.public_ingress_ipv6),'') FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.capability='tunnel' AND i.state='active' AND i.claim_complete AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2) AND paperboat.node_workspace_edge_eligible(i.node_id,$3,$4) FOR SHARE OF i,n`, *installation, actor, owner, team).Scan(&node, &selectedHost, &v4, &v6)
+		err = tx.QueryRow(ctx, `SELECT i.node_id,n.endpoint_host,coalesce(host(n.public_ingress_ipv4),''),coalesce(host(n.public_ingress_ipv6),'') FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.capability='tunnel' AND i.state='active' AND i.claim_complete AND i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2) AND paperboat.node_workspace_edge_eligible(i.node_id,$3,$4) FOR SHARE OF i,n`, *installation, actor, owner, team).Scan(&node, &selectedHost, &v4, &v6)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return out, ErrUnauthorized
 		}

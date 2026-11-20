@@ -5,49 +5,36 @@ import (
 	"testing"
 )
 
-func candidateList(pairs ...string) []Candidate {
-	out := make([]Candidate, 0, len(pairs)/2)
-	for i := 0; i+1 < len(pairs); i += 2 {
-		out = append(out, Candidate{NodeID: pairs[i], FailureDomain: pairs[i+1]})
-	}
-	return out
-}
-
-func retainedOf(ids ...string) map[string]bool {
+func retainedOf(regions ...string) map[string]bool {
 	out := map[string]bool{}
-	for _, id := range ids {
-		out[id] = true
+	for _, region := range regions {
+		out[region] = true
 	}
 	return out
 }
 
-func TestChooseSpreadsAcrossFailureDomains(t *testing.T) {
-	usable := candidateList("a1", "dom-a", "a2", "dom-a", "b1", "dom-b")
-	got := choose("scope", nil, nil, nil, usable, Size)
-	if len(got) != 2 {
-		t.Fatalf("set = %v", got)
-	}
-	domains := map[string]string{"a1": "dom-a", "a2": "dom-a", "b1": "dom-b"}
-	if domains[got[0]] == domains[got[1]] {
-		t.Fatalf("set %v shares a failure domain although two exist", got)
+func TestChooseGivesTwoDistinctRegions(t *testing.T) {
+	got := choose("scope", nil, nil, nil, []string{"frankfurt", "mumbai", "oregon"}, Size)
+	if len(got) != 2 || got[0] == got[1] {
+		t.Fatalf("pair = %v, want two different regions", got)
 	}
 }
 
-func TestChooseIsStableAndKeepsRetainedMembers(t *testing.T) {
-	usable := candidateList("a", "dom-a", "b", "dom-b", "c", "dom-c")
+func TestChooseIsStableAndKeepsRetainedRegions(t *testing.T) {
+	usable := []string{"a", "b", "c"}
 	first := choose("scope", nil, nil, nil, usable, Size)
 	if again := choose("scope", nil, nil, nil, usable, Size); !reflect.DeepEqual(first, again) {
 		t.Fatalf("same inputs gave %v then %v", first, again)
 	}
 	if kept := choose("scope", first, retainedOf(first...), nil, usable, Size); !reflect.DeepEqual(kept, first) {
-		t.Fatalf("a healthy set changed: %v -> %v", first, kept)
+		t.Fatalf("a healthy pair changed: %v -> %v", first, kept)
 	}
-	// One member is gone: the other keeps its place, one replacement joins from another domain.
+	// One region is gone: the other keeps its place, one replacement joins.
 	survivor := first[1]
-	var remaining []Candidate
-	for _, candidate := range usable {
-		if candidate.NodeID != first[0] {
-			remaining = append(remaining, candidate)
+	var remaining []string
+	for _, region := range usable {
+		if region != first[0] {
+			remaining = append(remaining, region)
 		}
 	}
 	replaced := choose("scope", first, retainedOf(survivor), nil, remaining, Size)
@@ -56,49 +43,46 @@ func TestChooseIsStableAndKeepsRetainedMembers(t *testing.T) {
 	}
 }
 
-func TestChooseFallsBackToOneOrSameDomain(t *testing.T) {
-	if got := choose("scope", nil, nil, nil, candidateList("only", "dom"), Size); !reflect.DeepEqual(got, []string{"only"}) {
-		t.Fatalf("single edge set = %v", got)
-	}
-	if got := choose("scope", nil, nil, nil, candidateList("x", "dom", "y", "dom"), Size); len(got) != 2 {
-		t.Fatalf("two edges in one domain should still form a set, got %v", got)
+func TestChooseFallsBackToOneRegion(t *testing.T) {
+	if got := choose("scope", nil, nil, nil, []string{"only"}, Size); !reflect.DeepEqual(got, []string{"only"}) {
+		t.Fatalf("single region pair = %v", got)
 	}
 	if got := choose("scope", nil, nil, nil, nil, Size); len(got) != 0 {
-		t.Fatalf("no edges gave %v", got)
+		t.Fatalf("no regions gave %v", got)
 	}
 }
 
-func TestChooseSpreadsWorkspacesAcrossEdges(t *testing.T) {
-	usable := candidateList("a", "dom-a", "b", "dom-b", "c", "dom-c", "d", "dom-d")
+func TestChooseSpreadsWorkspacesAcrossRegions(t *testing.T) {
+	usable := []string{"a", "b", "c", "d"}
 	first := map[string]int{}
 	for i := 0; i < 200; i++ {
 		got := choose("workspace-"+string(rune('A'+i%26))+string(rune('a'+i/26)), nil, nil, nil, usable, 1)
 		first[got[0]]++
 	}
-	for _, id := range []string{"a", "b", "c", "d"} {
-		if first[id] < 20 {
-			t.Fatalf("edge %s received only %d of 200 workspaces: %v", id, first[id], first)
+	for _, region := range usable {
+		if first[region] < 20 {
+			t.Fatalf("region %s received only %d of 200 workspaces: %v", region, first[region], first)
 		}
 	}
 }
 
-func TestChoosePicksNearestPairInDistinctDomains(t *testing.T) {
-	usable := candidateList("near-a", "dom-a", "near-a2", "dom-a", "mid-b", "dom-b", "far-c", "dom-c", "unmeasured", "dom-d")
-	rtt := map[string]int{"near-a": 10, "near-a2": 12, "mid-b": 40, "far-c": 200}
-	if got := choose("scope", nil, nil, rtt, usable, Size); !reflect.DeepEqual(got, []string{"near-a", "mid-b"}) {
-		t.Fatalf("nearest pair = %v, want the two fastest in distinct domains", got)
+func TestChoosePicksNearestRegions(t *testing.T) {
+	usable := []string{"near", "mid", "far", "unmeasured"}
+	rtt := map[string]int{"near": 10, "mid": 40, "far": 200}
+	if got := choose("scope", nil, nil, rtt, usable, Size); !reflect.DeepEqual(got, []string{"near", "mid"}) {
+		t.Fatalf("nearest pair = %v, want the two fastest", got)
 	}
 }
 
 func TestChooseWithoutSamplesKeepsHashOrder(t *testing.T) {
-	usable := candidateList("a", "dom-a", "b", "dom-b", "c", "dom-c")
+	usable := []string{"a", "b", "c"}
 	if got, want := choose("scope", nil, nil, map[string]int{}, usable, Size), choose("scope", nil, nil, nil, usable, Size); !reflect.DeepEqual(got, want) {
 		t.Fatalf("empty samples gave %v, hash gave %v", got, want)
 	}
 }
 
 func TestChooseKeepsRetainedPairOverNearer(t *testing.T) {
-	usable := candidateList("slow1", "dom-a", "slow2", "dom-b", "fast", "dom-c")
+	usable := []string{"slow1", "slow2", "fast"}
 	rtt := map[string]int{"slow1": 300, "slow2": 400, "fast": 1}
 	manual := []string{"slow1", "slow2"}
 	if got := choose("scope", manual, retainedOf(manual...), rtt, usable, Size); !reflect.DeepEqual(got, manual) {

@@ -274,7 +274,7 @@ func (c *HTTPClient) Heartbeat(ctx context.Context, observation NodeObservation)
 	if err := c.post(ctx, "/v1/nodes/heartbeat", observation, &answer); err != nil {
 		return NodeAnswer{}, err
 	}
-	if answer.IngressLimits != nil && answer.IngressLimits.Validate() != nil {
+	if answer.IngressLimits != nil && answer.IngressLimits.Validate() != nil || answer.DrainDeadline != nil && *answer.DrainDeadline <= 0 {
 		return NodeAnswer{}, &RequestFailure{Path: "/v1/nodes/heartbeat", Category: "response_invalid", SupportReference: controlReference(ctx), Err: ErrControlUnavailable, Cause: edgelimits.ErrInvalid}
 	}
 	return answer, nil

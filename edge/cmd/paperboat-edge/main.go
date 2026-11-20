@@ -755,6 +755,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	trackedCarrier := &trackedCarrierComponent{Component: carrierComponent}
 	carrierComponent = trackedCarrier
+	nodeWorker.Drain = trackedCarrier.Drain // an operator Drain reaches the edge in its heartbeat answer
 	redirectHandler := portEightyHandler()
 	publicTLS, err := infrastructureTLS(deployment, carrierTrust.Certificate, certificateSelector.TLSConfig())
 	if err != nil {

@@ -6,10 +6,13 @@
   NAME is a relay's name in `pb relay list`, ADDRESS the public IPv4 of its host (two relays are needed). Relays on one host
   (a staging stack) are told apart by TCP port: ADDRESS may be IP:PORT, which cuts only that port (Linux).
   1. UDP is dropped (path_display.udp_blocked) so PEER is reached through a relay; `pb status --json` names the home relay
-     (home_relay.node_id, which is one of the relay ids of `pb relay list`) once a pair is bound;
+     (home_relay.region, the region of one of the relays of `pb relay list`) once a pair is bound;
   2. the relay that is NOT home is blocked (TCP and UDP to its address): the home relay is unchanged and PEER still answers;
   3. that block is lifted and the HOME relay is blocked: within 90 s the home relay is the other one, and PEER answers over it;
   4. every rule is removed on every exit path.
+Users see regions, never relay node ids, so the check compares REGIONS: the status home region against the region `pb relay list`
+gives each NAME. This is weaker than comparing relay ids: the two relays must be in different regions, because two relays of one
+region cannot be told apart (the script fails saying so).
 Prints one JSON line {"check": "relay-home-wire", ...}; exit 1 on failure.
 """
 import contextlib
@@ -68,7 +71,7 @@ def status():
 def home(peer):
     pd.pb('ping', peer)
     value = status()
-    return (value.get('home_relay') or {}).get('node_id')
+    return (value.get('home_relay') or {}).get('region')
 
 
 def answers(peer, seconds=60):
@@ -81,16 +84,24 @@ def answers(peer, seconds=60):
     return False
 
 
+def relay_regions(listed, ips):
+    """{region: relay name} for the relays that have an address; the regions must be distinct."""
+    regions = {r['name']: r.get('region', '') for r in listed}
+    if len(ips) < 2 or not set(ips) <= set(regions):
+        raise RuntimeError('two relays of `pb relay list` (%s) need an address each' % ', '.join(sorted(regions)))
+    by_region = {regions[name]: name for name in ips}
+    if '' in by_region or len(by_region) != len(ips):
+        raise RuntimeError('the relays must be in different regions to be told apart by region: %s' % {n: regions[n] for n in ips})
+    return by_region
+
+
 def main():
     argv = sys.argv[1:]
     peer = argv[0]
     ips = dict(item.split('=', 1) for flag, item in zip(argv, argv[1:]) if flag == '--relay-ip')
     listed = json.loads(pd.pb('relay', 'list', '--json')[1])
     listed = listed.get('data', listed)['relays']
-    ids = {r['name']: r['relay_id'] for r in listed}
-    if len(ips) < 2 or not set(ips) <= set(ids):
-        raise RuntimeError('two relays of `pb relay list` (%s) need an address each' % ', '.join(sorted(ids)))
-    by_id = {ids[name]: name for name in ips}
+    by_region = relay_regions(listed, ips)
     with pd.udp_blocked():
         first = None
         for _ in range(30):
@@ -98,18 +109,18 @@ def main():
             if first:
                 break
             time.sleep(3)
-        if first not in by_id:
-            raise RuntimeError('status has no home relay among %s: %r' % (sorted(by_id), first))
-        other = next(i for i in by_id if i != first)
-        with blocked(ips[by_id[other]]):
+        if first not in by_region:
+            raise RuntimeError('status has no home region among %s: %r' % (sorted(by_region), first))
+        other = next(i for i in by_region if i != first)
+        with blocked(ips[by_region[other]]):
             time.sleep(10)
             after = home(peer)
             if after != first:
-                raise RuntimeError('blocking the relay that is not home moved the home relay %s -> %s' % (by_id[first], by_id.get(after)))
+                raise RuntimeError('blocking the relay that is not home moved the home relay %s -> %s' % (by_region[first], by_region.get(after)))
             if not answers(peer):
                 raise RuntimeError('%s did not answer with the non-home relay blocked' % peer)
         moved_to, began = None, time.time()
-        with blocked(ips[by_id[first]]):
+        with blocked(ips[by_region[first]]):
             deadline = began + 90
             while time.time() < deadline:
                 pd.pb('ping', peer)
@@ -118,11 +129,11 @@ def main():
                     break
                 time.sleep(3)
             if moved_to != other:
-                raise RuntimeError('the home relay %s was blocked and the home relay is still %s after 90 s' % (by_id[first], by_id.get(moved_to)))
+                raise RuntimeError('the home relay %s was blocked and the home relay is still %s after 90 s' % (by_region[first], by_region.get(moved_to)))
             took = time.time() - began
             if not answers(peer):
-                raise RuntimeError('%s did not answer over the new home relay %s' % (peer, by_id[other]))
-    print(json.dumps({'check': 'relay-home-wire', 'status': 'PASS', 'home_before': by_id[first], 'home_after_block': by_id[other],
+                raise RuntimeError('%s did not answer over the new home relay %s' % (peer, by_region[other]))
+    print(json.dumps({'check': 'relay-home-wire', 'status': 'PASS', 'home_before': by_region[first], 'home_after_block': by_region[other],
                       'failover_seconds': round(took, 1), 'unchanged_when_other_blocked': True}))
 
 

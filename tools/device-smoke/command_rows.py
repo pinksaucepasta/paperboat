@@ -395,14 +395,14 @@ def access_rows(args):
         r.expect(code != 0 and not BAD.search(o + e), 'non-loopback --listen was accepted')
         out.append(r)
 
-    for ident, name, schema, key in (('C139', 'edge', 'paperboat.edge-list/v1', 'edges'), ('C141', 'relay', 'paperboat.relay-list/v1', 'relays')):
+    for ident, name, schema, key in (('C139', 'edge', 'paperboat.edge-list/v1', 'regions'), ('C141', 'relay', 'paperboat.relay-list/v1', 'relays')):
         r = Row(ident, name); r.help(); r.invalid('bogus', hint='Usage|usage|invalid')
         listing = Row(ident, name + ' list'); d = listing.json_ok(); r.failures += listing.failures
         r.expect(isinstance(d, dict) and d.get('schema') == schema and d.get('pool_mode'), name + ' list --json lacks schema or pool mode')
         items = (d or {}).get(key) or []
-        r.expect(len(items) > 0 and all(i.get('region') and i.get('status') and i.get('source') for i in items), name + ' list shows no usable ' + key)
+        r.expect(len(items) > 0 and all((i.get('region') or i.get('id')) and i.get('status') and i.get('source') for i in items), name + ' list shows no usable ' + key)
         human = run(name, 'list')[1].splitlines()
-        r.expect(len(human) == len(items) + 1 and human[0].split()[0] == name.upper(), name + ' list table does not match its JSON')
+        r.expect(len(human) >= len(items) + 1 and human[0].split()[0] == 'REGION', name + ' list table does not match its JSON')
         out.append(r)
     return out
 

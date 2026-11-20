@@ -2,13 +2,10 @@ package selfhost
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -18,28 +15,31 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
 )
 
+// InvalidPairError is ErrInvalid with the sentence a user is shown (regions are named, never nodes).
+type InvalidPairError struct{ Message string }
+
+func (e *InvalidPairError) Error() string { return ErrInvalid.Error() + ": " + e.Message }
+func (e *InvalidPairError) Unwrap() error { return ErrInvalid }
+
 // ErrEdgePairUnassigned means no edge can serve the workspace yet, so it has no pair to show.
 var ErrEdgePairUnassigned = errors.New("the workspace has no edge pair yet")
 
-// PairEdge is one edge of a workspace's pair. A self-hosted edge is named by its installation id (what
-// PUT takes back), a Paperboat edge by its node id.
-type PairEdge struct {
+// PairRegion is one region of a workspace's pair. Users see regions only: which machines of a region serve them is
+// the server's business (prior art: tailscale tailcfg.DERPRegion, a region is a set of nodes the client does not
+// choose between). Name is Paperboat's display name for a managed region and the region id for the owner's own.
+type PairRegion struct {
 	ID            string     `json:"id"`
-	Kind          string     `json:"kind"` // managed | self_hosted
-	Region        string     `json:"region"`
-	Site          string     `json:"site"`           // the operator-set site, else the region's display name; a self-hosted server shows its name
-	Name          string     `json:"name,omitempty"` // a self-hosted server's name
-	EndpointHost  string     `json:"endpoint_host,omitempty"`
-	Status        string     `json:"status"`
-	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
+	Name          string     `json:"name"`
+	Status        string     `json:"status"` // ready | draining | unavailable, folded over the region's nodes
 	BestRTTMillis *int       `json:"best_rtt_ms,omitempty"`
 	MeasuredAt    *time.Time `json:"measured_at,omitempty"`
 }
 
-// EdgePair is the primary and fallback edge of a workspace. Fallback is absent while only one edge can serve it.
+// EdgePair is the primary and backup region of a workspace. Fallback is absent while only one region can serve it.
 type EdgePair struct {
-	Primary  PairEdge  `json:"primary"`
-	Fallback *PairEdge `json:"fallback,omitempty"`
+	Kind     string      `json:"kind"` // managed | self_hosted
+	Primary  PairRegion  `json:"primary"`
+	Fallback *PairRegion `json:"fallback,omitempty"`
 }
 
 // pairScope is the workspace and the account that stands for it when asking which edges it may use.
@@ -60,120 +60,134 @@ func (s *Service) pairScope(ctx context.Context, actor string, scope Scope, writ
 	return out, nil
 }
 
-// EdgePair reads the workspace's stored edge set (assigning one first when a machine has not yet).
+// EdgePair reads the workspace's stored pair of regions (assigning one first when a machine has not yet).
 func (s *Service) EdgePair(ctx context.Context, actor string, scope Scope) (EdgePair, error) {
 	ws, err := s.pairScope(ctx, actor, scope, false)
 	if err != nil {
 		return EdgePair{}, err
 	}
-	var ids []string
+	var mode string
+	var regions []string
 	err = s.database.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := edgeset.EnsureTx(ctx, tx, ws, s.now().UTC()); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `SELECT node_ids FROM workspace_edge_sets WHERE scope_kind=$1 AND scope_id=$2`, ws.Kind, ws.ID).Scan(&ids)
+		return tx.QueryRow(ctx, `SELECT mode,regions FROM workspace_edge_sets WHERE scope_kind=$1 AND scope_id=$2`, ws.Kind, ws.ID).Scan(&mode, &regions)
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && len(regions) == 0 {
 		return EdgePair{}, ErrEdgePairUnassigned
 	}
 	if err != nil {
 		return EdgePair{}, err
 	}
-	return s.readPair(ctx, actor, ws, ids)
+	return s.readPair(ctx, actor, ws, mode, regions)
 }
 
-// readPair describes the first two nodes of an edge set: the pair's edges, with the best RTT any of the account's
-// machines measured to each.
-func (s *Service) readPair(ctx context.Context, actor string, ws edgeset.Scope, ids []string) (EdgePair, error) {
-	if len(ids) > 2 {
-		ids = ids[:2]
+func workspaceTeam(ws edgeset.Scope) any {
+	if ws.Kind == "team" {
+		return ws.ID
 	}
-	now := s.now().UTC()
-	edges, nodeIDs := make([]PairEdge, 0, 2), make([]string, 0, 2)
-	for _, id := range ids {
-		var e PairEdge
-		var name, installation, site string
-		var heartbeat sql.NullTime
-		err := s.database.SQL().QueryRowContext(ctx, `SELECT n.id,coalesce(n.region,''),coalesce(n.endpoint_host,''),`+edgeset.NodeStatusSQL("$2")+`,n.last_heartbeat_at,
- coalesce(i.id,''),coalesce(i.name,''),coalesce(n.site,(SELECT r.display_name FROM paperboat.managed_node_authority m JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE m.node_id=n.id AND m.retired_at IS NULL),'')
-FROM paperboat.control_tunnel_nodes n
-LEFT JOIN LATERAL (SELECT i.id,i.name FROM paperboat.selfhost_installations i WHERE i.node_id=n.id AND i.capability='tunnel' AND i.state='active' AND i.scope_kind<>'global'
- AND ((i.scope_kind=$3 AND i.scope_id=$4) OR ($3='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$5))) ORDER BY i.id LIMIT 1) i ON true
-WHERE n.id=$1`, id, now, ws.Kind, ws.ID, ws.Account).Scan(&e.ID, &e.Region, &e.EndpointHost, &e.Status, &heartbeat, &installation, &name, &site)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
+	return nil
+}
+
+// readPair describes the first two regions of a stored pair, with the best RTT any of the account's machines
+// measured to a node of each.
+func (s *Service) readPair(ctx context.Context, actor string, ws edgeset.Scope, mode string, regions []string) (EdgePair, error) {
+	if len(regions) > edgeset.Size {
+		regions = regions[:edgeset.Size]
+	}
+	pair := EdgePair{Kind: "managed"}
+	if mode == "self-hosted-only" {
+		pair.Kind = "self_hosted"
+	}
+	read := make([]PairRegion, 0, len(regions))
+	for _, id := range regions {
+		r, err := s.readRegion(ctx, actor, ws, pair.Kind, id)
 		if err != nil {
 			return EdgePair{}, err
 		}
-		e.Kind, e.Site = "managed", site
-		if installation != "" {
-			e.Kind, e.ID, e.Name, e.Site = "self_hosted", installation, name, name
-		}
-		if heartbeat.Valid {
-			t := heartbeat.Time.UTC()
-			e.LastHeartbeat = &t
-		}
-		edges, nodeIDs = append(edges, e), append(nodeIDs, id)
+		read = append(read, r)
 	}
-	if len(edges) == 0 {
+	if len(read) == 0 {
 		return EdgePair{}, ErrEdgePairUnassigned
 	}
-	best, err := machinelatency.BestForAccount(ctx, s.database.SQL(), actor, nodeIDs, now)
-	if err != nil {
-		return EdgePair{}, err
-	}
-	for i := range edges {
-		if b, ok := best[nodeIDs[i]]; ok {
-			rtt, at := b.RTTMillis, b.MeasuredAt
-			edges[i].BestRTTMillis, edges[i].MeasuredAt = &rtt, &at
-		}
-	}
-	pair := EdgePair{Primary: edges[0]}
-	if len(edges) > 1 {
-		pair.Fallback = &edges[1]
+	pair.Primary = read[0]
+	if len(read) > 1 {
+		pair.Fallback = &read[1]
 	}
 	return pair, nil
 }
 
-// resolvePairEdge turns an id from GET /v1/edges (a Paperboat node) or a self-hosted tunnel installation id
-// into its node. The workspace sees only installations it may use, so an id of another workspace is unknown.
-func resolvePairEdge(ctx context.Context, tx *db.Tx, ws edgeset.Scope, id string) (node string, selfHosted bool, err error) {
-	err = tx.QueryRow(ctx, `SELECT i.node_id FROM paperboat.selfhost_installations i WHERE i.id=$1 AND i.capability='tunnel' AND i.state='active' AND i.claim_complete AND i.scope_kind<>'global'
- AND ((i.scope_kind=$2 AND i.scope_id=$3) OR ($2='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$4)))`, id, ws.Kind, ws.ID, ws.Account).Scan(&node)
-	if err == nil {
-		return node, true, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", false, err
-	}
-	err = tx.QueryRow(ctx, `SELECT n.id FROM paperboat.control_tunnel_nodes n WHERE n.id=$1 AND n.roles @> ARRAY['edge']::text[]`, id).Scan(&node)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, fmt.Errorf("%w: %q is not an edge this workspace can use", ErrInvalid, id)
-	}
-	return node, false, err
-}
-
-// SetEdgePair makes primary and fallback the workspace's edge pair through the machinery that already assigns
-// edges: the tunnel pool policy (both Paperboat's or both its own servers), the stored edge set that placement
-// consults, and the tunnels/previews topics that make its machines look again. Switching between Paperboat's
-// edges and its own servers is refused while previews or tunnels run (LivePublicationsError), as the pool is.
-func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, primaryID, fallbackID string) (EdgePair, error) {
-	for _, id := range []string{primaryID, fallbackID} {
-		if id == "" || len(id) > 128 || !utf8.ValidString(id) || strings.ContainsRune(id, 0) {
-			return EdgePair{}, fmt.Errorf("%w: primary_id and fallback_id are required", ErrInvalid)
+// readRegion folds the status of the workspace's nodes in one region (the nodes the workspace may use under its
+// current mode: ready if any is, else draining if any is, else unavailable) and takes the best RTT measured to any
+// of them. Only the region id and the display name leave this function: never a node id, host or heartbeat.
+func (s *Service) readRegion(ctx context.Context, actor string, ws edgeset.Scope, kind, id string) (PairRegion, error) {
+	now := s.now().UTC()
+	out := PairRegion{ID: id, Name: id, Status: "unavailable"}
+	if kind == "managed" {
+		if err := s.database.SQL().QueryRowContext(ctx, `SELECT coalesce((SELECT display_name FROM paperboat.operator_regions WHERE id=$1),$1)`, id).Scan(&out.Name); err != nil {
+			return PairRegion{}, err
 		}
 	}
-	if primaryID == fallbackID {
-		return EdgePair{}, fmt.Errorf("%w: the primary and the fallback must be different edges", ErrInvalid)
+	rows, err := s.database.SQL().QueryContext(ctx, `SELECT n.id,`+edgeset.NodeStatusSQL("$2")+` FROM paperboat.control_tunnel_nodes n
+WHERE n.region=$1 AND n.roles @> ARRAY['edge']::text[] AND n.state<>'retired' AND paperboat.node_workspace_edge_candidate(n.id,$3,$4)
+ORDER BY n.id LIMIT 100`, id, now, ws.Account, workspaceTeam(ws))
+	if err != nil {
+		return PairRegion{}, err
+	}
+	defer rows.Close()
+	var nodeIDs []string
+	rank := map[string]int{"ready": 0, "draining": 1, "unavailable": 2}
+	for rows.Next() {
+		var node, status string
+		if err = rows.Scan(&node, &status); err != nil {
+			return PairRegion{}, err
+		}
+		nodeIDs = append(nodeIDs, node)
+		if rank[status] < rank[out.Status] {
+			out.Status = status
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return PairRegion{}, err
+	}
+	best, err := machinelatency.BestForAccount(ctx, s.database.SQL(), actor, nodeIDs, now)
+	if err != nil {
+		return PairRegion{}, err
+	}
+	for _, b := range best {
+		if out.BestRTTMillis == nil || b.RTTMillis < *out.BestRTTMillis {
+			rtt, at := b.RTTMillis, b.MeasuredAt
+			out.BestRTTMillis, out.MeasuredAt = &rtt, &at
+		}
+	}
+	return out, nil
+}
+
+// SetEdgePair makes primary and fallback (region ids) the workspace's pair through the machinery that already
+// assigns edges: the tunnel pool policy (both Paperboat's regions or both the workspace's own), the stored pair
+// that placement consults, and the tunnels/previews topics that make its machines look again. Switching between
+// Paperboat's regions and its own servers is refused while previews or tunnels run (LivePublicationsError), as the
+// pool is. Errors name regions, never nodes.
+func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, kind, primary, fallback string) (EdgePair, error) {
+	if kind != "managed" && kind != "self_hosted" {
+		return EdgePair{}, &InvalidPairError{"kind must be managed or self_hosted."}
+	}
+	for _, region := range []string{primary, fallback} {
+		if !validRegion(region) {
+			return EdgePair{}, &InvalidPairError{"primary_region and fallback_region must be region names."}
+		}
+	}
+	if primary == fallback {
+		return EdgePair{}, &InvalidPairError{"Choose two different regions."}
 	}
 	ws, err := s.pairScope(ctx, actor, scope, true)
 	if err != nil {
 		return EdgePair{}, err
 	}
-	var nodes []string
+	var mode string
 	err = s.database.InTx(ctx, func(ctx context.Context, tx *db.Tx) (storeErr error) {
-		nodes, storeErr = s.storePair(ctx, tx, actor, ws, primaryID, fallbackID)
+		mode, storeErr = s.storePair(ctx, tx, actor, ws, kind, []string{primary, fallback})
 		return storeErr
 	})
 	if err != nil {
@@ -183,77 +197,91 @@ func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, pr
 	if err = s.publishPairChange(ctx, ws); err != nil {
 		slog.ErrorContext(ctx, "edge_pair_publish_failed", "scope_kind", ws.Kind, "scope_id", ws.ID, "error", err)
 	}
-	return s.readPair(ctx, actor, ws, nodes)
+	return s.readPair(ctx, actor, ws, mode, []string{primary, fallback})
 }
 
-func (s *Service) storePair(ctx context.Context, tx *db.Tx, actor string, ws edgeset.Scope, primaryID, fallbackID string) ([]string, error) {
+// storePair writes the policy, the pair and (for the workspace's own servers) the pool, in this order: the pair
+// is stored before anything resolves edges (repointing the domains, judging the regions), because those go
+// through node_workspace_edge_eligible, which follows the stored pair.
+func (s *Service) storePair(ctx context.Context, tx *db.Tx, actor string, ws edgeset.Scope, kind string, regions []string) (string, error) {
 	now := s.now().UTC()
 	// The same lock the pool policy takes, so a pool change and a pair change never interleave.
 	if err := edgeset.LockWorkspace(ctx, tx, ws); err != nil {
-		return nil, err
+		return "", err
 	}
-	var team any
-	if ws.Kind == "team" {
-		team = ws.ID
-	}
+	team := workspaceTeam(ws)
 	if err := requireTeamManager(ctx, tx, actor, Scope{Kind: ws.Kind, ID: ws.ID}); err != nil {
-		return nil, err
+		return "", err
 	}
-	first, firstOwn, err := resolvePairEdge(ctx, tx, ws, primaryID)
-	if err != nil {
-		return nil, err
-	}
-	second, secondOwn, err := resolvePairEdge(ctx, tx, ws, fallbackID)
-	if err != nil {
-		return nil, err
-	}
-	if first == second {
-		return nil, fmt.Errorf("%w: the primary and the fallback must be different edges", ErrInvalid)
-	}
-	if firstOwn != secondOwn {
-		return nil, fmt.Errorf("%w: both edges must be Paperboat's or both your own servers, never one of each", ErrInvalid)
-	}
-	mode, installations := "managed-only", []string{}
-	if firstOwn {
+	mode := "managed-only"
+	if kind == "self_hosted" {
 		mode = "self-hosted-only"
-		installations = append(installations, primaryID, fallbackID)
 	}
 	var current string
-	if err = tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,$2)`, ws.Account, team).Scan(&current); err != nil {
-		return nil, err
+	if err := tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,$2)`, ws.Account, team).Scan(&current); err != nil {
+		return "", err
 	}
 	if current != mode {
-		if err = refuseLiveEdgeChange(ctx, tx, ws.Account, team); err != nil {
-			return nil, err
+		if err := refuseLiveEdgeChange(ctx, tx, ws.Account, team); err != nil {
+			return "", err
 		}
 	}
-	// The pool is the pair: the policy decides which edges may serve the workspace, the edge set which of them do.
-	if _, err = tx.Exec(ctx, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES($1,$2,'tunnel',$3,$4::text[])
-ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids`, ws.Kind, ws.ID, mode, installations); err != nil {
-		return nil, err
+	// The pool is the pair: the policy decides which servers may serve the workspace (every own server of the pair's
+	// regions, filled in below), the stored pair which regions do.
+	if _, err := tx.Exec(ctx, `INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES($1,$2,'tunnel',$3,'{}')
+ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids`, ws.Kind, ws.ID, mode); err != nil {
+		return "", err
+	}
+	if err := edgeset.Store(ctx, tx, ws, mode, regions, now); err != nil {
+		return "", err
+	}
+	if err := syncTunnelPool(ctx, tx, ws); err != nil {
+		return "", err
 	}
 	if current != mode {
-		if err = repointWorkspaceDomains(ctx, tx, ws.Account, team, mode); err != nil {
-			return nil, err
+		if err := repointWorkspaceDomains(ctx, tx, ws.Account, team, mode); err != nil {
+			return "", err
 		}
 	}
-	// Eligibility is judged under the new mode, and an edge nobody has heard from lately would be replaced by the
+	// Eligibility is judged under the new mode, and a region nobody has heard from lately would be replaced by the
 	// next reconcile, silently undoing the choice.
-	for i, node := range []string{first, second} {
-		var ok bool
-		if err = tx.QueryRow(ctx, `SELECT paperboat.node_workspace_edge_eligible($1,$2,$3) AND EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes n WHERE n.id=$1 AND n.roles @> ARRAY['edge']::text[] AND n.last_heartbeat_at>$4::timestamptz-make_interval(secs=>$5::float8))`,
-			node, ws.Account, team, now, edgeset.ReplaceAfter.Seconds()).Scan(&ok); err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("%w: %q is not available to this workspace right now; choose an edge that is ready", ErrInvalid, []string{primaryID, fallbackID}[i])
+	for _, region := range regions {
+		if err := s.requireRegionReady(ctx, tx, ws, kind, region, now); err != nil {
+			return "", err
 		}
 	}
-	nodes := []string{first, second}
-	if err = edgeset.Store(ctx, tx, ws, mode, nodes, now); err != nil {
-		return nil, err
+	return mode, nil
+}
+
+// requireRegionReady refuses a region the workspace cannot be served from right now. A value that is no region of
+// the workspace's kind (for Paperboat's, an enabled operator region; for its own, the region of one of its own tunnel
+// servers, as the pool counts them) gets an answer that does not echo it, so a node id typed here is never repeated;
+// a known region needs a node the workspace may use (node_workspace_edge_candidate: the pair being decided cannot be a
+// condition of itself) with a heartbeat inside edgeset.ReplaceAfter, else it is named (display name, or region id for own).
+func (s *Service) requireRegionReady(ctx context.Context, tx *db.Tx, ws edgeset.Scope, kind, region string, now time.Time) error {
+	var name string
+	var known, ready bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT display_name FROM paperboat.operator_regions WHERE id=$1),$1),
+ CASE WHEN $6='self_hosted' THEN EXISTS(SELECT 1 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
+  WHERE i.capability='tunnel' AND i.state='active' AND i.claim_complete AND i.scope_kind<>'global' AND n.region=$1
+   AND ((i.scope_kind=$7 AND i.scope_id=$8) OR ($7='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$8))))
+  ELSE EXISTS(SELECT 1 FROM paperboat.operator_regions WHERE id=$1 AND enabled) END,
+ EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes n WHERE n.region=$1 AND n.roles @> ARRAY['edge']::text[]
+  AND paperboat.node_workspace_edge_candidate(n.id,$2,$3) AND n.last_heartbeat_at>$4::timestamptz-make_interval(secs=>$5::float8)
+  AND n.ready AND n.state='ready' AND (n.drain_deadline IS NULL OR n.drain_deadline>$4::timestamptz) AND n.registry_expires_at>$4::timestamptz)`,
+		region, ws.Account, workspaceTeam(ws), now, edgeset.ReplaceAfter.Seconds(), kind, ws.Kind, ws.ID).Scan(&name, &known, &ready); err != nil {
+		return err
 	}
-	return nodes, nil
+	if !known {
+		return &InvalidPairError{"That is not a region this workspace can use; choose one from the list."}
+	}
+	if kind == "self_hosted" {
+		name = region
+	}
+	if !ready {
+		return &InvalidPairError{name + " is not available to this workspace right now; choose a region that is ready."}
+	}
+	return nil
 }
 
 // pairPublishBatch bounds how many machines one wake-up read and one topic write cover.

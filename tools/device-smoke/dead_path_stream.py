@@ -46,7 +46,7 @@ def status_sample(peer):
     machine = next(m for m in data['machines'] if peer in (m['alias'], m['id']))
     home = data.get('home_relay') or {}
     return {'selected_path': machine.get('selected_path', ''), 'standby_path': machine.get('standby_path', ''),
-            'relay_region': machine.get('relay_region', ''), 'home_relay': home.get('node_id', ''), 'home_region': home.get('region', '')}
+            'relay_region': machine.get('relay_region', ''), 'home_region': home.get('region', '')}
 
 
 def sample_status(peer, stop, samples, interval=1.0, sample=status_sample):
@@ -69,16 +69,16 @@ def write_trace(directory, blocked_at, arrivals, samples):
         writer = csv.writer(out)
         writer.writerow(['t_ms', 'line'])
         writer.writerows([ms(t), line.decode(errors='replace') if isinstance(line, bytes) else line] for t, line in arrivals)
-    columns = ['selected_path', 'standby_path', 'relay_region', 'home_relay', 'home_region', 'error']
+    columns = ['selected_path', 'standby_path', 'relay_region', 'home_region', 'error']
     with open(directory / 'status.csv', 'w', newline='') as out:
         writer = csv.writer(out)
         writer.writerow(['t_ms'] + columns)
         writer.writerows([ms(t)] + [reading.get(column, '') for column in columns] for t, reading in samples)
     after = [ms(t) for t, _ in arrivals if t >= blocked_at]
     off_direct = [ms(t) for t, reading in samples if t >= blocked_at and reading.get('selected_path') not in ('direct', '', None)]
-    homes = {reading['home_relay'] for _, reading in samples if reading.get('home_relay')}
+    homes = {reading['home_region'] for _, reading in samples if reading.get('home_region')}
     return {'dir': str(directory), 'first_line_after_ms': after[0] if after else None, 'first_non_direct_ms': off_direct[0] if off_direct else None,
-            'home_relay_changed': len(homes) > 1, 'status_errors': sum(1 for _, reading in samples if 'error' in reading)}
+            'home_region_changed': len(homes) > 1, 'status_errors': sum(1 for _, reading in samples if 'error' in reading)}
 
 
 def stream_argv(peer, script, device=None):

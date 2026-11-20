@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 )
@@ -80,7 +84,7 @@ func existingInstallConfig(dir string, fs *flag.FlagSet) (selfhost.Config, bool,
 	return c, true, err
 }
 
-func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode string) (selfhost.Config, error) {
+func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode, region string) (selfhost.Config, error) {
 	value := func(name string) string { return fs.Lookup(name).Value.String() }
 	host := value("endpoint-host")
 	if host == "" {
@@ -104,10 +108,48 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode string) (sel
 		if mode == "both" {
 			tcp = 27445
 		}
-		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: 27446, Region: value("region"), FailureDomain: failure, CapacityLimit: 256})
+		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: 27446, Region: region, FailureDomain: failure, CapacityLimit: 256})
 	}
 	if mode == "tunnel" || mode == "both" {
-		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: 27443, QUICPort: 27444, Region: value("region"), FailureDomain: failure, CapacityLimit: 256})
+		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: 27443, QUICPort: 27444, Region: region, FailureDomain: failure, CapacityLimit: 256})
 	}
 	return c, nil
+}
+
+// regionName is the rule the server enforces at enrol (selfhost.validRegion).
+var regionName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+
+const (
+	defaultRegion   = "selfhost"
+	regionPromptTry = 3
+)
+
+// installRegion is the region a fresh install enrols with: --region when given, otherwise the owner's answer on a
+// terminal (empty = selfhost, three tries), otherwise selfhost. Servers sharing a region back each other up.
+func installRegion(fs *flag.FlagSet, in io.Reader, out io.Writer, terminal bool) (string, error) {
+	given := false
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "region" })
+	region := fs.Lookup("region").Value.String()
+	if given || !terminal {
+		if !regionName.MatchString(region) {
+			return "", commandError("--region must start with a lowercase letter and use only lowercase letters, digits, - and _ (at most 63 characters)")
+		}
+		return region, nil
+	}
+	r := bufio.NewReader(in)
+	for range regionPromptTry {
+		fmt.Fprintf(out, "Region name for this server (servers with the same region back each other up) [%s]: ", defaultRegion)
+		answer, err := r.ReadString('\n')
+		if answer = strings.TrimSpace(answer); answer == "" && err == nil {
+			return defaultRegion, nil
+		}
+		if regionName.MatchString(answer) {
+			return answer, nil
+		}
+		if err != nil {
+			break
+		}
+		fmt.Fprintln(out, "A region starts with a lowercase letter and uses only lowercase letters, digits, - and _ (at most 63 characters).")
+	}
+	return "", commandError("no valid region given: pass --region <name> (for example --region eu-west)")
 }

@@ -41,5 +41,5 @@ pb relay [flags]
 ### SEE ALSO
 
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
-* [pb relay list](pb_relay_list.md)	 - List hosted and self-hosted relays
+* [pb relay list](pb_relay_list.md)	 - List Paperboat relay regions and self-hosted relays
 

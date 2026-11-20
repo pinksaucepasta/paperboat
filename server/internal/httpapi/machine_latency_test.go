@@ -71,15 +71,15 @@ func TestMachineLatencyReportRequiresAManageableMachineAndValidInput(t *testing.
 
 func TestMachineLatencyListChecksTheMachineBeforeListing(t *testing.T) {
 	lookup := &fakeMachineLookup{machine: usermachines.UserMachine{ID: "m1"}}
-	latency := &fakeLatency{items: []machinelatency.Item{{NodeID: "node_a", Role: "edge", Region: "india", RTTMillis: 21}}}
+	latency := &fakeLatency{items: []machinelatency.Item{{Region: "india", Name: "India", Role: "edge", RTTMillis: 21}}}
 	recorder := httptest.NewRecorder()
 	machineLatencyList(lookup, latency)(recorder, latencyRequest(http.MethodGet, ""))
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"rtt_ms":21`) || len(lookup.asked) != 1 || lookup.asked[0] != "account_1/m1" {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"region":"india","name":"India","role":"edge","rtt_ms":21`) || strings.Contains(recorder.Body.String(), "node_id") || len(lookup.asked) != 1 || lookup.asked[0] != "account_1/m1" {
 		t.Fatalf("status=%d body=%s asked=%v", recorder.Code, recorder.Body.String(), lookup.asked)
 	}
 	recorder = httptest.NewRecorder()
 	machineLatencyList(&fakeMachineLookup{err: usermachines.ErrNotFound}, latency)(recorder, latencyRequest(http.MethodGet, ""))
-	if recorder.Code != http.StatusNotFound || strings.Contains(recorder.Body.String(), "node_a") {
+	if recorder.Code != http.StatusNotFound || strings.Contains(recorder.Body.String(), "India") {
 		t.Fatalf("an invisible machine leaked latency: %d %s", recorder.Code, recorder.Body.String())
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
+	"io"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/spf13/cobra"
@@ -39,9 +40,7 @@ func statusCommand() *cobra.Command {
 			}
 			jsonOutput, _ := command.Flags().GetBool("json")
 			if jsonOutput {
-				encoder := json.NewEncoder(command.OutOrStdout())
-				encoder.SetEscapeHTML(false)
-				return encoder.Encode(snapshot)
+				return writeStatusJSON(command.OutOrStdout(), snapshot)
 			}
 			writeStatus(command.OutOrStdout(), snapshot)
 			return nil
@@ -49,6 +48,27 @@ func statusCommand() *cobra.Command {
 	}
 	command.Flags().Bool("json", false, "print JSON")
 	return command
+}
+
+// statusJSON is the snapshot as `pb status --json` prints it. The daemon's snapshot names the home relay by
+// node id (its renewals need it); users see regions only, so the shallower home_relay field hides the embedded one.
+type statusJSON struct {
+	localapi.Snapshot
+	HomeRelay *homeRelayRegion `json:"home_relay,omitempty"`
+}
+
+type homeRelayRegion struct {
+	Region string `json:"region,omitempty"`
+}
+
+func writeStatusJSON(output io.Writer, snapshot localapi.Snapshot) error {
+	view := statusJSON{Snapshot: snapshot}
+	if snapshot.HomeRelay != nil {
+		view.HomeRelay = &homeRelayRegion{Region: snapshot.HomeRelay.Region}
+	}
+	encoder := json.NewEncoder(output)
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(view)
 }
 
 // serverWorkspaceStatusMachines keeps the snapshot machines the server lists for a team workspace.

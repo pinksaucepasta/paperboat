@@ -212,8 +212,10 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 		t.Fatalf("more than two enrolled eligible edges rejected: %v", err)
 	}
 	var used int
-	if err = database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.publication_edge_nodes('tunnel',$1)`, tunnel).Scan(&used); err != nil || used != 2 {
-		t.Fatalf("publication selected %d edges: %v", used, err)
+	// A machine holds a carrier to every ready node of its pair's regions (up to the serving cap per region) and edges do
+	// not forward, so the custom-domain records list all four (they were two, one per failure domain, before regions).
+	if err = database.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.publication_edge_nodes('tunnel',$1)`, tunnel).Scan(&used); err != nil || used != 4 {
+		t.Fatalf("publication selected %d edges, want all 4 serving nodes: %v", used, err)
 	}
 	if _, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET ready=false WHERE id IN(SELECT node_id FROM paperboat.selfhost_installations WHERE id=ANY($1))`, ids); err != nil {
 		t.Fatal(err)

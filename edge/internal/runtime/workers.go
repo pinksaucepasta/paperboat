@@ -192,12 +192,19 @@ type NodeWorker struct {
 	Metrics func(time.Time) *nodemetrics.Report
 	// OnAnswer, when set, applies each heartbeat answer (the server's ingress limits).
 	OnAnswer func(control.NodeAnswer) error
+	// Drain, when set, runs once per drain order (an answer carrying drain_deadline) in its own goroutine: it tells
+	// every carrier the edge is going away and returns when they are idle or at the deadline. The node keeps
+	// heartbeating ready and keeps accepting: an operator Drain is not this process stopping, and a Resume (an answer
+	// without a deadline) ends the order, so a later drain sends again.
+	Drain func(ctx context.Context, deadline time.Time)
 	// Ready, when set, is closed once the server has recorded this process as ready (a
 	// heartbeat reporting ready succeeded). The server refuses runtime, private access and
 	// browser access requests from an unready node, so their callers wait on it.
 	Ready chan struct{}
 
 	readyOnce sync.Once
+	drains    sync.WaitGroup
+	drained   int64 // the deadline already sent; 0 when no drain order stands (run's goroutine only)
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	done      chan struct{}
@@ -225,6 +232,7 @@ func (w *NodeWorker) Start(ctx context.Context) error {
 
 func (w *NodeWorker) run(ctx context.Context) {
 	defer close(w.done)
+	defer w.drains.Wait() // a drain ends with ctx
 	tick := w.Pulse
 	if tick == nil {
 		ticker := time.NewTicker(w.Interval)
@@ -280,7 +288,25 @@ func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 	if observation.Ready && w.Ready != nil {
 		w.readyOnce.Do(func() { close(w.Ready) })
 	}
+	w.drainOrder(ctx, answer.DrainDeadline, at)
 	return w.apply(answer)
+}
+
+// drainOrder sends the goaway once for each standing order; an answer with no deadline (Resume) clears it.
+func (w *NodeWorker) drainOrder(ctx context.Context, deadline *int64, at time.Time) {
+	if deadline == nil {
+		w.drained = 0
+		return
+	}
+	if w.Drain == nil || w.drained == *deadline || !time.Unix(*deadline, 0).After(at) {
+		return
+	}
+	w.drained = *deadline
+	w.drains.Add(1)
+	go func() {
+		defer w.drains.Done()
+		w.Drain(ctx, time.Unix(*deadline, 0))
+	}()
 }
 
 func (w *NodeWorker) apply(answer control.NodeAnswer) error {

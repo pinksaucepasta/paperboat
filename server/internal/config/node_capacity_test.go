@@ -25,12 +25,25 @@ func TestNodeCapacityDefaultsEnvAndBounds(t *testing.T) {
 		"fraction over one": func(n *NodeCapacity) { n.TrafficWarnFraction = 1.5 },
 		"cpu over 100":      func(n *NodeCapacity) { n.EdgeCPUWarnPercent = 101 },
 		"tiny memory":       func(n *NodeCapacity) { n.RelayRSSWarnBytes = 10 },
+		"in not below out":  func(n *NodeCapacity) { n.LoadInPercent = n.LoadOutPercent },
+		"in zero":           func(n *NodeCapacity) { n.LoadInPercent = 0 },
+		"out over 100":      func(n *NodeCapacity) { n.LoadOutPercent = 101 },
+		"wildcard cap below one workspace's nodes": func(n *NodeCapacity) { n.EdgeWildcardMaxNodes = 7 },
 	} {
 		n := Default().NodeCapacity
 		mutate(&n)
 		if n.validate() == nil {
 			t.Errorf("%s accepted", name)
 		}
+	}
+	if n := c.NodeCapacity; n.LoadOutPercent != 85 || n.LoadInPercent != 70 {
+		t.Fatalf("load defaults %v/%v", n.LoadOutPercent, n.LoadInPercent)
+	}
+	if err := overlayNodeCapacityEnv(&c, lookup(map[string]string{"PAPERBOAT_NODE_CAPACITY_LOAD_OUT_PERCENT": "90", "PAPERBOAT_NODE_CAPACITY_LOAD_IN_PERCENT": "60"})); err != nil || c.NodeCapacity.LoadOutPercent != 90 || c.NodeCapacity.LoadInPercent != 60 || c.NodeCapacity.validate() != nil {
+		t.Fatalf("load env: %v %+v", err, c.NodeCapacity)
+	}
+	if err := overlayNodeCapacityEnv(&c, lookup(map[string]string{"PAPERBOAT_NODE_CAPACITY_LOAD_IN_PERCENT": "low"})); err == nil {
+		t.Fatal("a non-numeric threshold was accepted")
 	}
 	r := Default().Retention
 	if r.NodeCapacityDaily != 90*day {

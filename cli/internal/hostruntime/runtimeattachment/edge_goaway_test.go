@@ -225,6 +225,49 @@ func TestEdgeGoawayWithoutReplacementFallsBackToTheOtherEdge(t *testing.T) {
 	}
 }
 
+// A three-node answer (two nodes of one region, one of the backup region): one node goes away and the
+// other two carry on; the host moves the active edge off it and keeps its carrier until the edge ends it.
+func TestEdgeGoawayInAThreeNodeAnswerKeepsTheOtherCarriersServing(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	h := startRuntimeCarrier(t, ctx, runtimeCarrierOptions{
+		expiry: time.Now().Add(time.Hour), status: func() int { return http.StatusOK }, confirmActive: true,
+		failDial: func(edgeID string, dial int) bool { return dial > 1 },
+		tweak:    func(a *admission) { listNodes(a, "r1-a", "r1-b", "r2-a") },
+	})
+	edges := map[string]*connector.DataCarrier{}
+	for len(edges) < 3 {
+		dial := nextEdge(t, h, 5*time.Second)
+		edges[dial.edgeID] = dial.edge
+	}
+	routes := map[string]*preview.DataCarrierPreviewRegistration{}
+	for id := range edges {
+		route, err := hubFor(t, h.service, id).Register("route-held")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer route.Close()
+		routes[id] = route
+	}
+	for len(h.actives) > 0 {
+		<-h.actives
+	}
+	sendEdgeGoaway(t, edges["r1-a"])
+	select {
+	case active := <-h.actives:
+		if active == "r1-a" {
+			t.Fatal("host kept the draining edge active")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("host did not move the active edge off the draining one")
+	}
+	served(t, edges["r1-b"], routes["r1-b"], "on-same-region")
+	served(t, edges["r2-a"], routes["r2-a"], "on-backup-region")
+	if len(heldNodes(h.service)) != 3 {
+		t.Fatalf("a carrier was cut: %v", heldNodes(h.service))
+	}
+}
+
 // Revocation during the drain still ends the held stream at once.
 func TestRevocationDuringEdgeDrainEndsTheHeldStream(t *testing.T) {
 	confirmRevocationAfter(t, 300*time.Millisecond)

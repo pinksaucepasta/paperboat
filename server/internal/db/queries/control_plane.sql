@@ -1191,10 +1191,10 @@ WHERE x.edge_node_id = sqlc.arg(edge_node_id)
   AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol IN ('http', 'tcp', 'tls', 'private_tcp')
   AND ra.route_id IN (SELECT route_id FROM valid_carrier)
   AND node.process_epoch = x.edge_process_epoch
-  AND node.state = 'ready' AND node.ready = true
+  AND ((node.ready AND node.state = 'ready') OR (node.state = 'draining' AND node.drain_deadline > sqlc.arg(now)))
   AND node.registry_expires_at > sqlc.arg(now)
   AND node.roles @> ARRAY['edge']::text[]
-  AND node.drain_deadline IS NULL
+  AND (node.drain_deadline IS NULL OR node.drain_deadline > sqlc.arg(now))
  -- A managed-only account eligible on this edge with a tunnel placed on no self-hosted node is node_route_eligible by
  -- its definition; anything else takes the full check.
  AND ((EXISTS(SELECT 1 FROM managed_account ma WHERE ma.account_id=t.account_id AND ma.owner_team_id IS NOT DISTINCT FROM t.owner_team_id)

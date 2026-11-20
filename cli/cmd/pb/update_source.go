@@ -133,7 +133,8 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 		return updateCompletionFailure{stage: "verify the installed executable", cause: err}
 	}
 	if bundle != "" {
-		actual.Distribution, actual.AutomaticUpdates = installsource.Official, true
+		// The bundle keeps the machine's own automatic-update setting, which this process cannot see: not reported.
+		actual.Distribution = installsource.Official
 	}
 	return writeUpdateFromResult(command, buildinfo.Version, installed, actual)
 }
@@ -143,7 +144,11 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 func writeUpdateFromResult(command *cobra.Command, previousVersion, installed string, actual installsource.Source) error {
 	changed := actual.Version != previousVersion
 	if updateJSON(command) {
-		return writeCLIJSON(command.OutOrStdout(), map[string]any{"executable": installed, "version": actual.Version, "previous_version": previousVersion, "changed": changed, "distribution": actual.Distribution, "automatic_update_checks": actual.AutomaticUpdates, "sha256": actual.SHA256, "enrollment": "unchanged"})
+		result := map[string]any{"executable": installed, "version": actual.Version, "previous_version": previousVersion, "changed": changed, "distribution": actual.Distribution, "sha256": actual.SHA256, "enrollment": "unchanged"}
+		if actual.Distribution != installsource.Official {
+			result["automatic_update_checks"] = actual.AutomaticUpdates
+		}
+		return writeCLIJSON(command.OutOrStdout(), result)
 	}
 	if !changed {
 		_, err := fmt.Fprintf(command.OutOrStdout(), "Paperboat is already on %s; reinstalled it from the supplied file.\n", actual.Version)

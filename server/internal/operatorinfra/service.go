@@ -13,7 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
+	"log/slog"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -27,8 +27,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodedrain"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 )
 
 var (
@@ -85,6 +87,16 @@ type Node struct {
 	CapacityLimit     int64      `json:"capacity_limit"`
 	Revision          int64      `json:"revision"`
 	Ready             bool       `json:"ready"`
+	// Carriers counts the machines holding a live carrier attachment on the node; 0 means safe to retire.
+	Carriers int64 `json:"carriers"`
+	// LoadPercent is the node's load (node_load_percent: the worst of sustained CPU and connections against its own
+	// limit); absent when it reported nothing in the last 2 minutes.
+	LoadPercent *float64 `json:"load_percent,omitempty"`
+	// InRotation is false while the load rule holds the ready node out: an edge is out of the wildcard DNS answers, a
+	// relay out of the relay candidate list; absent for nodes the rule does not manage.
+	InRotation *bool `json:"in_rotation,omitempty"`
+	// IngressVerified: the node's public ingress addresses passed the operator's verify-ingress probe.
+	IngressVerified bool `json:"ingress_verified"`
 	// Forward is the node's forwarding counters from its latest observation: an edge's visitor forwarding, a relay's mesh.
 	Forward *nodemesh.Stats `json:"forward,omitempty"`
 }
@@ -341,16 +353,9 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if tag.RowsAffected() != 1 {
 				return ErrNotFound
 			}
-		case "drain", "resume", "retire":
+		case "drain", "drain-move", "resume", "retire":
 			if in.Revision < 1 {
 				return ErrInvalid
-			}
-			state := "draining"
-			if in.Action == "resume" {
-				state = "registered"
-			}
-			if in.Action == "retire" {
-				state = "retired"
 			}
 			var regionEnabled bool
 			err := tx.QueryRow(ctx, `SELECT r.enabled FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=$1 AND m.revision=$2 AND m.retired_at IS NULL FOR UPDATE OF m`, in.NodeID, in.Revision).Scan(&regionEnabled)
@@ -362,11 +367,21 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if in.Action == "resume" && !regionEnabled {
 				return ErrConflict
 			}
-			_, err = tx.Exec(ctx, `UPDATE control_tunnel_nodes SET state=$2,ready=false,drain_deadline=CASE WHEN $2='draining' THEN now()+interval '30 seconds' ELSE NULL END,version=version+1,updated_at=now() WHERE id=$1`, in.NodeID, state)
+			switch in.Action {
+			case "drain", "drain-move":
+				err = nodedrain.Begin(ctx, tx, in.NodeID, in.Action == "drain-move")
+			case "resume":
+				err = nodedrain.Resume(ctx, tx, in.NodeID)
+			default:
+				_, err = tx.Exec(ctx, `UPDATE control_tunnel_nodes SET state='retired',ready=false,drain_deadline=NULL,version=version+1,updated_at=now() WHERE id=$1`, in.NodeID)
+			}
+			if errors.Is(err, nodedrain.ErrNotFound) || errors.Is(err, nodedrain.ErrRetired) {
+				return ErrConflict
+			}
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `UPDATE managed_node_authority SET revision=revision+1,retired_at=CASE WHEN $2='retired' THEN now() ELSE retired_at END,updated_at=now() WHERE node_id=$1`, in.NodeID, state)
+			_, err = tx.Exec(ctx, `UPDATE managed_node_authority SET revision=revision+1,retired_at=CASE WHEN $2='retire' THEN now() ELSE retired_at END,updated_at=now() WHERE node_id=$1`, in.NodeID, in.Action)
 			if err != nil {
 				return err
 			}
@@ -377,6 +392,12 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 	})
 	if err != nil {
 		return NodeMutationResult{}, err
+	}
+	if in.Action == "drain-move" {
+		// A failed wake is not an error: the drain deadline still ends the carriers, only later.
+		if err := nodedrain.Wake(ctx, s.store.Pool(), in.NodeID); err != nil {
+			slog.WarnContext(ctx, "operator_drain_move_wake_failed", "node_id", in.NodeID, "error", err)
+		}
 	}
 	return out, nil
 }
@@ -438,7 +459,7 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id WHERE ($1='' OR m.region_id=$1)`, region).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL),coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
+		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL),(SELECT count(DISTINCT a.machine_id) FROM runtime_carrier_attachments a WHERE a.edge_node_id=n.id AND a.expires_at>now()),node_load_percent(n.id)::float8,(SELECT NOT w.out_for_load FROM node_load_out w WHERE w.node_id=n.id),n.public_ingress_verified_at IS NOT NULL,coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
 		if err != nil {
 			return err
 		}
@@ -446,7 +467,7 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		for rows.Next() {
 			var v Node
 			var forward []byte
-			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready, &forward); err != nil {
+			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready, &v.Carriers, &v.LoadPercent, &v.InRotation, &v.IngressVerified, &forward); err != nil {
 				rows.Close()
 				return errors.Join(err, rows.Err())
 			}
@@ -607,7 +628,7 @@ func (s *Service) RuntimeCredential(ctx context.Context, node string) (string, e
 func (s *Service) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
 func readNodeTx(ctx context.Context, tx *db.Tx, id string, out *Node) error {
 	var forward []byte
-	err := tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL),coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready, &forward)
+	err := tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL),(SELECT count(DISTINCT a.machine_id) FROM runtime_carrier_attachments a WHERE a.edge_node_id=n.id AND a.expires_at>now()),node_load_percent(n.id)::float8,(SELECT NOT w.out_for_load FROM node_load_out w WHERE w.node_id=n.id),n.public_ingress_verified_at IS NOT NULL,coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready, &out.Carriers, &out.LoadPercent, &out.InRotation, &out.IngressVerified, &forward)
 	out.Forward = forwardStats(forward)
 	return err
 }

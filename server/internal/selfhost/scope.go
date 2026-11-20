@@ -19,9 +19,12 @@ type Scope struct {
 	ID   string `json:"id,omitempty"`
 }
 type Installation struct {
-	InstallationID  string `json:"installation_id"`
-	NodeID          string `json:"node_id"`
-	EndpointHost    string `json:"endpoint_host"`
+	InstallationID string `json:"installation_id"`
+	NodeID         string `json:"node_id"`
+	EndpointHost   string `json:"endpoint_host"`
+	// Region is the region the owner named when enrolling the server (default "selfhost"); servers of one region
+	// back each other up, and a workspace's pair names regions.
+	Region          string `json:"region"`
 	Name            string `json:"name"`
 	Capability      string `json:"capability"`
 	Ready           bool   `json:"ready"`
@@ -99,7 +102,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 			return nil, err
 		}
 	}
-	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2)) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
+	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR (i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +110,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 	for rows.Next() {
 		var i Installation
 		var complete bool
-		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat); err != nil {
+		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat); err != nil {
 			return nil, withDatabaseCleanupFailure("list_installations", err, rows.Close())
 		}
 		i.EnrollmentState = "pending"
@@ -283,11 +286,12 @@ func (s *Service) storePool(ctx context.Context, tx *db.Tx, actor, capability st
 		return false, err
 	}
 	if flipped {
-		if err = repointWorkspaceDomains(ctx, tx, actor, team, p.Mode); err != nil {
+		// The stored pair follows the mode at once (a pair change stores it too), not at some later reconcile, and
+		// before the domains are repointed: resolving the new edges goes through the stored pair.
+		if _, err = edgeset.ReconcileScope(ctx, tx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}, nil, time.Now().UTC()); err != nil {
 			return false, err
 		}
-		// The stored edge set follows the mode at once (a pair change stores it too), not at some later reconcile.
-		if _, err = edgeset.ReconcileScope(ctx, tx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}, nil, time.Now().UTC()); err != nil {
+		if err = repointWorkspaceDomains(ctx, tx, actor, team, p.Mode); err != nil {
 			return false, err
 		}
 	}
@@ -360,6 +364,10 @@ func (s *Service) remove(ctx context.Context, id, actor string, authorizedScope 
 				return err
 			}
 		}
+	}
+	// A removed server leaves the pool of the workspace it served.
+	if _, err = tx.ExecContext(ctx, syncTunnelPoolSQL, scope.Kind, scope.ID); err != nil {
+		return err
 	}
 	if err = revokeIneligible(ctx, tx, scope); err != nil {
 		return err

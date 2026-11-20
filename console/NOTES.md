@@ -420,11 +420,18 @@ Add server (the installer command for relay/tunnel/both, then the claim address 
 code it prints, `POST /v1/selfhost/enrollments` with the workspace scope), Check public access
 (`verify-ingress`), Remove (deletes each installation of the node), and the two pools: relays
 `mixed | self-hosted-only` (account scope always), tunnel servers `managed-only | self-hosted-only`
-(workspace scope). Paperboat's servers come from `GET /v1/edges`, grouped by region. Gaps:
+(workspace scope). **Users see regions, never Paperboat's nodes.** `GET /v1/edges` and `/v1/relays` list
+Paperboat's regions (`id`, `name`, `status`); the workspace's pair (`GET/PUT /v1/edges/pair`) is two regions,
+both Paperboat's or both your own (`kind`). Your own servers keep their names and addresses, grouped under the
+region you named when pairing them (`region` on the installation; servers of one region back each other up),
+and their menu has Drain, Drain and move and Resume. Only the admin panel lists nodes. Gaps:
+
+- The installation list has no draining flag: a server whose installations are all not ready is treated as
+  draining and offers Resume. Add the flag to the list if that proves wrong.
 
 - Team scope sends the workspace ID (the team slug) as `scope_id`; confirm the server's team scope
   takes the slug, not an internal ID.
-- Installations carry no version, last-seen time or region, so the list can't show them; `ready`
+- Installations carry no region-level health, so the list can't show it; `ready`
   is the only health signal. Tunnel readiness doesn't say whether public access was verified.
 - Per-tunnel placement (`/v1/selfhost/placements/...`) isn't in the console yet; it belongs on
   the tunnel's page once a workspace uses its own tunnel servers.

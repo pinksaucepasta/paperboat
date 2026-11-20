@@ -21,7 +21,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
-const maxDesiredAddressRecords = 4
+// maxDesiredAddressRecords bounds one hostname's addresses: the wildcard names list every ready managed edge (at most 8 nodes, IPv4 and IPv6 each).
+const maxDesiredAddressRecords = 16
 
 type AddressRecordProvider interface {
 	ListAddressRecords(context.Context, string, string) ([]AddressRecord, error)
@@ -264,7 +265,8 @@ const (
 	resolverWaitDetail     = "authoritative address results have not converged"
 )
 
-const maxPublishPasses = 8
+// maxPublishPasses covers replacing every record of a full set (one provider mutation per pass) plus the readback passes.
+const maxPublishPasses = 40
 
 // WaitingForDNS reports whether err only means that DNS has not caught up with records the provider
 // holds yet (a normal state for about one TTL after every change), as opposed to a failure.
@@ -354,58 +356,12 @@ func (r *AddressReconciler) reconcile(ctx context.Context, desired DesiredAddres
 		return r.recordFailure(ctx, conn.Conn(), desired, generation, nil, err)
 	}
 	wanted := stringSet(addresses)
-	mutated := false
-	retained := make(map[string]bool, len(records))
-	kept := records[:0]
-	for _, record := range records {
-		if record.Generation > generation {
-			err := addressError(AddressPublicationConflict, "provider record has a future publication generation")
-			return r.recordFailure(ctx, conn.Conn(), desired, generation, records, err)
-		}
-		_, wantedAddress := wanted[record.Address]
-		if wantedAddress && !retained[record.Address] {
-			kept = append(kept, record)
-			retained[record.Address] = true
-			continue
-		}
-		if mutated {
-			kept = append(kept, record)
-			continue
-		}
-		writeCtx, cancel, deadlineErr := publicationWriteContext(ctx, desired)
-		if deadlineErr != nil {
-			return deadlineErr
-		}
-		deleteErr := r.provider.DeleteAddressRecord(writeCtx, record)
-		cancel()
-		if deleteErr != nil {
-			return r.recordFailure(ctx, conn.Conn(), desired, generation, records, deleteErr)
-		}
-		mutated = true
+	fail := func(failed []AddressRecord, cause error) error {
+		return r.recordFailure(ctx, conn.Conn(), desired, generation, failed, cause)
 	}
-	records = kept
-	present := make(map[string]bool, len(records))
-	for _, record := range records {
-		present[record.Address] = true
-	}
-	for _, address := range addresses {
-		if mutated {
-			break
-		}
-		if present[address] {
-			continue
-		}
-		writeCtx, cancel, deadlineErr := publicationWriteContext(ctx, desired)
-		if deadlineErr != nil {
-			return deadlineErr
-		}
-		created, createErr := r.provider.CreateAddressRecord(writeCtx, AddressRecord{Hostname: host, Address: address, Owner: desired.Owner, Generation: generation}, desired.IPv6ReachabilityVerified)
-		cancel()
-		if createErr != nil {
-			return r.recordFailure(ctx, conn.Conn(), desired, generation, records, createErr)
-		}
-		records = append(records, created)
-		mutated = true
+	records, mutated, err := r.applyAddressStep(ctx, desired, generation, records, wanted, fail)
+	if err != nil {
+		return err
 	}
 	if !addressRecordsMatch(records, desired.Owner, generation, wanted) {
 		err = addressError(AddressPublicationPending, notConvergedDetail)
@@ -425,6 +381,54 @@ func (r *AddressReconciler) reconcile(ctx context.Context, desired DesiredAddres
 		return err
 	}
 	return r.markState(ctx, conn.Conn(), desired, generation, records, "verified", "")
+}
+
+// applyAddressStep makes at most one provider mutation. It creates a missing desired address before it deletes
+// any stale record, so replacing the only record of a name never leaves the name without an address; a stale
+// record is deleted only on a pass where no desired address is missing.
+func (r *AddressReconciler) applyAddressStep(ctx context.Context, desired DesiredAddressPublication, generation uint64, records []AddressRecord, wanted map[string]struct{}, fail func([]AddressRecord, error) error) ([]AddressRecord, bool, error) {
+	present := make(map[string]bool, len(records))
+	kept := make([]AddressRecord, 0, len(records))
+	var stale []AddressRecord
+	for _, record := range records {
+		if record.Generation > generation {
+			return records, false, fail(records, addressError(AddressPublicationConflict, "provider record has a future publication generation"))
+		}
+		if _, ok := wanted[record.Address]; ok && !present[record.Address] {
+			kept = append(kept, record)
+			present[record.Address] = true
+		} else {
+			stale = append(stale, record)
+		}
+	}
+	for _, address := range desired.Addresses {
+		if present[address] {
+			continue
+		}
+		writeCtx, cancel, err := publicationWriteContext(ctx, desired)
+		if err != nil {
+			return records, false, err
+		}
+		created, err := r.provider.CreateAddressRecord(writeCtx, AddressRecord{Hostname: desired.Hostname, Address: address, Owner: desired.Owner, Generation: generation}, desired.IPv6ReachabilityVerified)
+		cancel()
+		if err != nil {
+			return records, false, fail(records, err)
+		}
+		return append(append(kept, stale...), created), true, nil
+	}
+	if len(stale) == 0 {
+		return kept, false, nil
+	}
+	writeCtx, cancel, err := publicationWriteContext(ctx, desired)
+	if err != nil {
+		return records, false, err
+	}
+	err = r.provider.DeleteAddressRecord(writeCtx, stale[0])
+	cancel()
+	if err != nil {
+		return records, false, fail(records, err)
+	}
+	return append(kept, stale[1:]...), true, nil
 }
 
 func (r *AddressReconciler) verifyAddressResolution(ctx context.Context, host string, wanted map[string]struct{}) error {

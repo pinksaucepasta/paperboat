@@ -2,6 +2,7 @@ package usermachines
 
 import (
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"strings"
 	"testing"
@@ -146,8 +147,19 @@ func testSDKRevocationFeedBounds(t *testing.T, f workspaceMachineFixture, sessio
 		}
 	}
 	seed(time.Now().Add(time.Minute))
-	if _, err := edge.Revocations(ctx); err == nil {
-		t.Fatal("global revocation feed silently truncated credentials")
+	// cba4189ea removed the row ceiling: the global feed is complete and only the snapshot byte budget bounds it.
+	all, err := edge.Revocations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inFeed := map[string]bool{}
+	for _, jti := range all.JTIs {
+		inFeed[jti] = true
+	}
+	for _, g := range []int{1, 5000, 10001} {
+		if !inFeed[fmt.Sprintf("overflow_jti_%s_%d", f.suffix, g)] {
+			t.Fatalf("global revocation feed lost revoked credential %d of 10001", g)
+		}
 	}
 	if _, err := edge.OperationRevocations(ctx, "env_"+f.suffix, live); err == nil {
 		t.Fatal("revocation feed silently truncated live-operation revocations")

@@ -199,12 +199,14 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 			return err
 		}
 		type edgeRow struct {
-			node, epoch, domain, endpoint, browserHost, pin, chain string
+			node, epoch, region, endpoint, browserHost, pin, chain string
 			tcp, quic                                              int64
 			// terminal: browser terminals may use this carrier, which only Paperboat's managed edges allow.
 			terminal bool
 		}
-		// pick reads up to limit live edges, the machine's preferred first, that satisfy eligible.
+		// pick reads up to limit live edges, the machine's preferred first, then the workspace's primary region before
+		// its backup, that satisfy eligible. A machine holds a carrier to every one of them: edges do not forward, so a
+		// visitor may land on any serving node of the pair's regions (edgeset.ServingNodes).
 		pick := func(eligible string, limit int, terminal bool) ([]edgeRow, error) {
 			rows, err := tx.Query(ctx, edgeSelectQuery(eligible), proof.UserID, activeNode, proof.MachineID, request.InstallationGeneration, request.WorkerGeneration, teamID)
 			if err != nil {
@@ -214,15 +216,13 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 			var picked []edgeRow
 			for rows.Next() {
 				edge := edgeRow{terminal: terminal}
-				if err = rows.Scan(&edge.node, &edge.epoch, &edge.domain, &edge.endpoint, &edge.browserHost, &edge.tcp, &edge.quic, &edge.pin, &edge.chain); err != nil {
+				if err = rows.Scan(&edge.node, &edge.epoch, &edge.region, &edge.endpoint, &edge.browserHost, &edge.tcp, &edge.quic, &edge.pin, &edge.chain); err != nil {
 					return nil, err
 				}
 				if edge.tcp < 1 || edge.tcp > 65535 || edge.quic < 1 || edge.quic > 65535 || connectorprotocol.ValidateOpaqueEpoch(edge.epoch) != nil {
 					continue
 				}
-				if len(picked) == 0 || (picked[0].domain != "" && edge.domain != "" && edge.domain != picked[0].domain) {
-					picked = append(picked, edge)
-				}
+				picked = append(picked, edge)
 				if len(picked) == limit {
 					break
 				}
@@ -231,15 +231,24 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 		}
 		// The workspace's edges carry its tunnels and previews. Whatever the mode, browser terminals use one of
 		// Paperboat's managed edges at its own domain, never a customer-run one: in a self-hosted-only workspace
-		// that is an extra carrier of its own, first so it is the machine's active (terminal) edge.
-		selected, err := pick(`paperboat.node_workspace_edge_eligible(n.id,$1,$6) AND paperboat.workspace_edge_set_allows(n.id,$1,$6)`, 2, mode == "managed-only")
+		// that is up to MaximumManagedTerminalCarriers extra carriers, on managed nodes of different regions (the best
+		// placed node of each), first so the first is the machine's active (terminal) edge and the second its failover.
+		selected, err := pick(`paperboat.node_workspace_edge_eligible(n.id,$1,$6)`, runtimewire.MaximumRegionCarriers, mode == "managed-only")
 		if err != nil {
 			return err
 		}
 		if mode == "self-hosted-only" {
-			terminal, err := pick(`paperboat.node_managed_edge_eligible(n.id,$1,$6)`, 1, true)
+			managed, err := pick(`paperboat.node_managed_edge_eligible(n.id,$1,$6)`, runtimewire.MaximumEdgeCandidates, true)
 			if err != nil {
 				return err
+			}
+			var terminal []edgeRow
+			regions := map[string]bool{}
+			for _, edge := range managed {
+				if len(terminal) < runtimewire.MaximumManagedTerminalCarriers && !(edge.region != "" && regions[edge.region]) {
+					terminal = append(terminal, edge)
+					regions[edge.region] = true
+				}
 			}
 			selected = append(terminal, selected...)
 		}
@@ -325,9 +334,10 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 			if err = tx.QueryRow(ctx, `SELECT paperboat.runtime_carrier_valid($1,$2,$3,false)`, route, activeNode, activeEpoch).Scan(&valid); err != nil {
 				return err
 			}
-			// An active carrier on an edge that cannot carry terminals (a customer-run one) is retired too.
+			// An active carrier on an edge that cannot carry terminals (a customer-run one) is retired too, and so is one
+			// on a node in Drain: it keeps serving what runs on it, but new terminals go to another edge.
 			var terminalEdge bool
-			if err = tx.QueryRow(ctx, `SELECT paperboat.node_managed_edge_eligible($1,$2,$3)`, activeNode, proof.UserID, teamID).Scan(&terminalEdge); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT paperboat.node_managed_edge_eligible($1,$2,$3) AND NOT EXISTS(SELECT 1 FROM control_tunnel_nodes WHERE id=$1 AND state='draining')`, activeNode, proof.UserID, teamID).Scan(&terminalEdge); err != nil {
 				return err
 			}
 			if !valid || !terminalEdge {
@@ -410,7 +420,8 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 		for _, edge := range selected {
 			kept = append(kept, edge.node)
 		}
-		if _, err = tx.Exec(ctx, `DELETE FROM runtime_carrier_attachments WHERE route_id=$1 AND NOT active AND edge_node_id<>ALL($2::text[])`, route, kept); err != nil {
+		if _, err = tx.Exec(ctx, `DELETE FROM runtime_carrier_attachments a WHERE a.route_id=$1 AND NOT a.active AND a.edge_node_id<>ALL($2::text[])
+ AND NOT EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE n.id=a.edge_node_id AND n.state='draining' AND n.drain_deadline>now())`, route, kept); err != nil {
 			return err
 		}
 		out.ActiveEdgeNodeID, out.ActiveEdgeProcessEpoch = activeNode, activeEpoch
@@ -824,7 +835,10 @@ ORDER BY g.tunnel_id`, proof.MachineID, proof.UserID)
 	return out, rows.Err()
 }
 
-// edgeSelectQuery reads up to 32 live edges for a machine, its preferred ones first. It locks no node row: every edge
+// edgeSelectQuery reads up to 32 live edges for a machine, its preferred ones first, then its workspace's primary
+// region before the backup, then spread by machine so one region's nodes share a fleet. Managed edges are limited to the
+// serving set (edgeset.ServingNodes), the same nodes the wildcard DNS names publish, so a visitor never lands on a node
+// this machine holds no carrier to; the order only decides which carrier is first. It locks no node row: every edge
 // heartbeats its row every few seconds, and a serializable transaction that locks (FOR SHARE) a row changed after its
 // snapshot fails with 40001, so attaches lost to heartbeats (13 of the 70 serialization failures in 30 min on prod,
 // 2026-11-20). A node that drains or goes offline right after it is chosen is the case of an edge failing after an
@@ -832,18 +846,19 @@ ORDER BY g.tunnel_id`, proof.MachineID, proof.UserID)
 // from heartbeat records without locking them (lib/reversetunnel/agentpool.go); Headscale clients choose a DERP region
 // from the map it serves (hscontrol/derp/derp.go).
 func edgeSelectQuery(eligible string) string {
-	return `SELECT n.id,n.process_epoch,coalesce(n.failure_domain,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
+	return `SELECT n.id,n.process_epoch,coalesce(n.region,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
 FROM control_tunnel_nodes n LEFT JOIN machine_edge_placements p ON p.machine_id=$3 AND p.account_id=$1
 AND p.installation_generation=$4 AND p.worker_generation=$5 AND p.observed_at>now()-interval '2 minutes'
+LEFT JOIN workspace_edge_sets ws ON ws.scope_kind=CASE WHEN $6::text IS NULL THEN 'account' ELSE 'team' END AND ws.scope_id=COALESCE($6::text,$1)
 WHERE n.ready AND n.state='ready' AND n.roles @> ARRAY['edge']::text[]
 AND n.transports @> ARRAY['http2','http3']::text[] AND n.last_heartbeat_at>now()-interval '30 seconds' AND n.registry_expires_at>now()
 AND n.capacity_observed_at>now()-interval '30 seconds'
-AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND ` + eligible + `
+AND (n.drain_deadline IS NULL OR n.drain_deadline>now()) AND ` + eligible + ` AND ` + edgeset.ServingOnly + `
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
 ORDER BY CASE WHEN n.id=p.primary_node_id AND n.process_epoch=p.primary_process_epoch THEN 0
 WHEN n.id=p.secondary_node_id AND n.process_epoch=p.secondary_process_epoch THEN 1
-WHEN n.id=$2 THEN 2 ELSE 3 END,n.id LIMIT 32`
+WHEN n.id=$2 THEN 2 ELSE 3 END,coalesce(array_position(ws.regions,n.region),9),hashtextextended($3||n.id,0),n.id LIMIT 32`
 }
 
 // edgeSetBuilders lets one attach per workspace build the workspace's edge set; the rest wait in memory.

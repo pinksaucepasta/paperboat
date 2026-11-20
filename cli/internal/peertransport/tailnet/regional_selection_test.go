@@ -6,7 +6,8 @@ import (
 )
 
 func selectionScore(id, domain string, rtt time.Duration) regionalScore {
-	return regionalScore{node: RegionalNode{NodeID: id, FailureDomain: domain, CapacityLimit: 100}, rtt: rtt}
+	// Each test node is its own region, so these tests keep ranking nodes by RTT.
+	return regionalScore{node: RegionalNode{NodeID: id, Region: id, FailureDomain: domain, CapacityLimit: 100}, rtt: rtt}
 }
 
 func TestRegionalSelectionSustainedGainAndCommit(t *testing.T) {
@@ -126,5 +127,31 @@ func TestRegionalSelectionInvalidInputAndBackupDomains(t *testing.T) {
 		if s.current() != "" {
 			t.Fatal("unoffered route committed")
 		}
+	}
+}
+
+func TestRegionalSelectionFollowsServerOrderWithinRegion(t *testing.T) {
+	now := time.Unix(2000, 0)
+	x := regionalScore{node: RegionalNode{NodeID: "x", Region: "r", FailureDomain: "one", CapacityLimit: 100}, rtt: 50 * time.Millisecond, order: 1}
+	y := regionalScore{node: RegionalNode{NodeID: "y", Region: "r", FailureDomain: "two", CapacityLimit: 100}, rtt: 52 * time.Millisecond, order: 0}
+	var s regionalSelection
+	chosen, _ := s.choose(now, []regionalScore{x})
+	s.commit(chosen.node.NodeID, now)
+	// Same region: the server-first node is chosen at once, without the RTT hysteresis or dwell.
+	chosen, reason := s.choose(now.Add(time.Second), []regionalScore{x, y})
+	if chosen.node.NodeID != "y" || reason != "server_order_within_region" {
+		t.Fatalf("chosen=%s reason=%s, want y server_order_within_region", chosen.node.NodeID, reason)
+	}
+	s.commit("y", now.Add(time.Second))
+	if s.current() != "y" {
+		t.Fatal("server-ordered promotion not committed")
+	}
+	// With y ineligible (failed or absent) the active x is kept.
+	var kept regionalSelection
+	chosen, _ = kept.choose(now, []regionalScore{x})
+	kept.commit(chosen.node.NodeID, now)
+	chosen, reason = kept.choose(now.Add(time.Second), []regionalScore{x})
+	if chosen.node.NodeID != "x" || reason != "healthy_choice_retained" {
+		t.Fatalf("chosen=%s reason=%s, want x healthy_choice_retained", chosen.node.NodeID, reason)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -106,6 +107,21 @@ func TestDesiredAddressPublicationValidationAndRecordMatching(t *testing.T) {
 	desired.IPv6ReachabilityVerified = false
 	if _, _, err := validateDesiredAddressPublication(desired); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unverified IPv6 error=%v", err)
+	}
+}
+
+func TestDesiredAddressPublicationCapsAtSixteenAddresses(t *testing.T) {
+	now := time.Now()
+	desired := DesiredAddressPublication{Owner: "tunnel_1", Hostname: "*.example.test", ResourceGeneration: 1, ReadinessVersion: "ready-v1", ObservedAt: now, ValidUntil: now.Add(time.Minute)}
+	for i := range 16 {
+		desired.Addresses = append(desired.Addresses, fmt.Sprintf("8.8.8.%d", i+1))
+	}
+	if _, addresses, err := validateDesiredAddressPublication(desired); err != nil || len(addresses) != 16 {
+		t.Fatalf("16 addresses: %d %v", len(addresses), err)
+	}
+	desired.Addresses = append(desired.Addresses, "8.8.8.17")
+	if _, _, err := validateDesiredAddressPublication(desired); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("17 addresses: %v", err)
 	}
 }
 
@@ -533,6 +549,50 @@ func TestAddressPublishWritesEveryAddressWithoutWaitingForResolverOnPostgres(t *
 	}
 }
 
+// A full set (nine addresses here: eight edges and a v6 one) is written, then replaced address by address, within one Publish.
+func TestAddressPublishWritesNineAddressesOnPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run address publication PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	host, owner := "nine-"+suffix+".example.test", "edge_wildcard:nine-"+suffix+".example.test"
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
+	})
+	provider := &fakeAddressProvider{}
+	reconciler, err := NewAddressReconciler(database, provider, &fakeAddressResolver{err: &net.DNSError{IsNotFound: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	desired := DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: 1, ReadinessVersion: "ready_1", ObservedAt: now, ValidUntil: now.Add(time.Minute)}
+	for i := range 9 {
+		desired.Addresses = append(desired.Addresses, fmt.Sprintf("8.8.8.%d", i+1))
+	}
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.creates != 9 || len(provider.records) != 9 {
+		t.Fatalf("nine addresses: creates=%d records=%d err=%v", provider.creates, len(provider.records), err)
+	}
+	desired.ReadinessVersion, desired.ObservedAt, desired.Addresses = "ready_2", now.Add(time.Second), nil
+	for i := range 9 {
+		desired.Addresses = append(desired.Addresses, fmt.Sprintf("1.1.1.%d", i+1))
+	}
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.deletes != 9 || provider.creates != 18 || len(provider.records) != 9 {
+		t.Fatalf("replacing all nine: deletes=%d creates=%d records=%d err=%v", provider.deletes, provider.creates, len(provider.records), err)
+	}
+}
+
 func TestWaitingForDNSIsOnlyThePropagationWait(t *testing.T) {
 	for detail, want := range map[string]bool{
 		readbackRequiredDetail: true, notConvergedDetail: true, resolverWaitDetail: true,
@@ -597,5 +657,92 @@ func TestAddressPublishRecordsAFailureAfterItsBudgetExpiredOnPostgres(t *testing
 	var state string
 	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "failed" {
 		t.Fatalf("state after the failed attempt = %q, %v; want failed", state, err)
+	}
+}
+
+// replacementFixture is a wildcard-style hostname whose provider holds seeded records.
+func replacementFixture(t *testing.T, seeded ...string) (*AddressReconciler, *fakeAddressProvider, DesiredAddressPublication) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run address publication PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	host, owner := "swap-"+suffix+".example.test", "edge_wildcard:swap-"+suffix+".example.test"
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
+	})
+	provider := &fakeAddressProvider{}
+	for i, address := range seeded {
+		provider.records = append(provider.records, AddressRecord{Hostname: host, Address: address, Owner: owner, Generation: 1, ProviderID: fmt.Sprintf("seed_%d", i)})
+	}
+	reconciler, err := NewAddressReconciler(database, provider, &fakeAddressResolver{err: &net.DNSError{IsNotFound: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	return reconciler, provider, DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: 1, ReadinessVersion: "ready_1", ObservedAt: now, ValidUntil: now.Add(time.Minute)}
+}
+
+func providerAddresses(provider *fakeAddressProvider) []string {
+	addresses := []string{}
+	for _, record := range provider.records {
+		addresses = append(addresses, record.Address)
+	}
+	sort.Strings(addresses)
+	return addresses
+}
+
+func reconcilePass(t *testing.T, reconciler *AddressReconciler, desired DesiredAddressPublication) {
+	t.Helper()
+	if err := reconciler.Reconcile(context.Background(), desired); !isAddressErrorKind(err, AddressPublicationPending) {
+		t.Fatalf("a changing pass must end pending on readback: %v", err)
+	}
+}
+
+func TestReconcileCreatesTheReplacementBeforeDeletingTheOldAddress(t *testing.T) {
+	reconciler, provider, desired := replacementFixture(t, "8.8.8.8")
+	desired.Addresses = []string{"8.8.4.4"}
+	reconcilePass(t, reconciler, desired)
+	if got := providerAddresses(provider); strings.Join(got, ",") != "8.8.4.4,8.8.8.8" || provider.deletes != 0 {
+		t.Fatalf("after the first pass both addresses must serve: %v deletes=%d", got, provider.deletes)
+	}
+	reconcilePass(t, reconciler, desired)
+	if got := providerAddresses(provider); strings.Join(got, ",") != "8.8.4.4" || provider.creates != 1 || provider.deletes != 1 {
+		t.Fatalf("after the second pass only the new address remains: %v creates=%d deletes=%d", got, provider.creates, provider.deletes)
+	}
+}
+
+func TestReconcileShrinkingSetStillDeletes(t *testing.T) {
+	reconciler, provider, desired := replacementFixture(t, "8.8.8.8", "8.8.4.4")
+	desired.Addresses = []string{"8.8.8.8"}
+	reconcilePass(t, reconciler, desired)
+	if got := providerAddresses(provider); strings.Join(got, ",") != "8.8.8.8" || provider.creates != 0 || provider.deletes != 1 {
+		t.Fatalf("a shrinking set must delete without creating: %v creates=%d deletes=%d", got, provider.creates, provider.deletes)
+	}
+}
+
+func TestReconcileNeverLeavesTheProviderEmptyWhileAnAddressIsMissing(t *testing.T) {
+	reconciler, provider, desired := replacementFixture(t, "8.8.8.8", "8.8.4.4")
+	desired.Addresses = []string{"1.1.1.1"}
+	for pass := 0; pass < 3; pass++ {
+		reconcilePass(t, reconciler, desired)
+		if len(provider.records) == 0 {
+			t.Fatalf("pass %d left the provider with no record", pass+1)
+		}
+	}
+	if got := providerAddresses(provider); strings.Join(got, ",") != "1.1.1.1" || provider.creates != 1 || provider.deletes != 2 {
+		t.Fatalf("final records %v creates=%d deletes=%d", got, provider.creates, provider.deletes)
 	}
 }

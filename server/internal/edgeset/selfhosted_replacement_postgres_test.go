@@ -3,6 +3,7 @@ package edgeset
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestSelfHostedEdgeSetReplacesOnlyWithSelectedServersOnPostgres(t *testing.T
 	var installations []string
 	node := func(name, domain string, own bool) string {
 		id := "edgeset_sh_" + name + "_" + stamp
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$2,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, domain)
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region_'||$1,$2,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, domain)
 		t.Cleanup(func() {
 			_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 		})
@@ -63,10 +64,15 @@ func TestSelfHostedEdgeSetReplacesOnlyWithSelectedServersOnPostgres(t *testing.T
 		}
 		return changed
 	}
+	// Every fixture node is a region of its own ("region_"+node id): stored returns the node ids of the pair's regions.
 	stored := func() (mode string, ids []string) {
 		t.Helper()
-		if err := database.Pool().QueryRow(ctx, `SELECT mode,node_ids FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, account).Scan(&mode, &ids); err != nil {
+		var regions []string
+		if err := database.Pool().QueryRow(ctx, `SELECT mode,regions FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, account).Scan(&mode, &regions); err != nil {
 			t.Fatal(err)
+		}
+		for _, r := range regions {
+			ids = append(ids, strings.TrimPrefix(r, "region_"))
 		}
 		return
 	}

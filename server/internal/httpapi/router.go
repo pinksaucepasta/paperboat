@@ -421,6 +421,8 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("GET /v1/selfhost/installations/{installationID}", read)
 			mux.Handle("DELETE /v1/selfhost/installations/{installationID}", write)
 			mux.Handle("POST /v1/selfhost/installations/{installationID}/verify-ingress", write)
+			mux.Handle("POST /v1/selfhost/installations/{installationID}/drain", write)
+			mux.Handle("POST /v1/selfhost/installations/{installationID}/resume", write)
 			mux.Handle("POST /v1/selfhost/installations/{installationID}/update", write)
 			mux.HandleFunc("POST /v1/selfhost/update/check", opts.Selfhost.UpdateCheck)
 			mux.HandleFunc("POST /v1/selfhost/update/report", opts.Selfhost.UpdateReport)

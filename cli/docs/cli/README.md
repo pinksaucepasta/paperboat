@@ -88,8 +88,8 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb domain remove](pb_domain_remove.md) | Remove a domain no tunnel or preview uses |
 | [pb domain show](pb_domain_show.md) | Show a domain's DNS records, status and uses |
 | [pb domain verify](pb_domain_verify.md) | Check a domain's DNS now and wait until it is verified |
-| [pb edge](pb_edge.md) | Inspect tunnel edges |
-| [pb edge list](pb_edge_list.md) | List managed or selected self-hosted tunnel edges |
+| [pb edge](pb_edge.md) | Inspect the regions tunnels and previews are served from |
+| [pb edge list](pb_edge_list.md) | List the regions tunnels and previews are served from |
 | [pb env](pb_env.md) | Manage automatic global ENV and device overrides |
 | [pb env grants](pb_env_grants.md) | Reconcile encrypted ENV team grants |
 | [pb env grants sync](pb_env_grants_sync.md) | Accept pending team grants into this account's encrypted vault |
@@ -188,7 +188,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb recordings start](pb_recordings_start.md) | Start recording the terminal session you are attached to |
 | [pb recordings stop](pb_recordings_stop.md) | Stop the recording of the terminal session you are attached to |
 | [pb relay](pb_relay.md) | Inspect hosted and self-hosted relays |
-| [pb relay list](pb_relay_list.md) | List hosted and self-hosted relays |
+| [pb relay list](pb_relay_list.md) | List Paperboat relay regions and self-hosted relays |
 | [pb reset](pb_reset.md) | Remove the current Paperboat setup before fresh enrollment |
 | [pb resolve](pb_resolve.md) | Resolve a peer machine's loopback address and forwarded ports |
 | [pb rsync](pb_rsync.md) | Run rsync with Paperboat machine resolution |

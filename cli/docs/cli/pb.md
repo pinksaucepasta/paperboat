@@ -75,7 +75,7 @@ pb [environment] [new] [flags]
 * [pb daemon](pb_daemon.md)	 - Paperboat endpoint daemon
 * [pb doctor](pb_doctor.md)	 - Check Paperboat connectivity and readiness
 * [pb domain](pb_domain.md)	 - Add your own domains to the workspace
-* [pb edge](pb_edge.md)	 - Inspect tunnel edges
+* [pb edge](pb_edge.md)	 - Inspect the regions tunnels and previews are served from
 * [pb env](pb_env.md)	 - Manage automatic global ENV and device overrides
 * [pb environments](pb_environments.md)	 - List enrolled machines available to this account
 * [pb exec](pb_exec.md)	 - Execute an exact command on a machine
