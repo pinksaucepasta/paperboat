@@ -846,13 +846,13 @@ test_reset_lifecycle() {
     [ "$device" != apple ] || password="$APPLE_PASS"
     # Phase 1 resets and interrupts the first pair; a reset signs the device out, so ANOTHER device of the account
     # lists machines: the old record, its name and its local address must still be there (make-before-break).
-    out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py reset" 2>&1); status=$?
+    out=$(printf '%s\n' "$password" | device_py "$device" reset_lifecycle.py reset 2>&1); status=$?
     checker=$CLIENT; [ "$checker" != "$device" ] || checker=$PEER
     if [ "$status" = 0 ]; then
       listing=$(on "$checker" "~/.local/bin/pb machine list --json" 2>&1)
       python3 -c 'import json,sys;r=json.loads(sys.argv[1].splitlines()[-1]);m=[x for x in json.loads(sys.argv[2])["machines"] if x["id"]==r["old_machine_id"]];assert r["assigned_ip"] and m and m[0]["alias"]==r["alias"] and m[0].get("assigned_ip")==r["assigned_ip"]' "$out" "$listing" 2>/dev/null || { status=1; out="a failed pair after reset lost the old record, its name or its address: $out"; }
     fi
-    [ "$status" != 0 ] || { out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py pair" 2>&1); status=$?; }
+    [ "$status" != 0 ] || { out=$(printf '%s\n' "$password" | device_py "$device" reset_lifecycle.py pair 2>&1); status=$?; }
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="reset-lifecycle" and r["status"]=="PASS" and r["old_record_removed"] and r["local_address_kept"] and r["new_record_same_alias"] and r["inbox_preserved"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "failed pair after reset kept the old record, name and address; then reset + pair: same name and local address, old record removed, Inbox kept"
     else
@@ -877,7 +877,7 @@ test_tunnel_domain() {
       continue
     fi
     on "$device" "umask 077; cat > /tmp/$RUN_ID/fixtures-token" < "$FINAL_FIXTURES_TOKEN_FILE"
-    out=$(on "$device" "python3 /tmp/$RUN_ID/tunnel_domain.py --fixtures-url $FINAL_FIXTURES_URL --fixtures-token-file /tmp/$RUN_ID/fixtures-token --zone $SMOKE_DNS_ZONE" 2>&1); status=$?
+    out=$(device_py "$device" tunnel_domain.py --fixtures-url $FINAL_FIXTURES_URL --fixtures-token-file /tmp/$RUN_ID/fixtures-token --zone $SMOKE_DNS_ZONE 2>&1); status=$?
     on "$device" "rm -f /tmp/$RUN_ID/fixtures-token" >/dev/null 2>&1
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);assert r["check"]=="tunnel-domain" and r["status"]=="PASS" and r["domain_add_list_instructions_verify_remove"] and r["ephemeral_start_stop"] and r["served_over_https"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "C089 C100-C105 C123: domain add/list/instructions/verify/serve/remove, ephemeral start/stop"

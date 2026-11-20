@@ -697,6 +697,7 @@ TLIST=($DEVICES)
         for script in ('terminal_lifecycle.py', 'session_lifecycle.py', '$script $target$extra'):
             self.assertIn('device_py "$source" ' + ('"$script" $target$extra' if script.startswith('$') else script), text)
         self.assertNotIn('on "$source" "python3', text)
+        self.assertNotRegex(text, r'\bon "\$(source|device)" "python3')
 
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
