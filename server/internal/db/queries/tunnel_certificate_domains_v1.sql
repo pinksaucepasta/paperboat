@@ -80,6 +80,28 @@ WHERE d.certificate_strategy = 'on_demand_leaf'
 ORDER BY d.id
 LIMIT sqlc.arg(row_limit);
 
+-- name: GetExactTunnelCertificateDomainForEdgeV1 :one
+-- A verified custom domain the edge serves, with an active certificate: the edge asks for it when it has none (or
+-- only one about to expire) because the push that carried it missed this edge.
+SELECT d.*
+FROM tunnel_domains AS d
+WHERE d.match_type = 'exact'
+  AND d.hostname = sqlc.arg(hostname)
+  AND d.ownership_state = 'verified'
+  AND d.conflict_state = 'clear'
+  AND d.certificate_state = 'ready'
+  AND d.certificate_reference IS NOT NULL
+  AND d.deleted_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM tunnel_route_ready_edges_v1 AS a
+    WHERE a.route_id = d.route_id AND a.tunnel_id = d.tunnel_id AND a.account_id = d.account_id
+      AND a.edge_node_id = sqlc.arg(edge_node_id)
+      AND a.edge_process_epoch = sqlc.arg(edge_process_epoch)
+  )
+ORDER BY d.id
+LIMIT 1;
+
 -- Preview domains are lease-bound aliases, so their certificate worker uses
 -- the same DNS/certificate/distribution due rules as durable domains while
 -- retaining the preview target fence. Lease identity and expiry are resolved

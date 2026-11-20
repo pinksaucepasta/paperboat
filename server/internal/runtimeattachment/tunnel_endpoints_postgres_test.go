@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
@@ -472,6 +474,23 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 			t.Fatalf("certificate target %q is not one of the agent's edges", target.EdgeNodeID)
 		}
 	}
+	// An edge that missed the push of its domain's certificate asks for it by name: the server finds the domain only
+	// for an edge that serves its route, and only once it has an active certificate.
+	exact := func(node, epoch string) error {
+		_, err := f.database.Queries().GetExactTunnelCertificateDomainForEdgeV1(f.ctx, dbsqlc.GetExactTunnelCertificateDomainForEdgeV1Params{Hostname: "custom-" + f.prefix + ".example.test", EdgeNodeID: node, EdgeProcessEpoch: epoch})
+		return err
+	}
+	if err := exact(targets[0].EdgeNodeID, targets[0].EdgeProcessEpoch); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("domain without a certificate found for its edge: %v", err)
+	}
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='ready',certificate_reference='tcert_'||$2,certificate_expires_at=now()+interval '60 days' WHERE id=$1`, domain, f.prefix)
+	if err := exact(targets[0].EdgeNodeID, targets[0].EdgeProcessEpoch); err != nil {
+		t.Fatalf("domain with a certificate not found for its serving edge: %v", err)
+	}
+	if err := exact(targets[0].EdgeNodeID, "epoch_not_serving"); !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("domain found for an edge process that does not serve it: %v", err)
+	}
+	f.exec(t, `UPDATE tunnel_domains SET certificate_state='issuing' WHERE id=$1`, domain)
 	// `pb tunnel route add --wait` on an engine tunnel ends: the route operation settles once the
 	// engine's edges serve the route's current generation (it waited on connector assignments only).
 	routeOperation := "op_route_" + f.prefix
