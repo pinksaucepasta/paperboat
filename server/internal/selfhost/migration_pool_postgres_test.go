@@ -1,6 +1,7 @@
 package selfhost
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,7 +63,7 @@ func TestRegionBackfillMigrationIsBatchedAndTerminates(t *testing.T) {
 	f := newPairFixture(t)
 	prefix := "backfill-" + f.stamp
 	t.Cleanup(func() {
-		if _, err := f.store.SQL().ExecContext(t.Context(), `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id LIKE $1`, prefix+"%"); err != nil {
+		if _, err := f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id LIKE $1`, prefix+"%"); err != nil {
 			t.Errorf("cleanup: %v", err)
 		}
 	})
