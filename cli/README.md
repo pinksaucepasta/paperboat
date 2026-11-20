@@ -303,13 +303,14 @@ not retryable): free space there or move its Inbox with `pb inbox set`, then sen
 Use `pb send destination set <machine>` for a default recipient, and `pb send list`,
 `pb send status <transfer-id>`, or `pb send cancel <transfer-id>` with `--on <machine>`
 to manage an outgoing delivery. `pb inbox` controls the receiving directory and
-incoming team requests. `pb edge list` shows edges allowed by the active
+incoming team requests. `pb edge list` shows the regions allowed by the active
 workspace's tunnel mode; `pb relay list` shows relays allowed by the Personal
-relay pool. Tunnel edge ownership is workspace-scoped and exclusive: managed-only
-or self-hosted-only, with no mixed mode or managed fallback. A workspace can select
-up to 32 self-hosted tunnel installations; Paperboat chooses at most two ready
-edges per tunnel publication and one per preview. Relay pools remain Personal-
-scoped and support mixed or self-hosted-only modes.
+relay pool, Paperboat's per region. Tunnel edge ownership is workspace-scoped and exclusive: managed-only
+or self-hosted-only, with no mixed mode or managed fallback. A workspace is served
+from a pair of regions (primary and backup), both Paperboat's or both your own; a
+region is one or more servers, and a machine holds a connection to every ready
+server of both regions. A workspace can select up to 32 self-hosted tunnel
+installations. Relay pools remain Personal-scoped and support mixed or self-hosted-only modes.
 
 Self-hosted browser and runtime publications require customer-owned domains. Set
 their DNS records to exactly the verified public ingress addresses Paperboat

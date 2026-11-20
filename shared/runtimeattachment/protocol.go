@@ -34,6 +34,12 @@ const MaximumAdmissions = 4096
 // browser still on it then reconnects at once to the new generation (terminalend.Moved).
 const DrainLimit = 6 * time.Hour
 const MaximumEdgeCandidates = 32
+
+// MaximumRegionCarriers is how many edge nodes of a workspace's two regions one machine holds a carrier to.
+const MaximumRegionCarriers = 8
+
+// MaximumCarriers adds the managed terminal edge a self-hosted-only workspace holds next to its own regions.
+const MaximumCarriers = MaximumRegionCarriers + 1
 const HostPath = "/v1/runtime/carrier-attachment"
 const EdgePullPath = "/v1/edge/runtime/carrier-admissions"
 const EdgeObservePath = "/v1/edge/runtime/carrier-observations"

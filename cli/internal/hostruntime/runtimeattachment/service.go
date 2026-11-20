@@ -609,8 +609,8 @@ func carriersReady(lives map[string]*live, publisherKey string, noTerminalEdge b
 	return true
 }
 
-// maxHeldCarriers is the admitted carriers (a pair, and a managed edge for terminals next to a self-hosted pair): a ready carrier the server no longer lists stays up while the pair has room.
-const maxHeldCarriers = 3
+// maxHeldCarriers is the admitted carriers: every ready node of the pair's two regions, and a managed terminal edge next to a self-hosted pair. A ready carrier the server no longer lists stays up while the pair has room; the edge ends it when its admission leaves the pull snapshot (a node past its drain deadline).
+const maxHeldCarriers = runtimewire.MaximumCarriers
 
 // carrierRetired reports whether a live carrier is closed. The server stops listing an edge whose control heartbeat
 // went stale (30 s), which is also what a control outage between that edge and the server looks like, while the

@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
-func TestEdgeListUsesAccountInventoryAndPaginates(t *testing.T) {
+func TestEdgeListShowsPaperboatRegionsAndPaginates(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.Header.Get("Authorization") == "" {
@@ -49,9 +49,9 @@ func TestEdgeListUsesAccountInventoryAndPaginates(t *testing.T) {
 			return
 		}
 		if r.URL.Query().Get("after") == "" {
-			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"edge_a","region":"fsn1","status":"ready"}],"next_cursor":"edge_a","observed_at":"2026-09-23T00:00:00Z"}}`))
-		} else if r.URL.Query().Get("after") == "edge_a" {
-			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"edge_b","region":"hel1","status":"draining"}],"observed_at":"2026-09-23T00:00:01Z"}}`))
+			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"frankfurt","name":"Frankfurt","status":"ready"}],"next_cursor":"frankfurt","observed_at":"2026-09-23T00:00:00Z"}}`))
+		} else if r.URL.Query().Get("after") == "frankfurt" {
+			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"helsinki","name":"Helsinki","status":"draining"}],"observed_at":"2026-09-23T00:00:01Z"}}`))
 		} else {
 			http.Error(w, "bad cursor", http.StatusBadRequest)
 		}
@@ -65,17 +65,18 @@ func TestEdgeListUsesAccountInventoryAndPaginates(t *testing.T) {
 		t.Fatalf("code=%d output=%s", code, output.String())
 	}
 	var document struct {
-		Schema string `json:"schema"`
-		Edges  []struct {
+		Schema  string `json:"schema"`
+		Regions []struct {
 			ID     string `json:"id"`
+			Name   string `json:"name"`
 			Status string `json:"status"`
-		} `json:"edges"`
+		} `json:"regions"`
 	}
-	if err := json.Unmarshal(output.Bytes(), &document); err != nil || document.Schema != "paperboat.edge-list/v1" || len(document.Edges) != 2 || document.Edges[0].ID != "edge_a" || document.Edges[1].Status != "draining" || requests != 2 {
+	if err := json.Unmarshal(output.Bytes(), &document); err != nil || document.Schema != "paperboat.edge-list/v1" || len(document.Regions) != 2 || document.Regions[0].ID != "frankfurt" || document.Regions[0].Name != "Frankfurt" || document.Regions[1].Status != "draining" || requests != 2 {
 		t.Fatalf("document=%+v requests=%d error=%v", document, requests, err)
 	}
 	output.Reset()
-	if code := run(context.Background(), []string{"--config", configPath, "edge", "list"}, &output, &output); code != 0 || !strings.Contains(output.String(), "edge_a") || !strings.Contains(output.String(), "hel1") {
+	if code := run(context.Background(), []string{"--config", configPath, "edge", "list"}, &output, &output); code != 0 || !strings.Contains(output.String(), "REGION  NAME") || !strings.Contains(output.String(), "Frankfurt") || !strings.Contains(output.String(), "Helsinki") {
 		t.Fatalf("human code=%d output=%s", code, output.String())
 	}
 }
@@ -87,8 +88,8 @@ func TestEdgeListRespectsTunnelPoolByActiveWorkspace(t *testing.T) {
 		wantSelfhost                                   int
 	}{
 		{"managed_only", "managed-only", `[]`, `[]`, "", true, 0},
-		{"personal_selfhosted_only_allows_more_than_two", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"Edge one","capability":"tunnel","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"install_2","node_id":"node_2","name":"Edge two","capability":"tunnel","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":true},{"installation_id":"install_3","node_id":"node_3","name":"Edge three","capability":"tunnel","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":true}]`, `["install_1","install_2","install_3"]`, "", false, 3},
-		{"team_selfhosted_only", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"Team edge","capability":"tunnel","scope_kind":"team","scope_id":"team-one","enrollment_state":"enrolled","ready":true}]`, `["install_1"]`, "team-one", false, 1},
+		{"personal_selfhosted_only_allows_more_than_two", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"Edge one","capability":"tunnel","region":"home","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"install_2","node_id":"node_2","name":"Edge two","capability":"tunnel","region":"home","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":true},{"installation_id":"install_3","node_id":"node_3","name":"Edge three","capability":"tunnel","region":"home","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":true}]`, `["install_1","install_2","install_3"]`, "", false, 3},
+		{"team_selfhosted_only", "self-hosted-only", `[{"installation_id":"install_1","node_id":"node_1","name":"Team edge","capability":"tunnel","region":"home","scope_kind":"team","scope_id":"team-one","enrollment_state":"enrolled","ready":true}]`, `["install_1"]`, "team-one", false, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hostedRequests := 0
@@ -116,7 +117,7 @@ func TestEdgeListRespectsTunnelPoolByActiveWorkspace(t *testing.T) {
 					_, _ = w.Write([]byte(`{"data":{"mode":"` + tc.mode + `","installation_ids":` + tc.selected + `}}`))
 				case "/v1/edges":
 					hostedRequests++
-					_, _ = w.Write([]byte(`{"data":{"items":[{"id":"hosted_1","region":"fsn1","status":"ready"}],"observed_at":"2026-09-23T00:00:00Z"}}`))
+					_, _ = w.Write([]byte(`{"data":{"items":[{"id":"fsn1","name":"Falkenstein","status":"ready"}],"observed_at":"2026-09-23T00:00:00Z"}}`))
 				default:
 					http.NotFound(w, r)
 				}
@@ -135,18 +136,21 @@ func TestEdgeListRespectsTunnelPoolByActiveWorkspace(t *testing.T) {
 				t.Fatalf("code=%d output=%s", code, output.String())
 			}
 			var result struct {
-				Edges []struct {
+				Regions []struct {
 					Source string `json:"source"`
-				} `json:"edges"`
+					Nodes  []struct {
+						Name string `json:"name"`
+					} `json:"nodes"`
+				} `json:"regions"`
 			}
 			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
 			hosted, selfhost := false, 0
-			for _, edge := range result.Edges {
-				hosted = hosted || edge.Source == "paperboat"
-				if edge.Source == "self-hosted" {
-					selfhost++
+			for _, region := range result.Regions {
+				hosted = hosted || region.Source == "paperboat"
+				if region.Source == "self-hosted" {
+					selfhost += len(region.Nodes)
 				}
 			}
 			if hosted != tc.wantHosted || selfhost != tc.wantSelfhost || (hostedRequests > 0) != tc.wantHosted {
@@ -163,18 +167,50 @@ func TestRelayListResultsUseNativeAuthorityAndSelectedPool(t *testing.T) {
 		{NodeID: "node_1", Region: "hel1", State: "ready", ObservedAt: now.Unix() - 3, ExpiresAt: now.Unix() + 30, Roles: []string{"relay"}, Transports: []string{"derp_quic"}},
 		{NodeID: "edge_1", Region: "fsn1", State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Unix() + 30, Roles: []string{"edge"}, Transports: []string{"http3"}},
 	}}
-	selected := []api.SelfhostInstallation{{InstallationID: "install_1", NodeID: "node_1", Name: "My relay", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Selected: true}, {InstallationID: "install_2", NodeID: "node_2", Name: "Offline relay", ScopeKind: "team", ScopeID: "team_1", EnrollmentState: "enrolled", Selected: true}}
-	mixed := relayListResults(inventory, selected, "mixed", now)
-	if len(mixed) != 3 || mixed[0].RelayID != "hosted_1" || mixed[0].Status != "reported_ready" || mixed[1].Name != "My relay" || mixed[1].Source != "self-hosted" || mixed[2].RelayID != "node_2" || mixed[2].Status != "unavailable" {
+	selected := []api.SelfhostInstallation{{InstallationID: "install_1", NodeID: "node_1", Name: "My relay", Region: "hel1", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Selected: true}, {InstallationID: "install_2", NodeID: "node_2", Name: "Offline relay", Region: "home", ScopeKind: "team", ScopeID: "team_1", EnrollmentState: "enrolled", Selected: true}}
+	names := map[string]string{"fsn1": "Falkenstein"}
+	mixed := relayListResults(inventory, selected, names, "mixed", now)
+	if len(mixed) != 3 || mixed[0].RelayID != "" || mixed[0].Name != "Falkenstein" || mixed[0].Region != "fsn1" || mixed[0].Status != "reported_ready" || mixed[1].Name != "My relay" || mixed[1].Source != "self-hosted" || mixed[2].RelayID != "node_2" || mixed[2].Region != "home" || mixed[2].Status != "unavailable" {
 		t.Fatalf("mixed relays = %+v", mixed)
 	}
-	strict := relayListResults(inventory, selected, "self-hosted-only", now)
+	strict := relayListResults(inventory, selected, names, "self-hosted-only", now)
 	if len(strict) != 2 || strict[0].RelayID != "node_1" || strict[1].RelayID != "node_2" {
 		t.Fatalf("strict relays = %+v", strict)
 	}
-	stale := relayListResults(inventory, selected, "mixed", now.Add(20*time.Second))
+	stale := relayListResults(inventory, selected, names, "mixed", now.Add(20*time.Second))
 	if stale[0].Status != "unavailable" || stale[1].Status != "unavailable" {
 		t.Fatalf("stale relays = %+v", stale)
+	}
+}
+
+// Paperboat's relays are shown per region: two relays of one region are one row, ready while either is,
+// and no relay id or node name of a Paperboat relay reaches the output.
+func TestRelayListFoldsPaperboatRelaysIntoRegions(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	relay := func(node, region, state string) localapi.RelayCandidate {
+		return localapi.RelayCandidate{NodeID: node, Region: region, State: state, ObservedAt: now.Unix() - 1, ExpiresAt: now.Unix() + 30, Roles: []string{"relay"}, Transports: []string{"derp_quic"}}
+	}
+	inventory := localapi.RelayInventory{Candidates: []localapi.RelayCandidate{relay("relay_a", "frankfurt", "draining"), relay("relay_b", "frankfurt", "ready"), relay("relay_c", "mumbai", "draining")}}
+	global := []api.SelfhostInstallation{{NodeID: "relay_a", Name: "Secret node name", Region: "frankfurt", ScopeKind: "global", ScopeID: "global", EnrollmentState: "enrolled"}}
+	results := relayListResults(inventory, global, map[string]string{"frankfurt": "Frankfurt"}, "mixed", now)
+	if len(results) != 2 || results[0].Region != "frankfurt" || results[0].Name != "Frankfurt" || results[0].Status != "reported_ready" || results[1].Name != "mumbai" || results[1].Status != "unavailable" {
+		t.Fatalf("regions = %+v", results)
+	}
+	encoded, err := json.Marshal(results)
+	if err != nil || strings.Contains(string(encoded), "relay_") || strings.Contains(string(encoded), "Secret") {
+		t.Fatalf("a Paperboat node leaked into %s (%v)", encoded, err)
+	}
+}
+
+func TestEdgeRegionsGroupOwnServersUnderTheirRegion(t *testing.T) {
+	own := []api.SelfhostInstallation{
+		{Name: "rack-1", Region: "home", Ready: false}, {Name: "rack-2", Region: "home", Ready: true}, {Name: "vps", Region: "backup", Ready: false},
+	}
+	regions := edgeRegions([]api.HostedEdge{{ID: "frankfurt", Name: "Frankfurt", Status: "ready"}}, own)
+	if len(regions) != 3 || regions[0].Source != "paperboat" || len(regions[0].Nodes) != 0 ||
+		regions[1].ID != "home" || regions[1].Status != "ready" || len(regions[1].Nodes) != 2 || regions[1].Nodes[0].Name != "rack-1" || regions[1].Nodes[0].Status != "unavailable" ||
+		regions[2].ID != "backup" || regions[2].Status != "unavailable" {
+		t.Fatalf("regions = %+v", regions)
 	}
 }
 
@@ -205,11 +241,11 @@ func TestRelayListKeepsUnselectedSignedIdentityWithoutInventingOfflineEntries(t 
 		{NodeID: "offline_selected", Name: "Selected offline", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Selected: true},
 		{NodeID: "offline_unselected", Name: "Unselected offline", ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled"},
 	}
-	mixed := relayListResults(candidates, metadata, "mixed", now)
-	if len(mixed) != 3 || mixed[0].Name != "Shared relay" || mixed[0].Source != "self-hosted" || mixed[0].Status != "reported_ready" || mixed[1].Name != "Paperboat relay" || mixed[1].Source != "paperboat" || mixed[2].RelayID != "offline_selected" || mixed[2].Status != "unavailable" {
+	mixed := relayListResults(candidates, metadata, nil, "mixed", now)
+	if len(mixed) != 3 || mixed[0].Name != "Shared relay" || mixed[0].Source != "self-hosted" || mixed[0].Status != "reported_ready" || mixed[1].Name != "fsn1" || mixed[1].Source != "paperboat" || mixed[2].RelayID != "offline_selected" || mixed[2].Status != "unavailable" {
 		t.Fatalf("mixed relays=%+v", mixed)
 	}
-	strict := relayListResults(candidates, metadata, "self-hosted-only", now)
+	strict := relayListResults(candidates, metadata, nil, "self-hosted-only", now)
 	if len(strict) != 1 || strict[0].RelayID != "offline_selected" {
 		t.Fatalf("strict relays=%+v", strict)
 	}
@@ -225,7 +261,7 @@ func TestSelfhostInventoryRetainsAuthorizedEnrolledMetadataAndComputesSelection(
 					if invalid {
 						scope = ""
 					}
-					fmt.Fprint(w, selfhostTestInventoryJSON(fmt.Sprintf(`[{"installation_id":"shared","node_id":"shared_node","name":"Shared relay","capability":"relay","scope_kind":%q,"scope_id":"team_1","enrollment_state":"enrolled","ready":true},{"installation_id":"selected","node_id":"selected_node","name":"Offline selected","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"pending","node_id":"pending_node","name":"Pending relay","capability":"relay","scope_kind":"account","scope_id":"account_1","enrollment_state":"pending","ready":false}]`, scope)))
+					fmt.Fprint(w, selfhostTestInventoryJSON(fmt.Sprintf(`[{"installation_id":"shared","node_id":"shared_node","name":"Shared relay","capability":"relay","region":"home","scope_kind":%q,"scope_id":"team_1","enrollment_state":"enrolled","ready":true},{"installation_id":"selected","node_id":"selected_node","name":"Offline selected","capability":"relay","region":"home","scope_kind":"account","scope_id":"account_1","enrollment_state":"enrolled","ready":false},{"installation_id":"pending","node_id":"pending_node","name":"Pending relay","capability":"relay","region":"home","scope_kind":"account","scope_id":"account_1","enrollment_state":"pending","ready":false}]`, scope)))
 				} else if r.URL.Path == "/v1/selfhost/pools/relay" {
 					fmt.Fprint(w, `{"data":{"mode":"mixed","installation_ids":["selected"]}}`)
 				} else {

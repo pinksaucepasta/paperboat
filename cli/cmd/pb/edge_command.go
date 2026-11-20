@@ -11,30 +11,63 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 )
 
-type edgeListItem struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name,omitempty"`
-	Source        string     `json:"source"`
-	Region        string     `json:"region,omitempty"`
-	Status        string     `json:"status"`
-	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
+// edgeRegion is one region of the tunnel pool. Paperboat's regions show no servers; the owner's own
+// servers are listed by name under their region.
+type edgeRegion struct {
+	ID     string     `json:"id"`
+	Name   string     `json:"name"`
+	Source string     `json:"source"`
+	Status string     `json:"status"`
+	Nodes  []edgeNode `json:"nodes,omitempty"`
+}
+
+type edgeNode struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// edgeRegions lists Paperboat's regions, then the owner's own selected servers grouped by the region
+// they were enrolled in (a region is ready while any of its servers is).
+func edgeRegions(hosted []api.HostedEdge, own []api.SelfhostInstallation) []edgeRegion {
+	regions := make([]edgeRegion, 0, len(hosted)+len(own))
+	for _, edge := range hosted {
+		regions = append(regions, edgeRegion{ID: edge.ID, Name: edge.Name, Source: "paperboat", Status: edge.Status})
+	}
+	index := map[string]int{}
+	for _, installation := range own {
+		status := "unavailable"
+		if installation.Ready {
+			status = "ready"
+		}
+		i, ok := index[installation.Region]
+		if !ok {
+			i = len(regions)
+			index[installation.Region] = i
+			regions = append(regions, edgeRegion{ID: installation.Region, Name: installation.Region, Source: "self-hosted", Status: "unavailable"})
+		}
+		regions[i].Nodes = append(regions[i].Nodes, edgeNode{Name: installation.Name, Status: status})
+		if status == "ready" {
+			regions[i].Status = "ready"
+		}
+	}
+	return regions
 }
 
 func edgeCommand() *cobra.Command {
-	root := &cobra.Command{Use: "edge", Short: "Inspect tunnel edges", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
-	list := &cobra.Command{Use: "list", Short: "List managed or selected self-hosted tunnel edges", Long: `List tunnel edge nodes for the active workspace. Managed-only mode lists
-Paperboat-managed edges. Self-hosted-only mode lists only selected self-hosted
-edges, including ones that are currently unavailable. It never falls back to
-managed edges. Self-hosted browser publications require a verified customer
-domain and a ready certificate.
+	root := &cobra.Command{Use: "edge", Short: "Inspect the regions tunnels and previews are served from", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, _ []string) error { return command.Help() }}
+	list := &cobra.Command{Use: "list", Short: "List the regions tunnels and previews are served from", Long: `List the regions tunnels and previews are served from for the active
+workspace. Managed-only mode lists Paperboat's regions. Self-hosted-only mode
+lists only your own servers, one row per server under the region you gave it,
+including ones that are currently unavailable. It never falls back to
+Paperboat's regions. Self-hosted browser publications require a verified
+customer domain and a ready certificate.
 
-Listing an edge never guarantees admission for a particular route; domain and
+Listing a region never guarantees admission for a particular route; domain and
 route authorization still apply.
 
-The table identifies each edge's source, region, status, and last heartbeat.
-Self-hosted readiness comes from the control plane; hosted status is an
-observed node state. Use --json for paperboat.edge-list/v1 output with the
-active workspace's pool mode and edge list.`, Example: "  pb edge list\n  pb edge list --workspace acme\n  pb edge list --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
+The table identifies each region's name, source and status. A region is ready
+while any of its servers is. Use --json for paperboat.edge-list/v1 output with
+the active workspace's pool mode and region list.`, Example: "  pb edge list\n  pb edge list --workspace acme\n  pb edge list --json", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
 		client, err := backendClient(actionContext(command, args))
 		if err != nil {
 			return err
@@ -52,63 +85,43 @@ active workspace's pool mode and edge list.`, Example: "  pb edge list\n  pb edg
 			return friendlyCommandError(err)
 		}
 		selected := make([]api.SelfhostInstallation, 0, len(selfhost))
-		metadata := make(map[string]api.SelfhostInstallation, len(selfhost))
 		for _, installation := range selfhost {
-			metadata[installation.NodeID] = installation
 			if installation.Selected && installation.ScopeKind != "global" {
 				selected = append(selected, installation)
 			}
 		}
-		showHosted := pool.Mode == "managed-only"
-		items := make([]edgeListItem, 0, len(selfhost))
+		var hosted []api.HostedEdge
 		observedAt := time.Now().UTC()
-		if showHosted {
+		if pool.Mode == "managed-only" {
 			page, err := client.ListHostedEdges(command.Context())
 			if err != nil {
 				return friendlyCommandError(err)
 			}
-			observedAt = page.ObservedAt
-			for _, edge := range page.Items {
-				items = append(items, edgeListItem{ID: edge.ID, Name: metadata[edge.ID].Name, Source: "paperboat", Region: edge.Region, Status: edge.Status, LastHeartbeat: edge.LastHeartbeat})
-			}
+			observedAt, hosted = page.ObservedAt, page.Items
 		}
-		for _, installation := range selected {
-			status := "unavailable"
-			if installation.Ready {
-				status = "ready"
-			}
-			items = append(items, edgeListItem{ID: installation.NodeID, Name: installation.Name, Source: "self-hosted", Status: status})
-		}
+		regions := edgeRegions(hosted, selected)
 		if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
-			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema": "paperboat.edge-list/v1", "observed_at": observedAt, "pool_mode": pool.Mode, "edges": items})
+			return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema": "paperboat.edge-list/v1", "observed_at": observedAt, "pool_mode": pool.Mode, "regions": regions})
 		}
-		if len(items) == 0 {
-			message := "No tunnel edges are available in the active workspace."
+		if len(regions) == 0 {
+			message := "No regions are available in the active workspace."
 			if pool.Mode == "self-hosted-only" {
-				message = "No selected self-hosted tunnel edge is visible in the active workspace. Managed edges are not used in self-hosted-only mode."
+				message = "No selected self-hosted region is visible in the active workspace. Paperboat's regions are not used in self-hosted-only mode."
 			}
 			_, err = fmt.Fprintln(command.OutOrStdout(), message)
 			return err
 		}
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
-		fmt.Fprintln(writer, "EDGE\tNAME\tSOURCE\tREGION\tSTATUS\tLAST HEARTBEAT")
-		for _, edge := range items {
-			name, region, heartbeat := edge.Name, edge.Region, "-"
-			if name == "" {
-				name = "-"
+		fmt.Fprintln(writer, "REGION\tNAME\tSOURCE\tSTATUS")
+		for _, region := range regions {
+			if len(region.Nodes) == 0 {
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n", region.ID, region.Name, region.Source, region.Status)
 			}
-			if region == "" {
-				region = "-"
+			for _, node := range region.Nodes {
+				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n", region.ID, node.Name, region.Source, node.Status)
 			}
-			if edge.LastHeartbeat != nil {
-				heartbeat = edge.LastHeartbeat.Local().Format(time.RFC3339)
-			}
-			fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", edge.ID, name, edge.Source, region, edge.Status, heartbeat)
 		}
-		if err := writer.Flush(); err != nil {
-			return err
-		}
-		return err
+		return writer.Flush()
 	}}
 	list.Flags().Bool("json", false, "print JSON")
 	root.AddCommand(list)

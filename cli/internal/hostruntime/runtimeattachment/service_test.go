@@ -76,9 +76,9 @@ func TestUnlistedReadyCarrierStaysUpWhilePairHasRoom(t *testing.T) {
 		held          int
 		retired       bool
 	}{
-		{ready: true, wanted: true, held: 3, retired: false},
-		{ready: true, wanted: false, held: 3, retired: false}, // edge cut from control: server stopped listing it
-		{ready: true, wanted: false, held: 4, retired: true},  // placement moved on to another set
+		{ready: true, wanted: true, held: maxHeldCarriers, retired: false},
+		{ready: true, wanted: false, held: maxHeldCarriers, retired: false},    // edge cut from control: server stopped listing it
+		{ready: true, wanted: false, held: maxHeldCarriers + 1, retired: true}, // a replacement node joined the answer
 		{ready: false, wanted: true, held: 1, retired: true},
 		{ready: false, wanted: false, held: 1, retired: true},
 	} {
@@ -340,6 +340,8 @@ type runtimeCarrierHarness struct {
 	edges chan edgeDial
 	// actives receives each active edge node the host asks the control plane for.
 	actives chan string
+	// update changes the attachment answer the control plane gives from now on.
+	update func(func(*admission))
 }
 
 type edgeDial struct {
@@ -385,6 +387,11 @@ func startRuntimeCarrier(t *testing.T, ctx context.Context, options runtimeCarri
 		}
 		return &http.Response{StatusCode: options.status(), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(payload)), Request: request}, nil
 	})
+	h.update = func(change func(*admission)) {
+		mu.Lock()
+		defer mu.Unlock()
+		change(&document)
+	}
 	service := newRuntimeAttachmentTestService(t, transport)
 	service.config.Wake = options.wake
 	h.service = service
