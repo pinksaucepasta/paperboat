@@ -22,7 +22,9 @@ class ExampleTargets(unittest.TestCase):
             for match in KEY.finditer((ROOT / name).read_text(errors='ignore')):
                 used.update(key for key in match.groups() if key)
         # 'smoke' and 'ssh' are dev_targets.py subcommands, 'run' and 'if' are shell words, windows_name is derived.
-        missing = used - set(self.example) - {'smoke', 'ssh', 'run', 'if', 'windows_name'}
+        # These four relocate local files and default to the checkout: setting them in the example would redirect every test.
+        optional = {'results_dir', 'green_dir', 'deployment_log', 'build_queue_dir'}
+        missing = used - set(self.example) - optional - {'smoke', 'ssh', 'run', 'if', 'windows_name'}
         self.assertEqual(missing, set())
 
     def test_example_logins_and_urls_use_the_test_domain(self):

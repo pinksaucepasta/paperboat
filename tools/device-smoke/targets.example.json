@@ -35,10 +35,6 @@
     "SMOKE_MACOS_PASSWORD": "MACOS_PASSWORD",
     "SMOKE_WINDOWS_PASSWORD": "WINDOWS_PASSWORD"
   },
-  "results_dir": "~/paperboat-dev/smoke-results",
-  "green_dir": "~/paperboat-dev/green",
-  "deployment_log": "~/paperboat-dev/deployments.log",
-  "build_queue_dir": "~/paperboat-dev/build-queue",
   "linux_ci_hosts": [
     "linux-ci-1",
     "linux-ci-2",

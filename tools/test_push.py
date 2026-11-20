@@ -107,7 +107,7 @@ class PushTests(unittest.TestCase):
                 git('git', 'merge-base', '--is-ancestor', ancestor, remote_head,
                     cwd=repo.worktree, env=repo.env)
             self.assertEqual(repo.main_head(), upstream)
-            self.assertEqual(repo.refs().splitlines(), ['refs/heads/' + branch, 'refs/heads/main'])
+            self.assertEqual(repo.refs().splitlines(), ['refs/heads/main', 'refs/heads/' + branch])
 
     def test_failed_required_check_fails_the_push(self):
         done, _ = self.run_case(state='OPEN', check='FAILURE')

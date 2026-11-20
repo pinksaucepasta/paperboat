@@ -70,6 +70,9 @@ class CITestScript(unittest.TestCase):
         (root / "tools").mkdir(parents=True)
         (root / "bin").mkdir()
         shutil.copy2(SCRIPT, root / "tools/ci-test.sh")
+        (root / "tools/device-smoke").mkdir()
+        shutil.copy2(SCRIPT.parent / "device-smoke/dev_targets.py", root / "tools/device-smoke/dev_targets.py")
+        (root / "targets.json").write_text("{}")
         state = root / "state.json"
         state.write_text(json.dumps({"lookups": 0, "appear_after": appear_after, "active_default": active_default,
                                      "active": active or {},
@@ -84,7 +87,7 @@ class CITestScript(unittest.TestCase):
             (root / "bin" / name).write_text(source)
             (root / "bin" / name).chmod(0o755)
         env = dict(os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}", FAKE_STATE=str(state),
-                   FAKE_LOG=str(log), FAKE_ROOT=str(root), FAKE_REMOTE=str(remote))
+                   PB_DEV_TARGETS_FILE=str(root / "targets.json"), FAKE_LOG=str(log), FAKE_ROOT=str(root), FAKE_REMOTE=str(remote))
         result = subprocess.run(["bash", str(root / "tools/ci-test.sh"), "smoke"], env=env, capture_output=True,
                                 text=True, stdin=subprocess.DEVNULL)
         calls = log.read_text().splitlines()

@@ -206,19 +206,19 @@ class RegistrationTest(unittest.TestCase):
         from cryptography import x509
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import ed25519
-        cert_pem, key_pem, pin = staging.carrier_certificate('vantage-b.stg.example.test')
+        cert_pem, key_pem, pin = staging.carrier_certificate(f'{staging.REGION}.stg.example.test')
         cert = x509.load_pem_x509_certificate(cert_pem.encode())
         spki = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
         self.assertEqual(pin, hashlib.sha256(spki).hexdigest())
         self.assertIsInstance(cert.public_key(), ed25519.Ed25519PublicKey)
-        self.assertEqual(cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName), ['vantage-b.stg.example.test'])
+        self.assertEqual(cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName), [f'{staging.REGION}.stg.example.test'])
 
     def test_relay_is_registered_as_a_relay_on_a_public_range_tcp_port_and_replaces_only_its_own_install(self):
         statements, commands = self.register(staging.relay, 'paperboat-relay:stg-test')
         joined = '\n'.join(statements)
         self.assertIn("scope_id='usr_staging' AND capability='relay'", statements[0])
         self.assertIn("ARRAY['relay'],ARRAY['derp_quic','derp_wss']", joined)
-        self.assertIn(f"'vantage-b.stg.example.test',{staging.RELAY_TCP_PORT},{staging.RELAY_QUIC_PORT}", joined)
+        self.assertIn(f"'{staging.REGION}.stg.example.test',{staging.RELAY_TCP_PORT},{staging.RELAY_QUIC_PORT}", joined)
         self.assertIn("'usr_staging','relay','self-hosted-only'", joined)
         self.assertNotIn('control_usage_verification_keys', joined)
         self.assertTrue(10000 <= staging.RELAY_TCP_PORT <= 59999 and 10000 <= staging.RELAY_QUIC_PORT <= 59999 and staging.RELAY_TCP_PORT != staging.RELAY_QUIC_PORT)
