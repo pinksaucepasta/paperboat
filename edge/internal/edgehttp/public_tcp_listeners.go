@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
+	"github.com/pinksaucepasta/paperboat/edge/internal/forward"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
@@ -60,6 +61,31 @@ type PublicTCPListeners struct {
 	connections chan struct{}
 	sharedTLS   *SharedTLSListener
 	browser     *BrowserAccess
+	forwarding  *ForwardHooks
+}
+
+// SetForwarding makes the shared TLS listener forward to other nodes (and take their forwarded visitors). It may be
+// called before or after WrapTLSListener.
+func (p *PublicTCPListeners) SetForwarding(hooks ForwardHooks) {
+	p.mu.Lock()
+	p.forwarding = &hooks
+	shared := p.sharedTLS
+	p.mu.Unlock()
+	if shared != nil {
+		shared.SetForwarding(hooks)
+	}
+}
+
+// Inject hands a visitor another node forwarded to the shared TLS listener (SharedTLSListener.Inject); before the
+// listener exists the node cannot serve it, which a forwarder reads as draining.
+func (p *PublicTCPListeners) Inject(conn net.Conn, visitor net.Addr) error {
+	p.mu.Lock()
+	shared := p.sharedTLS
+	p.mu.Unlock()
+	if shared == nil {
+		return forward.ErrDraining
+	}
+	return shared.Inject(conn, visitor)
 }
 
 // SetBrowserAccess makes the unknown-name page of listeners wrapped afterwards the one the HTTP handler answers
@@ -383,6 +409,9 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	shared.browser = p.browser
 	shared.routeGrace = p.cfg.RouteGrace
 	shared.holdableName = p.cfg.HoldableName
+	if p.forwarding != nil {
+		shared.SetForwarding(*p.forwarding)
+	}
 	p.sharedTLS = shared
 	return shared, nil
 }
