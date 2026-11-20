@@ -49,11 +49,10 @@ func (m *Mesh) heldLoop(ctx context.Context) {
 	}
 }
 
-// holds reports whether this node serves key, re-reading its holdings once (at most every 50 ms) on a miss.
+// holds reports whether this node serves key. It re-reads its holdings at most every 50 ms, so a name that just
+// attached is served at once and one that just left is refused at once (the 250 ms watch tick has not told the
+// peers yet).
 func (m *Mesh) holds(key string) bool {
-	if _, ok := m.held.Load().set[key]; ok {
-		return true
-	}
 	m.heldMu.Lock()
 	recent := time.Since(m.heldAt) < 50*time.Millisecond
 	m.heldMu.Unlock()

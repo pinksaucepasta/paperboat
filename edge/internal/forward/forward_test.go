@@ -139,14 +139,16 @@ func TestForwardHolderDead(t *testing.T) {
 func TestForwardLoopPrevention(t *testing.T) {
 	c := newTrio(t)
 	a, b := c.node(t, "edge-a"), c.node(t, "edge-b")
-	// Both nodes' seeds say the other one holds the name; neither does.
-	a.src.setSeed(appName, "edge-b")
-	b.src.setSeed(appName, "edge-a")
+	a.held.put(appName)
+	b.held.put(appName)
 	cluster(a, b)
 	eventually(t, "a to list b", func() bool { return holdersOf(a, appName) == "edge-b" })
 	eventually(t, "b to list a", func() bool { return holdersOf(b, appName) == "edge-a" })
 
-	// The visitor at a is forwarded to b once; b refuses (not_holder) and never forwards it back.
+	// The name leaves both nodes at once; each one's map still lists the other. The visitor at a is forwarded to b
+	// once; b refuses (not_holder) and never forwards it back.
+	a.held.drop(appName)
+	b.held.drop(appName)
 	status, body, _, err := visit(t, a, appName, c.page.pool)
 	if err != nil || status != 503 {
 		t.Fatalf("visit at a: %d %q %v", status, body, err)
@@ -155,7 +157,10 @@ func TestForwardLoopPrevention(t *testing.T) {
 		t.Fatalf("exactly one stream a->b expected: a=%+v b=%+v", sa, sb)
 	}
 
-	// A visitor injected on b is never forwarded again: the name is not held there, so it gets the not-found page.
+	// A visitor injected on b is never forwarded again, even though b's map lists a, which holds the name again:
+	// b does not hold it, so the visitor gets b's not-found page.
+	a.held.put(appName)
+	eventually(t, "b to list a", func() bool { return holdersOf(b, appName) == "edge-a" })
 	server, client := tcpPair(t)
 	defer client.Close()
 	before := b.mesh.Stats()
@@ -174,6 +179,9 @@ func TestForwardLoopPrevention(t *testing.T) {
 	}
 	if after := b.mesh.Stats(); after.Forwarded != before.Forwarded || after.HolderMiss != before.HolderMiss || after.Unreachable != before.Unreachable {
 		t.Fatalf("b forwarded an injected visitor: %+v -> %+v", before, after)
+	}
+	if a.hits.Load() != 0 {
+		t.Fatal("the injected visitor reached a")
 	}
 }
 
@@ -494,9 +502,9 @@ func TestForwardTCPKeyReachesTCPInjector(t *testing.T) {
 	d.held.put(key)
 	cluster(c2, d)
 	eventually(t, "c to learn the port", func() bool { return holdersOf(c2, key) == "edge-d" })
-	server, client = tcpPair(t)
-	defer client.Close()
-	err := c2.mesh.Forward(context.Background(), server, key)
+	server2, client2 := tcpPair(t)
+	defer client2.Close()
+	err := c2.mesh.Forward(context.Background(), server2, key)
 	var failure *forward.Failure
 	if !errors.As(err, &failure) || !errors.Is(err, forward.ErrUnavailable) {
 		t.Fatalf("forward to a holder without a TCP injector: %v", err)
