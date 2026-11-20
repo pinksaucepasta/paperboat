@@ -473,7 +473,7 @@ func tcpPair(t *testing.T) (server, client net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return routableConn{(<-accepted).(*net.TCPConn)}, client
+	return routableConn{(<-accepted).(*net.TCPConn), net.IPv4(192, 0, 2, 7)}, client
 }
 
 // echoTCP is a holder's raw TCP injector: it echoes the visitor and records the port it was asked for.

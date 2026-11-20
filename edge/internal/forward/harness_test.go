@@ -198,6 +198,7 @@ type node struct {
 	cfg     func(*forward.Config)
 	dialed  []net.Conn
 	dialMu  sync.Mutex
+	vip     net.IP // the address this node's listener shows for its accepted connections
 }
 
 // echo handler: GET answers who served it; an Upgrade request becomes a raw echo stream.
@@ -229,7 +230,7 @@ func newNode(t *testing.T, id string, visitorCert, unknownCert tls.Certificate) 
 		t.Fatal(err)
 	}
 	link, pin := linkCertificate(t)
-	n := &node{t: t, id: id, region: "r1", link: link, pin: pin, ln: ln, port: uint16(ln.Addr().(*net.TCPAddr).Port), held: &fakeHeld{}, src: &fakeSource{region: "r1"}}
+	n := &node{t: t, id: id, region: "r1", link: link, pin: pin, ln: ln, port: uint16(ln.Addr().(*net.TCPAddr).Port), held: &fakeHeld{}, src: &fakeSource{region: "r1"}, vip: nextVisitorIP()}
 	registry, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +241,7 @@ func newNode(t *testing.T, id string, visitorCert, unknownCert tls.Certificate) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := n.public.WrapTLSListener(routableListener{ln}, n.held.has, n.held.has)
+	shared, err := n.public.WrapTLSListener(routableListener{ln, n.vip}, n.held.has, n.held.has)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +336,7 @@ func visit(t *testing.T, via *node, name string, pool *x509.CertPool) (status in
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			conn, err := (&net.Dialer{}).DialContext(ctx, network, via.ln.Addr().String())
 			if err == nil {
-				localAddr.Store(routableAddr(conn.LocalAddr()).String())
+				localAddr.Store(routableAddr(conn.LocalAddr(), via.vip).String())
 			}
 			return conn, err
 		}}
@@ -390,23 +391,36 @@ func echoOnce(conn net.Conn, text string) error {
 	return nil
 }
 
-// The holder refuses a forwarded visitor whose address is loopback, so the tests' loopback visitors present a
-// TEST-NET-1 address with their real port (routableAddr), as a visitor on the Internet would.
-func routableAddr(real net.Addr) net.Addr {
-	tcp := real.(*net.TCPAddr)
-	return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 7), Port: tcp.Port}
+// The holder refuses a forwarded visitor whose address is loopback or is the link's own, so every node's listener
+// presents its accepted connections (visitors and links) with that node's own unicast address (198.18.0.0/15, with
+// the real port), as a visitor on the Internet would have; tcpPair's visitors use the fixed 192.0.2.7.
+var nodeCounter atomic.Int64
+
+func nextVisitorIP() net.IP {
+	n := nodeCounter.Add(1)
+	return net.IPv4(198, 18, byte(n/250), byte(n%250+1))
 }
 
-type routableConn struct{ *net.TCPConn }
+func routableAddr(real net.Addr, ip net.IP) net.Addr {
+	return &net.TCPAddr{IP: ip, Port: real.(*net.TCPAddr).Port}
+}
 
-func (c routableConn) RemoteAddr() net.Addr { return routableAddr(c.TCPConn.RemoteAddr()) }
+type routableConn struct {
+	*net.TCPConn
+	ip net.IP
+}
 
-type routableListener struct{ net.Listener }
+func (c routableConn) RemoteAddr() net.Addr { return routableAddr(c.TCPConn.RemoteAddr(), c.ip) }
+
+type routableListener struct {
+	net.Listener
+	ip net.IP
+}
 
 func (l routableListener) Accept() (net.Conn, error) {
 	conn, err := l.Listener.Accept()
 	if err != nil {
 		return nil, err
 	}
-	return routableConn{conn.(*net.TCPConn)}, nil
+	return routableConn{conn.(*net.TCPConn), l.ip}, nil
 }

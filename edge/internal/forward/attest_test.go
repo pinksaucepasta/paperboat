@@ -79,7 +79,8 @@ func TestForwardSNIKeyMismatchRefused(t *testing.T) {
 	defer client.Close()
 	defer server.Close()
 	err := b.mesh.Forward(context.Background(), helloVisitor{Conn: server, hello: clientHello(t, "app2.example.test")}, appName)
-	if !errors.Is(err, forward.ErrNoHolder) {
+	var failure *forward.Failure
+	if !errors.As(err, &failure) {
 		t.Fatalf("a hello for another name was forwarded: %v", err)
 	}
 	if a.hits.Load() != 0 || a.mesh.Stats().Accepted != 0 {
