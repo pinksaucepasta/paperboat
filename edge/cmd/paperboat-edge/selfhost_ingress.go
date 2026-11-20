@@ -9,9 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -45,6 +48,42 @@ func installationChallenge(node, host, credential string, next http.Handler) htt
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(map[string]string{"node_id": node, "challenge": values[0], "proof": base64.RawURLEncoding.EncodeToString(mac.Sum(nil))})
+	})
+}
+
+var acmeChallengeToken = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
+
+// acmeChallenge answers an ACME HTTP-01 validation request on port 80 with the key authorization pbh wrote for that
+// token (relay/selfhost public_acme.go), so a certificate is obtained and renewed while the edge keeps serving.
+// Anything else (an unknown token, another method) falls through to next.
+func acmeChallenge(dir string, next http.Handler) http.Handler {
+	if dir == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := strings.CutPrefix(r.URL.Path, "/.well-known/acme-challenge/")
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Method != http.MethodGet || !acmeChallengeToken.MatchString(token) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		file, err := os.Open(filepath.Join(dir, token))
+		if err != nil {
+			next.ServeHTTP(w, r) // not an answer pbh wrote: the explanation page below
+			return
+		}
+		defer file.Close()
+		answer, err := io.ReadAll(io.LimitReader(file, 1<<10))
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(answer)
 	})
 }
 

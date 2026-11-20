@@ -8,6 +8,7 @@ require (
 	github.com/pinksaucepasta/paperboat/shared v0.0.0
 	github.com/quic-go/quic-go v0.61.0
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/sys v0.50.0
 	tailscale.com v1.103.0-pre.0.20260923014604-610b05c58e8d
 )
@@ -21,7 +22,6 @@ require (
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.7.0 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
-	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect

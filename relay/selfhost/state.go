@@ -31,6 +31,9 @@ type Config struct {
 	ControlCA           string `json:"control_ca,omitempty"`
 	PublicHTTPSCertFile string `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile  string `json:"public_https_key_file,omitempty"`
+	// PublicHTTPSAutomatic: the node obtains and renews its browser HTTPS certificate itself (public_acme.go); the
+	// two paths above then point at the certificate it keeps in its state directory.
+	PublicHTTPSAutomatic bool `json:"public_https_automatic,omitempty"`
 }
 type state struct {
 	Version         int           `json:"version"`

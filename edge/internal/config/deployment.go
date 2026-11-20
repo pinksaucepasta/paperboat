@@ -30,15 +30,18 @@ type Deployment struct {
 	InfrastructureTLSKeyFile  string `json:"infrastructure_tls_key_file"`
 	PublicHTTPSCertFile       string `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile        string `json:"public_https_key_file,omitempty"`
-	BrowserAccessEnabled      bool   `json:"browser_access_enabled"`
-	ControlURL                string `json:"control_url"`
-	CredentialIssuer          string `json:"credential_issuer"`
-	ControlCredentialFile     string `json:"control_credential_file"`
-	ControlCAFile             string `json:"control_ca_file"`
-	JWKSFile                  string `json:"jwks_file"`
-	RevocationsFile           string `json:"revocations_file"`
-	UsageSigningKeyFile       string `json:"usage_signing_key_file"`
-	ConnectorAdvertiseHost    string `json:"connector_advertise_host"`
+	// PublicACMEChallengeDir holds the ACME HTTP-01 answers pbh writes while it obtains the browser HTTPS certificate;
+	// port 80 serves them. Empty: no automatic certificate.
+	PublicACMEChallengeDir string `json:"public_acme_challenge_dir,omitempty"`
+	BrowserAccessEnabled   bool   `json:"browser_access_enabled"`
+	ControlURL             string `json:"control_url"`
+	CredentialIssuer       string `json:"credential_issuer"`
+	ControlCredentialFile  string `json:"control_credential_file"`
+	ControlCAFile          string `json:"control_ca_file"`
+	JWKSFile               string `json:"jwks_file"`
+	RevocationsFile        string `json:"revocations_file"`
+	UsageSigningKeyFile    string `json:"usage_signing_key_file"`
+	ConnectorAdvertiseHost string `json:"connector_advertise_host"`
 	// Carrier listeners are dedicated connector-v1 data-plane endpoints. They
 	// require mutual TLS plus the
 	// server's admission-backed peer binding.
@@ -141,6 +144,9 @@ func (d Deployment) validate() error {
 		if path != "" && (!filepath.IsAbs(path) || len(path) > 4096) {
 			return errors.New("public HTTPS TLS paths must be bounded and absolute")
 		}
+	}
+	if d.PublicACMEChallengeDir != "" && (!filepath.IsAbs(d.PublicACMEChallengeDir) || len(d.PublicACMEChallengeDir) > 4096) {
+		return errors.New("public_acme_challenge_dir must be a bounded absolute path")
 	}
 	// Canonical preview traffic always has both dedicated carrier transports.
 	// There is no safe legacy-only deployment: buildService cannot construct a
