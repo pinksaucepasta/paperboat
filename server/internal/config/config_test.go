@@ -436,6 +436,7 @@ func TestCertificatesEnvironmentReferencesOverlayWithoutSecretFields(t *testing.
 				"PAPERBOAT_CERTIFICATES_CAA_RESOLVER":                      "127.0.0.1:53",
 				"PAPERBOAT_CERTIFICATES_DISTRIBUTION_CREDENTIAL_REFERENCE": "secret://edge/distribution",
 				"PAPERBOAT_CERTIFICATES_OWNER_ID":                          "server_01",
+				"PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS":             "true",
 			}
 			value, ok := values[name]
 			return value, ok
@@ -446,6 +447,9 @@ func TestCertificatesEnvironmentReferencesOverlayWithoutSecretFields(t *testing.
 	}
 	if !cfg.Certificates.Enabled || cfg.Certificates.MasterKeyReference != "secret://paperboat/master" {
 		t.Fatalf("certificate references were not overlaid: %#v", cfg.Certificates)
+	}
+	if !cfg.Certificates.ManageEdgeWildcards {
+		t.Fatal("PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS was not read")
 	}
 	if !strings.Contains(cfg.RedactedJSON(), `"public_dns_zone_id": "zone_public"`) {
 		t.Fatal("public zone must be independently configured")
