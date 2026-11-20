@@ -3,6 +3,7 @@ package derpquic
 import (
 	"encoding/binary"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"io"
 	"strings"
 	"sync"
@@ -220,7 +221,8 @@ type budget struct {
 	burst   float64
 	at      time.Time
 	tokens  float64
-	offered uint64 // demand since the last takeOffered: the bytes offered to reserve, counted twice when the limit delayed or dropped them
+	offered uint64 // bytes offered to reserve since the last takeDemand
+	held    uint64 // of them, the bytes the limit delayed or dropped
 }
 
 func newBudget(bytesPerSecond float64) *budget {
@@ -275,9 +277,8 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 		b.tokens -= cost
 		return 0, true
 	}
-	// The limit held this packet back: the flow wanted more than it got, which the demand reports by counting the bytes twice (so a flow
-	// held at a small share can grow it, instead of looking as small as the share it was given).
-	b.offered += uint64(size)
+	// The limit holds this packet back: the flow wants more than it gets, which the demand reports (relayshare).
+	b.held += uint64(size)
 	delay := time.Duration((cost - b.tokens) / b.rate * float64(time.Second))
 	if delay > maxDelay {
 		return 0, false
@@ -286,13 +287,22 @@ func (b *budget) reserve(now time.Time, size int, maxDelay time.Duration) (time.
 	return delay, true
 }
 
-// takeOffered returns the bytes offered since the last call and starts a new window.
-func (b *budget) takeOffered() uint64 {
+// AccountDemand is what an account offered a relay over a window, in bytes, and the part of it the relay's speed limit delayed or dropped.
+type AccountDemand struct{ Offered, Held uint64 }
+
+// takeDemand returns the demand since the last call and starts a new window.
+func (b *budget) takeDemand() AccountDemand {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	n := b.offered
-	b.offered = 0
-	return n
+	d := AccountDemand{b.offered, b.held}
+	b.offered, b.held = 0, 0
+	return d
+}
+
+// wireRate is the budget rate, in bytes per second, for an account whose plan speed is rate: grossed up by relaylimits.AccountWireOverhead, never
+// above the ceiling of a relay.
+func wireRate(rate float64) float64 {
+	return min(rate*relaylimits.AccountWireOverhead, accountBytesPerSecond)
 }
 
 // setRate changes the refill rate and the burst; tokens already held are cut to the new burst.

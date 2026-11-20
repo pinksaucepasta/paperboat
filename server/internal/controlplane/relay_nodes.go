@@ -61,10 +61,9 @@ type relayNodeObservation struct {
 	SubjectsDigest string `json:"subjects_digest,omitempty"`
 	// Metrics is the relay's version, CPU, memory and bytes forwarded; optional, an older relay sends none.
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
-	// AccountDemand is what each connected account offered this relay in bytes per second over the observation interval (counted before
-	// the speed limit decides, so a relay held at its share still shows it wants more); the control plane divides the account's speed
-	// among its relays by it.
-	AccountDemand map[string]float64 `json:"account_demand,omitempty"`
+	// AccountDemand is what each connected account offered this relay over the observation interval and how much of it the relay's speed
+	// limit held back (bytes per second): the control plane divides the account's speed among its relays by it (relayshare.Shares).
+	AccountDemand map[string]relayshare.Demand `json:"account_demand,omitempty"`
 }
 
 // relayAccountSpeed is one account a relay holds to less than the default speed.
@@ -86,7 +85,7 @@ type relayNodeLeaseDocument struct {
 	PoolHandover *[]relayPoolHandover `json:"pool_handover,omitempty"`
 	// AccountMbit is the speed of one account on this relay in Mbit/s, and AccountSpeeds the connected accounts held to a different
 	// one: those past their plan's included relay bytes this month (the plan's slower speed), paid ones (the paid speed) and those on
-	// more than one relay (this relay's share of their speed by demand, relayshare.Share), until a later observation no longer lists them.
+	// more than one relay (this relay's share of their speed by demand, relayshare.Shares), until a later observation no longer lists them.
 	// An account's speed is one bucket across all relays: the shares of its relays add up to its speed. All empty on a customer-owned
 	// relay: Paperboat never limits it. They never carry authority.
 	AccountMbit   float64             `json:"account_mbit"`
@@ -198,8 +197,8 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		return out, invalidUsage("relay_nodes.go:139")
 	}
 	in.Metrics = usableMetrics(ctx, in.NodeID, in.Metrics)
-	for account, rate := range in.AccountDemand {
-		if !relayIdentifier(account) || rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+	for account, d := range in.AccountDemand {
+		if !relayIdentifier(account) || !validRate(d.Offered) || !validRate(d.Held) {
 			return out, invalidUsage("relay_nodes.go:demand")
 		}
 	}
@@ -240,12 +239,12 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 // relayFairUse puts the speeds in a Paperboat-operated relay's lease (read after the commit and outside the transaction: cached,
 // bounded, fail-safe). An account's speed is its plan's fast speed (Free 10, paid 100 Mbit/s), or its plan's slower speed once any
 // workspace it belongs to used its pool (edge and relay traffic together) this month, and it is ONE bucket across relays: an account
-// on more than one live relay has its speed divided among them by the demand they report (relayshare.Share), so one busy relay gets nearly
+// on more than one live relay has its speed divided among them by the demand they report (relayshare.Shares), so one busy relay gets nearly
 // all of it and the shares never add up to more than the speed. A customer-owned relay gets none, so it is never limited.
 // Prior art: the bucket per client is Tailscale's DERP receive limiter (derp/derpserver/derpserver.go rateLimit, x/time/rate); the
-// split by demand is Doorman's ProportionalShare (github.com/youtube/doorman); a central bucket would put the control plane on every
+// split among them is max-min fair as in Doorman's FairShare (github.com/youtube/doorman); a central bucket would put the control plane on every
 // packet's path.
-func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand map[string]float64, set relaySubjectSet, now time.Time, out *relayNodeLeaseDocument) error {
+func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand map[string]relayshare.Demand, set relaySubjectSet, now time.Time, out *relayNodeLeaseDocument) error {
 	if customerOwned, err := s.customerOwnedNode(ctx, nodeID); err != nil || customerOwned {
 		return err // a customer-owned relay is never limited, and its accounts' demand is not Paperboat's to divide
 	}
@@ -285,14 +284,13 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand ma
 			}
 		}
 		// The relays that carry the account: those that report it, and this one even before it does (a new connection here starts at
-		// its floor, not at the full speed).
-		rates := s.relayDemand.ratesOf(account, now)
-		own, reported := rates[nodeID]
-		if !reported {
-			rates[nodeID] = 0
+		// the start allowance, not at the full speed).
+		carried := s.relayDemand.demandFor(account, now)
+		if _, reported := carried[nodeID]; !reported {
+			carried[nodeID] = relayshare.Demand{}
 		}
-		if len(rates) > 1 {
-			mbit = relayshare.Share(mbit, own, rates)
+		if len(carried) > 1 {
+			mbit = relayshare.Shares(mbit, carried)[nodeID]
 		} else if mbit == s.fairUse.RelayMbitFree {
 			continue
 		}
@@ -473,3 +471,6 @@ func (s *EdgeService) customerOwnedNode(ctx context.Context, nodeID string) (boo
 	err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, nodeID).Scan(&owned)
 	return owned, err
 }
+
+// validRate is a byte rate a relay may report: finite and not negative.
+func validRate(v float64) bool { return v >= 0 && !math.IsInf(v, 0) && !math.IsNaN(v) }

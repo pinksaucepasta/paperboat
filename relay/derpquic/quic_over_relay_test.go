@@ -109,7 +109,7 @@ func (r *relayConn) SetWriteDeadline(time.Time) error { return nil }
 
 // quicThroughput runs a QUIC bulk upload from peer a to peer b through a relay whose account speed is mbit (0 lifts the cap) for the given
 // duration and returns the goodput in Mbit/s.
-func quicThroughput(t *testing.T, mbit float64, duration time.Duration) (goodput float64, dropped uint64) {
+func quicThroughput(t *testing.T, mbit float64, duration time.Duration, w writes) (goodput float64, dropped, wire uint64) {
 	t.Helper()
 	f := newFixture(t)
 	s, address, _ := f.start("127.0.0.1:0")
@@ -127,11 +127,23 @@ func quicThroughput(t *testing.T, mbit float64, duration time.Duration) (goodput
 	ra, rb := newRelayConn(a, kb), newRelayConn(b, ka)
 	defer ra.Close()
 	defer rb.Close()
-	return quicBulk(t, ra, rb, relayAddr{}, duration), s.Snapshot().Dropped
+	s.TakeAccountDemand() // a window that starts with the flow
+	received := new(atomic.Int64)
+	goodput = quicBulk(t, ra, rb, relayAddr{}, duration, received, w)
+	return goodput, s.Snapshot().Dropped, s.TakeAccountDemand()["quicaccount"].Offered
 }
 
-// quicBulk runs a QUIC bulk upload from ra's side to rb's over two packet conns for the given duration and returns the goodput in Mbit/s.
-func quicBulk(t *testing.T, ra, rb net.PacketConn, dial net.Addr, duration time.Duration) float64 {
+// writes is how a bulk sender writes: size bytes per Write, one every `every` (zero: as fast as the stream takes them).
+type writes struct {
+	size  int
+	every time.Duration
+}
+
+var bulkWrites = writes{size: 32 << 10}
+
+// quicBulk runs a QUIC bulk upload from ra's side to rb's over two packet conns for the given duration and returns the goodput in Mbit/s;
+// received counts the payload bytes the receiver has read, so a caller can watch the flow while it runs.
+func quicBulk(t *testing.T, ra, rb net.PacketConn, dial net.Addr, duration time.Duration, received *atomic.Int64, w writes) float64 {
 	t.Helper()
 	innerCert := certificate(t)
 	server := &quic.Transport{Conn: rb}
@@ -141,7 +153,6 @@ func quicBulk(t *testing.T, ra, rb net.PacketConn, dial net.Addr, duration time.
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	var received atomic.Int64
 	go func() {
 		connection, err := listener.Accept(context.Background())
 		if err != nil {
@@ -174,11 +185,16 @@ func quicBulk(t *testing.T, ra, rb net.PacketConn, dial net.Addr, duration time.
 	}
 	started := time.Now()
 	deadline := started.Add(duration)
-	chunk := make([]byte, 32<<10)
+	chunk := make([]byte, w.size)
 	go func() {
-		for time.Now().Before(deadline) {
+		for next := time.Now(); time.Now().Before(deadline); {
 			if _, err := stream.Write(chunk); err != nil {
 				return
+			}
+			if w.every > 0 { // paced: a write every w.every, catching up when the sleep ran long
+				if next = next.Add(w.every); time.Until(next) > 0 {
+					time.Sleep(time.Until(next))
+				}
 			}
 		}
 		_ = stream.Close()
@@ -197,7 +213,7 @@ func TestQUICBulkThroughRelayGetsMostOfTheAccountSpeed(t *testing.T) {
 		t.Skip("takes about 20 s")
 	}
 	for _, mbit := range []float64{10, 1} {
-		goodput, dropped := quicThroughput(t, mbit, 8*time.Second)
+		goodput, dropped, _ := quicThroughput(t, mbit, 8*time.Second, bulkWrites)
 		t.Logf("account speed %4.1f Mbit/s: QUIC goodput %.2f Mbit/s, relay dropped %d datagrams", mbit, goodput, dropped)
 		if goodput < 0.75*mbit || goodput > 1.05*mbit {
 			t.Fatalf("a QUIC transfer through an account capped at %.1f Mbit/s got %.2f Mbit/s, want 75-105%% of it", mbit, goodput)
@@ -224,22 +240,25 @@ func TestQUICBulkMeasure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		goodput, dropped := quicThroughput(t, mbit, time.Duration(seconds)*time.Second)
+		goodput, dropped, _ := quicThroughput(t, mbit, time.Duration(seconds)*time.Second, bulkWrites)
 		t.Logf("MEASURE cap %6.1f Mbit/s: QUIC goodput %7.2f Mbit/s (%.0f%% of the cap), relay dropped %d datagrams", mbit, goodput, 100*goodput/max(mbit, 1e-9), dropped)
 	}
 }
 
-// shareLoop is the control plane's part in a test: every interval it reads what the account offered each relay, divides the plan speed
-// among them with relayshare.Share (as the control plane does for each observation) and sets every relay's share.
+// shareLoop is the control plane's part in a test: every interval it reads what the account offered each relay and how much was held
+// back, divides the plan speed among them with relayshare.Shares (as the control plane does for each observation) and sets every
+// relay's share. The production interval is 3 s (nodelifecycle.Interval).
 func shareLoop(t *testing.T, servers []*Server, account string, plan float64, interval time.Duration) (stop func()) {
 	t.Helper()
 	step := func(dt float64) {
-		demand := map[string]float64{}
+		demand := map[string]relayshare.Demand{}
 		for i, s := range servers {
-			demand[strconv.Itoa(i)] = float64(s.TakeAccountDemand()[account]) / dt
+			d := s.TakeAccountDemand()[account]
+			demand[strconv.Itoa(i)] = relayshare.Demand{Offered: float64(d.Offered) / dt, Held: float64(d.Held) / dt}
 		}
+		shares := relayshare.Shares(plan, demand)
 		for i, s := range servers {
-			if err := s.SetAccountSpeeds(map[string]float64{account: relayshare.Share(plan, demand[strconv.Itoa(i)], demand)}); err != nil {
+			if err := s.SetAccountSpeeds(map[string]float64{account: shares[strconv.Itoa(i)]}); err != nil {
 				t.Error(err)
 			}
 		}
@@ -285,44 +304,91 @@ func twoRelays(t *testing.T, plan float64) (servers []*Server, pairs [2][2]*rela
 		pairs[i] = [2]*relayConn{newRelayConn(a, kb), newRelayConn(b, ka)}
 		t.Cleanup(func() { pairs[i][0].Close(); pairs[i][1].Close() })
 	}
-	return servers, pairs, shareLoop(t, servers, "shareaccount", plan, 500*time.Millisecond)
+	return servers, pairs, shareLoop(t, servers, "shareaccount", plan, 3*time.Second)
 }
 
-// An account's speed is one budget across its relays, divided by demand: a single flow on one of two relays gets at least 90% of the plan
-// speed at the relay (the idle relay holds only its floor) and nearly all of it as QUIC goodput, and two flows on two relays together
-// stay within the plan speed.
+// flow runs a bulk upload over a pair in the background and returns its received-byte counter and a wait for its end.
+func flow(t *testing.T, pair [2]*relayConn, duration time.Duration) (*atomic.Int64, func()) {
+	received, done := new(atomic.Int64), make(chan struct{})
+	go func() { defer close(done); quicBulk(t, pair[0], pair[1], relayAddr{}, duration, received, bulkWrites) }()
+	return received, func() { <-done }
+}
+
+// mbitOver is the goodput of a flow between two readings of its counter.
+func mbitOver(from, to int64, window time.Duration) float64 {
+	return float64(to-from) * 8 / 1e6 / window.Seconds()
+}
+
+// An account's speed is one budget across its relays, divided by demand, with the production 3 s observation: one active flow on one of
+// two relays runs at the plan speed as goodput (at least 95%: the idle relay holds only its start allowance, and the budget counts the
+// wire overhead on top of the plan speed), a second flow on the other relay is given its half within two observations, and the two
+// together stay within the plan speed.
 func TestAccountSpeedIsSharedAcrossRelaysByDemand(t *testing.T) {
 	if testing.Short() {
-		t.Skip("takes about 30 s")
+		t.Skip("takes about 45 s")
 	}
 	const plan = 10.0
-	duration := 12 * time.Second
 
 	servers, pairs, stop := twoRelays(t, plan)
-	var single float64
-	done := make(chan struct{})
-	go func() { defer close(done); single = quicBulk(t, pairs[0][0], pairs[0][1], relayAddr{}, duration) }()
-	time.Sleep(duration / 2)
-	atFlow, atIdle := servers[0].AccountMbit("shareaccount"), servers[1].AccountMbit("shareaccount")
-	<-done
-	stop()
-	t.Logf("one flow on relay 1: QUIC goodput %.2f Mbit/s; relay 1 held at %.2f, the idle relay 2 at %.2f of %.0f", single, atFlow, atIdle, plan)
-	if atFlow < 0.9*plan || atFlow+atIdle > plan*1.001 || single < 0.8*plan {
-		t.Fatalf("one flow got relay speed %.2f (+%.2f idle) and %.2f Mbit/s goodput of a %.0f Mbit/s account: want at least 90%% at the relay, the shares within the plan, at least 80%% as goodput", atFlow, atIdle, single, plan)
+	first, wait := flow(t, pairs[0], 40*time.Second)
+	time.Sleep(8 * time.Second) // past the first observation (3 s) and the transport's ramp
+	from, steadyFrom := first.Load(), time.Now()
+	time.Sleep(6 * time.Second)
+	alone := mbitOver(from, first.Load(), time.Since(steadyFrom))
+	t.Logf("one active flow: %.2f Mbit/s of a %.0f Mbit/s plan (relay 1 held at %.2f, the idle relay 2 at %.3f)", alone, plan, servers[0].AccountMbit("shareaccount"), servers[1].AccountMbit("shareaccount"))
+	if alone < 0.95*plan {
+		t.Errorf("one active flow got %.2f Mbit/s of a %.0f Mbit/s plan, want at least 95%%", alone, plan)
 	}
 
-	_, pairs, stop = twoRelays(t, plan)
-	var both [2]float64
-	done = make(chan struct{})
-	go func() {
-		defer close(done)
-		both[1] = quicBulk(t, pairs[1][0], pairs[1][1], relayAddr{}, duration)
-	}()
-	both[0] = quicBulk(t, pairs[0][0], pairs[0][1], relayAddr{}, duration)
-	<-done
+	// A second flow starts on the other relay: how long until it runs at 80% of its fair half?
+	second, waitSecond := flow(t, pairs[1], 22*time.Second)
+	secondAt := time.Now()
+	var ramp time.Duration
+	last, lastAt := second.Load(), secondAt
+	var firstFrom, secondFrom, firstTo, secondTo int64
+	var windowFrom time.Time
+	for time.Since(secondAt) < 21*time.Second {
+		time.Sleep(250 * time.Millisecond)
+		now, at := second.Load(), time.Now()
+		if windowFrom.IsZero() && at.Sub(secondAt) >= 13*time.Second {
+			firstFrom, secondFrom, windowFrom = first.Load(), now, at
+		}
+		if rate := mbitOver(last, now, at.Sub(lastAt)); ramp == 0 && rate >= 0.8*plan/2 && at.Sub(secondAt) > time.Second {
+			ramp = at.Sub(secondAt)
+		}
+		last, lastAt = now, at
+	}
+	firstTo, secondTo = first.Load(), second.Load()
+	both, window := mbitOver(firstFrom, firstTo, time.Since(windowFrom))+mbitOver(secondFrom, secondTo, time.Since(windowFrom)), time.Since(windowFrom)
+	t.Logf("both flows over the last %.0f s: %.2f + %.2f = %.2f Mbit/s of %.0f", window.Seconds(), mbitOver(firstFrom, firstTo, window), mbitOver(secondFrom, secondTo, window), both, plan)
+	if both > 1.05*plan || both < 0.7*plan {
+		t.Errorf("two flows together got %.2f Mbit/s of a %.0f Mbit/s plan, want at most 105%% (and at least 70%%)", both, plan)
+	}
+	waitSecond()
+	wait()
 	stop()
-	t.Logf("two flows on two relays: %.2f + %.2f = %.2f Mbit/s of %.0f", both[0], both[1], both[0]+both[1], plan)
-	if sum := both[0] + both[1]; sum > 1.05*plan || sum < 0.6*plan {
-		t.Fatalf("two flows together got %.2f Mbit/s of a %.0f Mbit/s account: want at most 105%% and, as a sanity floor, at least 60%%", sum, plan)
+	t.Logf("a second flow on relay 2 ramped to 80%% of its half (%.1f Mbit/s) after %.1f s", 0.8*plan/2, ramp.Seconds())
+	if ramp == 0 || ramp > 8*time.Second {
+		t.Errorf("the second flow took %v to reach 80%% of its half, want at most 8 s (two observations of 3 s and the transport's ramp)", ramp)
+	}
+}
+
+// Terminal-like traffic: a flow of small writes (about 200 B) goes through the relay at the plan speed too. Written as fast as the stream
+// takes them the sender packs them into full packets and the flow is a bulk one; paced (a write every 250 us, 6.4 Mbit/s offered) the
+// packets are small and the wire overhead, which the budget grosses up for, is larger.
+func TestQUICSmallWritesThroughRelayGetsTheirSpeed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes about 20 s")
+	}
+	const plan = 10.0
+	fast, _, fastWire := quicThroughput(t, plan, 8*time.Second, writes{size: 200})
+	t.Logf("200 B writes, as fast as possible: goodput %.2f Mbit/s of a %.0f Mbit/s plan; the relay counted %.2f Mbit/s on the wire", fast, plan, float64(fastWire)*8/1e6/8)
+	if fast < 0.8*plan {
+		t.Errorf("200 B writes got %.2f Mbit/s of a %.0f Mbit/s plan, want at least 80%%", fast, plan)
+	}
+	paced, _, pacedWire := quicThroughput(t, plan, 8*time.Second, writes{size: 200, every: 250 * time.Microsecond})
+	t.Logf("200 B writes every 250 us (6.4 Mbit/s offered): goodput %.2f Mbit/s; the relay counted %.2f Mbit/s on the wire (%.0f%% overhead)", paced, float64(pacedWire)*8/1e6/8, 100*(float64(pacedWire)*8/1e6/8/paced-1))
+	if paced < 0.9*6.4 {
+		t.Errorf("paced 200 B writes got %.2f Mbit/s of 6.4 offered, want at least 90%%", paced)
 	}
 }

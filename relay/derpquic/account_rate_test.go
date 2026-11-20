@@ -3,6 +3,7 @@ package derpquic
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"testing"
 	"time"
 
@@ -30,14 +31,16 @@ func TestAccountSpeedsSetTheSharedBudgetRate(t *testing.T) {
 	if budget == nil || accounts != 1 {
 		t.Fatalf("one account must hold one shared budget, got %d (%v)", accounts, budget)
 	}
-	// A second of traffic is bounded by 10 Mbit/s (1.25 MB) plus a quarter second of burst, and the budget does refill.
+	// A second of traffic is bounded by 10 Mbit/s plus the wire overhead the budget allows for (1.25 MB x AccountWireOverhead) plus a quarter
+	// second of burst, and the budget does refill.
+	wire := 1_250_000 * relaylimits.AccountWireOverhead
 	now, sent := time.Now(), 0
 	for at := now; at.Before(now.Add(time.Second)); at = at.Add(time.Microsecond) {
 		if budget.allow(at, 1400) {
 			sent += 1400
 		}
 	}
-	if sent > 1_250_000+312_500 || sent < 1_250_000 {
+	if float64(sent) > wire*1.25 || float64(sent) < wire {
 		t.Fatalf("one second at 10 Mbit/s forwarded %d bytes", sent)
 	}
 	// Naming the account slow lowers its existing budget to the second tier; unnaming returns it.
@@ -53,8 +56,8 @@ func TestAccountSpeedsSetTheSharedBudgetRate(t *testing.T) {
 	budget.mu.Lock()
 	slow := budget.rate
 	budget.mu.Unlock()
-	if slow != 0.512e6/8 {
-		t.Fatalf("the existing budget refills at %v bytes/s, want 64000", slow)
+	if want := wireRate(0.512e6 / 8); slow != want {
+		t.Fatalf("the existing budget refills at %v bytes/s, want %v (64000 plus the wire overhead)", slow, want)
 	}
 	if err := s.SetAccountSpeeds(nil); err != nil || s.AccountMbit("fair") != 10 {
 		t.Fatalf("clearing the slow list did not restore the normal speed: %v %v", err, s.AccountMbit("fair"))

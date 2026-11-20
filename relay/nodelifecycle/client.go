@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
@@ -360,13 +361,13 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	digest := subjectsDigest(subjects)
 	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest}
 	body["metrics"] = c.metrics(stats)
-	// What each connected account offered this relay since the last observation (bytes per second): the control plane divides an
-	// account's speed among its relays by it. The first observation only opens the window.
+	// What each connected account offered this relay since the last observation and how much the limit held back (bytes per second): the
+	// control plane divides an account's speed among its relays by it. The first observation only opens the window.
 	taken, now := server.TakeAccountDemand(), time.Now()
 	if elapsed := now.Sub(c.demandAt).Seconds(); !c.demandAt.IsZero() && elapsed > 0 {
-		demand := make(map[string]float64, len(taken))
-		for account, n := range taken {
-			demand[account] = float64(n) / elapsed
+		demand := make(map[string]relayshare.Demand, len(taken))
+		for account, d := range taken {
+			demand[account] = relayshare.Demand{Offered: float64(d.Offered) / elapsed, Held: float64(d.Held) / elapsed}
 		}
 		body["account_demand"] = demand
 	}

@@ -436,7 +436,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		s.fences[id] = next
 	}
 	if s.accounts[g.AccountID] == nil {
-		s.accounts[g.AccountID] = newAccountBudget(s.rateForLocked(g.AccountID))
+		s.accounts[g.AccountID] = newAccountBudget(wireRate(s.rateForLocked(g.AccountID)))
 	}
 	return nil
 }
@@ -643,15 +643,14 @@ func (s *Server) SetAccountSpeeds(accounts map[string]float64) error {
 	return nil
 }
 
-// TakeAccountDemand returns, for every account with traffic admitted on this relay, the bytes it offered since the last call (counted
-// before the speed limit decides, so delayed and dropped bytes count: a relay held at its share still shows it wants more) and starts
-// a new window. The control plane divides the account's speed among its relays by it.
-func (s *Server) TakeAccountDemand() map[string]uint64 {
+// TakeAccountDemand returns, for every account with a carrier on this relay, the bytes it offered since the last call and how many of
+// them the speed limit held back, and starts a new window. The control plane divides the account's speed among its relays by it.
+func (s *Server) TakeAccountDemand() map[string]AccountDemand {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(map[string]uint64, len(s.accounts))
+	out := make(map[string]AccountDemand, len(s.accounts))
 	for account, b := range s.accounts {
-		out[account] = b.takeOffered()
+		out[account] = b.takeDemand()
 	}
 	return out
 }
@@ -680,7 +679,7 @@ func (s *Server) rateForLocked(account string) float64 {
 
 func (s *Server) applyAccountRatesLocked() {
 	for account, b := range s.accounts {
-		rate := s.rateForLocked(account)
+		rate := wireRate(s.rateForLocked(account))
 		b.setRate(rate, accountBurst(rate))
 	}
 }

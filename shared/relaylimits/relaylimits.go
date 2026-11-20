@@ -16,3 +16,17 @@ const MaxGrantLifetime = 12 * time.Hour
 // account's pool: longer than the daemons' configuration refresh (about a minute idle), so they have moved to
 // the new relays before the old ones close theirs (make-before-break).
 const PoolHandoverGrace = 5 * time.Minute
+
+// AccountWireOverhead is how much more than an account's plan speed a relay's account budget lets through. The plan speed is what the
+// user sees (payload); the relay counts what it forwards: inner QUIC packet headers and authentication tags, the ACKs flowing back
+// through the same budget, and retransmissions of packets it delayed or dropped. Measured at the relay with one datagram per packet, a
+// bulk QUIC flow's goodput is 0.92-0.95 of the wire bytes (10.6 Mbit/s through a budget of 11.2; 200 B writes 9.76 of 11.70), so a plan
+// speed counted on the wire gave users 5% to 8% less than they bought. The relay cannot see inside the end-to-end encrypted packets, so it
+// grosses the budget up instead of counting payload. Prior art: Tailscale's DERP limits the bytes of each frame it forwards
+// (derp/derpserver/derpserver.go rateLimit), headers included.
+const AccountWireOverhead = 1.06
+
+// AccountStartMbit is what a relay that carries an account but sees none of its traffic is given of the account's speed: enough for a
+// new flow's first packets and the account's control traffic, so the flow shows its demand and is given its share on the next
+// observation (relayshare.Shares).
+const AccountStartMbit = 0.064

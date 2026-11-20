@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"math/big"
 	"net"
 	"net/http"
@@ -32,7 +33,7 @@ import (
 func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	credential := strings.Repeat("test", 16)
 	var revoke atomic.Bool
-	var demandSeen atomic.Pointer[map[string]float64] // the last account_demand an observation carried
+	var demandSeen atomic.Pointer[map[string]relayshare.Demand] // the last account_demand an observation carried
 	var storedMu sync.Mutex
 	var stored []derpquic.AuthoritySubject
 	// The grant's generation; a revocation's min_generation is the next one.
@@ -44,12 +45,12 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 			return
 		}
 		var in struct {
-			NodeID             string                      `json:"node_id"`
-			ExpectedGeneration uint64                      `json:"expected_generation"`
-			Generation         uint64                      `json:"node_generation"`
-			Epoch              string                      `json:"process_epoch"`
-			Subjects           []derpquic.AuthoritySubject `json:"subjects"`
-			AccountDemand      map[string]float64          `json:"account_demand"`
+			NodeID             string                       `json:"node_id"`
+			ExpectedGeneration uint64                       `json:"expected_generation"`
+			Generation         uint64                       `json:"node_generation"`
+			Epoch              string                       `json:"process_epoch"`
+			Subjects           []derpquic.AuthoritySubject  `json:"subjects"`
+			AccountDemand      map[string]relayshare.Demand `json:"account_demand"`
 		}
 		if json.NewDecoder(r.Body).Decode(&in) != nil {
 			http.Error(w, "invalid", 400)
@@ -187,7 +188,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	// the account's speed among its relays by it): the account is listed, with a non-negative rate.
 	if seen := demandSeen.Load(); seen == nil {
 		t.Fatal("the observation carried no account demand")
-	} else if rate, listed := (*seen)[account]; !listed || rate < 0 {
+	} else if d, listed := (*seen)[account]; !listed || d.Offered < 0 || d.Held < 0 {
 		t.Fatalf("account demand = %v, want the connected account %q listed", *seen, account)
 	}
 	deadline := time.Now().Add(time.Second)
