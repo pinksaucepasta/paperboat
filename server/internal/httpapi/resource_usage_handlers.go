@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {
@@ -94,7 +95,7 @@ func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {
 func resourceUsageNative(identities machineRequestVerifier, service *resourceusage.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)
-		body, err := io.ReadAll(io.LimitReader(r.Body, 65537))
+		body, err := io.ReadAll(io.LimitReader(r.Body, connectorprotocol.MaximumSnapshotBytes+1))
 		if err != nil {
 			if expectedHTTPErrorOnly(err, context.Canceled) {
 				return
@@ -102,7 +103,7 @@ func resourceUsageNative(identities machineRequestVerifier, service *resourceusa
 			writeError(w, r, 503, "usage_unavailable", "Bandwidth reporting is temporarily unavailable.", err)
 			return
 		}
-		if len(body) > 65536 {
+		if len(body) > connectorprotocol.MaximumSnapshotBytes {
 			writeError(w, r, 400, "invalid_usage_report", "Bandwidth report is invalid.")
 			return
 		}
