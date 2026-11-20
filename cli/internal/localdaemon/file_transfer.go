@@ -56,6 +56,9 @@ type FileTransferBroker struct {
 	mu     sync.Mutex
 	closed bool
 	leases map[string]daemonTransferLease
+	// releasing counts the leases a release has taken out of leases and not yet closed: Close waits for them, or a
+	// daemon that stops while a client's hangup is being released returns with that association still open.
+	releasing sync.WaitGroup
 }
 
 type nativeTransferPreparer interface {
@@ -206,6 +209,7 @@ func (b *FileTransferBroker) ReleaseFileTransfer(peer localapi.Peer, handle stri
 	lease, ok := b.leases[handle]
 	if ok && samePeer(lease.peer, peer) {
 		delete(b.leases, handle)
+		b.releasing.Add(1)
 	} else {
 		ok = false
 	}
@@ -213,6 +217,7 @@ func (b *FileTransferBroker) ReleaseFileTransfer(peer localapi.Peer, handle stri
 	if !ok {
 		return localapi.ErrPermission
 	}
+	defer b.releasing.Done()
 	return lease.closer.Close()
 }
 
@@ -230,6 +235,7 @@ func (b *FileTransferBroker) Close() error {
 	for _, lease := range leases {
 		result = errors.Join(result, lease.closer.Close())
 	}
+	b.releasing.Wait()
 	return result
 }
 

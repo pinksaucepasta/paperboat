@@ -282,3 +282,69 @@ func TestUnlimitedTransferWakesAPeerWithNoPath(t *testing.T) {
 		t.Fatal("a direct path woke the peer")
 	}
 }
+
+// blockingCloseDirect holds Close until released, as a release that is mid-way through closing its association.
+type blockingCloseDirect struct {
+	transferDirectFake
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingCloseDirect) Close() error {
+	close(f.entered)
+	<-f.release
+	return nil
+}
+
+// A daemon that stops while a client's hangup is releasing its transfer lease returns only after the association is
+// closed: the release had taken the lease out of the table, so Close found nothing to close and returned at once (macOS CI:
+// "daemon did not close native transfer association").
+func TestFileTransferBrokerCloseWaitsForAReleaseInFlight(t *testing.T) {
+	now := time.Unix(10_000, 0).UTC()
+	direct := &blockingCloseDirect{entered: make(chan struct{}), release: make(chan struct{})}
+	broker, err := NewFileTransferBroker(transferPreparerFake{direct: &direct.transferDirectFake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fake preparer returns its *transferDirectFake: wrap it so its Close is the blocking one.
+	broker.tunnel = blockingPreparer{direct: direct}
+	broker.now = func() time.Time { return now }
+	request := localapi.FileTransferRequest{Schema: localapi.FileTransferSchemaV1, MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Credential: "credential_1", AccessSessionID: "access_1", Deadline: now.Add(time.Hour), MaximumBytes: 1 << 20}
+	owner := localapi.Peer{UID: 1000, GID: 1000, PID: 41}
+	result, err := broker.PrepareFileTransfer(context.Background(), owner, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan error, 1)
+	go func() { released <- broker.ReleaseFileTransfer(owner, result.Handle) }()
+	<-direct.entered // the lease is out of the table and its association is closing
+	closed := make(chan error, 1)
+	go func() { closed <- broker.Close() }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a release was still closing its association")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(direct.release)
+	if err := <-released; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return after the release finished")
+	}
+}
+
+type blockingPreparer struct{ direct *blockingCloseDirect }
+
+func (blockingPreparer) WakePeer(string) {}
+func (blockingPreparer) PathEligibility(ctx context.Context, _ string) (tailnet.PathKind, <-chan struct{}) {
+	return tailnet.PathDirect, ctx.Done()
+}
+func (p blockingPreparer) PrepareNativeFileTransfer(context.Context, resolver.ConnectInfo, string) (tunnel.DirectTransferStreamOpener, error) {
+	return p.direct, nil
+}
