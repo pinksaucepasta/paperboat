@@ -251,7 +251,8 @@
   {
    "actor": "user_perf_0003",
    "path": "/v1/billing/workspaces/teams/perf-team-001",
-   "max_queries": 20
+   "max_queries": 24,
+   "reason": "measured 24 (was 29 before OverridesTx): the team overview returns scalar fields added since the budget was set (seat override, add-on row, add-on entitlement, SSO/SCIM overrides, per-seat allowance, throttle); each is one lookup per request, none per row"
   },
   {
    "actor": "user_perf_0002",
