@@ -155,29 +155,47 @@ func newSSHOutputStream(operationID string, remove func()) *sshOutputStream {
 	return &sshOutputStream{operationID: operationID, host: &sshDuplex{input: inputReader, output: outputWriter}, input: inputWriter, output: outputReader, done: make(chan error, 1), remove: remove, sequence: 1}
 }
 
+type sshRead struct {
+	count int
+	err   error
+}
+
 func (s *sshOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, error) {
 	buffer := make([]byte, 32<<10)
-	type readResult struct {
-		count int
-		err   error
-	}
-	result := make(chan readResult, 1)
-	go func() { count, err := s.output.Read(buffer); result <- readResult{count: count, err: err} }()
+	result := make(chan sshRead, 1)
+	go func() { count, err := s.output.Read(buffer); result <- sshRead{count: count, err: err} }()
+	return s.await(ctx, buffer, result)
+}
+
+// await returns the bytes of a read that has completed even when ctx is done too: both can be ready together and a
+// random pick would drop the bytes the read already took out of the pipe.
+func (s *sshOutputStream) await(ctx context.Context, buffer []byte, result <-chan sshRead) (protocol.BinaryFrame, error) {
 	select {
-	case <-ctx.Done():
-		return protocol.BinaryFrame{}, ctx.Err()
 	case read := <-result:
-		if read.count > 0 {
-			frame := protocol.BinaryFrame{Channel: protocol.Stdout, StartSequence: s.sequence, Data: buffer[:read.count]}
-			s.sequence += uint64(read.count)
-			return frame, nil
+		return s.readOutcome(buffer, read)
+	case <-ctx.Done():
+		select {
+		case read := <-result:
+			if read.count > 0 {
+				return s.readOutcome(buffer, read)
+			}
+		default:
 		}
-		bridgeErr := <-s.done
-		if bridgeErr != nil && !expectedStreamFailure(bridgeErr) {
-			return protocol.BinaryFrame{}, &StreamError{Code: "ssh_target_not_ready", Cause: bridgeErr}
-		}
-		return protocol.BinaryFrame{}, &StreamEnd{Payload: json.RawMessage(`{"state":"closed"}`)}
+		return protocol.BinaryFrame{}, ctx.Err()
 	}
+}
+
+func (s *sshOutputStream) readOutcome(buffer []byte, read sshRead) (protocol.BinaryFrame, error) {
+	if read.count > 0 {
+		frame := protocol.BinaryFrame{Channel: protocol.Stdout, StartSequence: s.sequence, Data: buffer[:read.count]}
+		s.sequence += uint64(read.count)
+		return frame, nil
+	}
+	bridgeErr := <-s.done
+	if bridgeErr != nil && !expectedStreamFailure(bridgeErr) {
+		return protocol.BinaryFrame{}, &StreamError{Code: "ssh_target_not_ready", Cause: bridgeErr}
+	}
+	return protocol.BinaryFrame{}, &StreamEnd{Payload: json.RawMessage(`{"state":"closed"}`)}
 }
 
 func (s *sshOutputStream) closeWrite() error {
