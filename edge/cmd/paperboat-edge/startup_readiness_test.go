@@ -99,7 +99,37 @@ func (c *readinessControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// freePort is a free loopback address. The kernel hands a port out again as soon as it is released, and the edge refuses two
+// listen addresses on one port number (LoadDeployment, "distinct ports"), so a port number is never handed out twice in this
+// process: the test failed on GitHub CI when two successive calls returned the same one.
 func freePort(t *testing.T, network string) string {
+	t.Helper()
+	handedOutMu.Lock()
+	defer handedOutMu.Unlock()
+	return uniquePort(handedOut, func() string { return ephemeralAddress(t, network) })
+}
+
+var (
+	handedOutMu sync.Mutex
+	handedOut   = map[string]bool{}
+)
+
+// uniquePort calls pick until it returns a port number not in seen, and records it.
+func uniquePort(seen map[string]bool, pick func() string) string {
+	for {
+		address := pick()
+		_, port, err := net.SplitHostPort(address)
+		if err != nil {
+			port = address
+		}
+		if !seen[port] {
+			seen[port] = true
+			return address
+		}
+	}
+}
+
+func ephemeralAddress(t *testing.T, network string) string {
 	t.Helper()
 	if network == "udp" {
 		conn, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -115,6 +145,16 @@ func freePort(t *testing.T, network string) string {
 	}
 	defer listener.Close()
 	return listener.Addr().String()
+}
+
+func TestUniquePortNeverHandsOutAPortNumberTwice(t *testing.T) {
+	answers := []string{"127.0.0.1:41000", "127.0.0.1:41000", "127.0.0.1:41001", "127.0.0.1:41000", "127.0.0.1:41002"}
+	pick := func() string { a := answers[0]; answers = answers[1:]; return a }
+	seen := map[string]bool{}
+	got := []string{uniquePort(seen, pick), uniquePort(seen, pick), uniquePort(seen, pick)}
+	if got[0] != "127.0.0.1:41000" || got[1] != "127.0.0.1:41001" || got[2] != "127.0.0.1:41002" {
+		t.Fatalf("handed out %v, want 41000, 41001, 41002 (repeats skipped)", got)
+	}
 }
 
 // An edge restart through the real service assembly: the control plane refuses nothing, and the
