@@ -9,6 +9,8 @@ import (
 	"net/netip"
 	"testing"
 	"time"
+
+	"tailscale.com/types/key"
 )
 
 type connectCloser interface {
@@ -133,5 +135,45 @@ func TestCarrierClassificationRetainsPrivateTypedCause(t *testing.T) {
 		if !errors.Is(err, ErrAdmission) || !errors.As(err, &original) || original != verification || !fatalCarrier(err) || err.Error() != ErrAdmission.Error() {
 			t.Fatal("TLS cause or finite decision lost")
 		}
+	}
+}
+
+func TestRelayCarrierWaitsForNewGrantAfterRemoteExpiry(t *testing.T) {
+	for _, transport := range []string{"quic", "wss", "fallback"} {
+		t.Run(transport, func(t *testing.T) {
+			f := newFixture(t)
+			server, address, _ := f.start("127.0.0.1:0")
+			cert := certificate(t)
+			grant := f.grant(key.NewNode().Public(), cert, "expired")
+			expired := grant
+			expired.IssuedAt = time.Now().Add(-time.Minute).Unix()
+			expired.ExpiresAt = expired.IssuedAt + 1
+			token := f.token(expired)
+			credential := func(context.Context) (string, error) { return token, nil }
+			quic := f.client(address, cert, expired)
+			quic.config.Credential = credential
+			wss, _ := f.wss(server, cert, expired, nil)
+			wss.config.Credential = credential
+			var c connectCloser = quic
+			switch transport {
+			case "wss":
+				c = wss
+			case "fallback":
+				c = NewFallbackCarrier(quic, wss, time.Hour)
+				t.Cleanup(func() { _ = c.Close() })
+			}
+			for range 3 {
+				if err := c.Connect(t.Context()); !errors.Is(err, ErrExpired) {
+					t.Fatalf("connect with expired grant = %v, want expiry so the client renews its grant", err)
+				}
+			}
+			if denied := server.Snapshot().Denied; denied != 1 {
+				t.Fatalf("relay refused the same expired grant %d times, want one attempt until renewal", denied)
+			}
+			token = f.token(grant)
+			if err := c.Connect(t.Context()); err != nil {
+				t.Fatalf("connect with renewed grant: %v", err)
+			}
+		})
 	}
 }

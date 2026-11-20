@@ -53,30 +53,35 @@ func NewFallbackCarrier(preferred, fallback Carrier, recovery time.Duration) *Fa
 	return &FallbackCarrier{preferred: preferred, fallback: fallback, recovery: recovery, ctx: ctx, cancel: cancel, connectGate: make(chan struct{}, 1)}
 }
 
-// refused is the latched refusal *fatal unless the credential changed since it was given: a refusal holds for the
-// grant it answered, and a fresh grant (a renewal above a revocation floor, a key rotation) gets one new attempt,
-// latching again if refused. Tailscale's DERP client redials after every failure; this keeps a refused grant from
-// being redialed while letting a new one through, so a refusal is not dead until restart (audit A P1-8).
-func refused(ctx context.Context, credential func(context.Context) (string, error), fatal *error, token *string) error {
-	if *fatal == nil {
+// refused holds a relay's decision for the credential it answered. A fresh
+// credential gets one attempt. In particular, retryable expiry must ask for
+// renewal without sending the same grant again on every reconnect.
+func refused(ctx context.Context, credential func(context.Context) (string, error), refusal *error, token *string) error {
+	if *refusal == nil {
 		return nil
 	}
 	if credential == nil {
-		return *fatal
+		return *refusal
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	next, err := credential(ctx)
 	if err != nil || next == *token {
-		return *fatal
+		return *refusal
 	}
-	*fatal, *token = nil, ""
+	*refusal, *token = nil, ""
 	return nil
 }
 
 func fatalCarrier(err error) bool {
 	var f interface{ Fatal() bool }
 	return errors.As(err, &f) && f.Fatal()
+}
+
+// A relay decision applies to both transports. Expiry still reaches the
+// authority owner so it can renew, and does not stop the carrier's reader.
+func rememberRefusal(err error) bool {
+	return fatalCarrier(err) || errors.Is(err, ErrExpired)
 }
 
 func (c *FallbackCarrier) Connect(ctx context.Context) error {
@@ -108,8 +113,11 @@ func (c *FallbackCarrier) Connect(ctx context.Context) error {
 		c.active = c.preferred
 		c.mu.Unlock()
 		return nil
-	} else if fatalCarrier(err) {
-		c.latch(err)
+	}
+	if rememberRefusal(err) {
+		if fatalCarrier(err) {
+			c.latch(err)
+		}
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -292,7 +300,7 @@ func (c *FallbackCarrier) withRetry(run func(Carrier) error) error {
 		c.latch(e)
 		return e
 	}
-	if a != c.preferred {
+	if a != c.preferred || errors.Is(e, ErrExpired) {
 		return e
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
@@ -371,7 +379,7 @@ func (c *FallbackCarrier) RecvDetail() (derp.ReceivedMessage, int, error) {
 			return nil, g, e
 		}
 		c.mu.Unlock()
-		if a == c.fallback {
+		if a == c.fallback || errors.Is(e, ErrExpired) {
 			return nil, g, e
 		}
 		ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
@@ -413,7 +421,7 @@ func (c *FallbackCarrier) Ping(ctx context.Context) error {
 	err = a.Ping(preferredCtx)
 	stopCancel()
 	cancelPreferred()
-	if err == nil || fatalCarrier(err) || ctx.Err() != nil {
+	if err == nil || rememberRefusal(err) || ctx.Err() != nil {
 		if fatalCarrier(err) {
 			c.latch(err)
 		}
