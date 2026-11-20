@@ -122,7 +122,7 @@ func TestOwnerDrainMoveWakesMachines(t *testing.T) {
 		f.exec(`DELETE FROM paperboat.control_environments WHERE id=$1`, env)
 	})
 	f.exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080)`, route, env)
-	f.exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',m.public_identity_key,1,$1,$1,'{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, own.NodeID, machine)
+	f.exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',coalesce(m.public_identity_key, 'fixture-key'),1,'session_00000000-0000-4000-8000-000000000001','session_00000000-0000-4000-8000-000000000001','{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, own.NodeID, machine)
 	topics := func() (n int) {
 		f.t.Helper()
 		if err := f.store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic IN ('tunnels','previews')`, machine).Scan(&n); err != nil {
