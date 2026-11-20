@@ -303,7 +303,10 @@ VALUES($1,$2,$1,5,'http','managed',$3,NULL,'http','127.0.0.1:1','not_applicable'
 ($5,$2,$5,5,'http','one_label_wildcard',NULL,$6,'http','127.0.0.1:1','not_applicable',1,'active',$4,$4,now(),now(),NULL,NULL,false)`, exact, tunnel, stable, f.account, wild, routeSuffix)
 	f.exec(t, `INSERT INTO endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, f.account, f.machine)
 	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'one_label_wildcard',$1,'verified',$5,'none','not_applicable','ready','clear')`, "domain_"+f.prefix, f.account, tunnel, exact, "*."+domainSuffix)
-	for id, host := range map[string]string{exact: stable, wild: "*." + routeSuffix} {
+	// endpoint_routes.hostname is always a concrete name (endpoint_routes_hostname_check), so the wildcard route's own
+	// endpoint hostname is a name under the suffix; the seed announces it as before, beside the wildcard key.
+	app := "app." + routeSuffix
+	for id, host := range map[string]string{exact: stable, wild: app} {
 		f.exec(t, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) SELECT $1,$2,$3,protocol,id FROM tunnel_routes WHERE id=$1`, id, tunnel, host)
 		f.exec(t, `INSERT INTO endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,generation,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_endpoint',$4,1,true,now())`, id, tunnel, f.node, session)
 	}
@@ -318,10 +321,10 @@ VALUES($1,$2,$1,5,'http','managed',$3,NULL,'http','127.0.0.1:1','not_applicable'
 			t.Fatalf("holder %+v", h)
 		}
 	}
-	want := []string{stable, nodemesh.WildcardKey(domainSuffix), nodemesh.WildcardKey(routeSuffix)}
+	want := []string{stable, app, nodemesh.WildcardKey(domainSuffix), nodemesh.WildcardKey(routeSuffix)}
 	sort.Strings(want)
 	if fmt.Sprint(names) != fmt.Sprint(want) {
-		t.Fatalf("keys %v, want %v: the exact hostname, the wildcard custom domain and the wildcard route as *.suffix keys", names, want)
+		t.Fatalf("keys %v, want %v: the exact hostnames, the wildcard custom domain and the wildcard route as *.suffix keys", names, want)
 	}
 }
 
