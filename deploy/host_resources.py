@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import time
@@ -13,6 +14,7 @@ THRESHOLDS = {"warning": 80, "critical": 90}
 HYSTERESIS = 5
 SUSTAIN_SECONDS = 180
 MAX_SAMPLE_GAP = 90  # the systemd timer runs every minute
+STALE_AFTER = 300  # the panel calls this report old after five missed timer runs
 UNREACHABLE_AFTER = 3  # consecutive failed samples before a host is reported, so one ssh hiccup stays quiet
 
 
@@ -86,7 +88,20 @@ def assess(previous, current, now):
         if level != severity(old):
             action = "RECOVERED" if level == "normal" else level.upper()
             transitions.append(f"{action}: {name} at {percent:.1f}%")
-    return {"at": now, "boot": current["boot"], "cpu": current["cpu"], "resources": resources, "misses": 0}, transitions
+    return {"at": now, "boot": current["boot"], "cpu": current["cpu"], "resources": resources, "misses": 0,
+            "usage": usage}, transitions
+
+
+def report(state):
+    """What the admin panel shows: per host, each resource's percentage and level, and whether sampling works."""
+    hosts = {}
+    for host, host_state in state.items():
+        label = socket.gethostname() if host == "local" else host.rsplit("@", 1)[-1]
+        usage = host_state.get("usage", {})
+        resources = {name: {"percent": round(usage[name], 1), "level": severity(levels)}
+                     for name, levels in host_state.get("resources", {}).items() if name in usage}
+        hosts[label] = {"resources": resources, "unreachable": host_state.get("misses", 0) >= UNREACHABLE_AFTER}
+    return {"hosts": hosts, "stale_after_seconds": STALE_AFTER}
 
 
 def read_host(host, script):
@@ -101,7 +116,7 @@ def read_host(host, script):
 
 def main():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/probe"))
-    from canary import STATE, now, record_lock, send_alert, write
+    from canary import STATE, now, push_health, record_lock, send_alert, write
 
     hosts = os.environ["CANARY_RESOURCE_HOSTS"].split()
     if not hosts:
@@ -130,6 +145,7 @@ def main():
             messages.append(f"host capacity {host} RECOVERED: sampling works again ({now()})")
         messages.extend(f"host capacity {host} {transition} ({now()})" for transition in transitions)
     write(path, json.dumps(state) + "\n")
+    push_health("hosts", report(state))
     if messages:
         with record_lock(), (STATE / "alerts.log").open("a") as log:
             log.write("\n".join(messages) + "\n")

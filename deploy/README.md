@@ -364,7 +364,10 @@ The timer checks memory in use, CPU busy time between samples, each persistent
 local filesystem, and allocated file descriptors against the host's capacity.
 The policy in `host_resources.py` fires at 80% (warning) or 90% (critical) for
 three minutes and clears each level five percentage points below its trigger.
-Transitions go to the canary's `alerts.log`, its
+The runner also pushes the latest of both (`CANARY_REPORT_URL`, the server's origin, and
+`CANARY_REPORT_TOKEN_FILE`, a file holding the server's `PAPERBOAT_HOST_HEALTH_TOKEN`) so the admin panel's
+Servers > "Hosts & canary" tab shows each host's percentages and the canary's state, and its notices bell lists
+the open alerts. A report older than five minutes is itself an open alert. Transitions go to the canary's `alerts.log`, its
 `CANARY_ALERT_THREAD`. A host whose sample fails three times in a row
 is reported once as UNKNOWN (and RECOVERED when sampling works), so a broken ssh key cannot silence it. Resource status is kept in `host-resources.json` in
 the canary state directory.

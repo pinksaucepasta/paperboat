@@ -9,7 +9,7 @@ State lives in CANARY_STATE (default ~/.local/state/paperboat-canary):
 A step that fails in two runs in a row alerts once; its first pass afterwards sends one recovery line.
 The probe's environment (RUN_A, CANARY_A, ...) comes from the unit's EnvironmentFile.
 """
-import fcntl, json, os, subprocess, sys, time
+import fcntl, json, os, subprocess, sys, time, urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,6 +117,7 @@ def record(run, alert):
         if messages:
             with open(STATE / "alerts.log", "a") as log:
                 log.write("".join(m + "\n" for m in messages))
+    push_health("canary", health_payload(status))
     if messages:  # network delivery cannot hold the state lock or delay the other unit
         alert("\n".join(messages))
     return status
@@ -136,6 +137,31 @@ def send_alert(message):
         subprocess.run(["t3", "thread", "send", thread, message], timeout=30, capture_output=True)
     except (OSError, subprocess.TimeoutExpired):
         pass
+
+
+def push_health(source, payload):
+    """Latest state for the admin panel: CANARY_REPORT_URL (the server's origin) and CANARY_REPORT_TOKEN_FILE, both optional.
+    Best effort: the panel shows a report that stopped arriving as stale, so a failed push must not fail the run."""
+    url, token_file = os.environ.get("CANARY_REPORT_URL"), os.environ.get("CANARY_REPORT_TOKEN_FILE")
+    if not url or not token_file:
+        return
+    try:
+        request = urllib.request.Request(
+            url.rstrip("/") + "/v1/operations/host-health/reports", method="POST",
+            data=json.dumps({"source": source, "payload": payload}).encode(),
+            headers={"content-type": "application/json", "authorization": "Bearer " + Path(token_file).read_text().strip()})
+        urllib.request.urlopen(request, timeout=10).close()
+    except (OSError, ValueError) as error:
+        print(f"health report failed: {error}", file=sys.stderr)
+
+
+def health_payload(status):
+    """The canary state the panel shows: red or green, the open step failures, and each unit's last run without its history."""
+    def last(run):
+        return run and {"started": run["started"], "finished": run["finished"], "ok": run["ok"],
+                        "steps": [{"step": s["step"], "ok": s["ok"], "error": s.get("error", "")[:200]} for s in run["steps"]]}
+    return {"red": status["red"], "red_since": status["red_since"], "failing": status["consecutive_failures"],
+            "last": last(status.get("last")), "account_last": last(status.get("account_last")), "stale_after_seconds": 300}
 
 
 def account_steps():

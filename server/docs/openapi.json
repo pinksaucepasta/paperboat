@@ -78,6 +78,11 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Opaque runtime credential issued for exactly one completed active pbh node."
+      },
+      "bearerHostHealth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The dedicated host health reporting token (PAPERBOAT_HOST_HEALTH_TOKEN)."
       }
     },
     "schemas": {
@@ -66753,6 +66758,166 @@
         ],
         "x-operator-capability": "operations",
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Our own relays or edges, paged by node id, with the bytes each carried; a registered node that reported nothing is listed with reporting=false."
+      }
+    },
+    "/v1/operations/host-health/reports": {
+      "post": {
+        "operationId": "post_host_health_report",
+        "summary": "Record the latest host capacity or canary state",
+        "security": [
+          {
+            "bearerHostHealth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "payload"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "hosts",
+                      "canary"
+                    ]
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The latest report of that source was replaced.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "recorded"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Accepts at most 49152 request-body bytes and a payload of at most 32768. This route uses only its dedicated bearer and never accepts browser staff authority or CSRF."
+      }
+    },
+    "/v1/admin/host-health": {
+      "get": {
+        "operationId": "get_admin_host_health",
+        "summary": "Read the latest host capacity and canary reports",
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "responses": {
+          "200": {
+            "description": "The latest report of each source; a source that never reported is absent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "reports"
+                      ],
+                      "properties": {
+                        "reports": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "source",
+                              "payload",
+                              "reported_at"
+                            ],
+                            "properties": {
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "hosts",
+                                  "canary"
+                                ]
+                              },
+                              "payload": {
+                                "type": "object",
+                                "additionalProperties": true
+                              },
+                              "reported_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   }

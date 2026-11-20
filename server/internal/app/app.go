@@ -46,6 +46,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/favorites"
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/hosthealth"
 	"github.com/pinksaucepasta/paperboat/server/internal/httpapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/inboxdispatch"
 	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
@@ -790,6 +791,7 @@ func New(opts Options) (*App, error) {
 		ServerNodes:              newServerNodeEnroller(store, opts.Config),
 		Database:                 store,
 		OperatorBackups:          backupService,
+		HostHealth:               hosthealth.NewService(store, opts.Config.Secrets.HostHealthToken),
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,
 		OperatorMoney:            moneyService(stripeClient, store),

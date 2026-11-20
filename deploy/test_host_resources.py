@@ -37,6 +37,16 @@ class HostResourceTest(unittest.TestCase):
         _, alerts = assess(state, {"boot": "b", "cpu": [102, 102], "usage": {}}, 720)
         self.assertEqual(alerts, ["RECOVERED: CPU at 0.0%"])
 
+    def test_the_report_gives_each_resource_its_percentage_and_level_per_host(self):
+        state, _ = assess({}, {"boot": "a", "cpu": [0, 0], "usage": {"memory": 85.04, "disk /": 10}}, 0)
+        for minute in (1, 2, 3):
+            state, _ = assess(state, {"boot": "a", "cpu": [0, 0], "usage": {"memory": 85.04, "disk /": 10}}, minute * 60)
+        out = host_resources.report({"root@db": state, "bad@gone": {"misses": 3}})
+        self.assertEqual(out["hosts"]["db"], {"resources": {"memory": {"percent": 85.0, "level": "warning"},
+                                                            "disk /": {"percent": 10, "level": "normal"}},
+                                              "unreachable": False})
+        self.assertEqual(out["hosts"]["gone"], {"resources": {}, "unreachable": True})
+
     def test_a_host_that_cannot_be_sampled_alerts_once_and_recovers_once(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/probe"))
         import canary

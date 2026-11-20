@@ -567,6 +567,7 @@ type Secrets struct {
 	SentryAPIToken        string   `json:"sentry_api_token"`
 	PostHogPersonalKey    string   `json:"posthog_personal_api_key"`
 	BackupReportToken     string   `json:"backup_report_token"`
+	HostHealthToken       string   `json:"host_health_token"`
 	TestFixturesToken     string   `json:"test_fixtures_token"`
 	SentryDSN             string   `json:"sentry_dsn"`
 	SessionKeys           []string `json:"session_keys"`
