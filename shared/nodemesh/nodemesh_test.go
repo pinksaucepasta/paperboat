@@ -302,3 +302,47 @@ func TestTCPKeys(t *testing.T) {
 		t.Fatal("tcp key refused in a message")
 	}
 }
+
+func TestWildcardKeys(t *testing.T) {
+	if got := WildcardKey("a.example.test"); got != "*.a.example.test" {
+		t.Fatalf("WildcardKey: %q", got)
+	}
+	if suffix, ok := WildcardSuffix("*.a.example.test"); !ok || suffix != "a.example.test" {
+		t.Fatalf("WildcardSuffix: %q %v", suffix, ok)
+	}
+	if key, ok := WildcardMatch("x.a.example.test"); !ok || key != "*.a.example.test" {
+		t.Fatalf("WildcardMatch: %q %v", key, ok)
+	}
+	if _, ok := WildcardMatch("localhost"); ok {
+		t.Fatal("a one-label name has no wildcard")
+	}
+	for _, bad := range []string{"*.", "*.*.example.test", "*a.example.test", "a.*.example.test", "*.A.example.test", "**.example.test", "*.example.test."} {
+		if ValidKey(bad) == nil {
+			t.Errorf("%q accepted as a key", bad)
+		}
+	}
+	for _, good := range []string{"*.a.example.test", "*.example"} {
+		if err := ValidKey(good); err != nil {
+			t.Errorf("%q refused: %v", good, err)
+		}
+	}
+	if (Holder{Name: "*.a.example.test", NodeIDs: []string{"n1"}}).Validate() != nil {
+		t.Fatal("wildcard holder refused")
+	}
+}
+
+func TestOpenHelloBound(t *testing.T) {
+	open := Open{V: 1, Name: "a.example.test", Visitor: "192.0.2.1:5000", From: "n1", Hop: ForwardHop, Hello: make([]byte, MaxHello)}
+	if err := open.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	open.Hello = make([]byte, MaxHello+1)
+	if err := open.Validate(); !errors.Is(err, ErrFrame) {
+		t.Fatalf("oversized hello accepted: %v", err)
+	}
+	var buf bytes.Buffer
+	open.Hello = make([]byte, MaxHello)
+	if err := WriteMessage(&buf, open); err != nil {
+		t.Fatalf("a full hello must fit one frame: %v", err)
+	}
+}

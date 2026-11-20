@@ -41,6 +41,10 @@ const (
 	DefaultHolderPage = MaxHolderPage
 	// ForwardHop is the only hop count a holder accepts: a forwarded visitor is never forwarded again.
 	ForwardHop = 1
+	// MaxHello bounds the ClientHello bytes an Open carries so the holder can check the name before it acks.
+	MaxHello = 4096
+	// WildcardPrefix starts the holder key of a one-label wildcard publication: "*.<name>".
+	WildcardPrefix = "*."
 )
 
 var (
@@ -177,12 +181,40 @@ func ParseTCPKey(key string) (uint16, bool) {
 	return uint16(port), true
 }
 
+// WildcardKey is the holder key of the one-label wildcard publication for suffix ("a.example.test" gives
+// "*.a.example.test"); it matches exactly one more label (WildcardMatch).
+func WildcardKey(suffix string) string { return WildcardPrefix + suffix }
+
+// WildcardSuffix returns the suffix of a wildcard key.
+func WildcardSuffix(key string) (string, bool) {
+	suffix, ok := strings.CutPrefix(key, WildcardPrefix)
+	if !ok || ValidName(suffix) != nil {
+		return "", false
+	}
+	return suffix, true
+}
+
+// WildcardMatch is the wildcard key that covers name (exactly one label above the key's suffix), if any.
+func WildcardMatch(name string) (string, bool) {
+	_, rest, ok := strings.Cut(name, ".")
+	if !ok || rest == "" {
+		return "", false
+	}
+	return WildcardKey(rest), true
+}
+
 // ValidKey accepts what a node can hold and forward: a lower-case DNS name (HTTPS and TLS passthrough
-// tunnels, and per-session names) or a raw TCP key.
+// tunnels, and per-session names), a one-label wildcard key, or a raw TCP key.
 func ValidKey(key string) error {
 	if strings.HasPrefix(key, TCPKeyPrefix) {
 		if _, ok := ParseTCPKey(key); !ok {
 			return fmt.Errorf("%w: tcp key", ErrInvalid)
+		}
+		return nil
+	}
+	if strings.HasPrefix(key, WildcardPrefix) {
+		if _, ok := WildcardSuffix(key); !ok {
+			return fmt.Errorf("%w: wildcard key", ErrInvalid)
 		}
 		return nil
 	}
@@ -196,6 +228,9 @@ type Open struct {
 	Visitor string `json:"visitor"` // visitor ip:port as the forwarding node saw it
 	From    string `json:"from"`    // forwarding node id; the holder checks it against the authenticated peer
 	Hop     int    `json:"hop"`
+	// Hello is the visitor's TLS ClientHello (HTTPS keys only): the holder parses its server name, requires it to
+	// match Name and checks it can serve the name before it acks, so the forwarder can still try another holder.
+	Hello []byte `json:"hello,omitempty"`
 }
 
 func (o Open) Validate() error {
@@ -207,6 +242,9 @@ func (o Open) Validate() error {
 	}
 	if _, err := netip.ParseAddrPort(o.Visitor); err != nil {
 		return fmt.Errorf("%w: visitor address", ErrInvalid)
+	}
+	if len(o.Hello) > MaxHello {
+		return fmt.Errorf("%w: hello", ErrFrame)
 	}
 	return nil
 }
