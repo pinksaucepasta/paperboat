@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -20,6 +21,11 @@ type RuntimeRepository struct {
 	db                     *db.DB
 	presenceRefresh        time.Duration
 	identityConflictWindow time.Duration
+
+	presenceMu      sync.Mutex
+	presencePending map[string]struct{}
+	// writePresence is the one statement a flush runs; replaced in tests.
+	writePresence func(context.Context, []string) error
 }
 
 // NewRuntimeRepository records machine heartbeats. presenceRefresh is how stale last_seen_at may become
@@ -38,10 +44,56 @@ func NewRuntimeRepository(store *db.DB, presenceRefresh time.Duration, identityC
 // offline cutoff (90 s).
 const machineWaitPresenceGate = 30 * time.Second
 
-// TouchMachinePresence records that machineID's machine-events wait is alive (see TouchUserMachinePresence).
-func (r *RuntimeRepository) TouchMachinePresence(ctx context.Context, machineID string) error {
-	_, err := r.db.Queries().TouchUserMachinePresence(ctx, dbsqlc.TouchUserMachinePresenceParams{ID: machineID, GateSeconds: machineWaitPresenceGate.Seconds()})
-	return err
+// PresenceFlushEvery is how long a wait's presence touch may sit in memory before it is written. A wait is held
+// 55 s, so one write per machine per wait became one statement a second for the whole fleet (commit and WAL sync
+// per row were ~10% of Postgres busy time in production). Together with machineWaitPresenceGate and a held wait it
+// stays under the offline cutoff (TestBatchedPresenceNeverApproachesTheOfflineCutoff).
+const PresenceFlushEvery = time.Second
+
+// TouchMachinePresence records that machineID's machine-events wait is alive: it queues the machine for the next
+// FlushPresence (see TouchUserMachinesPresence for what the write does). A crash loses at most PresenceFlushEvery of
+// touches; the machines' next waits repeat them.
+func (r *RuntimeRepository) TouchMachinePresence(_ context.Context, machineID string) error {
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	if r.presencePending == nil {
+		r.presencePending = map[string]struct{}{}
+	}
+	r.presencePending[machineID] = struct{}{}
+	return nil
+}
+
+// FlushPresence writes every queued touch in one statement. On failure the machines stay queued for the next flush.
+func (r *RuntimeRepository) FlushPresence(ctx context.Context) error {
+	r.presenceMu.Lock()
+	ids := make([]string, 0, len(r.presencePending))
+	for id := range r.presencePending {
+		ids = append(ids, id)
+	}
+	clear(r.presencePending)
+	r.presenceMu.Unlock()
+	if len(ids) == 0 {
+		return nil
+	}
+	write := r.writePresence
+	if write == nil {
+		write = func(ctx context.Context, ids []string) error {
+			_, err := r.db.Queries().TouchUserMachinesPresence(ctx, dbsqlc.TouchUserMachinesPresenceParams{Ids: ids, GateSeconds: machineWaitPresenceGate.Seconds()})
+			return err
+		}
+	}
+	if err := write(ctx, ids); err != nil {
+		r.presenceMu.Lock()
+		defer r.presenceMu.Unlock()
+		if r.presencePending == nil {
+			r.presencePending = map[string]struct{}{}
+		}
+		for _, id := range ids {
+			r.presencePending[id] = struct{}{}
+		}
+		return err
+	}
+	return nil
 }
 
 type RuntimeObservation struct {

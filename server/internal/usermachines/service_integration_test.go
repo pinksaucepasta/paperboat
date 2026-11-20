@@ -1176,7 +1176,7 @@ func TestMachineKeptOnlineByWaitTouchesGoesOfflineWhenTheyStop(t *testing.T) {
 	}
 	// Touch every 100 ms (a wait start, gate 0.05 s) for twice the cutoff: never offline.
 	for end := time.Now().Add(2 * offlineAfter); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
-		if _, err := store.Queries().TouchUserMachinePresence(ctx, dbsqlc.TouchUserMachinePresenceParams{ID: machineID, GateSeconds: 0.05}); err != nil {
+		if _, err := store.Queries().TouchUserMachinesPresence(ctx, dbsqlc.TouchUserMachinesPresenceParams{Ids: []string{machineID}, GateSeconds: 0.05}); err != nil {
 			t.Fatal(err)
 		}
 		if got := state(); got != "online" {

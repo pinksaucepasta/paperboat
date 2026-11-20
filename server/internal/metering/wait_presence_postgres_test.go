@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 )
 
 // The held machine-events wait is an idle machine's presence: it refreshes last_seen_at of an online machine once the
@@ -60,6 +61,9 @@ VALUES($1,$2,$3,'wp-'||$4,'linux','amd64','/w','offline','occupied',false,now()-
 		if err := repo.TouchMachinePresence(ctx, machine); err != nil {
 			t.Fatal(err)
 		}
+		if err := repo.FlushPresence(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	touch() // an offline machine stays offline: only an observation brings it online
@@ -87,5 +91,70 @@ VALUES($1,$2,$3,'wp-'||$4,'linux','amd64','/w','offline','occupied',false,now()-
 	got := read()
 	if !got.lastSeen.After(stale.lastSeen) || got.version != stale.version || got.state != "online" {
 		t.Fatalf("a wait past the gate did not refresh presence alone: %+v -> %+v", stale, got)
+	}
+}
+
+// Flap test: an idle machine whose row is as old as a healthy one gets before its next held wait starts (the gate it
+// was skipped at plus one wait) is still online when its batched touch is flushed, by the offline cutoff's own rule.
+func TestBatchedTouchKeepsAMachineOnlineAtItsWorstHealthyAge(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	s := fmt.Sprint(time.Now().UnixNano())
+	user := "bp_user_" + s
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(id string, age time.Duration) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,last_seen_at)
+VALUES($1,$2,$3,'bp-'||left(md5($3),12),'linux','amd64','/w','online','occupied',true,now()-make_interval(secs=>$4::float8))`, id, user, "env_"+id, age.Seconds()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worst := machineWaitPresenceGate + machineevents.MaxWait
+	idle, fresh := "bp_idle_"+s, "bp_fresh_"+s
+	insert(idle, worst)
+	insert(fresh, time.Second)
+	var before string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT xmin::text FROM paperboat.user_machines WHERE id=$1`, fresh).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRuntimeRepository(store, time.Hour)
+	for _, id := range []string{idle, fresh, idle} {
+		if err := repo.TouchMachinePresence(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.FlushPresence(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var stale bool
+	var after string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT last_seen_at < now()-make_interval(secs=>$2::float8) FROM paperboat.user_machines WHERE id=$1`, idle, config.Default().UserMachines.OfflineAfter.Seconds()).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if stale {
+		t.Fatal("the batched touch left a healthy machine past the offline cutoff")
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT xmin::text FROM paperboat.user_machines WHERE id=$1`, fresh).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatal("a touch inside the gate rewrote the fresh machine's row")
 	}
 }

@@ -6054,22 +6054,23 @@ func (q *Queries) SetUserTransferDestinationDefault(ctx context.Context, arg Set
 	return i, err
 }
 
-const touchUserMachinePresence = `-- name: TouchUserMachinePresence :execrows
+const touchUserMachinesPresence = `-- name: TouchUserMachinesPresence :execrows
 UPDATE user_machines SET last_seen_at = now()
-WHERE id = $1 AND state = 'online' AND online AND deleted_at IS NULL
+WHERE id = ANY($1::text[]) AND state = 'online' AND online AND deleted_at IS NULL
   AND (last_seen_at IS NULL OR last_seen_at < now() - make_interval(secs => $2::float8))
 `
 
-type TouchUserMachinePresenceParams struct {
-	ID          string
+type TouchUserMachinesPresenceParams struct {
+	Ids         []string
 	GateSeconds float64
 }
 
-// The held machine-events wait is an idle machine's presence signal: it refreshes last_seen_at of a machine that is
-// already online once the row is older than gate_seconds, and writes nothing else (no version, no capabilities). It
-// never brings an offline machine online: that takes an observation, which also restores its capabilities.
-func (q *Queries) TouchUserMachinePresence(ctx context.Context, arg TouchUserMachinePresenceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, touchUserMachinePresence, arg.ID, arg.GateSeconds)
+// The held machine-events wait is an idle machine's presence signal: it refreshes last_seen_at of the machines that
+// are already online once their row is older than gate_seconds, and writes nothing else (no version, no capabilities).
+// It never brings an offline machine online: that takes an observation, which also restores its capabilities. One
+// statement for every wait of the last flush interval (metering.PresenceFlushEvery).
+func (q *Queries) TouchUserMachinesPresence(ctx context.Context, arg TouchUserMachinesPresenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, touchUserMachinesPresence, arg.Ids, arg.GateSeconds)
 	if err != nil {
 		return 0, err
 	}

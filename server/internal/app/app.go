@@ -1032,6 +1032,8 @@ func New(opts Options) (*App, error) {
 		observedWorker(supportService, "worker_peer_policy", listenerWorker(24*time.Second, func(ctx context.Context) error {
 			return peerNetworkService.ListenPolicy(ctx, store.Direct(), 24*time.Second)
 		}), progress),
+		// Every process writes the presence touches of its own held waits, one statement per flush.
+		observedWorker(supportService, "worker_presence", periodicPreviewTunnelWorker(metering.PresenceFlushEvery, runtimeRepository.FlushPresence), progress),
 		// Each server process records its own CPU and memory for the operator capacity page.
 		observedWorker(supportService, "worker_node_capacity", periodicPreviewTunnelWorker(30*time.Second, serverCapacityRecorder(store, opts.Config.Reporting.Instance)), progress))
 	sweeps := 0
