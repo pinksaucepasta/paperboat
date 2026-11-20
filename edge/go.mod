@@ -26,3 +26,5 @@ require (
 replace github.com/pinksaucepasta/paperboat/shared => ../shared
 
 replace github.com/pinksaucepasta/paperboat/relay => ../relay
+
+replace github.com/quic-go/quic-go => ../third_party/quic-go

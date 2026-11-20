@@ -30,6 +30,14 @@ type relayConn struct {
 	once     sync.Once
 	mu       sync.Mutex
 	deadline time.Time
+	// delayed carries writes through a fixed one-way delay (nil: none), in order, as a long path would.
+	delayed chan delayedPacket
+	delay   time.Duration
+}
+
+type delayedPacket struct {
+	data []byte
+	at   time.Time
 }
 
 type relayAddr struct{}
@@ -37,8 +45,24 @@ type relayAddr struct{}
 func (relayAddr) Network() string { return "relay" }
 func (relayAddr) String() string  { return "relay-peer" }
 
-func newRelayConn(c *Client, peer key.NodePublic) *relayConn {
-	r := &relayConn{c: c, peer: peer, in: make(chan []byte, 4096), done: make(chan struct{}), wake: make(chan struct{}, 1)}
+func newRelayConn(c *Client, peer key.NodePublic, oneWayDelay time.Duration) *relayConn {
+	r := &relayConn{c: c, peer: peer, in: make(chan []byte, 4096), done: make(chan struct{}), wake: make(chan struct{}, 1), delay: oneWayDelay}
+	if oneWayDelay > 0 {
+		r.delayed = make(chan delayedPacket, 8192)
+		go func() {
+			for {
+				select {
+				case p := <-r.delayed:
+					time.Sleep(time.Until(p.at))
+					if r.c.Send(r.peer, p.data) != nil {
+						return
+					}
+				case <-r.done:
+					return
+				}
+			}
+		}()
+	}
 	go func() {
 		for {
 			message, _, err := c.RecvDetail()
@@ -86,6 +110,14 @@ func (r *relayConn) ReadFrom(p []byte) (int, net.Addr, error) {
 }
 
 func (r *relayConn) WriteTo(p []byte, _ net.Addr) (int, error) {
+	if r.delayed != nil {
+		select {
+		case r.delayed <- delayedPacket{append([]byte(nil), p...), time.Now().Add(r.delay)}:
+			return len(p), nil
+		default:
+			return len(p), nil // a full delay line drops, as a full path buffer would
+		}
+	}
 	if err := r.c.Send(r.peer, append([]byte(nil), p...)); err != nil {
 		return 0, err
 	}
@@ -108,8 +140,8 @@ func (r *relayConn) SetReadDeadline(t time.Time) error {
 func (r *relayConn) SetWriteDeadline(time.Time) error { return nil }
 
 // quicThroughput runs a QUIC bulk upload from peer a to peer b through a relay whose account speed is mbit (0 lifts the cap) for the given
-// duration and returns the goodput in Mbit/s.
-func quicThroughput(t *testing.T, mbit float64, duration time.Duration, w writes) (goodput float64, dropped, wire uint64) {
+// duration and returns the goodput in Mbit/s; oneWayDelay is added to every packet of each peer (a path's round trip is twice it).
+func quicThroughput(t *testing.T, mbit float64, oneWayDelay, duration time.Duration, w writes) (goodput float64, dropped, wire uint64) {
 	t.Helper()
 	f := newFixture(t)
 	s, address, _ := f.start("127.0.0.1:0")
@@ -124,7 +156,7 @@ func quicThroughput(t *testing.T, mbit float64, duration time.Duration, w writes
 	a, b := f.client(address, ca, ga), f.client(address, cb, gb)
 	connect(t, a)
 	connect(t, b)
-	ra, rb := newRelayConn(a, kb), newRelayConn(b, ka)
+	ra, rb := newRelayConn(a, kb, oneWayDelay), newRelayConn(b, ka, oneWayDelay)
 	defer ra.Close()
 	defer rb.Close()
 	s.TakeAccountDemand() // a window that starts with the flow
@@ -213,11 +245,25 @@ func TestQUICBulkThroughRelayGetsMostOfTheAccountSpeed(t *testing.T) {
 		t.Skip("takes about 20 s")
 	}
 	for _, mbit := range []float64{10, 1} {
-		goodput, dropped, _ := quicThroughput(t, mbit, 8*time.Second, bulkWrites)
+		goodput, dropped, _ := quicThroughput(t, mbit, 0, 8*time.Second, bulkWrites)
 		t.Logf("account speed %4.1f Mbit/s: QUIC goodput %.2f Mbit/s, relay dropped %d datagrams", mbit, goodput, dropped)
 		if goodput < 0.75*mbit || goodput > 1.05*mbit {
 			t.Fatalf("a QUIC transfer through an account capped at %.1f Mbit/s got %.2f Mbit/s, want 75-105%% of it", mbit, goodput)
 		}
+	}
+}
+
+// A QUIC transfer over a path with a 500 ms round trip still gets most of the account speed. quic-go's HyStart used to leave slow start
+// after 16 ms of delay jitter, at about 69 KB of congestion window, and then grew the window by one packet per round trip: 1.4 Mbit/s
+// whatever the plan (third_party/quic-go/README.paperboat.md). With the patch a 5 Mbit/s account gets about 4.2 Mbit/s.
+func TestQUICBulkOverALongPathGetsMostOfTheAccountSpeed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes about 25 s")
+	}
+	goodput, dropped, _ := quicThroughput(t, 5, 250*time.Millisecond, 20*time.Second, bulkWrites)
+	t.Logf("500 ms round trip, account speed 5 Mbit/s: QUIC goodput %.2f Mbit/s, relay dropped %d datagrams", goodput, dropped)
+	if goodput < 3.5 || goodput > 5.25 {
+		t.Fatalf("a QUIC transfer over a 500 ms path through an account capped at 5 Mbit/s got %.2f Mbit/s, want 3.5-5.25 (70-105%%)", goodput)
 	}
 }
 
@@ -235,12 +281,13 @@ func TestQUICBulkMeasure(t *testing.T) {
 	if v, err := strconv.Atoi(os.Getenv("RELAY_QUIC_SECONDS")); err == nil && v > 0 {
 		seconds = v
 	}
+	delayMs, _ := strconv.Atoi(os.Getenv("RELAY_QUIC_DELAY_MS")) // one-way delay per peer; the round trip is twice it
 	for _, field := range strings.Split(caps, ",") {
 		mbit, err := strconv.ParseFloat(strings.TrimSpace(field), 64)
 		if err != nil {
 			t.Fatal(err)
 		}
-		goodput, dropped, _ := quicThroughput(t, mbit, time.Duration(seconds)*time.Second, bulkWrites)
+		goodput, dropped, _ := quicThroughput(t, mbit, time.Duration(delayMs)*time.Millisecond, time.Duration(seconds)*time.Second, bulkWrites)
 		t.Logf("MEASURE cap %6.1f Mbit/s: QUIC goodput %7.2f Mbit/s (%.0f%% of the cap), relay dropped %d datagrams", mbit, goodput, 100*goodput/max(mbit, 1e-9), dropped)
 	}
 }
@@ -381,12 +428,12 @@ func TestQUICSmallWritesThroughRelayGetsTheirSpeed(t *testing.T) {
 		t.Skip("takes about 20 s")
 	}
 	const plan = 10.0
-	fast, _, fastWire := quicThroughput(t, plan, 8*time.Second, writes{size: 200})
+	fast, _, fastWire := quicThroughput(t, plan, 0, 8*time.Second, writes{size: 200})
 	t.Logf("200 B writes, as fast as possible: goodput %.2f Mbit/s of a %.0f Mbit/s plan; the relay counted %.2f Mbit/s on the wire", fast, plan, float64(fastWire)*8/1e6/8)
 	if fast < 0.8*plan {
 		t.Errorf("200 B writes got %.2f Mbit/s of a %.0f Mbit/s plan, want at least 80%%", fast, plan)
 	}
-	paced, _, pacedWire := quicThroughput(t, plan, 8*time.Second, writes{size: 200, every: 250 * time.Microsecond})
+	paced, _, pacedWire := quicThroughput(t, plan, 0, 8*time.Second, writes{size: 200, every: 250 * time.Microsecond})
 	t.Logf("200 B writes every 250 us (6.4 Mbit/s offered): goodput %.2f Mbit/s; the relay counted %.2f Mbit/s on the wire (%.0f%% overhead)", paced, float64(pacedWire)*8/1e6/8, 100*(float64(pacedWire)*8/1e6/8/paced-1))
 	if paced < 0.9*6.4 {
 		t.Errorf("paced 200 B writes got %.2f Mbit/s of 6.4 offered, want at least 90%%", paced)

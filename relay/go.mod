@@ -33,3 +33,5 @@ require (
 replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.20261119151000-b2eaa82185fc
 
 replace github.com/pinksaucepasta/paperboat/shared => ../shared
+
+replace github.com/quic-go/quic-go => ../third_party/quic-go
