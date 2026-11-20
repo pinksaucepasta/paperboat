@@ -311,18 +311,6 @@ func (s *Server) servePeer(p *peerConn) {
 			s.reject(p, ErrOverload)
 			return
 		}
-		// Payload over the account's fair-use speed waits for its tokens before the next frame is read, so the sender's TCP slows to
-		// the speed (nothing is dropped); control frames are bounded by the carrier's own budget only, so a saturated account can
-		// still ping and re-authenticate.
-		if kind == framePacket {
-			if delay, _ := accountBudget.reserve(now, len(b), time.Hour); delay > 0 {
-				select {
-				case <-time.After(delay):
-				case <-p.context().Done():
-					return
-				}
-			}
-		}
 		switch kind {
 		case frameAuth, frameAuthGeneration, frameAuthBatch:
 			if err = s.authenticate(p, kind, b); errors.Is(err, ErrExpired) {
@@ -367,6 +355,20 @@ func (s *Server) servePeer(p *peerConn) {
 				return
 			}
 			msg.control = false
+			if !s.sendAuthorized(p, msg.peer, now) { // not the account's traffic: no tokens, no demand
+				s.dropped.Add(1)
+				continue
+			}
+			// Payload over the account's fair-use speed waits for its tokens before the next frame is read, so the sender's TCP slows to
+			// the speed (nothing is dropped); control frames are bounded by the carrier's own budget only, so a saturated account can
+			// still ping and re-authenticate.
+			if delay, _ := accountBudget.reserve(now, len(b), time.Hour); delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-p.context().Done():
+					return
+				}
+			}
 			s.route(p, msg)
 		default:
 			s.reject(p, ErrProtocol)
@@ -494,6 +496,14 @@ func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
 	p.paired = pairMemo{peer: q, mine: p.grant.signedHash, theirs: q.grant.signedHash, allowed: allowedAdmitted(p.grant, q.grant)}
 	return p.paired.allowed
 }
+
+// sendAuthorized reports whether p may send to the peer with key k now.
+func (s *Server) sendAuthorized(p *peerConn, k key.NodePublic, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
+}
+
 func (s *Server) route(p *peerConn, msg packet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -522,11 +532,7 @@ func (s *Server) readDatagrams(p *peerConn) {
 	defer p.close(0, "relay closed")
 	var r reassembler
 	forward := func(b []byte, now time.Time) bool {
-		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
-		})
+		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool { return s.sendAuthorized(p, k, now) })
 		if e != nil {
 			s.reject(p, e)
 			return false
@@ -579,6 +585,11 @@ func (s *Server) readDatagrams(p *peerConn) {
 		account := s.accounts[p.grant.AccountID]
 		s.mu.Unlock()
 		if !p.rate.allow(now, len(b)) || account == nil {
+			s.dropped.Add(1)
+			continue
+		}
+		// A datagram for a peer this one may not reach costs the carrier's budget only: it takes no account tokens and adds no demand.
+		if len(b) >= fragmentHeader && !s.sendAuthorized(p, fragmentPeer(b), now) {
 			s.dropped.Add(1)
 			continue
 		}
@@ -713,8 +724,10 @@ func speedBytes(mbit float64) float64 {
 }
 
 func (s *Server) rateForLocked(account string) float64 {
-	if slow, ok := s.accountSpeeds[account]; ok {
-		return min(s.accountRate, slow)
+	// A listed speed replaces the default: the control plane lists an account whose plan speed differs from it, a paid account's
+	// 100 Mbit/s as well as a Free account's slower tier (clamping to the default held every paid account to Free's 10).
+	if speed, ok := s.accountSpeeds[account]; ok {
+		return speed
 	}
 	return s.accountRate
 }

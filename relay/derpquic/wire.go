@@ -133,6 +133,13 @@ type reassembler struct {
 	completed [128]uint64
 }
 
+// fragmentPeer is the peer a datagram is for (b is at least fragmentHeader long).
+func fragmentPeer(b []byte) key.NodePublic {
+	var raw [32]byte
+	copy(raw[:], b[8:40])
+	return key.NodePublicFromRaw32(mem.B(raw[:]))
+}
+
 func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePublic) bool) (packet, bool, error) {
 	if len(b) < fragmentHeader+1 || len(b) > fragmentHeader+MaxPacket {
 		return packet{}, false, ErrProtocol
@@ -140,9 +147,7 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 	id := binary.BigEndian.Uint64(b)
 	size := int(binary.BigEndian.Uint16(b[40:42]))
 	index := int(b[42])
-	var raw [32]byte
-	copy(raw[:], b[8:40])
-	peer := key.NodePublicFromRaw32(mem.B(raw[:]))
+	peer := fragmentPeer(b)
 	part := len(b) - fragmentHeader
 	// A packet is one datagram carrying all of it (index 0), or two fragments of fragmentPayload and the rest.
 	whole := index == 0 && part == size
