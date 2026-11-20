@@ -256,15 +256,6 @@ func (g *GenerationRegistry) streamCount(state *generationState) int {
 	return state.streams
 }
 
-func rulesForTelemetryRule(rules []RouteRule, selected RouteRule) []RouteRule {
-	for _, rule := range rules {
-		if rule.ID == selected.ID {
-			return []RouteRule{rule}
-		}
-	}
-	return []RouteRule{selected}
-}
-
 func (g *GenerationRegistry) StageGeneration(generation uint64, rules []RouteRule) error {
 	if g == nil {
 		return ErrGenerationClosed
