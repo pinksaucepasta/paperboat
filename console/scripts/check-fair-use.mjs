@@ -13,6 +13,8 @@ const freePort = () => new Promise((resolve) => { const s = net().listen(0, "127
 
 const GB = 1e9
 let state = "under"
+// The console rejects any answer that does not follow the OpenAPI shapes, so every stubbed route does.
+const PAGE = { limit: 200, offset: 0, total: 0, next_offset: null }
 const USED = { under: 40 * GB, nearly: 85 * GB, throttled: 104 * GB, own: 3 * GB, team: 150 * GB }
 const billing = () => {
   const used = USED[state]
@@ -40,7 +42,7 @@ const usage = () => ({
       { mode: "relay", hosting: "self_hosted", upload_bytes: 7 * GB, download_bytes: 0 },
     ],
   }, resources: [], series: [],
-  pagination: { limit: 200, next_cursor: "" },
+  pagination: PAGE,
 })
 const api = createServer((request, response) => {
   const path = new URL(request.url, "http://x").pathname.replace(/^\/v1\//, "")
@@ -49,6 +51,10 @@ const api = createServer((request, response) => {
     workspaces: { items: [{ id: "personal", name: "Personal", kind: "personal", role: "owner" }] },
     "billing/workspaces/personal": billing(),
     usage: usage(),
+    machines: { items: [], pagination: PAGE, total: 0, next_cursor: "" },
+    "machines/summary": { total: 0, by_state: { online: 0, offline: 0, pending: 0 }, by_platform: { linux: 0, macos: 0, windows: 0 } },
+    "team-inbox/requests": { requests: [], pagination: PAGE },
+    "team-invitations": { items: [], pagination: PAGE },
     announcements: { banner: null, notices: [], unread: 0 },
   }
   const data = answers[path]
