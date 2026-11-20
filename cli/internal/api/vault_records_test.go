@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
@@ -67,5 +68,23 @@ func TestVaultRecordsReadsMoreThan32Pages(t *testing.T) {
 	out, err := New(server.URL, config.Credential{}, server.Client()).VaultRecords(context.Background(), coordinate, 0)
 	if err != nil || len(out.Records) != pages*perPage {
 		t.Fatalf("records over 32 pages were refused: %d records, %v", len(out.Records), err)
+	}
+}
+
+func TestVaultRecordsRejectOversizedPage(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		fmt.Fprintf(w, `{"data":{"records":[],"sequence":1,"after_sequence":0},"padding":"%s"}`, strings.Repeat("x", 16<<20))
+	}))
+	defer server.Close()
+
+	client := New(server.URL, config.Credential{}, server.Client())
+	_, err := client.VaultRecordsPage(context.Background(), VaultLayerCoordinate{
+		WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account-one",
+	}, 0, 0, "")
+	var decode *ResponseDecodeError
+	if !errors.As(err, &decode) {
+		t.Fatalf("oversized ENV page returned %v, want response decode error", err)
 	}
 }

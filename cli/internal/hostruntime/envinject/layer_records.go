@@ -158,7 +158,7 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 		if err != nil {
 			return nil, err
 		}
-		if next.Sequence != through || next.AfterSequence != after || len(next.Records) > 200 {
+		if next.Sequence != through || next.AfterSequence != after || len(next.Records) > connectorprotocol.MaximumVaultRecordsPageSize {
 			return nil, ErrInvalidSnapshot
 		}
 		for _, record := range next.Records {

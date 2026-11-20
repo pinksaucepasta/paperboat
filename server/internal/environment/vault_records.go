@@ -252,7 +252,7 @@ func decodeRecordCursor(token string, key []byte) (vaultRecordCursor, error) {
 }
 func readVaultRecordsPageTx(ctx context.Context, tx *db.Tx, account string, c VaultLayerCoordinate, epoch uint64, q VaultRecordsQuery, now time.Time) (VaultRecordsPage, error) {
 	out := VaultRecordsPage{Records: []VaultRecordState{}, AfterSequence: q.AfterSequence}
-	if q.Limit < 1 || q.Limit > 200 || q.AfterSequence > MaxBrowserInteger {
+	if q.Limit < 1 || q.Limit > connectorprotocol.MaximumVaultRecordsPageSize || q.AfterSequence > MaxBrowserInteger {
 		return out, ErrProtocolInvalid
 	}
 	head, err := ensureVaultRecordHeadTx(ctx, tx, c, epoch)
