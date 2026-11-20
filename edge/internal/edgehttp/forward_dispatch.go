@@ -39,7 +39,7 @@ func (l *SharedTLSListener) SetForwarding(hooks ForwardHooks) { l.hooks.Store(&h
 // On nil Inject owns conn.
 func (l *SharedTLSListener) Inject(conn net.Conn, visitor net.Addr) error {
 	if host, _, err := net.SplitHostPort(visitor.String()); err == nil {
-		if _, ok := l.handshakes.admit(host, false); !ok {
+		if _, ok := l.handshakes.Admit(host, false); !ok {
 			l.observe("tls_handshake_rate", errHandshakeRate)
 			return forward.ErrBusy
 		}
