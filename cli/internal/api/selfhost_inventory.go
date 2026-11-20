@@ -87,7 +87,7 @@ func (c *Client) SelfhostInstallationsPage(ctx context.Context, limit, offset in
 	}
 	page := SelfhostInstallationPage{Installations: *wire.Installations, Pagination: Pagination{Limit: *wire.Pagination.Limit, Offset: *wire.Pagination.Offset, Total: *wire.Pagination.Total, NextOffset: next}, Counts: SelfhostCounts{Ready: *wire.Counts.Ready, Enrolled: *wire.Counts.Enrolled, Pending: *wire.Counts.Pending}}
 	p, counts := page.Pagination, page.Counts
-	if p.Limit != limit || p.Offset != offset || p.Total < 0 || p.Total > 16384 || len(page.Installations) > limit || counts.Ready < 0 || counts.Enrolled < 0 || counts.Pending < 0 || counts.Ready > counts.Enrolled || counts.Enrolled > p.Total || counts.Pending != p.Total-counts.Enrolled {
+	if p.Limit != limit || p.Offset != offset || p.Total < 0 || len(page.Installations) > limit || counts.Ready < 0 || counts.Enrolled < 0 || counts.Pending < 0 || counts.Ready > counts.Enrolled || counts.Enrolled > p.Total || counts.Pending != p.Total-counts.Enrolled {
 		return SelfhostInstallationPage{}, invalidSelfhostInventory("invalid self-hosted inventory pagination or counts")
 	}
 	end := offset + len(page.Installations)
