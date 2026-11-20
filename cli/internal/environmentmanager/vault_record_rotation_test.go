@@ -8,6 +8,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
@@ -237,5 +238,61 @@ func TestTeamRecordRotationPreservesLiveValuesAndTotalLossSkipsCiphertext(t *tes
 				t.Fatal("old epoch decrypts new record")
 			}
 		})
+	}
+}
+
+// Removed variables leave tombstones, so a scope can hold far more record IDs than live variables.
+func TestTeamRecordRotationHasNoRecordCountCap(t *testing.T) {
+	ctx := context.Background()
+	v, base, store := newVaultScopesFixture(t)
+	control := &teamRecordRotationControl{personalRotationControl: &personalRotationControl{vaultScopesControl: base, records: map[string]api.VaultRecordsResult{}}}
+	v.Client = control
+	const team = "team_alpha"
+	if err := v.CreateTeamAt(ctx, team, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.SetScopeVariable(ctx, "team", team, "", "PRESERVED", []byte("team-rotation-value")); err != nil {
+		t.Fatal(err)
+	}
+	before, oldKeys := loadVaultKeysForScopeTest(t, store)
+	defer before.Clear()
+	defer oldKeys.Clear()
+	anchor, err := api.DecodeVaultScope(control.teams[team].Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldKey, err := v.recordKey(&oldKeys, anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(oldKey)
+	key := scopeControlKey("team", team, "")
+	result := control.records[key]
+	writer, err := base64.RawURLEncoding.DecodeString(result.Records[0].WriterPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4096; i++ { // with PRESERVED: 4097 record IDs, above the former limit
+		name := "GONE_" + strconv.Itoa(i)
+		id, err := env.VaultRecordIdentifier(oldKey, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tombstone, err := env.SealVaultRecord(ctx, env.VaultRecordClaims{Issuer: v.Issuer, WorkspaceID: anchor.Claims.WorkspaceID, OwnerKind: "team", OwnerID: team, KeyEpoch: anchor.Claims.KeyEpoch, RecordID: id, Revision: 1, Deleted: true, WriterAccount: v.AccountID, WriterVaultGeneration: before.Head.Generation}, oldKey, oldKeys.WriterSeed, name, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := rotationRecordState(vaultEncoded(tombstone.Raw), writer, result.Sequence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result.Records = append(result.Records, state)
+	}
+	control.records[key] = result
+	if err := v.RotateTeam(ctx, team, nil, false); err != nil {
+		t.Fatal("rotation of a scope with 4097 record IDs refused:", err)
+	}
+	if len(control.requests) != 1 || len(control.requests[0].Records.DocumentIDs) != 1 {
+		t.Fatal("tombstones were carried over or the live record was lost")
 	}
 }
