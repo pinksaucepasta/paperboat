@@ -87,7 +87,7 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 			writeJSON(w, 200, SuccessResponse{Data: out})
 		})))
 	}
-	for _, action := range []string{"enroll", "update", "drain", "resume", "retire", "rotate", "verify-ingress", "site"} {
+	for _, action := range []string{"enroll", "update", "drain", "drain-move", "resume", "retire", "rotate", "verify-ingress", "site"} {
 		mux.Handle("POST /v1/admin/nodes/{node_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var in operatorNodeInput
 			r.Body = http.MaxBytesReader(w, r.Body, 8192)
