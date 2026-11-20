@@ -129,7 +129,7 @@ func (s *Service) Holders(ctx context.Context, callerNode, page string, limit in
 // carrier pull, and the answer is one page of the holder snapshot.
 func (h *Handler) serveHolders(w http.ResponseWriter, r *http.Request, raw []byte) {
 	var request nodemesh.HoldersRequest
-	if strictjson.Decode(raw, &request, 8) != nil || request.Validate() != nil {
+	if strictjson.DecodeResponse(raw, &request, 8) != nil || request.Validate() != nil {
 		writeError(w, 400, "invalid_request")
 		return
 	}
