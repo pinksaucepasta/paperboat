@@ -204,7 +204,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.Bool("both", false, "run a relay and an edge")
 	fs.String("endpoint-host", "", "public IP or DNS name (auto-detected when omitted)")
 	fs.String("name", "", "installation name")
-	fs.String("region", "selfhost", "selection region")
+	fs.String("region", defaultRegion, "where users see this server; add more servers with the same region to spread load and replace machines without downtime (asked on a terminal when omitted)")
 	fs.String("failure-domain", "", "independent failure domain (defaults to endpoint host)")
 	fs.String("claim-listen", "0.0.0.0:8443", "local claim HTTPS listen address")
 	fs.String("preview-domain", "", "preview base domain")
@@ -253,6 +253,12 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	if existing {
 		enable = installationMode(c)
 	}
+	region := ""
+	if !existing {
+		if region, err = installRegion(fs, os.Stdin, out, isTerminal(os.Stdin)); err != nil {
+			return err
+		}
+	}
 	// A first install that fails before its runtime starts leaves no state
 	// behind; once the runtime is installed, failures keep the installation.
 	fresh := !existing
@@ -277,7 +283,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		}
 	}
 	if !existing {
-		c, err = freshInstallConfig(ctx, fs, enable)
+		c, err = freshInstallConfig(ctx, fs, enable, region)
 		if err != nil {
 			return err
 		}
