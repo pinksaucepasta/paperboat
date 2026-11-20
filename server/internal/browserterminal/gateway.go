@@ -10,7 +10,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 )
@@ -78,11 +77,14 @@ type Gateway struct {
 	RecordUsageResumed func(ctx context.Context, attachment, terminal, node string, since, until time.Time) error
 	// RecordUsageDetached leaves an attachment that a resume on another connection extended past until.
 	RecordUsageDetached func(ctx context.Context, attachment string, until time.Time) error
-	Tickets             TicketAuthority
-	Authorizer          Authorizer
-	Signer              *mint.Provider
-	Issuer              string
-	AllowedOrigins      []string
+	// HoldsCarrier reports whether the edge process holds a valid carrier for the route the decision names: the
+	// browser may redeem its ticket at any edge that does. Nil refuses every admission.
+	HoldsCarrier   func(ctx context.Context, d Decision, nodeID, processEpoch string) (bool, error)
+	Tickets        TicketAuthority
+	Authorizer     Authorizer
+	Signer         *mint.Provider
+	Issuer         string
+	AllowedOrigins []string
 	// MaxPerSession bounds the live attachments one browser login holds (inspector and recording channels
 	// included); 0 is unbounded. It is the plan ceiling: the plan limit itself is CheckBrowserTerminalLimit.
 	MaxPerSession int
@@ -140,10 +142,12 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 	if err != nil {
 		return Ticket{}, "", Decision{}, unavailableCause(err)
 	}
-	if runtimeURL.Scheme != "wss" || runtimeURL.Hostname() == "" || runtimeURL.Port() != "" || runtimeURL.Path != "/v1/browser-terminal" || runtimeURL.RawQuery != "" || runtimeURL.Fragment != "" || decision.EdgeEndpointHost == "" || strings.ContainsAny(decision.EdgeEndpointHost, "/:@?#") {
+	if runtimeURL.Scheme != "wss" || runtimeURL.Hostname() == "" || runtimeURL.Port() != "" || runtimeURL.Path != "/v1/browser-terminal" || runtimeURL.RawQuery != "" || runtimeURL.Fragment != "" {
 		return Ticket{}, "", Decision{}, ErrHostUnavailable
 	}
-	streamURL := (&url.URL{Scheme: "wss", Host: decision.EdgeEndpointHost, Path: "/v1/browser-terminal/" + runtimeURL.Hostname()}).String()
+	// The browser dials the runtime hostname itself: any managed edge answers it, and one that does not hold the
+	// machine's carrier forwards the TLS stream to the one that does. No edge is named, so none is pinned.
+	streamURL := runtimeURL.String()
 	ticket, err := g.Tickets.Issue(ctx, Ticket{GuestSessionID: in.GuestSessionID, UserID: in.UserID, BrowserSessionID: in.BrowserSessionID, TerminalSessionID: terminalSessionID, InspectorCredentialID: in.InspectorCredentialID, RecordingID: in.RecordingID, Origin: origin, Role: decision.Role, PolicyGeneration: decision.PolicyGeneration, TeamGeneration: decision.TeamGeneration, MembershipGeneration: decision.MembershipGeneration, BindingGeneration: decision.BindingGeneration, BrowserPublicKeySHA256: browserPublicKeySHA256})
 	return ticket, streamURL, decision, err
 }
