@@ -57,7 +57,8 @@ class Repo:
         return done
 
     def seed(self, files):
-        script = ['rm -rf %s && mkdir -p %s && git init -q --bare -b main %s/pair.git' % (REPO_ROOT, REPO_ROOT, REPO_ROOT),
+        script = ['{ kill $(cat %s/pid) 2>/dev/null; true; }' % REPO_ROOT,  # an earlier run killed before close() left its server; rm -rf would lose its pid file
+                  'rm -rf %s && mkdir -p %s && git init -q --bare -b main %s/pair.git' % (REPO_ROOT, REPO_ROOT, REPO_ROOT),
                   'work=$(mktemp -d) && git clone -q %s/pair.git $work && cd $work' % REPO_ROOT]
         for name, data in files.items():
             script.append('mkdir -p "$(dirname %s)" && printf %%s %s | base64 -d > %s'
