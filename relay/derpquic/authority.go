@@ -89,13 +89,14 @@ func ParseKey(s string) (key.NodePublic, error) {
 func KeyString(k key.NodePublic) string {
 	return base64.RawURLEncoding.EncodeToString(k.AppendTo(nil))
 }
-func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time) (Grant, error) {
+
+// verifyGrantClaims checks a signed grant token: its shape, its EdDSA signature by a key in keys, its strict claims and
+// their value rules at now. It binds nothing to a relay identity or a TLS certificate; each verifier checks those itself,
+// and each checks expiry, since Check leaves it to the caller.
+func verifyGrantClaims(token string, keys map[string]ed25519.PublicKey, now time.Time) (Grant, error) {
 	var g Grant
-	if len(token) > peernetwork.MaxGrantBytes || len(state.PeerCertificates) != 1 {
-		return g, ErrAdmission
-	}
 	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
+	if len(token) > peernetwork.MaxGrantBytes || len(parts) != 3 {
 		return g, ErrAdmission
 	}
 	h, e1 := base64.RawURLEncoding.Strict().DecodeString(parts[0])
@@ -109,9 +110,9 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	if e1 != nil || e2 != nil || e3 != nil || len(h) > 1024 || peernetwork.DecodeSigned(h, &header) != nil || header.Algorithm != "EdDSA" || header.Type != peernetwork.RelayGrantType {
 		return g, ErrAdmission
 	}
-	pub := v.Keys[header.KeyID]
-	if len(pub) != 32 {
-		return Grant{}, fmt.Errorf("%w: %w", ErrAdmission, errUnknownKey)
+	pub := keys[header.KeyID]
+	if len(pub) != ed25519.PublicKeySize {
+		return g, fmt.Errorf("%w: %w", ErrAdmission, errUnknownKey)
 	}
 	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || peernetwork.DecodeSigned(b, &g.RelayGrant) != nil {
 		return Grant{}, ErrAdmission
@@ -119,6 +120,18 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	g.DropUnknownScopes()
 	if err := g.Check(now); err != nil {
 		return Grant{}, fmt.Errorf("%w: %w", err, ErrAdmission)
+	}
+	g.signedHash = sha256.Sum256(b)
+	return g, nil
+}
+
+func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time) (Grant, error) {
+	if len(state.PeerCertificates) != 1 {
+		return Grant{}, ErrAdmission
+	}
+	g, err := verifyGrantClaims(token, v.Keys, now)
+	if err != nil {
+		return Grant{}, err
 	}
 	leaf := state.PeerCertificates[0]
 	quicPublic, _ := base64.RawURLEncoding.Strict().DecodeString(g.QUICPublicKey)
@@ -139,7 +152,6 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	if g.ExpiresAt <= now.Unix() {
 		return Grant{}, ErrExpired
 	}
-	g.signedHash = sha256.Sum256(b)
 	return g.withIndex(), nil
 }
 

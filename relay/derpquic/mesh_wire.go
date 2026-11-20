@@ -4,16 +4,13 @@ import (
 	"container/list"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=keyed-peer-connection-registry
 	"tailscale.com/types/key"
 )
@@ -97,32 +94,9 @@ type remoteSource struct {
 // (node id, issuer, signature, bounds) and the key it vouches for; the TLS binding was checked by that relay when it
 // admitted the carrier, and its process epoch is not known here.
 func (v Verifier) verifyRemoteGrant(token string, keys map[string]ed25519.PublicKey, from string, route key.NodePublic, namespace [32]byte, now time.Time) (Grant, error) {
-	var g Grant
-	parts := strings.Split(token, ".")
-	if len(token) > peernetwork.MaxGrantBytes || len(parts) != 3 {
-		return g, ErrAdmission
-	}
-	h, e1 := base64.RawURLEncoding.Strict().DecodeString(parts[0])
-	b, e2 := base64.RawURLEncoding.Strict().DecodeString(parts[1])
-	sig, e3 := base64.RawURLEncoding.Strict().DecodeString(parts[2])
-	var header struct {
-		Algorithm string `json:"alg"`
-		Type      string `json:"typ"`
-		KeyID     string `json:"kid"`
-	}
-	if e1 != nil || e2 != nil || e3 != nil || len(h) > 1024 || peernetwork.DecodeSigned(h, &header) != nil || header.Algorithm != "EdDSA" || header.Type != peernetwork.RelayGrantType {
-		return g, ErrAdmission
-	}
-	pub := keys[header.KeyID]
-	if len(pub) != ed25519.PublicKeySize {
-		return g, fmt.Errorf("%w: %w", ErrAdmission, errUnknownKey)
-	}
-	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || peernetwork.DecodeSigned(b, &g.RelayGrant) != nil {
-		return Grant{}, ErrAdmission
-	}
-	g.DropUnknownScopes()
-	if err := g.Check(now); err != nil {
-		return Grant{}, fmt.Errorf("%w: %w", err, ErrAdmission)
+	g, err := verifyGrantClaims(token, keys, now)
+	if err != nil {
+		return Grant{}, err
 	}
 	root, err := ParseKey(g.WireGuardPublicKey)
 	switch {
@@ -135,7 +109,6 @@ func (v Verifier) verifyRemoteGrant(token string, keys map[string]ed25519.Public
 	case g.ExpiresAt <= now.Unix():
 		return Grant{}, ErrExpired
 	}
-	g.signedHash = sha256.Sum256(b)
 	return g.withIndex(), nil
 }
 
@@ -227,4 +200,12 @@ func (s *Server) authorizedRemoteLocked(rs *remoteSource, q *peerConn, control b
 		rs.paired = pairMemo{peer: q, theirs: q.grant.signedHash, allowed: rs.namespace == q.namespace && allowedAdmitted(rs.grant, q.grant)}
 	}
 	return rs.paired.allowed || control && controlAdmitted(rs.grant, q.grant)
+}
+
+// MeshPeers returns the relay directory the mesh holds in node id order; nil when this relay has no mesh.
+func (s *Server) MeshPeers() []nodemesh.Peer {
+	if s.mesh == nil {
+		return nil
+	}
+	return s.mesh.peerSet.Load().Peers()
 }

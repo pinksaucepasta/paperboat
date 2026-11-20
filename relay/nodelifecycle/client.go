@@ -84,8 +84,9 @@ type Lease struct {
 	// so a rotation or withdrawal applies within one observation.
 	JWKS json.RawMessage `json:"jwks,omitempty"`
 	// MeshPeers are the other Paperboat-managed relays this one links to (pins are the SPKI of each relay's serving
-	// certificate). Absent means no mesh. A list that fails validation keeps the last good one; it never fences the relay.
-	MeshPeers []nodemesh.Peer `json:"mesh_peers,omitempty"`
+	// certificate), decoded by meshPeers. Absent means no mesh. A list that fails to decode or validate keeps the last
+	// good one; it never fences the relay. Raw so that a malformed list cannot fail the whole lease.
+	MeshPeers json.RawMessage `json:"mesh_peers,omitempty"`
 }
 
 // PoolHandover is one account moving off this relay: its carriers close at CloseAt (Unix seconds).
@@ -419,7 +420,11 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 			return ErrControl
 		}
 	}
-	if err := server.SetMeshPeers(out.MeshPeers); err != nil {
+	peers, err := meshPeers(out.MeshPeers)
+	if err == nil {
+		err = server.SetMeshPeers(peers)
+	}
+	if err != nil {
 		slog.Warn("relay mesh directory refused; keeping the last one", "error", err)
 	}
 	if out.SubjectsRequired {
@@ -439,6 +444,18 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	c.lease = out
 	return nil
+}
+
+// meshPeers decodes a lease's mesh_peers; absent means no mesh.
+func meshPeers(raw json.RawMessage) ([]nodemesh.Peer, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var peers []nodemesh.Peer
+	if err := wirejson.Decode(raw, &peers); err != nil {
+		return nil, err
+	}
+	return peers, nil
 }
 
 // metrics is the report sent with each observation. A relay forwards payload and has no separate inbound count, so
