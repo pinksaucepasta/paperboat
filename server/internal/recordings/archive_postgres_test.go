@@ -132,9 +132,6 @@ func TestPostgresRecordingsArchive(t *testing.T) {
 	if err := f.s.Archived(f.ctx, f.prod, recID, 3); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a deleted recording took a report: %v", err)
 	}
-	if err := f.s.Archived(f.ctx, f.prod, recID, maxArchiveSegments+1); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("an archive past the bound = %v", err)
-	}
 	f.exec(`UPDATE paperboat.user_machines SET revoked_at = now() WHERE id = $1`, f.prod)
 	if _, err := f.s.Replay(f.ctx, f.member, recID, f.native()); !errors.Is(err, ErrDeleted) {
 		t.Fatalf("machine replay of a deleted recording = %v", err)
@@ -181,4 +178,40 @@ func archivedOf(t *testing.T, f *fixture, id string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// A minute-segmented long recording has more than 4096 segments: the archive replays every one.
+func TestPostgresRecordingsArchiveReplaysPastFourThousandSegments(t *testing.T) {
+	f := newFixture(t)
+	recID := "rec_" + uuid.NewString()
+	f.paid()
+	if err := f.policy(`{"rules": [{"src": ["user:` + f.member + `@example.test"], "dst": ["machine:prod"], "allow": ["recording_view"]}]}`); err != nil {
+		t.Fatal(err)
+	}
+	k1, _ := newKey(t, f.team, 1, nil)
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	const segments = 4097
+	started := recording.Report{RecordingID: recID, SessionID: "sess_1", Trigger: recording.TriggerRule, KeyGeneration: 1, Accounts: []string{f.member}, StartedAt: now}
+	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return ApplyReportTx(ctx, tx, f.prod, recording.KindStarted, started)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stopped := recording.Report{RecordingID: recID, Reason: recording.ReasonSessionEnded, Bytes: segments, Segments: segments, EndedAt: now}
+	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return ApplyReportTx(ctx, tx, f.prod, recording.KindStopped, stopped)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.s.SetBuckets(&fakeBucket{prefix: "paperboat"})
+	if err := f.s.Archived(f.ctx, f.prod, recID, segments); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{Source: recording.SourceBucket})
+	if err != nil || len(out.Segments) != segments || !out.Final {
+		t.Fatalf("replay of %d segments = %d segments, final %v, %v", segments, len(out.Segments), out.Final, err)
+	}
 }

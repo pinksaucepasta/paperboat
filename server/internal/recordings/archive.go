@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 	shared "github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
@@ -86,7 +87,7 @@ func (s *Service) UploadURLs(ctx context.Context, machineID, id string, in share
 // Archived is POST /v1/machine/recordings/{id}/archived: the machine's first n segments are in the bucket. It only
 // ever grows, and only the recording's own machine moves it.
 func (s *Service) Archived(ctx context.Context, machineID, id string, n int) error {
-	if !recording.ValidRecordingID(id) || n < 0 || n > maxArchiveSegments {
+	if !recording.ValidRecordingID(id) || n < 0 {
 		return ErrInvalid
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -102,10 +103,6 @@ func (s *Service) Archived(ctx context.Context, machineID, id string, n int) err
 	})
 }
 
-// maxArchiveSegments bounds a recording's archive and so one archive replay answer (one presigned URL each); a
-// recording is at most 2 GiB in segments of 1 MiB or a minute.
-const maxArchiveSegments = 4096
-
 // archiveReplayTx fills out for an archive replay of recording id (already authorized) and returns whether the
 // archive holds every segment of an ended recording.
 func (s *Service) archiveReplayTx(ctx context.Context, tx *db.Tx, t target, id string, out *recording.Replay) error {
@@ -117,14 +114,12 @@ func (s *Service) archiveReplayTx(ctx context.Context, tx *db.Tx, t target, id s
 	if archived < 1 {
 		return ErrNotArchived
 	}
-	if archived > maxArchiveSegments {
-		return fmt.Errorf("%w: archive of %d segments exceeds one replay", ErrInvalid, archived)
-	}
 	store, err := s.storeTx(ctx, tx, t.team)
 	if err != nil {
 		return err
 	}
 	out.Source = recording.SourceBucket
+	var answerBytes int
 	for i := 0; i < int(archived); i++ {
 		key, err := shared.RecordingSegmentKey(store.Config().Prefix, id, i)
 		if err != nil {
@@ -133,6 +128,13 @@ func (s *Service) archiveReplayTx(ctx context.Context, tx *db.Tx, t target, id s
 		get, err := store.PresignGet(ctx, key, shared.URLLifetime)
 		if err != nil {
 			return err
+		}
+		answerBytes += len(get.URL)
+		for k, v := range get.Headers {
+			answerBytes += len(k) + len(v)
+		}
+		if answerBytes > connectorprotocol.MaximumSnapshotBytes {
+			return fmt.Errorf("%w: archive replay of %d segments exceeds %d bytes", ErrInvalid, archived, connectorprotocol.MaximumSnapshotBytes)
 		}
 		out.Segments = append(out.Segments, get)
 	}
@@ -168,7 +170,7 @@ func (s *Service) PruneArchive(ctx context.Context) error {
 			if err := rows.Scan(&e.id, &e.team, &n); err != nil {
 				return err
 			}
-			e.segments = int(min(n, maxArchiveSegments))
+			e.segments = int(n)
 			batch = append(batch, e)
 		}
 		return rows.Err()
