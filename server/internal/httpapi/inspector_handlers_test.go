@@ -86,9 +86,15 @@ func inspectorHTTPFixture(t *testing.T, ctx context.Context, database *db.DB, no
 		del(`DELETE FROM paperboat.preview_leases WHERE id=$1`, lease)
 		del(`DELETE FROM paperboat.operations WHERE id=$1`, operation)
 		del(`DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel)
-		del(`DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
 		del(`DELETE FROM paperboat.control_environments WHERE id IN (SELECT environment_id FROM paperboat.user_machines WHERE id=$1)`, machine)
 		del(`DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		// The machine delete cascades the runtime carrier attachments that reference the node, so the node goes after it.
+		del(`DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
+		// Rows the tests create through login and the device flow, none of which cascade from the user.
+		del(`DELETE FROM paperboat.device_grants WHERE user_id IN($1,$2)`, owner, mate)
+		del(`DELETE FROM paperboat.cli_client_sessions WHERE user_id IN($1,$2)`, owner, mate)
+		del(`DELETE FROM paperboat.sessions WHERE user_id IN($1,$2)`, owner, mate)
+		del(`DELETE FROM paperboat.user_identities WHERE user_id IN($1,$2)`, owner, mate)
 		del(`DELETE FROM paperboat.users WHERE id IN($1,$2)`, owner, mate)
 	})
 	return owner, mate, lease, tunnel, route, node
