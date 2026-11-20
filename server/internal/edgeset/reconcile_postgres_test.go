@@ -42,9 +42,11 @@ func TestWorkspaceEdgeSetOnPostgres(t *testing.T) {
 			t.Fatalf("%v: %s", err, query)
 		}
 	}
+	regionOf := map[string]string{}
 	node := func(name, domain string) string {
 		id := "edgeset_" + name + "_" + stamp
-		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$2,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, domain)
+		regionOf[id] = "edgeset_region_" + name + "_" + stamp
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),$3,$2,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, domain, regionOf[id])
 		t.Cleanup(func() {
 			_, _ = database.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 		})
@@ -80,12 +82,28 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 		}
 		return changed
 	}
-	stored := func() (mode string, ids []string, generation int64) {
+	stored := func() (mode string, regions []string, generation int64) {
 		t.Helper()
-		if err := database.Pool().QueryRow(ctx, `SELECT mode,node_ids,generation FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, account).Scan(&mode, &ids, &generation); err != nil {
+		if err := database.Pool().QueryRow(ctx, `SELECT mode,regions,generation FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, account).Scan(&mode, &regions, &generation); err != nil {
 			t.Fatal(err)
 		}
 		return
+	}
+	eligible := func(node string) bool {
+		t.Helper()
+		var ok bool
+		if err := database.Pool().QueryRow(ctx, `SELECT paperboat.node_workspace_edge_eligible($1,$2,NULL)`, node, account).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	candidate := func(node string) bool {
+		t.Helper()
+		var ok bool
+		if err := database.Pool().QueryRow(ctx, `SELECT paperboat.node_workspace_edge_candidate($1,$2,NULL)`, node, account).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
 	}
 	allows := func(node string) bool {
 		t.Helper()
@@ -100,18 +118,20 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 	if !allows(a) || !allows(b) || !allows(c) {
 		t.Fatal("a workspace without a set must not restrict placement")
 	}
-	// First use: two managed edges in distinct failure domains.
+	// First use: two managed regions (here one node each).
 	if !reconcile(time.Now()) {
 		t.Fatal("first reconcile stored no set")
 	}
-	mode, ids, generation := stored()
-	if mode != "managed-only" || len(ids) != 2 || generation != 1 || ids[0] == ids[1] {
-		t.Fatalf("managed set = %s %v generation %d", mode, ids, generation)
+	mode, regions, generation := stored()
+	if mode != "managed-only" || len(regions) != 2 || generation != 1 || regions[0] == regions[1] {
+		t.Fatalf("managed set = %s %v generation %d", mode, regions, generation)
 	}
-	members := map[string]bool{ids[0]: true, ids[1]: true}
+	members := map[string]bool{regions[0]: true, regions[1]: true}
 	for _, id := range []string{a, b, c} {
-		if allows(id) != members[id] {
-			t.Fatalf("set_allows(%s) = %v with members %v", id, allows(id), ids)
+		in := members[regionOf[id]]
+		// The pair-aware choke point follows the pair; the candidate test (what reconcile uses) does not.
+		if allows(id) != in || eligible(id) != in || !candidate(id) {
+			t.Fatalf("node %s (region %s) in pair %v: allows=%v eligible=%v candidate=%v", id, regionOf[id], regions, allows(id), eligible(id), candidate(id))
 		}
 	}
 	if reconcile(time.Now()) {
@@ -143,7 +163,13 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 		}
 	}
 	// A member silent for less than the ten-minute replacement window keeps its place...
-	lost := ids[0]
+	lostRegion, survivorRegion := regions[0], regions[1]
+	var lost string
+	for id, region := range regionOf {
+		if region == lostRegion {
+			lost = id
+		}
+	}
 	exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now()-interval '5 minutes' WHERE id=$1`, lost)
 	if reconcile(time.Now()) {
 		t.Fatal("a member that missed heartbeats for five minutes was replaced")
@@ -165,20 +191,29 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 		t.Fatal("the sweep still lists a workspace after its member was replaced")
 	}
 	_, replaced, generation := stored()
-	if generation != 2 || len(replaced) != 2 || replaced[0] != ids[1] || replaced[1] == lost {
-		t.Fatalf("after losing %s: %v generation %d (survivor %s)", lost, replaced, generation, ids[1])
+	if generation != 2 || len(replaced) != 2 || replaced[0] != survivorRegion || replaced[1] == lostRegion {
+		t.Fatalf("after losing %s: %v generation %d (survivor %s)", lostRegion, replaced, generation, survivorRegion)
 	}
-	// Switching to the workspace's own servers starts over with exactly those servers: one
-	// installation gives a single-edge set, and managed edges are no longer allowed.
+	// The pair changed, so the node of the new region is eligible now and the lost region's node is not.
+	if eligible(lost) {
+		t.Fatalf("node %s of the replaced region %s is still eligible", lost, lostRegion)
+	}
+	for id, region := range regionOf {
+		if region == replaced[1] && !eligible(id) {
+			t.Fatalf("node %s of the new region %s is not eligible after the pair changed", id, region)
+		}
+	}
+	// Switching to the workspace's own servers starts over with exactly those servers' regions: one
+	// installation gives a single-region set, and managed edges are no longer allowed.
 	own := node("own", "dom-own")
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'fixture','own server','tunnel','account',$3,$1,true)`, "edgeset_inst_"+stamp, own, account)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2]::text[])`, account, "edgeset_inst_"+stamp)
 	if !reconcile(time.Now()) {
 		t.Fatal("switching to self-hosted stored no new set")
 	}
-	mode, ids, generation = stored()
-	if mode != "self-hosted-only" || len(ids) != 1 || ids[0] != own || generation != 3 {
-		t.Fatalf("self-hosted set = %s %v generation %d", mode, ids, generation)
+	mode, regions, generation = stored()
+	if mode != "self-hosted-only" || len(regions) != 1 || regions[0] != regionOf[own] || generation != 3 {
+		t.Fatalf("self-hosted set = %s %v generation %d", mode, regions, generation)
 	}
 	if !allows(own) || allows(a) || allows(b) || allows(c) {
 		t.Fatal("a self-hosted workspace must only use its own servers")
@@ -188,9 +223,9 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 	if !reconcile(time.Now()) {
 		t.Fatal("switching back to managed stored no new set")
 	}
-	mode, ids, _ = stored()
-	if mode != "managed-only" || len(ids) != 2 || allows(own) {
-		t.Fatalf("managed set after switching back = %s %v", mode, ids)
+	mode, regions, _ = stored()
+	if mode != "managed-only" || len(regions) != 2 || allows(own) {
+		t.Fatalf("managed set after switching back = %s %v", mode, regions)
 	}
 }
 
@@ -227,7 +262,7 @@ func (f *nearestFixture) exec(query string, args ...any) {
 
 func (f *nearestFixture) node(name string) string {
 	id := "edgenear_" + name + "_" + f.stamp
-	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
+	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region_'||$1,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
 	f.t.Cleanup(func() {
 		_, _ = f.db.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 	})
@@ -244,6 +279,10 @@ func (f *nearestFixture) machine(name string, rtt map[string]int, age string) {
 	}
 }
 
+// region is the region of a node made by node (each fixture node is a region of its own).
+func region(node string) string { return "region_" + node }
+
+// pair returns the stored regions.
 func (f *nearestFixture) pair() []string {
 	f.t.Helper()
 	scope := Scope{Kind: "account", ID: f.account, Account: f.account}
@@ -258,11 +297,11 @@ func (f *nearestFixture) pair() []string {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	var ids []string
-	if err = f.db.Pool().QueryRow(f.ctx, `SELECT node_ids FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, f.account).Scan(&ids); err != nil {
+	var regions []string
+	if err = f.db.Pool().QueryRow(f.ctx, `SELECT regions FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, f.account).Scan(&regions); err != nil {
 		f.t.Fatal(err)
 	}
-	return ids
+	return regions
 }
 
 func TestWorkspaceEdgeSetPrefersNearestOnPostgres(t *testing.T) {
@@ -270,8 +309,8 @@ func TestWorkspaceEdgeSetPrefersNearestOnPostgres(t *testing.T) {
 	slow, mid, near, stale := f.node("slow"), f.node("mid"), f.node("near"), f.node("stale")
 	f.machine("one", map[string]int{slow: 300, mid: 40, near: 5}, "1 hour")
 	f.machine("old", map[string]int{stale: 1}, "48 hours")
-	if ids := f.pair(); len(ids) != 2 || ids[0] != near || ids[1] != mid {
-		t.Fatalf("pair = %v, want [%s %s] (the stale 1 ms sample of %s must be ignored)", ids, near, mid, stale)
+	if got := f.pair(); len(got) != 2 || got[0] != region(near) || got[1] != region(mid) {
+		t.Fatalf("pair = %v, want [%s %s] (the stale 1 ms sample of %s must be ignored)", got, region(near), region(mid), region(stale))
 	}
 }
 
@@ -283,8 +322,8 @@ func TestWorkspaceEdgeSetRanksByMedianMachineOnPostgres(t *testing.T) {
 	for _, name := range []string{"m2", "m3", "m4"} {
 		f.machine(name, map[string]int{a: 100, b: 10, c: 200}, "1 hour")
 	}
-	if ids := f.pair(); len(ids) != 2 || ids[0] != b || ids[1] != a {
-		t.Fatalf("pair = %v, want [%s %s]: three machines near B outvote the one near A", ids, b, a)
+	if got := f.pair(); len(got) != 2 || got[0] != region(b) || got[1] != region(a) {
+		t.Fatalf("pair = %v, want [%s %s]: three machines near B outvote the one near A", got, region(b), region(a))
 	}
 }
 

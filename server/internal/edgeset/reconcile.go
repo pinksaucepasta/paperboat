@@ -39,14 +39,14 @@ AND n.public_ingress_verified_at IS NOT NULL`
 // usableRegionsSQL lists the regions in which some edge can serve the workspace right now.
 var usableRegionsSQL = `SELECT DISTINCT n.region FROM control_tunnel_nodes n
 WHERE ` + usableEdge("$1") + `
-AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)
+AND paperboat.node_workspace_edge_candidate(n.id,$2,$3)
 ORDER BY n.region`
 
 // retainedRegionsSQL lists the regions with an eligible edge seen within $4: a region keeps its place in a
 // workspace's pair while any of its nodes does.
 const retainedRegionsSQL = `SELECT DISTINCT n.region FROM control_tunnel_nodes n
 WHERE n.roles @> ARRAY['edge']::text[] AND n.last_heartbeat_at>$1::timestamptz-$4::interval
-AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)`
+AND paperboat.node_workspace_edge_candidate(n.id,$2,$3)`
 
 // ReconcileScope makes the workspace's stored pair of regions current: a pair keeps its regions while one of
 // their nodes stays eligible and recently seen, a gone region is replaced, and a change of mode (managed pool
@@ -204,7 +204,7 @@ func equal(a, b []string) bool {
 // Every other workspace keeps its pair (choose keeps retained regions), so it costs nothing: walking every workspace
 // each second was ~7 queries per workspace and grew with accounts, not machines.
 //
-// full adds the per-workspace eligibility of nodes (node_workspace_edge_eligible, ~1 ms per call and node). The quick
+// full adds the per-workspace eligibility of nodes (node_workspace_edge_candidate, ~1 ms per call and node). The quick
 // form leaves it out: a region that stopped being eligible without going silent, or a self-hosted workspace's free
 // place, is found by the next full pass. Mode is read from the pool policy row, not through workspace_edge_mode.
 func scopesSQL(full bool) string {
@@ -212,7 +212,7 @@ func scopesSQL(full bool) string {
 		if !full {
 			return ""
 		}
-		return " AND paperboat.node_workspace_edge_eligible(" + node + ",s.account,s.team)"
+		return " AND paperboat.node_workspace_edge_candidate(" + node + ",s.account,s.team)"
 	}
 	managedOnly := ""
 	if !full {
