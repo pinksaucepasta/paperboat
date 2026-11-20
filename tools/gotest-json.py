@@ -7,6 +7,7 @@ tools/skip-audit.py. Exit status is go test's: use `set -o pipefail`.
 """
 import argparse
 import json
+import os
 import sys
 
 
@@ -16,6 +17,8 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
     buffers = {}
+    # A step that runs after an earlier failure can be the first writer: create the events directory here.
+    os.makedirs(os.path.dirname(os.path.abspath(args.save)), exist_ok=True)
     with open(args.save, 'a') as saved:
         for line in sys.stdin:
             saved.write(line)
