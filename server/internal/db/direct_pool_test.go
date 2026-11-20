@@ -2,6 +2,7 @@ package db
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -59,5 +60,21 @@ func TestPoolerModeSendsNoStartupParamsAndUsesUnnamedStatements(t *testing.T) {
 			t.Errorf("%s: exec mode %v, search_path startup param %v; want %v, %v", tc.name, got.DefaultQueryExecMode, hasParams, tc.wantMode, tc.wantParams)
 		}
 		store.Close()
+	}
+}
+
+// A retired server keeps serving held streams after a rollout and stops using most of its connections; they must go
+// back to Postgres quickly (pgx keeps an idle connection 30 minutes by default) or four overlapping instances of 26
+// connections each exceed max_connections 100.
+func TestPoolsReleaseIdleConnectionsWithinMinutes(t *testing.T) {
+	store, err := Open(config.Database{Driver: "postgres", DSN: "postgres://app:secret@primary.example.test:5432/paperboat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for name, idle := range map[string]time.Duration{"request": store.Pool().Config().MaxConnIdleTime, "direct": store.Direct().Config().MaxConnIdleTime} {
+		if idle <= 0 || idle > 5*time.Minute {
+			t.Fatalf("%s pool keeps an idle connection for %v, want at most 5 minutes", name, idle)
+		}
 	}
 }

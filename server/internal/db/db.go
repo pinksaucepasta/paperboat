@@ -145,6 +145,10 @@ func newPoolConfig(cfg config.Database, dsn string, maxConns int32, observer *qu
 		}
 	}
 	poolConfig.MaxConnLifetime = 30 * time.Minute
+	// A rollout keeps up to two retired servers draining beside the active one (and a rollback adds a fourth): each
+	// opened up to MaxConns+DirectMaxConns = 26 connections at peak, held 30 minutes by pgx's default idle time, so four
+	// instances (104) exceed prod's max_connections of 100 (97 after the 3 reserved). Idle connections now go after 2 minutes.
+	poolConfig.MaxConnIdleTime = 2 * time.Minute
 	poolConfig.MaxConns = maxConns
 	poolConfig.ConnConfig.Tracer = observer
 	return poolConfig, nil
