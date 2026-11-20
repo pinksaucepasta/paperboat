@@ -125,15 +125,16 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// One current route (the preview) multiplied by limit+1 current accessors must be
-	// rejected rather than returned as an incomplete complete=true snapshot.
+	// One current route (the preview) multiplied by 4,097 current accessors (past the old limit) must come back
+	// whole: no count truncates or refuses a snapshot.
+	const accessors = 4097
 	type limitMachine struct {
 		ID            string `json:"id"`
 		EnvironmentID string `json:"environment_id"`
 		PublicKey     string `json:"public_key"`
 	}
-	machines := make([]limitMachine, 0, accessorLimit+1)
-	for index := 0; index < accessorLimit+1; index++ {
+	machines := make([]limitMachine, 0, accessors)
+	for index := 0; index < accessors; index++ {
 		seed := sha256.Sum256([]byte(fmt.Sprintf("trk17-limit:%s:%d", f.suffix, index)))
 		public := ed25519.NewKeyFromSeed(seed[:]).Public().(ed25519.PublicKey)
 		machineID := fmt.Sprintf("mch_limit_%s_%d", f.suffix, index)
@@ -147,8 +148,8 @@ func TestAccessorRouteDiscoveryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := repository.EdgeAdmissions(ctx, f.nodeID, f.epoch); err == nil {
-		t.Fatal("limit+1 edge snapshot succeeded; want refusal of incomplete snapshot")
+	if got, err := repository.EdgeAdmissions(ctx, f.nodeID, f.epoch); err != nil || len(got) != accessors {
+		t.Fatalf("edge snapshot of %d accessors = %d admissions, err %v; want all of them", accessors, len(got), err)
 	}
 }
 

@@ -314,7 +314,6 @@ func TestAccessorDiscoveryRejectsAmbiguousURLContentTypeAndDuplicates(t *testing
 		"duplicate":            jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{admission, admission}}),
 		"incomplete":           jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: false, Admissions: []accessorAdmission{admission}}),
 		"stale duplicate name": jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{admission, stale}}),
-		"limit plus one":       jsonResponse(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: make([]accessorAdmission, connectorprotocol.MaxPrivateAccessAdmissions+1)}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			client, err := newAccessorDiscoveryClient("https://api.example.test", privateAccessTestAuth{}, privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) { response.Request = request; return response, nil }))

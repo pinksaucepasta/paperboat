@@ -23,7 +23,6 @@ import (
 const (
 	MachineRoutesPath  = "/v1/private-access/routes"
 	EdgeAdmissionsPath = "/v1/edge/private-access/carrier-admissions"
-	accessorLimit      = 4096
 )
 
 // AccessorAdmission is a short-lived, secret-free projection. It authorizes one enrolled machine identity
@@ -67,12 +66,9 @@ func admissionFromValues(now time.Time, accountID, resourceKind, resourceID, tun
 
 func (r *AccessorRepository) MachineRoutes(ctx context.Context, accountID, machineID string) ([]AccessorAdmission, error) {
 	now := r.now().UTC()
-	rows, err := r.queries.ListPrivateAccessRoutesForMachineV1(ctx, dbsqlc.ListPrivateAccessRoutesForMachineV1Params{AccountID: accountID, MachineID: machineID, Now: now, RowLimit: accessorLimit + 1})
+	rows, err := r.queries.ListPrivateAccessRoutesForMachineV1(ctx, dbsqlc.ListPrivateAccessRoutesForMachineV1Params{AccountID: accountID, MachineID: machineID, Now: now})
 	if err != nil {
 		return nil, err
-	}
-	if len(rows) > accessorLimit {
-		return nil, ErrInvalid
 	}
 	out := make([]AccessorAdmission, 0, len(rows))
 	for _, v := range rows {
@@ -90,12 +86,9 @@ func (r *AccessorRepository) MachineRoutes(ctx context.Context, accountID, machi
 
 func (r *AccessorRepository) EdgeAdmissions(ctx context.Context, nodeID, epoch string) ([]AccessorAdmission, error) {
 	now := r.now().UTC()
-	rows, err := r.queries.ListPrivateAccessCarrierAdmissionsForEdgeV1(ctx, dbsqlc.ListPrivateAccessCarrierAdmissionsForEdgeV1Params{EdgeNodeID: nodeID, EdgeProcessEpoch: epoch, Now: now, RowLimit: accessorLimit + 1})
+	rows, err := r.queries.ListPrivateAccessCarrierAdmissionsForEdgeV1(ctx, dbsqlc.ListPrivateAccessCarrierAdmissionsForEdgeV1Params{EdgeNodeID: nodeID, EdgeProcessEpoch: epoch, Now: now})
 	if err != nil {
 		return nil, err
-	}
-	if len(rows) > accessorLimit {
-		return nil, ErrInvalid
 	}
 	out := make([]AccessorAdmission, 0, len(rows))
 	for _, v := range rows {

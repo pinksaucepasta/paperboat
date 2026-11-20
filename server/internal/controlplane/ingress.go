@@ -55,9 +55,6 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if len(throttled) > 4096 {
-		throttled = throttled[:4096]
-	}
 	var responses []wire.HTTP01Response
 	// The field exists only where http-01 is configured (staging).
 	if s.http01 != nil {
@@ -131,7 +128,7 @@ FROM paperboat.native_usage_authorities n
 JOIN paperboat.user_machines m ON m.id=n.machine_id
 JOIN paperboat.control_routes r ON r.environment_id=m.environment_id AND r.kind='runtime_https_wss' AND r.applied_node_id=$1
 WHERE n.resource_kind='terminal' AND n.edge_node_id=$1 AND coalesce(n.attached_until,n.expires_at)>now()
-LIMIT 4096`, nodeID)
+`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +227,7 @@ WHERE p.terminal_state='active'
  AND (NOT (m.state='online' AND m.online) OR NOT EXISTS (SELECT 1 FROM endpoint_edge_assignments x
   WHERE x.endpoint_id=p.id AND x.edge_node_id=$1 AND x.observed_ready AND x.observed_at>now()-interval '2 minutes'))
  AND paperboat.node_preview_eligible($1,p.account_id,p.id)
-ORDER BY p.id,publication.hostname LIMIT 4096`, nodeID)
+ORDER BY p.id,publication.hostname`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -367,23 +364,9 @@ func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.Ingres
 			blocked = append(blocked, wire.IngressBlock{Hostname: host})
 		}
 	}
-	// The edge refuses a snapshot whose list is longer than its bound (and keeps serving the last one), so the list is cut
-	// to the bound: a name beyond it is still withheld above and answers "does not exist" rather than being served.
-	blocked = capBlocked(blocked)
 	*decisions = slices.DeleteFunc(*decisions, func(d wire.IngressDecision) bool { return taken[d.Binding.Hostname] })
 	*throttled = slices.DeleteFunc(*throttled, func(d wire.IngressThrottle) bool { return taken[d.Hostname] })
 	return blocked, nil
-}
-
-// maximumBlocked is the edge's bound on the takedown list (edge/internal/control: maximumIngressDecisions).
-const maximumBlocked = 4096
-
-// capBlocked keeps the first maximumBlocked takedowns: the operator's hostname blocks come first in the list.
-func capBlocked(blocked []wire.IngressBlock) []wire.IngressBlock {
-	if len(blocked) > maximumBlocked {
-		return blocked[:maximumBlocked]
-	}
-	return blocked
 }
 
 const bannedOwnerHostnamesSQL = `SELECT DISTINCT hostname FROM (
@@ -403,10 +386,9 @@ const bannedOwnerHostnamesSQL = `SELECT DISTINCT hostname FROM (
   WHERE p.terminal_state='active' AND d.deleted_at IS NULL
 ) h WHERE hostname IS NOT NULL`
 
-// bannedOwnerHostnames lists the hostnames of the previews and tunnels of accounts and teams under a running ban, up to the
-// edge's bound.
+// bannedOwnerHostnames lists the hostnames of the previews and tunnels of accounts and teams under a running ban.
 func bannedOwnerHostnames(ctx context.Context, store *db.DB) ([]string, error) {
-	return hostnames(ctx, store, bannedOwnerHostnamesSQL+` ORDER BY hostname LIMIT $1`, maximumBlocked)
+	return hostnames(ctx, store, bannedOwnerHostnamesSQL+` ORDER BY hostname`)
 }
 
 // bannedAmong returns those of names whose owner is under a running ban.
@@ -417,8 +399,8 @@ func bannedAmong(ctx context.Context, store *db.DB, names []string) ([]string, e
 	return hostnames(ctx, store, bannedOwnerHostnamesSQL+` AND hostname = ANY($1::text[])`, names)
 }
 
-func hostnames(ctx context.Context, store *db.DB, query string, arg any) ([]string, error) {
-	rows, err := store.Pool().Query(ctx, query, arg)
+func hostnames(ctx context.Context, store *db.DB, query string, args ...any) ([]string, error) {
+	rows, err := store.Pool().Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

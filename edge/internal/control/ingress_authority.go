@@ -55,6 +55,10 @@ type IngressAuthority struct {
 }
 
 // previewMiss is one refresh for a publication the edge has not heard of; done closes when it ends.
+// maximumPreviewMisses bounds the remembered unknown preview names: a visitor chooses them, so the table is an abuse bound on
+// what any client can make the edge ask the server, not a limit on the node's previews.
+const maximumPreviewMisses = 4096
+
 type previewMiss struct {
 	at     time.Time
 	done   chan struct{}
@@ -688,7 +692,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 		}
 		return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 	}
-	if len(a.previewMisses) >= maximumIngressDecisions {
+	if len(a.previewMisses) >= maximumPreviewMisses {
 		a.mu.Unlock()
 		return connectorprotocol.IngressDecision{}, ErrControlUnavailable
 	}

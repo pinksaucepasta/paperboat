@@ -26,7 +26,6 @@ const (
 	// the full runtime pull leaves them out (scale matrix: no full re-send per poll).
 	CapabilityEndpointDeltas = "endpoint_deltas"
 )
-const MaximumAdmissions = 4096
 
 // DrainLimit bounds how long a retiring generation (pb update) keeps serving what it already holds, as
 // nginx's worker_shutdown_timeout bounds a graceful shutdown. For browser terminals on its runtime carriers:

@@ -93,8 +93,7 @@ JOIN user_machines AS machine
  AND machine.state = 'online' AND machine.online
  AND machine.revoked_at IS NULL AND machine.deleted_at IS NULL
  AND machine.public_identity_key IS NOT NULL
-ORDER BY routes.resource_kind, routes.resource_id, routes.route_id
-LIMIT sqlc.arg(row_limit);
+ORDER BY routes.resource_kind, routes.resource_id, routes.route_id;
 
 -- name: ListPrivateAccessCarrierAdmissionsForEdgeV1 :many
 WITH private_routes AS (
@@ -169,5 +168,4 @@ JOIN user_machines AS machine
  AND machine.state = 'online' AND machine.online
  AND machine.revoked_at IS NULL AND machine.deleted_at IS NULL
  AND machine.public_identity_key IS NOT NULL
-ORDER BY routes.resource_kind, routes.resource_id, routes.route_id, machine.id
-LIMIT sqlc.arg(row_limit);
+ORDER BY routes.resource_kind, routes.resource_id, routes.route_id, machine.id;

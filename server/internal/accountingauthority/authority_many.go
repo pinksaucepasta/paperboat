@@ -137,49 +137,16 @@ func bindingKey(authority, environment, route string, revision int64) string {
 	return authority + "\x00" + environment + "\x00" + route + "\x00" + strconv.FormatInt(revision, 10)
 }
 
-// retainTx records the admitted bindings: capacity is judged once for the group (a binding the node already holds is
-// always accepted; a new one only while the node holds fewer than MaximumPerNode unexpired), then one statement upserts them.
+// retainTx records the admitted bindings with one statement. A node holds any number of them: capacity is watched by resource
+// alerts, not by a count that would refuse the 4,097th route.
 func retainTx(ctx context.Context, tx *db.Tx, node string, bindings []Binding, candidates []int, workspaces map[string]*workspaceAdmission, errs []error) error {
-	ids := make([]string, 0, len(candidates))
-	for _, i := range candidates {
-		ids = append(ids, bindings[i].ID)
-	}
-	var active int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM usage_accounting_authorities WHERE edge_node_id=$1 AND admission_expires_at>$2`, node, bindings[candidates[0]].IssuedAt).Scan(&active); err != nil {
-		return err
-	}
-	existing := map[string]bool{}
-	rows, err := tx.Query(ctx, `SELECT authority_id,environment_id,route_id,route_revision FROM usage_accounting_authorities WHERE edge_node_id=$1 AND authority_id=ANY($2::text[])`, node, ids)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var authority, environment, route string
-		var revision int64
-		if err := rows.Scan(&authority, &environment, &route, &revision); err != nil {
-			rows.Close()
-			return err
-		}
-		existing[bindingKey(authority, environment, route, revision)] = true
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
 	var write []int
 	queued := map[string]bool{}
 	for _, i := range candidates {
 		b := bindings[i]
 		key := bindingKey(b.ID, b.Environment, b.Route, b.Revision)
-		switch {
-		case queued[key]:
+		if queued[key] {
 			continue // the same binding twice in one group: one row, the first one's answer stands for both
-		case existing[key]:
-		case active < MaximumPerNode:
-			active++
-		default:
-			errs[i] = ErrUnavailable
-			continue
 		}
 		queued[key] = true
 		write = append(write, i)

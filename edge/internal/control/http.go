@@ -27,12 +27,6 @@ import (
 
 const maxControlDocument = 1 << 20
 
-// maxRouteSnapshotPages bounds how many pages one route snapshot may take: the server's 256 routes a page make 4,096
-// routes 16 pages, and a node holds no more than maxCanonicalRouteAssignments.
-const maxRouteSnapshotPages = 64
-
-const maxCanonicalRouteAssignments = 4096
-
 var (
 	ErrControlInvalid       = errors.New("private control configuration is invalid")
 	ErrControlUnavailable   = errors.New("private control is unavailable")
@@ -383,9 +377,6 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 	var pages [][]routeAssignmentWire
 	total := 0
 	for page := 0; ; page++ {
-		if page == maxRouteSnapshotPages {
-			return RouteSnapshot{}, ErrControlUnavailable
-		}
 		result.Routes, result.NextCursor = nil, ""
 		if err := c.post(ctx, "/v1/edge/routes/desired-state", request, &result); err != nil {
 			return RouteSnapshot{}, err
@@ -399,9 +390,7 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 			break
 		}
 		pages = append(pages, result.Routes)
-		if total += len(result.Routes); total > maxCanonicalRouteAssignments {
-			return RouteSnapshot{}, ErrControlUnavailable
-		}
+		total += len(result.Routes)
 		if result.NextCursor == "" {
 			break
 		}
@@ -424,9 +413,6 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 		joined = append(joined, page...)
 	}
 	result.Routes = joined
-	if len(result.Routes) > maxCanonicalRouteAssignments {
-		return RouteSnapshot{}, ErrControlUnavailable
-	}
 	// A canonical request is always a complete snapshot.  Treat a missing or
 	// false completion marker as an unavailable control response rather than
 	// allowing a truncated route list to revoke the last-known-good registry.
@@ -543,9 +529,6 @@ func (c *HTTPClient) trustDocument(ctx context.Context, path string) (data []byt
 const routeObservationBatch = 100
 
 func (c *HTTPClient) ObserveRoutes(ctx context.Context, nodeID string, routes []RouteObservation) error {
-	if len(routes) > maxCanonicalRouteAssignments {
-		return ErrControlInvalid
-	}
 	if c.silent.Load() {
 		return nil
 	}
@@ -588,7 +571,7 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	}
 	ctx, finish := c.startRequest(ctx, operation)
 	defer func() { finish(resultErr) }()
-	if maximum <= 0 || maximum > 16<<20 {
+	if maximum <= 0 || maximum > connectorprotocol.MaximumSnapshotBytes {
 		return ErrControlInvalid
 	}
 	payload, err := json.Marshal(input)

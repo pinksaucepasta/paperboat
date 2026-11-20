@@ -27,7 +27,7 @@ func TestRuntimeCarrierControlRequiresCompleteBoundSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := runtimewire.Admission{Schema: runtimewire.Schema, Binding: runtimewire.Binding{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, ConfigGeneration: 1, InstallationGeneration: 1, RouteID: "runtime_route", RouteGeneration: 1, EdgeNodeID: "edge_1", EdgeProcessEpoch: "edge_epoch_1", EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM, MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(publicKey), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])}, AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", EdgeEndpoints: []string{"h2://edge.example.test:27443", "h3://edge.example.test:27444"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	for _, scenario := range []string{"valid", "incomplete", "missing_admissions", "wrong_epoch", "wrong_kind", "wrong_key", "stale_revision", "wrong_installation"} {
+	for _, scenario := range []string{"valid", "incomplete", "missing_admissions", "wrong_epoch", "wrong_kind", "wrong_key", "stale_revision", "wrong_installation", "past_the_old_4096_limit"} {
 		t.Run(scenario, func(t *testing.T) {
 			value := a
 			switch scenario {
@@ -46,6 +46,13 @@ func TestRuntimeCarrierControlRequiresCompleteBoundSnapshot(t *testing.T) {
 			if scenario == "missing_admissions" {
 				delete(body, "admissions")
 			}
+			if scenario == "past_the_old_4096_limit" {
+				many := make([]runtimewire.Admission, 5000)
+				for i := range many {
+					many[i] = value
+				}
+				body["admissions"] = many
+			}
 			encoded, _ := json.Marshal(body)
 			client := controlClient(t, func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path != runtimewire.EdgePullPath || r.Header.Get("Authorization") != "Bearer "+testControlCredential || r.Header.Get("X-Paperboat-Edge-Process-Epoch") != "edge_epoch_1" {
@@ -61,6 +68,10 @@ func TestRuntimeCarrierControlRequiresCompleteBoundSnapshot(t *testing.T) {
 			if scenario == "valid" {
 				if err != nil || len(values) != 1 {
 					t.Fatalf("valid snapshot: %v", err)
+				}
+			} else if scenario == "past_the_old_4096_limit" {
+				if err != nil || len(values) != 5000 {
+					t.Fatalf("5,000-admission snapshot: %d admissions, err %v", len(values), err)
 				}
 			} else if err == nil {
 				t.Fatal("invalid snapshot accepted")
