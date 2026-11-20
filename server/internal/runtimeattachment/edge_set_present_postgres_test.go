@@ -11,7 +11,9 @@ import (
 func TestEnsureEdgeSetSkipsTheBuilderLockWhenTheSetExistsPostgres(t *testing.T) {
 	f := newAgentFixture(t, "edgesetpresent")
 	f.exec(t, `INSERT INTO workspace_edge_sets(scope_kind,scope_id,mode,node_ids) VALUES('account',$1,'managed-only',ARRAY[$2]::text[])`, f.account, f.node)
-	t.Cleanup(func() { f.database.SQL().ExecContext(context.Background(), `DELETE FROM workspace_edge_sets WHERE scope_id=$1`, f.account) })
+	t.Cleanup(func() {
+		f.database.SQL().ExecContext(context.Background(), `DELETE FROM workspace_edge_sets WHERE scope_id=$1`, f.account)
+	})
 	unlock, err := edgeSetBuilders.Lock(f.ctx, "account:"+f.account)
 	if err != nil {
 		t.Fatal(err)
