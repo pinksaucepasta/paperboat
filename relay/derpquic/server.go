@@ -393,7 +393,6 @@ func (s *Server) reject(p *peerConn, err error) {
 const fenceSweepEvery = time.Second
 
 func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
-	var err error
 	k, _ := ParseKey(g.WireGuardPublicKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
