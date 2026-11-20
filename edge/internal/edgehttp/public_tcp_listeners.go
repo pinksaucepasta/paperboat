@@ -22,6 +22,7 @@ import (
 
 type PublicTCPAuthority interface {
 	Snapshot(context.Context) ([]connectorprotocol.IngressDecision, error)
+	SnapshotForHost(context.Context, string) ([]connectorprotocol.IngressDecision, error)
 	ResolveDecision(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
 

@@ -356,6 +356,10 @@ type slowSnapshotAuthority struct {
 	release chan struct{}
 }
 
+func (a *slowSnapshotAuthority) SnapshotForHost(ctx context.Context, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	return testSnapshotForHost(ctx, a, hostname)
+}
+
 func (a *slowSnapshotAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.IngressDecision, error) {
 	select {
 	case a.entered <- struct{}{}:

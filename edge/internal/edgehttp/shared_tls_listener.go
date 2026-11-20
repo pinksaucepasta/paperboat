@@ -219,7 +219,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		}
 	}()
 	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
-	decisions, err := l.authority.Snapshot(ctx)
+	decisions, err := l.authority.SnapshotForHost(ctx, host)
 	cancel()
 	https := l.httpsHostname(host)
 	infrastructureHTTPS := host == l.infrastructureHostname && https
@@ -232,9 +232,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			return
 		}
 		decisions = nil
-	}
-	if len(decisions) > 4096 {
-		return
 	}
 	// Customer aliases need ingress authority even when the route matcher names
 	// a different host. Configuration membership cannot grant TLS ownership;
@@ -264,13 +261,13 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	}
 	// The locally admitted public preview may become ready after the cached
 	// complete snapshot was fetched. Refresh its exact authority before any TLS
-	// writes, then inspect the entire current snapshot for protocol conflicts.
+	// writes, then inspect every binding for this hostname for protocol conflicts.
 	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
 		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
 		defer stop()
 		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
-			decisions, err = l.authority.Snapshot(refresh)
-			if err != nil || len(decisions) > 4096 {
+			decisions, err = l.authority.SnapshotForHost(refresh, host)
+			if err != nil {
 				return
 			}
 			for _, decision := range decisions {
@@ -390,8 +387,8 @@ func (l *SharedTLSListener) previewDecisionExists(ctx context.Context, host stri
 	if l.previewHTTPSAuthority == nil || l.previewHTTPSAuthority(ctx, host) != nil {
 		return false
 	}
-	decisions, err := l.authority.Snapshot(ctx)
-	if err != nil || len(decisions) > 4096 {
+	decisions, err := l.authority.SnapshotForHost(ctx, host)
+	if err != nil {
 		return false
 	}
 	for _, decision := range decisions {

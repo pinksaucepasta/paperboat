@@ -145,6 +145,14 @@ func (a *IngressAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.In
 	return a.snapshot(ctx, false)
 }
 
+// SnapshotForHost returns every binding for the exact hostname in the current authority.
+func (a *IngressAuthority) SnapshotForHost(ctx context.Context, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	if a == nil || a.Client == nil || ctx == nil || hostname == "" {
+		return nil, ErrControlInvalid
+	}
+	return a.snapshotFor(ctx, false, hostname)
+}
+
 // Start runs the background refresh until Shutdown.
 func (a *IngressAuthority) Start(ctx context.Context) error {
 	if a == nil || a.Client == nil || ctx == nil {
