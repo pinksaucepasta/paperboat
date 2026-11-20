@@ -243,14 +243,18 @@ func TestNativeSendCutsAStreamThatStopsMovingAndResumesFromWhatArrived(t *testin
 	// The first PATCH: the peer reads nothing and never answers, so the sender's transport stops taking bytes.
 	started := time.Now()
 	var resumedAfter atomic.Int64
+	resumed := make(chan struct{})
 	server, state := streamServer(t, latencyManifest(item), func(_ *recordingServer, patch int, _ http.ResponseWriter, r *http.Request) bool {
 		if patch == 2 {
 			resumedAfter.Store(int64(time.Since(started)))
+			close(resumed)
 		}
 		if patch == 1 {
+			// Held until the sender's resume arrives (so the server's cleanup does not wait out the fallback), or 10 s.
 			select {
 			case <-r.Context().Done():
-			case <-time.After(5 * time.Second):
+			case <-resumed:
+			case <-time.After(10 * time.Second):
 			}
 		}
 		return patch == 1
@@ -269,8 +273,9 @@ func TestNativeSendCutsAStreamThatStopsMovingAndResumesFromWhatArrived(t *testin
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	// The handler gives up after 5 s on its own: a resume sooner than that is the sender's stall cut.
-	if resumedAfter.Load() == 0 || time.Duration(resumedAfter.Load()) > 4*time.Second {
+	// The handler gives up after 10 s on its own: a resume sooner than that is the sender's stall cut (1 s timer; a
+	// loaded macOS runner under -race resumed at 4.39 s against the former 4 s bound, CI run 44670582274).
+	if resumedAfter.Load() == 0 || time.Duration(resumedAfter.Load()) > 8*time.Second {
 		t.Fatalf("the stalled stream was not cut by the sender: resumed after %s", time.Duration(resumedAfter.Load()))
 	}
 	if state.patches < 2 || len(state.received) != len(data) {
