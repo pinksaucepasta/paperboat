@@ -60,8 +60,8 @@ func TestTunnelHealthFollowsObservedRoutesOnPostgres(t *testing.T) {
 		}
 	}
 	assert("pending", "running")
-	// A second live edge holds the route too but has not observed it yet: the hostname can resolve
-	// to it, so the tunnel is not ready until it has (F8-06 first-request EOF).
+	// A second live edge holds the route too but has not observed it yet. One ready holder is enough
+	// (e7cba7404), so the lagging edge must not flap the tunnel back to pending.
 	secondNode := f.nodeID + "_second"
 	secondSession := fmt.Sprintf("session_00000000-0000-4000-8000-%012d", now.UnixNano()%1e12+1)
 	exec(`INSERT INTO paperboat.control_tunnel_nodes SELECT (jsonb_populate_record(NULL::paperboat.control_tunnel_nodes, to_jsonb(n) || jsonb_build_object('id',$2::text,'process_epoch','epoch_second_'||$3::text,'endpoints_epoch','epoch_second_'||$3::text,'tunnel_endpoints_epoch','epoch_second_'||$3::text))).* FROM paperboat.control_tunnel_nodes n WHERE n.id=$1`, f.nodeID, secondNode, f.suffix)
@@ -76,7 +76,7 @@ func TestTunnelHealthFollowsObservedRoutesOnPostgres(t *testing.T) {
 	if err := tunnelv1.RefreshHealth(ctx, database.Pool(), f.accountID, []string{f.tunnelID}, now); err != nil {
 		t.Fatal(err)
 	}
-	assert("pending", "running")
+	assert("ready", "succeeded")
 	if err := service.ObserveRoutes(ctx, secondNode, []RouteObservation{f.observation(secondNode, "epoch_second_"+f.suffix, secondSession, "ready")}); err != nil {
 		t.Fatal(err)
 	}
