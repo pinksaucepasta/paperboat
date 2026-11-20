@@ -361,6 +361,56 @@ func noUDP(t *testing.T, c *udpClient) {
 	}
 }
 
+// noUDP only shows that nothing arrived within 40 ms, which a closed socket, an unsent packet or a late packet also
+// satisfies: it is a secondary check. The verdicts are the helpers below, which read the relay's own decision and counters.
+
+// refused is whether the relay's own forwarding decision for the pair is no. (A yes from allowForward also spends a
+// packet of the account's budget, which only matters when the test is already failing.)
+func refused(s *Server, a, b key.DiscoPublic) bool {
+	return !s.authorizePacket(a, b) && !s.allowForward(a, b)
+}
+
+// assertDropped sends a packet of the fixture's pair that the relay must refuse and proves it was not forwarded without
+// a timeout: the relay's decision for the pair is no, the sweeper has removed the allocation, and the count of packets
+// the relay let through (before: taken after the last packet the test saw arrive) did not move.
+func (f *testFixture) assertDropped(sender, receiver *udpClient, before uint64) {
+	f.t.Helper()
+	if !refused(f.relay, f.da.Public(), f.db.Public()) {
+		f.t.Fatal("relay still authorizes the fenced pair")
+	}
+	sender.send(f.t, false, []byte("fenced"))
+	waitFor(f.t, func() bool { return f.relay.Snapshot().Allocations == 0 })
+	if got := f.relay.Snapshot().AuthorizedPackets; got != before {
+		f.t.Fatalf("fenced packet was authorized: %d packets let through, want %d", got, before)
+	}
+	noUDP(f.t, receiver)
+}
+
+// assertFencedThenFresh sends a packet of a fenced pair, then a packet of a fresh allocation of the same pair (f.a must
+// already be connected with a grant that may allocate again). The relay reads one socket in order, so the fresh packet
+// arriving, with exactly one more packet let through than before, shows the fenced one was handled first and dropped.
+func (f *testFixture) assertFencedThenFresh(sender, receiver *udpClient, generation uint32) {
+	f.t.Helper()
+	before := f.relay.Snapshot().AuthorizedPackets
+	if !refused(f.relay, f.da.Public(), f.db.Public()) {
+		f.t.Fatal("relay still authorizes the fenced pair")
+	}
+	sender.send(f.t, false, []byte("fenced"))
+	a, b := f.bound(f.allocate(generation))
+	fresh := []byte("fresh allocation")
+	a.send(f.t, false, fresh)
+	if got := b.read(f.t); !bytes.Equal(got, fresh) {
+		f.t.Fatalf("fresh allocation delivered %q: the fenced packet came first", got)
+	}
+	if got := f.relay.Snapshot().AuthorizedPackets; got != before+1 {
+		f.t.Fatalf("fenced packet was authorized: %d packets let through, want %d", got, before+1)
+	}
+	if f.relay.Snapshot().Allocations != 1 {
+		f.t.Fatal("the fenced allocation was kept next to the fresh one")
+	}
+	noUDP(f.t, receiver)
+}
+
 func TestControlToUDPForwardingRevocation(t *testing.T) {
 	f := newFixture(t, nil)
 	first := f.allocate(7)
@@ -375,18 +425,23 @@ func TestControlToUDPForwardingRevocation(t *testing.T) {
 		t.Fatal("replayed pair request multiplied allocation")
 	}
 	before := f.relay.Snapshot().AuthorizedPackets
+	// The relay reads one socket in order: when the packet sent after the two forbidden ones arrives as itself and is
+	// the only one let through, the forbidden ones were handled before it and dropped.
 	forged := newUDPClient(t, first.AddrPorts[0], key.NewDisco(), f.db.Public(), first.ServerDisco, first.VNI)
 	forged.send(t, false, payload)
-	noUDP(t, b)
-	if f.relay.Snapshot().AuthorizedPackets != before {
-		t.Fatal("forged source consumed account forwarding quota")
-	}
 	a.send(t, false, make([]byte, 2049))
-	noUDP(t, b)
+	next := []byte("after the forbidden packets")
+	a.send(t, false, next)
+	if got := b.read(t); !bytes.Equal(got, next) {
+		t.Fatalf("a forbidden packet was forwarded ahead of the next one: %d bytes", len(got))
+	}
+	if got := f.relay.Snapshot().AuthorizedPackets; got != before+1 {
+		t.Fatalf("forged or oversize packet consumed account forwarding quota: %d packets let through, want %d", got, before+1)
+	}
 	f.server.Revoke("account", "a", 2)
-	a.send(t, false, payload)
-	noUDP(t, b)
-	waitFor(t, func() bool { return f.relay.Snapshot().Allocations == 0 })
+	f.ga.Generation = 2
+	f.a = f.reconnectA(f.ga)
+	f.assertFencedThenFresh(a, b, 9)
 }
 func TestControlToUDPRestart(t *testing.T) {
 	f := newFixture(t, nil)
@@ -403,8 +458,10 @@ func TestControlToUDPRestart(t *testing.T) {
 	f.relay = replacement
 	f.active.Store(replacement)
 	// A fresh server has no bound allocation, even though old clients retain a VNI.
+	if stats := replacement.Snapshot(); stats.Allocations != 0 || stats.AuthorizedPackets != 0 {
+		t.Fatalf("restarted server starts with state: %+v", stats)
+	}
 	a.send(t, false, payload)
-	noUDP(t, b)
 	second := f.allocate(2)
 	if second.ServerDisco == first.ServerDisco {
 		t.Fatal("UDP server restart retained discovery private identity")
@@ -414,6 +471,11 @@ func TestControlToUDPRestart(t *testing.T) {
 	if got := b2.read(t); !bytes.Equal(got, payload) {
 		t.Fatal("restart forwarding failed")
 	}
+	// The old-VNI packet was read before every packet of the new allocation: the fresh server let through only the new one.
+	if got := replacement.Snapshot().AuthorizedPackets; got != 1 {
+		t.Fatalf("restarted server forwarded the old VNI: %d packets let through, want 1", got)
+	}
+	noUDP(t, b)
 }
 func TestAllocationDeniedSignedBindings(t *testing.T) {
 	for _, mode := range []string{"source_discovery", "scope", "service"} {
@@ -451,6 +513,12 @@ func TestAllocationExpiryLifetimeAndRateBound(t *testing.T) {
 		t.Fatalf("response lifetime exceeds shorter peer grant: bind=%v steady=%v remaining at request=%v", response.BindLifetime, response.SteadyStateLifetime, remaining)
 	}
 	a, b := f.bound(response)
+	live := []byte("before expiry")
+	a.send(t, false, live)
+	if got := b.read(t); !bytes.Equal(got, live) {
+		t.Fatal("packet before expiry was not forwarded")
+	}
+	authorized := f.relay.Snapshot().AuthorizedPackets
 	payload := allocationMessage(f.da, f.config.DiscoPrivate.Public(), f.da.Public(), f.db.Public(), 2)
 	for range 20 {
 		if e := f.a.SendControl(f.service, payload); e != nil {
@@ -462,9 +530,7 @@ func TestAllocationExpiryLifetimeAndRateBound(t *testing.T) {
 		t.Fatal("allocation request burst escaped pair bound")
 	}
 	waitFor(t, func() bool { return time.Now().Unix() >= f.gb.ExpiresAt })
-	a.send(t, false, []byte("expired"))
-	noUDP(t, b)
-	waitFor(t, func() bool { return f.relay.Snapshot().Allocations == 0 })
+	f.assertDropped(a, b, authorized)
 }
 func TestForwardRateBurstRecovery(t *testing.T) {
 	var r rate
@@ -498,6 +564,10 @@ func TestForwardBudgetCarriesFullSizePacketsAtLinkRate(t *testing.T) {
 
 func TestAllocationReplyFencedWhenOtherPeerRevoked(t *testing.T) {
 	f := newFixture(t, nil)
+	// A reply that is delivered is counted as forwarded: the first one proves the path works and sets the baseline.
+	f.allocate(1)
+	waitFor(t, func() bool { return f.server.Snapshot().Forwarded >= 1 })
+	forwarded := f.server.Snapshot().Forwarded
 	entered := make(chan error, 1)
 	release := make(chan struct{}, 1)
 	defer close(release)
@@ -525,7 +595,7 @@ func TestAllocationReplyFencedWhenOtherPeerRevoked(t *testing.T) {
 			}
 		}
 	}()
-	payload := allocationMessage(f.da, f.config.DiscoPrivate.Public(), f.da.Public(), f.db.Public(), 1)
+	payload := allocationMessage(f.da, f.config.DiscoPrivate.Public(), f.da.Public(), f.db.Public(), 2)
 	if err := f.a.SendControl(f.service, payload); err != nil {
 		t.Fatal(err)
 	}
@@ -547,13 +617,17 @@ func TestAllocationReplyFencedWhenOtherPeerRevoked(t *testing.T) {
 	}
 	release <- struct{}{}
 	waitFor(t, func() bool { return f.server.Snapshot().Dropped > before })
+	// A delivered reply is counted as forwarded (and not as dropped), so the count also rules out a late delivery.
+	if got := f.server.Snapshot().Forwarded; got != forwarded {
+		t.Fatalf("stale reply was forwarded: forwarded %d, want %d", got, forwarded)
+	}
 	select {
 	case err := <-received:
 		if err == nil {
 			t.Fatal("stale allocation response delivered after other-peer revocation")
 		}
 		t.Fatalf("requesting peer unexpectedly closed: %v", err)
-	case <-time.After(40 * time.Millisecond):
+	default:
 	}
 	f.a.Close()
 	select {
@@ -629,14 +703,18 @@ func TestUDPAllocationSurvivesDERPReconnect(t *testing.T) {
 	if _, ok := oldLease.Valid(); ok {
 		t.Fatal("regrant revived revoked allocation lease")
 	}
-	a.send(t, false, payload)
-	noUDP(t, b)
+	f.assertFencedThenFresh(a, b, 3)
 }
 
 func TestUDPAllocationFencedByChangedAuthority(t *testing.T) {
 	f := newFixture(t, nil)
 	first := f.allocate(1)
 	a, b := f.bound(first)
+	live := bytes.Repeat([]byte{4}, 1312)
+	a.send(t, false, live)
+	if got := b.read(t); !bytes.Equal(got, live) {
+		t.Fatal("packet before the authority changed was not forwarded")
+	}
 	f.relay.mu.Lock()
 	var oldLease PairLease
 	for _, entry := range f.relay.allocations {
@@ -655,8 +733,7 @@ func TestUDPAllocationFencedByChangedAuthority(t *testing.T) {
 	if _, ok := oldLease.Valid(); ok {
 		t.Fatal("restoring authority revived old lease")
 	}
-	a.send(t, false, bytes.Repeat([]byte{4}, 1312))
-	noUDP(t, b)
+	f.assertFencedThenFresh(a, b, 2)
 }
 
 func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
@@ -697,13 +774,13 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 			if !bytes.Equal(b.read(t), payload) {
 				t.Fatal("authorized payload changed")
 			}
+			authorized := f.relay.Snapshot().AuthorizedPackets
 			waitFor(t, func() bool { return time.Now().Unix() >= short })
 			if !retained {
 				if _, ok := lease.Valid(); ok {
 					t.Fatal("expired-only pair retained authority")
 				}
-				a.send(t, false, payload)
-				noUDP(t, b)
+				f.assertDropped(a, b, authorized)
 			} else {
 				// Identical signed content remains the same generation even when
 				// receipt-time projection removes its now-expired short scope.
@@ -727,10 +804,8 @@ func TestUDPAllocationUsesIndependentReciprocalScopeLifetimes(t *testing.T) {
 				if _, ok := lease.Valid(); ok {
 					t.Fatal("nonexpired withdrawal retained old pair")
 				}
-				a.send(t, false, payload)
-				noUDP(t, b)
+				f.assertDropped(a, b, f.relay.Snapshot().AuthorizedPackets)
 			}
-			waitFor(t, func() bool { f.relay.mu.Lock(); defer f.relay.mu.Unlock(); return len(f.relay.allocations) == 0 })
 		})
 	}
 }
@@ -755,10 +830,19 @@ func TestCarrierGenerationKeepsBothUDPRelayAllocationsAndRevokesBoth(t *testing.
 	if len(f.server.AuthoritySubjects()) != 2 {
 		t.Fatal("generation created extra root authority subjects")
 	}
+	authorized := f.relay.Snapshot().AuthorizedPackets
 	f.server.Revoke(f.gb.AccountID, f.gb.EndpointID, 2)
+	for _, pair := range []*testFixture{f, next} { // the lease is fenced at once, before the sweeper removes the allocation
+		if !refused(f.relay, pair.da.Public(), pair.db.Public()) {
+			t.Fatal("relay still authorizes a revoked generation's pair")
+		}
+	}
 	waitFor(t, func() bool { return f.relay.Snapshot().Allocations == 0 })
 	oldA.send(t, false, []byte("revoked"))
 	newA.send(t, false, []byte("revoked"))
 	noUDP(t, oldB)
 	noUDP(t, newB)
+	if got := f.relay.Snapshot().AuthorizedPackets; got != authorized {
+		t.Fatalf("revoked generation's packets were authorized: %d let through, want %d", got, authorized)
+	}
 }
