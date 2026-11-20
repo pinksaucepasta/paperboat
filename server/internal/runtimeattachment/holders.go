@@ -56,6 +56,9 @@ SELECT names.key COLLATE "C", x.edge_node_id` + endpointCols + `
  WHERE x.desired='active' AND r.protocol<>'private_tcp' AND (r.protocol<>'tcp' OR tr.public_tcp_port IS NOT NULL)` + endpointLive
 }
 
+// keyPage is the next limit+1 distinct keys after $1 of the superset: the page's keys, and whether more follow.
+var keyPage = `WITH ` + holderNodes + ` SELECT DISTINCT key FROM (` + heldKeys(false) + `) c WHERE key>$1::text ORDER BY key LIMIT $2`
+
 // validHolders groups the keys in ($1, $2] by node once their carrier is valid. runtime_carrier_valid (a plpgsql call of about a
 // millisecond) runs once per distinct carrier of the page, never per route: a carrier serves many names (ingressprojection does
 // the same). The CTEs are materialized so the planner cannot run the call before the key range cuts the rows.
@@ -79,7 +82,7 @@ func (s *Service) Holders(ctx context.Context, callerNode, page string, limit in
 	if err = s.DB.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM managed_node_authority WHERE node_id=$1 AND retired_at IS NULL)`, callerNode).Scan(&managed); err != nil || !managed {
 		return nil, "", err
 	}
-	rows, err := s.DB.Pool().Query(ctx, `WITH `+holderNodes+` SELECT DISTINCT key FROM (`+heldKeys(false)+`) c WHERE key>$1::text ORDER BY key LIMIT $2`, page, limit+1)
+	rows, err := s.DB.Pool().Query(ctx, keyPage, page, limit+1)
 	if err != nil {
 		return nil, "", err
 	}

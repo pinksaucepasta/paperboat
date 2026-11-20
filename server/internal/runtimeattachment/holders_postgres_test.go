@@ -1,6 +1,7 @@
 package runtimeattachment
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sort"
@@ -212,6 +213,17 @@ func TestHoldersPagesAcrossMoreThan4096Names(t *testing.T) {
 	f.previews(t, tag, 5000)
 	f.serve(t, tag, 5000, f.node, "epoch_endpoint", sessionA, true)
 	f.serve(t, tag, 5000, f.backupNode, "epoch_backup", sessionB, true)
+	for _, table := range []string{"preview_leases", "endpoints", "endpoint_routes", "endpoint_edge_assignments"} {
+		f.exec(t, "ANALYZE "+table) // the planner needs the sizes the bulk insert just made, as production's autovacuum gives it
+	}
+	first, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+	_, _, err := f.service.Holders(first, f.node, "", nodemesh.MaxHolderPage)
+	cancel()
+	if err != nil {
+		f.explain(t, keyPage, "", nodemesh.MaxHolderPage+1)
+		f.explain(t, validHolders, "", "zzzz")
+		t.Fatalf("first page: %v", err)
+	}
 	got, pages := allHolders(t, f, f.node, nodemesh.MaxHolderPage)
 	if len(got) != 5000 || pages < 10 || pages > 11 {
 		t.Fatalf("%d names in %d pages, want 5000 in 10 or 11", len(got), pages)
@@ -270,5 +282,30 @@ VALUES($1,$2,$3,5,$4,`+extra+`,'tcp','127.0.0.1:1','not_applicable',1,'active',$
 	got, _ := allHolders(t, f, f.node, 1)
 	if len(got) != 3 {
 		t.Fatalf("one key per page walk: %v", got)
+	}
+}
+
+// explain logs the executed plan of one holder query (a failing page names where its time went).
+func (f *agentFixture) explain(t *testing.T, query string, args ...any) {
+	t.Helper()
+	tx, err := f.database.SQL().BeginTx(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(f.ctx, `SET LOCAL statement_timeout='120s'`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.QueryContext(f.ctx, "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		t.Log(line)
 	}
 }
