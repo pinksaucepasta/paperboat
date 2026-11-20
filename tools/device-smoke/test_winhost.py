@@ -1065,6 +1065,7 @@ class TerminalFamilyInPowerShell(unittest.TestCase):
     def test_terminal_lifecycle_windows_phases_against_a_console_that_echoes(self):
         import terminal_lifecycle
         terminal = terminal_lifecycle.Terminal(self.fake_cmd())
+        terminal.wait_raw = lambda: None  # the fake console stays in line mode; ssh -tt, which wait_raw polls, goes raw
         try:
             phases = terminal_lifecycle.windows_phases(terminal, 'main', 'off')
         finally:
