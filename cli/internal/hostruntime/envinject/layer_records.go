@@ -9,12 +9,11 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // openRecords builds a complete replacement in memory. Neither partial pages nor
 // plaintext enter the authenticated persistent cache.
-const maximumSourceRecordFloors = 4096
-const maximumRetainedRecordFloors = 16384
 
 type layerRecordFloor struct {
 	RecordID   string `json:"record_id"`
@@ -24,15 +23,7 @@ type layerRecordFloor struct {
 }
 
 func validateRecordFloors(floors map[string]layerFloor) error {
-	total := 0
 	for _, source := range floors {
-		if len(source.RecordFloors) > maximumSourceRecordFloors {
-			return ErrResourceExhausted
-		}
-		total += len(source.RecordFloors)
-		if total > maximumRetainedRecordFloors {
-			return ErrResourceExhausted
-		}
 		seen := map[string]bool{}
 		for _, floor := range source.RecordFloors {
 			id, err := hex.DecodeString(floor.RecordID)
@@ -101,9 +92,6 @@ func (s *LayerStore) openRecords(ctx context.Context, binding LaunchContext, del
 				return nil, nil, nil, ErrInvalidSnapshot
 			}
 			retained[record.RecordID] = layerRecordFloor{RecordID: record.RecordID, Revision: record.Revision, Deleted: record.Deleted, DocumentID: record.DocumentID}
-			if len(retained) > maximumSourceRecordFloors {
-				return nil, nil, nil, ErrResourceExhausted
-			}
 			if record.Deleted {
 				delete(cached, record.RecordID)
 			} else {
@@ -164,7 +152,8 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 	cursors := map[string]bool{}
 	cursor := ""
 	total := 0
-	for page := 0; page < 32; page++ {
+	// Ends: every page must hold records with new ids and a new cursor, and the bytes read are bounded.
+	for {
 		next, err := s.config.Records.VaultRecordPage(ctx, binding, source, after, through, cursor)
 		if err != nil {
 			return nil, err
@@ -178,7 +167,7 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 			}
 			ids[record.RecordID] = true
 			total += len(record.Envelope) + len(record.WriterPublic) + len(record.DocumentID) + 512
-			if len(ids) > 4096 || total > 8<<20 {
+			if total > connectorprotocol.MaximumSnapshotBytes {
 				return nil, ErrInvalidSnapshot
 			}
 			records = append(records, record)
@@ -192,5 +181,4 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 		cursors[next.NextCursor] = true
 		cursor = next.NextCursor
 	}
-	return nil, ErrInvalidSnapshot
 }
