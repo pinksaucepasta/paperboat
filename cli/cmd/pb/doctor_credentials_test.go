@@ -31,15 +31,13 @@ func TestDoctorCountsRecentMachineCredentialRefusals(t *testing.T) {
 // A machine whose renewal the server refused (removed, credential revoked) is a failure with the way back, not a
 // warning that fades once the daemon stops sending requests.
 func TestDoctorFailsAMachineWhoseRenewalWasRefused(t *testing.T) {
-	previous := renewalRefusedHere
-	renewalRefusedHere = func() bool { return true }
-	t.Cleanup(func() { renewalRefusedHere = previous })
-	check := probeDoctorCredentials(t.Context())
+	refused := withDoctorDependencies(t.Context(), func(d *doctorDependencies) { d.renewalRefused = func() bool { return true } })
+	check := probeDoctorCredentials(refused)
 	if check.Code != "machine_credentials" || check.Status != doctorpkg.StatusFail || !strings.Contains(check.Recovery, "pb pair") {
 		t.Fatalf("check %+v", check)
 	}
-	renewalRefusedHere = func() bool { return false }
-	if check := probeDoctorCredentials(t.Context()); check.Status != doctorpkg.StatusPass {
+	accepted := withDoctorDependencies(t.Context(), func(d *doctorDependencies) { d.renewalRefused = func() bool { return false } })
+	if check := probeDoctorCredentials(accepted); check.Status != doctorpkg.StatusPass {
 		t.Fatalf("an accepted machine: %+v", check)
 	}
 }

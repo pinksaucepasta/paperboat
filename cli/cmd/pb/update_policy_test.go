@@ -11,27 +11,25 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
-	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/spf13/cobra"
 )
 
 func TestCLIUpdateFloorWarnsBlocksAndLeavesRecoveryAccessible(t *testing.T) {
-	priorDistribution := buildinfo.Distribution
-	buildinfo.Distribution = "official"
-	t.Cleanup(func() { buildinfo.Distribution = priorDistribution })
-	priorFetch, priorVersion, priorCache := fetchCLIUpdatePolicy, cliUpdateVersion, cliUpdatePolicyCachePath
-	t.Cleanup(func() {
-		fetchCLIUpdatePolicy, cliUpdateVersion, cliUpdatePolicyCachePath = priorFetch, priorVersion, priorCache
-	})
 	cache := filepath.Join(t.TempDir(), "policy.json")
-	cliUpdatePolicyCachePath = func(string, string) string { return cache }
-	cliUpdateVersion = func() string { return "2026.10.08.1" }
 	deadline := time.Now().Add(time.Hour)
 	policy := api.UpdatePolicy{Schema: "paperboat.client-update-policy/v1", Revision: 1, MinimumVersion: "2026.10.08.2", Reason: "Protocol maintenance", EnforceAt: &deadline}
 	calls := 0
-	fetchCLIUpdatePolicy = func(context.Context, string, *http.Client) (api.UpdatePolicy, error) { calls++; return policy, nil }
+	fetch := func(context.Context, string, *http.Client) (api.UpdatePolicy, error) { calls++; return policy, nil }
+	ctx := withUpdatePolicyDependencies(t.Context(), func(d *updatePolicyDependencies) {
+		d.distribution = "official"
+		d.cachePath = func(string, string) string { return cache }
+		d.version = func() string { return "2026.10.08.1" }
+		d.fetch = func(ctx context.Context, issuer string, client *http.Client) (api.UpdatePolicy, error) {
+			return fetch(ctx, issuer, client)
+		}
+	})
 	command := &cobra.Command{Use: "pb"}
-	command.SetContext(context.Background())
+	command.SetContext(ctx)
 	command.Flags().String("config", filepath.Join(t.TempDir(), "config.json"), "")
 	command.Flags().String("server", "https://example.invalid", "")
 	command.Flags().Bool("json", false, "")
@@ -65,7 +63,7 @@ func TestCLIUpdateFloorWarnsBlocksAndLeavesRecoveryAccessible(t *testing.T) {
 			t.Fatalf("recovery %s gated: %v", name, err)
 		}
 	}
-	fetchCLIUpdatePolicy = func(context.Context, string, *http.Client) (api.UpdatePolicy, error) {
+	fetch = func(context.Context, string, *http.Client) (api.UpdatePolicy, error) {
 		return api.UpdatePolicy{}, errors.New("offline")
 	}
 	if err := os.Chtimes(cache, stale, stale); err != nil {
@@ -82,15 +80,17 @@ func TestCLIUpdateFloorWarnsBlocksAndLeavesRecoveryAccessible(t *testing.T) {
 }
 
 func TestCLIUpdateFloorExemptsCustomBuilds(t *testing.T) {
-	priorDistribution, priorFetch := buildinfo.Distribution, fetchCLIUpdatePolicy
-	t.Cleanup(func() { buildinfo.Distribution, fetchCLIUpdatePolicy = priorDistribution, priorFetch })
-	fetchCLIUpdatePolicy = func(context.Context, string, *http.Client) (api.UpdatePolicy, error) {
-		t.Fatal("custom build fetched official minimum-version policy")
-		return api.UpdatePolicy{}, nil
-	}
 	for _, distribution := range []string{"custom", ""} {
-		buildinfo.Distribution = distribution
-		if err := checkCLIUpdatePolicy(&cobra.Command{Use: "pb"}); err != nil {
+		ctx := withUpdatePolicyDependencies(t.Context(), func(d *updatePolicyDependencies) {
+			d.distribution = distribution
+			d.fetch = func(context.Context, string, *http.Client) (api.UpdatePolicy, error) {
+				t.Fatal("custom build fetched official minimum-version policy")
+				return api.UpdatePolicy{}, nil
+			}
+		})
+		command := &cobra.Command{Use: "pb"}
+		command.SetContext(ctx)
+		if err := checkCLIUpdatePolicy(command); err != nil {
 			t.Fatal(err)
 		}
 	}

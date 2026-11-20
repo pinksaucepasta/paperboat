@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"syscall"
 
@@ -30,9 +29,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
-
-// commandGOOS is the platform whose rules a command follows; tests check the Windows ones on any host.
-var commandGOOS = runtime.GOOS
 
 // boundedErrorWalk reports whether match holds for an error in the chain without trusting its shape: the
 // walk is breadth-first and capped, so a self-referencing cause cannot hang the command (errors.Is and
@@ -90,7 +86,7 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if boundedErrorWalk(err, func(e error) bool { return e == localdaemon.ErrServiceNotInstalled }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return "The Paperboat background service is not installed. Run `pb service install`, then retry."
 	}
-	if localDaemonStopped(commandGOOS, err) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+	if localDaemonStopped(err) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return localDaemonStoppedSummary + " " + localDaemonStoppedRecovery
 	}
 	if boundedErrorWalk(err, func(e error) bool { return e == preview.ErrOwnerSessionLeaseLimit }) {

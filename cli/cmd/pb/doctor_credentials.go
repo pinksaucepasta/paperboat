@@ -6,14 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
-	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/enrollment"
 )
 
 // credentialRefusalWindow and credentialRefusalThreshold decide when refusals are a pattern, not one blip.
@@ -27,7 +23,7 @@ const (
 // healthy (test-r26b, ~28 an hour all day, 2026-10-25).
 func probeDoctorCredentials(ctx context.Context) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "machine_credentials", Status: doctorpkg.StatusPass, Summary: "The Paperboat server accepts this machine's credentials."}
-	if renewalRefusedHere() {
+	if doctorDependenciesOf(ctx).renewalRefused() {
 		check.Status = doctorpkg.StatusFail
 		check.Summary = "The Paperboat server no longer accepts this machine: it was removed or its credentials were revoked. Paperboat has stopped retrying."
 		check.Recovery = "Run `pb pair` with a new enrollment token to add this machine again."
@@ -65,16 +61,4 @@ func countCredentialRefusals(events []byte, since time.Time) int {
 		}
 	}
 	return count
-}
-
-// renewalRefusedHere reads whether the daemon recorded that the server refused this machine's identity renewal (401).
-var renewalRefusedHere = func() bool {
-	root := strings.TrimSpace(os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT"))
-	if root == "" {
-		var err error
-		if root, err = helperconfig.DefaultStateRoot(os.Getenv); err != nil {
-			return false
-		}
-	}
-	return enrollment.RenewalRefused(root, time.Now().UTC())
 }

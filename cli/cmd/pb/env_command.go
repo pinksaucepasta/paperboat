@@ -197,9 +197,6 @@ type environmentVariableTarget struct {
 	machineName string
 }
 
-var environmentVariableBackendForCommand = backendForCommand
-var environmentVariableResolveMachine = resolveUserMachine
-
 func environmentVariablesCobraCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "env",
@@ -331,7 +328,7 @@ func environmentVariableTargetForCommand(command *cobra.Command, client *api.Cli
 	if requested == "" {
 		return environmentVariableTarget{}, nil
 	}
-	machine, err := environmentVariableResolveMachine(command.Context(), client, requested)
+	machine, err := envDependenciesOf(command.Context()).resolveMachine(command.Context(), client, requested)
 	if err != nil {
 		return environmentVariableTarget{}, friendlyCommandError(err)
 	}
@@ -486,7 +483,7 @@ func writeEnvironmentRecoveryFile(path string, value []byte) (resultErr error) {
 	return nil
 }
 
-func safeEnvironmentVariableCommandError(err error) error {
+func safeEnvironmentVariableCommandError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -527,7 +524,7 @@ func safeEnvironmentVariableCommandError(err error) error {
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrSecretNotFound }):
 		// The account's vault record is absent here: ENV was never set up or unlocked on this computer. Offline that
 		// cannot be told from an account that uses ENV: unlocking needs Paperboat.
-		if paperboatUnreachable(context.Background()) {
+		if paperboatUnreachable(ctx) {
 			return envCommandError(environmentmanager.ErrVaultNotSetUp, envNeedsOnlineMessage)
 		}
 		return envCommandError(environmentmanager.ErrVaultNotSetUp, envNotSetUpMessage)
@@ -578,7 +575,7 @@ const envNeedsOnlineMessage = "ENV needs Paperboat online: this computer has no 
 func paperboatUnreachable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, daemonSnapshotLookupTimeout)
 	defer cancel()
-	snapshot, err := readDaemonSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).readSnapshot(ctx)
 	if err != nil {
 		return false
 	}
@@ -617,7 +614,7 @@ func environmentVariableConfiguredName(items []api.EnvironmentVariable, name str
 }
 
 func runEnvironmentVariablesTUI(command *cobra.Command) error {
-	client, err := environmentVariableBackendForCommand(command)
+	client, err := envDependenciesOf(command.Context()).backendForCommand(command)
 	if err != nil {
 		return err
 	}
@@ -720,9 +717,9 @@ func environmentVariablePickerScope(workspace, account string, target environmen
 }
 
 func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, target environmentVariableTarget) error {
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	workspace, err := effectiveWorkspace(command)
 	if err != nil {
@@ -756,13 +753,13 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 				return selector.ErrCanceled
 			}
 			if err := manager.CreateTeamAt(command.Context(), scope.owner, team.Generation, membership); err != nil {
-				return safeEnvironmentVariableCommandError(err)
+				return safeEnvironmentVariableCommandError(command.Context(), err)
 			}
 			if err := refreshENVLayers(command, manager, true); err != nil {
 				return err
 			}
 		} else if getErr != nil {
-			return safeEnvironmentVariableCommandError(getErr)
+			return safeEnvironmentVariableCommandError(command.Context(), getErr)
 		} else {
 			canEdit = false
 			for _, member := range teamState.Members {
@@ -775,7 +772,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 	for {
 		metadata, err := readVaultScopeMetadata(command.Context(), manager, scope)
 		if err != nil {
-			return safeEnvironmentVariableCommandError(err)
+			return safeEnvironmentVariableCommandError(command.Context(), err)
 		}
 		items := environmentVariableScopeActions(metadata, canEdit)
 		selection, selectErr := selector.Choose(selector.Options{Context: command.Context(),
@@ -826,7 +823,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 			}
 			clear(value)
 			if setErr != nil {
-				return safeEnvironmentVariableCommandError(setErr)
+				return safeEnvironmentVariableCommandError(command.Context(), setErr)
 			}
 			if err := refreshENVRecordScope(command, manager, scope.kind, scope.owner, scope.machine); err != nil {
 				return err
@@ -847,7 +844,7 @@ func runEnvironmentVariableScopeTUI(command *cobra.Command, client *api.Client, 
 		}
 		deleteErr := manager.RemoveScopeVariable(command.Context(), scope.kind, scope.owner, scope.machine, name)
 		if deleteErr != nil {
-			return safeEnvironmentVariableCommandError(deleteErr)
+			return safeEnvironmentVariableCommandError(command.Context(), deleteErr)
 		}
 		if err := refreshENVRecordScope(command, manager, scope.kind, scope.owner, scope.machine); err != nil {
 			return err

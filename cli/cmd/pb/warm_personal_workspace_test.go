@@ -21,11 +21,9 @@ func TestPersonalWorkspaceResolvesOwnMachinesFromWarmSnapshot(t *testing.T) {
 		machine("mch_shared", "lent", "personal", "acct_other"),
 		machine("mch_team", "ci", "team", "acct_me"),
 	}}
-	previous := loadWarmMachineSnapshot
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+	ctx := withDaemonSnapshot(t, snapshot)
 
-	personal := context.WithValue(context.WithValue(context.Background(), workspaceInvocationKey{}, "personal"), personalWorkspaceAccountKey{}, "acct_me")
+	personal := context.WithValue(context.WithValue(ctx, workspaceInvocationKey{}, "personal"), personalWorkspaceAccountKey{}, "acct_me")
 	if got, ok := resolveWarmUserMachine(personal, "build"); !ok || got.ID != "mch_own" || got.InstallationGeneration != 2 {
 		t.Fatalf("own personal machine was not resolved warm: %+v %v", got, ok)
 	}
@@ -34,11 +32,11 @@ func TestPersonalWorkspaceResolvesOwnMachinesFromWarmSnapshot(t *testing.T) {
 			t.Fatalf("%s is outside the personal workspace but resolved warm: %+v", alias, got)
 		}
 	}
-	unknownAccount := context.WithValue(context.Background(), workspaceInvocationKey{}, "personal")
+	unknownAccount := context.WithValue(ctx, workspaceInvocationKey{}, "personal")
 	if _, ok := resolveWarmUserMachine(unknownAccount, "build"); ok {
 		t.Fatal("personal workspace without a known account resolved warm")
 	}
-	team := context.WithValue(context.Background(), workspaceInvocationKey{}, "team-a")
+	team := context.WithValue(ctx, workspaceInvocationKey{}, "team-a")
 	if _, ok := resolveWarmUserMachine(team, "ci"); ok {
 		t.Fatal("a team workspace resolved from the snapshot instead of the server")
 	}
@@ -78,21 +76,19 @@ func TestPingResolvesAWarmMachineWithoutListing(t *testing.T) {
 	snapshot := localapi.Snapshot{Schema: localapi.SnapshotSchemaV1, Generation: 1, ObservedAt: time.Now().UTC(), DaemonState: "ready", DaemonVersion: "dev", Machines: []localapi.MachineStatus{
 		{ID: "mch_ready", EnvironmentID: "env_ready", Alias: "build", Eligible: true, RuntimeState: "ready", Generation: 2},
 	}}
-	previous := loadWarmMachineSnapshot
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
+	ctx := withDaemonSnapshot(t, snapshot)
 	listings := 0
 	errListed := errors.New("listed on the server")
 	server := func() (*api.Client, error) { listings++; return nil, errListed }
 
-	machine, err := resolveMachineWarmFirst(context.Background(), "build", server)
+	machine, err := resolveMachineWarmFirst(ctx, "build", server)
 	if err != nil || machine.ID != "mch_ready" || machine.EnvironmentID != "env_ready" || machine.InstallationGeneration != 2 || !machine.Online {
 		t.Fatalf("warm machine = %+v, %v", machine, err)
 	}
 	if listings != 0 {
 		t.Fatalf("a warm machine was listed on the server %d times", listings)
 	}
-	if _, err := resolveMachineWarmFirst(context.Background(), "unknown", server); !errors.Is(err, errListed) || listings != 1 {
+	if _, err := resolveMachineWarmFirst(ctx, "unknown", server); !errors.Is(err, errListed) || listings != 1 {
 		t.Fatalf("a machine outside the snapshot was not resolved on the server: err=%v listings=%d", err, listings)
 	}
 }

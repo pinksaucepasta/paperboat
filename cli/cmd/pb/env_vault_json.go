@@ -115,7 +115,7 @@ func vaultPasswordForOperation(command *cobra.Command, title string, confirm boo
 		if jsonOutputRequested(command) {
 			return nil, localArgumentError("--json requires --password-file or --password-stdin")
 		}
-		password, err = passwordVaultPrompt(command, title)
+		password, err = envDependenciesOf(command.Context()).passwordPrompt(command, title)
 		if err != nil {
 			return nil, err
 		}
@@ -127,7 +127,7 @@ func vaultPasswordForOperation(command *cobra.Command, title string, confirm boo
 	if !confirm || explicit {
 		return password, nil
 	}
-	confirmation, err := passwordVaultPrompt(command, "Confirm "+strings.ToLower(title))
+	confirmation, err := envDependenciesOf(command.Context()).passwordPrompt(command, "Confirm "+strings.ToLower(title))
 	if err != nil {
 		clear(password)
 		return nil, err
@@ -155,7 +155,7 @@ func readVaultRecoveryInput(command *cobra.Command) ([]byte, error) {
 		if jsonOutputRequested(command) {
 			return nil, localArgumentError("--json recover requires --recovery-input-file")
 		}
-		return passwordVaultPrompt(command, "Recovery code")
+		return envDependenciesOf(command.Context()).passwordPrompt(command, "Recovery code")
 	}
 	if !filepath.IsAbs(path) {
 		return nil, invocationError(errors.New("--recovery-input-file requires an absolute path"))

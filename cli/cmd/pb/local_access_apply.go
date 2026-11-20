@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-var applyLocalAccessSettings = applyLocalAccessConfig
-
 // Provision trust before activating the daemon. Restore the previous domain
 // and daemon if activation fails.
 func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, domain string) error {
@@ -45,7 +43,7 @@ func applyLocalAccessConfig(ctx context.Context, cfg *config.Config, domain stri
 	if !state.Installed {
 		return errors.New("Paperboat is not installed; run pb install before applying local browser settings")
 	}
-	status, err := localAccessGuardStatus(ctx)
+	status, err := installDependenciesOf(ctx).guardStatus(ctx)
 	if err != nil {
 		return err
 	}

@@ -55,7 +55,7 @@ func TestEnvironmentVaultUsesSecureCustodyWithFileBackedSession(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("config", path, "")
 	cmd.Flags().String("server", server.URL, "")
-	manager, err := passwordVaultForCommand(cmd)
+	manager, err := defaultPasswordVault(cmd)
 	if err != nil {
 		t.Fatal(err)
 	}

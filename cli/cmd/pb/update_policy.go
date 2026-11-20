@@ -16,15 +16,10 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/userpaths"
 	"github.com/spf13/cobra"
 )
-
-var fetchCLIUpdatePolicy = api.FetchUpdatePolicy
-var cliUpdateVersion = func() string { return buildinfo.Version }
-var cliUpdatePolicyCachePath = cliPolicyCachePath
 
 func updatePolicyRecoveryCommand(command *cobra.Command) bool {
 	path := strings.Fields(command.CommandPath())
@@ -58,7 +53,7 @@ func cliUpdatePolicyCacheFor(command *cobra.Command) (cachePath string, cfg *con
 	if err != nil {
 		return "", nil, "", false
 	}
-	return cliUpdatePolicyCachePath(issuer, cfg.Path()), cfg, issuer, true
+	return updatePolicyDependenciesOf(command.Context()).cachePath(issuer, cfg.Path()), cfg, issuer, true
 }
 
 // forgetUpdatePolicyAfterRefusal drops the cached policy when the server refused a request as update_required: the
@@ -73,7 +68,8 @@ func forgetUpdatePolicyAfterRefusal(cachePath string, err error) {
 }
 
 func checkCLIUpdatePolicy(command *cobra.Command) error {
-	if buildinfo.Distribution != "official" {
+	deps := updatePolicyDependenciesOf(command.Context())
+	if deps.distribution != "official" {
 		return nil
 	}
 	if updatePolicyRecoveryCommand(command) {
@@ -88,13 +84,13 @@ func checkCLIUpdatePolicy(command *cobra.Command) error {
 		ctx, cancel := context.WithTimeout(command.Context(), time.Second)
 		defer cancel()
 		client := &http.Client{Timeout: time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		if policy, err = fetchCLIUpdatePolicy(ctx, issuer, client); err == nil {
+		if policy, err = deps.fetch(ctx, issuer, client); err == nil {
 			_ = saveCLIUpdatePolicy(cachePath, policy)
 		} else if policy, err = readCLIUpdatePolicy(cachePath); err != nil {
 			return nil // The server still enforces incompatible requests.
 		}
 	}
-	version := cliUpdateVersion()
+	version := deps.version()
 	if !api.UpdatePolicyBehind(policy, version) {
 		return nil
 	}

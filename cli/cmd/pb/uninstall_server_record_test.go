@@ -62,12 +62,12 @@ func TestUninstallDisconnectsOwnMachineRecord(t *testing.T) {
 }
 
 func TestUninstallServerRecordNoticeNamesTheConsole(t *testing.T) {
-	original := disconnectOwnMachine
-	t.Cleanup(func() { disconnectOwnMachine = original })
-	disconnectOwnMachine = func(*command.Context) error {
-		return &url.Error{Op: "Post", URL: "x", Err: errors.New("connection refused")}
-	}
-	notice := removeOwnServerRecord(nil)
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.disconnectMachine = func(*command.Context) error {
+			return &url.Error{Op: "Post", URL: "x", Err: errors.New("connection refused")}
+		}
+	})
+	notice := removeOwnServerRecord(&command.Context{Context: ctx})
 	if !strings.Contains(notice, "could not be reached") || !strings.Contains(notice, "console") || !strings.Contains(notice, "continues locally") {
 		t.Fatalf("notice = %q", notice)
 	}

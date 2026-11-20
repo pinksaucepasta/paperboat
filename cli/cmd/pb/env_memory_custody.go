@@ -29,7 +29,7 @@ type daemonVaultCustody struct {
 }
 
 func newDaemonVaultCustody(command *cobra.Command, profile config.Profile) (*daemonVaultCustody, error) {
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(command.Context()).daemonPaths()
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (s *daemonVaultCustody) LockEnvironmentMutations(issuer, account, subject s
 	response, err := s.request(s.command.Context(), "begin", nil)
 	if errors.Is(err, localapi.ErrTransportUnavailable) || errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
 		// Reuse the normal user-daemon startup owner, never a host service.
-		s.client, _, err = localDaemonSnapshot(s.command, installLocalDaemonService)
+		s.client, _, err = localDaemonSnapshot(s.command, installDependenciesOf(s.command.Context()).installService)
 		if err == nil {
 			response, err = s.request(s.command.Context(), "begin", nil)
 		}

@@ -88,22 +88,22 @@ func TestUninstallStatusLeftoverIsAcceptedOnlyOnCompletedAndAsCleanPaths(t *test
 
 // A helper that is alive but slow to acknowledge is a pending uninstall, not a failed one.
 func TestSlowButRunningUninstallHelperIsPendingNotFailure(t *testing.T) {
-	previous := windowsHelperIsRunning
-	t.Cleanup(func() { windowsHelperIsRunning = previous })
 	timedOut := windowsUninstallLocalFailure("", context.DeadlineExceeded)
-	windowsHelperIsRunning = func(string) (bool, error) { return true, nil }
-	if !pendingWindowsUninstallHandoff(timedOut, "helper.exe") {
+	running := func(running bool, err error) context.Context {
+		return withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+			d.helperIsRunning = func(string) (bool, error) { return running, err }
+		})
+	}
+	if !pendingWindowsUninstallHandoff(running(true, nil), timedOut, "helper.exe") {
 		t.Fatal("a running helper that was slow to acknowledge failed the uninstall")
 	}
-	if pendingWindowsUninstallHandoff(errors.New("invalid protected Windows uninstall status"), "helper.exe") {
+	if pendingWindowsUninstallHandoff(running(true, nil), errors.New("invalid protected Windows uninstall status"), "helper.exe") {
 		t.Fatal("another handoff failure was treated as pending")
 	}
-	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
-	if pendingWindowsUninstallHandoff(timedOut, "helper.exe") {
+	if pendingWindowsUninstallHandoff(running(false, nil), timedOut, "helper.exe") {
 		t.Fatal("a helper that is gone was treated as pending")
 	}
-	windowsHelperIsRunning = func(string) (bool, error) { return true, errors.New("query failed") }
-	if pendingWindowsUninstallHandoff(timedOut, "helper.exe") {
+	if pendingWindowsUninstallHandoff(running(true, errors.New("query failed")), timedOut, "helper.exe") {
 		t.Fatal("a failed process query was treated as pending")
 	}
 }
@@ -121,51 +121,50 @@ func TestAppendLeftoverReportsEachPathOnce(t *testing.T) {
 }
 
 func TestAHelperRunningDespiteALaunchErrorIsAPendingUninstallNotAFailure(t *testing.T) {
-	original := windowsHelperIsRunning
-	t.Cleanup(func() { windowsHelperIsRunning = original })
 	helper := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\paperboat-uninstall-helper.exe`
-	windowsHelperIsRunning = func(path string) (bool, error) { return path == helper, nil }
-	if !helperStartedDespite(helper) {
+	with := func(isRunning func(string) (bool, error)) context.Context {
+		return withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) { d.helperIsRunning = isRunning })
+	}
+	ctx := with(func(path string) (bool, error) { return path == helper, nil })
+	if !helperStartedDespite(ctx, helper) {
 		t.Fatal("a running helper was treated as a failed launch")
 	}
-	if helperStartedDespite(`C:\other\paperboat-uninstall-helper.exe`) {
+	if helperStartedDespite(ctx, `C:\other\paperboat-uninstall-helper.exe`) {
 		t.Fatal("another image counted as this helper")
 	}
-	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
-	if helperStartedDespite(helper) {
+	if helperStartedDespite(with(func(string) (bool, error) { return false, nil }), helper) {
 		t.Fatal("a helper that is not running counted as started")
 	}
-	windowsHelperIsRunning = func(string) (bool, error) { return true, errors.New("process query failed") }
-	if helperStartedDespite(helper) {
+	if helperStartedDespite(with(func(string) (bool, error) { return true, errors.New("process query failed") }), helper) {
 		t.Fatal("an unreadable process list counted as started")
 	}
 }
 
 func TestHandoffWaitReadsThroughATransientStatusReadError(t *testing.T) {
-	originalRead := readUninstallStatus
-	t.Cleanup(func() { readUninstallStatus = originalRead })
-	ctx := withTimings(context.Background(), func(timings *commandTimings) { timings.windowsHandoff = 5 * time.Second })
 	statusPath := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\status.json`
 	reads := 0
-	readUninstallStatus = func(string) (windowsUninstallStatus, error) {
-		reads++
-		if reads <= 2 { // the helper replaces status.json while it is read
-			return windowsUninstallStatus{}, &fs.PathError{Op: "open", Path: statusPath, Err: windows.ERROR_SHARING_VIOLATION}
+	ctx := withWindowsUninstallDependencies(context.Background(), func(d *windowsUninstallDependencies) {
+		d.readStatus = func(string) (windowsUninstallStatus, error) {
+			reads++
+			if reads <= 2 { // the helper replaces status.json while it is read
+				return windowsUninstallStatus{}, &fs.PathError{Op: "open", Path: statusPath, Err: windows.ERROR_SHARING_VIOLATION}
+			}
+			return windowsUninstallStatus{State: "completed"}, nil
 		}
-		return windowsUninstallStatus{State: "completed"}, nil
-	}
+	})
+	ctx = withTimings(ctx, func(timings *commandTimings) { timings.windowsHandoff = 5 * time.Second })
 	if err := waitForWindowsUninstallHandoff(ctx, statusPath); err != nil || reads != 3 {
 		t.Fatalf("a transient sharing violation failed the handoff: err=%v reads=%d", err, reads)
 	}
 }
 
 func TestHandoffWaitFailsWithTheReadErrorWhenTheStatusStaysUnreadable(t *testing.T) {
-	originalRead := readUninstallStatus
-	t.Cleanup(func() { readUninstallStatus = originalRead })
-	ctx := withTimings(context.Background(), func(timings *commandTimings) { timings.windowsHandoff = 300 * time.Millisecond })
 	statusPath := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\status.json`
 	broken := errors.New("invalid protected Windows uninstall status")
-	readUninstallStatus = func(string) (windowsUninstallStatus, error) { return windowsUninstallStatus{}, broken }
+	ctx := withWindowsUninstallDependencies(context.Background(), func(d *windowsUninstallDependencies) {
+		d.readStatus = func(string) (windowsUninstallStatus, error) { return windowsUninstallStatus{}, broken }
+	})
+	ctx = withTimings(ctx, func(timings *commandTimings) { timings.windowsHandoff = 300 * time.Millisecond })
 	err := waitForWindowsUninstallHandoff(ctx, statusPath)
 	if err == nil || !errors.Is(err, broken) {
 		t.Fatalf("a status that never validates must fail with its own error, got %v", err)

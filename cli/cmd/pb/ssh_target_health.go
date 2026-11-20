@@ -23,7 +23,7 @@ func (e *sshTargetNotReadyError) Error() string {
 func sshTargetHealth(ctx context.Context, machineID, alias string) error {
 	ctx, cancel := context.WithTimeout(ctx, daemonSnapshotLookupTimeout)
 	defer cancel()
-	snapshot, err := readDaemonSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).readSnapshot(ctx)
 	if err != nil {
 		return nil
 	}

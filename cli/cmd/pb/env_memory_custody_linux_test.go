@@ -75,7 +75,7 @@ func TestHeadlessVaultUnlockSurvivesCLIExitUntilLock(t *testing.T) {
 	defer control.Close()
 	configPath := filepath.Join(root, "config.json")
 	_ = writeAuthLoginTestProfile(t, root, configPath, control.URL)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestHeadlessVaultUnlockSurvivesCLIExitUntilLock(t *testing.T) {
 		cmd.SetContext(context.Background())
 		cmd.Flags().String("config", configPath, "")
 		cmd.Flags().String("server", control.URL, "")
-		result, err := passwordVaultForCommand(cmd)
+		result, err := defaultPasswordVault(cmd)
 		if err != nil {
 			t.Fatal(err)
 		}

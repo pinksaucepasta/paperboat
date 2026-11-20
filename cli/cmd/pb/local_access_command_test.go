@@ -18,20 +18,19 @@ import (
 
 func TestLocalAccessDomainSetNormalizesAndApplies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	oldApply := applyLocalAccessSettings
 	var appliedDomains []string
-	applyLocalAccessSettings = func(_ context.Context, _ *config.Config, domain string) error {
+	applyLocal := func(_ context.Context, _ *config.Config, domain string) error {
 		appliedDomains = append(appliedDomains, domain)
 		return nil
 	}
-	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
 
 	var stdout, stderr bytes.Buffer
 	root := newRootCommand()
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs([]string{"--config", path, "config", "local-access", "domain", "set", "DEV.Example.COM"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatalf("execute: %v; stderr=%q", err, stderr.String())
 	}
 	if strings.TrimSpace(stdout.String()) == "" {
@@ -51,18 +50,16 @@ func TestLocalAccessApplyFailureDoesNotClaimSuccessOrChangeConfig(t *testing.T) 
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
-
-	oldApply := applyLocalAccessSettings
 	applyErr := errors.New("PRIVATE_TRUST_PROVISIONING_FAILURE")
-	applyLocalAccessSettings = func(context.Context, *config.Config, string) error { return applyErr }
-	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
+	applyLocal := func(context.Context, *config.Config, string) error { return applyErr }
 
 	var stdout, stderr bytes.Buffer
 	root := newRootCommand()
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetArgs([]string{"--config", path, "config", "local-access", "domain", "set", "other.example.com"})
-	err = root.ExecuteContext(context.Background())
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+	err = root.ExecuteContext(ctx)
 	if !errors.Is(err, applyErr) {
 		t.Fatalf("apply error = %v", err)
 	}
@@ -87,9 +84,7 @@ func TestLocalAccessReportedFailureRetainsMixedCausesWithoutPrivateText(t *testi
 	secretPath := filepath.Join(t.TempDir(), "PRIVATE_LOCAL_ACCESS_PATH")
 	primary := errors.New("PRIVATE_LOCAL_ACCESS_PAYLOAD")
 	causes := errors.Join(primary, &os.PathError{Op: "open", Path: secretPath, Err: syscall.EIO})
-	priorApply := applyLocalAccessSettings
-	applyLocalAccessSettings = func(context.Context, *config.Config, string) error { return causes }
-	t.Cleanup(func() { applyLocalAccessSettings = priorApply })
+	applyLocal := func(context.Context, *config.Config, string) error { return causes }
 
 	reference := "support_01234567-89ab-4def-8123-456789abcdef"
 	var faults []errorreport.Fault
@@ -98,7 +93,8 @@ func TestLocalAccessReportedFailureRetainsMixedCausesWithoutPrivateText(t *testi
 	})
 	defer restoreObserver()
 	var stdout, stderr bytes.Buffer
-	code := runWithReporter(supportref.WithContext(t.Context(), reference), []string{"--no-customization", "--config", path, "config", "local-access", "domain", "set", "other.example.com"}, &stdout, &stderr, nil)
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+	code := runWithReporter(supportref.WithContext(ctx, reference), []string{"--no-customization", "--config", path, "config", "local-access", "domain", "set", "other.example.com"}, &stdout, &stderr, nil)
 	if code != 1 {
 		t.Fatalf("command exit code = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -133,9 +129,7 @@ func TestLocalAccessConfirmationWriteFailureKeepsAppliedStateAndCause(t *testing
 	if _, err := config.Load(path); err != nil {
 		t.Fatal(err)
 	}
-	priorApply := applyLocalAccessSettings
-	applyLocalAccessSettings = func(context.Context, *config.Config, string) error { return nil }
-	t.Cleanup(func() { applyLocalAccessSettings = priorApply })
+	applyLocal := func(context.Context, *config.Config, string) error { return nil }
 
 	secretPath := filepath.Join(t.TempDir(), "PRIVATE_LOCAL_ACCESS_OUTPUT_PATH")
 	writeErr := &os.PathError{Op: "write", Path: secretPath, Err: syscall.EIO}
@@ -147,7 +141,8 @@ func TestLocalAccessConfirmationWriteFailureKeepsAppliedStateAndCause(t *testing
 		faults = append(faults, fault)
 	})
 	defer restoreObserver()
-	code := runWithReporter(supportref.WithContext(t.Context(), reference), []string{"--no-customization", "--config", path, "config", "local-access", "domain", "set", "dev.example.com"}, stdout, &stderr, nil)
+	ctx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+	code := runWithReporter(supportref.WithContext(ctx, reference), []string{"--no-customization", "--config", path, "config", "local-access", "domain", "set", "dev.example.com"}, stdout, &stderr, nil)
 	if code != 1 {
 		t.Fatalf("command exit code = %d, want 1", code)
 	}
@@ -167,29 +162,28 @@ func TestLocalAccessConfirmationWriteFailureKeepsAppliedStateAndCause(t *testing
 }
 
 // useGuardStatus makes the machine guard report status for the local access commands.
-func useGuardStatus(t *testing.T, status machineguard.RuntimeStatus, err error) {
+func useGuardStatus(t *testing.T, status machineguard.RuntimeStatus, err error) context.Context {
 	t.Helper()
-	prior := localAccessGuardStatus
-	localAccessGuardStatus = func(context.Context) (machineguard.RuntimeStatus, error) { return status, err }
-	t.Cleanup(func() { localAccessGuardStatus = prior })
+	return withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.guardStatus = func(context.Context) (machineguard.RuntimeStatus, error) { return status, err }
+	})
 }
 
 func TestLocalAccessResetUsesTheGuardsDomain(t *testing.T) {
-	useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "custom.example.test", DefaultBrowserDomain: "reset.example.test"}, nil)
+	ctx := useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "custom.example.test", DefaultBrowserDomain: "reset.example.test"}, nil)
 	path := filepath.Join(t.TempDir(), "config.json")
-	oldApply := applyLocalAccessSettings
 	var appliedDomains []string
-	applyLocalAccessSettings = func(_ context.Context, _ *config.Config, domain string) error {
+	applyLocal := func(_ context.Context, _ *config.Config, domain string) error {
 		appliedDomains = append(appliedDomains, domain)
 		return nil
 	}
-	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
 
 	root := newRootCommand()
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"--config", path, "config", "local-access", "domain", "reset"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	ctx = withInstallDependencies(ctx, func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if len(appliedDomains) != 1 || appliedDomains[0] != "reset.example.test" {
@@ -199,7 +193,7 @@ func TestLocalAccessResetUsesTheGuardsDomain(t *testing.T) {
 
 // A config file written before the guard owned the domain still carries one; it is ignored.
 func TestLocalAccessIgnoresAStaleDomainInTheConfigFile(t *testing.T) {
-	useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "ppr.example.test", DefaultBrowserDomain: "ppr.example.test"}, nil)
+	ctx := useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "ppr.example.test", DefaultBrowserDomain: "ppr.example.test"}, nil)
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"local_access":{"domain":"local.pprbt.example.test"}}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -209,7 +203,7 @@ func TestLocalAccessIgnoresAStaleDomainInTheConfigFile(t *testing.T) {
 	root.SetOut(&output)
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"--config", path, "config", "local-access", "show"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "domain: ppr.example.test") || strings.Contains(output.String(), "local.pprbt.example.test") {
@@ -219,13 +213,11 @@ func TestLocalAccessIgnoresAStaleDomainInTheConfigFile(t *testing.T) {
 
 func TestLocalAccessInvalidValuesDoNotReachApply(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	oldApply := applyLocalAccessSettings
 	calls := 0
-	applyLocalAccessSettings = func(context.Context, *config.Config, string) error {
+	applyLocal := func(context.Context, *config.Config, string) error {
 		calls++
 		return nil
 	}
-	t.Cleanup(func() { applyLocalAccessSettings = oldApply })
 
 	for _, args := range [][]string{
 		{"config", "local-access", "domain", "set", "com"},
@@ -234,7 +226,8 @@ func TestLocalAccessInvalidValuesDoNotReachApply(t *testing.T) {
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
 		root.SetArgs(append([]string{"--config", path}, args...))
-		if err := root.ExecuteContext(context.Background()); err == nil {
+		ctx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+		if err := root.ExecuteContext(ctx); err == nil {
 			t.Fatalf("invalid arguments %v were accepted", args)
 		}
 	}
@@ -244,14 +237,14 @@ func TestLocalAccessInvalidValuesDoNotReachApply(t *testing.T) {
 }
 
 func TestLocalAccessShowExposesDomain(t *testing.T) {
-	useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "dev.example.com"}, nil)
+	ctx := useGuardStatus(t, machineguard.RuntimeStatus{BrowserDomain: "dev.example.com"}, nil)
 	path := filepath.Join(t.TempDir(), "config.json")
 	var humanOutput bytes.Buffer
 	root := newRootCommand()
 	root.SetOut(&humanOutput)
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"--config", path, "config", "local-access", "show"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(humanOutput.String(), "domain: dev.example.com") {
@@ -284,23 +277,22 @@ func TestLocalAccessDomainResetNeedsTheGuardsRecordedDomain(t *testing.T) {
 		"guard unreachable":               {err: errors.New("guard unreachable")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			useGuardStatus(t, tc.status, tc.err)
+			ctx := useGuardStatus(t, tc.status, tc.err)
 			path := filepath.Join(t.TempDir(), "config.json")
-			prior := applyLocalAccessSettings
 			var appliedDomain string
 			applies := 0
-			applyLocalAccessSettings = func(_ context.Context, cfg *config.Config, domain string) error {
+			applyLocal := func(_ context.Context, cfg *config.Config, domain string) error {
 				applies++
 				appliedDomain = domain
 				return nil
 			}
-			t.Cleanup(func() { applyLocalAccessSettings = prior })
 			root := newRootCommand()
 			var output bytes.Buffer
 			root.SetOut(&output)
 			root.SetErr(&bytes.Buffer{})
 			root.SetArgs([]string{"--config", path, "config", "local-access", "domain", "reset", "--json"})
-			err := root.ExecuteContext(t.Context())
+			ctx = withInstallDependencies(ctx, func(d *installDependencies) { d.applyLocalAccess = applyLocal })
+			err := root.ExecuteContext(ctx)
 			if (err != nil) == tc.wantApply {
 				t.Fatalf("reset error = %v, want error=%v", err, !tc.wantApply)
 			}

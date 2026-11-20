@@ -12,7 +12,6 @@ import (
 
 // Paying for a team needs the buyer's explicit agreement to the server's wording; the version sent is the one shown.
 func TestTeamCreateNeedsAcceptedTerms(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	var created []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {

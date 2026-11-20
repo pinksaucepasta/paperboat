@@ -1019,7 +1019,7 @@ func TestPreviewStopCompletionReadsTheDaemonCache(t *testing.T) {
 	t.Setenv("TMPDIR", runtimeRoot)
 	deps := defaultPreviewDependencies()
 	deps.client = func(*cobra.Command) (*api.Client, error) { t.Fatal("completion called the server"); return nil, nil }
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

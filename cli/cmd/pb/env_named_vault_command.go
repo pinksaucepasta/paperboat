@@ -27,12 +27,12 @@ type namedVaultSession struct {
 	vault     environmentmanager.PasswordVault
 }
 
-var namedVaultSessionFor = func(command *cobra.Command) (namedVaultSession, error) {
+func defaultNamedVaultSession(command *cobra.Command) (namedVaultSession, error) {
 	client, workspace, err := policyClient(command, nil)
 	if err != nil {
 		return namedVaultSession{}, err
 	}
-	vault, err := passwordVaultForCommand(command)
+	vault, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return namedVaultSession{}, err
 	}
@@ -73,7 +73,7 @@ with pb env unlock. Names use lowercase letters, digits and -, up to 63 characte
 		if !recipe.ValidName(name) {
 			return localArgumentError("a vault name uses lowercase letters, digits and -, up to 63 characters, like canary-env")
 		}
-		s, err := namedVaultSessionFor(command)
+		s, err := envDependenciesOf(command.Context()).namedVaultSession(command)
 		if err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func changeNamedVaultValue(command *cobra.Command, vaultName, name string, value
 			return err
 		}
 	}
-	s, err := namedVaultSessionFor(command)
+	s, err := envDependenciesOf(command.Context()).namedVaultSession(command)
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func recipeVaultWraps(command *cobra.Command, recipeName string, vaults []string
 	if len(vaults) == 0 {
 		return nil, nil
 	}
-	s, err := namedVaultSessionFor(command)
+	s, err := envDependenciesOf(command.Context()).namedVaultSession(command)
 	if err != nil {
 		return nil, err
 	}

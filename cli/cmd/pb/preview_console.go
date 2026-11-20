@@ -423,7 +423,7 @@ func runPreviewConsole(command *cobra.Command, lease preview.Lease, target previ
 			result := previewConsoleResult{action: action}
 			switch action {
 			case "open":
-				result.err = openBrowser(lease.Endpoint)
+				result.err = hostDependenciesOf(ctx).openBrowser(lease.Endpoint)
 			case "background":
 				ttl, err := time.ParseDuration(value)
 				if err != nil || ttl <= 0 || ttl > previewMaximumTTL {

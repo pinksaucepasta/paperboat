@@ -503,7 +503,7 @@ func TestBugreportJSONFailureAcrossLocalAPIHasOneResultAndCorrelatedCause(t *tes
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 	t.Setenv("TMPDIR", runtimeRoot)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

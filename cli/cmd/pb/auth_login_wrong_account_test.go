@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -14,16 +13,16 @@ import (
 func TestReauthApprovedByAnotherAccountNamesBothAccounts(t *testing.T) {
 	f := &loginDeviceFixture{}
 	srv := loginDeviceServer(t, f)
-	oldMachine, oldPair := loginLocalMachineID, pairLoginDevice
-	t.Cleanup(func() { loginLocalMachineID, pairLoginDevice = oldMachine, oldPair })
-	loginLocalMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
-	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
+	ctx := loginDeviceContext(t, srv, func(d *authDependencies) {
+		d.localMachineID = func(*config.Config) (string, error) { return "machine_abc", nil }
+		d.pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
+	})
 	path, _ := browserLoginFixture(t, srv.URL)
-	if out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser"); err != nil {
+	if out, err := runBrowserLogin(t, ctx, path, "login", "--no-browser"); err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
 	f.approvedBy = "other@example.test"
-	_, err := runBrowserLogin(t, context.Background(), path, "login", "--reauth", "--no-browser")
+	_, err := runBrowserLogin(t, ctx, path, "login", "--reauth", "--no-browser")
 	if err == nil {
 		t.Fatal("reauth approved by another account succeeded")
 	}

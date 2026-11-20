@@ -38,14 +38,14 @@ func TestSSHTrustHostRefreshesTheMachineListAfterPromotion(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	old := refreshAfterSSHTrustHost
-	t.Cleanup(func() { refreshAfterSSHTrustHost = old })
-	refreshAfterSSHTrustHost = func(context.Context) error {
-		mu.Lock()
-		defer mu.Unlock()
-		calls = append(calls, "refresh")
-		return nil
-	}
+	ctx := withSSHDependencies(t.Context(), func(d *sshDependencies) {
+		d.refreshInventory = func(context.Context) error {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, "refresh")
+			return nil
+		}
+	})
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
 	for name, test := range map[string]struct {
 		fingerprint string
@@ -60,7 +60,7 @@ func TestSSHTrustHostRefreshesTheMachineListAfterPromotion(t *testing.T) {
 		command.Flags().Bool("json", true, "")
 		command.SetOut(&bytes.Buffer{})
 		command.SetErr(&bytes.Buffer{})
-		command.SetContext(t.Context())
+		command.SetContext(ctx)
 		_ = trustSSHHost(command, client, api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1})
 		if got := strings.Join(calls, ","); got != test.want {
 			t.Fatalf("%s: calls %q, want %q", name, got, test.want)

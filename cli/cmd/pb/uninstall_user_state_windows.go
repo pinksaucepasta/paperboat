@@ -47,13 +47,6 @@ func checkWindowsUserStatePath(profile, path string) error {
 	return nil
 }
 
-// afterWindowsUserStateCheck runs between the path check and the removal; tests plant a link there.
-var afterWindowsUserStateCheck = func() {}
-
-// removeWindowsStateElevated is removeWindowsStateByHandle; tests replace it to prove that a removal needed
-// only the user's rights.
-var removeWindowsStateElevated = removeWindowsStateByHandle
-
 // retryWindowsRemoval removes one user state path for the elevated helper. The user can write there, so a link
 // can appear at any moment, also between the check and the removal. The removal therefore runs as the user
 // without the helper's elevation (what MSI and Chromium's installer do for per-user data): whatever a planted
@@ -62,6 +55,7 @@ var removeWindowsStateElevated = removeWindowsStateByHandle
 // directory that another process holds open is not retried for five minutes: it is returned in leftovers and
 // reported in the status (lockedBridgeLeftover).
 func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []string, leftovers *[]string) error {
+	edges := windowsUninstallDependenciesOf(ctx)
 	for attempt := 1; ; attempt++ {
 		checked := false
 		last := windowssecurity.WithUnelevatedToken(func() error {
@@ -70,11 +64,11 @@ func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []
 				return err
 			}
 			checked = true
-			afterWindowsUserStateCheck()
+			edges.afterUserStateCheck()
 			return removePathPreserving(path, preserved)
 		})
 		if checked && errors.Is(last, fs.ErrPermission) {
-			last = removeWindowsStateElevated(path, preserved)
+			last = edges.removeStateElevated(path, preserved)
 		}
 		if last == nil || errors.Is(last, errWindowsUserStateRefused) {
 			return last

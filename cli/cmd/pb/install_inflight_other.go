@@ -2,4 +2,6 @@
 
 package main
 
-func windowsUninstallInFlight() error { return nil }
+import "context"
+
+func windowsUninstallInFlight(context.Context) error { return nil }

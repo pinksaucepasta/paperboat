@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,8 +14,9 @@ import (
 // reinstalled the machine guard and roots the helper was deleting and died 'operation_failed / local_io' inside its
 // first elevated step, 3 of 3 (a Windows test VM, spark/install-after-uninstall-diag.md). Failing at once and saying why is the
 // pending contract's counterpart: no wait the user did not ask for.
-func windowsUninstallInFlight() error {
-	root := windowsUninstallRoot()
+func windowsUninstallInFlight(ctx context.Context) error {
+	edges := windowsUninstallDependenciesOf(ctx)
+	root := edges.root()
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil // no helper directory: nothing is being removed
@@ -25,11 +27,11 @@ func windowsUninstallInFlight() error {
 		}
 		directory := filepath.Join(root, entry.Name())
 		statusPath := filepath.Join(directory, "status.json")
-		status, statusErr := readWindowsUninstallStatus(statusPath)
+		status, statusErr := edges.readStatus(statusPath)
 		if statusErr != nil || (status.State != "scheduled" && status.State != "waiting_for_parent" && status.State != "removing") {
 			continue
 		}
-		running, runErr := windowsHelperIsRunning(filepath.Join(directory, "paperboat-uninstall-helper.exe"))
+		running, runErr := edges.helperIsRunning(filepath.Join(directory, "paperboat-uninstall-helper.exe"))
 		if runErr != nil || !running {
 			continue // a helper that is gone is the expired-record case: the uninstall recovery cleans it up
 		}

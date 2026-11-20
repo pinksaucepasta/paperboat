@@ -80,7 +80,7 @@ func buildDeps(c *command.Context) (*deps, error) {
 	var peerApplications peerApplicationTunnel
 	var peerLocal *localapi.Client
 	if cfg.ServerURL != "" {
-		paths, pathsErr := currentLocalDaemonPaths()
+		paths, pathsErr := hostDependenciesOf(c.Context).daemonPaths()
 		if pathsErr != nil {
 			return nil, pathsErr
 		}

@@ -20,11 +20,11 @@ func refreshSignedInDaemon(ctx context.Context, cfg *config.Config) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, signedInDaemonRefreshTimeout)
 	defer cancel()
-	_, _, err = startLocalDaemonAndWait(ctx, cfg, installLocalDaemonService)
+	_, _, err = startLocalDaemonAndWait(ctx, cfg, installDependenciesOf(ctx).installService)
 	if err != nil {
 		return err
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ const renameInventoryRefreshTimeout = 20 * time.Second
 // refreshLocalInventory asks the running daemon to re-read the account's machines, so `pb status`
 // shows a change this command just made. Without a running daemon there is nothing to refresh.
 func refreshLocalInventory(ctx context.Context) error {
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return err
 	}

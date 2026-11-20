@@ -12,7 +12,6 @@ import (
 
 // Owners and admins accept, decline and list machines waiting to join a team, and switch the rule.
 func TestTeamMachineAdmissionCommands(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	var actions []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {

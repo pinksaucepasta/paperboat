@@ -9,8 +9,6 @@ import (
 )
 
 func TestFreshenSSHHostKeys(t *testing.T) {
-	old := refreshInventoryForSSHHostKeys
-	t.Cleanup(func() { refreshInventoryForSSHHostKeys = old })
 	withKeys := api.UserMachine{Alias: "m", SSHHostKeys: []string{"ssh-ed25519 AAAA"}}
 	cases := []struct {
 		name          string
@@ -33,8 +31,10 @@ func TestFreshenSSHHostKeys(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			refreshes, resolves := 0, 0
-			refreshInventoryForSSHHostKeys = func(context.Context) error { refreshes++; return tc.refreshErr }
-			got, none := freshenSSHHostKeys(context.Background(), tc.start, !tc.notInventory, func() (api.UserMachine, error) { resolves++; return tc.resolved, nil })
+			ctx := withSSHDependencies(t.Context(), func(d *sshDependencies) {
+				d.refreshInventory = func(context.Context) error { refreshes++; return tc.refreshErr }
+			})
+			got, none := freshenSSHHostKeys(ctx, tc.start, !tc.notInventory, func() (api.UserMachine, error) { resolves++; return tc.resolved, nil })
 			if refreshes != tc.wantRefreshes || resolves != tc.wantResolves || len(got.SSHHostKeys) != tc.wantKeys || none != tc.wantNone {
 				t.Fatalf("refreshes=%d resolves=%d keys=%d none=%v, want %d %d %d %v", refreshes, resolves, len(got.SSHHostKeys), none, tc.wantRefreshes, tc.wantResolves, tc.wantKeys, tc.wantNone)
 			}

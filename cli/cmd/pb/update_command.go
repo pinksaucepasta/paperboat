@@ -68,7 +68,7 @@ func readLocalDaemonSnapshot(ctx context.Context) (localapi.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return localapi.Snapshot{}, err
 	}

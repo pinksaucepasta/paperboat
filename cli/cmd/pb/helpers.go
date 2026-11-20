@@ -30,8 +30,6 @@ func containsString(values []string, wanted string) bool {
 
 const dashboardEnrollmentGuidance = "Run `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser."
 
-var openBrowser = platformOpenBrowser
-
 func relativeTimestamp(at time.Time) string {
 	if at.IsZero() {
 		return "unknown"

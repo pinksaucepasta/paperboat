@@ -55,9 +55,9 @@ func TestLoginDaemonRefreshFailureAfterRevocationPointsToFreshLogin(t *testing.T
 			go func() { done <- server.Run(ctx) }()
 			t.Cleanup(func() { cancel(); <-done })
 			waitForCommandSocket(t, socket)
-			old := currentLocalDaemonPaths
-			currentLocalDaemonPaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: socket}, nil }
-			t.Cleanup(func() { currentLocalDaemonPaths = old })
+			ctx = withHostDependencies(ctx, func(d *hostDependencies) {
+				d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{SocketPath: socket}, nil }
+			})
 
 			err = refreshLocalInventory(ctx)
 			var remote *localapi.RemoteError

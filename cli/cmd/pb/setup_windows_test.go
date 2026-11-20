@@ -14,11 +14,9 @@ import (
 )
 
 func TestSetupOpenSSHSkipsOnlyWhatMeansUnobtainableOrOutOfTime(t *testing.T) {
-	previousWriter := setupNoticeWriter
-	t.Cleanup(func() { setupNoticeWriter = previousWriter })
 	var notice bytes.Buffer
-	setupNoticeWriter = &notice
-	budget := withTimings(context.Background(), func(timings *commandTimings) { timings.setupOpenSSH = 30 * time.Millisecond })
+	withNotice := withDependencies(context.Background(), defaultWindowsSetupDependencies, func(d *windowsSetupDependencies) { d.noticeWriter = &notice })
+	budget := withTimings(withNotice, func(timings *commandTimings) { timings.setupOpenSSH = 30 * time.Millisecond })
 
 	unobtainable := &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "no package"}
 	if err := runSetupOpenSSH(budget, func(context.Context) error { return unobtainable }); err != nil {

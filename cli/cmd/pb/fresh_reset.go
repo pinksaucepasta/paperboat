@@ -77,7 +77,7 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			}
 			asJSON, _ := command.Flags().GetBool("json")
 			if resume {
-				executable, err := resolveFreshEnrollmentExecutable()
+				executable, err := installDependenciesOf(command.Context()).freshExecutable()
 				if err != nil {
 					return fmt.Errorf("resolve existing enrollment executable: %w", err)
 				}
@@ -94,11 +94,11 @@ func freshEnrollmentResetCommand() *cobra.Command {
 			}
 			// Make-before-break: the old machine record stays until pb pair has a working new machine,
 			// which then replaces it (ReplaceUserMachine). A reset that fails leaves the record and sign-in.
-			replaced, err := rememberReplacedMachineFunc()
+			replaced, err := installDependenciesOf(command.Context()).rememberReplaced()
 			if err != nil {
 				return machineReplacementError{step: replaceStepRemember, cause: err}
 			}
-			if err := freshEnrollmentCleanup(command); err != nil {
+			if err := installDependenciesOf(command.Context()).freshCleanup(command); err != nil {
 				return err
 			}
 			if err := source.Verify(executable); err != nil {
@@ -123,9 +123,6 @@ func freshEnrollmentResetCommand() *cobra.Command {
 	return command
 }
 
-var freshEnrollmentCleanup = runFreshEnrollmentCleanup
-var rememberReplacedMachineFunc = rememberReplacedMachine
-
 // rememberReplacedMachine notes, before anything is removed, which machine record the next pairing of this
 // computer replaces; the note survives the wipe (freshEnrollmentPreserved) and keeps the records earlier
 // resets and failed pairings left behind. It returns that ID, or "" when this computer has no record
@@ -138,7 +135,7 @@ func rememberReplacedMachine() (string, error) {
 	return machineID, bootstrap.SaveReplacement(machineID, false, time.Now())
 }
 
-var replaceUserMachine = func(c *command.Context, replacementID, retiredID string) error {
+func replaceUserMachine(c *command.Context, replacementID, retiredID string) error {
 	client, err := backendClient(c)
 	if err != nil {
 		return err
@@ -157,7 +154,7 @@ func finishMachineReplacement(c *command.Context, machineID string) error {
 		if retired == machineID {
 			continue
 		}
-		if err := replaceUserMachine(c, machineID, retired); err != nil {
+		if err := installDependenciesOf(c.Context).replaceMachine(c, machineID, retired); err != nil {
 			return machineReplacementError{step: replaceStepCutover, retiredID: retired, cause: err}
 		}
 	}
@@ -180,7 +177,7 @@ func pairingFailed(c *command.Context, before, after string) {
 	now := time.Now()
 	left := bootstrap.LoadReplacements(now)
 	for index := len(left) - 1; index >= 0; index-- {
-		if retired := left[index].MachineID; left[index].Unfinished && retired != after && replaceUserMachine(c, after, retired) == nil {
+		if retired := left[index].MachineID; left[index].Unfinished && retired != after && installDependenciesOf(c.Context).replaceMachine(c, after, retired) == nil {
 			_ = bootstrap.ForgetReplacement(retired, now)
 		}
 	}
@@ -226,8 +223,6 @@ func (e machineReplacementError) Error() string {
 	return "This machine is paired and working, but its old machine record " + e.retiredID + " could not be replaced. Check your connection, then remove the old machine in the dashboard."
 }
 
-var resolveFreshEnrollmentExecutable = existingFreshEnrollmentExecutable
-
 func runFreshEnrollmentCleanup(command *cobra.Command) error {
 	preservedInboxes, inboxErr := uninstallInboxPaths(command)
 	executable, executableErr := os.Executable()
@@ -272,7 +267,7 @@ func freshEnrollmentPreserved(command *cobra.Command) []string {
 	if path, err := bootstrap.ReplacementPath(); err == nil {
 		paths = append(paths, path)
 	}
-	if path, err := processDiagnosticsDirectory(command); err == nil {
+	if path, err := processDiagnosticsDirectory(command.Context(), command); err == nil {
 		paths = append(paths, path)
 	}
 	return paths

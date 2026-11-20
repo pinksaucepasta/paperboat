@@ -62,10 +62,6 @@ func interactiveArgs(parent *cobra.Command, args []string) []string {
 	return append(result, args...)
 }
 
-var newInteractiveRootCommand func() *cobra.Command
-
-func init() { newInteractiveRootCommand = newRootCommand }
-
 func actionHomePreviewLaunch(command *cobra.Command) error {
 	target, err := prompt.Text(prompt.TextOptions{Title: "Share a local app", Description: "Local port, HTTP URL, or absolute Unix socket path", Placeholder: "3000", Stdin: os.Stdin, Context: command.Context(), Output: command.ErrOrStderr(), Validate: func(value string) error { _, err := parsePreviewTarget(value); return err }})
 	if err != nil {
@@ -534,7 +530,7 @@ func (b *homeOutput) String() string {
 
 func runHomeResult(parent *cobra.Command, args []string) error {
 	output := &homeOutput{}
-	child := newInteractiveRootCommand()
+	child := homeDependenciesOf(parent.Context()).newRoot()
 	child.SetIn(parent.InOrStdin())
 	child.SetOut(output)
 	child.SetErr(parent.ErrOrStderr())
@@ -655,8 +651,6 @@ func (m homeTextModel) render() string {
 	lines := strings.Split(rendered, "\n")
 	return strings.Join(lines[:min(len(lines), max(1, m.height))], "\n")
 }
-
-var showHomeText = renderHomeText
 
 func renderHomeText(command *cobra.Command, title, content string) error {
 	// Strip terminal escape sequences from command/API output before rendering it

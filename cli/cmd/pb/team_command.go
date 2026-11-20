@@ -164,7 +164,7 @@ func teamCreateCommand() *cobra.Command {
 		} else {
 			fmt.Fprintf(c.OutOrStdout(), "To create team %s, pay for %d seat(s) (billed per %s) here:\n  %s\nThe team is created when payment completes.\n", args[0], seats, interval, checkout.URL)
 		}
-		if err := openBrowser(checkout.URL); err != nil && !jsonOutput {
+		if err := hostDependenciesOf(c.Context()).openBrowser(checkout.URL); err != nil && !jsonOutput {
 			fmt.Fprintln(c.ErrOrStderr(), "Could not open a browser; open the link above.")
 		}
 		if noWait {

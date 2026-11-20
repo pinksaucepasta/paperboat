@@ -415,7 +415,7 @@ func TestReadLocalDaemonSnapshotIsReadOnly(t *testing.T) {
 		t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 		t.Setenv("TMPDIR", runtimeRoot)
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,14 +438,14 @@ func TestReadLocalDaemonSnapshotIsReadOnly(t *testing.T) {
 	go func() { done <- server.Run(serverCtx) }()
 	waitForCommandSocket(t, paths.SocketPath)
 
-	previousInstaller := installLocalDaemonService
 	installCalls := 0
-	installLocalDaemonService = func(context.Context, string, string, string) error {
-		installCalls++
-		return errors.New("unexpected daemon installation")
-	}
-	t.Cleanup(func() { installLocalDaemonService = previousInstaller })
-	snapshot, err := readLocalDaemonSnapshot(context.Background())
+	probeCtx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.installService = func(context.Context, string, string, string) error {
+			installCalls++
+			return errors.New("unexpected daemon installation")
+		}
+	})
+	snapshot, err := readLocalDaemonSnapshot(probeCtx)
 	if err != nil || snapshot.DaemonVersion != "daemon-build" || snapshot.DaemonState != "ready" {
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}

@@ -80,8 +80,6 @@ type accessTunnelRuntime interface {
 	Release(context.Context, accessTunnelSession) error
 }
 
-var accessTunnelRuntimeForCommand = newProductionAccessTunnelRuntime
-
 func accessTunnelCobraCommandV1() *cobra.Command {
 	command := tunnelCommand("tunnel <tunnel-or-route>", "Open private TCP access to a private tunnel route", cobra.ExactArgs(1), runAccessTunnel)
 	command.Flags().String("listen", "127.0.0.1:0", "loopback address to listen on, 127.0.0.1 or ::1 with optional port (default: a free port)")
@@ -95,7 +93,7 @@ func runAccessTunnel(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	runtime, err := accessTunnelRuntimeForCommand()
+	runtime, err := accessDependenciesOf(command.Context()).tunnelRuntime()
 	if err != nil {
 		return err
 	}

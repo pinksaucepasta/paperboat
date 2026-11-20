@@ -24,12 +24,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Seams for tests; production always uses the real identity store and pairing.
-var (
-	loginLocalMachineID = localMachineID
-	pairLoginDevice     = pairLoginEnrollment
-)
-
 // localMachineID is the machine this device already is on the configured server, or "" when it
 // has not been added yet.
 func localMachineID(cfg *config.Config) (string, error) {
@@ -51,8 +45,8 @@ func localMachineID(cfg *config.Config) (string, error) {
 // loginJoin says what approving a login here means: a device that is not a machine yet joins the
 // account (in the workspace given with --workspace, else the one chosen at approval); a machine
 // that is already added only signs in again.
-func loginJoin(cfg *config.Config, workspace string) (api.DeviceJoin, error) {
-	machineID, err := loginLocalMachineID(cfg)
+func loginJoin(ctx context.Context, cfg *config.Config, workspace string) (api.DeviceJoin, error) {
+	machineID, err := authDependenciesOf(ctx).localMachineID(cfg)
 	if err != nil {
 		return api.DeviceJoin{}, err
 	}
@@ -124,10 +118,10 @@ func pairLoginEnrollment(c *command.Context, server string, enrollment *config.L
 	return nil
 }
 
-// loginDaemonAwaitingEnrollment reports whether this computer's daemon says it is not enrolled. It only reads the
+// localDaemonAwaitingEnrollment reports whether this computer's daemon says it is not enrolled. It only reads the
 // local snapshot: a missing or unreachable daemon is not that state.
-var loginDaemonAwaitingEnrollment = func(ctx context.Context) bool {
-	paths, err := currentLocalDaemonPaths()
+func localDaemonAwaitingEnrollment(ctx context.Context) bool {
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return false
 	}
@@ -147,7 +141,8 @@ var errStartFresh = errors.New("start fresh")
 // again or start fresh. It reports whether login should go on to a new approval.
 func offerLoginChoices(c *command.Context, store config.ProfileStore, issuer string, old config.Profile, machineID string, state *config.BrowserLoginState) (bool, error) {
 	who := firstNonEmpty(old.Account.Email, old.Account.DisplayName, old.Account.ID)
-	if loginDaemonAwaitingEnrollment(c.Context) {
+	deps := authDependenciesOf(c.Context)
+	if deps.daemonAwaitingEnrollment(c.Context) {
 		// The sign-in is valid but this computer's service lost its enrollment; signing in again cannot restore it.
 		// Approving again proves the account; login then re-adds the computer if its machine record is gone.
 		state.ExpectedAccountID = old.Account.ID
@@ -158,11 +153,11 @@ func offerLoginChoices(c *command.Context, store config.ProfileStore, issuer str
 		summary += " on " + where
 	}
 	summary += "."
-	if c.Bool("json") || !workspaceTerminal() {
+	if c.Bool("json") || !hostDependenciesOf(c.Context).isTerminal() {
 		_, err := fmt.Fprintln(c.ErrWriter, summary+" Run pb login --fresh to remove this computer's setup and add it again, or --reauth or --change-account to sign in again.")
 		return false, err
 	}
-	choice, err := chooseLoginAction(selector.Options{Context: c.Context, Title: summary, Items: []selector.Item{
+	choice, err := deps.chooseLoginAction(selector.Options{Context: c.Context, Title: summary, Items: []selector.Item{
 		{ID: "keep", Title: "Keep as it is"},
 		{ID: "reauth", Title: "Authenticate again"},
 		{ID: "change", Title: "Sign in with another account", Description: "Current login stays usable until the new sign-in succeeds"},
@@ -192,7 +187,7 @@ func machineWorkspaceSummary(ctx context.Context, store config.ProfileStore, iss
 	if err != nil {
 		return ""
 	}
-	client := api.New(issuer, credential, loginHTTPClient())
+	client := api.New(issuer, credential, authDependenciesOf(ctx).httpClient())
 	machines, err := client.ListUserMachines(ctx)
 	if err != nil {
 		return ""
@@ -235,7 +230,7 @@ func startFresh(c *command.Context, replacesRecord bool) error {
 		return errors.New("start fresh needs a CLI command context")
 	}
 	if replacesRecord {
-		if _, err := rememberReplacedMachineFunc(); err != nil {
+		if _, err := installDependenciesOf(c.Context).rememberReplaced(); err != nil {
 			return machineReplacementError{step: replaceStepRemember, cause: err}
 		}
 	} else if err := bootstrap.ClearReplacement(); err != nil {
@@ -243,16 +238,16 @@ func startFresh(c *command.Context, replacesRecord bool) error {
 		// anything is wiped, so a failure here leaves the working setup untouched.
 		return fmt.Errorf("clear the old replacement note before resetting this computer: %w", err)
 	}
-	if err := freshEnrollmentCleanup(cobraCommand); err != nil {
+	if err := installDependenciesOf(c.Context).freshCleanup(cobraCommand); err != nil {
 		return err
 	}
-	executable, source, err := runningInstallSource()
+	executable, source, err := installDependenciesOf(c.Context).runningSource()
 	if err != nil {
 		return fmt.Errorf("reinstall after cleanup: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(c.Context, suppliedInstallTimeout(runtime.GOOS))
 	defer cancel()
-	if _, err = installSuppliedExecutable(ctx, executable, source, "", selectedInstallServer(cobraCommand)); err != nil {
+	if _, err = installDependenciesOf(c.Context).installExecutable(ctx, executable, source, "", selectedInstallServer(cobraCommand)); err != nil {
 		return fmt.Errorf("reinstall after cleanup: %w", err)
 	}
 	if !replacesRecord {
@@ -286,7 +281,8 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 	if !errors.As(refreshErr, &remote) || remote.Code != localapi.AuthenticationRequiredCode || state.ExpectedAccountID == "" {
 		return nil
 	}
-	machineID, err := loginLocalMachineID(cfg)
+	deps := authDependenciesOf(c.Context)
+	machineID, err := deps.localMachineID(cfg)
 	if err != nil || machineID == "" {
 		return nil
 	}
@@ -299,7 +295,7 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 	if err != nil {
 		return nil
 	}
-	client := api.New(issuer, credential, loginHTTPClient())
+	client := api.New(issuer, credential, deps.httpClient())
 	// Only the server's explicit "no such machine" counts: team-owned machines are not in the personal list, and a
 	// refusal or a failure to answer proves nothing, so none of those may wipe a working setup.
 	if _, err = client.GetUserMachine(ctx, machineID); !api.IsMachineRemoved(err) {
@@ -308,16 +304,16 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 	account := firstNonEmpty(profile.Account.Email, profile.Account.DisplayName, profile.Account.ID)
 	// A computer set up for another profile is not "removed": this profile's account never owned it, and resetting
 	// would replace that profile's daemon.
-	if other := otherProfileServes(cfg); other != nil {
+	if other := otherProfileServes(ctx, cfg); other != nil {
 		return browserLoginFailure{message: "Signed in as " + account + ", but this computer's Paperboat is set up for another profile, so nothing was reset. " + other.Error(), cause: other}
 	}
 	// The approval authorized signing in, not resetting this computer's setup: that needs its own yes, and a
 	// script or --json caller never gets to wipe.
 	declined := browserLoginFailure{message: "Signed in as " + account + ", but this computer was removed from the account. Run pb login --fresh to add it again; that resets its local Paperboat setup (your Inbox is kept).", cause: &computerRemovedError{}}
-	if c.Bool("json") || !workspaceTerminal() {
+	if c.Bool("json") || !hostDependenciesOf(c.Context).isTerminal() {
 		return declined
 	}
-	choice, err := chooseLoginAction(selector.Options{Context: ctx, Title: "This computer was removed from " + account + ". Add it again?", Items: []selector.Item{
+	choice, err := deps.chooseLoginAction(selector.Options{Context: ctx, Title: "This computer was removed from " + account + ". Add it again?", Items: []selector.Item{
 		{ID: "keep", Title: "Not now", Description: "Leaves this computer as it is"}, // first, so Enter declines
 		{ID: "add", Title: "Add it again", Description: "Resets this computer's local Paperboat setup; your Inbox is kept"},
 	}, Stdin: os.Stdin, Output: c.ErrWriter})
@@ -349,8 +345,7 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 	return &machineRemovedError{account: account, resume: resume}
 }
 
-// serviceProfile is the config the installed local daemon service runs for; tests replace it.
-var serviceProfile = func() (string, error) {
+func installedServiceProfile() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -359,8 +354,8 @@ var serviceProfile = func() (string, error) {
 }
 
 // otherProfileServes names the profile the local daemon service already runs for when it is not cfg's own.
-func otherProfileServes(cfg *config.Config) *localdaemon.OtherProfileError {
-	existing, err := serviceProfile()
+func otherProfileServes(ctx context.Context, cfg *config.Config) *localdaemon.OtherProfileError {
+	existing, err := authDependenciesOf(ctx).serviceProfile()
 	if err != nil || existing == "" || cfg.Path() == "" {
 		return nil
 	}

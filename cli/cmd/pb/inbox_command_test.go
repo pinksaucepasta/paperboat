@@ -13,7 +13,6 @@ import (
 )
 
 func TestInboxPolicyAndDecisionsReachTheirAuthenticatedOwners(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	for _, action := range []string{"manual", "automatic", "approve", "decline"} {
 		t.Run(action, func(t *testing.T) {
 			policy := action == "manual" || action == "automatic"

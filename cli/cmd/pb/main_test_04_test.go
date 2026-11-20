@@ -231,17 +231,13 @@ func TestFailedUnifiedSetupPreservesMachineControlCapabilitiesAndRecovery(t *tes
 			if err := os.WriteFile(custodyPath, []byte("existing protected custody"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			oldVerifier := verifySetupInstallSource
-			oldBackend := setupBackendClient
-			oldPrerequisites := setupHostPrerequisites
-			setupHostPrerequisites = func(context.Context) (uint16, error) { return 0, nil } // Windows would prompt for elevation
-			setupBackendClient = func(*command.Context) (*api.Client, error) {
-				return api.New(server.URL, config.Credential{AccessToken: "fixture-token"}, server.Client()), nil
-			}
 			sourceFailure := errors.New("invalid supplied executable")
-			verifySetupInstallSource = func() error { return sourceFailure }
-			t.Cleanup(func() {
-				verifySetupInstallSource, setupBackendClient, setupHostPrerequisites = oldVerifier, oldBackend, oldPrerequisites
+			ctx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+				d.setupPrerequisites = func(context.Context) (uint16, error) { return 0, nil } // Windows would prompt for elevation
+				d.setupBackend = func(*command.Context) (*api.Client, error) {
+					return api.New(server.URL, config.Credential{AccessToken: "fixture-token"}, server.Client()), nil
+				}
+				d.verifySetupSource = func() error { return sourceFailure }
 			})
 			configPath := filepath.Join(root, "config.json")
 			writeTestProfile(t, root, configPath, server.URL)
@@ -249,7 +245,7 @@ func TestFailedUnifiedSetupPreservesMachineControlCapabilitiesAndRecovery(t *tes
 			command.SetOut(io.Discard)
 			command.SetErr(io.Discard)
 			command.SetArgs(append([]string{"--config", configPath, "setup", "--state-root", stateRoot, "--name", "studio"}, test.flags...))
-			err = command.ExecuteContext(context.Background())
+			err = command.ExecuteContext(ctx)
 			var capabilityErr *api.APIError
 			if err == nil || (!test.failCapabilities && !errors.Is(err, sourceFailure)) || (test.failCapabilities && (!errors.As(err, &capabilityErr) || capabilityErr.Status != http.StatusServiceUnavailable)) || !strings.Contains(err.Error(), "retry `pb setup`") {
 				t.Fatalf("failure=%v", err)

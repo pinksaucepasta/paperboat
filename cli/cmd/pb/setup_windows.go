@@ -13,8 +13,18 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
-// setupNoticeWriter receives the notice that setup went on without managed SSH.
-var setupNoticeWriter io.Writer = os.Stderr
+// windowsSetupDependencies are the edges of Windows setup that tests replace.
+type windowsSetupDependencies struct {
+	noticeWriter io.Writer // receives the notice that setup went on without managed SSH
+}
+
+func defaultWindowsSetupDependencies() windowsSetupDependencies {
+	return windowsSetupDependencies{noticeWriter: os.Stderr}
+}
+
+func windowsSetupDependenciesOf(ctx context.Context) windowsSetupDependencies {
+	return dependenciesIn(ctx, defaultWindowsSetupDependencies)
+}
 
 func setupPlatformHostPrerequisites(ctx context.Context) (uint16, error) {
 	executable, err := os.Executable()
@@ -46,6 +56,6 @@ func runSetupOpenSSH(ctx context.Context, step func(context.Context) error) erro
 	default:
 		return err
 	}
-	fmt.Fprintf(setupNoticeWriter, "Managed SSH was not prepared (%v); setup continues without it. Run `pb doctor --repair` to prepare it.\n", err)
+	fmt.Fprintf(windowsSetupDependenciesOf(ctx).noticeWriter, "Managed SSH was not prepared (%v); setup continues without it. Run `pb doctor --repair` to prepare it.\n", err)
 	return nil
 }
