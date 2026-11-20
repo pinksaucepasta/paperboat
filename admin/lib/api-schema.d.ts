@@ -6535,6 +6535,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/selfhost/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List your own regions
+         * @description The scope's stored regions plus every region its enrolled servers name (a region with no stored name is listed under its slug), ordered by name. machines counts distinct servers; Paperboat's managed regions never appear.
+         */
+        get: operations["get_v1_selfhost_regions"];
+        put?: never;
+        /**
+         * Create one of your own regions
+         * @description Derives the slug from the name (NFKD, non-ASCII dropped, lowercase, runs of anything but a-z0-9 become -, a leading letter guaranteed with the prefix r-, at most 40 characters; selfhost, Paperboat's region ids and the scope's existing slugs get -2, -3 ...). 409 region_exists names the region that already has the name (stored, or an implicit region under its slug). 429 selfhost_limit past 64 stored regions.
+         */
+        post: operations["post_v1_selfhost_regions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/selfhost/regions/{regionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove one of your own regions
+         * @description Removes the stored region. 409 region_in_use (the message says what to do) while any server of the scope is enrolled in it (remove it, or drain and remove it, first) or a workspace's pair names it (switch the pair's regions first). Serialized with enrollment, so a server cannot join while the region is removed. 404 region_not_found.
+         */
+        delete: operations["delete_v1_selfhost_regions_region_id"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename one of your own regions
+         * @description Changes only the display name; the slug, the servers, pairs and pools are untouched. A region that has no stored name yet (it exists only as its servers' region string) is stored by its first rename. 404 region_not_found; 409 region_exists names the region that already has the name.
+         */
+        patch: operations["patch_v1_selfhost_regions_region_id"];
+        trace?: never;
+    };
     "/v1/selfhost/installations/{installationID}/verify-ingress": {
         parameters: {
             query?: never;
@@ -9957,6 +10005,13 @@ export interface components {
             /** @enum {string} */
             capability: "relay" | "tunnel";
             ready: boolean;
+            /** @description The server's node is drained: it takes no new work and ready is false. Resume returns it to service. */
+            draining: boolean;
+            /**
+             * Format: date-time
+             * @description When a draining server leaves service (existing work ends); absent while it is not draining.
+             */
+            drain_deadline?: string;
             trust_notice: string;
             /** @enum {string} */
             scope_kind: "account" | "team" | "global";
@@ -13323,6 +13378,33 @@ export interface components {
             address: string;
             /** @description Expiring one-use certificate-pinned code from pbh selfhost code; generated locally without ownership scope. */
             code: string;
+            scope?: components["schemas"]["SelfhostScope"];
+            /** @description Refuse a machine that was not installed for this region (pbh install --region). Checked before anything is reserved; 400 invalid_request names the region the machine reports. On a retry the stored region must equal it too. */
+            expect_region?: string;
+            /**
+             * @description Refuse a machine that was not installed as this role (relay, or tunnel for an edge). When either expectation is given the machine must advertise exactly one component and it must match; a machine running both roles is refused with 400 invalid_request.
+             * @enum {string}
+             */
+            expect_capability?: "relay" | "tunnel";
+        };
+        SelfhostRegion: {
+            /** @description The region's slug: what servers, pbh install --region, workspace pairs and pools carry. It never changes. */
+            id: string;
+            /** @description The display name the owner gave the region (console only, renameable); the slug while an implicit region has not been named. */
+            name: string;
+            /** @description Distinct servers (nodes) of this scope enrolled in the region; a server that runs both a relay and an edge counts once. */
+            machines: number;
+            /** @description How many of those servers are ready now. */
+            ready: number;
+        };
+        SelfhostRegionCreate: {
+            /** @description Display name, 1 to 48 printable characters (surrounding spaces are trimmed). Unique within the scope without regard to case, counting each region without a stored name under its slug. */
+            name: string;
+            scope?: components["schemas"]["SelfhostScope"];
+        };
+        SelfhostRegionRename: {
+            /** @description Display name, 1 to 48 printable characters (surrounding spaces are trimmed). Unique within the scope without regard to case, counting each region without a stored name under its slug. */
+            name: string;
             scope?: components["schemas"]["SelfhostScope"];
         };
         SelfhostInventoryEnvelope: {
@@ -31425,6 +31507,146 @@ export interface operations {
             410: components["responses"]["Error"];
             429: components["responses"]["Error"];
             502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_selfhost_regions: {
+        parameters: {
+            query?: {
+                /** @description Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given). */
+                scope_kind?: "account" | "team";
+                /** @description Required for team; account defaults to the signed-in actor. */
+                scope_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Regions in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostRegion"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_selfhost_regions: {
+        parameters: {
+            query?: {
+                /** @description Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given). */
+                scope_kind?: "account" | "team";
+                /** @description Required for team; account defaults to the signed-in actor. */
+                scope_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelfhostRegionCreate"];
+            };
+        };
+        responses: {
+            /** @description The new region in a data envelope. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostRegion"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    delete_v1_selfhost_regions_region_id: {
+        parameters: {
+            query?: {
+                /** @description Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given). */
+                scope_kind?: "account" | "team";
+                /** @description Required for team; account defaults to the signed-in actor. */
+                scope_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The region's slug. */
+                regionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation completed in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    patch_v1_selfhost_regions_region_id: {
+        parameters: {
+            query?: {
+                /** @description Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given). */
+                scope_kind?: "account" | "team";
+                /** @description Required for team; account defaults to the signed-in actor. */
+                scope_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The region's slug. */
+                regionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelfhostRegionRename"];
+            };
+        };
+        responses: {
+            /** @description The region in a data envelope. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SelfhostRegion"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };

@@ -2667,6 +2667,15 @@ type SelfhostPoolPolicy struct {
 	InstallationIds []string
 }
 
+type SelfhostRegion struct {
+	ScopeKind   string
+	ScopeID     string
+	Slug        string
+	DisplayName string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type SelfhostUpdateRequest struct {
 	NodeID           string
 	ID               string

@@ -867,6 +867,7 @@
           "name",
           "capability",
           "ready",
+          "draining",
           "trust_notice",
           "scope_kind",
           "scope_id",
@@ -897,6 +898,15 @@
           },
           "ready": {
             "type": "boolean"
+          },
+          "draining": {
+            "type": "boolean",
+            "description": "The server's node is drained: it takes no new work and ready is false. Resume returns it to service."
+          },
+          "drain_deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a draining server leaves service (existing work ends); absent while it is not draining."
           },
           "trust_notice": {
             "type": "string"
@@ -13948,6 +13958,88 @@
             "minLength": 92,
             "maxLength": 92,
             "pattern": "^pbh1\\.[A-Za-z0-9_-]{43}\\.[A-Za-z0-9_-]{43}$"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SelfhostScope"
+          },
+          "expect_region": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "description": "Refuse a machine that was not installed for this region (pbh install --region). Checked before anything is reserved; 400 invalid_request names the region the machine reports. On a retry the stored region must equal it too."
+          },
+          "expect_capability": {
+            "type": "string",
+            "enum": [
+              "relay",
+              "tunnel"
+            ],
+            "description": "Refuse a machine that was not installed as this role (relay, or tunnel for an edge). When either expectation is given the machine must advertise exactly one component and it must match; a machine running both roles is refused with 400 invalid_request."
+          }
+        }
+      },
+      "SelfhostRegion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "machines",
+          "ready"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 63,
+            "description": "The region's slug: what servers, pbh install --region, workspace pairs and pools carry. It never changes."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 48,
+            "description": "The display name the owner gave the region (console only, renameable); the slug while an implicit region has not been named."
+          },
+          "machines": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Distinct servers (nodes) of this scope enrolled in the region; a server that runs both a relay and an edge counts once."
+          },
+          "ready": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many of those servers are ready now."
+          }
+        }
+      },
+      "SelfhostRegionCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "Display name, 1 to 48 printable characters (surrounding spaces are trimmed). Unique within the scope without regard to case, counting each region without a stored name under its slug."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/SelfhostScope"
+          }
+        }
+      },
+      "SelfhostRegionRename": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "Display name, 1 to 48 printable characters (surrounding spaces are trimmed). Unique within the scope without regard to case, counting each region without a stored name under its slug."
           },
           "scope": {
             "$ref": "#/components/schemas/SelfhostScope"
@@ -52295,6 +52387,346 @@
             }
           }
         }
+      }
+    },
+    "/v1/selfhost/regions": {
+      "get": {
+        "operationId": "get_v1_selfhost_regions",
+        "summary": "List your own regions",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "scope_kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "account",
+                "team"
+              ]
+            },
+            "description": "Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given)."
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Required for team; account defaults to the signed-in actor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Regions in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "maxItems": 320,
+                      "items": {
+                        "$ref": "#/components/schemas/SelfhostRegion"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "The scope's stored regions plus every region its enrolled servers name (a region with no stored name is listed under its slug), ordered by name. machines counts distinct servers; Paperboat's managed regions never appear."
+      },
+      "post": {
+        "operationId": "post_v1_selfhost_regions",
+        "summary": "Create one of your own regions",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "scope_kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "account",
+                "team"
+              ]
+            },
+            "description": "Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given)."
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Required for team; account defaults to the signed-in actor."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The new region in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostRegion"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Derives the slug from the name (NFKD, non-ASCII dropped, lowercase, runs of anything but a-z0-9 become -, a leading letter guaranteed with the prefix r-, at most 40 characters; selfhost, Paperboat's region ids and the scope's existing slugs get -2, -3 ...). 409 region_exists names the region that already has the name (stored, or an implicit region under its slug). 429 selfhost_limit past 64 stored regions.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfhostRegionCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/selfhost/regions/{regionID}": {
+      "patch": {
+        "operationId": "patch_v1_selfhost_regions_region_id",
+        "summary": "Rename one of your own regions",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "regionID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63,
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+            },
+            "description": "The region's slug."
+          },
+          {
+            "name": "scope_kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "account",
+                "team"
+              ]
+            },
+            "description": "Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given)."
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Required for team; account defaults to the signed-in actor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The region in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostRegion"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Changes only the display name; the slug, the servers, pairs and pools are untouched. A region that has no stored name yet (it exists only as its servers' region string) is stored by its first rename. 404 region_not_found; 409 region_exists names the region that already has the name.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfhostRegionRename"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_v1_selfhost_regions_region_id",
+        "summary": "Remove one of your own regions",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "regionID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 63,
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+            },
+            "description": "The region's slug."
+          },
+          {
+            "name": "scope_kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "account",
+                "team"
+              ]
+            },
+            "description": "Scope of the regions; omission means the signed-in account. Team writes need current owner/admin authority. For a create or rename the scope may instead be sent in the body (and must agree when both are given)."
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Required for team; account defaults to the signed-in actor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation completed in a data envelope."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Removes the stored region. 409 region_in_use (the message says what to do) while any server of the scope is enrolled in it (remove it, or drain and remove it, first) or a workspace's pair names it (switch the pair's regions first). Serialized with enrollment, so a server cannot join while the region is removed. 404 region_not_found."
       }
     },
     "/v1/selfhost/installations/{installationID}/verify-ingress": {
