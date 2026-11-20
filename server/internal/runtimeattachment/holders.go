@@ -27,8 +27,8 @@ AND (e.kind<>'tunnel' OR EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id A
 
 // heldKeys are (holder key, node id) pairs over the managed edge nodes, from the rows Service.Pull (the runtime route of each
 // carrier: its hostname) and PullEndpoints (the preview and tunnel routes riding on carriers) read for one node, here for
-// all of them (a tunnel route's custom domains too). A key is a hostname, or nodemesh.TCPKey(port) for a public raw TCP tunnel
-// route; a private TCP route has none. strict adds what those pulls apply short of carrier validity (the carrier, the
+// all of them (a tunnel route's custom domains too). A key is a hostname, nodemesh.TCPKey(port) for a public raw TCP tunnel
+// route, or nodemesh.WildcardKey(suffix) for a one-label wildcard route or domain; a private TCP route has none. strict adds what those pulls apply short of carrier validity (the carrier, the
 // assignment observed ready, the endpoint live) and the carrier's identity as route and epoch columns, for the caller to check
 // runtime_carrier_valid once per carrier; without it the pairs are the cheap superset the key page is cut from.
 func heldKeys(strict bool) string {
@@ -50,9 +50,13 @@ SELECT names.key COLLATE "C", x.edge_node_id` + endpointCols + `
  CROSS JOIN LATERAL (
   SELECT CASE WHEN r.protocol='tcp' THEN 'tcp:'||tr.public_tcp_port::text ELSE r.hostname END AS key
   UNION ALL
-  -- the custom domains the route is also served under (ingressprojection engineTunnelIngressSQL's second publication)
+  -- a one-label wildcard route is held under its wildcard key (wildcard_suffix holds the suffix without "*.")
+  SELECT '*.'||tr.wildcard_suffix WHERE tr.match_type='one_label_wildcard' AND r.protocol<>'tcp'
+  UNION ALL
+  -- the custom domains the route is also served under (ingressprojection engineTunnelIngressSQL's second publication);
+  -- a wildcard domain's hostname is already its "*.suffix" key
   SELECT d.hostname FROM tunnel_domains d WHERE tr.protocol IN ('http','tls') AND d.route_id=tr.id AND d.tunnel_id=tr.tunnel_id
-   AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact'
+   AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type IN ('exact','one_label_wildcard')
    AND (tr.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))) names
  WHERE x.desired='active' AND r.protocol<>'private_tcp' AND (r.protocol<>'tcp' OR tr.public_tcp_port IS NOT NULL)` + endpointLive
 }

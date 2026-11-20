@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"strings"
 
@@ -269,9 +270,9 @@ func (r *DataCarrierRouteRegistry) HasAdmittedHTTPSHostname(host string, assignm
 	return false
 }
 
-// HeldHosts lists the hostnames of the active HTTPS tunnel rules and TLS-passthrough tunnel rules that have a ready
-// replica attached here: what this node serves that no preview registry knows. Rules whose hostname is a pattern
-// are left out (a node mesh announces exact names).
+// HeldHosts lists the holder keys of the active HTTPS tunnel rules and TLS-passthrough tunnel rules that have a ready
+// replica attached here: what this node serves that no preview registry knows. A rule is announced as its hostname,
+// or as its one-label wildcard key; other patterns are left out.
 func (r *DataCarrierRouteRegistry) HeldHosts(assignments *route.Registry) []string {
 	if r == nil || assignments == nil {
 		return nil
@@ -290,15 +291,32 @@ func (r *DataCarrierRouteRegistry) HeldHosts(assignments *route.Registry) []stri
 	}
 	var hosts []string
 	for _, rule := range rules {
-		if rule.Kind != route.TunnelHTTPSWSS && rule.Kind != route.TunnelTLS || rule.Hostname == "" || strings.ContainsAny(rule.Hostname, "*?") {
+		if rule.Kind != route.TunnelHTTPSWSS && rule.Kind != route.TunnelTLS {
+			continue
+		}
+		key, ok := heldKey(rule)
+		if !ok {
 			continue
 		}
 		for _, entry := range byRoute[carrierRouteID(rule)] {
 			if readyRouteReplica(entry, rule) {
-				hosts = append(hosts, strings.ToLower(rule.Hostname))
+				hosts = append(hosts, key)
 				break
 			}
 		}
 	}
 	return hosts
+}
+
+// heldKey is the holder key a rule is announced under: its lower-case hostname, or the wildcard key of a one-label wildcard
+// route (WildcardSuffix holds the suffix without "*."). A wildcard suffix that is not a valid name yields no key.
+func heldKey(rule route.RouteRule) (string, bool) {
+	if rule.MatchType == route.MatchOneLabelWildcard {
+		key := nodemesh.WildcardKey(strings.ToLower(rule.WildcardSuffix))
+		return key, nodemesh.ValidKey(key) == nil
+	}
+	if rule.Hostname == "" || strings.ContainsAny(rule.Hostname, "*?") {
+		return "", false
+	}
+	return strings.ToLower(rule.Hostname), true
 }

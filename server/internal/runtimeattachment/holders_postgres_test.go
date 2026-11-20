@@ -285,6 +285,49 @@ VALUES($1,$2,$3,5,$4,`+extra+`,'tcp','127.0.0.1:1','not_applicable',1,'active',$
 	}
 }
 
+// TestWildcardHolderSeeded: a one-label wildcard custom domain and a one-label wildcard route are held under their *.suffix
+// keys by the carrier's node, and the exact hostname beside them is held as before.
+func TestWildcardHolderSeeded(t *testing.T) {
+	f := newAgentFixture(t, "holdwild")
+	f.manage(t, f.node)
+	session := f.carrier(t, f.node, "epoch_endpoint", true, "")
+	tunnel, label := "tunnel_"+f.prefix, uuid.NewString()
+	stable := label + ".tunnels.example.test"
+	domainSuffix := "wild-" + f.prefix + ".example.test"
+	routeSuffix := "routes-" + f.prefix + ".example.test"
+	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
+		tunnel, f.account, "endpoint_"+label, "https://"+stable, f.machine)
+	exact, wild := "exact_"+f.prefix, "wild_"+f.prefix
+	f.exec(t, `INSERT INTO tunnel_routes(id,tunnel_id,name,priority,protocol,match_type,match_hostname,wildcard_suffix,origin_scheme,origin_address,tls_verification,generation,desired_state,created_by_actor_id,updated_by_actor_id,created_at,updated_at,public_tcp_listener_id,public_tcp_port,preserve_host)
+VALUES($1,$2,$1,5,'http','managed',$3,NULL,'http','127.0.0.1:1','not_applicable',1,'active',$4,$4,now(),now(),NULL,NULL,false),
+($5,$2,$5,5,'http','one_label_wildcard',NULL,$6,'http','127.0.0.1:1','not_applicable',1,'active',$4,$4,now(),now(),NULL,NULL,false)`, exact, tunnel, stable, f.account, wild, routeSuffix)
+	f.exec(t, `INSERT INTO endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, f.account, f.machine)
+	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'one_label_wildcard',$1,'verified',$5,'none','not_applicable','ready','clear')`, "domain_"+f.prefix, f.account, tunnel, exact, "*."+domainSuffix)
+	// endpoint_routes.hostname is always a concrete name (endpoint_routes_hostname_check), so the wildcard route's own
+	// endpoint hostname is a name under the suffix; the seed announces it as before, beside the wildcard key.
+	app := "app." + routeSuffix
+	for id, host := range map[string]string{exact: stable, wild: app} {
+		f.exec(t, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) SELECT $1,$2,$3,protocol,id FROM tunnel_routes WHERE id=$1`, id, tunnel, host)
+		f.exec(t, `INSERT INTO endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,generation,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_endpoint',$4,1,true,now())`, id, tunnel, f.node, session)
+	}
+	holders, _, err := f.service.Holders(f.ctx, f.node, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, h := range holders {
+		names = append(names, h.Name)
+		if len(h.NodeIDs) != 1 || h.NodeIDs[0] != f.node || h.Validate() != nil {
+			t.Fatalf("holder %+v", h)
+		}
+	}
+	want := []string{stable, app, nodemesh.WildcardKey(domainSuffix), nodemesh.WildcardKey(routeSuffix)}
+	sort.Strings(want)
+	if fmt.Sprint(names) != fmt.Sprint(want) {
+		t.Fatalf("keys %v, want %v: the exact hostnames, the wildcard custom domain and the wildcard route as *.suffix keys", names, want)
+	}
+}
+
 // explain logs the executed plan of one holder query (a failing page names where its time went).
 func (f *agentFixture) explain(t *testing.T, query string, args ...any) {
 	t.Helper()
