@@ -253,23 +253,31 @@ ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,ins
 	return mode, nil
 }
 
-// requireRegionReady refuses a region the workspace cannot be served from right now: for Paperboat's it must be
-// an enabled operator region, for both it needs a node the workspace may use (node_workspace_edge_candidate: the
-// pair being decided cannot be a condition of itself) with a heartbeat inside edgeset.ReplaceAfter.
+// requireRegionReady refuses a region the workspace cannot be served from right now. A value that is no region of
+// the workspace's kind (for Paperboat's, an enabled operator region; for its own, the region of one of its own tunnel
+// servers, as the pool counts them) gets an answer that does not echo it, so a node id typed here is never repeated;
+// a known region needs a node the workspace may use (node_workspace_edge_candidate: the pair being decided cannot be a
+// condition of itself) with a heartbeat inside edgeset.ReplaceAfter, else it is named (display name, or region id for own).
 func (s *Service) requireRegionReady(ctx context.Context, tx *db.Tx, ws edgeset.Scope, kind, region string, now time.Time) error {
 	var name string
-	var ok bool
+	var known, ready bool
 	if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT display_name FROM paperboat.operator_regions WHERE id=$1),$1),
- ($6='self_hosted' OR EXISTS(SELECT 1 FROM paperboat.operator_regions WHERE id=$1 AND enabled))
- AND EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes n WHERE n.region=$1 AND n.roles @> ARRAY['edge']::text[]
+ CASE WHEN $6='self_hosted' THEN EXISTS(SELECT 1 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
+  WHERE i.capability='tunnel' AND i.state='active' AND i.claim_complete AND i.scope_kind<>'global' AND n.region=$1
+   AND ((i.scope_kind=$7 AND i.scope_id=$8) OR ($7='account' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$8))))
+  ELSE EXISTS(SELECT 1 FROM paperboat.operator_regions WHERE id=$1 AND enabled) END,
+ EXISTS(SELECT 1 FROM paperboat.control_tunnel_nodes n WHERE n.region=$1 AND n.roles @> ARRAY['edge']::text[]
   AND paperboat.node_workspace_edge_candidate(n.id,$2,$3) AND n.last_heartbeat_at>$4::timestamptz-make_interval(secs=>$5::float8))`,
-		region, ws.Account, workspaceTeam(ws), now, edgeset.ReplaceAfter.Seconds(), kind).Scan(&name, &ok); err != nil {
+		region, ws.Account, workspaceTeam(ws), now, edgeset.ReplaceAfter.Seconds(), kind, ws.Kind, ws.ID).Scan(&name, &known, &ready); err != nil {
 		return err
+	}
+	if !known {
+		return &InvalidPairError{"That is not a region this workspace can use; choose one from the list."}
 	}
 	if kind == "self_hosted" {
 		name = region
 	}
-	if !ok {
+	if !ready {
 		return &InvalidPairError{name + " is not available to this workspace right now; choose a region that is ready."}
 	}
 	return nil
