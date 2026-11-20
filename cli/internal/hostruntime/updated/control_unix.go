@@ -142,12 +142,10 @@ func (s *controlServer) handle(connection *net.UnixConn) error {
 // checkWhileEnrollmentPending answers `pb update check` before enrollment commits. A check reads only the signed public
 // release metadata and never touches the installed slot, so it needs no pairing (prior art: `tailscale update` needs no login,
 // ~/ref/tailscale/cmd/tailscale/cli/update.go and clientupdate/clientupdate.go). Download and install stay fenced: they would change the
-// slot the enrollment commit verifies.
+// slot the enrollment commit verifies; `pb update` then installs the signed release bundle through the supplied-install
+// transaction, which keeps the enrollment pending and re-points it at the new slot.
 func (s *Service) checkWhileEnrollmentPending(ctx context.Context) (ControlResponse, error) {
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Observation: s.Snapshot(), UpdaterVersion: buildinfo.Version, Pending: true}
-	if s.config.Active.LocalSource != nil && s.config.Active.LocalSource.Distribution == installsource.Custom {
-		return response, ErrCustomInstallation
-	}
 	result, err := s.Check(ctx)
 	response.Version = result.Version
 	return response, err
@@ -191,8 +189,13 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 		return startSessionOwner(ctx, &s.controlMu, s.config.SessionOwners, request.Generation)
 	}
 	if err := s.requireCommittedSource(); err != nil {
-		if request.Operation == "check" && errors.Is(err, ErrInstallationPending) {
-			return s.checkWhileEnrollmentPending(ctx)
+		if errors.Is(err, ErrInstallationPending) {
+			if s.config.Active.LocalSource != nil && s.config.Active.LocalSource.Distribution == installsource.Custom && (request.Operation == "check" || request.Operation == "download" || request.Operation == "install") {
+				return ControlResponse{}, ErrCustomInstallation
+			}
+			if request.Operation == "check" {
+				return s.checkWhileEnrollmentPending(ctx)
+			}
 		}
 		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Pending: errors.Is(err, ErrInstallationPending), UpdaterVersion: buildinfo.Version}
 		if response.Pending && request.Operation == "status" {

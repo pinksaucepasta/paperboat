@@ -17,6 +17,7 @@ type updateDependencies struct {
 	inspect         func(context.Context, string) (installsource.Source, error)
 	install         func(context.Context, string, installsource.Source, string, bool, string, string) (string, error)
 	openConnections func(context.Context) (liveconnections.Counts, error)
+	exportBundle    func(ctx context.Context, directory, output string) error // the signed official release as a .pb-update bundle
 }
 
 type updateDependenciesKey struct{}
@@ -29,6 +30,7 @@ func defaultUpdateDependencies() updateDependencies {
 		inspect:         installsource.InspectCandidate,
 		install:         hostruntimecmd.InstallUpdateSource,
 		openConnections: openConnectionsForUpdate,
+		exportBundle:    exportOfficialBundle,
 	}
 }
 

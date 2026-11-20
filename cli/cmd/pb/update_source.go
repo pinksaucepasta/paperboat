@@ -128,7 +128,7 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 	if err != nil {
 		return updateCompletionFailure{stage: "locate the installed executable", cause: err}
 	}
-	actual, err := installsource.InspectCandidate(ctx, canonical)
+	actual, err := updateDependenciesOf(ctx).inspect(ctx, canonical)
 	if err != nil {
 		return updateCompletionFailure{stage: "verify the installed executable", cause: err}
 	}
@@ -204,24 +204,29 @@ func bundleExportError(err error) error {
 	return err
 }
 
-// Explicit force may move a custom installation to official bytes. A custom
-// runtime still cannot enable automatic updates or select arbitrary release URLs.
-func actionForceOfficial(command *cobra.Command, ctx context.Context) error {
+// installOfficialBundle installs the signed official release as a bundle, verified like `pb update --from <bundle>`.
+// force moves a custom installation to official bytes; a custom runtime still cannot enable automatic updates or
+// select arbitrary release URLs.
+func installOfficialBundle(command *cobra.Command, ctx context.Context, force bool) error {
 	directory, err := os.MkdirTemp("", "paperboat-official-update-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(directory)
 	bundle := filepath.Join(directory, "release.pb-update")
+	if err = updateDependenciesOf(ctx).exportBundle(ctx, filepath.Join(directory, "proof"), bundle); err != nil {
+		return bundleExportError(err)
+	}
+	return installStagedUpdateSource(command, ctx, bundle, force)
+}
+
+func exportOfficialBundle(ctx context.Context, proofDirectory, output string) error {
 	repository, err := buildinfo.ReleaseRepository()
 	if err != nil {
 		return err
 	}
-	_, err = bootstrap.ExportUpdateBundle(ctx, repository, filepath.Join(directory, "proof"), bundle, nil, time.Now())
-	if err != nil {
-		return bundleExportError(err)
-	}
-	return installStagedUpdateSource(command, ctx, bundle, true)
+	_, err = bootstrap.ExportUpdateBundle(ctx, repository, proofDirectory, output, nil, time.Now())
+	return err
 }
 
 // bundleMadeForOtherOS tells from the file magic of the executable inside a .pb-update bundle (which records no platform) that it was made

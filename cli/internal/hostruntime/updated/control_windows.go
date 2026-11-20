@@ -302,6 +302,10 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 			// Reading signed release metadata does not touch the uncommitted installation (see checkWhileEnrollmentPending).
 			return c.observeSignedRelease(ctx, response)
 		case "download", "install":
+			if !automatic {
+				// Not a silent success: `pb update` installs the signed bundle through the supplied-install path instead.
+				return response, ErrInstallationPending
+			}
 			return response, nil
 		case "settings":
 			if request.Settings != nil {
