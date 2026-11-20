@@ -224,7 +224,11 @@ func (r *SQLRepository) observeHost(ctx context.Context, request ObserveHostRequ
 		ObservationGeneration uint64
 		Fingerprint           [32]byte
 	}{request.UserMachineID, request.MachineGeneration, request.ObservationGeneration, proposed.Fingerprint})
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed behind the machine's authority lock (the sibling of UserCAs): the replay, observation, active and
+	// pending set reads are FOR UPDATE rows of this machine, the account's clone checks run under its advisory lock
+	// and key ownership is one INSERT .. ON CONFLICT DO NOTHING, so a report that queues behind a config write to its
+	// machine beats a 40001 replay.
+	err := r.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		var supersededSetID, rejectedPendingSetID string
 		if _, err := q.ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: request.UserMachineID, UserID: request.UserID, MachineGeneration: int64(request.MachineGeneration)}); err != nil {
