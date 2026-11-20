@@ -45,15 +45,12 @@ WHERE p.workspace_id=$1 AND p.period_start<=$2 AND p.period_end>$2`, w.ID, at).S
 	}
 	if allowance.Valid {
 		// An unlimited allowance stays unlimited; a limited one grows by the bytes an operator granted.
-		if err = tx.QueryRow(ctx, `SELECT workspace_granted_bytes($1)`, w.ID).Scan(&w.AllowanceGrantedBytes); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT workspace_granted_bytes($1),workspace_throttle_lifted($1)`, w.ID).Scan(&w.AllowanceGrantedBytes, &w.ThrottleLifted); err != nil {
 			return err
 		}
 		total := allowance.Int64 + w.AllowanceGrantedBytes
 		w.AllowanceBytes = &total
 		// Throttled: the fair-use amount is used up (a paid plan's top-ups come first) and no operator lifted it.
-		if err = tx.QueryRow(ctx, `SELECT workspace_throttle_lifted($1)`, w.ID).Scan(&w.ThrottleLifted); err != nil {
-			return err
-		}
 		w.ThrottleMbit = s.throttleMbit(window.paid)
 		w.Throttled = consumed >= total && !w.ThrottleLifted
 		if w.Throttled && policy.paid && window.paid {

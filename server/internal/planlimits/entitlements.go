@@ -67,6 +67,18 @@ func OverrideTx(ctx context.Context, q queryer, workspaceID string, kind Kind) (
 	return value, err == nil, err
 }
 
+// OverridesTx is the running override of each of kinds on the workspace, in one statement (the newest per kind).
+func OverridesTx(ctx context.Context, q queryer, workspaceID string, kinds ...Kind) (map[Kind]int64, error) {
+	names := make([]string, len(kinds))
+	for i, kind := range kinds {
+		names[i] = string(kind)
+	}
+	var found map[Kind]int64
+	err := q.QueryRow(ctx, `SELECT coalesce(jsonb_object_agg(kind,amount),'{}') FROM (SELECT DISTINCT ON (kind) kind,amount FROM billing_workspace_grants
+ WHERE workspace_id=$1 AND kind=ANY($2) AND `+runningGrant+` ORDER BY kind,created_at DESC) g`, workspaceID, names).Scan(&found)
+	return found, err
+}
+
 // effective is the limit in force: the override while one runs, else the plan's value.
 func effective(override int64, ok bool, plan int) (limit int, granted bool) {
 	if ok {
@@ -110,14 +122,13 @@ func AddonsTx(ctx context.Context, q queryer, team string) (sso, scim bool, err 
 		return false, false, err
 	}
 	sso, scim = addon == "sso" || addon == "sso_scim", addon == "scim" || addon == "sso_scim"
-	for kind, set := range map[Kind]*bool{SSO: &sso, SCIM: &scim} {
-		if _, granted, e := OverrideTx(ctx, q, "team:"+team, kind); e != nil {
-			return false, false, e
-		} else if granted {
-			*set = true
-		}
+	granted, err := OverridesTx(ctx, q, "team:"+team, SSO, SCIM)
+	if err != nil {
+		return false, false, err
 	}
-	return sso, scim, nil
+	_, grantedSSO := granted[SSO]
+	_, grantedSCIM := granted[SCIM]
+	return sso || grantedSSO, scim || grantedSCIM, nil
 }
 
 // Grant is one row of billing_workspace_grants.
@@ -246,7 +257,11 @@ func LimitsTx(ctx context.Context, tx *db.Tx, workspaceID string) ([]LimitRow, e
 	for _, kind := range []Kind{Machines, Publications, BrowserTerminals, PublicTCP} {
 		row := LimitRow{Kind: kind, Used: usage[kind].Used, Limit: usage[kind].Limit}
 		if kind == PublicTCP {
-			row.Plan, _, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan)
+			own, e := ownEdgesTx(ctx, tx, scope)
+			if e != nil {
+				return nil, e
+			}
+			row.Plan, _, err = publicTCPLimitTx(ctx, tx, set.limits.PublicTCP, scope, plan, own)
 			if err != nil {
 				return nil, err
 			}
