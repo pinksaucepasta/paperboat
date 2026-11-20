@@ -148,13 +148,12 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 	// stops this loop reading: heartbeats are still answered and an interrupt key can overtake the stuck input.
 	work := make(chan readResult, connectionWorkQueue)
 	failed := make(chan error, 1)
-	var busy atomic.Bool
+	var backlog frameBacklog
 	defer close(work)
 	go func() {
 		for result := range work {
-			busy.Store(true)
 			err := s.serveFrame(result, connectionCtx, writer, authorizer, conn, terminalState, selected)
-			busy.Store(false)
+			backlog.end()
 			if err != nil {
 				failed <- err
 				cancelConnection()
@@ -200,7 +199,8 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 				}
 				continue
 			}
-			s.offerInterrupt(connectionCtx, result.binary, terminalState, busy.Load())
+			s.offerInterrupt(connectionCtx, result.binary, terminalState, backlog.busy())
+			backlog.begin()
 			select {
 			case work <- result:
 			case err := <-failed:
@@ -229,6 +229,15 @@ func (s *Server) offerInterrupt(ctx context.Context, message []byte, state *term
 		s.interruptTerminalInput(ctx, message, state)
 	}
 }
+
+// frameBacklog counts the frames handed to the worker and not yet served: queued, or being served. The read loop counts
+// a frame before it queues it and the worker uncounts it after serving it, so no moment between a frame being queued and
+// the worker starting on it reads as idle (a Ctrl-C arriving then must still be offered as an interrupt).
+type frameBacklog struct{ frames atomic.Int64 }
+
+func (b *frameBacklog) begin()     { b.frames.Add(1) }
+func (b *frameBacklog) end()       { b.frames.Add(-1) }
+func (b *frameBacklog) busy() bool { return b.frames.Load() > 0 }
 
 // connectionWorkQueue holds more frames than a client leaves unanswered (256 input chunks), so only a client that
 // ignores its own window fills it; the read loop then waits for the worker, as it always did.
