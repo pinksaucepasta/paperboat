@@ -1,5 +1,5 @@
 -- +goose Up
--- Regions. A workspace's pair is two regions (migration 477-479). This migration makes every caller of
+-- Regions. A workspace's pair is two regions (migrations 482-484). This migration makes every caller of
 -- node_workspace_edge_eligible pair-aware through one choke point: the old body (membership and the pool/mode rules) is
 -- kept as node_workspace_edge_candidate, which only the code that decides the pair may call (edgeset reconcile and
 -- selfhost.storePair: they must not depend on the pair they are choosing). Carriers stay valid on a node in Drain until its
