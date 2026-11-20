@@ -131,7 +131,11 @@ func TestStalledUploadThroughDurableTunnelGets408(t *testing.T) {
 			return
 		}
 		_ = datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.Copy(io.Discard, r.Body)
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				// An app whose upload stalled has no answer to give: returning here sent an implicit 200 that raced the gateway's
+				// 408 (11 of 150 runs under -race, 2026-11-20). It waits until the gateway has ended the request.
+				<-r.Context().Done()
+			}
 		}), 16<<10, 5*time.Second)
 	}()
 	reader, writer := io.Pipe()
