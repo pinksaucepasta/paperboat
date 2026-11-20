@@ -389,3 +389,6 @@ Migration 447 made `recipes.source_format` optional (the server no longer writes
 
 ## Before running a second server: per-server limits (2026-11-20)
 Relay speed sharing (each account's relay budget split by per-relay demand), sign-up/sign-in rate limits and abuse-report rate limits live in one server's memory. Before a second server runs, move them to Postgres or a shared store, so two servers do not double the limits.
+
+## Flood protection (2026-11-20)
+Plan bandwidth limits stop big transfers, not floods of tiny requests; per-address limits stop one attacker, not a flood from many addresses (DDoS) against a preview or tunnel. Later: DDoS protection in front of the edges (e.g. Cloudflare Spectrum or an anycast scrubbing provider) and per-route request shedding.
