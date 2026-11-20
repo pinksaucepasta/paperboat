@@ -105,6 +105,7 @@ func (f *pairFixture) cleanup() {
 		{`DELETE FROM paperboat.tunnels WHERE account_id=$1`, []any{f.owner}},
 		{`DELETE FROM paperboat.machine_node_latency WHERE node_id LIKE $1`, []any{"%" + f.stamp}},
 		{`DELETE FROM paperboat.workspace_edge_sets WHERE scope_id IN ($1,$2)`, []any{f.owner, f.team}},
+		{`DELETE FROM paperboat.selfhost_regions WHERE scope_id IN ($1,$2,$3)`, []any{f.owner, f.other, f.team}},
 		{`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id IN ($1,$2)`, []any{f.owner, f.team}},
 		{`DELETE FROM paperboat.selfhost_installations WHERE id LIKE $1`, []any{"%" + f.stamp}},
 		{`DELETE FROM paperboat.managed_node_authority WHERE node_id LIKE $1`, []any{"%" + f.stamp}},
