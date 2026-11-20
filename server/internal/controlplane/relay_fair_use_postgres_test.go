@@ -123,6 +123,6 @@ func TestRelayLeaseCarriesAccountSpeedAndPlanSlowTiersPostgres(t *testing.T) {
 		speeds[a.Account] = a.Mbit
 	}
 	if speeds[both] != 5 || speeds[paid120] != 0.5 || speeds[free12] != 0.512 {
-		t.Fatalf("shares = %v, want %s at 5 (10 Mbit/s over two relays), %s at 0.5 (its 1 Mbit/s tier over two relays), %s at 0.512 (one relay)", speeds, both, paid120, free12)
+		t.Fatalf("shares = %v, want %s at 5 (Free's 10 Mbit/s over two relays), %s at 0.5 (its 1 Mbit/s tier over two relays), %s at 0.512 (one relay)", speeds, both, paid120, free12)
 	}
 }
