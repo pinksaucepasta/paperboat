@@ -110,7 +110,7 @@ class PinnedRelay(unittest.TestCase):
 
     def relay_file(self, spki_b64std, exp=4102444800):
         """A relay file like the daemon keeps: a signed candidate set (the signature is not read here) naming this relay's key."""
-        raw = base64.b64decode(spki_b64std.split("//")[1])
+        raw = base64.b64decode(spki_b64std.removeprefix("sha256//"))  # not split("//"): the base64 itself can contain "//"
         claims = {"exp": exp, "nodes": [{"endpoint_host": "127.0.0.1", "endpoint_tcp_port": self.server.server_port, "tls_spki_sha256": base64.urlsafe_b64encode(raw).decode().rstrip("="), "roles": ["relay"]}]}
         payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
         return json.dumps({"candidate_set": f"h.{payload}.s", "relay_grants": []})
@@ -128,6 +128,11 @@ class PinnedRelay(unittest.TestCase):
         self.assertFalse(self.checked(stale)["ok"])
         got = self.checked(self.relay_file(self.pin))
         self.assertTrue(got["ok"], got)  # the set was refreshed with the rotated key: green again, same config
+
+    def test_a_pin_whose_base64_contains_slashes_survives_the_relay_file(self):
+        pin = "sha256//" + base64.b64encode(b"\xff\xff\xff" + b"x" * 29).decode()  # starts "////": a random key hits this about 1 in 16
+        self.assertIn("//", pin.removeprefix("sha256//"))
+        self.assertEqual(list(sr.relay_pins(self.relay_file(pin)).values()), [pin])
 
     def test_an_expired_or_unreadable_set_names_no_identity(self):
         self.assertEqual(sr.relay_pins(self.relay_file(self.pin, exp=1)), {})
