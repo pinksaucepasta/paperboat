@@ -21,8 +21,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 )
 
-// maxDesiredAddressRecords bounds one hostname's addresses: the wildcard names list every ready managed edge (at most 8 nodes, IPv4 and IPv6 each).
-const maxDesiredAddressRecords = 16
+// MaxDesiredAddressRecords bounds one hostname's addresses; the wildcard names fit their answer to it (app edge_wildcard_dns.go).
+const MaxDesiredAddressRecords = 16
 
 type AddressRecordProvider interface {
 	ListAddressRecords(context.Context, string, string) ([]AddressRecord, error)
@@ -524,7 +524,7 @@ func (r *AddressReconciler) markState(ctx context.Context, conn *pgx.Conn, desir
 
 func validateDesiredAddressPublication(desired DesiredAddressPublication) (string, []string, error) {
 	host, _, err := normalizeHostname(desired.Hostname)
-	if err != nil || !validMetadata(desired.Owner, 128) || desired.ResourceGeneration == 0 || desired.ResourceGeneration > maxPlatformGeneration || desired.ObservedAt.IsZero() || len(desired.Addresses) > maxDesiredAddressRecords {
+	if err != nil || !validMetadata(desired.Owner, 128) || desired.ResourceGeneration == 0 || desired.ResourceGeneration > maxPlatformGeneration || desired.ObservedAt.IsZero() || len(desired.Addresses) > MaxDesiredAddressRecords {
 		return "", nil, fmt.Errorf("%w: desired address publication is invalid", ErrInvalid)
 	}
 	set := make(map[string]struct{}, len(desired.Addresses))

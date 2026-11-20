@@ -108,16 +108,54 @@ ORDER BY s.rank,m.region_id,n.id`)
 		return nil, err
 	}
 	total := len(nodes)
-	if total > w.maxNodes {
-		nodes = nodes[:w.maxNodes]
+	nodes, err = fitWildcardAnswer(nodes, w.maxNodes, tunnelcert.MaxDesiredAddressRecords)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) < total {
 		if w.truncatedAt != total {
-			w.log.WarnContext(ctx, "edge_wildcard_dns_truncated", "ready", total, "published", w.maxNodes, "detail", "raise node_capacity.edge_wildcard_max_nodes")
+			w.log.WarnContext(ctx, "edge_wildcard_dns_truncated", "ready", total, "published", len(nodes), "detail", "raise node_capacity.edge_wildcard_max_nodes")
 		}
 		w.truncatedAt = total
 	} else {
 		w.truncatedAt = 0
 	}
 	return nodes, nil
+}
+
+// errWildcardRegionsDoNotFit: more serving regions than the answer has room for (one address each); nothing is
+// published, so the old records stay rather than a region being dropped.
+var errWildcardRegionsDoNotFit = errors.New("edge wildcard DNS: more serving regions than the answer fits; raise node_capacity.edge_wildcard_max_nodes or disable a region")
+
+// fitWildcardAnswer keeps at most maxNodes nodes and maxAddresses addresses, never dropping a region: nodes come
+// ordered by rank, so each region's first node is met before any second node, and it keeps at least one address
+// (its IPv4) with one address held back for each region still to come. Later ranks take what is left, whole.
+func fitWildcardAnswer(nodes []wildcardNode, maxNodes, maxAddresses int) ([]wildcardNode, error) {
+	regions := map[string]bool{}
+	for _, n := range nodes {
+		regions[n.region] = true
+	}
+	pending := len(regions)
+	if pending > maxNodes || pending > maxAddresses {
+		return nil, errWildcardRegionsDoNotFit
+	}
+	seen := map[string]bool{}
+	out, used := nodes[:0:0], 0
+	for _, n := range nodes {
+		if seen[n.region] {
+			if len(out) < maxNodes && used+len(n.addresses) <= maxAddresses {
+				out, used = append(out, n), used+len(n.addresses)
+			}
+			continue
+		}
+		seen[n.region] = true
+		pending--
+		if room := maxAddresses - used - pending; len(n.addresses) > room {
+			n.addresses = n.addresses[:room]
+		}
+		out, used = append(out, n), used+len(n.addresses)
+	}
+	return out, nil
 }
 
 // Sync publishes every wildcard name whose set changed (or is due for a refresh). It never publishes an empty

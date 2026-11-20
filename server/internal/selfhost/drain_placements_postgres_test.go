@@ -144,3 +144,32 @@ func TestOwnerDrainMoveWithoutASiblingKeepsThePin(t *testing.T) {
 		t.Fatalf("domain records changed with no sibling: %v, were %v", got, before)
 	}
 }
+
+// A sibling publication_edge_nodes would reject (here a stale heartbeat) is not a drain-and-move target: the pin
+// stays rather than move to a server that cannot serve it.
+func TestOwnerDrainMoveSkipsASiblingThatCannotServe(t *testing.T) {
+	f := newPinFixture(t, true)
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET last_heartbeat_at=now()-interval '1 minute' WHERE id=$1`, f.sibling.NodeID)
+	if _, err := f.service.DrainScoped(t.Context(), f.owner, f.first.InstallationID, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.pinnedInstallation(); got != f.first.InstallationID {
+		t.Fatalf("the pin moved to %s, a sibling with a stale heartbeat", got)
+	}
+}
+
+// Re-placing on the same server after only its second address changed rewrites the domain's records: the primary
+// target is the same, so comparing dns_target alone kept the old set.
+func TestPlacementRetargetsWhenOnlyTheSecondAddressChanges(t *testing.T) {
+	f := newPinFixture(t, false)
+	if got := f.expectedValues(); !slices.Equal(got, []string{"93.184.216.41"}) {
+		t.Fatalf("records before: %v", got)
+	}
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv6='2606:4700::41' WHERE id=$1`, f.first.NodeID)
+	if _, err := f.service.SetPlacement(t.Context(), f.owner, "tunnel", f.tunnel, &f.first.InstallationID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.expectedValues(); !slices.Equal(got, []string{"93.184.216.41", "2606:4700::41"}) {
+		t.Fatalf("records after the IPv6 address was added: %v", got)
+	}
+}

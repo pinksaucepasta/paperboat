@@ -27,7 +27,8 @@ type NodeCapacity struct {
 	LoadInPercent  float64 `json:"load_in_percent"`
 	// EdgeWildcardMaxNodes bounds the nodes in the wildcard DNS answer. The serving set is at most
 	// edgeset.ServingNodesPerRegion nodes of each region, so this only bites with more regions than it divides into;
-	// the nodes left out are the last of each region's rank, taken round-robin across regions (edge_wildcard_dns.go).
+	// the nodes left out are the last of each region's rank, taken round-robin across regions, and the answer also fits
+	// tunnelcert.MaxDesiredAddressRecords addresses; a region is never dropped (edge_wildcard_dns.go fitWildcardAnswer).
 	EdgeWildcardMaxNodes int `json:"edge_wildcard_max_nodes"`
 }
 

@@ -513,3 +513,65 @@ func TestWildcardCapIsPerRegionNotByNodeId(t *testing.T) {
 		t.Fatalf("truncation logged %d times for one unchanged count, want once: %s", n, logs.String())
 	}
 }
+
+// Edges whose ingress is not verified hold no serving rank: four of them with lower ids do not push a region's
+// verified edge out of the serving set.
+func TestEdgeWildcardUnverifiedEdgesDoNotTakeServingRanks(t *testing.T) {
+	f := newWildcardFixture(t)
+	on := "wc_on_" + f.stamp
+	for i := 1; i <= 4; i++ {
+		f.node(fmt.Sprintf("a%d", i), fmt.Sprintf("203.0.113.%d", i), "", on, "public_ingress_verified_at=NULL")
+	}
+	f.node("b", "203.0.113.9", "", on, "")
+	f.sync()
+	f.want("203.0.113.9")
+}
+
+// manyRegions adds count enabled regions with one serving edge each (its IPv4, and an IPv6 when dual) and returns
+// every region's IPv4.
+func (f *wildcardFixture) manyRegions(count int, dual bool) (v4s []string) {
+	for i := 1; i <= count; i++ {
+		region := fmt.Sprintf("wc_r%02d_%s", i, f.stamp)
+		f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Many',true)`, region)
+		f.t.Cleanup(func() {
+			f.exec(`DELETE FROM paperboat.managed_node_authority WHERE region_id=$1`, region)
+			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
+		})
+		v4, v6 := fmt.Sprintf("203.0.113.%d", i), ""
+		if dual {
+			v6 = fmt.Sprintf("2001:db8::%d", i)
+		}
+		f.node(fmt.Sprintf("r%02d", i), v4, v6, region, "")
+		v4s = append(v4s, v4)
+	}
+	return v4s
+}
+
+// Nine dual-stack regions are 18 addresses, above what one name may hold: the answer fits the limit and keeps every region.
+func TestEdgeWildcardFitsTheAddressLimitAndKeepsEveryRegion(t *testing.T) {
+	f := newWildcardFixture(t)
+	v4s := f.manyRegions(9, true)
+	f.sync()
+	got := f.public.calls[0].Addresses
+	if len(got) > tunnelcert.MaxDesiredAddressRecords {
+		t.Fatalf("published %d addresses, the limit is %d: %v", len(got), tunnelcert.MaxDesiredAddressRecords, got)
+	}
+	for _, v4 := range v4s {
+		if !slices.Contains(got, v4) {
+			t.Fatalf("region with %s dropped: %v", v4, got)
+		}
+	}
+}
+
+// More regions than the node cap: nothing is published (the old records stay) rather than a region being dropped.
+func TestEdgeWildcardCapNeverDropsARegion(t *testing.T) {
+	f := newWildcardFixture(t)
+	f.manyRegions(9, false)
+	f.wildcard.maxNodes = 8
+	if err := f.wildcard.Sync(context.Background()); err == nil {
+		t.Fatal("nine regions published under a cap of eight")
+	}
+	if len(f.public.calls)+len(f.runtime.calls) != 0 {
+		t.Fatalf("published with a region dropped: %+v", f.public.calls)
+	}
+}
