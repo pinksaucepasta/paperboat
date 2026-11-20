@@ -1125,20 +1125,21 @@ func TestPacerRunsARoundAtOnceWhenAnEventWakesIt(t *testing.T) {
 	}
 }
 
-// A self-hosted-only workspace is admitted a managed edge for terminals next to its own servers: every admitted
-// carrier is held, and only the edges the server names may carry terminals (an answer naming none allows all).
+// A self-hosted-only workspace is admitted managed edges for terminals (up to two, in two managed regions, so one
+// region down moves the terminal to the other) next to its own servers: every admitted carrier is held, and only
+// the edges the server names may carry terminals (an answer naming none allows all).
 func TestAdmissionNamesTheCarriersThatMayCarryTerminals(t *testing.T) {
 	at := func(node string) admissionBinding { return admissionBinding{Binding: binding{EdgeNodeID: node}} }
-	a := admission{Binding: binding{EdgeNodeID: "managed"}, Backup: &admissionBinding{Binding: binding{EdgeNodeID: "own-1"}}, More: []admissionBinding{at("own-2")}, TerminalEdgeNodeIDs: []string{"managed"}}
+	a := admission{Binding: binding{EdgeNodeID: "managed-1"}, Backup: &admissionBinding{Binding: binding{EdgeNodeID: "managed-2"}}, More: []admissionBinding{at("own-1"), at("own-2")}, TerminalEdgeNodeIDs: []string{"managed-1", "managed-2"}}
 	var got []string
 	for _, c := range a.carriers() {
 		got = append(got, c.Binding.EdgeNodeID)
 	}
-	if len(got) != 3 || got[0] != "managed" || got[1] != "own-1" || got[2] != "own-2" {
+	if len(got) != 4 || got[0] != "managed-1" || got[1] != "managed-2" || got[2] != "own-1" || got[3] != "own-2" {
 		t.Fatalf("carriers = %v", got)
 	}
-	if !a.terminalCapable("managed") || a.terminalCapable("own-1") || a.terminalCapable("own-2") {
-		t.Fatal("only the managed edge may carry terminals")
+	if !a.terminalCapable("managed-1") || !a.terminalCapable("managed-2") || a.terminalCapable("own-1") || a.terminalCapable("own-2") {
+		t.Fatal("exactly the two managed edges may carry terminals")
 	}
 	if !(admission{}).terminalCapable("any") {
 		t.Fatal("an answer without the list allows every carrier")
