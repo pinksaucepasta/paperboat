@@ -6,10 +6,6 @@ import (
 	"strings"
 )
 
-// MaxRevokedKeyIDs bounds a machine's revoked list: certificates live 12 h and one CLI session holds one key ID per
-// machine, so this is how many sessions may lose access to one machine within a certificate's lifetime.
-const MaxRevokedKeyIDs = 4096
-
 // KRL is an OpenSSH key revocation list (PROTOCOL.krl, read by sshd's RevokedKeys and `ssh-keygen -Q`) revoking the
 // certificates with the given key IDs signed by any of the given CAs. Key IDs, not serials: one CLI session's key ID
 // for a machine is stable ("paperboat:<user>:<session>:<machine>"), so revoking a session revokes every certificate it
