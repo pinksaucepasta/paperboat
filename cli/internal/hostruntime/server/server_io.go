@@ -109,11 +109,23 @@ func (w *lockedWriter) enqueue(queue func(*lockedWriter) chan writerRequest, wri
 	case <-w.done:
 		return io.ErrClosedPipe
 	}
+	return w.outcome(request.result)
+}
+
+// outcome is a queued write's result. run answers a write before it can stop, so a result that is there wins over a
+// closed writer: a peer that disconnects right after reading its answer must not turn a delivered write into an error
+// (the create path closes the session of an answer it believes was not delivered).
+func (w *lockedWriter) outcome(result <-chan error) error {
 	select {
-	case err := <-request.result:
+	case err := <-result:
 		return err
 	case <-w.done:
-		return io.ErrClosedPipe
+		select {
+		case err := <-result:
+			return err
+		default:
+			return io.ErrClosedPipe
+		}
 	}
 }
 

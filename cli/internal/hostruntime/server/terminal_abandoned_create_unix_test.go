@@ -72,6 +72,7 @@ func TestTerminalCreateClosedWhenItsAnswerCannotBeDelivered(t *testing.T) {
 	create("ses_delivered", true)
 	time.Sleep(200 * time.Millisecond)
 	if got := state("ses_delivered"); got != session.Running {
-		t.Fatalf("delivered create with nobody attached: session %s, want running", got)
+		snapshot, _ := sessions.Snapshot("ses_delivered")
+		t.Fatalf("delivered create with nobody attached: session %s (exit %+v, participants %d), want running", got, snapshot.Exit, len(snapshot.Participants))
 	}
 }
