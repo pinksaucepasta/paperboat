@@ -57,7 +57,7 @@ const installationInventorySQL = `WITH visible AS (
  FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
  LEFT JOIN paperboat.node_capacity c ON c.node_id=i.node_id
  LEFT JOIN paperboat.selfhost_update_requests u ON u.node_id=i.node_id
- WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))
+ WHERE i.state='active' AND ($1 OR (i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2)))
  AND (NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5))
 ), filtered AS (
  SELECT * FROM visible WHERE ($6='' OR position(lower($6) in lower(name || ' ' || endpoint_host || ' ' || id || ' ' || node_id))>0)
@@ -168,7 +168,7 @@ func (s *Service) GetInstallation(ctx context.Context, actor, id string, operato
 	var complete bool
 	err := s.database.SQL().QueryRowContext(ctx, `SELECT i.id,i.node_id,coalesce(n.endpoint_host,''),coalesce(n.region,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,
  `+installationReadySQL+`,n.last_heartbeat_at
- FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat)
+ FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND i.scope_kind<>'global' AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Region, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat)
 	if err == sql.ErrNoRows {
 		return i, ErrInstallationNotFound
 	}
