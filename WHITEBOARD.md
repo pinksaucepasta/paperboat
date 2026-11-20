@@ -391,6 +391,20 @@ Recorded 2026-11-20 from the user's direction.
 A region's machines all hold a carrier from every machine of a workspace, so a visitor can land on any node (edges do not
 forward). That is fine for a few nodes per region. When a region needs more than about 3 machines, a machine stops holding a
 carrier to every node: it holds one or two, and the nodes of the region forward a visitor's request to the node that holds the
-carrier. Prior art: the Tailscale DERP mesh, where servers of a region forward packets to the server a client is connected to
-(`~/ref/tailscale/derp/derpserver/derpserver.go` `SetMeshKey`, `derp/derphttp/mesh_client.go`).
-Trigger: a region needs a 4th machine. Until then `MaximumRegionCarriers` (8, `shared/runtimeattachment/protocol.go`) bounds it.
+carrier. Until then `MaximumRegionCarriers` (8, `shared/runtimeattachment/protocol.go`) bounds it. Trigger: a region needs a 4th machine.
+
+Design:
+- Each node keeps an in-memory map "publication (preview or tunnel) -> the node of its region that holds the carrier".
+- The nodes of a region fill it by telling each other: a node that gets or loses a carrier says so over a watch stream to its
+  region mates, and a new mate first gets the full list, the way a DERP server of a mesh learns which server holds which client
+  (`~/ref/tailscale/derp/derpserver/derpserver.go`: `clientsMesh` is the map from client to the `PacketForwarder` that reaches its
+  server, `watchers` are the mesh peers that stream changes).
+- A visitor's request that lands on a node without the carrier goes to the node that holds it, over a connection between nodes of
+  the same region; if the map has no entry the node answers "not connected" as today.
+- On start or restart a node rebuilds the map from the server's carrier table (`runtime_carrier_attachments`, the single source
+  of truth) and then follows the stream; the stream is a speed-up, never the only copy.
+- No Redis or other shared store: it would be one more stateful service to run in every region. Teleport keeps the same kind
+  of map (agent -> the proxy that holds its tunnel) in its own backend and lets proxies reach each other directly
+  (`~/ref/teleport/lib/reversetunnel/agent_proxy.go` `ProxyIDs`, `~/ref/teleport/lib/proxy/peer`).
+- Much later, at real scale: anycast addresses with load-aware layer-4 balancing in front of the nodes, which is what Cloudflare,
+  ngrok and Fly do. Not needed while a region is a handful of machines.
