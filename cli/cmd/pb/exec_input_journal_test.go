@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -352,5 +355,61 @@ func TestExecStdinEOFWaitsForTheReattachResend(t *testing.T) {
 	}
 	if size := <-second.eofAtSize; size != len("tail") {
 		t.Fatalf("EOF reached the execution after %d stdin bytes, want %d", size, len("tail"))
+	}
+}
+
+// eofLostConn is an attachment whose daemon link was already closed when the stdin EOF was sent: the peer finished and left.
+type eofLostConn struct {
+	execInputTestConn
+	err error
+}
+
+func (c *eofLostConn) CloseWrite() error { return c.err }
+
+// The causes the Windows run observed (errno 0 on every branch): a closed-pipe sentinel, and an unknown errno kept as text.
+func eofLostCauses() map[string]error {
+	return map[string]error{
+		"closed pipe": errors.Join(tunnel.ErrLocalDaemonLost, io.ErrClosedPipe),
+		"text only":   fmt.Errorf("%w: %v", tunnel.ErrLocalDaemonLost, errors.New("the pipe is being closed")),
+	}
+}
+
+// A replacement whose peer already ended when the stdin EOF was resent is not a failed attachment: its events carry the
+// terminal event it delivered, and a real loss ends them. Abandoning it burned an attempt (opens=4, output "before").
+func TestExecReattachKeepsAReplacementWhoseEOFFindsTheLinkClosed(t *testing.T) {
+	for name, cause := range eofLostCauses() {
+		t.Run(name, func(t *testing.T) {
+			ref := newExecConnectionRef(&execInputTestConn{})
+			if err := ref.CloseInput(); err != nil {
+				t.Fatal(err)
+			}
+			var request tunnel.ExecRequest
+			dials := 0
+			replacement := &eofLostConn{err: cause}
+			dial := func(context.Context, api.ExecDescriptor) (tunnel.ExecConn, error) { dials++; return replacement, nil }
+			descriptor := func(context.Context) (api.ExecDescriptor, error) { return api.ExecDescriptor{}, nil }
+			got, err := reattachExecConnection(context.Background(), ref, &request, descriptor, dial)
+			if err != nil || got != tunnel.ExecConn(replacement) || dials != 1 || ref.Current() != tunnel.ExecConn(replacement) {
+				t.Fatalf("reattach: err=%v dials=%d kept=%t", err, dials, ref.Current() == tunnel.ExecConn(replacement))
+			}
+		})
+	}
+}
+
+// Input that ends after its attachment was lost is that attachment's loss, not a stdin failure: reported to the command
+// loop it ended the stream of whichever connection was current, a healthy replacement included.
+func TestExecInputEOFOnALostLinkIsNotAnInputFailure(t *testing.T) {
+	for name, cause := range eofLostCauses() {
+		t.Run(name, func(t *testing.T) {
+			ref := newExecConnectionRef(&eofLostConn{err: cause})
+			if err := forwardExecInput(context.Background(), bytes.NewReader(nil), ref); err != nil {
+				t.Fatalf("forwardExecInput = %v", err)
+			}
+		})
+	}
+	// Any other failure to send EOF stays an input failure.
+	ref := newExecConnectionRef(&eofLostConn{err: errors.Join(tunnel.ErrLocalDaemonLost, io.ErrClosedPipe, syscall.EIO)})
+	if err := forwardExecInput(context.Background(), bytes.NewReader(nil), ref); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("an independent failure was dropped: %v", err)
 	}
 }

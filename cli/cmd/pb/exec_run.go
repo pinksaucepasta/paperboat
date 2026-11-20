@@ -421,7 +421,17 @@ func (r *execConnectionRef) Set(connection tunnel.ExecConn) error {
 		return err
 	}
 	if eof {
-		return connection.CloseWrite()
+		return closeExecInput(connection)
+	}
+	return nil
+}
+
+// closeExecInput half-closes the connection's stdin. A lost link is not an input failure: the attachment's own end
+// (closed events, Wait) reports the loss and the next Set repeats the EOF from r.eof. Failing here instead discarded a
+// healthy replacement whose peer had already delivered its terminal event and left (Windows teardown race).
+func closeExecInput(connection tunnel.ExecConn) error {
+	if err := connection.CloseWrite(); err != nil && !retryableExecTransportFailure(err) {
+		return err
 	}
 	return nil
 }
@@ -506,7 +516,7 @@ func (r *execConnectionRef) CloseInput() error {
 	if err := r.flushLocked(connection); err != nil {
 		return err
 	}
-	return connection.CloseWrite()
+	return closeExecInput(connection)
 }
 
 func forwardExecInput(ctx context.Context, reader io.Reader, connections *execConnectionRef) error {
