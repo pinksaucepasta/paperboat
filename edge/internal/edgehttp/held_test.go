@@ -62,12 +62,12 @@ func TestHeldAnnouncesPreviewAndRuntimeHostnamesWithAttachedCarriers(t *testing.
 // A preview alias the server admitted on a route is held like the route's own name: announced while the route's carrier
 // is attached and live, never for a route with no carrier here, a name the wire cannot carry, or an unadmitted name.
 func TestHeldEmitsPreviewAliases(t *testing.T) {
-	admitted := map[string]string{"alias.account.example.test": "preview_01", "alias-two.account.example.test": "preview_01", "orphan.account.example.test": "preview_02", "bad_alias.example.test": "preview_01"}
+	admitted := map[string]string{"alias.account.example.test": "preview_01", "alias-two.account.example.test": "preview_01", "orphan.account.example.test": "preview_02", "bad alias.example.test": "preview_01"}
 	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{
 		BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1",
 		HostRoute: func(host string) string { return admitted[host] },
 		AliasHosts: func() []string { // its own name is not announced twice; case is folded
-			return []string{"app.runtime.example.test", "unadmitted.account.example.test", "Alias-Two.account.example.test", "alias.account.example.test", "orphan.account.example.test", "bad_alias.example.test"}
+			return []string{"app.runtime.example.test", "unadmitted.account.example.test", "Alias-Two.account.example.test", "alias.account.example.test", "orphan.account.example.test", "bad alias.example.test"}
 		},
 	})
 	if err != nil {
