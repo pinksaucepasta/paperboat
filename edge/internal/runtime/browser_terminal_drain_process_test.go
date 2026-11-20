@@ -102,8 +102,8 @@ func TestBrowserTerminalDrainAcrossUpdates(t *testing.T) {
 	defer browsers.Close()
 
 	describe, err := json.Marshal(map[string]string{"node_id": node, "epoch": epoch, "h2": "h2://" + service.TCPAddr().String(), "h3": "h3://" + service.QUICAddr().String(),
-		"spki": trust.SPKISHA256, "chain": trust.CertificateChainPEM, "browser_url": "ws" + strings.TrimPrefix(browsers.URL, "http") + "/v1/browser-terminal/" + runtimeHost,
-		"edge_host": edgeHost, "runtime_host": runtimeHost})
+		"spki": trust.SPKISHA256, "chain": trust.CertificateChainPEM, "browser_url": "ws" + strings.TrimPrefix(browsers.URL, "http") + "/v1/browser-terminal",
+		"edge_host": runtimeHost, "runtime_host": runtimeHost})
 	if err != nil {
 		t.Fatal(err)
 	}

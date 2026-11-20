@@ -114,12 +114,12 @@ func TestRuntimeBrowserTerminalReplacesTicketWithHostCredential(t *testing.T) {
 	edge := httptest.NewServer(policy)
 	defer edge.Close()
 	defer cleanup()
-	edgeURL := "ws" + strings.TrimPrefix(edge.URL, "http") + "/v1/browser-terminal/" + value.Hostname
+	edgeURL := "ws" + strings.TrimPrefix(edge.URL, "http") + "/v1/browser-terminal"
 	dial := func() *websocket.Conn {
 		header := make(http.Header)
 		header.Set("Origin", "https://dashboard.example.test")
 		connection, response, dialErr := websocket.Dial(ctx, edgeURL, &websocket.DialOptions{
-			Host:       "edge.example.test",
+			Host:       value.Hostname,
 			HTTPHeader: header, Subprotocols: []string{browserTerminalSubprotocol, browserTerminalTicketPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
 			CompressionMode: websocket.CompressionDisabled,
 		})

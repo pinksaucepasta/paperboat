@@ -64,10 +64,19 @@ func (g *Gateway) edgeHostURL(input EdgeControlRequest, nodeID, processEpoch str
 	return urlValue, nil
 }
 
-// matchesTicket reports whether the current decision still is the one the ticket was issued for, at
-// this edge process.
-func matchesTicket(decision Decision, ticket Ticket, urlValue *url.URL, nodeID, processEpoch string) bool {
-	return validDecision(decision, ticket.subjectID(), ticket.TerminalSessionID) && decision.Role == ticket.Role && decision.PolicyGeneration == ticket.PolicyGeneration && decision.TeamGeneration == ticket.TeamGeneration && decision.MembershipGeneration == ticket.MembershipGeneration && decision.BindingGeneration == ticket.BindingGeneration && decision.HostWSSURL == urlValue.String() && decision.EdgeNodeID == nodeID && decision.EdgeProcessEpoch == processEpoch
+// matchesTicket reports whether the current decision still is the one the ticket was issued for. The ticket names the
+// machine's runtime hostname, not an edge: holdsRoute decides whether the redeeming edge may serve it.
+func matchesTicket(decision Decision, ticket Ticket, urlValue *url.URL) bool {
+	return validDecision(decision, ticket.subjectID(), ticket.TerminalSessionID) && decision.Role == ticket.Role && decision.PolicyGeneration == ticket.PolicyGeneration && decision.TeamGeneration == ticket.TeamGeneration && decision.MembershipGeneration == ticket.MembershipGeneration && decision.BindingGeneration == ticket.BindingGeneration && decision.HostWSSURL == urlValue.String()
+}
+
+// holdsRoute reports whether the edge process currently holds a valid carrier for the decision's route, the only edge
+// that may serve the machine's terminal (the others forward the browser's stream to it, never decrypting it).
+func (g *Gateway) holdsRoute(ctx context.Context, decision Decision, nodeID, processEpoch string) (bool, error) {
+	if g.HoldsCarrier == nil {
+		return false, nil
+	}
+	return g.HoldsCarrier(ctx, decision, nodeID, processEpoch)
 }
 
 func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeID, processEpoch string) (edgeAdmission, func(), error) {
@@ -98,8 +107,15 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
-	if !matchesTicket(decision, ticket, urlValue, nodeID, processEpoch) {
+	if !matchesTicket(decision, ticket, urlValue) {
 		release()
+		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
+	}
+	if holds, err := g.holdsRoute(ctx, decision, nodeID, processEpoch); err != nil || !holds {
+		release()
+		if err != nil {
+			return edgeAdmission{}, nil, unavailableCause(err)
+		}
 		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
 	}
 	if ticket.terminalLess() {
@@ -197,10 +213,15 @@ func (g *Gateway) resumeEdge(ctx context.Context, input EdgeControlRequest, node
 	}
 	release := func() { g.release(ticket.principalSessionID()) }
 	decision, err := g.resolveTicketRole(ctx, ticket)
-	if err == nil && (decision.EdgeNodeID != nodeID || decision.EdgeProcessEpoch != processEpoch) {
-		err = refused(terminalend.NoAccess, ErrForbidden) // not this edge process's terminal
-	} else if err == nil && !matchesTicket(decision, ticket, urlValue, nodeID, processEpoch) {
+	if err == nil && !matchesTicket(decision, ticket, urlValue) {
 		err = refused(terminalend.Revoked, ErrForbidden) // its grant changed during the gap
+	}
+	if err == nil {
+		if holds, holdErr := g.holdsRoute(ctx, decision, nodeID, processEpoch); holdErr != nil {
+			err = holdErr
+		} else if !holds {
+			err = refused(terminalend.NoAccess, ErrForbidden) // this edge process no longer holds the machine's carrier
+		}
 	}
 	if err == nil {
 		var active bool

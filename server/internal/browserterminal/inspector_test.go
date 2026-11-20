@@ -51,7 +51,7 @@ func TestGatewayIssuesInspectorTicketBoundToCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if streamURL != "wss://edge-one.example.test/v1/browser-terminal/machine.runtime.example.test" || ticket.Role != RoleInspector {
+	if streamURL != "wss://machine.runtime.example.test/v1/browser-terminal" || ticket.Role != RoleInspector {
 		t.Fatalf("stream %q role %q", streamURL, ticket.Role)
 	}
 	if got := tickets.issued; got.InspectorCredentialID != "credential_1" || got.TerminalSessionID != "" || got.PolicyGeneration != 7 || got.UserID != "usr_1" || got.BrowserSessionID != "browser_1" {
@@ -78,7 +78,7 @@ func TestEdgeAdmitsInspectorChannelAndClosesItWhenTheCredentialIsRevoked(t *test
 	ticket := Ticket{UserID: "usr_1", BrowserSessionID: "ses_1", InspectorCredentialID: "credential_1", Origin: "https://dashboard.example.test", Role: RoleInspector, PolicyGeneration: 7, BrowserPublicKeySHA256: testBrowserKeyDigest}
 	tickets := &edgeTestTickets{active: true, ticket: ticket, value: "inspector-ticket"}
 	authorizer := &inspectorTestAuthorizer{testBrowserAuthorizer: testBrowserAuthorizer{decision: inspectorDecision()}}
-	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gateway.ServeEdgeControl(w, r, "edge_1", "epoch_1")
 	}))
@@ -140,7 +140,7 @@ func TestEdgeKeepsAnAttachmentThroughABriefAuthorityOutageButNotARefusal(t *test
 	ticket := Ticket{UserID: "usr_1", BrowserSessionID: "ses_1", InspectorCredentialID: "credential_1", Origin: "https://dashboard.example.test", Role: RoleInspector, PolicyGeneration: 7, BrowserPublicKeySHA256: testBrowserKeyDigest}
 	authorizer := &inspectorTestAuthorizer{testBrowserAuthorizer: testBrowserAuthorizer{decision: inspectorDecision()}}
 	tickets := &edgeTestTickets{active: true, ticket: ticket, value: "inspector-ticket"}
-	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gateway.ServeEdgeControl(w, r, "edge_1", "epoch_1")
 	}))

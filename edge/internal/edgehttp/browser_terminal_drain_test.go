@@ -104,8 +104,8 @@ func TestHeldBrowserTerminalCrossesAWorkerHandover(t *testing.T) {
 			dial := func() *websocket.Conn {
 				header := make(http.Header)
 				header.Set("Origin", "https://dashboard.example.test")
-				connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal/"+oldRoute.Hostname, &websocket.DialOptions{
-					Host: "edge.example.test", HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
+				connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal", &websocket.DialOptions{
+					Host: oldRoute.Hostname, HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
 					Subprotocols: []string{browserTerminalSubprotocol, browserTerminalTicketPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
 				})
 				if err != nil {
@@ -327,8 +327,8 @@ func handOverEndsBrowserTerminalsMoved(t *testing.T, mode string) {
 	dial := func() *websocket.Conn {
 		header := make(http.Header)
 		header.Set("Origin", "https://dashboard.example.test")
-		connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal/"+route.Hostname, &websocket.DialOptions{
-			Host: "edge.example.test", HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
+		connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal", &websocket.DialOptions{
+			Host: route.Hostname, HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
 			Subprotocols: []string{browserTerminalSubprotocol, browserTerminalTicketPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
 		})
 		if err != nil {
