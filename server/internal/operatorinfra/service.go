@@ -39,7 +39,7 @@ var (
 	ErrForbidden = errors.New("infrastructure operation forbidden")
 	ErrNotFound  = errors.New("infrastructure resource not found")
 	ErrConflict  = errors.New("infrastructure operation conflict")
-	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, or an update that
+	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, rotate, or an update that
 	// re-registers it): the region would leave the wildcard DNS names and every pair using it.
 	ErrLastServingEdge = errors.New("last serving edge of an enabled region")
 )
@@ -274,6 +274,10 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 		case "rotate":
 			if in.Revision < 1 {
 				return ErrInvalid
+			}
+			// Rotation clears the verified ingress below, which takes the node out of the serving set.
+			if err := refuseLastServingEdge(ctx, tx, in.NodeID); err != nil {
+				return err
 			}
 			credential := randomToken()
 			hash := sha256.Sum256([]byte(credential))

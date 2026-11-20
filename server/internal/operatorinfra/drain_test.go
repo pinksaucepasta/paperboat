@@ -140,7 +140,7 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 		}
 	}
 	serve(node.ID)
-	for _, action := range []string{"drain", "drain-move", "retire"} {
+	for _, action := range []string{"drain", "drain-move", "retire", "rotate"} {
 		if _, err := s.MutateNode(ctx, admin, action+"-last-"+node.ID, NodeMutation{Action: action, NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); !errors.Is(err, ErrLastServingEdge) {
 			t.Fatalf("%s of the last serving edge: %v", action, err)
 		}
