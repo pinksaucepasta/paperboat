@@ -864,11 +864,16 @@ var edgeSetBuilders keyedlock.Locks
 // set with one read.
 func (s *Service) ensureEdgeSet(ctx context.Context, proof previewattachment.MachineProof) error {
 	var team sql.NullString
-	err := s.DB.SQL().QueryRowContext(ctx, `SELECT owner_team_id FROM user_machines WHERE id=$1 AND user_id=$2`, proof.MachineID, proof.UserID).Scan(&team)
+	var exists bool
+	// One read for the common case, a workspace whose set exists: no transaction and no builder lock, so the attaches of
+	// one account do not queue behind each other (the attach p95 rose 88 -> 127 ms with a transaction per attach).
+	err := s.DB.SQL().QueryRowContext(ctx, `SELECT m.owner_team_id,
+EXISTS(SELECT 1 FROM workspace_edge_sets s WHERE s.scope_kind=CASE WHEN m.owner_team_id IS NULL THEN 'account' ELSE 'team' END AND s.scope_id=COALESCE(m.owner_team_id,m.user_id))
+FROM user_machines m WHERE m.id=$1 AND m.user_id=$2`, proof.MachineID, proof.UserID).Scan(&team, &exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil // the attach transaction reports the machine
 	}
-	if err != nil {
+	if err != nil || exists {
 		return err
 	}
 	scope := edgeset.Scope{Kind: "account", ID: proof.UserID, Account: proof.UserID}
