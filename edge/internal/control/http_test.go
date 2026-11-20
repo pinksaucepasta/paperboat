@@ -425,6 +425,26 @@ func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
 	}
 }
 
+// The answer's drain_deadline is Unix seconds and positive; anything else is a refused answer, never applied.
+func TestNodeAnswerDrainDeadlineIsValidated(t *testing.T) {
+	answer := ""
+	client := controlClient(t, func(*http.Request) (*http.Response, error) { return response(http.StatusOK, answer), nil })
+	answer = `{"drain_deadline":1800000000}`
+	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil || got.DrainDeadline == nil || *got.DrainDeadline != 1800000000 {
+		t.Fatalf("heartbeat answer = %+v, %v", got, err)
+	}
+	answer = `{"ingress_limits":null}`
+	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil || got.DrainDeadline != nil {
+		t.Fatalf("answer without a deadline = %+v, %v", got, err)
+	}
+	for _, bad := range []string{`{"drain_deadline":0}`, `{"drain_deadline":-5}`, `{"drain_deadline":"soon"}`} {
+		answer = bad
+		if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err == nil || got.DrainDeadline != nil {
+			t.Fatalf("%s accepted: %+v, %v", bad, got, err)
+		}
+	}
+}
+
 // F21-38: the client sends the version of the route answer it holds and keeps it when the
 // server answers "unchanged", so an idle edge does not re-receive its whole route set.
 func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {

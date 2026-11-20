@@ -305,4 +305,7 @@ type NodeSink interface {
 type NodeAnswer struct {
 	// IngressLimits is the configured abuse-protection set (audit T11); nil keeps the current one.
 	IngressLimits *edgelimits.IngressLimits `json:"ingress_limits,omitempty"`
+	// DrainDeadline (Unix seconds, > 0) is set while an operator or the owner has drained this node: the edge
+	// tells its carriers to move (goaway) and serves what it holds until then. Absent after a Resume.
+	DrainDeadline *int64 `json:"drain_deadline,omitempty"`
 }
