@@ -38,6 +38,26 @@ func batchOf(table, candidates string) string {
 		` LIMIT $1 FOR UPDATE SKIP LOCKED))`
 }
 
+// bandwidthRollup merges raw usage rows older than $2 seconds into one row per hour, resource, machine, path and member:
+// the keys and the hour of interval_end that every reader of resource_bandwidth_events groups or filters by, so a window
+// aligned to whole hours reads the same sums, series and updated_at. The raw rows go in the same statement; a hour merged
+// in several batches adds up through the rollup row's fixed operation id. The statement counts the raw rows it removed.
+const bandwidthRollup = `WITH old AS MATERIALIZED (
+ SELECT * FROM paperboat.resource_bandwidth_events
+ WHERE interval_end < now()-make_interval(secs=>$2) AND operation_id NOT LIKE 'rollup:%'
+ ORDER BY interval_end,operation_id LIMIT $1 FOR UPDATE SKIP LOCKED
+), merged AS (
+ INSERT INTO paperboat.resource_bandwidth_events AS x(operation_id,workspace_id,resource_kind,resource_id,resource_name,resource_route_id,machine_id,machine_name,mode,hosting,node_id,node_name,upload_bytes,download_bytes,interval_start,interval_end,actor_account_id)
+ SELECT 'rollup:'||md5(concat_ws('|',workspace_id,resource_kind,resource_id,resource_route_id,machine_id,mode,hosting,node_id,coalesce(actor_account_id,'-'),date_trunc('hour',interval_end AT TIME ZONE 'UTC'))),
+  workspace_id,resource_kind,resource_id,max(resource_name),resource_route_id,machine_id,max(machine_name),mode,hosting,node_id,max(node_name),
+  sum(upload_bytes),sum(download_bytes),min(interval_start),max(interval_end),actor_account_id
+ FROM old GROUP BY workspace_id,resource_kind,resource_id,resource_route_id,machine_id,mode,hosting,node_id,actor_account_id,date_trunc('hour',interval_end AT TIME ZONE 'UTC')
+ ON CONFLICT(operation_id) DO UPDATE SET upload_bytes=x.upload_bytes+EXCLUDED.upload_bytes,download_bytes=x.download_bytes+EXCLUDED.download_bytes,
+  resource_name=greatest(x.resource_name,EXCLUDED.resource_name),machine_name=greatest(x.machine_name,EXCLUDED.machine_name),node_name=greatest(x.node_name,EXCLUDED.node_name),
+  interval_start=least(x.interval_start,EXCLUDED.interval_start),interval_end=greatest(x.interval_end,EXCLUDED.interval_end)
+)
+DELETE FROM paperboat.resource_bandwidth_events e USING old o WHERE e.operation_id=o.operation_id`
+
 // policies run in this order: a parent whose foreign keys do not cascade comes after the children that hold it.
 var policies = []policy{
 	// A CLI recording replay's peer network admission, after its ticket expired.
@@ -219,6 +239,8 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
 	{"control_usage_receipts", batchOf("control_usage_receipts", `created_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.UsageReceipts })},
+	{"resource_bandwidth_rollup", bandwidthRollup,
+		seconds(func(config.Retention) time.Duration { return config.ResourceBandwidthExactWindow })},
 	{"resource_bandwidth_events", batchOf("resource_bandwidth_events", `interval_end < now()-make_interval(secs=>$2)`),
 		seconds(func(config.Retention) time.Duration { return config.ResourceBandwidthWindow })},
 	{"tunnel_log_entries", batchOf("tunnel_log_entries", `occurred_at < now()-make_interval(secs=>$2)`),

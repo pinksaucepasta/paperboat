@@ -37,7 +37,7 @@ func TestBandwidthHistoryExpiresInBatchesWithoutNewReportsPostgres(t *testing.T)
 	const historyWindow = 90 * 24 * time.Hour
 	if _, err := store.Pool().Exec(ctx, `INSERT INTO paperboat.resource_bandwidth_events
  (operation_id,workspace_id,resource_kind,resource_id,resource_name,mode,hosting,upload_bytes,download_bytes,interval_start,interval_end)
- SELECT 'bandwidth_retention_'||g,$1,'preview','preview','preview','edge','managed',1,0,stamp,stamp
+ SELECT 'bandwidth_retention_'||g,$1,'preview','preview','preview','edge','managed',g,0,stamp,stamp
  FROM generate_series(1,6) g CROSS JOIN LATERAL
  (SELECT now()-make_interval(secs=>$2::float8)+CASE WHEN g<6 THEN '-1 hour' ELSE '1 hour' END::interval stamp) v`,
 		workspace, historyWindow.Seconds()); err != nil {
@@ -46,12 +46,13 @@ func TestBandwidthHistoryExpiresInBatchesWithoutNewReportsPostgres(t *testing.T)
 	if _, err := Run(ctx, store, cfg); err != nil {
 		t.Fatal(err)
 	}
-	var left string
-	if err := store.Pool().QueryRow(ctx, `SELECT string_agg(operation_id,',' ORDER BY operation_id)
- FROM paperboat.resource_bandwidth_events WHERE workspace_id=$1`, workspace).Scan(&left); err != nil {
+	// Rows past the exact window are merged into one row per hour first, so the survivor is told by its bytes: the in-window report is 6.
+	var rows, upload int64
+	if err := store.Pool().QueryRow(ctx, `SELECT count(*),coalesce(sum(upload_bytes),0)
+ FROM paperboat.resource_bandwidth_events WHERE workspace_id=$1`, workspace).Scan(&rows, &upload); err != nil {
 		t.Fatal(err)
 	}
-	if left != "bandwidth_retention_6" {
-		t.Fatalf("remaining rows = %q, want only the in-window report", left)
+	if rows != 1 || upload != 6 {
+		t.Fatalf("remaining %d rows with %d bytes, want only the in-window report (1 row, 6 bytes)", rows, upload)
 	}
 }
