@@ -66,7 +66,7 @@ func grantAction(ctx context.Context, tx *db.Tx, kind, target string, in Input, 
 		if !owner {
 			return ErrNotFound
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id,team_id) VALUES($1,NULLIF($2,''),NULLIF($3,'')) ON CONFLICT DO NOTHING`, target, user, team); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id,team_id) SELECT $1::text,NULLIF($2::text,''),NULLIF($3::text,'') WHERE NOT EXISTS(SELECT 1 FROM billing_workspaces WHERE id=$1) ON CONFLICT DO NOTHING`, target, user, team); err != nil {
 			return err
 		}
 	}

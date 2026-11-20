@@ -173,7 +173,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			grown := max(previousUp, r.UploadBytes) + max(previousDown, r.DownloadBytes) - previousUp - previousDown
 			if s.Debiter != nil && r.Mode == "relay" && hosting == "managed" && grown > 0 {
 				// The workspace row exists for edge traffic from the first byte; a relay-only workspace gets it here.
-				if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id,team_id) VALUES($1,CASE WHEN $1 LIKE 'personal:%' THEN substr($1,10) END,CASE WHEN $1 LIKE 'team:%' THEN substr($1,6) END) ON CONFLICT DO NOTHING`, ws); err != nil {
+				if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id,team_id) SELECT $1::text,CASE WHEN $1 LIKE 'personal:%' THEN substr($1,10) END,CASE WHEN $1 LIKE 'team:%' THEN substr($1,6) END WHERE NOT EXISTS(SELECT 1 FROM billing_workspaces WHERE id=$1) ON CONFLICT DO NOTHING`, ws); err != nil {
 					return fmt.Errorf("create workspace for native relay bandwidth: %w", err)
 				}
 				if _, _, err := s.Debiter.DebitWorkspaceBandwidthTx(ctx, tx, ws, grown, r.IntervalEnd); err != nil {

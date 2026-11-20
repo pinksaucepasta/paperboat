@@ -105,9 +105,9 @@ func recordNodeTx(ctx context.Context, tx *db.Tx, node string, bindings []Bindin
 func admitWorkspaceTx(ctx context.Context, tx *db.Tx, b Binding, customerOwned bool, policy QuotaChecker) (*workspaceAdmission, error) {
 	var err error
 	if b.Team != "" {
-		_, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id,team_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, "team:"+b.Team, b.Team)
+		_, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id,team_id) SELECT $1::text,$2::text WHERE NOT EXISTS(SELECT 1 FROM billing_workspaces WHERE id=$1) ON CONFLICT DO NOTHING`, "team:"+b.Team, b.Team)
 	} else {
-		_, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, "personal:"+b.User, b.User)
+		_, err = tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id) SELECT $1::text,$2::text WHERE NOT EXISTS(SELECT 1 FROM billing_workspaces WHERE id=$1) ON CONFLICT DO NOTHING`, "personal:"+b.User, b.User)
 	}
 	if err != nil {
 		return nil, err

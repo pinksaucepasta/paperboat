@@ -132,7 +132,9 @@ func WorkspaceTx(ctx context.Context, tx *db.Tx, account, team string, manage bo
 		}
 		out.ID, out.UserID, out.TeamID = "team:"+team, "", team
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id,team_id) VALUES($1,NULLIF($2,''),NULLIF($3,'')) ON CONFLICT DO NOTHING`, out.ID, out.UserID, out.TeamID); err != nil {
+	// NOT EXISTS: an INSERT .. ON CONFLICT DO NOTHING against a row another transaction updated after this snapshot is a 40001
+	// (usage writes touch the row constantly); a row already visible is not touched at all.
+	if _, err := tx.Exec(ctx, `INSERT INTO billing_workspaces(id,user_id,team_id) SELECT $1::text,NULLIF($2::text,''),NULLIF($3::text,'') WHERE NOT EXISTS(SELECT 1 FROM billing_workspaces WHERE id=$1) ON CONFLICT DO NOTHING`, out.ID, out.UserID, out.TeamID); err != nil {
 		return out, err
 	}
 	var customer, subscription, item, product sql.NullString
