@@ -19,11 +19,6 @@ var (
 	ErrCarrierAssemblyClosed  = errors.New("data carrier assembly is closed")
 )
 
-const (
-	defaultCarrierHandlers = 64
-	maxCarrierHandlers     = 4096 // config.MaximumNodeCapacity
-)
-
 // CarrierService is the lifecycle boundary implemented by
 // datacarrier.Service. Keeping the narrow interface here lets deterministic
 // runtime tests exercise accept and shutdown without constructing certificates
@@ -40,12 +35,11 @@ type CarrierService interface {
 type CarrierHandler func(context.Context, *datacarrier.Server) error
 
 type CarrierAssemblyConfig struct {
-	Reporter        *reporting.Reporter
-	Service         CarrierService
-	Handle          CarrierHandler
-	MaximumHandlers int
-	ObserveError    func(error)
-	Telemetry       *datacarrier.CarrierTelemetry
+	Reporter     *reporting.Reporter
+	Service      CarrierService
+	Handle       CarrierHandler
+	ObserveError func(error)
+	Telemetry    *datacarrier.CarrierTelemetry
 	// Goaway, when set, tells one carrier's host that this edge is going away until deadline
 	// (Drain sends it to every carrier).
 	Goaway func(ctx context.Context, server *datacarrier.Server, deadline time.Time) error
@@ -60,14 +54,13 @@ type CarrierAssemblyConfig struct {
 // datacarrier.NewService; Start only begins consumption of authenticated
 // peers.
 type CarrierAssembly struct {
-	reporter        *reporting.Reporter
-	service         CarrierService
-	handle          CarrierHandler
-	observeError    func(error)
-	telemetry       *datacarrier.CarrierTelemetry
-	goaway          func(context.Context, *datacarrier.Server, time.Time) error
-	drainMinimum    time.Duration
-	maximumHandlers int
+	reporter     *reporting.Reporter
+	service      CarrierService
+	handle       CarrierHandler
+	observeError func(error)
+	telemetry    *datacarrier.CarrierTelemetry
+	goaway       func(context.Context, *datacarrier.Server, time.Time) error
+	drainMinimum time.Duration
 	// live is every carrier a handler currently serves.
 	live map[*datacarrier.Server]struct{}
 
@@ -85,19 +78,13 @@ func NewCarrierAssembly(config CarrierAssemblyConfig) (*CarrierAssembly, error) 
 	if config.Service == nil || config.Handle == nil {
 		return nil, ErrCarrierAssemblyInvalid
 	}
-	if config.MaximumHandlers == 0 {
-		config.MaximumHandlers = defaultCarrierHandlers
-	}
-	if config.MaximumHandlers < 1 || config.MaximumHandlers > maxCarrierHandlers {
-		return nil, ErrCarrierAssemblyInvalid
-	}
 	if config.DrainMinimum == 0 {
 		config.DrainMinimum = DefaultDrainMinimum
 	}
 	return &CarrierAssembly{
 		drainMinimum: config.DrainMinimum,
 		reporter:     config.Reporter, service: config.Service, handle: config.Handle, observeError: config.ObserveError,
-		telemetry: config.Telemetry, goaway: config.Goaway, maximumHandlers: config.MaximumHandlers, done: make(chan error, 1),
+		telemetry: config.Telemetry, goaway: config.Goaway, done: make(chan error, 1),
 		live: map[*datacarrier.Server]struct{}{},
 	}, nil
 }
@@ -127,7 +114,6 @@ func (a *CarrierAssembly) Start(ctx context.Context) error {
 
 func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 	defer close(a.acceptDone)
-	limits := make(chan struct{}, a.maximumHandlers)
 	for {
 		server, err := a.service.Accept(ctx)
 		if err != nil {
@@ -157,15 +143,6 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 				return
 			}
 		}
-		select {
-		case limits <- struct{}{}:
-		case <-ctx.Done():
-			if accepted != nil {
-				_ = accepted.Close()
-			}
-			_ = server.Close()
-			return
-		}
 		a.handlers.Add(1)
 		a.mu.Lock()
 		a.live[server] = struct{}{}
@@ -182,7 +159,6 @@ func (a *CarrierAssembly) acceptLoop(ctx context.Context) {
 					a.reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
 				}
 			}()
-			defer func() { <-limits }()
 			if accepted != nil {
 				defer accepted.Close()
 			}

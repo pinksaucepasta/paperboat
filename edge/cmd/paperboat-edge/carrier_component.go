@@ -117,10 +117,8 @@ func newCarrierComponentWithTelemetry(
 		authorizers = append(authorizers, accessorExpected)
 	}
 	carrierConfig.Authorize = datacarrier.AnyAuthorizer(authorizers...)
-	maximumHandlers := carrierHandlerLimit(deployment.NodeCapacity)
 	service, err := datacarrier.NewHTTPService(context.Background(), datacarrier.ServiceConfig{
-		Carrier:         carrierConfig,
-		MaximumCarriers: maximumHandlers,
+		Carrier: carrierConfig,
 		OnFailure: func(ctx context.Context, err error) {
 			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
 				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
@@ -331,22 +329,12 @@ func newCarrierComponentWithTelemetry(
 		_, _ = io.Copy(io.Discard, io.LimitReader(stream, 1))
 		return nil
 	}
-	assembly, err := edgeruntime.NewCarrierAssembly(edgeruntime.CarrierAssemblyConfig{Reporter: reporter, Service: service, Handle: handle, MaximumHandlers: maximumHandlers, Telemetry: carrierTelemetry, Goaway: goaway})
+	assembly, err := edgeruntime.NewCarrierAssembly(edgeruntime.CarrierAssemblyConfig{Reporter: reporter, Service: service, Handle: handle, Telemetry: carrierTelemetry, Goaway: goaway})
 	if err != nil {
 		_ = service.Close()
 		return nil, nil, fmt.Errorf("create carrier assembly: %w", err)
 	}
 	return assembly, service.Close, nil
-}
-
-// carrierHandlerLimit is how many carriers one edge process holds: its configured node_capacity (the node's declared connection
-// capacity, at most config.MaximumNodeCapacity), not a second fixed number. A fixed 1024 refused the 1,025th machine of a node
-// declared for 4,096 (measured on a 2 vCPU / 4 GB node, which holds them at 270 KB and 0.8% of a core per 100 idle carriers).
-func carrierHandlerLimit(nodeCapacity uint32) int {
-	if nodeCapacity == 0 {
-		return 64
-	}
-	return int(nodeCapacity)
 }
 
 // carrierWorkersOutcome is how the component ends: a worker's own failure wins over the server stopping or the

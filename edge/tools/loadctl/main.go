@@ -106,7 +106,7 @@ func initFiles(args []string) error {
 	controlPort := flags.String("control-port", "8443", "loadctl port")
 	edgeHost := flags.String("edge-host", "edge.example.test", "DNS name of the edge (the public certificate must cover it); the load generator resolves it, e.g. through /etc/hosts")
 	relayHost := flags.String("relay-host", "relay.example.test", "DNS name in the relay's TLS certificate")
-	nodeCapacity := flags.Uint("capacity", 4096, "node_capacity (the edge refuses to start above 4096)")
+	nodeCapacity := flags.Uint("capacity", 4096, "node_capacity")
 	previewDomain := flags.String("preview-domain", "preview.example.test", "preview base domain")
 	tunnelDomain := flags.String("tunnel-domain", "tunnels.example.test", "tunnel base domain")
 	runtimeDomain := flags.String("runtime-domain", "runtime.example.test", "runtime base domain")

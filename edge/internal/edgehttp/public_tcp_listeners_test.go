@@ -31,7 +31,7 @@ func TestPublicTCPListenersBindBeforeReadyObservation(t *testing.T) {
 	_ = probe.Close()
 	authority := &publicTCPAuthorityFixture{}
 	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour})
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, MaximumConnections: 64, ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestPublicTCPFatalAcceptWithdrawsOnlyItsIdentityAndRebinds(t *testing.T) {
 	defer routes.Close()
 	type ctxKey struct{}
 	reported := make(chan error, 4)
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(ctx context.Context, phase string, cause error) {
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, MaximumConnections: 64, ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(ctx context.Context, phase string, cause error) {
 		if phase == "public_tcp_listener" {
 			if ctx.Value(ctxKey{}) != "borrowed" {
 				t.Error("invocation context lost")
@@ -240,7 +240,7 @@ func TestPublicTCPListenersRefusePortsOutsideTheRange(t *testing.T) {
 	var failures []error
 	authority := &publicTCPAuthorityFixture{}
 	routes, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
-	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(_ context.Context, _ string, err error) { failures = append(failures, err) }})
+	manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, MaximumConnections: 64, ListenHost: "127.0.0.1", Authority: authority, Routes: routes, Interval: time.Hour, OnFailure: func(_ context.Context, _ string, err error) { failures = append(failures, err) }})
 	if err != nil {
 		t.Fatal(err)
 	}

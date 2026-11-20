@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
@@ -526,7 +527,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 	}, PreviewHTTPSAuthority: func(ctx context.Context, host string) error {
 		return previewHTTPSMatcher.AuthorizePublicHTTPS(ctx, host, publicPreviewAuthority)
-	}, UnknownNameTLS: certificateSelector.WildcardTLSConfig(), ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: 4096, MaximumConnections: int(deployment.NodeCapacity) * 128})
+	}, UnknownNameTLS: certificateSelector.WildcardTLSConfig(), ListenHost: publicListenHost, InfrastructureHostname: deployment.ConnectorAdvertiseHost, Authority: ingressAuthority, Routes: durableRoutes, Interval: deployment.ControlInterval, MaximumListeners: edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1, MaximumConnections: int(deployment.NodeCapacity) * 128})
 	if err != nil {
 		return nil, fmt.Errorf("configure public TCP listeners: %w", err)
 	}

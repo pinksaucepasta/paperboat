@@ -35,7 +35,7 @@ type PrivateAccessConnectionRegistry struct {
 }
 
 func NewPrivateAccessConnectionRegistry(maximum int) (*PrivateAccessConnectionRegistry, error) {
-	if maximum < 1 || maximum > 4096 {
+	if maximum < 1 {
 		return nil, ErrPrivateConnectionInvalid
 	}
 	return &PrivateAccessConnectionRegistry{maximum: maximum, entries: make(map[string]privateConnectionEntry), now: func() time.Time { return time.Now().UTC() }}, nil

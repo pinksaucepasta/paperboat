@@ -69,7 +69,7 @@ func TestBrowserTerminalDrainAcrossUpdates(t *testing.T) {
 	carrierConfig.Authorize = expected
 	endpoint := datacarrier.EndpointConfig{Address: "127.0.0.1:0", TLS: tlsConfig, PeerBinding: expected.PeerBinding}
 	quic := endpoint
-	service, err := datacarrier.NewHTTPService(ctx, datacarrier.ServiceConfig{Carrier: carrierConfig, MaximumCarriers: 16, TCP: &endpoint, QUIC: &quic})
+	service, err := datacarrier.NewHTTPService(ctx, datacarrier.ServiceConfig{Carrier: carrierConfig, TCP: &endpoint, QUIC: &quic})
 	if err != nil {
 		t.Fatal(err)
 	}

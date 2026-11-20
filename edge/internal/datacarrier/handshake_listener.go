@@ -22,15 +22,14 @@ type handshakeListener struct {
 	config   *tls.Config
 	timeout  time.Duration
 	observe  func(error)
-	pending  chan struct{}
 	ready    chan net.Conn
 	done     chan struct{}
 	failed   chan error
 	stopOnce sync.Once
 }
 
-func newHandshakeListener(inner net.Listener, config *tls.Config, timeout time.Duration, maximumPending int, observe func(error)) *handshakeListener {
-	l := &handshakeListener{Listener: inner, config: config.Clone(), timeout: timeout, observe: observe, pending: make(chan struct{}, maximumPending), ready: make(chan net.Conn), done: make(chan struct{}), failed: make(chan error, 1)}
+func newHandshakeListener(inner net.Listener, config *tls.Config, timeout time.Duration, observe func(error)) *handshakeListener {
+	l := &handshakeListener{Listener: inner, config: config.Clone(), timeout: timeout, observe: observe, ready: make(chan net.Conn), done: make(chan struct{}), failed: make(chan error, 1)}
 	go l.acceptLoop()
 	return l
 }
@@ -42,17 +41,11 @@ func (l *handshakeListener) acceptLoop() {
 			l.failed <- err
 			return
 		}
-		select {
-		case l.pending <- struct{}{}:
-			go l.handshake(raw)
-		default:
-			_ = raw.Close() // bounded: too many unfinished handshakes
-		}
+		go l.handshake(raw) // each handshake ends at the timeout
 	}
 }
 
 func (l *handshakeListener) handshake(raw net.Conn) {
-	defer func() { <-l.pending }()
 	counted := &readCountingConn{Conn: raw}
 	// A refused handshake leaves no peer state on the connection, so the check's own state is kept.
 	config, seen := l.config, tls.ConnectionState{}
