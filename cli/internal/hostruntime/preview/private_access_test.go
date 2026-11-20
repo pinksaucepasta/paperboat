@@ -211,6 +211,48 @@ func TestPrivateAccessSnapshotNeverPublishesPrivateTCPToPACAndTakesARouteOnBothE
 	}
 }
 
+func TestPrivateAccessRouteListLargerThan64KiBIsAccepted(t *testing.T) {
+	now := time.Now().UTC()
+	base := validAccessorAdmission(t, now, "http")
+	var admissions []accessorAdmission
+	for i := range 400 {
+		a := base
+		a.Hostname = fmt.Sprintf("web%04d.example.test", i)
+		a.RouteID = fmt.Sprintf("route_http_%04d", i)
+		a.AssignmentID = fmt.Sprintf("assignment_%04d", i)
+		fallback := a // the same route through the second edge of the account's pair
+		fallback.EdgeNodeID = "edge_02"
+		admissions = append(admissions, a, fallback)
+	}
+	body, err := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: admissions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= 64<<10 {
+		t.Fatalf("route list is %d bytes, want more than the old 64 KiB bound", len(body))
+	}
+	transport := privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}, Request: request}, nil
+	})
+	discovery, err := newAccessorDiscoveryClient("https://api.example.test", privateAccessTestAuth{}, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := newPrivateAccessSource(&privateAccessGrantClient{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.discovery = discovery
+	source.now = func() time.Time { return now.Add(123 * time.Millisecond) }
+	routes, err := source.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("route list over 64 KiB: %v", err)
+	}
+	if len(routes) != 400 {
+		t.Fatalf("routes = %d, want 400", len(routes))
+	}
+}
+
 // The server admits a private HTTP catch-all route under its stable endpoint hostname (private_access_routes.sql
 // passes match_type through), so a machine must accept it, as the edge and server do.
 func TestAccessorAdmissionAcceptsHTTPCatchAll(t *testing.T) {
