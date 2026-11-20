@@ -22,7 +22,7 @@ type pinFixture struct {
 
 func (f *drainFixture) ready(node, ip string) {
 	f.t.Helper()
-	f.exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host=$2,state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',public_ingress_verified_at=now(),public_ingress_ipv4=$2 WHERE id=$1`, node, ip)
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host=$2::text,state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',public_ingress_verified_at=now(),public_ingress_ipv4=$2::inet WHERE id=$1`, node, ip)
 }
 
 func newPinFixture(t *testing.T, withSibling bool) *pinFixture {
