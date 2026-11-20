@@ -65,7 +65,7 @@ func TestNativeTransportReachesTheSnapshot(t *testing.T) {
 	if paths["machine_direct"] != "direct/" || paths["machine_relay"] != "relay/eu-central" || paths["machine_idle"] != "none/" {
 		t.Fatalf("paths = %v", paths)
 	}
-	// The home relay this machine advertises (the selected one) is in pb status --json by node id, with its region label.
+	// The daemon's snapshot names the home relay by node id (renewals need it); pb status --json prints only its region (TestStatusJSONShowsTheHomeRelayRegionOnly).
 	if encoded, _ := json.Marshal(snapshot.HomeRelay); string(encoded) != `{"node_id":"relay_fra_2","region":"eu-central"}` {
 		t.Fatalf("home relay = %s", encoded)
 	}
