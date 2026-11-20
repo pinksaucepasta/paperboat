@@ -17,7 +17,6 @@ import (
 
 const CodeTTL = 15 * time.Minute
 const ClaimPort = 8443
-const MaxBodyBytes = 1 << 20
 
 var encoding = base64.RawURLEncoding.Strict()
 
