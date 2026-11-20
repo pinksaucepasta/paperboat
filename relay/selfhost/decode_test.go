@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // A claim carries the full JWKS and revocations, so it can exceed 1 MiB.
@@ -19,7 +21,7 @@ func TestDecodeAcceptsClaimLargerThanOneMiB(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/v1/selfhost/claim", bytes.NewReader(body))
 	var got ClaimRequest
-	if err := decode(w, r, &got); err != nil {
+	if err := decode(w, r, &got, connectorprotocol.MaximumSnapshotBytes); err != nil {
 		t.Fatalf("decode of a %d-byte claim failed: %v", len(body), err)
 	}
 	if len(got.ClaimID) != size {

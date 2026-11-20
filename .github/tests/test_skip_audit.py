@@ -106,6 +106,14 @@ class SkipAuditTest(unittest.TestCase):
         self.assertIn("panic: test timed out", out)
         self.assertIn("=== RUN   TestHangs", out)
 
+    def test_save_creates_missing_events_directory(self):
+        # The root-tests step ran after a failed static-analysis step skipped the only mkdir and crashed here.
+        with tempfile.TemporaryDirectory() as directory:
+            saved = Path(directory) / "gotest-events" / "root.jsonl"
+            subprocess.run([sys.executable, str(REPORT), "--save", str(saved)], input="", text=True,
+                           capture_output=True, check=True)
+            self.assertTrue(saved.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
