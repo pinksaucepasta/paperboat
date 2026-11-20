@@ -119,7 +119,7 @@ func repointWorkspaceDomains(ctx context.Context, tx *db.Tx, account string, tea
 
 // retargetDomains points every domain of a preview or tunnel at targets (host is the one its dns_target names,
 // empty for the managed name), resetting what was observed against the old target and bumping the generation
-// that fences observations still in flight. A domain already at the target is left alone.
+// that fences observations still in flight. A domain already at the target with the same records is left alone; a changed second address alone also retargets.
 func retargetDomains(ctx context.Context, tx *db.Tx, kind, id, endpoint, host string, targets []string) error {
 	target, err := publicationdns.Target(endpoint, host)
 	if err != nil {
@@ -130,7 +130,7 @@ func retargetDomains(ctx context.Context, tx *db.Tx, kind, id, endpoint, host st
 		domainTable, resourceColumn = "paperboat.tunnel_domains", "tunnel_id"
 	}
 	type domain struct{ id, hostname, provider string }
-	rows, err := tx.Query(ctx, `SELECT id,hostname,dns_provider FROM `+domainTable+` WHERE `+resourceColumn+`=$1 AND deleted_at IS NULL AND dns_target<>$2 FOR UPDATE`, id, target)
+	rows, err := tx.Query(ctx, `SELECT id,hostname,dns_provider FROM `+domainTable+` WHERE `+resourceColumn+`=$1 AND deleted_at IS NULL FOR UPDATE`, id)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func retargetDomains(ctx context.Context, tx *db.Tx, kind, id, endpoint, host st
 		// Ownership comes from the hostname's workspace domain, so a move keeps it verified.
 		if _, err = tx.Exec(ctx, `UPDATE `+domainTable+` SET dns_target=$2,expected_records=$3::jsonb,
             conflict_state='clear',quarantine_until=NULL,observed_records='[]'::jsonb,
-            generation=generation+1,updated_at=now() WHERE id=$1`, d.id, target, records); err != nil {
+            generation=generation+1,updated_at=now() WHERE id=$1 AND (dns_target<>$2 OR expected_records<>$3::jsonb)`, d.id, target, records); err != nil {
 			return err
 		}
 	}
