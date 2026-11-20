@@ -2,108 +2,69 @@ package runtime
 
 import (
 	"context"
-	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
+
+	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/edge/internal/edgehttp"
 )
 
-// An edge that stops (an install handover, or SIGTERM) first tells every carrier's host it is
-// going away, then keeps serving: a held stream finishes before the drain ends, and the drain
-// still ends at its deadline when a stream never does.
-func TestCarrierAssemblyDrainSendsGoawayAndWaitsForOpenStreams(t *testing.T) {
-	for _, mode := range []string{"stream finishes", "deadline"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			identity := datacarrier.Identity{AccountID: "account_1", HostID: "host_1", TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 1, Generation: 1}
-			config := datacarrier.DefaultConfig()
-			config.Identity = identity
-			config.Authorize = datacarrier.AuthorizerFunc(func(context.Context, datacarrier.Identity, datacarrier.StreamOpen) error { return nil })
-			edgeLink, hostLink := net.Pipe()
-			server, err := datacarrier.NewServer(ctx, edgeLink, config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			host, err := datacarrier.NewClient(ctx, hostLink, config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer host.Close()
-			handled := make(chan struct{})
-			var goaways atomic.Int32
-			assembly, err := NewCarrierAssembly(CarrierAssemblyConfig{
-				DrainMinimum: 200 * time.Millisecond,
-				Service:      newTelemetryCarrierService(server),
-				Handle: func(ctx context.Context, _ *datacarrier.Server) error {
-					close(handled)
-					<-ctx.Done()
-					return nil
-				},
-				Goaway: func(_ context.Context, got *datacarrier.Server, deadline time.Time) error {
-					if got != server || deadline.IsZero() {
-						t.Error("goaway for the wrong carrier or without a deadline")
-					}
-					goaways.Add(1)
-					return nil
-				},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := assembly.Start(ctx); err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = assembly.Shutdown(context.Background()) }()
-			<-handled
-			accepted := make(chan *datacarrier.Stream, 1)
-			go func() {
-				stream, _, err := host.AcceptStream(ctx)
-				if err == nil {
-					accepted <- stream
-				}
-			}()
-			open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: 1, Generation: 1, RouteID: "route_1", RequestID: "request_held", Kind: "http"}
-			held, err := server.OpenStream(ctx, open)
-			if err != nil {
-				t.Fatal(err)
-			}
-			hostSide := <-accepted
-			drained := make(chan struct{})
-			deadline := time.Now().Add(1500 * time.Millisecond)
-			go func() { assembly.Drain(ctx, deadline); close(drained) }()
-			select {
-			case <-drained:
-				t.Fatal("drain ended while a stream was still open")
-			case <-time.After(500 * time.Millisecond):
-			}
-			if goaways.Load() != 1 {
-				t.Fatalf("goaways = %d, want 1", goaways.Load())
-			}
-			if mode == "stream finishes" {
-				_ = held.Close()
-				_ = hostSide.Close()
-				select {
-				case <-drained:
-				case <-time.After(time.Second):
-					t.Fatal("drain did not end once the held stream finished")
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("drain waited for its deadline although the carrier was idle")
-				}
-				return
-			}
-			select {
-			case <-drained:
-				if time.Now().Before(deadline) {
-					t.Fatal("drain ended before its deadline with a stream open")
-				}
-			case <-time.After(3 * time.Second):
-				t.Fatal("drain outlived its deadline")
-			}
-		})
+// A node past its drain deadline stops listing its admissions. The edge then detaches the routes at once
+// but leaves the carrier open (the host ends it, or the process leaving does), and a node that is resumed
+// lists the admission again: the same carrier serves it with no reconnect. The region plan relies on both:
+// a machine keeps one carrier to every node of its two regions, whether or not the node is listed.
+func TestCarrierStaysOpenWhenItsAdmissionLeavesThePullAndServesAgainWhenItReturns(t *testing.T) {
+	a := runtimeAdmission(t)
+	source := &runtimeSourceFake{admissions: []runtimewire.Admission{a}}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: a.Binding.EdgeNodeID, ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: a.Binding.EdgeProcessEpoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, a.Binding.EdgeProcessEpoch), Interval: 20 * time.Millisecond, Timeout: time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err = w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 })
+	ea, err := control.ExpectedRuntimeAdmission(a, a.Binding.EdgeNodeID, a.Binding.EdgeProcessEpoch, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newTestCarrierServer(t, ea.Identity)
+	done := make(chan error, 1)
+	go func() { done <- w.Handle(ctx, server) }()
+	waitRuntime(t, func() bool { return routes.Len() == 1 })
+
+	source.mu.Lock()
+	source.admissions = nil // the node is past its drain deadline
+	source.mu.Unlock()
+	waitRuntime(t, func() bool { return routes.Len() == 0 })
+	source.pullsAfter(t, 3)
+	select {
+	case <-server.Done():
+		t.Fatal("the edge closed the carrier when its admission left the pull")
+	case err := <-done:
+		t.Fatalf("the carrier handler ended when its admission left the pull: %v", err)
+	default:
+	}
+
+	source.mu.Lock()
+	source.admissions = []runtimewire.Admission{a} // resumed
+	source.mu.Unlock()
+	waitRuntime(t, func() bool { return routes.Len() == 1 })
+	_ = server.Close()
+	select {
+	case <-done:
+	case <-time.After(runtimeWaitBound):
+		t.Fatal("handler leaked")
 	}
 }
