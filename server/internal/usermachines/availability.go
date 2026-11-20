@@ -146,7 +146,9 @@ func (s *Service) RecordAvailabilityObservation(ctx context.Context, environment
 	if environmentID == "" || userMachineID == "" || observation.Schema != AvailabilityPolicySchemaV1 || !validAvailabilityMode(observation.Mode) || observation.Version < 0 || observation.UpdateRollbacks < 0 || !validUpdateHealth(observation.UpdateHealth) || !validAvailabilityStatus(observation.Status) || observation.ObservedAt.IsZero() || len(observation.HostServiceVersion) > 128 || observation.HostServiceVersion == "" || observation.HostServiceScope != "system" || (observation.ErrorCode != "" && !safeAvailabilityCode.MatchString(observation.ErrorCode)) || observation.Status == "applied" && observation.ErrorCode != "" || observation.Status != "applied" && observation.ErrorCode == "" {
 		return ErrAvailabilityInvalid
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed: the report decides on the machine row it locks (FOR UPDATE reads its newest version) and writes
+	// under that lock, so a heartbeat that queues behind another write to the machine beats a 40001 replay.
+	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		machine, err := tx.Queries().GetUserMachineForEnvironmentBandwidthUpdate(ctx, environmentID)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && machine.ID != userMachineID {
 			return ErrNotFound

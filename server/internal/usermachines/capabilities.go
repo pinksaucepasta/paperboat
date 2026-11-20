@@ -150,7 +150,9 @@ func (s *Service) RecordMachineCapabilitiesObservation(ctx context.Context, mach
 	if machineID == "" || environmentID == "" || in.Schema != MachineCapabilitiesSchemaV1 || in.Version < 1 || in.ObservedAt.IsZero() || !slices.Contains([]string{"applied", "error"}, in.Status) || in.Status == "applied" && in.ErrorCode != "" || in.Status == "error" && !safeAvailabilityCode.MatchString(in.ErrorCode) {
 		return ErrCapabilitiesInvalid
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed: the report decides on the machine row it locks (FOR UPDATE reads its newest version) and writes
+	// under that lock, so a heartbeat that queues behind another write to the machine beats a 40001 replay.
+	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		machine, err := tx.Queries().GetUserMachineForEnvironmentBandwidthUpdate(ctx, environmentID)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && machine.ID != machineID {
 			return ErrCapabilitiesObservationStale
