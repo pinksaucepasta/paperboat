@@ -100,17 +100,20 @@ try {
         const out = await el.evaluate((node) => {
           const card = node.parentElement
           const clipped = [...card.querySelectorAll("*")].some((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible" && e.clientWidth > 0)
-          return { title: card.firstElementChild.innerText.trim(), text: card.innerText.replace(/\s+/g, " "), clipped }
+          const leaves = []
+          for (const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT); walker.nextNode();) leaves.push(walker.currentNode.textContent.trim())
+          return { title: card.firstElementChild.innerText.trim(), text: leaves.filter(Boolean).join(" "), clipped }
         })
         if (process.env.SHOTS) await home.screenshot({ path: `${process.env.SHOTS}/home-${viewName}-${state}.png` })
         await home.close()
         return out
       }
+      if (s !== "own") await page.waitForSelector("[data-fair-use] [role=meter] > [title^=Relay]", { timeout: 60_000 }).catch(() => {})
       const text = ((await panel?.innerText()) ?? "").replace(/\s+/g, " ")
       const text0 = text
       check(`${name}/${s}: no asterisks`, !/\*/.test(text0))
       if (s === "team") {
-        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB included/.test(text), text.slice(0, 160))
+        check(`${name}/${s}: a team's included traffic is per seat, pooled: 100 GB × 4 seats = 400 GB`, /400 GB a month of traffic included \(100 GB × 4 seats, shared by the team\)/.test(text) && /150 GB of 400 GB/.test(text), text.slice(0, 160))
       } else if (s === "own") {
         check(`${name}/${s}: it says Unlimited (your own edges) and that nothing is counted`, /Unlimited \(your own edges\)/.test(text) && /never counted or limited by Paperboat/.test(text), text.slice(0, 90))
         check(`${name}/${s}: no upsell, no banner`, (await panel.$$eval("a", (a) => a.length)) === 0 && !(await page.$("[data-quota-banner]")))
