@@ -9549,6 +9549,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/operations/host-health/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the latest host capacity or canary state
+         * @description Accepts at most 49152 request-body bytes and a payload of at most 32768. This route uses only its dedicated bearer and never accepts browser staff authority or CSRF.
+         */
+        post: operations["post_host_health_report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/host-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the latest host capacity and canary reports */
+        get: operations["get_admin_host_health"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/transactional-mails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator transactional-mails
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Lists mail that stayed undelivered after its retries (state failed).
+         */
+        get: operations["get_v1_admin_transactional_mails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/transactional-mails/{mail_id}/redrive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Requeue a failed transactional mail
+         * @description Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result.
+         */
+        post: operations["post_v1_admin_transactional_mails_mail_id_redrive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -12632,6 +12709,7 @@ export interface components {
             accounts: components["schemas"]["OperatorStateCount"][];
             billing_workspaces: components["schemas"]["OperatorStateCount"][];
             control_operations: components["schemas"]["OperatorStateCount"][];
+            transactional_mail: components["schemas"]["OperatorStateCount"][];
             /** Format: int64 */
             hosts: number;
             /** Format: int64 */
@@ -13082,6 +13160,27 @@ export interface components {
             registry_expires_at: string;
             ready: boolean;
             protocol_version: string;
+            /** @description Forwarding counters from the node's latest observation: an edge's visitor forwarding, a relay's mesh. Absent when the node reports none. */
+            forward?: {
+                /** Format: int64 */
+                links?: number;
+                /** Format: int64 */
+                names?: number;
+                /** Format: int64 */
+                forwarded?: number;
+                /** Format: int64 */
+                accepted?: number;
+                /** Format: int64 */
+                holder_miss?: number;
+                /** Format: int64 */
+                unreachable?: number;
+                /** Format: int64 */
+                loop_refused?: number;
+                /** Format: int64 */
+                bytes_in?: number;
+                /** Format: int64 */
+                bytes_out?: number;
+            };
         };
         OperatorNodePage: {
             items: components["schemas"]["OperatorNode"][];
@@ -15475,6 +15574,22 @@ export interface components {
             kind: string;
             items: components["schemas"]["OperatorTrafficNode"][];
             next_after?: string;
+        };
+        OperatorMailFailure: {
+            id: string;
+            invitation_id?: string;
+            /** Format: int64 */
+            attempts: number;
+            first_attempt_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        OperatorMailFailurePage: {
+            mails: components["schemas"]["OperatorMailFailure"][];
+            next_after?: string;
+            /** @description Rows matching the filters, capped at 100000 (total_capped true). */
+            total: number;
+            total_capped?: boolean;
         };
     };
     responses: {
@@ -38672,6 +38787,210 @@ export interface operations {
             };
             /** @description Operator session or capability required */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_host_health_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    source: "hosts" | "canary";
+                    payload: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The latest report of that source was replaced. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            status: "recorded";
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_admin_host_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest report of each source; a source that never reported is absent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            reports: {
+                                /** @enum {string} */
+                                source: "hosts" | "canary";
+                                payload: {
+                                    [key: string]: unknown;
+                                };
+                                /** Format: date-time */
+                                reported_at: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_admin_transactional_mails: {
+        parameters: {
+            query?: {
+                limit?: number;
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorMailFailurePage"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_transactional_mails_mail_id_redrive: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "Operator-Target": string;
+                "Operator-Reason": string;
+            };
+            path: {
+                mail_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Control operation requeued. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The mail is not in the failed list (it was sent, is retrying, or does not exist) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
