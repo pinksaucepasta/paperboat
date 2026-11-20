@@ -222,7 +222,7 @@ export function ManagedNodes() {
             cell: (n) => (
               <span className="inline-flex flex-wrap items-center gap-2">
                 <StatusBadge state={n.ready ? n.state : "stale"} />
-                {n.state === "ready" && n.in_dns === false && <Badge variant="outline" className="font-normal text-muted-foreground">Paused for load</Badge>}
+                {n.state === "ready" && n.in_rotation === false && <Badge variant="outline" className="font-normal text-muted-foreground">Paused for load</Badge>}
               </span>
             ),
           },
