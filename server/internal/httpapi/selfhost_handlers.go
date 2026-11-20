@@ -72,6 +72,12 @@ func selfhostError(w http.ResponseWriter, r *http.Request, e error) {
 		status, code, message = 409, "update_running", e.Error()
 	case expectedHTTPErrorOnly(e, selfhost.ErrUpdateUnavailable):
 		status, code, message = 503, "release_unavailable", "No published self-host release to update to; retry shortly."
+	case expectedHTTPErrorOnly(e, selfhost.ErrRegionExists):
+		status, code, message = 409, "region_exists", e.Error()
+	case expectedHTTPErrorOnly(e, selfhost.ErrRegionInUse):
+		status, code, message = 409, "region_in_use", e.Error()
+	case expectedHTTPErrorOnly(e, selfhost.ErrRegionNotFound):
+		status, code, message = 404, "region_not_found", "Region was not found."
 	case expectedHTTPErrorOnly(e, selfhost.ErrIncompatibleTopology):
 		status, code, message = 409, "selfhost_topology_incompatible", e.Error()
 	}
@@ -96,6 +102,42 @@ func selfhostDecode(body []byte, v any) error {
 	}
 	return nil
 }
+
+// selfhostDecodeStrict is selfhostDecode that also refuses a field the request does not define.
+func selfhostDecodeStrict(body []byte, v any) error {
+	d := json.NewDecoder(bytes.NewReader(body))
+	d.DisallowUnknownFields()
+	if d.Decode(v) != nil || d.Decode(&struct{}{}) != io.EOF {
+		return selfhost.ErrInvalid
+	}
+	return nil
+}
+
+// regionBody is the body of a region create or rename; the scope may instead come from the query like any other
+// self-host request, and the two must agree when both are given.
+type regionBody struct {
+	Name  string         `json:"name"`
+	Scope selfhost.Scope `json:"scope"`
+}
+
+func (h *SelfhostHandlers) regionWrite(w http.ResponseWriter, r *http.Request, scope selfhost.Scope) (regionBody, selfhost.Scope, error) {
+	var in regionBody
+	b, err := selfhostRead(w, r)
+	if err == nil {
+		err = selfhostDecodeStrict(b, &in)
+	}
+	if err != nil {
+		return in, scope, err
+	}
+	if in.Scope.Kind != "" || in.Scope.ID != "" {
+		if scope.Kind != "" && scope != in.Scope {
+			return in, scope, selfhost.ErrInvalid
+		}
+		scope = in.Scope
+	}
+	return in, scope, nil
+}
+
 func (h *SelfhostHandlers) Account(w http.ResponseWriter, r *http.Request) { h.handle(w, r, false) }
 func (h *SelfhostHandlers) Global(w http.ResponseWriter, r *http.Request)  { h.handle(w, r, true) }
 func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operator bool) {
@@ -129,7 +171,27 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 	}
 	var out any = map[string]any{}
 	var e error
+	status := 200
 	switch {
+	case operator && (strings.HasSuffix(r.URL.Path, "/regions") || r.PathValue("regionID") != ""):
+		e = selfhost.ErrInvalid
+	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/regions"):
+		out, e = h.Service.ListRegions(r.Context(), actor, scope)
+	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/regions"):
+		var in regionBody
+		in, scope, e = h.regionWrite(w, r, scope)
+		if e == nil {
+			out, e = h.Service.CreateRegion(r.Context(), actor, scope, in.Name)
+			status = 201
+		}
+	case r.Method == "PATCH" && r.PathValue("regionID") != "":
+		var in regionBody
+		in, scope, e = h.regionWrite(w, r, scope)
+		if e == nil {
+			out, e = h.Service.RenameRegion(r.Context(), actor, scope, r.PathValue("regionID"), in.Name)
+		}
+	case r.Method == "DELETE" && r.PathValue("regionID") != "":
+		e = h.Service.DeleteRegion(r.Context(), actor, scope, r.PathValue("regionID"))
 	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/enrollments"):
 		var b []byte
 		b, e = selfhostRead(w, r)
@@ -209,7 +271,7 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 		selfhostError(w, r, e)
 		return
 	}
-	selfhostJSON(w, 200, map[string]any{"data": out})
+	selfhostJSON(w, status, map[string]any{"data": out})
 }
 
 // drainOrResume reads {"move":bool} (drain) or {} (resume) and returns the installation.

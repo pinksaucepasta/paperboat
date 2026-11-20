@@ -417,6 +417,10 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("PUT /v1/edges/pair", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, requireWorkspaceSelection(opts.Workspaces, edgePairPut(opts.Selfhost.Service))))))
 			}
 			mux.Handle("POST /v1/selfhost/enrollments", write)
+			mux.Handle("GET /v1/selfhost/regions", read)
+			mux.Handle("POST /v1/selfhost/regions", write)
+			mux.Handle("PATCH /v1/selfhost/regions/{regionID}", write)
+			mux.Handle("DELETE /v1/selfhost/regions/{regionID}", write)
 			mux.Handle("GET /v1/selfhost/installations", read)
 			mux.Handle("GET /v1/selfhost/installations/{installationID}", read)
 			mux.Handle("DELETE /v1/selfhost/installations/{installationID}", write)
