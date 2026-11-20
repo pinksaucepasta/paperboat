@@ -51,6 +51,19 @@ func TestAttachLatencyOfRenewingFleetOnPostgres(t *testing.T) {
 			_, _ = f.database.SQL().ExecContext(f.ctx, q, f.prefix)
 		}
 	})
+	// Real edges heartbeat every few seconds; an edge silent for ~40 s is not eligible and every attach would be unavailable.
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		for tick := time.NewTicker(5 * time.Second); ; {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				_, _ = f.database.SQL().ExecContext(f.ctx, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now(),capacity_observed_at=now() WHERE id IN ($1,$2)`, f.node, f.backupNode)
+			}
+		}
+	}()
 	var mu sync.Mutex
 	var durations []time.Duration
 	var wg sync.WaitGroup
