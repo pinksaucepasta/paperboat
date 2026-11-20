@@ -6,6 +6,9 @@ package previewtunnelstore
 
 import (
 	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
@@ -52,5 +55,23 @@ func VerifyLazyPreviewLeaseTx(ctx context.Context, tx *db.Tx, b LazyLeaseAuthori
 	if b.OwnerSessionKind != "lazy_runtime" {
 		return false, ErrOwnerNotFound
 	}
-	return verifyPreviewMachineAuthority(tx.QueryRow(ctx, lazyLeaseAuthoritySQL, lazyAuthorityArgs(b)...), "private")
+	// Lock the activation before its waiters, the same order as the activation claim.
+	var activation string
+	if err := tx.QueryRow(ctx, `SELECT a.activation_id FROM lazy_activations a JOIN lazy_access_policies p ON p.id=a.policy_id
+ WHERE p.account_id=$1 AND p.machine_id=$2 AND a.owner_session_id=$3 ORDER BY a.policy_id FOR SHARE OF a`,
+		b.AccountID, b.MachineID, b.OwnerSessionID).Scan(&activation); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrOwnerNotFound
+		}
+		return false, err
+	}
+	var waiter string
+	if err := tx.QueryRow(ctx, `SELECT waiter_id FROM lazy_activation_waiters
+ WHERE activation_id=$1 AND expires_at>now() ORDER BY waiter_id LIMIT 1 FOR SHARE`, activation).Scan(&waiter); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrOwnerNotFound
+		}
+		return false, err
+	}
+	return verifyPreviewMachineAuthority(tx.QueryRow(ctx, lazyLeaseAuthoritySQL+` FOR SHARE OF p,r`, lazyAuthorityArgs(b)...), "private")
 }

@@ -193,7 +193,7 @@ type ReconcilePreviewLeasesV1Result struct {
 
 var ErrPreviewPublicationDenied = errors.New("machine management does not authorize public publication")
 
-// Twin of tunnelv1 verifyHostWithQueries, kept separate: a preview host must be online, a tunnel host needs an identity key; no row lock here because SERIALIZABLE covers the revoke race and a lock would serialize preview creates per machine.
+// Twin of tunnelv1 verifyHostWithQueries, kept separate: a preview host must be online, a tunnel host needs an identity key; the creation transaction locks the machine before evaluating this predicate.
 const previewMachineAuthoritySQL = `SELECT m.user_id<>$1 OR m.owner_team_id IS NOT NULL
  FROM paperboat.user_machines m WHERE m.id=$2 AND (NOT $3::boolean OR (m.state='online' AND m.online))
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL
@@ -342,12 +342,26 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 		return CreatePreviewLeaseV1Result{}, lockErr
 	}
 	defer unlock()
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// The team fence protects grants and membership, and the machine lock protects the host
+	// authorization and orders this create against carrier writes across server processes.
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		ws, selected := workspace.FromContext(ctx)
 		if err := teams.LockFor(ctx, tx, ws.TeamID); err != nil {
 			return err
 		}
+		var machineID string
+		if err := tx.QueryRow(ctx, `SELECT id FROM user_machines WHERE id=$1 FOR NO KEY UPDATE`, input.OwnerMachineID).Scan(&machineID); errors.Is(err, pgx.ErrNoRows) {
+			return ErrOwnerNotFound
+		} else if err != nil {
+			return err
+		}
 		if selected {
+			var actorID string
+			if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id=$1 AND status='active' FOR SHARE`, input.AccountID).Scan(&actorID); errors.Is(err, pgx.ErrNoRows) {
+				return workspace.ErrForbidden
+			} else if err != nil {
+				return err
+			}
 			if err := workspace.ValidateTx(ctx, tx, input.AccountID, ws); err != nil {
 				return err
 			}
@@ -414,6 +428,9 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 			return err
 		}
 
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1885686843)`); err != nil {
+			return err
+		}
 		_, err = q.CreatePreviewLease(ctx, dbsqlc.CreatePreviewLeaseParams{
 			ID: input.LeaseID, Endpoint: input.Endpoint,
 			AccountID: input.AccountID, OwnerTeamID: nullableText(ws.TeamID), ActorID: input.ActorID, OwnerMachineID: input.OwnerMachineID,
