@@ -49,6 +49,8 @@ const (
 	MetricPreviewLeaseCleanup       = "paperboat_edge_preview_lease_cleanup_total"
 	MetricOperationIdempotencyReuse = "paperboat_edge_operation_idempotency_reuse_total"
 	MetricOperationConflicts        = "paperboat_edge_operation_conflicts_total"
+	// MetricForward counts visitors this edge forwarded to another managed node, by outcome (edge/internal/forward).
+	MetricForward = "paperboat_edge_forward_total"
 )
 
 var localMetricDescriptors = []sharedmetrics.Descriptor{
@@ -91,6 +93,7 @@ var localMetricDescriptors = []sharedmetrics.Descriptor{
 	{Name: MetricPreviewAllocations, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "outcome", AllowedValues: sharedmetrics.PreviewAllocationOutcomes()}}},
 	{Name: MetricPreviewLeaseCleanup, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "reason", AllowedValues: []string{"stop", "expiry", "owner_lost", "edge_lost", "shutdown", "unknown"}}}},
 	{Name: MetricOperationIdempotencyReuse, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "operation", AllowedValues: []string{"create", "update", "delete", "reconcile", "certificate", "access"}}}},
+	{Name: MetricForward, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "outcome", AllowedValues: []string{"forwarded", "holder_miss", "unreachable", "loop_refused", "refused"}}}},
 	{Name: MetricOperationConflicts, Kind: sharedmetrics.Counter, Labels: []sharedmetrics.LabelDescriptor{{Name: "operation", AllowedValues: []string{"create", "update", "delete", "reconcile", "certificate", "access"}}}},
 }
 

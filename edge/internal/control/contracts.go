@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"strings"
 	"time"
@@ -281,6 +282,8 @@ type NodeObservation struct {
 	Refusals []HostRefusals `json:"refusals,omitempty"`
 	// Metrics is this edge's version, CPU, memory and bytes carried since it started (nodemetrics.Report).
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
+	// Forward counts what this edge forwarded to, and accepted from, other managed nodes (edge/internal/forward).
+	Forward *nodemesh.Stats `json:"forward,omitempty"`
 }
 
 // HostRefusals is how many requests or connections to one hostname the edge refused for flood protection.
