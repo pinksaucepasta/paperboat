@@ -248,9 +248,10 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if endpointRoute.EndpointID != lease || endpointRoute.Hostname != host || endpointRoute.AccessMode != "team" || endpointRoute.RouteKind != runtimewire.EndpointRestrictedRouteKind {
 		t.Fatalf("endpoint admission = %+v", endpointRoute)
 	}
-	// Same carrier identity as the runtime route, its own route id.
-	if endpointRoute.Binding.SessionID != a.Binding.SessionID || endpointRoute.Binding.TunnelID != a.Binding.TunnelID || endpointRoute.Binding.RouteID != lease || endpointRoute.RouteRevision != endpointRoute.Binding.RouteGeneration {
-		t.Fatalf("endpoint route does not ride on the runtime carrier: %+v vs %+v", endpointRoute.Binding, a.Binding)
+	// Same carrier identity as the runtime route on this edge, its own route id.
+	onEdge := carrierOn(t, a, edge.NodeID)
+	if endpointRoute.Binding.SessionID != onEdge.Binding.SessionID || endpointRoute.Binding.TunnelID != onEdge.Binding.TunnelID || endpointRoute.Binding.RouteID != lease || endpointRoute.RouteRevision != endpointRoute.Binding.RouteGeneration {
+		t.Fatalf("endpoint route does not ride on the runtime carrier: %+v vs %+v", endpointRoute.Binding, onEdge.Binding)
 	}
 	// The fast endpoint-only pull carries exactly the endpoint routes of the snapshot.
 	if fast, err := service.PullEndpoints(ctx, edge, []string{runtimewire.CapabilityEndpoints}, "", "", 0); err != nil || !fast.Complete || fast.Admissions == nil || len(*fast.Admissions) != 1 || (*fast.Admissions)[0].EndpointID != lease || (*fast.Admissions)[0].Binding.RouteID != endpointRoute.Binding.RouteID {
@@ -260,7 +261,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatalf("unknown edge capability accepted: %v", err)
 	}
 	observation := runtimewire.Observation{RouteID: endpointRoute.Binding.RouteID, SessionID: endpointRoute.Binding.SessionID, AttachmentGeneration: endpointRoute.AttachmentGeneration, Ready: true}
-	runtimeObservation := runtimewire.Observation{RouteID: f.route, SessionID: a.Binding.SessionID, AttachmentGeneration: a.AttachmentGeneration, Ready: true}
+	runtimeObservation := runtimewire.Observation{RouteID: f.route, SessionID: onEdge.Binding.SessionID, AttachmentGeneration: onEdge.AttachmentGeneration, Ready: true}
 	if err := service.Observe(ctx, edge, []runtimewire.Observation{runtimeObservation, observation}); err != nil {
 		t.Fatal(err)
 	}
