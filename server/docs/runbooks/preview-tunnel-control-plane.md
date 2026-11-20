@@ -31,9 +31,33 @@ hostnames.
 
 Managed tunnel, preview and runtime hostnames are covered by DNS-only wildcards (`*.pprbt.app`, `*.runtime.pprbt.dev`)
 that list every managed edge; the server publishes no per-hostname records for them, and a custom domain's CNAME
-points at the resource's own managed name. Edges do not forward, so a route is reported ready only when every live
-edge serves it. When an edge dies or is drained for good, remove its A (and AAAA) record from both wildcards by hand:
-the wildcards are static, so until you do, about half of new connections go to the dead edge.
+points at the resource's own managed name. Edges do not forward, and a machine holds a carrier to every ready node of
+its workspace's two regions, so a visitor may land on any edge.
+
+With `PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS=true` the server keeps both wildcards itself (owner
+`edge_wildcard:<name>`, every 10 s on the worker leader): the A/AAAA records are the verified public ingress addresses
+of every managed edge that is `ready`, not draining, has a heartbeat under 15 s, is registered and sits in an enabled
+region. A node that dies, is drained or retired leaves the set on the next tick; a node that becomes ready (and has
+passed `verify-ingress`) joins it. The server never publishes an empty set: with no ready edge it logs
+`edge_wildcard_dns_empty` and leaves the old records. Nothing to remove by hand any more.
+
+One-time step before the first enable: the existing hand-made wildcard A/AAAA records are not Paperboat-owned, so the
+first publication fails with a conflict until they are deleted. Delete the A and AAAA records of both wildcards in the
+DNS zone, then set the flag and restart the server; the first sync writes them back (one record per 10 s tick, so a set
+of three edges takes about a minute, during which visitors reach only the records already written).
+
+## Move a region to a bigger machine
+
+Enrol the new node into the same region, so the region briefly has two nodes, and swap without a gap:
+
+1. Enrol the new machine in the region (`POST /v1/admin/nodes/{node_id}/enroll`) and wait until it is `ready`.
+2. `verify-ingress` on the new node; it joins the wildcards on the next tick and machines attach to it.
+3. **Drain** the old node (`drain`, or `drain-move` to push its machines off now, see operator-admin.md). It leaves the
+   wildcards at once.
+4. Watch `carriers` on the old node (`GET /v1/admin/nodes`) fall to 0.
+5. **Retire** the old node and remove the machine.
+
+Do not retire first: with one node in the region the region has no edge until the new one is ready.
 
 ## Public TCP tunnel ports on the edges
 
