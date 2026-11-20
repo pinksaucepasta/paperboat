@@ -3,6 +3,7 @@ package serverclock
 import (
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -48,28 +49,32 @@ func TestMeasureNamesWhyItCannot(t *testing.T) {
 // X-27: a machine whose clock was 10 minutes fast and is then set back must not keep judging by the old
 // offset until some unrelated response: the step makes it ask the server for its time at once.
 func TestAClockSetBackMakesItAskTheServerAgain(t *testing.T) {
+	var calls atomic.Int32
 	asked := make(chan struct{}, 4)
-	SetRemeasure(func() { asked <- struct{}{} })
-	realWall := wallNano
+	SetRemeasure(func() { calls.Add(1); asked <- struct{}{} })
+	realWall, realIn := wallNano, remeasureIn
 	t.Cleanup(func() {
-		wallNano = realWall
+		wallNano, remeasureIn = realWall, realIn
 		remeasure.Store(nil)
 		offset.Store(0)
 		learned.Store(nil)
 		remeasured.Store(nil)
 	})
+	// The ask is started inside Offset: remeasured is set before the goroutine runs, so it is a race-free verdict
+	// on "was the server asked" where a channel read with no wait could not tell "no" from "not yet".
 	sent := time.Now()
 	Observe(sent.Add(-10*time.Minute).UTC().Format(http.TimeFormat), sent, sent.Add(100*time.Millisecond)) // local clock 10 min fast
 	if got := Offset(); got > -9*time.Minute-50*time.Second || got < -10*time.Minute-10*time.Second {
 		t.Fatalf("offset=%v", got)
 	}
-	select {
-	case <-asked:
+	if remeasured.Load() != nil {
 		t.Fatal("asked the server again without a clock step")
-	default:
 	}
 	wallNano = func() int64 { return realWall() - int64(10*time.Minute) } // the local clock is set back to the real time
 	_ = Offset()
+	if remeasured.Load() == nil {
+		t.Fatal("the clock step did not start a new ask")
+	}
 	select {
 	case <-asked:
 	case <-time.After(30 * time.Second):
@@ -81,10 +86,16 @@ func TestAClockSetBackMakesItAskTheServerAgain(t *testing.T) {
 	if got := Offset(); got != 0 {
 		t.Fatalf("offset after the answer: %v", got)
 	}
-	_ = Offset()
-	select {
-	case <-asked:
-		t.Fatal("asked again after the answer")
-	default:
+	// With the 10 s throttle lifted, only the absence of a step can keep Offset from asking again.
+	remeasureIn = 0
+	answered := remeasured.Load()
+	for range 3 {
+		_ = Offset()
+	}
+	if remeasured.Load() != answered {
+		t.Fatal("asked again after the answer without a new step")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("the server was asked %d times, want exactly 1", n)
 	}
 }
