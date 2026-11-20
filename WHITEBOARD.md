@@ -376,3 +376,10 @@ Measured on prod 2026-11-19 (server log "peer network configuration slow"): 2,18
 
 ## Next server deploy after this release: drop recipes.source_format
 Migration 447 made `recipes.source_format` optional (the server no longer writes it: one HuJSON file format). The server of the deploy that ships 447 no longer reads the column either; the migration that drops the column ships one deploy later (AGENTS.md: a column the previous server reads is dropped one deploy after the code stops reading it): `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.recipes DROP COLUMN source_format;` (forward-only Down).
+
+## Edge and relay regions by where machines are — after launch (user 2026-11-20)
+
+- Launch with one edge+relay region in the US and one in the EU; add the next region (likely Singapore for Asia/India) when machines there reach about 10–15% of active machines.
+- Record a country per machine and per sign-up: GeoIP of the connecting public IP at enrollment/attach (store the country only, never the address); admin shows active machines and sign-ups by country. Today nothing stores a location (`users`, `user_machines` have no country; PostHog GeoIP is on for the marketing site only).
+- Relays need no change: machines already measure every relay and pick the best (`cli/internal/peertransport/tailnet/regional_selection.go`).
+- Edges do: an account's edge pair is chosen when its first machine attaches and kept while healthy (`server/internal/edgeset/reconcile.go` `EnsureTx`, `select.go` `choose`), so a new closer edge only gets new accounts. Move existing accounts make-before-break: the machine opens a carrier to the new edge, the new edge serves once its previews/tunnels are ready, the old one drains its open requests and is dropped. Prior art: cloudflared keeps several connections to different colos and replaces them one at a time. Test: a preview keeps serving during the move.
