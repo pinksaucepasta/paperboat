@@ -77,7 +77,7 @@ func (p *Progress) Register(name string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, exists := p.entries[name]; !exists && len(p.entries) < 32 {
+	if _, exists := p.entries[name]; !exists { // bounded by progressNames: the list is the cardinality limit
 		p.entries[name] = &progressEntry{registered: p.now()}
 	}
 }
