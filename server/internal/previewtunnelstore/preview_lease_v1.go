@@ -596,7 +596,11 @@ func (s *Store) StopPreviewLeaseV1(ctx context.Context, input StopPreviewLeaseV1
 	}
 	now := input.Now.UTC()
 	var result StopPreviewLeaseV1Result
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed: AdvancePreviewLeaseLifecycleV1 is the lease's owner/session/generation CAS (it locks the row and
+	// re-checks them on the newest version), the operation key is unique, and the domain and certificate withdrawals are
+	// fenced by the generation it yields, as in RenewPreviewLeaseV1.
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		result = StopPreviewLeaseV1Result{}
 		if _, selected := workspace.FromContext(ctx); selected {
 			if err := teams.Lock(ctx, tx); err != nil {
 				return err
@@ -840,7 +844,11 @@ func (s *Store) ReconcilePreviewLeasesV1(ctx context.Context, input ReconcilePre
 	}
 	now := input.Now.UTC()
 	var result ReconcilePreviewLeasesV1Result
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed: both batch queries claim their leases FOR UPDATE SKIP LOCKED (a lease being renewed or stopped is
+	// left for the next pass, and a claimed one is re-checked against its newest version), so concurrent passes and
+	// writers never abort each other.
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		result = ReconcilePreviewLeasesV1Result{}
 		q := tx.Queries()
 		expiredIDs, err := q.ExpirePreviewLeasesV1(ctx, dbsqlc.ExpirePreviewLeasesV1Params{Now: sql.NullTime{Time: now, Valid: true}, OwnerCutoff: now.Add(-input.OwnerGrace), RowLimit: input.Limit})
 		if err != nil {

@@ -185,6 +185,7 @@ WITH candidates AS (
       AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.updated_at <= $2))
   ORDER BY LEAST(source.lease_deadline, COALESCE(source.user_deadline, source.lease_deadline)), source.id
   LIMIT $3
+  FOR UPDATE OF source SKIP LOCKED
 )
 UPDATE preview_leases AS p
 SET allocation_state = 'released',
@@ -538,6 +539,7 @@ WITH candidates AS (
         AND (m.revoked_at IS NOT NULL OR m.deleted_at IS NOT NULL))))
   ORDER BY source.owner_last_seen_at, source.id
   LIMIT $4
+  FOR UPDATE OF source SKIP LOCKED
 )
 UPDATE preview_leases AS p
 SET allocation_state = 'released',
