@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,7 +18,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 const (
@@ -73,7 +71,7 @@ func Begin(ctx context.Context, tx *db.Tx, node string, move bool) error {
  JOIN paperboat.relay_subject_sets s ON s.node_id=n.id AND s.process_epoch=n.process_epoch AND s.node_generation=n.node_generation
  CROSS JOIN LATERAL jsonb_array_elements(s.subjects) e
  JOIN paperboat.users u ON u.id=e->>'account_id'
- WHERE n.id=$1 LIMIT `+strconv.Itoa(relaylimits.MaxConnectionsPerNode)+`
+ WHERE n.id=$1
  ON CONFLICT (node_id,account_id) DO UPDATE SET close_at=LEAST(paperboat.relay_pool_handovers.close_at,excluded.close_at)`, node)
 	if err != nil {
 		return fmt.Errorf("list relay handovers: %w", err)
