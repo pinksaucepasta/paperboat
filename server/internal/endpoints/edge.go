@@ -166,6 +166,7 @@ WHERE x.route_id=$1 AND x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.carr
 UPDATE endpoint_edge_assignments x SET observed_ready=a.want,observed_at=now()
 FROM assignment a WHERE (a.observed_ready IS DISTINCT FROM a.want OR a.observed_at IS NULL OR a.observed_at<now()-$7::interval)
  AND x.route_id=a.route_id AND x.edge_node_id=a.edge_node_id
+ AND x.edge_process_epoch=$3 AND x.carrier_session_id=$4 AND x.generation=$5
 RETURNING x.route_id
 ), logged AS (
 INSERT INTO tunnel_log_entries(id,account_id,tunnel_id,route_id,level,component,code,message,metadata,correlation_id,occurred_at)

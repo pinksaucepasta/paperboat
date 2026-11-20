@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -161,11 +162,29 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 	}
 	now := s.clock().UTC()
 	detachedCount := int64(0)
+	observations = slices.Clone(observations)
+	slices.SortStableFunc(observations, func(a, b RouteObservation) int { return strings.Compare(a.RouteID, b.RouteID) })
+	var tunnelRoutes []string
+	for _, observation := range observations {
+		if observation.ConfigGeneration > 0 && endpoints.IsTunnelAssignmentID(observation.AssignmentID) {
+			tunnelRoutes = append(tunnelRoutes, observation.RouteID)
+		}
+	}
 	// Read committed: every write below is fenced by its own WHERE (assignment generation, edge epoch, carrier session,
 	// route revision), and the health summary is recomputed by every report, so a report that queues behind another
 	// write to the same rows beats a 40001 replay (prod 2026-11-20: ObserveTx against attaches and reconciles).
 	err := s.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		detachedCount = 0
+		// Tunnel edits lock the tunnel before its assignments. Lock the batch's tunnels
+		// in ID order before recording any observation or refreshing their health.
+		if len(tunnelRoutes) != 0 {
+			if _, err := tx.Exec(ctx, `SELECT id FROM tunnels WHERE id IN (
+ SELECT e.tunnel_id FROM endpoint_routes r JOIN endpoints e ON e.id=r.endpoint_id
+ WHERE r.id=ANY($1::text[]) AND e.kind='tunnel')
+ ORDER BY id FOR NO KEY UPDATE`, tunnelRoutes); err != nil {
+				return err
+			}
+		}
 		// Legacy routes have one observation per route ID. Canonical route
 		// replacement deliberately reports the new and old assignment for the
 		// same route in one batch, so its idempotency key is the immutable

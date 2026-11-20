@@ -21,8 +21,11 @@ type healthExecutor interface {
 // sent first requests to an edge without the route (F8-06). The expiry
 // reconciler retains ownership of persisting expired summary/audit state.
 func RefreshHealth(ctx context.Context, executor healthExecutor, accountID string, tunnelIDs []string, now time.Time) error {
-	_, err := executor.Exec(ctx, `WITH health AS (
- SELECT t.id, CASE WHEN t.desired_state='deleted' THEN 'deleted'
+	_, err := executor.Exec(ctx, `WITH locked AS MATERIALIZED (
+ SELECT t.id,t.account_id,t.desired_state,t.expires_at FROM tunnels t
+ WHERE t.account_id=$1 AND t.id=ANY($2::text[]) ORDER BY t.id FOR NO KEY UPDATE OF t
+ ), health AS (
+ SELECT t.id,t.desired_state,CASE WHEN t.desired_state='deleted' THEN 'deleted'
  WHEN t.expires_at IS NOT NULL AND t.expires_at<=$3 THEN 'expired'
  WHEN t.desired_state='paused' THEN 'paused'
  WHEN paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only'
@@ -33,25 +36,21 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  WHEN count(r.id)>0 AND bool_and(coalesce(probe.ready,false)) THEN 'ready'
  WHEN bool_or(coalesce(probe.failed,false)) THEN 'route_unavailable'
  ELSE 'pending' END AS code
- FROM tunnels t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
+ FROM locked t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
  LEFT JOIN LATERAL (SELECT bool_and(paperboat.endpoint_route_ready(er.id,$3)) AS ready, false AS failed
  FROM endpoint_routes er JOIN endpoints e ON e.id=er.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
  WHERE er.tunnel_route_id=r.id) probe ON true
- WHERE t.account_id=$1 AND t.id=ANY($2::text[]) GROUP BY t.id
+ GROUP BY t.id,t.account_id,t.desired_state,t.expires_at
  ), updated AS (
  -- Edges report every few seconds; only a changed summary is written. Pending operations are settled from the
  -- projected health below, whether or not the summary changed.
  UPDATE tunnels t SET summary_code=h.code,summary_transitioned_at=$3
  FROM health h WHERE t.id=h.id AND h.code<>'expired' AND t.summary_code IS DISTINCT FROM h.code RETURNING t.id
- ), projected AS (
- SELECT t.id,h.code AS summary_code,t.desired_state FROM tunnels t JOIN health h ON h.id=t.id
- )
- UPDATE operations o SET state=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'succeeded' END,
- phase=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'ready' END,progress=100,retrying=false,next_retry_at=NULL,
- error_code=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'tunnel_expired' ELSE NULL END,completed_at=$3,updated_at=$3
- FROM projected t WHERE o.account_id=$1 AND o.resource_kind='tunnel' AND o.resource_id=t.id
+ ), pending AS (
+ SELECT o.id,t.code AS summary_code
+ FROM operations o JOIN health t ON t.id=o.resource_id WHERE o.account_id=$1 AND o.resource_kind='tunnel'
  AND o.state IN ('pending','running') AND (
- ((t.summary_code='expired' OR t.summary_code IN ('ready','origin_unreachable')
+ ((t.code='expired' OR t.code IN ('ready','origin_unreachable')
  -- An address change is done when the old name stops serving: SettleAddressMoves drops the hold, the next probe settles it.
  AND NOT EXISTS(SELECT 1 FROM paperboat.tunnel_address_holds h WHERE h.tunnel_id=t.id AND h.kind='incoming' AND h.operation_id=o.id)) AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch'))
  OR (t.desired_state IN ('paused','deleted') AND o.operation_type=CASE t.desired_state WHEN 'paused' THEN $5::text ELSE $6::text END
@@ -61,7 +60,13 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  AND NOT EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE n.state='ready' AND n.ready AND n.roles @> ARRAY['edge']::text[]
  AND n.tunnel_endpoints_epoch=n.process_epoch AND n.drain_deadline IS NULL AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
  AND (n.tunnel_snapshot_at IS NULL OR n.tunnel_snapshot_at<o.updated_at+interval '1 second')))
- )`, accountID, tunnelIDs, now, "tunnel."+stateOperationName(DesiredActive), "tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), OriginHealthMaxAge.Seconds())
+ )
+ ORDER BY o.resource_id,o.id FOR NO KEY UPDATE OF o
+ )
+ UPDATE operations o SET state=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'succeeded' END,
+ phase=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'failed' ELSE 'ready' END,progress=100,retrying=false,next_retry_at=NULL,
+ error_code=CASE WHEN t.summary_code='expired' AND o.operation_type IN ('tunnel.create',$4::text,'tunnel.patch') THEN 'tunnel_expired' ELSE NULL END,completed_at=$3,updated_at=$3
+ FROM pending t WHERE o.id=t.id`, accountID, tunnelIDs, now, "tunnel."+stateOperationName(DesiredActive), "tunnel."+stateOperationName(DesiredPaused), "tunnel."+stateOperationName(DesiredDeleted), OriginHealthMaxAge.Seconds())
 	return err
 }
 
