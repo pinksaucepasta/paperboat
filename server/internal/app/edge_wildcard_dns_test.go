@@ -136,9 +136,9 @@ func TestEdgeWildcardDropsDrainingNode(t *testing.T) {
 	f := newWildcardFixture(t)
 	on := "wc_on_" + f.stamp
 	f.node("a", "203.0.113.1", "", on, "")
-	drained := f.node("b", "203.0.113.2", "", on, "")
+	drained := f.node("b", "203.0.113.2", "2001:db8::2", on, "")
 	f.sync()
-	f.want("203.0.113.1", "203.0.113.2")
+	f.want("203.0.113.1", "203.0.113.2", "2001:db8::2")
 	f.public.reset()
 	f.runtime.reset()
 	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()+interval '10 minutes' WHERE id=$1`, drained)
