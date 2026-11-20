@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // C020 (round 9, Linux test machine): `pb doctor` right after `pb setup` said "degraded" for a daemon that was only
@@ -28,10 +29,14 @@ func TestAStartingDaemonMakesTheReportStartingNotDegraded(t *testing.T) {
 	}
 }
 
-func TestReportCarriesTheHomeRelayByNodeID(t *testing.T) {
-	encoded, err := json.Marshal(Report{Schema: SchemaV1, HomeRelay: &HomeRelay{NodeID: "relay_a", Region: "india"}})
-	if err != nil || !strings.Contains(string(encoded), `"home_relay":{"node_id":"relay_a","region":"india"}`) {
+func TestReportProjectsHomeRelayRegionOnly(t *testing.T) {
+	report := Report{Schema: SchemaV1, CorrelationID: "corr-1", CheckedAt: time.Now(), Overall: "healthy", Checks: []Check{{Category: "daemon", Code: "a", Status: StatusPass, Summary: "ok"}}, HomeRelay: &HomeRelay{Region: "india"}}
+	encoded, err := json.Marshal(report)
+	if err != nil || !strings.Contains(string(encoded), `"home_relay":{"region":"india"}`) || strings.Contains(string(encoded), "node_id") {
 		t.Fatalf("report = %s (%v)", encoded, err)
+	}
+	if err := report.Validate(); err != nil {
+		t.Fatalf("a region-only home relay is rejected: %v", err)
 	}
 	if encoded, _ = json.Marshal(Report{Schema: SchemaV1}); strings.Contains(string(encoded), "home_relay") {
 		t.Fatalf("a report without a home relay names one: %s", encoded)
