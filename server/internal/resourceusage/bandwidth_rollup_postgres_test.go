@@ -26,7 +26,7 @@ func TestRolledUpBandwidthHistoryReadsTheSameAsTheRawRowsPostgres(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 	if err := db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
