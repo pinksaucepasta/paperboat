@@ -65,7 +65,7 @@ type MeshConfig struct {
 }
 
 // Memory bounds of one Mesh, constants of the mesh itself: maxMeshHolders is the remote route keys a relay keeps (each a
-// 32-byte key and a pointer, about 100 MB in all), maxRemoteGrants the fetched sender grants (each up to 256 memberships).
+// 32-byte key and a slice of the few links announcing it, about 150 MB in all), maxRemoteGrants the fetched sender grants (each up to 256 memberships).
 const (
 	maxMeshHolders  = 1 << 20
 	maxRemoteGrants = 1 << 14
@@ -81,9 +81,11 @@ type Mesh struct {
 	peerSet             atomic.Pointer[nodemesh.PeerSet]
 
 	// mu guards what follows. Lock order: Server.mu, then Mesh.mu.
-	mu      sync.RWMutex
-	links   map[string]*meshLink // by peer node id
-	holders map[key.NodePublic]*meshLink
+	mu    sync.RWMutex
+	links map[string]*meshLink // by peer node id
+	// holders is every link that announced a route key: several relays may hold one key while it moves, and a Gone or a
+	// broken link removes only its own entry.
+	holders map[key.NodePublic][]*meshLink
 	// holderLimit bounds the remote route keys held (maxMeshHolders): this is memory safety against what a peer
 	// announces, not a capacity cap on connections; past it new Presents are dropped (counted) and a reconnect refloods.
 	holderLimit int
@@ -121,6 +123,7 @@ type meshLink struct {
 	out      chan meshOut
 	sequence atomic.Uint64
 	once     sync.Once
+	expires  time.Time // the peer certificate's NotAfter: the link never outlives it (zero: unbounded, tests only)
 }
 
 // NewMesh checks cfg; SetMesh attaches it to a server before Serve.
@@ -128,7 +131,7 @@ func NewMesh(cfg MeshConfig) (*Mesh, error) {
 	if len(cfg.Cert.Certificate) == 0 || cfg.RetryBase < 0 || cfg.RetryMax < 0 {
 		return nil, ErrProtocol
 	}
-	m := &Mesh{cert: cfg.Cert, retryBase: cfg.RetryBase, retryMax: cfg.RetryMax, links: make(map[string]*meshLink), holders: make(map[key.NodePublic]*meshLink),
+	m := &Mesh{cert: cfg.Cert, retryBase: cfg.RetryBase, retryMax: cfg.RetryMax, links: make(map[string]*meshLink), holders: make(map[key.NodePublic][]*meshLink),
 		holderLimit: maxMeshHolders, remote: newRemoteCache(maxRemoteGrants), needed: make(map[key.NodePublic]time.Time), dialers: make(map[string]*meshDialer)}
 	if m.retryBase == 0 {
 		m.retryBase = defaultRetryBase
@@ -200,7 +203,8 @@ func samePeer(a, b nodemesh.Peer) bool {
 }
 
 // reconcileLocked starts a dialer for every peer with a higher node id than this relay (the lower id dials), stops
-// those whose peer left or changed, and closes links (dialed or accepted) to peers that left or changed.
+// those whose peer left or changed (cancelling a dial or handshake in flight; a link that completes anyway is refused
+// by register), and closes links (dialed or accepted) to peers that left or changed, withdrawing what they held.
 func (m *Mesh) reconcileLocked(set nodemesh.PeerSet) {
 	if !m.started || m.closed {
 		return
@@ -214,6 +218,7 @@ func (m *Mesh) reconcileLocked(set nodemesh.PeerSet) {
 	for id, l := range m.links {
 		if p, ok := set.Lookup(id); !ok || !samePeer(p, l.peer) {
 			l.close()
+			m.forgetLocked(l) // trust ended with the directory entry: withdraw what it held now, not when the link unwinds
 		}
 	}
 	for _, p := range set.Peers() {
@@ -345,7 +350,11 @@ func (m *Mesh) accept(c *quic.Conn) {
 }
 
 func (m *Mesh) newLink(peer nodemesh.Peer, c *quic.Conn, stream *quic.Stream) *meshLink {
-	return &meshLink{m: m, peer: peer, conn: c, stream: stream, ctrl: make(chan meshFrame, meshControlDepth), out: make(chan meshOut, meshDataDepth)}
+	l := &meshLink{m: m, peer: peer, conn: c, stream: stream, ctrl: make(chan meshFrame, meshControlDepth), out: make(chan meshOut, meshDataDepth)}
+	if certs := c.ConnectionState().TLS.PeerCertificates; len(certs) > 0 {
+		l.expires = certs[0].NotAfter
+	}
+	return l
 }
 
 func (l *meshLink) close() { l.once.Do(func() { l.conn.CloseWithError(0, "mesh link closed") }) }
@@ -369,6 +378,10 @@ func (m *Mesh) run(l *meshLink) {
 		return
 	}
 	defer m.unregister(l)
+	if !l.expires.IsZero() {
+		t := time.AfterFunc(time.Until(l.expires), l.close) // a link never outlives the peer's certificate; the redial re-checks it
+		defer t.Stop()
+	}
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); l.writeControl() }()
@@ -388,6 +401,12 @@ func (m *Mesh) register(l *meshLink) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
+		return false
+	}
+	// Trust is the control plane's current directory, not the one at handshake time: a peer dropped or re-pinned while
+	// the link was being set up is refused here, under the lock SetPeers reconciles with. SetPeers stores the set
+	// before it takes the lock, so a link registered ahead of it is found and closed by its reconcile.
+	if p, ok := m.peerSet.Load().Lookup(l.peer.NodeID); !ok || !samePeer(p, l.peer) || !l.expires.IsZero() && !time.Now().Before(l.expires) {
 		return false
 	}
 	keys := make([]string, 0, min(len(s.peers), meshKeysPerFrame))
@@ -410,15 +429,41 @@ func (m *Mesh) register(l *meshLink) bool {
 func (m *Mesh) unregister(l *meshLink) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.forgetLocked(l)
+}
+
+// forgetLocked removes the link and everything it vouched for: the route keys it held and the grants it relayed.
+func (m *Mesh) forgetLocked(l *meshLink) {
 	if m.links[l.peer.NodeID] == l {
 		delete(m.links, l.peer.NodeID)
 	}
-	for k, h := range m.holders {
-		if h == l {
-			delete(m.holders, k)
-		}
+	for k := range m.holders {
+		m.removeHolderLocked(k, l)
 	}
 	m.remote.removeVia(l)
+}
+
+// addHolderLocked records that l holds k; false when k is new and the distinct-key bound is reached.
+func (m *Mesh) addHolderLocked(k key.NodePublic, l *meshLink) bool {
+	links, held := m.holders[k]
+	if slices.Contains(links, l) {
+		return true
+	}
+	if !held && len(m.holders) >= m.holderLimit {
+		return false
+	}
+	m.holders[k] = append(links, l)
+	return true
+}
+
+// removeHolderLocked drops l from the holders of k, and k with the last one.
+func (m *Mesh) removeHolderLocked(k key.NodePublic, l *meshLink) {
+	links := slices.DeleteFunc(slices.Clone(m.holders[k]), func(h *meshLink) bool { return h == l })
+	if len(links) == 0 {
+		delete(m.holders, k)
+	} else {
+		m.holders[k] = links
+	}
 }
 
 func (l *meshLink) writeControl() {
@@ -495,11 +540,9 @@ func (m *Mesh) handle(l *meshLink, f meshFrame) error {
 		}
 		m.mu.Lock()
 		for _, k := range keys {
-			if _, held := m.holders[k]; !held && len(m.holders) >= m.holderLimit {
+			if !m.addHolderLocked(k, l) {
 				m.drop(dropHolderFull)
-				continue
 			}
-			m.holders[k] = l
 		}
 		m.mu.Unlock()
 	case meshGone:
@@ -509,9 +552,7 @@ func (m *Mesh) handle(l *meshLink, f meshFrame) error {
 		}
 		m.mu.Lock()
 		for _, k := range keys {
-			if m.holders[k] == l {
-				delete(m.holders, k)
-			}
+			m.removeHolderLocked(k, l)
 			if e := m.remote.index[k]; e != nil && e.Value.(*remoteSource).via == l {
 				m.remote.remove(k)
 			}
@@ -645,7 +686,10 @@ func (s *Server) forwardLocked(p *peerConn, dst key.NodePublic, msg packet) bool
 		return false
 	}
 	m.mu.RLock()
-	l := m.holders[dst]
+	var l *meshLink
+	if links := m.holders[dst]; len(links) > 0 {
+		l = links[0]
+	}
 	m.mu.RUnlock()
 	if l == nil {
 		m.holderMiss.Add(1)
@@ -667,7 +711,7 @@ func (m *Mesh) holds(k key.NodePublic) bool {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.holders[k] != nil
+	return len(m.holders[k]) > 0
 }
 
 // announce tells every link a route key appeared or left this relay. Called with Server.mu held.

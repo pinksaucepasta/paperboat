@@ -56,6 +56,9 @@ type Config struct {
 	Version string
 	// ServingSPKISHA256 is the "sha256:" + hex pin of the relay's serving certificate, sent with start and observe so peer relays can pin it.
 	ServingSPKISHA256 string
+	// MeshPeersStaleAfter is how long the mesh directory stays trusted without a lease that carried a valid one;
+	// then it is cleared (no mesh links) until one arrives. Zero means 5 lease intervals.
+	MeshPeersStaleAfter time.Duration
 }
 
 // AccountSpeed is an account the relay holds to less than the default speed.
@@ -126,6 +129,7 @@ type Client struct {
 	sentSubjects string
 	demandAt     time.Time // start of the window the next observation reports account demand for
 	sampler      *nodemetrics.Sampler
+	meshAt       time.Time // when a lease last carried a mesh directory that was applied
 }
 
 // subjectsDigest is the hex SHA-256 of the sorted "account\x00endpoint\n" membership lines (the
@@ -396,6 +400,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	out, err := c.post(ctx, "/v1/relay/nodes/observe", body)
 	if err != nil {
+		c.expireMeshPeers(server)
 		return err
 	}
 	if out.Generation != c.lease.Generation || out.ProcessEpoch != c.lease.ProcessEpoch || !server.MatchesControlService(out.PeerRelay) {
@@ -435,7 +440,10 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		err = server.SetMeshPeers(peers)
 	}
 	if err != nil {
-		slog.Warn("relay mesh directory refused; keeping the last one", "error", err)
+		slog.Warn("relay mesh directory refused; keeping the last one for a bounded time", "error", err)
+		c.expireMeshPeers(server)
+	} else {
+		c.meshAt = time.Now()
 	}
 	if out.SubjectsRequired {
 		// The control plane lost or never had this set: send it in full next time, and keep the speed list, which such an
@@ -454,6 +462,23 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	c.lease = out
 	return nil
+}
+
+// expireMeshPeers ends mesh trust that no lease has renewed for MeshPeersStaleAfter: the control plane may have retired
+// or re-keyed a peer, and a relay cut off from it must not keep linking on the last directory forever. Applying the
+// empty directory closes every link; the next valid lease restores it. Called with c.mu held.
+func (c *Client) expireMeshPeers(server *derpquic.Server) {
+	stale := c.cfg.MeshPeersStaleAfter
+	if stale == 0 {
+		stale = 5 * Interval
+	}
+	if c.meshAt.IsZero() || time.Since(c.meshAt) < stale || len(server.MeshPeers()) == 0 {
+		return
+	}
+	slog.Warn("relay mesh directory expired: no valid lease for it", "stale_after", stale)
+	if err := server.SetMeshPeers(nil); err != nil {
+		slog.Error("relay mesh directory could not be cleared", "error", err)
+	}
 }
 
 // meshPeers decodes a lease's mesh_peers; absent means no mesh.

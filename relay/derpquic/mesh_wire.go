@@ -190,14 +190,16 @@ func parseNamespace(s string) ([32]byte, bool) {
 // authorizedRemoteLocked is authorizedLocked for a packet that arrived over the mesh: q is the local destination, the
 // source is a verified remote grant. The delivering relay judges the pair and the revocation fences itself.
 func (s *Server) authorizedRemoteLocked(rs *remoteSource, q *peerConn, control bool, now time.Time) bool {
-	if rs == nil || q == nil || rs.dead.Load() || rs.expires <= now.Unix() || s.peers[routeKey(q.key, q.namespace)] != q || s.draining && !now.Before(s.deadline) {
+	// Local delivery binds the destination inside the sender's carrier namespace (route), so a remote sender reaches only
+	// its own namespace too, for control packets as well: controlAdmitted is account-only and must not widen that.
+	if rs == nil || q == nil || rs.namespace != q.namespace || rs.dead.Load() || rs.expires <= now.Unix() || s.peers[routeKey(q.key, q.namespace)] != q || s.draining && !now.Before(s.deadline) {
 		return false
 	}
 	if f := s.fences[rs.id]; f != nil && rs.grant.Generation < f.Generation {
 		return false
 	}
 	if rs.paired.peer != q || rs.paired.theirs != q.grant.signedHash {
-		rs.paired = pairMemo{peer: q, theirs: q.grant.signedHash, allowed: rs.namespace == q.namespace && allowedAdmitted(rs.grant, q.grant)}
+		rs.paired = pairMemo{peer: q, theirs: q.grant.signedHash, allowed: allowedAdmitted(rs.grant, q.grant)}
 	}
 	return rs.paired.allowed || control && controlAdmitted(rs.grant, q.grant)
 }
