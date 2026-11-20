@@ -100,6 +100,10 @@ fi
 [ -n "${VICTUS_PASS:-}" ] || [[ ",$TARGETS," != *,victus,* ]] || { echo "export VICTUS_PASS (see REMOTE_TESTING.md)" >&2; exit 2; }
 command -v sshpass >/dev/null || { echo "sshpass is required" >&2; exit 2; }
 mkdir -p "$RESULTS_DIR"
+# Preflight: a Docker host whose logind stopped retiring sessions (pbvm3, 2026-11-13: 1,450 stuck) warns above 50, fails above 500.
+if [ -n "${SMOKE_CT_MAP:-}" ]; then
+  python3 "$HERE/host_sessions.py" $(for pair in ${SMOKE_CT_MAP//,/ }; do value=${pair#*=}; echo "${value%%:*}"; done | sort -u) || exit 2
+fi
 
 # ---------------------------------------------------------------- devices
 PB_HP='$HOME/.local/bin/pb'
