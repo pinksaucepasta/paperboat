@@ -396,3 +396,20 @@ func TestHelperExecStdinUsesFullFramesAndCompression(t *testing.T) {
 		t.Fatalf("frames=%d want %d compressed=%d bytes equal=%v", frames, want, compressed, bytes.Equal(got, stdin))
 	}
 }
+
+// The read loop answers a control request and may finish right after, so the answer and done are both ready: the
+// answer that was received must win every time (a random pick reported a delivered control as failed).
+func TestHelperExecControlOutcomeKeepsAnAnswerThatArrivedBeforeDone(t *testing.T) {
+	connection := &helperExecConn{done: make(chan struct{})}
+	close(connection.done)
+	for i := 0; i < 200; i++ {
+		response := make(chan helperFrame, 1)
+		response <- helperFrame{Type: "response"}
+		if err := connection.controlOutcome("resize", response); err != nil {
+			t.Fatalf("draw %d: a received answer was reported as %v", i, err)
+		}
+	}
+	if err := connection.controlOutcome("resize", make(chan helperFrame, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("no answer and a closed connection = %v, want %v", err, io.EOF)
+	}
+}

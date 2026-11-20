@@ -95,3 +95,19 @@ func TestRecordingStateTellsEveryObserver(t *testing.T) {
 		t.Fatalf("first %v second %v", first, second)
 	}
 }
+
+// A stop answered right before the link closed or the ctx was canceled has both ready: the answer that was
+// received must win every time (a random pick refused a delivered stop as transport lost or canceled).
+func TestRecordingOutcomeKeepsAnAnswerThatArrivedBeforeDoneOrCancel(t *testing.T) {
+	connection := &helperTerminalConn{done: make(chan struct{})}
+	close(connection.done)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 200; i++ {
+		response := make(chan helperFrame, 1)
+		response <- helperFrame{Type: "response", Payload: []byte(`{"result":{"recording":null}}`)}
+		if state, err := connection.recordingOutcome(ctx, wire.ActionStop, response); err != nil || state != nil {
+			t.Fatalf("draw %d: a received answer was reported as %+v %v", i, state, err)
+		}
+	}
+}

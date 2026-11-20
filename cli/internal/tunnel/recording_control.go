@@ -54,10 +54,16 @@ func (c *helperTerminalConn) RecordingControl(ctx context.Context, action string
 	if err := c.writeFrame(helperFrame{Type: "request", RequestID: id, Version: helperProtocolVersion, OperationID: helperID("operation"), Capability: "terminal.v1", DeadlineMS: uint32(helperRequestTimeout / time.Millisecond), Payload: payload}); err != nil {
 		return nil, err
 	}
+	return c.recordingOutcome(ctx, action, response)
+}
+
+// recordingOutcome waits for the host's answer to a record-start or record-stop. An answer that was really received
+// wins over a closed link or a canceled ctx: both can be ready together and a random pick would refuse a delivered
+// start or stop.
+func (c *helperTerminalConn) recordingOutcome(ctx context.Context, action string, response <-chan helperFrame) (*wire.State, error) {
 	ctx, cancel := context.WithTimeout(ctx, helperRequestTimeout)
 	defer cancel()
-	select {
-	case frame := <-response:
+	decode := func(frame helperFrame) (*wire.State, error) {
 		if frame.Type == "error" {
 			err := decodeHelperError(frame)
 			var remote *helperRemoteError
@@ -75,9 +81,19 @@ func (c *helperTerminalConn) RecordingControl(ctx context.Context, action string
 			return nil, errors.New("the machine returned an invalid recording answer")
 		}
 		return answer.Result.Recording, nil
+	}
+	select {
+	case frame := <-response:
+		return decode(frame)
 	case <-c.done:
+		if frame, ok := readyFrame(response); ok {
+			return decode(frame)
+		}
 		return nil, ErrTransportLost
 	case <-ctx.Done():
+		if frame, ok := readyFrame(response); ok {
+			return decode(frame)
+		}
 		return nil, ctx.Err()
 	}
 }

@@ -331,13 +331,26 @@ func (c *helperExecConn) control(action string, values map[string]any) error {
 	if err := c.writeControl(context.Background(), frame); err != nil {
 		return err
 	}
-	select {
-	case frame := <-response:
+	return c.controlOutcome(action, response)
+}
+
+// controlOutcome waits for the helper's answer to a control request. An answer that was really received wins over a
+// closed connection or the timeout: the read loop answers and may finish right after, so both are ready and a random
+// pick would report a delivered control as failed or uncertain.
+func (c *helperExecConn) controlOutcome(action string, response <-chan helperFrame) error {
+	answer := func(frame helperFrame) error {
 		if frame.Type == "error" {
 			return decodeHelperError(frame)
 		}
 		return nil
+	}
+	select {
+	case frame := <-response:
+		return answer(frame)
 	case <-c.done:
+		if frame, ok := readyFrame(response); ok {
+			return answer(frame)
+		}
 		if action == "cancel" && c.terminalSeen.Load() {
 			if c.exitErr == nil {
 				return nil
@@ -348,7 +361,20 @@ func (c *helperExecConn) control(action string, values map[string]any) error {
 		}
 		return c.waitError()
 	case <-time.After(helperRequestTimeout):
+		if frame, ok := readyFrame(response); ok {
+			return answer(frame)
+		}
 		return errors.New("helper execution control outcome is uncertain")
+	}
+}
+
+// readyFrame is an answer that has already arrived, without waiting.
+func readyFrame(response <-chan helperFrame) (helperFrame, bool) {
+	select {
+	case frame := <-response:
+		return frame, true
+	default:
+		return helperFrame{}, false
 	}
 }
 
