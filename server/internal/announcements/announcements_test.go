@@ -391,3 +391,32 @@ func TestRetriedKeyMustMeanTheSameWriteAndRetractIsAuditedOncePostgres(t *testin
 		t.Fatalf("retract of nothing = %v, want ErrNotFound", err)
 	}
 }
+
+func TestOperatorNoticeIsOnePerKeyPostgres(t *testing.T) {
+	f := newFixture(t)
+	key := "release-metadata:test:" + f.sfx
+	t.Cleanup(func() {
+		f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.announcements WHERE created_by=$1 AND idempotency_key LIKE $2`, SystemCreator, "%"+f.sfx+"%")
+	})
+	for i := 0; i < 2; i++ {
+		if err := f.svc.NoticeOperators(f.ctx, key+":a", "Timestamp release metadata expires soon "+f.sfx, "body", time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.svc.NoticeOperators(f.ctx, key+":b", "Targets release metadata expires soon "+f.sfx, "body", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	notices, err := f.svc.ForOperators(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, n := range notices {
+		if strings.HasSuffix(n.Title, f.sfx) {
+			seen++
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("operators saw %d of this test's notices, want 2 (a repeated key notifies once): %+v", seen, notices)
+	}
+}

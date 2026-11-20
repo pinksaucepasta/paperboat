@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/operator"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
+	"github.com/pinksaucepasta/paperboat/server/internal/releases"
 )
 
 // Staff authority is independent of workspace/team membership. Unknown routes deny.
@@ -609,6 +610,31 @@ func operatorStatus(opts Options) http.Handler {
 				dimensions[string(d)] = map[string]any{"status": state.Status, "code": state.Code, "since": state.Since, "retry": state.Retry, "next_retry_at": state.NextRetryAt}
 			}
 		}
+		if opts.Config.ReleaseDirectory != "" {
+			dimensions["release_metadata"] = releaseMetadataHealth(opts.Config.ReleaseDirectory, time.Now())
+		}
 		writeJSON(w, 200, SuccessResponse{Data: map[string]any{"observed_at": time.Now().UTC(), "build": map[string]string{"version": buildinfo.Version, "commit": buildinfo.Commit}, "readiness": readiness, "dimensions": dimensions, "providers": map[string]any{"workos_configured": opts.Config.Secrets.WorkOSClientID != "" && opts.Config.Secrets.WorkOSAPIKey != "", "stripe_configured": opts.Config.Secrets.StripeAPIKey != "", "github_configured": opts.Config.Secrets.GitHubClientID != "", "live_availability": "not_probed"}, "configuration": map[string]any{"host_offline_after_seconds": opts.Config.UserMachines.OfflineAfter.Seconds(), "request_timeout_seconds": opts.Config.HTTP.RequestTimeout.Seconds(), "billing_policy": "/v1/admin/config/billing", "deployment_settings": "managed_by_deployment"}}})
 	})
+}
+
+// releaseMetadataHealth is the Overview item for signed release metadata: failed once a role has expired or cannot be
+// read, degraded while one is inside its warning window (the refresh is not running), healthy otherwise.
+func releaseMetadataHealth(directory string, now time.Time) map[string]any {
+	expiries, err := releases.ReadMetadataExpiry(directory)
+	if err != nil {
+		return map[string]any{"status": "failed", "code": "release_metadata_unreadable"}
+	}
+	warnings := releases.ExpiryWarnings(expiries, now)
+	if len(warnings) == 0 {
+		return map[string]any{"status": "healthy", "code": "release_metadata_fresh"}
+	}
+	roles := make([]string, 0, len(warnings))
+	status := "degraded"
+	for _, w := range warnings {
+		roles = append(roles, w.Role)
+		if w.Expired {
+			status = "failed"
+		}
+	}
+	return map[string]any{"status": status, "code": "release_metadata_expiring_" + strings.Join(roles, "_"), "since": warnings[0].Expires}
 }

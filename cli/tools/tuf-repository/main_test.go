@@ -211,6 +211,60 @@ func TestRefreshRejectsExpiredTargetsWithoutChangingMetadata(t *testing.T) {
 	}
 }
 
+func TestRefreshTargetsRenewsExpiredTargetsAndKeepsTheTargets(t *testing.T) {
+	repository := newPublishedTestRepository(t, "2026.08.22.18")
+	targetsPath := filepath.Join(repository, "metadata", "targets.json")
+	targets, err := metadata.Targets().FromFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, assets := targets.Signed.Version, len(targets.Signed.Targets)
+	targets.Signed.Expires = time.Now().UTC().Add(-time.Minute)
+	targets.ClearSignatures()
+	if err := sign(targets); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targetsPath, mustMetadataBytes(targets), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshTargets(repository); err != nil {
+		t.Fatal(err)
+	}
+	_, after, snapshot, _, err := loadSet(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Signed.Version != version+1 || len(after.Signed.Targets) != assets || !after.Signed.Expires.After(time.Now().UTC().Add(80*24*time.Hour)) {
+		t.Fatalf("targets after refresh-targets: version=%d (was %d) targets=%d (was %d) expires=%s", after.Signed.Version, version, len(after.Signed.Targets), assets, after.Signed.Expires)
+	}
+	if snapshot.Signed.Meta["targets.json"].Version != after.Signed.Version {
+		t.Fatal("snapshot does not reference the renewed targets")
+	}
+	if err := verifyPublished(repository); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshTargetsRejectsExpiredRoot(t *testing.T) {
+	repository := newPublishedTestRepository(t, "2026.08.22.19")
+	rootPath := filepath.Join(repository, "metadata", "root.json")
+	root, err := metadata.Root().FromFile(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Signed.Expires = time.Now().UTC().Add(-time.Minute)
+	if err := os.WriteFile(rootPath, mustMetadataBytes(root), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetsBefore := readTestMetadata(t, filepath.Join(repository, "metadata", "targets.json"))
+	if err := refreshTargets(repository); err == nil {
+		t.Fatal("refresh-targets signed under an expired root")
+	}
+	if !bytes.Equal(targetsBefore, readTestMetadata(t, filepath.Join(repository, "metadata", "targets.json"))) {
+		t.Fatal("failed refresh-targets changed targets metadata")
+	}
+}
+
 func newPublishedTestRepository(t *testing.T, version string) string {
 	t.Helper()
 	t.Setenv("PAPERBOAT_TUF_CI", "1")
