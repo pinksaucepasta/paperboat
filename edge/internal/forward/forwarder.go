@@ -45,7 +45,7 @@ func (m *Mesh) Forward(ctx context.Context, conn net.Conn, key string) error {
 				continue
 			}
 			tried[h.NodeID] = true
-			stream, failure := m.openStream(ctx, h.NodeID, key, visitor)
+			stream, failure := m.openStream(ctx, h, key, visitor)
 			if failure != nil {
 				last = failure
 				continue
@@ -72,7 +72,8 @@ func (m *Mesh) Forward(ctx context.Context, conn net.Conn, key string) error {
 // openStream opens a forward stream to node id and waits for its ack. It returns the stream when the holder took
 // the visitor, a nil stream and nil failure when the holder refused (the refusal is counted), and a failure when
 // the node could not be reached or did not answer.
-func (m *Mesh) openStream(ctx context.Context, id, key, visitor string) (*streamConn, *Failure) {
+func (m *Mesh) openStream(ctx context.Context, h Holder, key, visitor string) (*streamConn, *Failure) {
+	id := h.NodeID
 	l, err := m.linkTo(ctx, id)
 	if err != nil {
 		m.unreachable.Add(1)
@@ -112,7 +113,7 @@ func (m *Mesh) openStream(ctx context.Context, id, key, visitor string) (*stream
 	case nodemesh.RefusalNotHolder:
 		m.holderMiss.Add(1)
 		m.outcome(OutcomeHolderMiss)
-		m.dir.Refused(key, id)
+		m.dir.Refused(key, id, h.Rev)
 	case nodemesh.RefusalLoop:
 		m.loopRefused.Add(1)
 		m.outcome(OutcomeLoopRefused)
