@@ -35,6 +35,15 @@ type relayConn struct {
 	delay   time.Duration
 }
 
+// pathJitter is 25 ms per direction (50 ms on the round trip) in every other half second: on a 500 ms path that is a 10% rise of the round trip, below HyStart's 1/8 but
+// above upstream quic-go's 16 ms clamp.
+func pathJitter(now time.Time) time.Duration {
+	if now.UnixMilli()/500%2 == 1 {
+		return 25 * time.Millisecond // per direction: 50 ms on the round trip
+	}
+	return 0
+}
+
 type delayedPacket struct {
 	data []byte
 	at   time.Time
@@ -50,9 +59,15 @@ func newRelayConn(c *Client, peer key.NodePublic, oneWayDelay time.Duration) *re
 	if oneWayDelay > 0 {
 		r.delayed = make(chan delayedPacket, 8192)
 		go func() {
+			var last time.Time
 			for {
 				select {
 				case p := <-r.delayed:
+					// the delay steps up by pathJitter every other half second (a queue elsewhere on the path), never reordering
+					if last.After(p.at) {
+						p.at = last
+					}
+					last = p.at
 					time.Sleep(time.Until(p.at))
 					if r.c.Send(r.peer, p.data) != nil {
 						return
@@ -112,7 +127,7 @@ func (r *relayConn) ReadFrom(p []byte) (int, net.Addr, error) {
 func (r *relayConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 	if r.delayed != nil {
 		select {
-		case r.delayed <- delayedPacket{append([]byte(nil), p...), time.Now().Add(r.delay)}:
+		case r.delayed <- delayedPacket{append([]byte(nil), p...), time.Now().Add(r.delay + pathJitter(time.Now()))}:
 			return len(p), nil
 		default:
 			return len(p), nil // a full delay line drops, as a full path buffer would
