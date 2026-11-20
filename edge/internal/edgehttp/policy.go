@@ -583,32 +583,24 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	r = r.WithContext(control.WithClientIP(r.Context(), p.clientIP(r)))
-	// Tickets use the selected edge's own TLS hostname so browser DNS caches
-	// cannot send a fresh admission to the former active edge. The path names
-	// only a candidate route; the one-use ticket and current node/epoch are
-	// still checked before any terminal stream is opened.
+	// The browser terminal is not served under the edge's own name: the browser dials the machine's runtime hostname
+	// (path /v1/browser-terminal, a ticket subprotocol), which any managed edge answers and a non-holder forwards at
+	// the TLS layer. Only the daemon's /v1/runtime/<runtime-host> path is addressed to the edge's own name.
 	// The edge's own name may carry the port its public HTTPS listener is published on (it advertises it to the control plane).
 	requestHost := r.Host
 	if parsed, _, err := net.SplitHostPort(requestHost); err == nil {
 		requestHost = parsed
 	}
-	if p.config.BrowserTerminalEdgeHost != "" && requestHost == p.config.BrowserTerminalEdgeHost && (strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/") || strings.HasPrefix(r.URL.Path, "/v1/runtime/")) {
-		browserTerminal := strings.HasPrefix(r.URL.Path, "/v1/browser-terminal/")
-		prefix := "/v1/runtime/"
-		if browserTerminal {
-			prefix = "/v1/browser-terminal/"
-		}
-		runtimeHost, suffix, hasSuffix := strings.Cut(strings.TrimPrefix(r.URL.Path, prefix), "/")
+	if p.config.BrowserTerminalEdgeHost != "" && requestHost == p.config.BrowserTerminalEdgeHost && strings.HasPrefix(r.URL.Path, "/v1/runtime/") {
+		runtimeHost, suffix, hasSuffix := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/runtime/"), "/")
 		_, kind, allowed := p.allowedHost(runtimeHost)
-		if !allowed || kind != "runtime_https_wss" || !normalizeRequestTarget(r, p.config.BrowserTerminalEdgeHost) || (browserTerminal && (hasSuffix || r.Method != http.MethodGet || !isWebSocketUpgrade(r.Header) || r.URL.RawQuery != "")) || (!hasSuffix && (r.Method != http.MethodGet || !isWebSocketUpgrade(r.Header) || r.URL.RawQuery != "")) {
+		if !allowed || kind != "runtime_https_wss" || !normalizeRequestTarget(r, p.config.BrowserTerminalEdgeHost) || (!hasSuffix && (r.Method != http.MethodGet || !isWebSocketUpgrade(r.Header) || r.URL.RawQuery != "")) {
 			writeErrorPage(w, http.StatusNotFound, "")
 			return
 		}
 		r = r.Clone(r.Context())
 		r.Host = runtimeHost
-		if browserTerminal {
-			r.URL.Path = "/v1/browser-terminal"
-		} else if hasSuffix {
+		if hasSuffix {
 			r.URL.Path = "/" + suffix
 		} else {
 			r.URL.Path = "/v1/runtime"
