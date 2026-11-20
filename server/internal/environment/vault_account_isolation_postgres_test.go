@@ -49,7 +49,7 @@ func newIsolationFixture(t *testing.T) *isolationFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
 	f := &isolationFixture{t: t, ctx: ctx, store: open(), probeStore: open(), run: "envlock_" + strconv.FormatInt(time.Now().UnixNano(), 36)}
-	if err := db.Migrate(ctx, f.store); err != nil {
+	if err := db.Migrate(context.Background(), f.store); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

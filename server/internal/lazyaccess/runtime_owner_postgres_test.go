@@ -30,7 +30,7 @@ func TestUnchangedLazyRuntimeObservationWritesNoRowOnPostgres(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if e = db.Migrate(ctx, store); e != nil {
+	if e = db.Migrate(context.Background(), store); e != nil {
 		t.Fatal(e)
 	}
 	suffix := fmt.Sprint(time.Now().UnixNano())

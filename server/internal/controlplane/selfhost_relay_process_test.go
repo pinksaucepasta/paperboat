@@ -43,7 +43,7 @@ func TestSelfhostRegisteredRelayProcessOnPostgres(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if e = db.Migrate(ctx, database); e != nil {
+	if e = db.Migrate(context.Background(), database); e != nil {
 		t.Fatal(e)
 	}
 	token := func(n int) string { b := make([]byte, n); rand.Read(b); return base64.RawURLEncoding.EncodeToString(b) }

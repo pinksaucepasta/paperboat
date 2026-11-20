@@ -28,7 +28,7 @@ func TestUserCAFetchWaitsForAMachineWritePostgres(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
@@ -114,7 +114,7 @@ func TestUserCAFetchDoesNotBlockOnAKeyShareOfTheOwnerPostgres(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)

@@ -44,7 +44,7 @@ func TestHeldBrowserTerminalSurvivesAnEdgeModeSwitchPostgres(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	prefix := "btmode_" + strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")

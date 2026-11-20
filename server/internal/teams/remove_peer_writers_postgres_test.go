@@ -39,7 +39,7 @@ func teamRemovalUnderPeerWriters(t *testing.T, action string) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	x := fmt.Sprint(time.Now().UnixNano())

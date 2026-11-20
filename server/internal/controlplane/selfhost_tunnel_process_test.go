@@ -55,7 +55,7 @@ func TestSelfhostTunnelOperatorProcessOnPostgres(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if e = db.Migrate(ctx, database); e != nil {
+	if e = db.Migrate(context.Background(), database); e != nil {
 		t.Fatal(e)
 	}
 	secret := strings.Repeat("e", 32)

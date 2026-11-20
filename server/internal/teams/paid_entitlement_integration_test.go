@@ -27,7 +27,7 @@ func TestPostgresTeamPaidEntitlementAdmissionExpiryAndRecovery(t *testing.T) {
 	t.Cleanup(func() { store.Close() }) // the first cleanup runs last: later cleanups still use store
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 

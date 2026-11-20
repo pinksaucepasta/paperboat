@@ -31,7 +31,7 @@ func TestWorkersRunInOneInstanceAndFailOverOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	var active, overlap atomic.Int32

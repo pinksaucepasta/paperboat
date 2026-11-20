@@ -40,7 +40,7 @@ func recordingReplayAdmission(t *testing.T, shared bool) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)

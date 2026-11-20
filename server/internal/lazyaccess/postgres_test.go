@@ -145,7 +145,7 @@ func TestPolicyRegrantPostgres(t *testing.T) {
 	}
 	defer store.Close()
 	if os.Getenv("PAPERBOAT_TEST_SCHEMA_READY") != "1" {
-		if err = db.Migrate(ctx, store); err != nil {
+		if err = db.Migrate(context.Background(), store); err != nil {
 			t.Fatal(err)
 		}
 	}

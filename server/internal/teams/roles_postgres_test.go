@@ -27,7 +27,7 @@ func TestRoleMatrixMatchesSQL(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	for _, role := range append(Roles, "stranger") {

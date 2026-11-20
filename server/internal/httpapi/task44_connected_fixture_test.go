@@ -57,7 +57,7 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()

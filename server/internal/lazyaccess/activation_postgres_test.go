@@ -56,7 +56,7 @@ func TestActivationPostgres(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	if os.Getenv("PAPERBOAT_TEST_SCHEMA_READY") != "1" {
-		if err = db.Migrate(ctx, database); err != nil {
+		if err = db.Migrate(context.Background(), database); err != nil {
 			t.Fatal(err)
 		}
 	}

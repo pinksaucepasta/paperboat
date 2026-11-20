@@ -36,7 +36,7 @@ func TestReconnectStormRuntimeObservationsTakeNoPredicateLocksOnPostgres(t *test
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	const machines = 300

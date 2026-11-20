@@ -42,7 +42,7 @@ func newPolicyFixture(t *testing.T) *policyFixture {
 	t.Cleanup(func() { store.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	t.Cleanup(cancel)
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	s := strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")

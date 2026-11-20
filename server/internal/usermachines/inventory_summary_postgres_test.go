@@ -30,7 +30,7 @@ func TestMachineSummaryCountsTheWholeWorkspaceOnPostgres(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	// live_user_machines is SELECT *: a column added to user_machines later must be added to the view too.

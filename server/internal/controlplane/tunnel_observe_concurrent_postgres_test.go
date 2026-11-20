@@ -27,7 +27,7 @@ func TestEdgeRouteReportWaitsForAConcurrentAssignmentWritePostgres(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)

@@ -31,7 +31,7 @@ func TestAuthorizeReadsOnlyTheCallersMembershipAndTheResourceOnPostgres(t *testi
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	s := fmt.Sprint(time.Now().UnixNano())

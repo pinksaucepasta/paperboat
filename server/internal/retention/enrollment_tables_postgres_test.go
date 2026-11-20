@@ -29,7 +29,7 @@ func TestRetentionBoundsEnrollmentsAndHeldDomainsOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	user := "ret_enr_" + fmt.Sprint(time.Now().UnixNano())

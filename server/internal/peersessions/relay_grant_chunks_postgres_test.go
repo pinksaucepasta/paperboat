@@ -34,7 +34,7 @@ func TestRelayGrantOfAHundredPeerAccountIsOneMembershipOnPostgres(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	_, signing, err := ed25519.GenerateKey(rand.Reader)

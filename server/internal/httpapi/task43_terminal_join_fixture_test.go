@@ -51,7 +51,7 @@ func TestTask43ServeTerminalJoinLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")

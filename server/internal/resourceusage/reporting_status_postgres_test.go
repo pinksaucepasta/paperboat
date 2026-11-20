@@ -29,7 +29,7 @@ func TestUnchangedNativeReportingStatusWritesNoRowOnPostgres(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	suffix := fmt.Sprint(time.Now().UnixNano())

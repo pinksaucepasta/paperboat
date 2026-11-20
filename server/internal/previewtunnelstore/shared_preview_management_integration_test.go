@@ -28,7 +28,7 @@ func TestExistingSharedPreviewManagementOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	store, err := New(database)

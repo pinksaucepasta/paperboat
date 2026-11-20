@@ -34,7 +34,7 @@ func TestOneChangeInAFiftyMachineAccountWakesOnlyTheAffectedMachinesOnPostgres(t
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	if err = db.Migrate(ctx, database); err != nil {
+	if err = db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	stamp := fmt.Sprint(time.Now().UnixNano())

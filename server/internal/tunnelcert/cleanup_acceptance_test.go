@@ -173,7 +173,7 @@ func TestSQLCertificateCleanupReachesCurrentEdgeAfterStageLedgerExpiry(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() }) // registered before the fixture cleanup, so it runs after it: the cleanup needs the open database
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	fixture := sqlCertificateFixture{suffix: fmt.Sprintf("%d", time.Now().UnixNano())}

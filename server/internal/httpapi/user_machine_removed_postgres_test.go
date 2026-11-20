@@ -35,7 +35,7 @@ func TestUserMachineGetSeparatesRemovedFromNotFoundPostgres(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	t.Cleanup(cancel)
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	suffix := fmt.Sprint(time.Now().UnixNano())

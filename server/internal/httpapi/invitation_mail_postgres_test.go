@@ -42,7 +42,7 @@ func TestInvitationMailPostgresHTTP(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	if err = db.Migrate(ctx, store); err != nil {
+	if err = db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()

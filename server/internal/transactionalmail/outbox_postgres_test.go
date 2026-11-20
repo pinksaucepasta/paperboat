@@ -33,7 +33,7 @@ func TestMailLeaseRetryHorizonPostgres(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if e = db.Migrate(ctx, store); e != nil {
+	if e = db.Migrate(context.Background(), store); e != nil {
 		t.Fatal(e)
 	}
 	id := "mail_crash_" + fmt.Sprint(time.Now().UnixNano())

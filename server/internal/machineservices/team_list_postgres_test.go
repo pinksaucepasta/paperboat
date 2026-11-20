@@ -35,7 +35,7 @@ func TestListShowsTeamSharedMachinesOnlyWithPrivateAccessOnPostgres(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if os.Getenv("PAPERBOAT_TEST_SCHEMA_READY") != "1" {
-		if e = db.Migrate(ctx, store); e != nil {
+		if e = db.Migrate(context.Background(), store); e != nil {
 			t.Fatal(e)
 		}
 	}

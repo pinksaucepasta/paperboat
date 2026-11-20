@@ -333,7 +333,7 @@ func TestPopulatedSchema45To61Upgrade(t *testing.T) {
 	if after := snapshot(true); after != before {
 		t.Fatalf("upgrade changed durable identity, ownership, publication or generations: before=%s after=%s", before, after)
 	}
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	var valid bool
@@ -358,7 +358,7 @@ func TestPopulatedSchema45To61Upgrade(t *testing.T) {
 	if err != nil || !nativeRetained || browserRetained || !nativeMetered {
 		t.Fatalf("comparison admission migration: native=%v browser=%v native usage=%v error=%v", nativeRetained, browserRetained, nativeMetered, err)
 	}
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatalf("migration replay: %v", err)
 	}
 }

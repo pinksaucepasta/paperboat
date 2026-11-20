@@ -26,7 +26,7 @@ func TestAdmittedMachineIdentitySurvivesCredentialExpiryAndObservationLossUntilR
 	defer database.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)

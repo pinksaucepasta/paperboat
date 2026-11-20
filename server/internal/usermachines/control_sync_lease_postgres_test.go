@@ -38,7 +38,7 @@ func newLeaseFixture(t *testing.T) leaseFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	return leaseFixture{t: t, ctx: ctx, store: store, exec: func(query string, args ...any) {

@@ -50,7 +50,7 @@ func TestPostgresVaultRecordsCASAtomicSnapshotAndDeletion(t *testing.T) {
 	defer store.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	account := "recordowner_" + strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")

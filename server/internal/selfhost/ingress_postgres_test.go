@@ -27,7 +27,7 @@ func TestIngressReconciliationFairnessAndCancellationOnPostgres(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
 	owner := "ingress_owner_" + randomIdentity()
