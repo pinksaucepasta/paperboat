@@ -79,7 +79,6 @@ func (w *edgeWildcards) readyEdges(ctx context.Context) ([]wildcardNode, error) 
 FROM paperboat.control_tunnel_nodes n
 JOIN `+edgeset.ServingNodes+` s ON s.id=n.id
 JOIN paperboat.managed_node_authority m ON m.node_id=n.id
-WHERE n.public_ingress_verified_at IS NOT NULL AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
 ORDER BY s.rank,m.region_id,n.id`)
 	if err != nil {
 		return nil, err

@@ -39,6 +39,9 @@ var (
 	ErrForbidden = errors.New("infrastructure operation forbidden")
 	ErrNotFound  = errors.New("infrastructure resource not found")
 	ErrConflict  = errors.New("infrastructure operation conflict")
+	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, or an update that
+	// re-registers it): the region would leave the wildcard DNS names and every pair using it.
+	ErrLastServingEdge = errors.New("last serving edge of an enabled region")
 )
 
 type Service struct {
@@ -300,6 +303,10 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if in.Revision < 1 || in.Site != "" || !validNode(shape) {
 				return ErrInvalid
 			}
+			// An update re-registers the node (out of the serving set until it is ready again).
+			if err := refuseLastServingEdge(ctx, tx, in.NodeID); err != nil {
+				return err
+			}
 			var previousRaw []byte
 			if err := tx.QueryRow(ctx, `SELECT config FROM managed_node_authority WHERE node_id=$1 AND revision=$2 AND retired_at IS NULL FOR UPDATE`, in.NodeID, in.Revision).Scan(&previousRaw); err == pgx.ErrNoRows {
 				return ErrConflict
@@ -359,10 +366,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return ErrInvalid
 			}
 			var regionEnabled bool
-			var region string
-			// FOR UPDATE OF r serializes every drain, resume and retire of one region, so two operators cannot each
-			// take out one of the region's last two serving edges.
-			err := tx.QueryRow(ctx, `SELECT r.enabled,r.id FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=$1 AND m.revision=$2 AND m.retired_at IS NULL FOR UPDATE OF m,r`, in.NodeID, in.Revision).Scan(&regionEnabled, &region)
+			err := tx.QueryRow(ctx, `SELECT r.enabled FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=$1 AND m.revision=$2 AND m.retired_at IS NULL FOR UPDATE OF m`, in.NodeID, in.Revision).Scan(&regionEnabled)
 			if err == pgx.ErrNoRows {
 				return ErrConflict
 			} else if err != nil {
@@ -371,16 +375,9 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if in.Action == "resume" && !regionEnabled {
 				return ErrConflict
 			}
-			if in.Action != "resume" && regionEnabled {
-				// An enabled region keeps a serving edge: taking out its last one would drop the region from the
-				// wildcard DNS names and every pair that uses it. Bring a replacement up first, or disable the region.
-				var last bool
-				err = tx.QueryRow(ctx, `SELECT $1 IN (SELECT id FROM `+edgeset.ServingNodes+` s) AND NOT EXISTS(SELECT 1 FROM `+edgeset.ServingNodes+` s JOIN managed_node_authority m ON m.node_id=s.id WHERE m.region_id=$2 AND s.id<>$1)`, in.NodeID, region).Scan(&last)
-				if err != nil {
+			if in.Action != "resume" {
+				if err = refuseLastServingEdge(ctx, tx, in.NodeID); err != nil {
 					return err
-				}
-				if last {
-					return ErrConflict
 				}
 			}
 			switch in.Action {
@@ -416,6 +413,26 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 		}
 	}
 	return out, nil
+}
+
+// refuseLastServingEdge returns ErrLastServingEdge when node is the last serving edge of its enabled region. It locks
+// the region row, so every drain, retire and update in one region is serialized and two operators cannot each take out
+// one of its last two serving edges. Bring a replacement up first, or disable the region.
+func refuseLastServingEdge(ctx context.Context, tx *db.Tx, node string) error {
+	var last bool
+	err := tx.QueryRow(ctx, `SELECT r.enabled AND $1 IN (SELECT id FROM `+edgeset.ServingNodes+` s)
+ AND NOT EXISTS(SELECT 1 FROM `+edgeset.ServingNodes+` s JOIN managed_node_authority o ON o.node_id=s.id WHERE o.region_id=r.id AND s.id<>$1)
+ FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=$1 FOR UPDATE OF r`, node).Scan(&last)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // not a managed node: the revision checks that follow refuse it
+	}
+	if err != nil {
+		return err
+	}
+	if last {
+		return ErrLastServingEdge
+	}
+	return nil
 }
 
 func (s *Service) ListRegions(ctx context.Context, actor, after string, limit int) (RegionPage, error) {

@@ -141,9 +141,12 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 	}
 	serve(node.ID)
 	for _, action := range []string{"drain", "drain-move", "retire"} {
-		if _, err := s.MutateNode(ctx, admin, action+"-last-"+node.ID, NodeMutation{Action: action, NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); !errors.Is(err, ErrConflict) {
+		if _, err := s.MutateNode(ctx, admin, action+"-last-"+node.ID, NodeMutation{Action: action, NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); !errors.Is(err, ErrLastServingEdge) {
 			t.Fatalf("%s of the last serving edge: %v", action, err)
 		}
+	}
+	if _, err := s.MutateNode(ctx, admin, "update-last-"+node.ID, NodeMutation{Action: "update", NodeID: node.ID, Revision: node.Revision, RegionID: node.RegionID, EdgePool: node.EdgePool, FailureDomain: "zone-c", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8}); !errors.Is(err, ErrLastServingEdge) {
+		t.Fatalf("update of the last serving edge: %v", err)
 	}
 	second, err := s.MutateNode(ctx, admin, "enroll-second-"+node.ID, NodeMutation{Action: "enroll", NodeID: node.ID + "_b", RegionID: node.RegionID, EdgePool: "managed:" + node.RegionID, FailureDomain: "zone-b", EndpointHost: "edge-b.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)})
 	if err != nil {

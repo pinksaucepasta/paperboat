@@ -121,6 +121,8 @@ func operatorInfrastructureError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, 403, "forbidden", "Current staff authority does not permit this infrastructure action.")
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrNotFound):
 		writeError(w, r, 404, "not_found", "The managed infrastructure target does not exist.")
+	case expectedHTTPErrorOnly(err, operatorinfra.ErrLastServingEdge):
+		writeError(w, r, 409, "last_serving_edge", "This is the last serving edge of an enabled region. Bring another edge in the region up first, or disable the region.")
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrConflict):
 		writeError(w, r, 409, "infrastructure_conflict", "The target state, revision or retry key conflicts. Read current state before changing the request; retry interrupted requests with their original key.")
 	default:
