@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -488,7 +489,7 @@ func TestUpdateCheckMissingUpdaterOnUnpairedInstallShowsHowToPair(t *testing.T) 
 	t.Cleanup(func() { updateControlSocketForCommand = oldSocket })
 	socket := filepath.Join(t.TempDir(), "missing-updater.sock")
 	if runtime.GOOS == "windows" {
-		socket = `\.\pipe\PaperboatMissingUpdater-` + strconv.Itoa(os.Getpid())
+		socket = `\\.\pipe\PaperboatMissingUpdater-` + strconv.Itoa(os.Getpid())
 	}
 	updateControlSocketForCommand = func() (string, error) { return socket, nil }
 
