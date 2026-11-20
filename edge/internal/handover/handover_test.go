@@ -1,7 +1,11 @@
 package handover
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -28,5 +32,37 @@ func TestRemainingAfterTakeover(t *testing.T) {
 	}
 	if got := RemainingAfterTakeover(3 * time.Second); got != 0 {
 		t.Fatalf("after the window = %v, want 0", got)
+	}
+}
+
+// A serving process that sends an unreadable release reply must leave the
+// replacement inactive and expose the decode cause to startup diagnostics.
+func TestReadyPreservesMalformedReleaseCause(t *testing.T) {
+	addr := &net.UnixAddr{Name: filepath.Join(t.TempDir(), "release.sock"), Net: "unixpacket"}
+	listener, err := net.ListenUnix(addr.Net, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	replacement, err := net.DialUnix(addr.Net, nil, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	serving, err := listener.AcceptUnix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serving.Close()
+	if _, err := serving.Write([]byte("{")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	inheritance := &Inheritance{conn: replacement}
+	err = inheritance.Ready(ctx)
+	var syntax *json.SyntaxError
+	if !errors.Is(err, ErrHandover) || !errors.As(err, &syntax) {
+		t.Fatalf("ready error = %v, want handover error wrapping the release reply decode cause", err)
 	}
 }

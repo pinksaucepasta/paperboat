@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -407,8 +408,11 @@ func askControl(dir, base string) (relayNode, error) {
 		return node, err
 	}
 	defer response.Body.Close()
-	if err := json.NewDecoder(response.Body).Decode(&node); err != nil || node.Epoch == "" {
-		return node, fmt.Errorf("no relay recorded (%v)", err)
+	if err := json.NewDecoder(response.Body).Decode(&node); err != nil {
+		return node, fmt.Errorf("decode relay registration; check loadctl is serving this relay: %w", err)
+	}
+	if node.Epoch == "" {
+		return node, errors.New("loadctl has no relay process epoch; start the relay and try again")
 	}
 	return node, nil
 }

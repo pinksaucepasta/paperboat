@@ -264,7 +264,7 @@ func (c *HTTPClient) ReportUsage(ctx context.Context, report UsageReport) (Usage
 
 func (c *HTTPClient) RegisterNode(ctx context.Context, registration NodeRegistration) error {
 	if err := registration.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrControlInvalid, err)
+		return fmt.Errorf("%w: validate node registration; check the node identity, carrier endpoint and capacity: %w", ErrControlInvalid, err)
 	}
 	if c.silent.Load() {
 		return nil
@@ -663,7 +663,7 @@ func (c *HTTPClient) nodeRequest(ctx context.Context, path, nodeID, processEpoch
 	endpoint := c.base.ResolveReference(&url.URL{Path: path})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
 	if err != nil {
-		return nil, ErrControlInvalid
+		return nil, documentFailure{sentinel: ErrControlInvalid, cause: err}
 	}
 	request.Header.Set("Authorization", "Bearer "+c.credential)
 	c.applyTraceHeaders(ctx, request.Header)

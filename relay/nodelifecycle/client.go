@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
 	"log/slog"
@@ -318,7 +319,7 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 	if len(out.JWKS) != 0 {
 		keys, err := c.cfg.Trust.Apply(out.JWKS)
 		if err != nil {
-			return Lease{}, ErrControl
+			return Lease{}, fmt.Errorf("%w: apply relay signing keys; check the control plane JWKS: %w", ErrControl, err)
 		}
 		c.startKeys, c.jwks = keys, out.JWKS
 	}

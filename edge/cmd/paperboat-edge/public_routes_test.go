@@ -110,16 +110,18 @@ func TestPublicIngressFailureIsSafeAndRecovers(t *testing.T) {
 	defer func() { os.Stderr = previous }()
 	ctx := reporting.WithSupportReference(t.Context(), "support_5b8a43c1-574f-4c56-94e1-a1adf6fc2c83")
 	handler := publicIngressHandler([]config.PublicRoute{{Host: "public.example.test", Upstream: strings.TrimPrefix(upstream.URL, "http://")}}, "infra.example.test", "127.0.0.1:1", http.NotFoundHandler(), reporter)
-	request := func() int {
+	request := func() *httptest.ResponseRecorder {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "https://public.example.test/PRIVATE_REQUEST_PATH", nil).WithContext(ctx))
-		return response.Code
+		return response
 	}
-	if status := request(); status != http.StatusBadGateway {
-		t.Fatalf("failure status=%d", status)
+	failed := request()
+	if failed.Code != http.StatusBadGateway || !strings.Contains(failed.Body.String(), "try again") ||
+		strings.Contains(failed.Body.String(), "PRIVATE") || strings.Contains(failed.Body.String(), upstream.URL) {
+		t.Fatalf("upstream failure did not give safe recovery advice (status %d)", failed.Code)
 	}
 	failing.Store(false)
-	if status := request(); status != http.StatusNoContent {
+	if status := request().Code; status != http.StatusNoContent {
 		t.Fatalf("recovery status=%d", status)
 	}
 	writer.Close()

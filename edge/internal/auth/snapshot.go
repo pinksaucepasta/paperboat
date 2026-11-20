@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,7 +74,7 @@ func (s *Snapshot) ConfigureRevocationFreshness(maxAge time.Duration, now func()
 func (s *Snapshot) ReplaceJWKS(data []byte) error {
 	next, err := s.trust.Apply(data)
 	if err != nil {
-		return ErrSnapshotInvalid
+		return fmt.Errorf("%w: apply signing keys; check the JWKS document: %w", ErrSnapshotInvalid, err)
 	}
 	s.mu.Lock()
 	s.keys = next

@@ -216,11 +216,12 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	service.Handover.Drain(ctx, time.Now().Add(drainWindow))
-	if err := service.Shutdown(ctx); err != nil {
-		return serviceFailure{error: err, definition: "service_shutdown"}
-	}
+	shutdownErr := service.Shutdown(ctx)
 	if runtimeErr != nil {
-		return serviceFailure{error: runtimeErr, definition: "service_run"}
+		return serviceFailure{error: errors.Join(runtimeErr, shutdownErr), definition: "service_run"}
+	}
+	if shutdownErr != nil {
+		return serviceFailure{error: shutdownErr, definition: "service_shutdown"}
 	}
 	return nil
 }
