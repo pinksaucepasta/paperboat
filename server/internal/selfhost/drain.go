@@ -13,12 +13,20 @@ import (
 )
 
 // DrainScoped takes the installation's own node out of service for new connections (move=false: existing ones
-// finish within nodedrain.DrainGrace) or also moves its machines off now (move=true: nodedrain.MoveGrace). It has the
+// finish within nodedrain.DrainGrace) or also moves its machines and the publications pinned to it off now (move=true:
+// nodedrain.MoveGrace). It has the
 // same authorization as RemoveScoped, and refuses a managed node (the operator drains those) and a node another
 // scope also holds an installation on.
 func (s *Service) DrainScoped(ctx context.Context, actor, id string, operator, move bool) (Installation, error) {
 	node, err := s.changeNodeState(ctx, actor, id, operator, func(ctx context.Context, tx *db.Tx, node string) error {
-		return nodedrain.Begin(ctx, tx, node, move)
+		if err := nodedrain.Begin(ctx, tx, node, move); err != nil {
+			return err
+		}
+		// A plain drain keeps its pins: existing connections finish and the node stays pinned until it leaves.
+		if move {
+			return repinPlacementsOffNode(ctx, tx, node)
+		}
+		return nil
 	})
 	if err != nil {
 		return Installation{}, err
