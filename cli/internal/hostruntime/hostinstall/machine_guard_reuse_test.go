@@ -97,7 +97,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 }
 
 // The machine-wide guard is never downgraded by another OS user's older install: a newer release, or a
-// development guard whose revision is not lower, is kept; an older one is replaced (victus). A guard fix
+// development guard whose revision is not lower, is kept; an older one is replaced (Windows test machine). A guard fix
 // that adds no feature still reaches machines through its higher revision (FIX-MULTIINST 2a602424f).
 func TestMachineGuardIsNotDowngradedByAnOlderInstall(t *testing.T) {
 	r := machineguard.Revision

@@ -287,7 +287,7 @@ func (o *Owner) dialOnce(ctx context.Context, descriptor mesh.Addr, peerID strin
 	// A peer whose own endpoints the signed configuration gives is reachable directly with no relay
 	// (PLAN 3b "Direct paths without a relay"); only a peer without them needs a usable relay first.
 	// A peer on this host with its endpoints never needs one: regional recovery bound to it probed a relay pair with
-	// itself and reported "No relay is usable" while every other machine had relays (hp 2026-10-27).
+	// itself and reported "No relay is usable" while every other machine had relays (Linux test machine 2026-10-27).
 	// A peer without its endpoints is reachable only through a relay, so with none ready within pathReadyBudget the dial
 	// is refused with what is missing (PathNotReadyError) instead of waiting for its deadline (F20-02/04).
 	hasEndpoints := o.authority.PeerHasEndpoints(peerID)

@@ -613,7 +613,7 @@ func TestCoordinatorReportsFailedReconciliationAndWithdraws(t *testing.T) {
 	}
 	c.ctx, c.cancel = context.WithCancel(t.Context())
 	defer c.Stop()
-	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{35173}}}, 1)
+	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{35173}}}, 1)
 	if !errors.Is(reported, guardErr) || strings.Contains(reported.Error(), guardErr.Error()) {
 		t.Fatalf("readiness failure not reported: %v", reported)
 	}
@@ -643,13 +643,13 @@ func TestCoordinatorStreamingReadinessReportsFailedAndRecoveredReconciliation(t 
 	}
 	c.ctx = ctx
 	defer c.Stop()
-	peers := []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "peer", Alias: "laptop", AssignedIp: "127.100.0.22", Approved: true, Online: true}}
 	c.applySnapshot(peers, 1)
 	if err := c.ReconcileStatus(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	names.replaceCause = syscall.EIO
-	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "bad", Alias: "hp", AssignedIp: "PRIVATE invalid address", Approved: true, Online: true}}, 2)
+	c.applySnapshot([]*daemonrpc.PeerUpdate{{PeerId: "bad", Alias: "laptop", AssignedIp: "PRIVATE invalid address", Approved: true, Online: true}}, 2)
 	failure := c.ReconcileStatus(t.Context())
 	if !errors.Is(failure, syscall.EIO) {
 		t.Fatal("invalid snapshot lost independent protected-name withdrawal cause")

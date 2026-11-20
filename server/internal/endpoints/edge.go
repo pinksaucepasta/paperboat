@@ -154,7 +154,7 @@ func ObserveTx(ctx context.Context, tx *db.Tx, nodeID, epoch string, o runtimewi
 	var current bool
 	// A route is ready on an edge only while the agent's carrier session there is ready too: after a
 	// host restart an edge kept reporting its routes on a carrier that was gone (ready=false), and
-	// DNS, health and private access kept sending traffic to that edge (pbvm2 lanemg-s1, 2026-10-26).
+	// DNS, health and private access kept sending traffic to that edge (Linux test VM test-s1, 2026-10-26).
 	err := tx.QueryRow(ctx, `WITH assignment AS (
 SELECT x.route_id,x.edge_node_id,x.observed_ready AS was,x.observed_ready,x.observed_at,
  ($6 AND x.desired='active' AND EXISTS(SELECT 1 FROM runtime_carrier_attachments ra WHERE ra.edge_node_id=x.edge_node_id

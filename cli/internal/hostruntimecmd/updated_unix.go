@@ -25,7 +25,7 @@ import (
 // healMachineGuard replaces a guard left on another version by an older updater (it installs the guard
 // from this installation under the all-or-nothing undo), so no user has to run pb install after an
 // update. It runs only while it holds the installation lock: an install or update in progress owns the
-// guard and its undo, and a heal racing that undo left ubuntu24 without a running guard (2026-10-26).
+// guard and its undo, and a heal racing that undo left teammate machine without a running guard (2026-10-26).
 // The lock is only tried, never waited on, since an install may be restarting this service while it
 // holds it; a busy lock is tried again later. Failure leaves the guard as it was and is logged.
 var (

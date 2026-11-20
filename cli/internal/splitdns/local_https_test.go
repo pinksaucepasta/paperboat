@@ -14,8 +14,8 @@ import (
 func TestLocalMachineIndexDoesNotForward(t *testing.T) {
 	var dials int
 	proxy, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{
-		"3000.hp.local.example.test": {Address: netip.MustParseAddr("127.100.0.4"), Port: 3000, MachineID: "hp"},
-		"5173.hp.local.example.test": {Address: netip.MustParseAddr("127.100.0.4"), Port: 5173, MachineID: "hp"},
+		"3000.hp.local.example.test": {Address: netip.MustParseAddr("127.100.0.4"), Port: 3000, MachineID: "laptop"},
+		"5173.hp.local.example.test": {Address: netip.MustParseAddr("127.100.0.4"), Port: 5173, MachineID: "laptop"},
 	}, DialContext: func(context.Context, string, string) (net.Conn, error) {
 		dials++
 		t.Fatal("machine index forwarded")
@@ -28,10 +28,10 @@ func TestLocalMachineIndexDoesNotForward(t *testing.T) {
 		host, path, method string
 		status             int
 	}{
-		{"hp.local.example.test", "/", "GET", 200},
-		{"hp.local.example.test", "/", "HEAD", 200},
-		{"hp.local.example.test", "/", "POST", 405},
-		{"hp.local.example.test", "/secret", "GET", 404},
+		{"laptop.local.example.test", "/", "GET", 200},
+		{"laptop.local.example.test", "/", "HEAD", 200},
+		{"laptop.local.example.test", "/", "POST", 405},
+		{"laptop.local.example.test", "/secret", "GET", 404},
 		{"absent.local.example.test", "/", "GET", 421},
 	} {
 		request := httptest.NewRequest(test.method, "https://"+test.host+test.path, nil)
@@ -48,7 +48,7 @@ func TestLocalMachineIndexDoesNotForward(t *testing.T) {
 			t.Fatal("HEAD included content")
 		}
 	}
-	request := httptest.NewRequest("GET", "https://hp.local.example.test/", nil)
+	request := httptest.NewRequest("GET", "https://laptop.local.example.test/", nil)
 	request.TLS = &tls.ConnectionState{ServerName: "3000.hp.local.example.test"}
 	recorder := httptest.NewRecorder()
 	proxy.ServeHTTP(recorder, request)

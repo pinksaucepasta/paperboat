@@ -1130,7 +1130,7 @@ func TestFormatForwardedUsesSafeAddressForms(t *testing.T) {
 	}
 }
 
-// Lane I (PLAN 3b, first-preview miss): a request to a preview the server admitted on this edge
+// (PLAN 3b, first-preview miss): a request to a preview the server admitted on this edge
 // waits for its carrier route instead of getting a 404; one that does not attach in time gets a
 // 503 the caller can retry, and an unknown preview still gets an immediate 404.
 func TestAdmittedPreviewWaitsForItsRouteInsteadOfNotFound(t *testing.T) {

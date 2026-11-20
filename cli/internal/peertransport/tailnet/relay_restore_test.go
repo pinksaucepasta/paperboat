@@ -25,7 +25,7 @@ func (r relayAnswer) PeerNetworkConfiguration(context.Context, api.PeerNetworkCo
 }
 
 // Behind NAT a daemon restarted while Paperboat was unreachable restored its peers but no relay, so it reached no peer
-// until Paperboat answered (a Windows test VM runner -> hp container, carrier_dial timed out, 2026-11-16). The relay list and
+// until Paperboat answered (a Windows test VM runner -> Linux test machine container, carrier_dial timed out, 2026-11-16). The relay list and
 // grants of the last answer are now restored with the configuration; a later answer that withdraws them (or a newer
 // configuration generation) leaves nothing to restore.
 func TestRestartWithoutPaperboatRestoresTheLastRelays(t *testing.T) {

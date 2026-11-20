@@ -31,7 +31,7 @@ func (p paperboatAnswer) PeerTransportKeys(ctx context.Context) (api.PeerTranspo
 }
 
 // A daemon restarted while Paperboat is unreachable had no verified local identity in memory, so every new session
-// waited for the server until its 10 s budget ran out ("could not reach the target machine", hp containers
+// waited for the server until its 10 s budget ran out ("could not reach the target machine", Linux test machine containers
 // 2026-11-16). The identity last verified with Paperboat is now served from disk at once; a refusal the server
 // answers in the background confirmation drops it, and a later restart does not serve it again.
 func TestRestartWhilePaperboatIsUnreachableResolvesTheLastVerifiedLocalIdentity(t *testing.T) {

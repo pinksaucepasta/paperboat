@@ -17,9 +17,9 @@ import (
 	"tailscale.com/wgengine/filter"
 )
 
-// hop-89: a Windows machine restarted after an update and homed on the other relay of the account's pair. hp kept
+// hop-89: a Windows machine restarted after an update and homed on the other relay of the account's pair. Linux test machine kept
 // sending its handshake to the relay it remembered, which the restarted machine was no longer on, so every exec
-// failed until something else moved hp. The peer's signed home now replaces the remembered region (one try), and
+// failed until something else moved Linux test machine. The peer's signed home now replaces the remembered region (one try), and
 // without one the answer to a probe on the other relays is recorded (a bounded fallback).
 func TestPeerRestartedOnTheOtherRelayIsReached(t *testing.T) {
 	envknob.Setenv("TS_DEBUG_ALWAYS_USE_DERP", "true")

@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// X-37: an Inbox on a write-protected NTFS volume (chmod R:\Inbox: The media is write protected, seen on victus) is a
+// X-37: an Inbox on a write-protected NTFS volume (chmod R:\Inbox: The media is write protected, seen on Windows test machine) is a
 // 507 the sender does not retry, with the operating system's words.
 func TestWriteProtectedWindowsVolumeIsAPermanentInboxRefusal(t *testing.T) {
 	recorder := httptest.NewRecorder()

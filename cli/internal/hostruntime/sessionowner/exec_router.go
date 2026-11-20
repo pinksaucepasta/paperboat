@@ -169,7 +169,7 @@ func (c *Connections) dropExecClient(generation string, client *workloadbridge.C
 
 // probeContext dials an older generation's owner without waiting for its pipe: the catalogue keeps every
 // generation an update left behind, and waiting winpipe.AbsentWait on each stopped one made every exec start on a
-// Windows machine updated ten times take 20 s (victus 2026-11-16).
+// Windows machine updated ten times take 20 s (Windows test machine 2026-11-16).
 func (c *Connections) probeContext(ctx context.Context, generation string) context.Context {
 	if generation == c.active.Generation {
 		return ctx

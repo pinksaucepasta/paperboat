@@ -220,12 +220,12 @@ func TestSharedTLSReservedIPNoSNIRequiresHTTPSBinding(t *testing.T) {
 			}
 			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
 			defer registry.Close()
-			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, ListenHost: "127.0.0.1", InfrastructureHostname: "140.245.11.41", Authority: &tlsAuthorityFixture{}, Routes: registry, MaximumConnections: 4})
+			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{MaximumListeners: 16, ListenHost: "127.0.0.1", InfrastructureHostname: "93.184.216.35", Authority: &tlsAuthorityFixture{}, Routes: registry, MaximumConnections: 4})
 			if err != nil {
 				raw.Close()
 				t.Fatal(err)
 			}
-			shared, err := manager.WrapTLSListener(raw, func(host string) bool { return bound && host == "140.245.11.41" }, nil)
+			shared, err := manager.WrapTLSListener(raw, func(host string) bool { return bound && host == "93.184.216.35" }, nil)
 			if err != nil {
 				raw.Close()
 				t.Fatal(err)

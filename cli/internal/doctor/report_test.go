@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// C020 (round 9, hp): `pb doctor` right after `pb setup` said "degraded" for a daemon that was only
+// C020 (round 9, Linux test machine): `pb doctor` right after `pb setup` said "degraded" for a daemon that was only
 // starting. A pending check makes the report "starting", not degraded; a real warning or failure
 // still decides the overall.
 func TestAStartingDaemonMakesTheReportStartingNotDegraded(t *testing.T) {

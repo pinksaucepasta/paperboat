@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// F21-14 (Lane X #15): the password is checked outside the row lock, and the per-email lockout
+// F21-14 (#15): the password is checked outside the row lock, and the per-email lockout
 // still trips after five failures, refuses even the right password while it lasts, and a success
 // resets the count.
 func TestLoginLockoutWithThePasswordCheckedOutsideTheLock(t *testing.T) {

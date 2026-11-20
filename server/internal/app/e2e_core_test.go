@@ -572,7 +572,7 @@ func (e *e2eCore) cleanup() {
 }
 
 // freePort is a port in 20000-29999 free on host now; the server binds it moments later. Not the kernel's
-// ephemeral range: a firewall that admits containers to the host (anvit: 10000-59999) may not cover it.
+// ephemeral range: a firewall that admits containers to the host (database test host: 10000-59999) may not cover it.
 func freePort(t *testing.T, host string) string {
 	for range 100 {
 		port := strconv.Itoa(20000 + mathrand.IntN(10000))

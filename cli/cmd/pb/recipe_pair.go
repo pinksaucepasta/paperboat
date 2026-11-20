@@ -60,7 +60,7 @@ func recipePair(c *command.Context, tokenText string, setupArgs []string) error 
 		return err
 	}
 	// A machine identity that cannot be read is not "paired": the preflight below then names the missing
-	// administrator rights, which is why it is unreadable for a standard Windows user (victus, rcpwn).
+	// administrator rights, which is why it is unreadable for a standard Windows user (Windows test machine, rcpwn).
 	machineID, identityErr := loginLocalMachineID(cfg)
 	if _, loadErr := store.Load(issuer); identityErr == nil && machineID != "" && loadErr == nil {
 		// A machine removed since (recipe revoked, lifetime, offline) is not "paired": say how to start over.

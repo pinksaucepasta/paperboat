@@ -8,7 +8,7 @@ UPDATE user_machine_access_sessions
 SET state = 'revoked', revoked_at = now(), revocation_reason = 'expired',
     helper_revoked_at = coalesce(helper_revoked_at, now()), updated_at = now()
 -- One array of ids, matched by primary key (or one hashed scan): an id IN (subquery) join let stale statistics
--- pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linpool 2026-11-19).
+-- pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linuxpool 2026-11-19).
 WHERE id = ANY(ARRAY(
   SELECT due.id FROM user_machine_access_sessions AS due
   WHERE due.state = 'active' AND due.expires_at < sqlc.arg(idle_before)
@@ -22,7 +22,7 @@ UPDATE user_machine_access_sessions
 SET state = 'revoked', revoked_at = now(), revocation_reason = 'machine_ended',
     helper_revoked_at = coalesce(helper_revoked_at, now()), updated_at = now()
 -- One array of ids, matched by primary key (or one hashed scan): an id IN (subquery) join let stale statistics
--- pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linpool 2026-11-19).
+-- pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linuxpool 2026-11-19).
 WHERE id = ANY(ARRAY(
   -- Driven by the ended machines (few), then one range scan of user_machine_access_sessions_machine_active_expiry per
   -- machine: a plan that cannot depend on how many sessions the statistics believe there are.

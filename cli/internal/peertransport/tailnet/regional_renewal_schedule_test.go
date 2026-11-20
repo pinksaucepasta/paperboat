@@ -9,7 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
-// Relays went unusable for ~2 s every ~20 s on hp: recovery renewed 9.2-9.8 s after the last
+// Relays went unusable for ~2 s every ~20 s on Linux test machine: recovery renewed 9.2-9.8 s after the last
 // renewal, but the signed observations it got were already up to 5 s old and end 15 s after
 // they were made, so the next renewal often came after they had ended.
 func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {

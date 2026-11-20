@@ -21,9 +21,9 @@ import (
 )
 
 func TestLeaseFDNameRoundTripAndRefusals(t *testing.T) {
-	l := &guardedLease{uid: "1001", ip: "127.100.0.9", port: 2222, hostname: "hp.local.example.test"}
+	l := &guardedLease{uid: "1001", ip: "127.100.0.9", port: 2222, hostname: "laptop.local.example.test"}
 	uid, ip, port, host, err := parseLeaseFDName(leaseFDName(l))
-	if err != nil || uid != "1001" || ip != "127.100.0.9" || port != 2222 || host != "hp.local.example.test" {
+	if err != nil || uid != "1001" || ip != "127.100.0.9" || port != 2222 || host != "laptop.local.example.test" {
 		t.Fatalf("round trip: %v %v %v %v %v", uid, ip, port, host, err)
 	}
 	for _, bad := range []string{"", "pbl|1|127.100.0.9|2222", "x|1|127.100.0.9|22|h", "pbl|u|127.100.0.9|22|h", "pbl|1|nope|22|h", "pbl|1|127.100.0.9|0|h", "pbl|1|127.100.0.9|22|"} {
@@ -48,7 +48,7 @@ func TestStoreLeaseSendsTheListeningSocketToSystemd(t *testing.T) {
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
-	lease := &guardedLease{uid: "1000", ip: "127.0.0.1", port: port, hostname: "hp.local.example.test", listener: listener}
+	lease := &guardedLease{uid: "1000", ip: "127.0.0.1", port: port, hostname: "laptop.local.example.test", listener: listener}
 	if err := storeLease(lease); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestInheritedLeaseKeepsAcceptingAndIsHandedToItsDaemon(t *testing.T) {
 	}
 	state := t.TempDir()
 	recordTestDefaultDomain(t, state)
-	host := "hp." + testBrowserDomain
+	host := "laptop." + testBrowserDomain
 	listener, err := net.Listen("tcp4", "127.100.0.77:0")
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestUnclaimedInheritedLeasesAreReleased(t *testing.T) {
 	}
 }
 
-// systemctl disable on the guard unit flushed the descriptor store (measured on hp: store 35 to 0, then the new
+// systemctl disable on the guard unit flushed the descriptor store (measured on Linux test machine: store 35 to 0, then the new
 // guard started with no rules for 3 s): the install sequence restarts the unit and never disables it.
 func TestGuardInstallKeepsTheDescriptorStore(t *testing.T) {
 	for _, args := range guardInstallCommands {

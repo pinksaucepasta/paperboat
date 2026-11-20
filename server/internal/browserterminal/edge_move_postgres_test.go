@@ -33,7 +33,7 @@ func (hostSnapshotAuthorizer) SnapshotProcess(context.Context, Decision) (int64,
 	return 1, nil
 }
 
-// pbvm1 2026-11-05 (vm1-1a6479a4-124638): pb update's new worker attached its carriers, the edge that observed one
+// Linux test VM 2026-11-05 (vm1-1a6479a4-124638): pb update's new worker attached its carriers, the edge that observed one
 // first became the route's active edge, and the control channel's 2 s recheck ended the browser terminal held on the
 // other edge as "revoked" (3.8 s pause). Here on PostgreSQL, with the real runtime carrier attachment, route
 // activation and browser terminal decision: the route's applied edge moves while the terminal is attached on the

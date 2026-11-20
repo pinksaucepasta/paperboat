@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The plan-limit refusals (Lane O, server ce8211a7) name the limit, the way out and the Billing link,
+// The plan-limit refusals (server ce8211a7) name the limit, the way out and the Billing link,
 // and keep their codes for --json.
 func TestPlanLimitRefusalsNameTheLimitAndTheWayOut(t *testing.T) {
 	details := map[string]any{"kind": "machines", "plan": "free", "limit": float64(100), "used": float64(100), "billing_url": "https://console.example.test/billing"}

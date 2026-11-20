@@ -8,11 +8,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 )
 
-// victus 2026-11-10: interactive `pb ssh hp` ended at once with the generic failure text. The loopback connection
+// Windows test machine 2026-11-10: interactive `pb ssh Linux test machine` ended at once with the generic failure text. The loopback connection
 // overrides Hostname, so the managed fragment's `Match host <alias> user <user>` group (which offers the managed key)
 // did not apply and ssh.exe had no identity to offer. The managed user's identity is passed on the command line.
 func TestWindowsLoopbackOpenSSHArgumentsOfferTheManagedIdentity(t *testing.T) {
-	identity := managedssh.ManagedIdentityArguments(`\\.\pipe\Paperboat-SSH-Agent`, `C:\Users\Pujan\.ssh\paperboat_managed_identity.pub`, `C:\Users\Pujan\.ssh\paperboat-managed-ssh-certs\hn-cert.pub`)
+	identity := managedssh.ManagedIdentityArguments(`\\.\pipe\Paperboat-SSH-Agent`, `C:\Users\Tester\.ssh\paperboat_managed_identity.pub`, `C:\Users\Tester\.ssh\paperboat-managed-ssh-certs\hn-cert.pub`)
 	destination := managedssh.Destination{User: "root", Host: "hn.local.example.test", Port: 2222, Managed: true}
 	got := windowsLoopbackOpenSSHArguments(destination, 49152, `C:\Program Files\Paperboat\pb.exe`, identity, []string{"/usr/bin/printf", "VICTUS_PB_SSH_OK"}, true)
 	want := []string{
@@ -22,8 +22,8 @@ func TestWindowsLoopbackOpenSSHArgumentsOfferTheManagedIdentity(t *testing.T) {
 		"-o", "PasswordAuthentication=no",
 		"-o", "KbdInteractiveAuthentication=no",
 		"-o", `IdentityAgent="\\\\.\\pipe\\Paperboat-SSH-Agent"`,
-		"-o", `IdentityFile="C:\\Users\\Pujan\\.ssh\\paperboat_managed_identity.pub"`,
-		"-o", `CertificateFile="C:\\Users\\Pujan\\.ssh\\paperboat-managed-ssh-certs\\hn-cert.pub"`,
+		"-o", `IdentityFile="C:\\Users\\Tester\\.ssh\\paperboat_managed_identity.pub"`,
+		"-o", `CertificateFile="C:\\Users\\Tester\\.ssh\\paperboat-managed-ssh-certs\\hn-cert.pub"`,
 		"-o", "ProxyCommand=none",
 		"-o", "Hostname=127.0.0.1",
 		"-o", "HostKeyAlias=hn.local.example.test",

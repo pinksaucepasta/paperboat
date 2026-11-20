@@ -33,7 +33,7 @@ WHERE id = ANY(ARRAY(
 
 // The expired signed sessions a machine revoke leaves active (migration 443; they need no helper call), one bounded batch per statement.
 // One array of ids, matched by primary key (or one hashed scan): an id IN (subquery) join let stale statistics
-// pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linpool 2026-11-19).
+// pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linuxpool 2026-11-19).
 func (q *Queries) RetireAccessSessionsOfEndedMachines(ctx context.Context, batchSize int32) (int64, error) {
 	result, err := q.db.Exec(ctx, retireAccessSessionsOfEndedMachines, batchSize)
 	if err != nil {
@@ -66,7 +66,7 @@ type RetireExpiredMachineAccessSessionsParams struct {
 // retired after the retention period (expired_before); the helper side expired it long before.
 // One bounded batch per statement: one statement over every expired row of a busy machine held its locks for seconds.
 // One array of ids, matched by primary key (or one hashed scan): an id IN (subquery) join let stale statistics
-// pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linpool 2026-11-19).
+// pick a nested loop over the whole table (30 s statement timeout on a fresh 20k-session burst, linuxpool 2026-11-19).
 func (q *Queries) RetireExpiredMachineAccessSessions(ctx context.Context, arg RetireExpiredMachineAccessSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, retireExpiredMachineAccessSessions, arg.IdleBefore, arg.ExpiredBefore, arg.BatchSize)
 	if err != nil {

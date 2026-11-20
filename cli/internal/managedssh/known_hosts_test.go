@@ -45,7 +45,7 @@ func TestFormatKnownHostsRejectsUnsafeHostAndDuplicateKeys(t *testing.T) {
 
 // ssh looks a HostKeyAlias up as the alias alone: a [host]:port line never matches it, so the Windows loopback
 // connection to a machine whose sshd is not on port 22 (its own managed port, any Windows machine) failed host
-// key verification (victus, 2026-11-19).
+// key verification (Windows test machine, 2026-11-19).
 func TestFormatKnownHostsForAliasIgnoresThePort(t *testing.T) {
 	line := authorizedPublicLine(t)
 	public, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))

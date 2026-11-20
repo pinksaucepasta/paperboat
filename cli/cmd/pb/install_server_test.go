@@ -7,7 +7,7 @@ import (
 )
 
 // pb install --server (or pb --server ... install) carries the selected server into the privileged
-// install, which learns the local access domain from it (Lane W: staging install read the build default).
+// install, which learns the local access domain from it (staging install read the build default).
 func TestInstallCarriesTheSelectedServer(t *testing.T) {
 	root := &cobra.Command{Use: "pb"}
 	root.PersistentFlags().String("server", "", "")

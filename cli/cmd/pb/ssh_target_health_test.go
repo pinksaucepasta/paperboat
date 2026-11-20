@@ -11,7 +11,7 @@ import (
 )
 
 // pb ssh to a machine whose SSH the daemon reports as not ready names the reason and the recovery
-// instead of OpenSSH's banner error (Lane W, F5: cloned sshd host keys).
+// instead of OpenSSH's banner error (F5: cloned sshd host keys).
 func TestSSHToATargetThatIsNotReadyNamesTheReason(t *testing.T) {
 	previous := readDaemonSnapshot
 	t.Cleanup(func() { readDaemonSnapshot = previous })
@@ -46,7 +46,7 @@ func TestSSHToAMachineWithoutATargetNamesTheCauses(t *testing.T) {
 }
 
 // pb scp, sftp and rsync stop at the account's managed-SSH key limit with the daemon's reason instead of
-// letting OpenSSH fail with "Permission denied (publickey)" (hp 2026-11-13, a full test account).
+// letting OpenSSH fail with "Permission denied (publickey)" (Linux test machine 2026-11-13, a full test account).
 func TestSSHToolsNameTheClientKeyLimit(t *testing.T) {
 	previous := readDaemonSnapshot
 	t.Cleanup(func() { readDaemonSnapshot = previous })

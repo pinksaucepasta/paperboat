@@ -634,7 +634,7 @@ func TestInstallLockRecreatesResetStateWithoutRepairingUnsafeEntries(t *testing.
 	}
 }
 
-// pbvm: the uninstall removed the system copy but left ~/.local/bin/pb pointing at it, so the next `pb` was "command not
+// linux-vm: the uninstall removed the system copy but left ~/.local/bin/pb pointing at it, so the next `pb` was "command not
 // found" (rc 127). The uninstall removes the link it installed, and nothing else in that directory.
 func TestUninstallRemovesTheInstalledCommandLinkOnly(t *testing.T) {
 	home, system := t.TempDir(), t.TempDir()

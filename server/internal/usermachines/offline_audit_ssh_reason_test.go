@@ -13,7 +13,7 @@ func TestSSHRefusalAuditAcceptsLoginNotAllowedWithoutDetail(t *testing.T) {
 	if !validOfflineAuditEvent(event("login_not_allowed"), time.Now().UTC()) {
 		t.Fatal("login_not_allowed refusal was rejected")
 	}
-	if validOfflineAuditEvent(event("login_not_allowed:pbmac2"), time.Now().UTC()) {
+	if validOfflineAuditEvent(event("login_not_allowed:macuser2"), time.Now().UTC()) {
 		t.Fatal("a refusal carrying an OS user name was accepted: the audit records the bare reason")
 	}
 }

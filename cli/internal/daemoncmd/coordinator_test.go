@@ -54,7 +54,7 @@ func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatalf("a busy browser gateway port must not fail reconciliation: %v", err)
 	}
@@ -97,7 +97,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}, {PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}, {PeerId: "second", Alias: "win-target", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 		}
 	}
 	// The machine URL is a local index, while a port URL forwards the exact app.
-	baseHost := "hp." + domain
+	baseHost := "laptop." + domain
 	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: baseHost, MinVersion: tls.VersionTLS12}}
 	indexClient := &http.Client{Transport: tr}
 	req, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
@@ -303,8 +303,8 @@ func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testin
 	c.ctx = t.Context()
 	t.Cleanup(func() { _ = c.Stop() })
 	peers := []*daemonrpc.PeerUpdate{
-		{PeerId: "local", Alias: "apple", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{5000, 7000}},
-		{PeerId: "remote", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6768}},
+		{PeerId: "local", Alias: "macmini", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{5000, 7000}},
+		{PeerId: "remote", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6768}},
 	}
 	assertRoutes := func(want int, localPorts []int32) {
 		t.Helper()
@@ -347,7 +347,7 @@ func TestCoordinatorPortConflictPreservesOtherRoutesRecoversAndRevokes(t *testin
 	remaining := len(c.routes)
 	c.mu.Unlock()
 	names.mu.Lock()
-	_, staleName := names.names["hp.local.example.test"]
+	_, staleName := names.names["laptop.local.example.test"]
 	names.mu.Unlock()
 	if remaining != 2 || staleName {
 		t.Fatal("revocation retained a route or removed an unrelated machine")
@@ -758,7 +758,7 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 }
 
 // On Windows the guard's listeners are named pipes: their address and their connections' local address carry
-// no port. https://<machine>.<domain>:<port> was refused there (victus, 2026-11-10: the per-port listener was
+// no port. https://<machine>.<domain>:<port> was refused there (Windows test machine, 2026-11-10: the per-port listener was
 // acquired, rejected for its address and closed again), while https://<port>.<machine>.<domain> worked.
 func TestCoordinatorServesMachineHostOnPublishedPortsOverPipeListeners(t *testing.T) {
 	testCoordinatorServesMachineHostOnPublishedPorts(t, &coordinatorNameClient{pipeListeners: true})
@@ -789,7 +789,7 @@ func testCoordinatorServesMachineHostOnPublishedPorts(t *testing.T, names *coord
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{22, 6767}}}
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{22, 6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func testCoordinatorServesMachineHostOnPublishedPorts(t *testing.T, names *coord
 	}
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(ca.CertPEM())
-	host := "hp." + domain
+	host := "laptop." + domain
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}
 	defer transport.CloseIdleConnections()
 	request, _ := http.NewRequest(http.MethodGet, "https://"+address+"/", nil)
@@ -861,7 +861,7 @@ func TestCoordinatorKeepsForwardedPortsPastTheServerLease(t *testing.T) {
 
 // A service that starts on a machine adds a route to the running browser gateway; the gateway is not
 // stopped and rebuilt, so a request right after the port appears is served instead of meeting a TLS
-// internal error or a refused connection (Lane H: private-https to a fresh port).
+// internal error or a refused connection (private-https to a fresh port).
 func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	ca, err := testcert.New()
 	if err != nil {
@@ -887,7 +887,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	defer c.Stop()
-	first := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	first := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
 	if err := c.replaceGuardedRoutes(t.Context(), first); err != nil {
 		t.Fatal(err)
 	}
@@ -895,7 +895,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	if gateway == nil || names.addresses[443] == "" {
 		t.Fatal("the browser gateway did not start its :443 listener (round 22 regression)")
 	}
-	second := append(first, &daemonrpc.PeerUpdate{PeerId: "second", Alias: "victus", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}})
+	second := append(first, &daemonrpc.PeerUpdate{PeerId: "second", Alias: "win-target", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{6767}})
 	if err := c.replaceGuardedRoutes(t.Context(), second); err != nil {
 		t.Fatal(err)
 	}
@@ -904,7 +904,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 	}
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(ca.CertPEM())
-	host := "6767.victus." + testBrowserDomain
+	host := "6767.win-target." + testBrowserDomain
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}}
 	request, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
 	request.Host = host
@@ -920,7 +920,7 @@ func TestCoordinatorBrowserGatewayAddsARouteWithoutRestarting(t *testing.T) {
 }
 
 // A browser request for a port of a known machine whose route has not arrived yet (the service just
-// started) waits for the route instead of failing the TLS handshake (Lane H: tlsv1 alert internal
+// started) waits for the route instead of failing the TLS handshake (tlsv1 alert internal
 // error on a fresh port); the gateway asks for a services refresh meanwhile.
 func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T) {
 	ca, err := testcert.New()
@@ -945,7 +945,7 @@ func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T)
 	c.ctx = t.Context()
 	defer c.Stop()
 	peer := func(ports ...int32) []*daemonrpc.PeerUpdate {
-		return []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: ports}}
+		return []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: ports}}
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), peer(6767)); err != nil {
 		t.Fatal(err)
@@ -998,14 +998,14 @@ func TestCoordinatorRefusedListenerSkipsOnlyThatItem(t *testing.T) {
 	c.ctx = t.Context()
 	defer c.Stop()
 	peers := []*daemonrpc.PeerUpdate{
-		{PeerId: "first", Alias: "hp", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{3000, 6767}},
+		{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{3000, 6767}},
 		{PeerId: "second", Alias: "nas", AssignedIp: "127.100.0.5", Approved: true, Online: true, ExportedPorts: []int32{3000}},
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
 		t.Fatalf("one refused listener failed the reconcile: %v", err)
 	}
 	if len(c.routes) != 1 || len(names.names) != 1 {
-		t.Fatalf("routes=%d names=%d, want only hp:6767", len(c.routes), len(names.names))
+		t.Fatalf("routes=%d names=%d, want only laptop:6767", len(c.routes), len(names.names))
 	}
 }
 
@@ -1023,7 +1023,7 @@ func TestCoordinatorUsesTheGuardAssignedAddressAndSendsTheCompleteSet(t *testing
 	names := relocatingNameClient{&coordinatorNameClient{}}
 	c := startClaimsCoordinator(t, names)
 	machines := []api.UserMachine{
-		{ID: "m_hp", Alias: "hp", AssignedIP: "127.100.0.3", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 1},
+		{ID: "m_hp", Alias: "laptop", AssignedIP: "127.100.0.3", State: "online", Online: true, NetworkApproved: true, InstallationGeneration: 1},
 		{ID: "m_off", Alias: "nas", AssignedIP: "127.100.0.4", State: "offline", NetworkApproved: true},
 	}
 	services := []api.MachineServicesMachine{{MachineID: "m_hp", InstallationGeneration: 1, ExpiresAt: time.Now().Add(time.Hour), Services: []api.MachineServicePort{{Port: 45680, AddressFamily: "ipv4"}}}}
@@ -1031,7 +1031,7 @@ func TestCoordinatorUsesTheGuardAssignedAddressAndSendsTheCompleteSet(t *testing
 		t.Fatal(err)
 	}
 	names.mu.Lock()
-	got, claims := names.names["hp."+c.localDomain()], slices.Clone(names.claims)
+	got, claims := names.names["laptop."+c.localDomain()], slices.Clone(names.claims)
 	names.mu.Unlock()
 	if got.String() != "127.100.0.77" {
 		t.Fatalf("published %v, want the guard-assigned 127.100.0.77", got)

@@ -312,7 +312,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 	}))
 }
 
-// loginInProgressFailure names a concurrent sign-in on this profile instead of a bare local_io failure (lanex2-m
+// loginInProgressFailure names a concurrent sign-in on this profile instead of a bare local_io failure (test-m
 // 2026-11-16: two logins at once ended one with only "could not finish the command").
 func loginInProgressFailure(err error) error {
 	if errors.Is(err, config.ErrLoginInProgress) {

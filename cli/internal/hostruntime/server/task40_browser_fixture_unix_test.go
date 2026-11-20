@@ -73,9 +73,13 @@ func TestTask40HoldBrowserRuntime(t *testing.T) {
 	if err != nil || json.Unmarshal(encoded, &in) != nil {
 		t.Fatal("runtime fixture input unavailable or invalid")
 	}
-	if in.ListenAddress != "100.95.70.63:15442" && in.ListenAddress != "100.95.70.63:15443" && in.ListenAddress != "127.0.0.1:0" {
-		t.Fatal("runtime must bind an approved private fixture address or ephemeral loopback")
+	approvedHost := os.Getenv("PAPERBOAT_TASK40_RUNTIME_HOST")
+	if in.ListenAddress != "127.0.0.1:0" &&
+		(net.ParseIP(approvedHost) == nil ||
+			(in.ListenAddress != net.JoinHostPort(approvedHost, "15442") && in.ListenAddress != net.JoinHostPort(approvedHost, "15443"))) {
+		t.Fatal("runtime must bind the configured fixture address or ephemeral loopback")
 	}
+	dashboardHost := os.Getenv("PAPERBOAT_TASK40_DASHBOARD_HOST")
 	key, err := base64.RawURLEncoding.DecodeString(in.PublicKey)
 	if err != nil || len(key) != ed25519.PublicKeySize {
 		t.Fatal("invalid authority public key")
@@ -127,7 +131,7 @@ func TestTask40HoldBrowserRuntime(t *testing.T) {
 		defer done()
 		_ = runtimeServer.Shutdown(cleanup)
 	}()
-	handler, err := NewWebSocketHandler(WebSocketHandlerConfig{Server: runtimeServer, MaxConnections: 8, OriginPatterns: []string{"100.95.70.63:3103"}, Authorizer: func(token string) (Authorizer, error) {
+	handler, err := NewWebSocketHandler(WebSocketHandlerConfig{Server: runtimeServer, MaxConnections: 8, OriginPatterns: []string{dashboardHost}, Authorizer: func(token string) (Authorizer, error) {
 		return &CredentialAuthorizer{Token: token, Verifier: verifier, Revocations: revocations, Resolver: resolverFunc(func(frame protocol.Frame) (auth.Policy, error) {
 			if frame.Capability != "terminal.v1" && frame.Capability != "health.v1" {
 				return auth.Policy{}, ErrCredentialPolicy

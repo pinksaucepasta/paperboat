@@ -19,11 +19,11 @@ func TestAliasHostRoundTrip(t *testing.T) {
 
 func TestParseMachineTarget(t *testing.T) {
 	for input, want := range map[string][2]string{
-		"build-01":            {"build-01", ""},
-		"root@build-01":       {"build-01", "root"},
-		"Deploy@BUILD-01":     {"BUILD-01", "Deploy"},
-		"root@machine_01":     {"machine_01", "root"},
-		`VICTUS\Pujan@victus`: {"victus", `VICTUS\Pujan`},
+		"build-01":                     {"build-01", ""},
+		"root@build-01":                {"build-01", "root"},
+		"Deploy@BUILD-01":              {"BUILD-01", "Deploy"},
+		"root@machine_01":              {"machine_01", "root"},
+		`WIN-TARGET\Tester@win-target`: {"win-target", `WIN-TARGET\Tester`},
 	} {
 		alias, username, err := ParseMachineTarget(input)
 		if err != nil || alias != want[0] || username != want[1] {
@@ -104,25 +104,25 @@ func TestResolveUsernameRejectsConflictAndUnsafeValues(t *testing.T) {
 }
 
 func TestResolveUsernameWindowsIsCaseInsensitiveAndCanonical(t *testing.T) {
-	for _, request := range []string{"", `victus\pujan`} {
-		got, err := ResolveUsernameForPlatform(request, "", `VICTUS\Pujan`, "local", true, "windows")
-		if err != nil || got != `VICTUS\Pujan` {
+	for _, request := range []string{"", `win-target\tester`} {
+		got, err := ResolveUsernameForPlatform(request, "", `WIN-TARGET\Tester`, "local", true, "windows")
+		if err != nil || got != `WIN-TARGET\Tester` {
 			t.Fatalf("qualified Windows identity = %q, %v", got, err)
 		}
 	}
-	if _, err := ResolveUsernameForPlatform(`VICTUS\Pujan`, "", "", "", false, "linux"); !errors.Is(err, ErrSSHUsernameInvalid) {
+	if _, err := ResolveUsernameForPlatform(`WIN-TARGET\Tester`, "", "", "", false, "linux"); !errors.Is(err, ErrSSHUsernameInvalid) {
 		t.Fatalf("Unix accepted qualified Windows identity: %v", err)
 	}
-	for _, value := range []string{`\Pujan`, `VICTUS\`, `VICTUS\Pujan\extra`, `-domain\Pujan`, `VICTUS\-user`, `VICTUS/Pujan`, `VICTUS\bad"user`, `VICTUS\bad;user`} {
+	for _, value := range []string{`\Tester`, `WIN-TARGET\`, `WIN-TARGET\Tester\extra`, `-domain\Tester`, `WIN-TARGET\-user`, `WIN-TARGET/Tester`, `WIN-TARGET\bad"user`, `WIN-TARGET\bad;user`} {
 		if _, err := ResolveUsernameForPlatform(value, "", "", "", false, "windows"); !errors.Is(err, ErrSSHUsernameInvalid) {
 			t.Fatalf("unsafe qualified identity %q accepted: %v", value, err)
 		}
 	}
-	got, err := ResolveUsernameForPlatform("pujan", "Pujan", "Pujan", "local", true, "windows")
-	if err != nil || got != "Pujan" {
+	got, err := ResolveUsernameForPlatform("tester", "Tester", "Tester", "local", true, "windows")
+	if err != nil || got != "Tester" {
 		t.Fatalf("ResolveUsernameForPlatform() = %q, %v", got, err)
 	}
-	if got, err := ResolveUsernameForPlatform("pujan", "", "Pujan", "local", true, "linux"); err != nil || got != "pujan" {
+	if got, err := ResolveUsernameForPlatform("tester", "", "Tester", "local", true, "linux"); err != nil || got != "tester" {
 		t.Fatalf("Linux user names are case-sensitive, so this is another user: %q, %v", got, err)
 	}
 }
@@ -155,8 +155,8 @@ func TestResolveDestinationMarksOnlyTheSetupUserAsManaged(t *testing.T) {
 			t.Fatalf("user %q: managed=%v err=%v, want managed=%v", requested, got.Managed, err, managed)
 		}
 	}
-	input.RequestedUser, input.Platform, input.RegisteredUser = "pujan", "windows", "Pujan"
-	if got, err := ResolveDestination(input); err != nil || !got.Managed || got.User != "Pujan" {
+	input.RequestedUser, input.Platform, input.RegisteredUser = "tester", "windows", "Tester"
+	if got, err := ResolveDestination(input); err != nil || !got.Managed || got.User != "Tester" {
 		t.Fatalf("Windows user names are case-insensitive: %+v %v", got, err)
 	}
 }

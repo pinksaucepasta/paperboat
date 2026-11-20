@@ -327,7 +327,7 @@ func TestRunSSHCommandCancellationDuringSessionAndEarlyEOF(t *testing.T) {
 	}
 }
 
-// victus -> hp 2026-11-10: the host ended the stream before sshd's banner and `pb ssh hp -- cmd` printed only the
+// Windows test machine -> Linux test machine 2026-11-10: the host ended the stream before sshd's banner and `pb ssh Linux test machine -- cmd` printed only the
 // generic failure text ("ssh: handshake failed: EOF" underneath). A refusal line is named the same way as on Unix.
 func TestRunSSHCommandNamesAHostRefusalInsteadOfAHandshakeFailure(t *testing.T) {
 	clientSigner, _ := testKey(t)

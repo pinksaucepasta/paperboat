@@ -3,7 +3,7 @@ package hostruntimecmd
 import "testing"
 
 func TestBootstrapSSHFields(t *testing.T) {
-	if user, port := bootstrapSSHFields(" pujan ", 22); user != "pujan" || port != 22 {
+	if user, port := bootstrapSSHFields(" tester ", 22); user != "tester" || port != 22 {
 		t.Fatalf("SSH fields = %q/%d", user, port)
 	}
 	if user, port := bootstrapSSHFields("", 0); user != "" || port != 0 {

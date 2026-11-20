@@ -424,7 +424,7 @@ const machineSectionSource = `{
   "paths": {"editor": {"local_path": "~/default", "kind": "directory"}},
   "os": {"linux": {"paths": {"editor": {"local_path": "~/os"}}}},
   "machine": {
-    "hp": {"paths": {"editor": {"local_path": "~/hp"}}, "mode": "pull_only"},
+    "laptop": {"paths": {"editor": {"local_path": "~/laptop"}}, "mode": "pull_only"},
     "laptop": {"paths": {"editor": {"exclude": ["private/**"]}}}
   }
 }`
@@ -434,14 +434,14 @@ func TestMachineSectionPrecedenceBetweenOSAndMachineFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shared.Machine["hp"].Mode == nil || *shared.Machine["hp"].Mode != ModePullOnly || shared.Machine["laptop"].Paths["editor"].Exclude == nil {
+	if shared.Machine["laptop"].Mode == nil || *shared.Machine["laptop"].Mode != ModePullOnly || shared.Machine["laptop"].Paths["editor"].Exclude == nil {
 		t.Fatalf("machine sections not parsed: %#v", shared.Machine)
 	}
 	cases := []struct {
 		name, machineName, wantLocal, wantSource string
 		wantMode                                 AssignmentMode
 	}{
-		{"named section beats os", "hp", "~/hp", "machine_section", ModePullOnly},
+		{"named section beats os", "laptop", "~/laptop", "machine_section", ModePullOnly},
 		{"other machine keeps os", "desktop", "~/os", "os", ModeBidirectional},
 		{"section only changes what it sets", "laptop", "~/os", "machine_section", ModeBidirectional},
 	}
@@ -456,16 +456,16 @@ func TestMachineSectionPrecedenceBetweenOSAndMachineFile(t *testing.T) {
 		}
 	}
 	machine := SourceConfig{Paths: map[string]RuleConfig{"editor": {LocalPath: stringPointer("~/mine")}}}
-	effective, err := MergeSourceConfigsForOS(shared, machine, "linux", "hp")
+	effective, err := MergeSourceConfigsForOS(shared, machine, "linux", "laptop")
 	if err != nil || effective.PathRules[0].LocalPath != "~/mine" || effective.PathRules[0].Source != "machine" || effective.Mode != ModePullOnly {
 		t.Fatalf("machine file must beat the machine section: %#v %v", effective, err)
 	}
 	if sourceRank("machine") <= sourceRank("machine_section") || sourceRank("machine_section") <= sourceRank("os") || sourceRank("os") <= sourceRank("shared") {
 		t.Fatal("path ownership ranks do not follow the precedence")
 	}
-	hp, _ := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", "hp")
+	laptop, _ := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", "laptop")
 	desktop, _ := MergeSourceConfigsForOS(shared, SourceConfig{}, "linux", "desktop")
-	if hp.Revision == desktop.Revision {
+	if laptop.Revision == desktop.Revision {
 		t.Fatal("configuration revision ignores the machine section")
 	}
 }
@@ -481,15 +481,15 @@ func TestMachineSectionNeedsMachineNameAndKnownSyntax(t *testing.T) {
 	if _, err := MergeSourceConfigsForOS(SourceConfig{}, SourceConfig{}, "linux", ""); err != nil {
 		t.Fatalf("a file without machine sections never needs the name: %v", err)
 	}
-	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{Machine: map[string]SourceConfig{"hp": {}}}, "linux", "hp"); !errors.Is(err, ErrSourceConfigInvalid) {
+	if _, err := MergeSourceConfigsForOS(shared, SourceConfig{Machine: map[string]SourceConfig{"laptop": {}}}, "linux", "laptop"); !errors.Is(err, ErrSourceConfigInvalid) {
 		t.Fatal("machine file accepted a [machine] section")
 	}
-	for _, data := range []string{`{"machine": {"HP": {}}}`, `{"machine": {"-hp": {}}}`, `{"machine": {"hp-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"hp": {"os": {"linux": {}}}}}`, `{"machine": {"hp": {"machine": {"other": {}}}}}`, `{"os": {"linux": {"machine": {"hp": {}}}}}`, `{"machine": 3}`, `{"machine": {"hp": {"mode": 3}}}`, `{"machine": {"hp": {"unknown": 1}}}`, `{"machine": {"hp": {"pull": {"repository_id": 3}}}}`} {
+	for _, data := range []string{`{"machine": {"HP": {}}}`, `{"machine": {"-hp": {}}}`, `{"machine": {"hp-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"laptop": {"os": {"linux": {}}}}}`, `{"machine": {"laptop": {"machine": {"other": {}}}}}`, `{"os": {"linux": {"machine": {"laptop": {}}}}}`, `{"machine": 3}`, `{"machine": {"laptop": {"mode": 3}}}`, `{"machine": {"laptop": {"unknown": 1}}}`, `{"machine": {"laptop": {"pull": {"repository_id": 3}}}}`} {
 		if _, err := ParseSourceConfig([]byte(data), DefaultSourceConfigLimits()); !errors.Is(err, ErrSourceConfigInvalid) {
 			t.Fatalf("accepted %q: %v", data, err)
 		}
 	}
-	if _, err := ParseSourceConfig([]byte(`{"machine": {"hp": {"pull": {"repository_id": "r"}, "paths": {"a": {"local_path": "x", "kind": "file"}}}}}`), DefaultSourceConfigLimits()); err != nil {
+	if _, err := ParseSourceConfig([]byte(`{"machine": {"laptop": {"pull": {"repository_id": "r"}, "paths": {"a": {"local_path": "x", "kind": "file"}}}}}`), DefaultSourceConfigLimits()); err != nil {
 		t.Fatalf("valid section rejected: %v", err)
 	}
 }

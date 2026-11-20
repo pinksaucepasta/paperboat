@@ -35,7 +35,7 @@ func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := g.certificate(t.Context(), owner, "owner", "hp.local.example.test")
+	base, err := g.certificate(t.Context(), owner, "owner", "laptop.local.example.test")
 	if err != nil || base != bundle {
 		t.Fatal("base and port did not reuse alias wildcard")
 	}
@@ -47,7 +47,7 @@ func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"hp.local.example.test", "3000.hp.local.example.test"} {
+	for _, host := range []string{"laptop.local.example.test", "3000.hp.local.example.test"} {
 		if leaf.VerifyHostname(host) != nil {
 			t.Fatalf("leaf lacks %s", host)
 		}
@@ -69,7 +69,7 @@ func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 		}
 	}
 	g.leases["gateway"].port = 80
-	if _, err := g.certificate(t.Context(), owner, "owner", "hp.local.example.test"); err == nil {
+	if _, err := g.certificate(t.Context(), owner, "owner", "laptop.local.example.test"); err == nil {
 		t.Fatal("cached certificate bypassed gateway withdrawal")
 	}
 }
@@ -79,10 +79,10 @@ func TestCertificateCachePrunesWithdrawnAliasesAndRefreshesCRL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cached := g.certificates[owner]["hp.local.example.test"]
+	cached := g.certificates[owner]["laptop.local.example.test"]
 	cached.renewAt = time.Now().Add(-time.Second)
-	g.certificates[owner]["hp.local.example.test"] = cached
-	next, err := g.certificate(t.Context(), owner, "owner", "hp.local.example.test")
+	g.certificates[owner]["laptop.local.example.test"] = cached
+	next, err := g.certificate(t.Context(), owner, "owner", "laptop.local.example.test")
 	if err != nil || next == original {
 		t.Fatal("expired CRL cache was not refreshed")
 	}
@@ -97,7 +97,7 @@ func TestCertificateWaitCancelsWithoutBlockingRegistry(t *testing.T) {
 	g.certificateGate <- struct{}{}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := g.certificate(ctx, &certificateConnection{}, "owner", "hp.local.example.test"); !errors.Is(err, context.Canceled) {
+	if _, err := g.certificate(ctx, &certificateConnection{}, "owner", "laptop.local.example.test"); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if !g.mu.TryLock() {

@@ -22,7 +22,7 @@ func TestLocalCRLMatchesIssuedLeafAndSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	rootBefore := append([]byte(nil), ca.CertPEM()...)
-	leafPEM, key, err := ca.IssueCertificate([]string{"hp.local.example.test"})
+	leafPEM, key, err := ca.IssueCertificate([]string{"laptop.local.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}

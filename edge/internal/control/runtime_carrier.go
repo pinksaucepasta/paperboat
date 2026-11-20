@@ -94,7 +94,7 @@ type EndpointUpdate struct {
 }
 
 // EndpointAdmissions pulls the endpoint routes of the edge's runtime snapshot (PLAN 3a), as deltas
-// after the first full set (Lane W scale matrix). The server sends them grouped by carrier in pages;
+// after the first full set (scale matrix). The server sends them grouped by carrier in pages;
 // all pages of one answer are read here, and the first page's cursor is the answer's cursor.
 func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, since string, wait time.Duration) (EndpointUpdate, error) {
 	if connectorprotocol.ValidateIdentifier(nodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(epoch) != nil || len(since) > 64 {

@@ -13,7 +13,7 @@ import (
 )
 
 // An Official build installed over a dev (Custom) installation, which stored an empty update target, failed "pb TUF target
-// descriptor is invalid" because the stored target was reused with only the version filled in (victus, 2026-11-19).
+// descriptor is invalid" because the stored target was reused with only the version filled in (Windows test machine, 2026-11-19).
 func TestOfficialInstallOverACustomInstallationCarriesItsOwnArtifact(t *testing.T) {
 	previousServer, previousRelease := buildinfo.DefaultServerURL, buildinfo.DefaultReleaseURL
 	t.Cleanup(func() { buildinfo.DefaultServerURL, buildinfo.DefaultReleaseURL = previousServer, previousRelease })

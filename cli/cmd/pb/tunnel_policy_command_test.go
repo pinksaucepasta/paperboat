@@ -40,7 +40,7 @@ func runLazyPolicyCommand(t *testing.T, fake *fakeLazyPolicyClient, command *cob
 	previous, previousMachine := lazyPolicyClientForCommand, lazyPolicyMachineID
 	lazyPolicyClientForCommand = func(*cobra.Command) (lazyPolicyClient, error) { return fake, nil }
 	lazyPolicyMachineID = func(_ *cobra.Command, requested string) (string, error) {
-		if requested == "hp" {
+		if requested == "laptop" {
 			return "machine_hp_id", nil
 		}
 		return requested, nil
@@ -74,7 +74,7 @@ func TestTunnelPolicyRevokeReadsCurrentGeneration(t *testing.T) {
 
 func TestTunnelPolicyAllowAcceptsAMachineName(t *testing.T) {
 	fake := &fakeLazyPolicyClient{current: api.LazyPolicy{ID: "lap_2", Generation: 1, Target: api.LazyPolicyTarget{Scheme: "http", Address: "127.0.0.1:19090"}, AccessMode: "private", ExpiresAt: time.Now().Add(time.Hour)}}
-	runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "hp", "19090")
+	runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "laptop", "19090")
 	if fake.upsert.MachineID != "machine_hp_id" {
 		t.Fatalf("the policy stored machine %q, want the ID the name resolves to", fake.upsert.MachineID)
 	}
@@ -87,7 +87,7 @@ func TestTunnelPolicyListAndAllowShowTheIDAndGeneration(t *testing.T) {
 	if out := runLazyPolicyCommand(t, fake, tunnelPolicyListCommand()); !strings.Contains(out, "lap_7") || !strings.Contains(out, "generation 3") {
 		t.Fatalf("list output=%q", out)
 	}
-	if out := runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "hp", "3000"); !strings.Contains(out, "policy lap_7, generation 1") {
+	if out := runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "laptop", "3000"); !strings.Contains(out, "policy lap_7, generation 1") {
 		t.Fatalf("allow output lacks the policy id: %q", out)
 	}
 }

@@ -826,7 +826,7 @@ func TestBrowserLoginReportsComputerWaitingForTeamAdmin(t *testing.T) {
 	pairLoginDevice = func(*command.Context, string, *config.LoginEnrollment, string) error { return nil }
 	path, _ := browserLoginFixture(t, srv.URL)
 	out, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser", "--workspace", "myteam")
-	if err != nil || !strings.Contains(out, "Waiting for an owner or admin of myteam to accept it.") || strings.Contains(out, "Added hp") {
+	if err != nil || !strings.Contains(out, "Waiting for an owner or admin of myteam to accept it.") || strings.Contains(out, "Added laptop") {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
 }

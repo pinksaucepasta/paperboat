@@ -42,7 +42,7 @@ func TestConfigureProcessLoggingSuppressesInteractiveTransportLogs(t *testing.T)
 	var output bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
 	recorder := diagnostics.NewMemoryRecorder()
-	defer configureProcessLogging([]string{"victus"}, recorder, supportref.New())()
+	defer configureProcessLogging([]string{"win-target"}, recorder, supportref.New())()
 	slog.Info("peer transport detail")
 	if output.Len() != 0 {
 		t.Fatalf("interactive transport log reached process output: %q", output.String())

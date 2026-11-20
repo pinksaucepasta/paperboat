@@ -216,7 +216,7 @@ func relayFailoverHealth(status tailnet.RegionalStatus) (localapi.HealthItem, bo
 // engineRelayFailure reports whether reason says this engine itself cannot use any relay. Per-pair
 // reachability (a pair with no common reachable relay, an expired pair authority) is not a health item: a
 // dial that needs that pair names its cause. Prior art: Tailscale warns only about the node's own home-relay
-// connection (health/warnings.go noDERPConnectionWarnable); pb status warned about pairs not in use (hp
+// connection (health/warnings.go noDERPConnectionWarnable); pb status warned about pairs not in use (Linux test machine
 // 2026-10-27).
 func engineRelayFailure(reason string) bool {
 	return reason == "regional_admission_denied" || reason == "no_authorized_common_node"

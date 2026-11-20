@@ -6,7 +6,7 @@ import type { Envelope } from "@sentry/core"
  * error text, extra data, user, request, breadcrumbs, tags, contexts) and none may be in what is sent.
  */
 const secrets = {
-  terminal: "ls -la /home/ubuntu/private-notes; cat hunter2-password",
+  terminal: "ls -la /home/user/private-notes; cat hunter2-password",
   envValue: "hunter2-ENVVALUE-4eC39HqLyjWDarjtT1zdp7dc",
   fileName: "quarterly-board-report.pdf",
   url: "https://console.example.test/terminals/term_abc123?code=JOINCODE9X&email=person@example.test",
@@ -107,10 +107,10 @@ test("stack frames keep the app path and drop the origin, query, host directory 
   expect(scrubFile("https://console.example.test/_next/static/chunks/app-1a2b.js?v=secret#x")).toBe(
     "_next/static/chunks/app-1a2b.js",
   )
-  expect(scrubFile("/home/ubuntu/paperboat/console/.next-a/server/chunks/ssr/x.js")).toBe(
+  expect(scrubFile("/home/user/paperboat/console/.next-a/server/chunks/ssr/x.js")).toBe(
     ".next-a/server/chunks/ssr/x.js",
   )
-  expect(scrubFile("/home/ubuntu/private/dir/file.ts")).toBe("file.ts")
+  expect(scrubFile("/home/user/private/dir/file.ts")).toBe("file.ts")
   expect(scrubText("see support_0b7c3a52-9d1e-4c8a-8f2b-3e5d7a9c1b64 and request_7")).toBe(
     "see support_0b7c3a52-9d1e-4c8a-8f2b-3e5d7a9c1b64 and request_7",
   )

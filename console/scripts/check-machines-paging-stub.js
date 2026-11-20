@@ -43,7 +43,7 @@
       return Response.json({ data: { total: live.length, by_state, by_platform: { linux: live.length, macos: 0, windows: 0 } } })
     }
     if (url.pathname !== "/api/v1/machines") return realFetch(input, init)
-    // The cursor contract (Lane Q, PQ-04 C1): state and q filter on the server, total counts them.
+    // The cursor contract (PQ-04 C1): state and q filter on the server, total counts them.
     const state = url.searchParams.get("state")
     const q = (url.searchParams.get("q") ?? "").toLowerCase()
     const offset = Number(url.searchParams.get("cursor") ?? 0)

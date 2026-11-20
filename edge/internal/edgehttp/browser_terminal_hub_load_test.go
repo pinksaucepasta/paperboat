@@ -2,7 +2,7 @@
 
 package edgehttp
 
-// Load check for the edge's shared browser-terminal fan-out (PLAN 3b scale matrix, Lane W): an account with 100 browser
+// Load check for the edge's shared browser-terminal fan-out (PLAN 3b scale matrix): an account with 100 browser
 // terminals on one edge node, one of them shared with 50 viewers plus a viewer that never reads. Reports delivered
 // records/s, publish-to-receive latency, and whether the stalled viewer is lagged (backlog dropped) without slowing the others. The
 // single-terminal run is the baseline: if 100 terminals deliver far less than 100× a single one per publisher, the hub's

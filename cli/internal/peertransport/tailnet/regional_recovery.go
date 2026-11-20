@@ -375,7 +375,7 @@ func (a *Authority) RegionalStatus() RegionalStatus {
 	defer r.mu.Unlock()
 	if r.peerID == "" && !listener {
 		// A dialing engine with no pair bound has no relay path to report: pb status warned "No relay is
-		// usable" on a machine whose dials all went direct (hp 2026-10-27). A listener reports its own.
+		// usable" on a machine whose dials all went direct (Linux test machine 2026-10-27). A listener reports its own.
 		return RegionalStatus{Redundancy: RedundancyNone}
 	}
 	// An unusable state is reported once it has lasted regionalWarningDelay (Tailscale's TimeToVisible for
@@ -432,7 +432,7 @@ func (r *regionalRecovery) releaseIdlePair() {
 }
 
 // BindRegionalPeer moves regional recovery to the pair just dialed successfully. It stayed on the first peer
-// ever prepared, so pb status on hp kept warning "No relay is usable" about a machine no longer in use while
+// ever prepared, so pb status on Linux test machine kept warning "No relay is usable" about a machine no longer in use while
 // the pairs that mattered were fine (2026-10-27).
 func (a *Authority) BindRegionalPeer(peerID string) {
 	a.relay.mu.Lock()

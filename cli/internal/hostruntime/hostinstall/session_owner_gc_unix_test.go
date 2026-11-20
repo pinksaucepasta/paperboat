@@ -15,7 +15,7 @@ import (
 
 // Since the terminal ceiling became 256 (b9ebbc8d), the installed catalogue's Maximum is 257 and the
 // pin sweep's bound 259, which the sweep refused as an invalid request. The updater's reconcile pass
-// builds its coordinator through that sweep, so every pass failed before retiring anything: on lanec-gate
+// builds its coordinator through that sweep, so every pass failed before retiring anything: on test-gate
 // twelve idle session owners from rounds 15 to 30 stayed running on their old binaries.
 func TestSessionOwnerPinSweepAcceptsTheInstalledCatalogueBound(t *testing.T) {
 	catalog, _, err := sessionOwnerCatalog(Request{UID: 1000, GID: 1000, User: "pbt", Group: "pbt"})

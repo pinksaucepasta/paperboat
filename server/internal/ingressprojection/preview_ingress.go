@@ -53,7 +53,7 @@ WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2
 // replaced carrier of a preview's assignment and the new carrier before the edge has observed the route on it:
 // the edge keeps the route on the old carrier until the new one serves it, so both stay authorized. The new
 // carrier is authorized from its attach: the edge may hold the route on it before it reports the carrier up
-// (pbvm1 vm1-1a6479a4-124638: 8 s of denials there).
+// (Linux test VM vm1-1a6479a4-124638: 8 s of denials there).
 // (make-before-break; Teleport keeps every agent connection of a node, lib/reversetunnel/local_cluster.go).
 // Columns as preview_routes; preview_routes itself lists the new carrier once observed.
 const handoverPreviewRoutesSQL = `SELECT p.id,p.account_id,COALESCE(c.admission->'binding'->>'tunnel_id',''),r.revision,x.route_id,

@@ -222,7 +222,7 @@ func runHostdWith(ctx context.Context, output io.Writer, newHost hostdHostFactor
 			// The tick's own timestamp can predate a freeze; the gap check needs the time the checker really ran.
 			if liveness.silent(server.Status(), time.Now()) {
 				owned.dumpActiveStacks(ctx, os.Stderr)
-				// Alive but frozen serves nobody either (lanex2-l2, 2026-11-13: offline 2.5 h).
+				// Alive but frozen serves nobody either (test-l2, 2026-11-13: offline 2.5 h).
 				return errors.Join(runtimeFailure("the runtime worker stopped sending heartbeats", errWorkerSilent), notifier.Degraded("runtime worker stopped sending heartbeats"))
 			}
 		case <-watchdog:

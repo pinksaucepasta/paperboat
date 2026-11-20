@@ -105,8 +105,8 @@ func (c *failingInstallComputer) recordList() string {
 	return strings.Join(ids, ",")
 }
 
-// victus, 2026-11-10: the server accepted each pairing and the local service installation then failed,
-// 18 times; every attempt left its machine record in the account (victus-2 … victus-19), because each
+// Windows test machine, 2026-11-10: the server accepted each pairing and the local service installation then failed,
+// 18 times; every attempt left its machine record in the account (Windows test machine-2 … Windows test machine-19), because each
 // reset noted only the last record and the note forgot the one before. A computer whose pairing keeps
 // failing has one record: each new attempt takes over the unfinished one before it.
 func TestAPairingThatKeepsFailingLeavesOneMachineRecord(t *testing.T) {

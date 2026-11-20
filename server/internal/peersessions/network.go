@@ -545,7 +545,7 @@ func (s *NetworkService) buildPolicy(ctx context.Context, in NetworkConfigReques
 		return nil, err
 	}
 	// Work the endpoint already runs leads, so the grant and scope bounds drop the newest grants, never a running
-	// stream (pbvm4: ~3 exec grants/s pushed a held exec or terminal out after ~45 s and its scope lease closed it).
+	// stream (Linux test VM: ~3 exec grants/s pushed a held exec or terminal out after ~45 s and its scope lease closed it).
 	slices.SortStableFunc(grants, func(a, b grantRow) int {
 		return boolRank(slices.Contains(live[a.kind], a.id)) - boolRank(slices.Contains(live[b.kind], b.id))
 	})

@@ -41,7 +41,7 @@ func TestValidateInstalledOpenSSHConfigAcceptsTargetBlocks(t *testing.T) {
 		CertificateCommand: "//?/C:/PROGRA~1/PAPERB~1/bin/pb.exe",
 		Targets: []OpenSSHAliasTarget{
 			{Alias: "hn", User: "root", Port: 22},
-			{Alias: "victus", User: "Pujan", Port: 38222},
+			{Alias: "win-target", User: "Tester", Port: 38222},
 		},
 	}
 	if _, err := InstallOpenSSHConfig(config); err != nil {

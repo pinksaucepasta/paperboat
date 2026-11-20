@@ -8,7 +8,7 @@ import { queryKeys } from "@/lib/query-keys"
 /*
  * Connecting GitHub for config sync. `pb config` (or Config sync here) starts it; this console
  * reviews and approves the request, GitHub returns to the server, and the server sends the browser
- * to /github/done. The API answers JSON only. Contract: Lane B, 2026-10-23 (PLAN Log).
+ * to /github/done. The API answers JSON only. Contract: 2026-10-23 (PLAN Log).
  */
 
 /** On: GitHub returns through the server's callback to /github/callback (server 2026.10.23.40, f69bcadb). */

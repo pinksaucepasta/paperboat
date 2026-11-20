@@ -12,7 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
-// Sends from a team-owned machine (Lane O, F12: `pb send` from laneo-pa to laneo-pb answered 403 after both
+// Sends from a team-owned machine (F12: `pb send` from test-pa to test-pb answered 403 after both
 // moved to the team). The source follows the descriptor rule (own personal machine or a machine of a team the
 // sender belongs to). Between machines the sender enrolled, no approval is needed; to a machine another member
 // enrolled, that member approves (a departed enroller makes it forbidden, see the lifecycle test); a non-member
@@ -65,7 +65,7 @@ func TestPostgresMemberSendsBetweenTeamOwnedMachines(t *testing.T) {
 	send := func(sender, id string) (Request, error) {
 		return service.Create(ctx, RequestInput{RequestID: "tir_" + id + "_" + suffix, OperationID: "op_" + id + "_" + suffix, SenderAccount: sender, SourceMachineID: source, DestinationMachineID: destination, BatchID: "fb_" + id + "_" + suffix, Files: files, ExpiresAt: time.Now().UTC().Add(time.Hour)})
 	}
-	// The enroller of both team machines (Lane O's case) sends between them without an approval step.
+	// The enroller of both team machines (the case) sends between them without an approval step.
 	request, err := send(owner, "enroller")
 	if err != nil {
 		t.Fatalf("enroller send between their own team-owned machines: %v", err)

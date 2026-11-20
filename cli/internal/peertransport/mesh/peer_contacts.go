@@ -152,7 +152,7 @@ func (s *Server) LocalEndpoints() []netip.AddrPort {
 // relay handshake is acknowledged (the relay carries traffic while no direct path is proven, as in Tailscale) or
 // a disco ping to the endpoints is answered (a direct path is proven), whichever comes first. Returning after an
 // unanswered ping left two machines behind one NAT, whose signed endpoints could not reach each other, without
-// the relay: every attempt idled out (Lane H, support_25a0e3be). With no usable relay the ping alone decides.
+// the relay: every attempt idled out (support_25a0e3be). With no usable relay the ping alone decides.
 //
 // A new handshake (none answered yet in this engine) is not released by a direct answer alone until the relay
 // handshake is acknowledged or newHandshakeHold passes: a disco answer does not show the peer's WireGuard side is

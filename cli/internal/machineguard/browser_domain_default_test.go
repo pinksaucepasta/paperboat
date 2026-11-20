@@ -18,7 +18,7 @@ func TestGuardWithoutRecordedDomainServesNoBrowserAccess(t *testing.T) {
 	if status.BrowserDomain != "" || status.DefaultBrowserDomain != "" || status.TrustReady {
 		t.Fatalf("status without a domain = %+v", status)
 	}
-	if validName("hp."+testBrowserDomain, "") {
+	if validName("laptop."+testBrowserDomain, "") {
 		t.Fatal("a machine name was valid without a domain")
 	}
 }
@@ -82,7 +82,7 @@ func TestRecordingTheDefaultDomainKeepsOrReplacesIt(t *testing.T) {
 }
 
 func TestMachineNamesAreScopedToTheOwnersDomain(t *testing.T) {
-	for _, name := range []string{"hp." + testBrowserDomain, "studio-1." + testBrowserDomain} {
+	for _, name := range []string{"laptop." + testBrowserDomain, "studio-1." + testBrowserDomain} {
 		if !validName(name, testBrowserDomain) {
 			t.Fatalf("rejected %s", name)
 		}

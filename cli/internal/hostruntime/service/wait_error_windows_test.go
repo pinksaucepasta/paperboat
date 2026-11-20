@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 )
 
-// victus's upgrade hung with a carrier in StartPending and the install said only "context deadline exceeded".
+// Windows test machine's upgrade hung with a carrier in StartPending and the install said only "context deadline exceeded".
 func TestWindowsServiceWaitErrorNamesTheStuckService(t *testing.T) {
 	err := windowsServiceWaitError("PaperboatCarrier-x-g2", svc.StartPending, svc.Running, context.DeadlineExceeded)
 	if !errors.Is(err, context.DeadlineExceeded) {

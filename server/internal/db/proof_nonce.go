@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// PLAN F21-13 (Lane X #16): a signed machine or helper proof with a nonce is used once. The nonce is
+// PLAN F21-13 (#16): a signed machine or helper proof with a nonce is used once. The nonce is
 // reserved until the proof expires; a second use is a replay. Requests that HTTP itself may send again
 // (GET/HEAD, or any request with an Idempotency-Key, which Go's transport re-sends after a dropped
 // connection) are idempotent by design and are not reserved, so such a re-send is never mistaken for a

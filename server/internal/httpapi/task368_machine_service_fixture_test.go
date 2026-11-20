@@ -49,6 +49,7 @@ import (
 // credential is forged, and all enrollment, signatures and observations are real.
 func TestTask368ServeMachineServices(t *testing.T) {
 	directory := os.Getenv("PAPERBOAT_TASK368_MACHINE_DIR")
+	edgeHost := os.Getenv("PAPERBOAT_TASK368_EDGE_HOST")
 	if directory == "" {
 		t.Skip("private native enrollment fixture is opt-in")
 	}
@@ -58,6 +59,9 @@ func TestTask368ServeMachineServices(t *testing.T) {
 	}
 	if !filepath.IsAbs(directory) {
 		t.Fatal("absolute protected fixture directory required")
+	}
+	if net.ParseIP(edgeHost) == nil {
+		t.Fatal("configure the private edge fixture IP")
 	}
 	address := os.Getenv("PAPERBOAT_TASK368_MACHINE_LISTEN")
 	host, _, err := net.SplitHostPort(address)
@@ -261,7 +265,7 @@ func TestTask368ServeMachineServices(t *testing.T) {
 					Ready    bool      `json:"ready"`
 				}
 				if json.Unmarshal(raw, &ready) == nil && ready.NodeID == "task368-relay" && ready.Ready && ready.Epoch != "" && ready.UDP > 0 && ready.UDP < 65536 && ready.TCP > 0 && ready.TCP < 65536 && ready.TCP != ready.UDP && ready.Observed.After(time.Now().Add(-5*time.Second)) && !ready.Observed.After(time.Now().Add(time.Second)) {
-					if _, e = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,allowed_account_ids) VALUES('task368-relay','task368','v1',$1,'100.70.146.64',$2,$3,'ready',true,$4,1,'task368','hetzner',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],$4::timestamptz+interval '15 seconds',100,0,$4,ARRAY[$5]::text[]) ON CONFLICT(id) DO UPDATE SET process_epoch=EXCLUDED.process_epoch,endpoint_tcp_port=EXCLUDED.endpoint_tcp_port,endpoint_quic_port=EXCLUDED.endpoint_quic_port,state='ready',ready=true,last_heartbeat_at=EXCLUDED.last_heartbeat_at,registry_expires_at=EXCLUDED.registry_expires_at,capacity_observed_at=EXCLUDED.capacity_observed_at,allowed_account_ids=EXCLUDED.allowed_account_ids`, ready.Epoch, ready.TCP, ready.UDP, ready.Observed, actors[0].AccountID); e != nil {
+					if _, e = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,last_heartbeat_at,node_generation,region,failure_domain,roles,transports,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,allowed_account_ids) VALUES('task368-relay','task368','v1',$1,$6,$2,$3,'ready',true,$4,1,'task368','hetzner',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],$4::timestamptz+interval '15 seconds',100,0,$4,ARRAY[$5]::text[]) ON CONFLICT(id) DO UPDATE SET process_epoch=EXCLUDED.process_epoch,endpoint_host=EXCLUDED.endpoint_host,endpoint_tcp_port=EXCLUDED.endpoint_tcp_port,endpoint_quic_port=EXCLUDED.endpoint_quic_port,state='ready',ready=true,last_heartbeat_at=EXCLUDED.last_heartbeat_at,registry_expires_at=EXCLUDED.registry_expires_at,capacity_observed_at=EXCLUDED.capacity_observed_at,allowed_account_ids=EXCLUDED.allowed_account_ids`, ready.Epoch, ready.TCP, ready.UDP, ready.Observed, actors[0].AccountID, edgeHost); e != nil {
 						t.Fatal("live relay registration:", e)
 					}
 				}

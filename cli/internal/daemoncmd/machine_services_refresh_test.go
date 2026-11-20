@@ -20,7 +20,7 @@ func (a *countingServiceApplier) ApplyServices(context.Context, []api.MachineSer
 }
 
 // An idle daemon fetches the service list once and then only on the machine_services topic or a
-// nudge, not before every short server lease ends (Lane W: one GET every ~7 s per idle machine).
+// nudge, not before every short server lease ends (one GET every ~7 s per idle machine).
 func TestMachineServicesAreFetchedOnlyOnTopicOrNudge(t *testing.T) {
 	var fetches atomic.Int32
 	fetch := func(context.Context) ([]api.MachineServicesMachine, error) {

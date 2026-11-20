@@ -27,7 +27,7 @@ func (handler windowsWorkerControlHandlerFunc) HandleWorkerControl(ctx context.C
 }
 
 func TestWindowsNamedPipeReportsOperationalFailureAndRecovers(t *testing.T) {
-	const privateDetail = "private worker path C:\\Users\\pujan\\AppData\\Local\\paperboat\\worker"
+	const privateDetail = "private worker path C:\\Users\\tester\\AppData\\Local\\paperboat\\worker"
 	failure := fmt.Errorf("%s: %w", privateDetail, syscall.EIO)
 	config := windowsNativeSocketConfig(t)
 	config.WorkerControl = windowsWorkerControlHandlerFunc(func(context.Context, WorkerControlRequest) (WorkerControlResponse, error) {

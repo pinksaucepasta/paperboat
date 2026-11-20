@@ -1,5 +1,5 @@
 -- +goose Up
--- PLAN F21-12 (Lane X #16): a create retried with the same Idempotency-Key returns the same
+-- PLAN F21-12 (#16): a create retried with the same Idempotency-Key returns the same
 -- token and its once-shown secret. The secret is held encrypted (secrets envelope, the server's
 -- encryption key) only for api_tokens.retry_seconds; expired rows are deleted.
 CREATE TABLE paperboat.api_token_create_requests (

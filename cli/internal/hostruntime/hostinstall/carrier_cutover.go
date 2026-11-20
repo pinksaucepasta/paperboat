@@ -76,7 +76,7 @@ func (u *carrierUpgrade) confirmServing(ctx context.Context, wait time.Duration)
 		if err = client.Health(ctx); err == nil {
 			return nil
 		}
-		// No fail-fast here: the carrier answers a rejected capability as unavailable on purpose (no oracle), so a
+		// No fail-fast here: the carrier answers a rejected capability as unavailable on purpose (no build host), so a
 		// definite error cannot be told from "still starting"; the budget is the bound and both ends are reported.
 		probes.note(err)
 		select {

@@ -60,7 +60,7 @@ func TestLoadTeamMutations(t *testing.T) {
 		seconds = v
 	}
 	// A team admin changes a setting about once a second at the very most; PAPERBOAT_LOAD_PAUSE_MS=100 is the saturating profile
-	// (188 mutations/s on a 4-vCPU Boat VM: about 1.5% of them exhaust the 10 serialization retries, SQLSTATE 40001).
+	// (188 mutations/s on a 4-vCPU test VM: about 1.5% of them exhaust the 10 serialization retries, SQLSTATE 40001).
 	pause := time.Second
 	if v, err := strconv.Atoi(os.Getenv("PAPERBOAT_LOAD_PAUSE_MS")); err == nil && v > 0 {
 		pause = time.Duration(v) * time.Millisecond

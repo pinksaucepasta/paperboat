@@ -284,7 +284,7 @@ func (s *Service) describeTerminalPage(ctx context.Context, account string, item
 
 // terminalPage is what describing a page of terminals reads from the database, once for the page: the sharing
 // grants of every session and the runtime ingress of every machine environment. Read per row it was the
-// catalog's N+1 (about 9 queries a session, 104 for the perf solo account's page; Lane X S3).
+// catalog's N+1 (about 9 queries a session, 104 for the perf solo account's page; S3).
 type terminalPage struct {
 	grants  map[string][]SharedTerminalGrant // session -> grants of its sharing team, by audience and account
 	ingress map[string]string                // environment -> runtime ingress URL; absent: unavailable

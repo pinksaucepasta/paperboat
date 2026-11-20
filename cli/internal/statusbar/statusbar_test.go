@@ -146,7 +146,7 @@ func TestTransportIndicatorIsAlwaysLast(t *testing.T) {
 func TestDebugVersionIsSessionScopedAndPrecedesTransport(t *testing.T) {
 	bar, _ := newTestBar(t, ModeAuto, "xterm-256color", 96, 24, true, time.Second)
 	bar.layout = Layout{Left: []string{"project"}, Center: []string{}, Right: []string{"connection"}}
-	bar.SetIdentity("victus", "shell-1")
+	bar.SetIdentity("win-target", "shell-1")
 	bar.SetConnection("connected")
 	if line := bar.Render(96); strings.Contains(line, "pb ") {
 		t.Fatalf("normal session unexpectedly shows a debug version: %q", line)

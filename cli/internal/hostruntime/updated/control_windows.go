@@ -341,7 +341,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 			return response, err
 		}
 		// The first approval of a staged candidate reaches the install path below, which records it; the
-		// fence there would otherwise reject every request while the candidate waits (victus 2026-11-10).
+		// fence there would otherwise reject every request while the candidate waits (Windows test machine 2026-11-10).
 		if windowsFirstApproval(journal, request.ApprovalID) {
 			blocked = false
 		} else {

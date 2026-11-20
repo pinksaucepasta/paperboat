@@ -120,7 +120,7 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 	if err != nil || runtime.calls.Load() != 1 || item.Name != "my-work" || item.Title != "vim main.go" || item.CurrentDirectory != "/live/api" || item.ForegroundProcess != "vim" || item.StartedIn != "/launch" || item.State != "detached" {
 		t.Fatalf("live authorized projection=%+v calls=%d error=%v", item, runtime.calls.Load(), err)
 	}
-	// Lane C, round 21: for a few seconds after create /sharing said closed while the host had not
+	// round 21: for a few seconds after create /sharing said closed while the host had not
 	// created the session yet ("unknown"). A session the host never confirmed is not closed by that.
 	fresh := "terminal_" + uuid.NewString()
 	insert(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd,runtime_state) VALUES($1,$2,$3,'just-created','/launch','creating')`, fresh, machine, owner)
@@ -197,12 +197,12 @@ func TestPostgresTerminalLiveIdentificationAuthorization(t *testing.T) {
 		t.Fatalf("ending the selected-member share: %v", err)
 	}
 
-	// A plain member shares to one member who owns the team (Lane U, ubuntu24: 404 terminal_session_not_found).
+	// A plain member shares to one member who owns the team (teammate machine: 404 terminal_session_not_found).
 	ownedElsewhere := "ti-team-owned-" + suffix
 	insert(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, ownedElsewhere, stranger)
 	insert(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true),($1,$3,1,'member',true)`, ownedElsewhere, stranger, owner)
 	insert(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "bw_"+ownedElsewhere, ownedElsewhere)
-	// Lane U's order: share with everyone, end it, then share with the team owner alone.
+	// the order: share with everyone, end it, then share with the team owner alone.
 	everyone := teams.TerminalSessionGrantRequest{OperationID: "all_owned_" + suffix, Audience: "all_members", Role: "interactive", Active: true}
 	if err = store.SQL().QueryRowContext(ctx, `SELECT generation FROM paperboat.teams WHERE team_id=$1`, ownedElsewhere).Scan(&everyone.ExpectedGeneration); err != nil {
 		t.Fatal(err)

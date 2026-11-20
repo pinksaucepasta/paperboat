@@ -269,7 +269,7 @@ const configStatusPageSize, configStatusMaxPages = 200, 50
 
 // ConfigSyncStatus reads every machine's status. The server pages it (50 by default); reading only
 // the first page hid machines past the 50th from status, conflict, force and approve (a test VM
-// lanel-e, 2026-10-23, on an account with 178 machines).
+// test-e, 2026-10-23, on an account with 178 machines).
 func (c *Client) ConfigSyncStatus(ctx context.Context) (ConfigSyncStatus, error) {
 	var out ConfigSyncStatus
 	offset := 0

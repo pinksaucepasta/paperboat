@@ -121,7 +121,7 @@ func (r *Reporter) sampleMetrics() {
 }
 
 // metricRefreshInterval is how often every series is sent again even when unchanged, so a gauge
-// does not disappear from dashboards; between refreshes only changed values are sent (Lane X P7:
+// does not disappear from dashboards; between refreshes only changed values are sent (P7:
 // every 30 s tick sent up to 68 unchanged gauges per process).
 const metricRefreshInterval = 15 * time.Minute
 

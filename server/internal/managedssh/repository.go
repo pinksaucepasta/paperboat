@@ -463,7 +463,7 @@ func (r *SQLRepository) PromoteHost(ctx context.Context, request PromoteHostRequ
 			return err
 		}
 		// The host installs authorized keys for the new set on its next reconcile; wake it now (it listens to
-		// machine_access), or pb ssh was refused for about a minute after pb ssh trust-host (hp 2026-10-27).
+		// machine_access), or pb ssh was refused for about a minute after pb ssh trust-host (Linux test machine 2026-10-27).
 		if err := machineevents.Publish(ctx, tx, []string{request.UserMachineID}, machineevents.TopicMachineAccess); err != nil {
 			return err
 		}

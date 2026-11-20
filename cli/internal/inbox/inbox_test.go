@@ -219,7 +219,7 @@ func TestRunObservesPendingFailuresOnceAndRecoversWithTheSameReference(t *testin
 	client := &pendingSequenceClient{
 		errors: []error{private, private}, called: make(chan int, 8), recovered: make(chan struct{}),
 	}
-	// Consecutive failures back off (Lane X audit P6); the waits are shortened here and recorded.
+	// Consecutive failures back off (audit P6); the waits are shortened here and recorded.
 	var waitsMu sync.Mutex
 	var waits []int
 	previousWait := pendingRetryWait

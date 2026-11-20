@@ -18,7 +18,7 @@ func TestSSHAuthorizationHeaderCarriesTheLoginUserOnlyForSSH(t *testing.T) {
 	}
 	// A Windows target registers DOMAIN\user (os/user on Windows): the header cannot carry it, and with it the
 	// stream to every Windows machine failed before it opened.
-	target.LoginUser = `VICTUS\Pujan`
+	target.LoginUser = `WIN-TARGET\Tester`
 	header, err = application.authorizationHeader(target, "ssh", "fallback", "stream_1", now)
 	if _, marshalErr := header.MarshalBinary(); err != nil || marshalErr != nil || header.LoginUser != "" {
 		t.Fatalf("ssh header for a qualified Windows user: %+v %v %v", header, err, marshalErr)

@@ -49,7 +49,7 @@ func AllowScript(group, program string) string {
 // RemoveScript removes every rule of the group; a group without rules is not an error. A real failure of
 // Remove-NetFirewallRule throws (ErrorActionPreference Stop) and fails the script; the explicit exit is for the
 // group lookup that finds nothing: its silenced error leaves $? false, which powershell -Command turns into exit
-// status 1 with no output, and a reset right after a clean uninstall failed on it (victus, 2026-11-19).
+// status 1 with no output, and a reset right after a clean uninstall failed on it (Windows test machine, 2026-11-19).
 func RemoveScript(group string) string {
 	return "$ErrorActionPreference='Stop';" + skipWithoutFirewall + ";Get-NetFirewallRule -Group " + quote(group) + " -ErrorAction SilentlyContinue|Remove-NetFirewallRule;exit 0"
 }

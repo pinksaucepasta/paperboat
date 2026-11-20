@@ -11,7 +11,7 @@ import (
 // same attachment id comes back) returns to the control it had.
 const sizeWindowRetention = 10 * time.Minute
 
-// windowSizes decides one session's PTY size when several windows are attached (F3-17, Lane K terminal plan item 4).
+// windowSizes decides one session's PTY size when several windows are attached (F3-17 terminal plan item 4).
 //
 // The rule is tmux's `window-size latest` (~/ref/tmux/options-table.c, resize.c): the PTY has the size of the controller
 // window that was last active. Activity is typing and focus; attaching and reconnecting do not count, so a reconnect

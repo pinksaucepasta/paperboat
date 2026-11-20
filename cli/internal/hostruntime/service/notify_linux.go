@@ -33,8 +33,7 @@ type serviceManagerEnvironment struct {
 
 // captureServiceManager takes the main process's notification socket and watchdog out of the
 // environment, once per process, so no child process inherits them: a child's notifications are
-// rejected by systemd ("reception only permitted for main PID"), logged on every carrier start (Lane W,
-// stg-m1).
+// rejected by systemd ("reception only permitted for main PID"), logged on every carrier start (// stg-m1).
 func captureServiceManager() (serviceManagerEnvironment, error) {
 	watchdog, err := daemon.SdWatchdogEnabled(true)
 	socket := os.Getenv("NOTIFY_SOCKET")

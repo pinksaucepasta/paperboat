@@ -30,7 +30,7 @@ now()-interval '1 minute',now()+interval '1 day','test',sha256(convert_to('signe
 	})
 	if _, err := f.store.SQL().ExecContext(ctx, `INSERT INTO paperboat.peer_network_identities
 (user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to('wg'||$2,'UTF8')),sha256(convert_to($2,'UTF8')),'100.72.220.7',now(),now())`, f.account, f.machine); err != nil {
+VALUES($1,$2,'machine',$2,1,1,1,sha256(convert_to('wg'||$2,'UTF8')),sha256(convert_to($2,'UTF8')),'100.64.12.7',now(),now())`, f.account, f.machine); err != nil {
 		t.Fatal(err)
 	}
 	writer, err := f.store.Pool().Begin(ctx)

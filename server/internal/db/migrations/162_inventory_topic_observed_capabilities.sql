@@ -2,7 +2,7 @@
 -- After `pb update` the host runtime restarts, and the daemon's first inventory refresh lands before the
 -- runtime re-reports its capabilities: file_receive/preview_launch read observed=false. The runtime reports
 -- them seconds later, but no topic moved, so Transfer and Preview showed "degraded" for the 5-minute event
--- fallback, on the machine and on every peer (Lane P, Lane U). A change in the set of observed capabilities
+-- fallback, on the machine and on every peer. A change in the set of observed capabilities
 -- now moves the inventory topic too. It changes at start-up and update only, never per heartbeat; a reordered
 -- write of the same set does not count.
 -- Prior art: Tailscale sends a peer change when its Hostinfo (services, capabilities) changes, not per ping.

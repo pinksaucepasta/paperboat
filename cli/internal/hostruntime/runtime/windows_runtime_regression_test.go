@@ -38,7 +38,7 @@ func (windowsRegressionPAC) Install(context.Context, string) error {
 func (windowsRegressionPAC) Remove(context.Context) error { return nil }
 
 // TestWindowsPACFailureLeavesOwnerSessionLeasesUsable protects the failure
-// boundary that was broken on Victus: an interactive-user PAC failure is
+// boundary that was broken on Windows test machine: an interactive-user PAC failure is
 // optional in a LocalSystem hostd process and must not tear down the preview
 // owner-session manager. Shutdown still closes the manager and rejects later
 // acquisition.

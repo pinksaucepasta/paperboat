@@ -4,7 +4,7 @@ import "testing"
 
 func TestTargetAndRecordType(t *testing.T) {
 	for _, c := range []struct{ selected, host, provider, wantTarget, wantType string }{
-		{"140.245.11.41", "www.example.com", "generic", "140.245.11.41", "A"},
+		{"93.184.216.35", "www.example.com", "generic", "93.184.216.35", "A"},
 		{"[2001:db8::1]", "example.com", "route53", "2001:db8::1", "AAAA"},
 		{"edge.example.net", "example.com", "route53", "edge.example.net", "ALIAS"},
 		{"", "www.example.com", "generic", "stable.example.net", "CNAME"},

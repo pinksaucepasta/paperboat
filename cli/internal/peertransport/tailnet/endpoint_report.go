@@ -36,7 +36,7 @@ func (a *Authority) localEndpointReport() []string {
 	}
 	var endpoints []netip.AddrPort
 	for _, ep := range engine.LocalEndpoints() {
-		// The server refuses the whole request for one entry it would not store (Lane Q, 917095b6), so
+		// The server refuses the whole request for one entry it would not store (917095b6), so
 		// keep only what it keeps: IPv4-mapped unwrapped, no loopback, unspecified, multicast or zoned address.
 		ep = netip.AddrPortFrom(ep.Addr().Unmap(), ep.Port())
 		if !peernetwork.ValidPeerEndpoint(ep) {
@@ -55,7 +55,7 @@ func (a *Authority) localEndpointReport() []string {
 
 // endpointReportDue is the endpoints this renewal reports: nil (field omitted) while they equal the last
 // accepted report, else the current set, which may be empty: a machine whose candidates are gone says so,
-// so peers stop dialing stale ones (Lane Q: [] stores "no candidates").
+// so peers stop dialing stale ones ([] stores "no candidates").
 func (a *Authority) endpointReportDue() *[]string {
 	current := a.localEndpointReport()
 	a.reportMu.Lock()
@@ -67,7 +67,7 @@ func (a *Authority) endpointReportDue() *[]string {
 		return nil
 	}
 	// The first report goes out even when empty: a request carrying `endpoints` is how the server learns
-	// this client accepts endpoints on delivered peer entries (agreed with Lane Q), and a machine with no
+	// this client accepts endpoints on delivered peer entries, and a machine with no
 	// candidate must still receive its peers'.
 	return &current
 }
@@ -133,7 +133,7 @@ func (a *Authority) endpointsReported(endpoints []string) {
 func (a *Authority) endpointsChanged() {
 	a.reportMu.Lock()
 	defer a.reportMu.Unlock()
-	// Initial reachability is not a steady-state address change. The urgent lane
+	// Initial reachability is not a steady-state address change. The urgent path
 	// still enforces server Retry-After and coalesces concurrent discoveries.
 	if !a.startupReported {
 		a.RequestUrgentRefresh()

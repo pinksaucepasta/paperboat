@@ -82,7 +82,7 @@ func TestMachineGuardDiagnosticsUseItsOwnStateDirectory(t *testing.T) {
 	}
 }
 
-// lanex2-m 2026-11-16: root `pb daemon machine-guard install` under sudo kept the user's HOME and warned "settings
+// test-m 2026-11-16: root `pb daemon machine-guard install` under sudo kept the user's HOME and warned "settings
 // could not be saved": root refuses the user-owned diagnostics directory. Root guard commands use the guard's own.
 func TestRootMachineGuardInstallDiagnosticsUseGuardStateDirectory(t *testing.T) {
 	if machineguard.DefaultStateDir == "" {

@@ -18,7 +18,7 @@ import (
 )
 
 // An account with 100 peers gets relay grants naming every peer and every peer's relay control key, across
-// chunks that released relays and CLIs accept (Lane W saw grants naming 16 of 44-96 peers).
+// chunks that released relays and CLIs accept (saw grants naming 16 of 44-96 peers).
 func TestRelayGrantOfAHundredPeerAccountIsOneMembershipOnPostgres(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {

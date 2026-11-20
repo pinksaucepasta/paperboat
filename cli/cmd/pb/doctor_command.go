@@ -221,7 +221,7 @@ func doctorCommandV1() *cobra.Command {
 				}
 				probes = doctorProbes(command, snapshot, machine)
 			case localDaemonStopped(commandGOOS, err):
-				// Every other check reads the local service: its absence is the report (victus 2026-11-10: doctor
+				// Every other check reads the local service: its absence is the report (Windows test machine 2026-11-10: doctor
 				// on a machine whose services an interrupted update had stopped said only "could not finish").
 				observeLocalDoctorFailure(command.Context(), err)
 				probes = []doctorpkg.Probe{{Code: "daemon", Run: func(context.Context) doctorpkg.Check {

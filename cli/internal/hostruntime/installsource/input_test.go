@@ -459,7 +459,7 @@ func assertOnlyFiles(t *testing.T, directory string, allowed ...string) {
 }
 
 // pb update --from stages a fresh copy and runs it once to read its version. On Windows that first run is held for
-// Defender's scan (8.8 s measured three times on victus), which a 5 s probe budget turned into 'not a Paperboat
+// Defender's scan (8.8 s measured three times on Windows test machine), which a 5 s probe budget turned into 'not a Paperboat
 // executable'. The fixture answers after 6 s, as a scanned first run does.
 func TestInspectCandidateWaitsForASlowFirstRun(t *testing.T) {
 	binary := buildPaperboatFixture(t, t.TempDir(), "pb", runtime.GOOS, runtime.GOARCH)

@@ -271,7 +271,7 @@ func New(config Config) (*Inbox, error) {
 
 // pendingRetryWait is the wait after the n-th consecutive failed pending poll: doubling from 1 s to
 // 60 s with jitter, so every pb connect session does not hit a recovering server once a second at the
-// same moment (Lane X audit P6: a fixed 1 s, 10k sessions = 10k requests/s at recovery).
+// same moment (audit P6: a fixed 1 s, 10k sessions = 10k requests/s at recovery).
 var pendingRetryWait = func(n int) time.Duration { return backoff.Retry(n, time.Second, time.Minute) }
 
 func (i *Inbox) Run(ctx context.Context) error {

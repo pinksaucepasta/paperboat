@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Lane U command rows C144/C146/C159/C005: typos in command groups exited 0.
+// command rows C144/C146/C159/C005: typos in command groups exited 0.
 func TestCommandGroupsRejectUnknownWordsAndListJSON(t *testing.T) {
 	for _, group := range [][]string{{"env", "grants"}, {"env", "host"}, {"env", "vault"}, {"daemon", "machine-guard"}} {
 		var out bytes.Buffer

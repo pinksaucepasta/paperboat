@@ -13,8 +13,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
-// Access sessions do not wait for the global team write lock (Lane A: concurrent exec setups queued ~430 ms
-// apart behind it; Lane X S2). While another transaction holds the lock, ten concurrent personal access
+// Access sessions do not wait for the global team write lock (concurrent exec setups queued ~430 ms
+// apart behind it; S2). While another transaction holds the lock, ten concurrent personal access
 // sessions and ten team-member sessions on a shared machine all start.
 func TestPostgresPersonalAccessSessionsDoNotQueueOnTheTeamLock(t *testing.T) {
 	store := testStore(t)

@@ -381,7 +381,7 @@ func TestCommandFailureBorrowsTerminalReferenceWithoutHidingIndependentFault(t *
 	}
 }
 
-// Round 10 (hp, lanep-r10a/b): a just-paired peer stayed cached offline in the daemon's snapshot until its next
+// Round 10 (Linux test machine, test-r10a/b): a just-paired peer stayed cached offline in the daemon's snapshot until its next
 // refresh, and pb exec refused it ("the machine is offline") for ~2 min while ping worked. A cached presence must
 // never refuse: a machine the snapshot does not see ready is resolved on the server.
 func TestCachedOfflinePeerIsResolvedOnTheServer(t *testing.T) {

@@ -64,10 +64,10 @@ func TestSelfhostUsageCannotChargeOrNameOtherResources(t *testing.T) {
 	// A customer edge serves its account's self-hosted-only pool, and a route only
 	// with a verified domain that names the edge's public ingress address (064).
 	exec(`INSERT INTO paperboat.control_environments (id, workspace_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, environment, "workspace_"+suffix)
-	exec(`UPDATE paperboat.control_tunnel_nodes SET tls_spki_sha256=$2,public_ingress_ipv4='140.245.11.41',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID, make([]byte, 32))
+	exec(`UPDATE paperboat.control_tunnel_nodes SET tls_spki_sha256=$2,public_ingress_ipv4='93.184.216.35',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, f.nodeID, make([]byte, 32))
 	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'ciphertext','usage test','tunnel','account',$4,$1,true)`, installation, f.nodeID, []byte(pub), f.accountID)
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.accountID, installation)
-	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,expected_records,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:usage-test','verified','target.example.test','[{"type":"A","value":"140.245.11.41"}]'::jsonb,'managed','ready','ready','clear')`, "dom_usage_"+suffix, f.accountID, f.tunnelID, f.routeID, "usage-"+suffix+".example.test")
+	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,expected_records,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:usage-test','verified','target.example.test','[{"type":"A","value":"93.184.216.35"}]'::jsonb,'managed','ready','ready','clear')`, "dom_usage_"+suffix, f.accountID, f.tunnelID, f.routeID, "usage-"+suffix+".example.test")
 	exec(`INSERT INTO paperboat.control_usage_verification_keys(key_id,edge_node_id,public_key,not_before,expires_at) VALUES($1,$2,$3,$4,$5)`, installation, f.nodeID, []byte(pub), now.Add(-time.Hour), now.Add(time.Hour))
 	service := NewEdgeService(store, "managed")
 	service.SetNodeCredentials(selfhost.New(store, "selfhost-test-encryption-key-32-bytes-long"))
@@ -124,7 +124,7 @@ func TestSelfhostUsageCannotChargeOrNameOtherResources(t *testing.T) {
 
 // Paperboat's own pbh-installed (global) nodes are hosted edges: a report for a route that
 // has moved to another edge is billed through the hosted path, not refused as an independent
-// operator's (oracle retried one refused preview report ~240 times a minute).
+// operator's (build host retried one refused preview report ~240 times a minute).
 func TestGlobalInstallationUsageIsHostedNotBoundToCurrentRoutes(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := t.Context()

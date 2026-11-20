@@ -52,7 +52,7 @@ func task368RegisterBrowserEdge(t *testing.T, ctx context.Context, database *sql
 		return
 	}
 	host, _, err := net.SplitHostPort(ready.HTTP)
-	if err != nil || host != "100.70.146.64" || ready.Node != "task368-browser-edge" || len(ready.Epoch) != 32 || ready.TCP < 1 || ready.TCP > 65535 || ready.QUIC < 1 || ready.QUIC > 65535 || ready.Observed.After(time.Now().Add(time.Second)) {
+	if err != nil || net.ParseIP(host) == nil || host != os.Getenv("PAPERBOAT_TASK368_EDGE_HOST") || ready.Node != "task368-browser-edge" || len(ready.Epoch) != 32 || ready.TCP < 1 || ready.TCP > 65535 || ready.QUIC < 1 || ready.QUIC > 65535 || ready.Observed.After(time.Now().Add(time.Second)) {
 		t.Fatal("unexpected edge listener identity")
 	}
 	block, _ := pem.Decode([]byte(ready.Certificate))
@@ -67,7 +67,7 @@ func task368RegisterBrowserEdge(t *testing.T, ctx context.Context, database *sql
 	if ready.SPKI != "sha256:"+hex.EncodeToString(digest[:]) || cert.VerifyHostname(host) != nil {
 		t.Fatal("edge listener certificate mismatch")
 	}
-	_, err = database.ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,allowed_account_ids) VALUES('task368-browser-edge','task368','v1',$1,'ready',true,$2,'100.70.146.64',$3,$4,$5,$6,ARRAY[$7]::text[]) ON CONFLICT(id) DO UPDATE SET process_epoch=EXCLUDED.process_epoch,state='ready',ready=true,last_heartbeat_at=EXCLUDED.last_heartbeat_at,carrier_endpoint_tcp_port=EXCLUDED.carrier_endpoint_tcp_port,carrier_endpoint_quic_port=EXCLUDED.carrier_endpoint_quic_port,carrier_server_spki_sha256=EXCLUDED.carrier_server_spki_sha256,carrier_server_certificate_chain_pem=EXCLUDED.carrier_server_certificate_chain_pem,allowed_account_ids=EXCLUDED.allowed_account_ids`, ready.Epoch, ready.Observed, ready.TCP, ready.QUIC, ready.SPKI, ready.Certificate, account)
+	_, err = database.ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,allowed_account_ids) VALUES('task368-browser-edge','task368','v1',$1,'ready',true,$2,$8,$3,$4,$5,$6,ARRAY[$7]::text[]) ON CONFLICT(id) DO UPDATE SET process_epoch=EXCLUDED.process_epoch,state='ready',ready=true,last_heartbeat_at=EXCLUDED.last_heartbeat_at,carrier_endpoint_host=EXCLUDED.carrier_endpoint_host,carrier_endpoint_tcp_port=EXCLUDED.carrier_endpoint_tcp_port,carrier_endpoint_quic_port=EXCLUDED.carrier_endpoint_quic_port,carrier_server_spki_sha256=EXCLUDED.carrier_server_spki_sha256,carrier_server_certificate_chain_pem=EXCLUDED.carrier_server_certificate_chain_pem,allowed_account_ids=EXCLUDED.allowed_account_ids`, ready.Epoch, ready.Observed, ready.TCP, ready.QUIC, ready.SPKI, ready.Certificate, account, host)
 	if err != nil {
 		t.Fatal("actual browser edge registration:", err)
 	}
@@ -99,7 +99,7 @@ func task368RegisterBrowserTarget(t *testing.T, ctx context.Context, database *s
 	}
 	host, portText, err := net.SplitHostPort(ready.Address)
 	port, pe := strconv.Atoi(portText)
-	if err != nil || pe != nil || host != "100.70.146.64" || port < 1 || port > 65535 || ready.Generation < 1 || ready.Observed.After(time.Now().Add(time.Second)) {
+	if err != nil || pe != nil || net.ParseIP(host) == nil || host != os.Getenv("PAPERBOAT_TASK368_EDGE_HOST") || port < 1 || port > 65535 || ready.Generation < 1 || ready.Observed.After(time.Now().Add(time.Second)) {
 		t.Fatal("unexpected target listener")
 	}
 	var valid bool

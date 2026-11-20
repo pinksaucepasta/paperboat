@@ -17,7 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 )
 
-// Lane Q / Lane W: 50 console viewers polled /sharing every 4 s. A browser terminal stream now
+// / 50 console viewers polled /sharing every 4 s. A browser terminal stream now
 // reports the session's participants itself: the current list first, then whenever someone joins,
 // leaves or changes role, at most every participantsInterval.
 func TestBrowserTerminalStreamReportsParticipantChanges(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 )
 
 // Different hosts can advertise the same private Docker/LAN addresses. An address match must not
-// skip regional relay preparation for a remote machine (the test host -> hp, 2026-10-27).
+// skip regional relay preparation for a remote machine (the test host -> Linux test machine, 2026-10-27).
 func TestPeerLocalityUsesMachineIdentityDespiteOverlappingAddresses(t *testing.T) {
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
@@ -45,7 +45,7 @@ func TestPeerLocalityUsesMachineIdentityDespiteOverlappingAddresses(t *testing.T
 }
 
 // A self-dial is local by machine ID even while the host's endpoints are missing from the configuration:
-// a self-dial in that window bound regional recovery to the machine itself (hp 2026-10-27).
+// a self-dial in that window bound regional recovery to the machine itself (Linux test machine 2026-10-27).
 func TestOwnMachineIsLocalWithoutEndpoints(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	c.Peers[0].Endpoints = nil

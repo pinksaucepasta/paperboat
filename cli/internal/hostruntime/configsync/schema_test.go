@@ -33,7 +33,7 @@ func TestSchemaAgreesWithTheReader(t *testing.T) {
 		`{"enabled": "true"}`, `{"paths": 3}`, `{"os": 3}`, `{"pull": 3}`, `{"pull": {}}`, `{"pull": {"repository_id": 3}}`, `{"pull": {"repository_id": "r", "x": 1}}`,
 		`{"paths": {"a": {"include": 1}}}`, `{"paths": {"a": {"exclude": [1]}}}`, `{"paths": {"a": {"kind": "link"}}}`, `{"paths": {"a": {"local_path": ""}}}`,
 		`{"paths": {"a": {"unknown": 1}}}`, `{"os": {"plan9": {}}}`, `{"os": {"linux": {"os": {}}}}`, `{"os": {"linux": {"machine": {}}}}`,
-		`{"machine": {"HP": {}}}`, `{"machine": {"-hp": {}}}`, `{"machine": {"hp-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"hp": {"os": {}}}}`, `{"machine": {"hp": {"mode": 3}}}`,
+		`{"machine": {"HP": {}}}`, `{"machine": {"-hp": {}}}`, `{"machine": {"hp-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"laptop": {"os": {}}}}`, `{"machine": {"laptop": {"mode": 3}}}`,
 	}
 	for _, doc := range valid {
 		if problems := checkAgainstSchema(t, doc); problems != nil {

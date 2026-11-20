@@ -13,7 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
 
-// PLAN F21-12 (Lane X #16): POST api-tokens with an Idempotency-Key. A client that lost the
+// PLAN F21-12 (#16): POST api-tokens with an Idempotency-Key. A client that lost the
 // response retries with the same key and gets the same token and once-shown secret, instead of a
 // 409 for the taken name and a secret nobody saw.
 

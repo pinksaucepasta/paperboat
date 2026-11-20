@@ -203,7 +203,7 @@ func TestRegionalStatusWithNoBoundPairReportsNothing(t *testing.T) {
 }
 
 // Regional recovery follows the pair last dialed successfully: it stayed on the first peer ever prepared and
-// pb status warned about that pair while the machines in use reached their relays (hp 2026-10-27).
+// pb status warned about that pair while the machines in use reached their relays (Linux test machine 2026-10-27).
 func TestRegionalRecoveryFollowsTheLastDialedPair(t *testing.T) {
 	a := &Authority{}
 	r := &regionalRecovery{authority: a, engine: &failingRegionalEngine{cause: errors.New("unused")}, peerID: "machine_first"}

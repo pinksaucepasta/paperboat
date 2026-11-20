@@ -28,7 +28,7 @@ func rendered(t *testing.T, config Config) string {
 }
 
 // A label change must not break the published-definition check of the next build (252b2ada1 changed the Windows labels; every
-// install over a build that published the old ones failed "invalid service definition", victus 2026-11-19).
+// install over a build that published the old ones failed "invalid service definition", Windows test machine 2026-11-19).
 func TestLinuxPublishedUnitIgnoresItsDescription(t *testing.T) {
 	config := Config{Platform: "linux", Kind: WorkerKind, User: "paperboat", Group: "paperboat", Executable: "/usr/local/libexec/paperboat/pb"}
 	current := rendered(t, config)

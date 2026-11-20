@@ -13,7 +13,7 @@ import (
 
 // A retiring owner's unit was rendered by the build that installed it, never by
 // the build retiring it: pb update to a release that changed the unit text
-// refused to retire the previous owner (pbvm1, c09a562c6). Retirement checks the
+// refused to retire the previous owner (Linux test VM, c09a562c6). Retirement checks the
 // declaration's custody, not this build's render.
 func TestRetirementAcceptsTheUnitAnEarlierBuildRendered(t *testing.T) {
 	if os.Geteuid() != 0 {

@@ -21,7 +21,7 @@ func TestWindowsPinnedUpdaterUsesProtectedFeatureVersion(t *testing.T) {
 		MachineID:     "machine",
 		ListenAddress: "127.0.0.1:8080",
 		TokenFile:     hostinstall.WindowsHostdTokenPath(),
-		StateRoot:     `C:\Users\Pujan\AppData\Local\Paperboat\runtime`,
+		StateRoot:     `C:\Users\Tester\AppData\Local\Paperboat\runtime`,
 		Artifact: bootstrap.ArtifactTarget{
 			Version:       "2026.08.27.61",
 			Architecture:  "amd64",

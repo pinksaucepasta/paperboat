@@ -10,7 +10,7 @@ import (
 // X-28: the endpoint is per Windows user. One host-wide pipe let a second OS user's daemon (or a leftover one of
 // the previous user) take it, and every other user's managed SSH failed to start with "access denied".
 func TestInstalledAgentSocketIsPerUserNamedPipe(t *testing.T) {
-	got, err := InstalledAgentSocket(`C:\Users\Pujan\AppData\Local\paperboat\run`)
+	got, err := InstalledAgentSocket(`C:\Users\Tester\AppData\Local\paperboat\run`)
 	if err != nil {
 		t.Fatal(err)
 	}

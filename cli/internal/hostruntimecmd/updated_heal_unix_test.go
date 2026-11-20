@@ -18,7 +18,7 @@ type closerFunc func() error
 
 func (f closerFunc) Close() error { return f() }
 
-// ubuntu24, 2026-10-26: the updater's heal ran while a failed update was restoring the guard; the undo
+// teammate machine, 2026-10-26: the updater's heal ran while a failed update was restoring the guard; the undo
 // then stopped the healed guard and left none running. The heal runs only while it holds the lock.
 func TestGuardHealWaitsForTheInstallationLock(t *testing.T) {
 	oldLock, oldHeal, oldWait, oldInventory := lockInstallation, healGuard, healRetryWait, settleInventory

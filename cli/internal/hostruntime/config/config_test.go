@@ -47,7 +47,7 @@ func TestValidateRejectsUnsafeLimits(t *testing.T) {
 	}
 }
 
-// Lane W 2026-10-23: native terminals have no plan limit; the machine's protection ceiling is 256
+// 2026-10-23: native terminals have no plan limit; the machine's protection ceiling is 256
 // and the message at the ceiling names it and the way out.
 func TestTerminalCeilingMessageNamesTheCeiling(t *testing.T) {
 	if DefaultResources.MaxSessions != 256 {

@@ -16,7 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/terminalend"
 )
 
-// Terminal slice 7 (Lane K plan): every refusal after the ticket parses is a WebSocket close the browser can read, with
+// Terminal slice 7 (plan): every refusal after the ticket parses is a WebSocket close the browser can read, with
 // a 4xxx code and a typed reason, instead of an HTTP status JavaScript cannot see. This runs the whole edge handler.
 func TestBrowserTerminalRefusalsAreClosesTheBrowserCanRead(t *testing.T) {
 	closedAdmission := make(chan struct{})

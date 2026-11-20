@@ -98,7 +98,7 @@ func TestVaultTeamCapsuleManagementUsesAccountAndExactTeamWorkspace(t *testing.T
 
 // Team ENV mutations go to the team they name, whatever workspace the command selected: the server
 // refuses them elsewhere with 409 workspace_target_conflict, which left a pending publication that
-// `pb env resume` replayed into the same refusal (Lane K).
+// `pb env resume` replayed into the same refusal.
 func TestVaultTeamMutationsUseTheNamedTeamWorkspace(t *testing.T) {
 	seen := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

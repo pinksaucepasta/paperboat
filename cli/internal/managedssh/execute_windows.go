@@ -84,7 +84,7 @@ func validEnvironment(values []string) bool {
 		}
 		// cmd.exe maintains one hidden current-directory entry per active
 		// drive. GetEnvironmentStringsW, and therefore os.Environ, preserves
-		// entries such as "=C:=C:\\Users\\Pujan". They are required input to
+		// entries such as "=C:=C:\\Users\\tester". They are required input to
 		// CreateProcess and are the only leading-equals form accepted here.
 		// After any earlier command cmd.exe also hands its children "=ExitCode=00000000" and "=ExitCodeAscii=" (the
 		// pb rsync that follows another command in a cmd window was refused as an invalid request).

@@ -11,7 +11,7 @@ import (
 // PrepareConsoleOutput makes a Windows console show what pb connect writes: VT processing on and UTF-8 as the output code page. It
 // returns the call that puts both back. A legacy conhost window (cmd.exe started by conhost.exe) leaves VT processing off, so the status
 // bar and the remote shell's colours and cursor moves printed as literal "←[...m" text; without UTF-8 the remote shell's non-ASCII
-// output printed as mojibake ("æ—¥æœ¬èªž" for 日本語) in a real Windows Terminal window (X-24, both found on the victus desktop).
+// output printed as mojibake ("æ—¥æœ¬èªž" for 日本語) in a real Windows Terminal window (X-24, both found on the Windows test machine desktop).
 // Docker's CLI enables VT the same way (moby/term EnableVirtualTerminalProcessing).
 func PrepareConsoleOutput() (restore func()) {
 	handle := windows.Handle(os.Stdout.Fd())

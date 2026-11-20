@@ -132,7 +132,7 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 // updateBrowserGatewayLocked applies changed routes to the running gateway: certificates for new names
 // first, then the routes, aliases and per-port listeners, without stopping the :80/:443 listeners. A
 // rebuild left a just-started service unreachable (TLS internal error, connection refused) until the
-// new gateway was up (Lane H: private-https to a fresh port).
+// new gateway was up (private-https to a fresh port).
 func (c *Coordinator) updateBrowserGatewayLocked(ctx context.Context, client guardedNameClient, old guardedWebRoute, routes map[string]splitdns.BrowserRoute, aliases map[string]string) (guardedWebRoute, error) {
 	byAddress, denied, err := browserGatewayRoutes(routes, aliases)
 	if err != nil {
@@ -245,7 +245,7 @@ func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guarde
 		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
 		if errors.Is(err, machineguard.ErrPortInUse) {
 			// Another program (sshd on 22) or a Windows excluded port range owns the port: permanent, like a
-			// native port conflict. Retrying and a doctor warning cannot fix it (victus, 2026-11-14).
+			// native port conflict. Retrying and a doctor warning cannot fix it (Windows test machine, 2026-11-14).
 			diagnosticlog.TryInfo("browser port URL unavailable: another program or the OS owns the port", "port", port)
 			continue
 		}

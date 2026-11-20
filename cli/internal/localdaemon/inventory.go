@@ -399,7 +399,7 @@ func (i *Inventory) refresh(ctx context.Context, reuse, forceReconcile bool, fre
 				// The local reconcile asks the server too (credentials, browser services and
 				// certificates). When the server did not answer, the machine's local access is not what
 				// is broken; saying so sent people to their local settings and made updates treat a slow
-				// server as a broken installation (lanel-a, 2026-10-23).
+				// server as a broken installation (test-a, 2026-10-23).
 				switch {
 				case inventoryAuthenticationRequired(reconcileErr):
 					// A server 401 or a signed-out credential during the reconcile is the signed-out state, not a
@@ -545,7 +545,7 @@ func healthSince(current *localapi.Snapshot, now time.Time, item localapi.Health
 // dependency ever moves to HTTP, this must look at the request's host instead of the error type.
 // controlPlaneUnreachable reports whether err is the Paperboat API not answering: a request to apiHost that
 // failed in transport, or an API answer of 408, 429 or 5xx. A failed request to any other host (a peer, a local
-// service) is not the control plane: labeling it so made a healthy update roll back (hp, 2026-10-27).
+// service) is not the control plane: labeling it so made a healthy update roll back (Linux test machine, 2026-10-27).
 func controlPlaneUnreachable(err error, apiHost string) bool {
 	var request *url.Error
 	if errors.As(err, &request) {

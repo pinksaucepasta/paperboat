@@ -141,7 +141,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(root)
-	for _, host := range []string{"hp.shared.xyz", "8989.hp.shared.xyz", "jellyfin.hp.shared.xyz"} {
+	for _, host := range []string{"laptop.shared.xyz", "8989.hp.shared.xyz", "jellyfin.hp.shared.xyz"} {
 		if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: pool}); err != nil {
 			t.Fatalf("trusted leaf %s: %v", host, err)
 		}
@@ -182,7 +182,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(state, "browser-domains.json"), []byte(`{"schema":"foreign"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if guard.runtimeStatus("1000").TrustReady || guard.certificateRequestAuthorizedDomain(conn, "1000", "8989.hp.shared.xyz", "hp", "shared.xyz") {
+	if guard.runtimeStatus("1000").TrustReady || guard.certificateRequestAuthorizedDomain(conn, "1000", "8989.hp.shared.xyz", "laptop", "shared.xyz") {
 		t.Fatal("malformed selection remained authorized")
 	}
 }

@@ -10,7 +10,7 @@ import (
 // credential on every API request, 16 process spawns a minute on an idle machine (PR-03). Another process's rewrite
 // is seen after ttl; this process's own Set and Delete take effect at once. Refresh tokens are never cached: a refresh
 // rewrites the same reference, and a token another process had already rotated, sent with a new attempt id, made the
-// server revoke the session as refresh_replay (lanex2-m 2026-11-16, twice).
+// server revoke the session as refresh_replay (test-m 2026-11-16, twice).
 type secretCache struct {
 	mu      sync.Mutex
 	ttl     time.Duration

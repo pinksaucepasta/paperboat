@@ -289,7 +289,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if after := assignmentVersions(); after != observedVersions {
 		t.Fatalf("unchanged observations and attachments rewrote the assignments: %s -> %s", observedVersions, after)
 	}
-	// The carrier to the edge goes down (a host restart, pbvm2 2026-10-26): the route is not ready
+	// The carrier to the edge goes down (a host restart, Linux test VM 2026-10-26): the route is not ready
 	// there even while the edge still reports it ready, and is ready again once the carrier is back.
 	down := runtimeObservation
 	down.Ready = false

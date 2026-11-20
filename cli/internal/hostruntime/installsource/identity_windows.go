@@ -11,7 +11,7 @@ import (
 
 // fileIdentity is a regular file's exact NTFS identity: volume, file ID, size, last write and change time. Any write,
 // replacement, rename onto the path or security change through the file system changes it. Without it the updater's
-// 5 s reconciliation re-hashed up to four ~100 MB executables every pass on Windows: victus read ~52 MB/s nonstop and
+// 5 s reconciliation re-hashed up to four ~100 MB executables every pass on Windows: Windows test machine read ~52 MB/s nonstop and
 // a concurrent install ran out of its activation budget (2026-11-13).
 type fileIdentity struct {
 	volume                uint32

@@ -64,7 +64,7 @@ func platformInstallCommand() *cobra.Command {
 }
 
 // selectedInstallServer is the server chosen with --server, normalized, for the privileged install step
-// (which learns the local access domain from it); empty uses the configured server (Lane W: the install
+// (which learns the local access domain from it); empty uses the configured server (the install
 // read the build's default server and failed against a staging server).
 func selectedInstallServer(command *cobra.Command) string {
 	server, err := config.NormalizeServerURL(workspaceServerOverride(command))

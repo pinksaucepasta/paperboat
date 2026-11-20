@@ -49,7 +49,7 @@ func TestManagedSSHProxyPreservesQualifiedWindowsUsername(t *testing.T) {
 	// OpenSSH rejects qualified users supplied on its command line before
 	// invoking any proxy. Literal User configuration is its supported form.
 	config := filepath.Join(root, "ssh_config")
-	if err := os.WriteFile(config, []byte("Host fixture.example.test\n    User VICTUS\\Pujan\n"), 0600); err != nil {
+	if err := os.WriteFile(config, []byte("Host fixture.example.test\n    User WIN-TARGET\\Tester\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.CommandContext(ctx, ssh, "-F", config, "-o", "ProxyCommand="+managedSSHProxyCommand(strconv.Quote(proxy)), "-o", "ConnectTimeout=2", "fixture.example.test")
@@ -59,7 +59,7 @@ func TestManagedSSHProxyPreservesQualifiedWindowsUsername(t *testing.T) {
 		t.Fatal("OpenSSH proxy did not finish within its deadline")
 	}
 	got, err := os.ReadFile(capture)
-	if err != nil || string(got) != `VICTUS\Pujan` {
+	if err != nil || string(got) != `WIN-TARGET\Tester` {
 		t.Fatalf("proxy changed qualified username: %q, %v", got, err)
 	}
 }

@@ -1,5 +1,5 @@
 -- +goose Up
--- Endpoint admission deltas (Lane W scale matrix, PLAN 3a): an edge pulls only the endpoint
+-- Endpoint admission deltas (scale matrix, PLAN 3a): an edge pulls only the endpoint
 -- assignments that changed since its cursor instead of its whole set every poll. changed_at moves
 -- whenever what EdgeAdmissions would answer for the row can change; time-only changes (a lease
 -- lapsing, a carrier going stale) and cascade deletes are caught by the edge's periodic full pull.
