@@ -288,10 +288,10 @@ func TestWritesThatChangeWhatAHostCachesPublishTheirTopicsOnPostgres(t *testing.
 	expect("services change", moved(TopicMachineServices, all, func() { services(`[]`) }), map[string]bool{laptop: true, outsider: false})
 	expect("services leave inventory", moved(TopicInventory, all, func() { services(`[{"port":8080,"address_family":"ipv4"}]`) }), map[string]bool{laptop: false, server: false, outsider: false})
 
-	// previews: every machine that can see the owner machine learns of a preview, not only the owner.
+	// previews: only the owner machine reads a lease (its host runtime and the observer waiting on it), so only it is told.
 	expect("preview", moved(TopicPreviews, all, func() {
 		exec(`INSERT INTO paperboat.preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,lease_deadline) VALUES($1,$2,$3,$3,$4,'session','foreground','http','127.0.0.1:3000',now()+interval '1 hour')`, "preview_"+stamp, "https://p-"+stamp+".preview.example.test", account, server)
-	}), map[string]bool{laptop: true, server: true, outsider: false})
+	}), map[string]bool{laptop: false, server: true, outsider: false})
 
 	// peer_network: new keys or a revocation reach the account's machines.
 	exec(`INSERT INTO paperboat.peer_endpoint_certificates(fingerprint,user_id,endpoint_id,role,generation,serial,certificate,quic_public_key,issued_at,expires_at,key_id,signer_public_key)
