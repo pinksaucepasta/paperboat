@@ -60,7 +60,11 @@ func revokedKeyIDs(ctx context.Context, q *dbsqlc.Queries, machineID string, now
 func (r *SQLRepository) UserCAs(ctx context.Context, request UserCAsRequest, candidate NewUserCA) ([]UserCA, []string, error) {
 	var result []UserCA
 	var revoked []string
-	err := r.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed behind the machine's row lock: the account's first CA is one conditional insert (unique per state,
+	// DO NOTHING), and every other write is this machine's own row, so a fetch that queues behind a config write to
+	// its machine beats a 40001 replay (prod 2026-11-20).
+	err := r.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		result, revoked = nil, nil
 		q := tx.Queries()
 		machine, err := q.ResolveMachineSSHHostKeyAuthorityForUpdate(ctx, dbsqlc.ResolveMachineSSHHostKeyAuthorityForUpdateParams{UserMachineID: request.UserMachineID, UserID: request.ActorUserID, MachineGeneration: int64(request.MachineGeneration)})
 		if err != nil {

@@ -14,6 +14,8 @@ VALUES
 RETURNING *;
 
 -- name: ResolveMachineSSHHostKeyAuthorityForUpdate :one
+-- NO KEY UPDATE / SHARE: neither blocks the foreign-key checks (KEY SHARE) of rows that name the machine or its owner
+-- (an audit row, a preview lease), which deadlocked with this lock held (prod 2026-11-20 05:55 and 06:07 IST).
 SELECT machine.id AS user_machine_id, machine.user_id, machine.installation_generation
 FROM user_machines machine
 JOIN users owner ON owner.id = machine.user_id
@@ -23,7 +25,8 @@ WHERE machine.id = sqlc.arg(user_machine_id)
   AND machine.state NOT IN ('revoked', 'deleted')
   AND machine.deleted_at IS NULL
   AND owner.status = 'active'
-FOR UPDATE OF machine, owner;
+FOR NO KEY UPDATE OF machine
+FOR SHARE OF owner;
 
 -- name: GetMachineSSHTargetForUpdate :one
 SELECT * FROM machine_ssh_targets

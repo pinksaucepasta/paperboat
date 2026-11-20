@@ -923,7 +923,8 @@ WHERE machine.id = $1
   AND machine.state NOT IN ('revoked', 'deleted')
   AND machine.deleted_at IS NULL
   AND owner.status = 'active'
-FOR UPDATE OF machine, owner
+FOR NO KEY UPDATE OF machine
+FOR SHARE OF owner
 `
 
 type ResolveMachineSSHHostKeyAuthorityForUpdateParams struct {
@@ -938,6 +939,8 @@ type ResolveMachineSSHHostKeyAuthorityForUpdateRow struct {
 	InstallationGeneration int64
 }
 
+// NO KEY UPDATE / SHARE: neither blocks the foreign-key checks (KEY SHARE) of rows that name the machine or its owner
+// (an audit row, a preview lease), which deadlocked with this lock held (prod 2026-11-20 05:55 and 06:07 IST).
 func (q *Queries) ResolveMachineSSHHostKeyAuthorityForUpdate(ctx context.Context, arg ResolveMachineSSHHostKeyAuthorityForUpdateParams) (ResolveMachineSSHHostKeyAuthorityForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, resolveMachineSSHHostKeyAuthorityForUpdate, arg.UserMachineID, arg.UserID, arg.MachineGeneration)
 	var i ResolveMachineSSHHostKeyAuthorityForUpdateRow
