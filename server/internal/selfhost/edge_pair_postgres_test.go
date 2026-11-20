@@ -506,3 +506,33 @@ func workspaceModeOf(t *testing.T, store *db.DB, kind, id string) string {
 	}
 	return mode
 }
+
+// Only Paperboat's managed edges are limited to the first four of a region (edgeset.ServingOnly): a workspace's own
+// servers are not, and attach holds carriers to every one of them, so publication must keep all of them. Six own
+// servers in one region and one in another: publication_edge_nodes names all seven (its LIMIT 8 is the carrier cap).
+func TestPublicationNodesKeepEveryOwnServerOfARegion(t *testing.T) {
+	f := newPairFixture(t)
+	nodes := []string{f.n1, f.n1b, f.n2}
+	for _, name := range []string{"n1c", "n1d", "n1e", "n1f"} {
+		node := f.node(name, f.own1, 0)
+		f.own("s"+name, "account", f.owner, node)
+		nodes = append(nodes, node)
+	}
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now(),public_ingress_ipv4='198.51.100.7' WHERE id=ANY($1::text[])`, nodes)
+	f.set(f.owner, f.personal, "self_hosted", f.own1, f.own2)
+	tunnel := "own_pub_" + f.stamp
+	endpoint := testutil.EndpointID(tunnel)
+	f.exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,$3,$4,$5,'actor')`, tunnel, f.owner, endpoint, "https://"+testutil.EndpointLabel(endpoint)+".example.test", f.first)
+	t.Cleanup(func() {
+		if _, err := f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+	var got int
+	if err := f.store.Pool().QueryRow(f.ctx, `SELECT count(*) FROM paperboat.publication_edge_nodes('tunnel',$1)`, tunnel).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 7 {
+		t.Fatalf("publication_edge_nodes named %d servers, want all 7 of the owner's", got)
+	}
+}
