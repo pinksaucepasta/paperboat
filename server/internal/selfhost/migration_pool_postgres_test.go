@@ -48,16 +48,19 @@ func TestPoolFixupMigrationAddsSiblingsInThePairRegions(t *testing.T) {
 	// The owner's pair is its own region f.own1 (node n1), and its policy lists only s1 (the server of n1).
 	f.exec(`INSERT INTO paperboat.workspace_edge_sets(scope_kind,scope_id,mode,node_ids,regions) VALUES('account',$1,'self-hosted-only',ARRAY[$2],ARRAY[$3])`, f.owner, f.n1, f.own1)
 	f.exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.owner, f.s1)
-	installations := func() []string {
+	installations := func() ([]string, string) {
 		var ids []string
-		if err := f.store.Pool().QueryRow(f.ctx, `SELECT installation_ids FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1 AND capability='tunnel'`, f.owner).Scan(&ids); err != nil {
+		var xmin string
+		if err := f.store.Pool().QueryRow(f.ctx, `SELECT installation_ids, xmin::text FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1 AND capability='tunnel'`, f.owner).Scan(&ids, &xmin); err != nil {
 			t.Fatal(err)
 		}
-		return sorted(ids...)
+		return sorted(ids...), xmin
 	}
 	migrationUp(t, f, "488_tunnel_pool_follows_regions.sql")
 	// s1b is enrolled on n1b, another node of the same region; s2 is in the other region and must stay out.
-	if got, want := installations(), sorted(f.s1, f.s1b); !slices.Equal(got, want) {
+	want := sorted(f.s1, f.s1b)
+	got, before := installations()
+	if !slices.Equal(got, want) {
 		t.Fatalf("pool after the fixup=%v, want %v", got, want)
 	}
 	var candidate bool
@@ -65,8 +68,12 @@ func TestPoolFixupMigrationAddsSiblingsInThePairRegions(t *testing.T) {
 		t.Fatalf("sibling node candidate=%v %v, want true", candidate, err)
 	}
 	migrationUp(t, f, "488_tunnel_pool_follows_regions.sql")
-	if got, want := installations(), sorted(f.s1, f.s1b); !slices.Equal(got, want) {
+	got, after := installations()
+	if !slices.Equal(got, want) {
 		t.Fatalf("pool after a rerun=%v, want %v", got, want)
+	}
+	if before != after {
+		t.Fatalf("rerun rewrote the unchanged pool (xmin %s -> %s)", before, after)
 	}
 }
 
@@ -112,6 +119,10 @@ func TestRegionBackfillMigrationIsBatchedAndTerminates(t *testing.T) {
 	}
 	if got := count(`SELECT count(*) FROM paperboat.workspace_edge_sets WHERE scope_id LIKE $1 AND scope_id LIKE '%-missing-%' AND cardinality(regions)=0`, prefix+"%"); got != 3 {
 		t.Fatalf("unresolvable pairs left empty = %d, want 3", got)
+	}
+	if got := count(`SELECT count(DISTINCT xmin::text) FROM paperboat.workspace_edge_sets
+		WHERE scope_id LIKE $1 AND cardinality(regions)>0`, prefix+"%"); got < 3 {
+		t.Fatalf("2500 resolved pairs were written in %d transactions, want at least 3", got)
 	}
 	var before, after int64
 	sumXmin := `SELECT coalesce(sum(xmin::text::bigint),0) FROM paperboat.workspace_edge_sets WHERE scope_id LIKE $1 AND scope_id LIKE '%-ok-%'`
