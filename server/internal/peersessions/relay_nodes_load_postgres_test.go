@@ -23,7 +23,6 @@ type relayLoadFixture struct {
 	now     time.Time
 	suffix  string
 	account string
-	reads   int
 }
 
 func newRelayLoadFixture(t *testing.T) *relayLoadFixture {
@@ -94,12 +93,14 @@ func (f *relayLoadFixture) clear(id string) {
 	}
 }
 
-// candidates are the relay ids of the given regions in list order; each call uses a later clock so the 5 s candidate
-// cache is not reused.
+// candidates are the relay ids of the given regions in list order; each call drops the 5 s candidate cache first
+// (the nodes' heartbeats are stamped f.now, so the clock cannot move on).
 func (f *relayLoadFixture) candidates(regions ...string) []string {
 	f.t.Helper()
-	f.reads++
-	nodes, err := f.service.relayNodes(context.Background(), f.account, f.now.Add(time.Duration(f.reads)*time.Minute))
+	f.service.nodes.mu.Lock()
+	f.service.nodes.entries = nil
+	f.service.nodes.mu.Unlock()
+	nodes, err := f.service.relayNodes(context.Background(), f.account, f.now)
 	if err != nil {
 		f.t.Fatal(err)
 	}
