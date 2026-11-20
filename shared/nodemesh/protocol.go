@@ -108,8 +108,10 @@ func (r PeersRequest) Validate() error {
 	return nil
 }
 
-// PeersResponse is the directory: managed edge nodes other than the caller, ready or draining.
+// PeersResponse is the directory: managed edge nodes other than the caller, ready or draining. Region is
+// the caller's own region, in the same id space as Peer.Region, so the caller can prefer same-region holders.
 type PeersResponse struct {
+	Region     string    `json:"region,omitempty"`
 	Peers      []Peer    `json:"peers"`
 	ObservedAt time.Time `json:"observed_at"`
 }
