@@ -114,7 +114,7 @@ func TestGuestEdgeDisconnectsWhenGuestSessionWithdrawn(t *testing.T) {
 	ticket := Ticket{GuestSessionID: decision.GuestSessionID, TerminalSessionID: decision.TerminalSessionID, Origin: "https://dashboard.example.test", Role: "viewer", PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}
 	tickets := &guestTestTickets{edgeTestTickets: edgeTestTickets{active: true, ticket: ticket, value: "guest-ticket"}}
 	a := &guestTestAuthorizer{decision: decision}
-	g := &Gateway{Tickets: tickets, Authorizer: a, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	g := &Gateway{Tickets: tickets, Authorizer: a, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { g.ServeEdgeControl(w, r, "edge_1", "epoch_1") }))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)

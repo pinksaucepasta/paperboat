@@ -38,13 +38,13 @@ func newRuntimeHostEdge(t *testing.T) *runtimeHostEdge {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(registry.Close)
+	t.Cleanup(func() { _ = registry.Close() })
 	value := DataCarrierPreviewRoute{RouteID: "runtime_browser", Hostname: "machine.runtime.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
 	if err := registry.Attach(value); err != nil {
 		t.Fatal(err)
 	}
 	hub := NewBrowserTerminalHub()
-	t.Cleanup(hub.Close)
+	t.Cleanup(func() { _ = hub.Close() })
 	if err := hub.ActivateRoute(value.RouteID, BrowserTerminalRouteFence{Identity: identity, Revision: value.Revision, AttachmentGeneration: value.AttachmentGeneration}); err != nil {
 		t.Fatal(err)
 	}
