@@ -39,14 +39,24 @@ AND n.public_ingress_verified_at IS NOT NULL`
 // usableRegionsSQL lists the regions in which some edge can serve the workspace right now.
 var usableRegionsSQL = `SELECT DISTINCT n.region FROM control_tunnel_nodes n
 WHERE ` + usableEdge("$1") + `
-AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)
+AND paperboat.node_workspace_edge_candidate(n.id,$2,$3)
 ORDER BY n.region`
 
-// retainedRegionsSQL lists the regions with an eligible edge seen within $4: a region keeps its place in a
+// retainsRegion is the test that a node keeps its region in a workspace's pair, now being the SQL placeholder holding the
+// observation time and window the one holding how long a silent node is waited for: an edge seen within the window that
+// is not draining, or is draining with its drain_deadline still ahead (its existing connections are finishing: a plain
+// Drain waits DrainGrace, a Drain and move MoveGrace). A region whose nodes are all drained past their deadline is
+// therefore replaced at the next sweep, not after ReplaceAfter of silence (a draining edge still heartbeats).
+func retainsRegion(now, window string) string {
+	return `n.roles @> ARRAY['edge']::text[] AND n.last_heartbeat_at>` + now + `::timestamptz-` + window + `::interval
+AND (n.state<>'draining' OR n.drain_deadline>` + now + `)`
+}
+
+// retainedRegionsSQL lists the regions with an eligible edge that retainsRegion (window $4): a region keeps its place in a
 // workspace's pair while any of its nodes does.
-const retainedRegionsSQL = `SELECT DISTINCT n.region FROM control_tunnel_nodes n
-WHERE n.roles @> ARRAY['edge']::text[] AND n.last_heartbeat_at>$1::timestamptz-$4::interval
-AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)`
+var retainedRegionsSQL = `SELECT DISTINCT n.region FROM control_tunnel_nodes n
+WHERE ` + retainsRegion("$1", "$4") + `
+AND paperboat.node_workspace_edge_candidate(n.id,$2,$3)`
 
 // ReconcileScope makes the workspace's stored pair of regions current: a pair keeps its regions while one of
 // their nodes stays eligible and recently seen, a gone region is replaced, and a change of mode (managed pool
@@ -200,11 +210,11 @@ func equal(a, b []string) bool {
 
 // scopesSQL lists, after ($1,$2), the workspaces whose stored pair ReconcileScope would change: no pair yet or a mode
 // that moved (and an edge that can serve it exists: with none, ReconcileScope keeps whatever it had), a region with no
-// node retained (silent past $6), more regions than Size, or a free place with a usable edge in another region to fill it.
+// node retained (silent past $6, or all drained past their deadline: retainsRegion), more regions than Size, or a free place with a usable edge in another region to fill it.
 // Every other workspace keeps its pair (choose keeps retained regions), so it costs nothing: walking every workspace
 // each second was ~7 queries per workspace and grew with accounts, not machines.
 //
-// full adds the per-workspace eligibility of nodes (node_workspace_edge_eligible, ~1 ms per call and node). The quick
+// full adds the per-workspace eligibility of nodes (node_workspace_edge_candidate, ~1 ms per call and node). The quick
 // form leaves it out: a region that stopped being eligible without going silent, or a self-hosted workspace's free
 // place, is found by the next full pass. Mode is read from the pool policy row, not through workspace_edge_mode.
 func scopesSQL(full bool) string {
@@ -212,7 +222,7 @@ func scopesSQL(full bool) string {
 		if !full {
 			return ""
 		}
-		return " AND paperboat.node_workspace_edge_eligible(" + node + ",s.account,s.team)"
+		return " AND paperboat.node_workspace_edge_candidate(" + node + ",s.account,s.team)"
 	}
 	managedOnly := ""
 	if !full {
@@ -235,8 +245,7 @@ WHERE (s.kind,s.id)>($1,$2) AND (
 	}() + `
  OR cardinality(e.regions)>$4
  OR EXISTS (SELECT 1 FROM unnest(e.regions) AS member(region) WHERE NOT EXISTS (
-  SELECT 1 FROM control_tunnel_nodes n WHERE n.region=member.region AND n.roles @> ARRAY['edge']::text[]
-   AND n.last_heartbeat_at>$5::timestamptz-$6::interval` + eligible("n.id") + `))
+  SELECT 1 FROM control_tunnel_nodes n WHERE n.region=member.region AND ` + retainsRegion("$5", "$6") + eligible("n.id") + `))
  OR (cardinality(e.regions)<$4` + managedOnly + ` AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `
    AND n.region<>ALL(e.regions)` + eligible("n.id") + `)))
 ORDER BY s.kind,s.id LIMIT $3`
@@ -320,7 +329,7 @@ func LockWorkspace(ctx context.Context, tx *db.Tx, scope Scope) error {
 	return err
 }
 
-// EnsureTx gives a workspace its first edge set inside the caller's transaction (a machine attaching
+// EnsureTx gives a workspace its first pair of regions inside the caller's transaction (a machine attaching
 // before the periodic reconcile has seen its workspace). An existing set is left to the reconciler. The first
 // assignment holds the workspace lock and looks again, so it never overwrites a pair chosen while it waited.
 func EnsureTx(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) error {

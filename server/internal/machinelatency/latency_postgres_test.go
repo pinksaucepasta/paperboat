@@ -123,7 +123,7 @@ VALUES($1,'p','v1','epoch_1','india','fd-1',$2,ARRAY['http2'],10,0,now(),now()+i
 	if items[0].SelfHosted || items[1].SelfHosted {
 		t.Fatalf("Paperboat's own (global) nodes were listed as self-hosted: %+v", items)
 	}
-	if items[0].Role != "edge" || items[0].RTTMillis != 20 || items[0].Region != "india" || items[1].Role != "relay" || items[1].RTTMillis != 42 {
+	if items[0].Role != "edge" || items[0].RTTMillis != 20 || items[0].Region != "india" || items[0].Name != "india" || items[1].Role != "relay" || items[1].RTTMillis != 42 {
 		t.Fatalf("listing wrong or unordered: %+v", items)
 	}
 

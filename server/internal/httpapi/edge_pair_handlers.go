@@ -11,7 +11,7 @@ import (
 // edgePairService is what the edge pair routes need of the self-host service.
 type edgePairService interface {
 	EdgePair(ctx context.Context, actor string, scope selfhost.Scope) (selfhost.EdgePair, error)
-	SetEdgePair(ctx context.Context, actor string, scope selfhost.Scope, primaryID, fallbackID string) (selfhost.EdgePair, error)
+	SetEdgePair(ctx context.Context, actor string, scope selfhost.Scope, kind, primaryRegion, fallbackRegion string) (selfhost.EdgePair, error)
 }
 
 // edgePairScope is the workspace of ?workspace= (Personal when absent), as the self-host service names it.
@@ -47,14 +47,15 @@ func edgePairPut(service edgePairService) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			PrimaryID  string `json:"primary_id"`
-			FallbackID string `json:"fallback_id"`
+			Kind           string `json:"kind"`
+			PrimaryRegion  string `json:"primary_region"`
+			FallbackRegion string `json:"fallback_region"`
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
 		if !decodeStrictJSON(w, r, &body) {
 			return
 		}
-		pair, err := service.SetEdgePair(r.Context(), principal.User.ID, edgePairScope(r, principal.User.ID), body.PrimaryID, body.FallbackID)
+		pair, err := service.SetEdgePair(r.Context(), principal.User.ID, edgePairScope(r, principal.User.ID), body.Kind, body.PrimaryRegion, body.FallbackRegion)
 		if err != nil {
 			writeEdgePairError(w, r, err)
 			return
@@ -66,15 +67,18 @@ func edgePairPut(service edgePairService) http.HandlerFunc {
 
 func writeEdgePairError(w http.ResponseWriter, r *http.Request, err error) {
 	var live *selfhost.LivePublicationsError
+	var invalid *selfhost.InvalidPairError
 	switch {
 	case errors.As(err, &live):
 		writeLiveEdgeChange(w, r, live)
 	case expectedHTTPErrorOnly(err, selfhost.ErrUnauthorized):
 		writeError(w, r, http.StatusForbidden, "forbidden", "Only the owner or an admin of this workspace can change its edge pair.")
+	case errors.As(err, &invalid):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", invalid.Message)
 	case expectedHTTPErrorOnly(err, selfhost.ErrInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 	case expectedHTTPErrorOnly(err, selfhost.ErrEdgePairUnassigned):
-		writeError(w, r, http.StatusNotFound, "edge_pair_unassigned", "No edge can serve this workspace yet. Try again in a minute.")
+		writeError(w, r, http.StatusNotFound, "edge_pair_unassigned", "No region can serve this workspace yet. Try again in a minute.")
 	default:
 		writeError(w, r, http.StatusServiceUnavailable, "edge_pair_unavailable", "The edge pair is unavailable. Retry later.", err)
 	}

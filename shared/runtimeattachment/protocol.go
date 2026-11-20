@@ -38,8 +38,14 @@ const MaximumEdgeCandidates = 32
 // MaximumRegionCarriers is how many edge nodes of a workspace's two regions one machine holds a carrier to.
 const MaximumRegionCarriers = 8
 
-// MaximumCarriers adds the managed terminal edge a self-hosted-only workspace holds next to its own regions.
-const MaximumCarriers = MaximumRegionCarriers + 1
+// MaximumManagedTerminalCarriers is how many of Paperboat's managed edges, in different managed regions, a self-hosted-only
+// workspace's machine holds for browser terminals next to its own regions: the first is the active terminal edge, the
+// second its failover, so one managed region going down does not take terminals down.
+const MaximumManagedTerminalCarriers = 2
+
+// MaximumCarriers adds the managed terminal edges a self-hosted-only workspace holds next to its own regions.
+const MaximumCarriers = MaximumRegionCarriers + MaximumManagedTerminalCarriers
+
 const HostPath = "/v1/runtime/carrier-attachment"
 const EdgePullPath = "/v1/edge/runtime/carrier-admissions"
 const EdgeObservePath = "/v1/edge/runtime/carrier-observations"
@@ -167,8 +173,9 @@ type HostAdmission struct {
 	Admission
 	EdgeCandidates []EdgeCandidate `json:"edge_candidates"`
 	Backup         *Admission      `json:"backup,omitempty"`
-	// More are the carriers after the primary and the backup: a self-hosted-only workspace holds a managed edge for
-	// terminals next to its own two servers.
+	// More are the carriers after the primary and the backup: up to MaximumRegionCarriers nodes of the workspace's
+	// regions in all, and for a self-hosted-only workspace up to MaximumManagedTerminalCarriers managed edges (in
+	// different regions) for terminals in front of its own servers.
 	More []Admission `json:"more,omitempty"`
 	// TerminalEdgeNodeIDs are the edges whose carriers may carry browser terminals (the runtime route's streams):
 	// Paperboat's managed edges, never a customer-run one. The machine serves terminals on no other carrier. Always present, empty when no managed edge is available.
