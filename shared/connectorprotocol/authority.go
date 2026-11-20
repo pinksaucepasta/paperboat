@@ -712,8 +712,6 @@ const (
 	DrainRejected  DrainStatus = "rejected"
 )
 
-const MaxActiveStreams = 1 << 20
-
 // Drain is a server-to-connector request. The target generation and hash are
 // part of the request so a stale process cannot drain a replacement session or
 // a different configuration. StopNewStreams is deliberately required: a
@@ -761,7 +759,7 @@ type DrainAck struct {
 }
 
 func (a DrainAck) Validate(now time.Time) error {
-	if ValidateIdentifier(a.AccountID) != nil || ValidateIdentifier(a.TunnelID) != nil || ValidateIdentifier(a.ConnectorID) != nil || ValidateIdentifier(a.SessionID) != nil || ValidateIdentifier(a.DrainID) != nil || a.ProcessGeneration == 0 || a.Generation == 0 || !ValidContentHash(a.ContentHash) || a.ActiveStreams > MaxActiveStreams {
+	if ValidateIdentifier(a.AccountID) != nil || ValidateIdentifier(a.TunnelID) != nil || ValidateIdentifier(a.ConnectorID) != nil || ValidateIdentifier(a.SessionID) != nil || ValidateIdentifier(a.DrainID) != nil || a.ProcessGeneration == 0 || a.Generation == 0 || !ValidContentHash(a.ContentHash) {
 		return ErrInvalidInput
 	}
 	switch a.Status {
