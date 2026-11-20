@@ -142,26 +142,6 @@ func TestMixedQUICWSSViaProxyAndRevocation(t *testing.T) {
 	}
 }
 
-func TestWSSAccountConnectionBound(t *testing.T) {
-	f := newFixture(t)
-	f.connectionLimit = 10
-	s, _, _ := f.start("127.0.0.1:0")
-	share := 9
-	for i := 0; i < share; i++ {
-		k, cert := key.NewNode().Public(), certificate(t)
-		g := f.grant(k, cert, string(rune('a'+i)))
-		c, _ := f.wss(s, cert, g, nil)
-		connectWSS(t, c)
-	}
-	k, cert := key.NewNode().Public(), certificate(t)
-	g := f.grant(k, cert, "overflow")
-	overflow, _ := f.wss(s, cert, g, nil)
-	if err := overflow.Connect(context.Background()); !errors.Is(err, ErrOverload) {
-		t.Fatalf("WSS account overload: %v", err)
-	}
-	eventually(t, func() bool { return s.Snapshot().Connections == share })
-}
-
 func TestRealWSSFallsBackThenRecoversToQUIC(t *testing.T) {
 	f := newFixture(t)
 	s, err := NewServer(f.verifier)

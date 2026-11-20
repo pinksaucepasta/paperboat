@@ -32,7 +32,7 @@ func validRegionalScores(scores []regionalScore) bool {
 	seen := make(map[string]bool, len(scores))
 	for _, score := range scores {
 		n := score.node
-		if n.NodeID == "" || len(n.NodeID) > 256 || seen[n.NodeID] || score.rtt <= 0 || score.rtt > time.Minute || n.CapacityLimit == 0 || n.CapacityUsed > n.CapacityLimit {
+		if n.NodeID == "" || len(n.NodeID) > 256 || seen[n.NodeID] || score.rtt <= 0 || score.rtt > time.Minute {
 			return false
 		}
 		seen[n.NodeID] = true
@@ -40,9 +40,14 @@ func validRegionalScores(scores []regionalScore) bool {
 	return true
 }
 
-// regionalQuality matches rankRegional's fresh-capacity queueing penalty.
+// regionalQuality matches rankRegional's fresh-capacity queueing penalty: a relay that is busier relative to its declared size
+// ranks lower, but is never excluded (a relay has no connection limit).
 func regionalQuality(score regionalScore) float64 {
-	return float64(score.rtt) * (1 + float64(score.node.CapacityUsed)/float64(score.node.CapacityLimit))
+	load := 0.0
+	if limit := score.node.CapacityLimit; limit > 0 {
+		load = min(float64(score.node.CapacityUsed)/float64(limit), 1)
+	}
+	return float64(score.rtt) * (1 + load)
 }
 
 func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regionalScore, string) {

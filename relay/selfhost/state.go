@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 type Config struct {
@@ -69,11 +68,7 @@ func validateConfig(c Config) error {
 			return errors.New("invalid or duplicate capability")
 		}
 		seen[v.Capability] = true
-		limit := int64(256) // tunnel components
-		if v.Capability == "relay" {
-			limit = relaylimits.MaxConnectionsPerNode
-		}
-		if v.CapacityLimit < 1 || v.CapacityLimit > limit || v.Region == "" || v.FailureDomain == "" {
+		if v.CapacityLimit < 1 || v.Region == "" || v.FailureDomain == "" {
 			return errors.New("invalid capacity, region, or failure domain")
 		}
 		for _, p := range []int{v.TCPPort, v.QUICPort} {

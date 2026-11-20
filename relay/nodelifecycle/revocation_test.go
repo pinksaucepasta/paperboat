@@ -29,7 +29,7 @@ func TestObservationAppliesUnknownAndRepeatedRevocations(t *testing.T) {
 			Epoch      string `json:"process_epoch"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
-		out := Lease{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}}
+		out := Lease{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}}
 		if r.URL.Path == "/v1/relay/nodes/start" {
 			out.Generation = in.Expected + 1
 		} else {

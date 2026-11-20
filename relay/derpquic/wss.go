@@ -22,7 +22,7 @@ func (s *Server) WSSHandler() http.Handler {
 			return
 		}
 		s.mu.Lock()
-		full := s.draining || len(s.connections)+len(s.wssConnections) >= s.connectionLimit
+		full := s.draining
 		s.mu.Unlock()
 		if full {
 			s.denied.Add(1)
@@ -52,7 +52,7 @@ func (s *Server) WSSHandler() http.Handler {
 			})
 		}
 		s.mu.Lock()
-		if s.draining || len(s.connections)+len(s.wssConnections) >= s.connectionLimit {
+		if s.draining {
 			s.mu.Unlock()
 			p.close(3, "relay unavailable")
 			return

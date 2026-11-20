@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"io"
@@ -431,12 +430,10 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 
 func mustPublicKey(value string) []byte { key, _ := publicKey(value); return []byte(key) }
 
-// validComponent bounds one advertised component. A relay's capacity is bounded by the ceiling the
-// relay itself enforces; a tunnel keeps its own bound.
+// validComponent bounds one advertised component. Its declared size has no ceiling.
 func validComponent(c Component) bool {
-	ceiling := map[string]int64{"relay": relaylimits.MaxConnectionsPerNode, "tunnel": 256}[c.Capability]
 	switch {
-	case ceiling == 0 || c.CapacityLimit < 1 || c.CapacityLimit > ceiling:
+	case c.Capability != "relay" && c.Capability != "tunnel" || c.CapacityLimit < 1:
 		return false
 	case c.TCPPort < 1 || c.TCPPort > 65535 || c.QUICPort < 1 || c.QUICPort > 65535:
 		return false

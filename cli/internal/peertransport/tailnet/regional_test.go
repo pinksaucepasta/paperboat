@@ -60,8 +60,9 @@ func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
 	overloaded := node("overloaded", "hel", "hel-d", "ready", 90)
 	candidates := RegionalCandidates{IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{excluded, draining, stale, overloaded, ready}}
 
+	// A relay at 90% of its declared size stays eligible: a relay has no connection limit, so load only ranks it.
 	got, redundancy, err := eligible(&candidates, "relay", "derp_quic", map[string]bool{"hel": true}, now)
-	if err != nil || len(got) != 1 || got[0].NodeID != "ready" || redundancy != RedundancyReduced {
+	if err != nil || len(got) != 2 || redundancy != RedundancyAvailable || !(got[0].NodeID == "ready" && got[1].NodeID == "overloaded" || got[0].NodeID == "overloaded" && got[1].NodeID == "ready") {
 		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
 	}
 	if _, _, err := eligible(&candidates, "relay", "derp_quic", nil, now.Add(61*time.Second)); !errors.Is(err, ErrRegionalAuthority) {

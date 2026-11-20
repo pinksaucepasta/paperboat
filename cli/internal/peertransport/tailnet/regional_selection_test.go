@@ -113,7 +113,7 @@ func TestRegionalSelectionInvalidInputAndBackupDomains(t *testing.T) {
 		}
 	}
 	bad := a
-	bad.node.CapacityLimit = 0
+	bad.rtt = 0
 	for _, scores := range [][]regionalScore{nil, {a, a}, {bad}, make([]regionalScore, MaxRegionalCandidates+1)} {
 		var s regionalSelection
 		if chosen, _ := s.choose(time.Now(), scores); chosen.node.NodeID != "" {

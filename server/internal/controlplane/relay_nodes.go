@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
@@ -14,7 +15,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -74,13 +74,12 @@ type relayAccountSpeed struct {
 }
 
 type relayNodeLeaseDocument struct {
-	NodeID        string                `json:"node_id"`
-	Generation    int64                 `json:"node_generation"`
-	ProcessEpoch  string                `json:"process_epoch"`
-	ExpiresAt     int64                 `json:"expires_at"`
-	CapacityLimit int64                 `json:"capacity_limit"`
-	Revocations   []relayRevocation     `json:"revocations"`
-	PeerRelay     *relayServiceIdentity `json:"peer_relay,omitempty"`
+	NodeID       string                `json:"node_id"`
+	Generation   int64                 `json:"node_generation"`
+	ProcessEpoch string                `json:"process_epoch"`
+	ExpiresAt    int64                 `json:"expires_at"`
+	Revocations  []relayRevocation     `json:"revocations"`
+	PeerRelay    *relayServiceIdentity `json:"peer_relay,omitempty"`
 	// PoolHandover lists accounts whose relay pool no longer includes this node and when the relay closes their
 	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
 	// relay's list as it is (the read failed); an empty list clears it.
@@ -140,18 +139,18 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 	}
 	defer tx.Rollback()
 	var epoch, state string
-	var gen, capacity int64
+	var gen int64
 	var leaseExpires sql.NullTime
 	// A node with any relay transport may start (overlap, not containment): a relay that serves fewer
 	// transports than a later one still starts.
-	err = tx.QueryRowContext(ctx, `SELECT n.node_generation,n.process_epoch,n.capacity_limit,n.state,n.registry_expires_at FROM paperboat.control_tunnel_nodes n LEFT JOIN paperboat.managed_node_authority m ON m.node_id=n.id LEFT JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND n.roles @> ARRAY['relay']::text[] AND n.transports && ARRAY['derp_quic','derp_wss']::text[] AND n.region IS NOT NULL AND (m.node_id IS NULL OR (m.retired_at IS NULL AND r.enabled)) FOR UPDATE OF n`, in.NodeID).Scan(&gen, &epoch, &capacity, &state, &leaseExpires)
+	err = tx.QueryRowContext(ctx, `SELECT n.node_generation,n.process_epoch,n.state,n.registry_expires_at FROM paperboat.control_tunnel_nodes n LEFT JOIN paperboat.managed_node_authority m ON m.node_id=n.id LEFT JOIN paperboat.operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND n.roles @> ARRAY['relay']::text[] AND n.transports && ARRAY['derp_quic','derp_wss']::text[] AND n.region IS NOT NULL AND (m.node_id IS NULL OR (m.retired_at IS NULL AND r.enabled)) FOR UPDATE OF n`, in.NodeID).Scan(&gen, &epoch, &state, &leaseExpires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, invalidUsage("relay_nodes.go:90")
 	}
 	if err != nil {
 		return out, err
 	}
-	if !relayNodeMayStart(state, capacity) {
+	if !relayNodeMayStart(state) {
 		return out, invalidUsage("relay_nodes.go:96")
 	}
 	if epoch == in.ProcessEpoch && gen == in.ExpectedGeneration+1 {
@@ -169,7 +168,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 				return out, err
 			}
 		}
-		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), CapacityLimit: capacity, Revocations: []relayRevocation{}}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), Revocations: []relayRevocation{}}
 	} else {
 		now := s.clock().UTC()
 		// A process whose remembered generation differs (its state file was lost or restored) adopts the
@@ -184,7 +183,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		if err != nil {
 			return out, err
 		}
-		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relayRevocation{}}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
@@ -195,7 +194,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 
 func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservation) (relayNodeLeaseDocument, error) {
 	var out relayNodeLeaseDocument
-	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.Generation < 1 || in.CapacityUsed < 0 || len(in.Subjects) > relaylimits.MaxConnectionsPerNode || len(in.AccountDemand) > relaylimits.MaxConnectionsPerNode || (in.SubjectsDigest != "" && !validRelaySubjectsDigest(in.SubjectsDigest)) {
+	if !relayIdentifier(in.NodeID) || !relayIdentifier(in.ProcessEpoch) || in.Generation < 1 || in.CapacityUsed < 0 || (in.SubjectsDigest != "" && !validRelaySubjectsDigest(in.SubjectsDigest)) {
 		return out, invalidUsage("relay_nodes.go:139")
 	}
 	in.Metrics = usableMetrics(ctx, in.NodeID, in.Metrics)
@@ -307,7 +306,7 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand ma
 // read failure, so the relay keeps its list.
 func (s *EdgeService) relayPoolHandovers(ctx context.Context, node string) *[]relayPoolHandover {
 	rows, err := s.store.SQL().QueryContext(ctx, `WITH expired AS (DELETE FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at<now()-make_interval(secs=>$2::float8))
-SELECT account_id,floor(extract(epoch from close_at))::bigint FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at>=now()-make_interval(secs=>$2::float8) ORDER BY account_id LIMIT `+strconv.Itoa(relaylimits.MaxConnectionsPerNode), node, (relaylimits.MaxGrantLifetime + peernetwork.MaxClockSkew).Seconds())
+SELECT account_id,floor(extract(epoch from close_at))::bigint FROM paperboat.relay_pool_handovers WHERE node_id=$1 AND close_at>=now()-make_interval(secs=>$2::float8) ORDER BY account_id`, node, (relaylimits.MaxGrantLifetime + peernetwork.MaxClockSkew).Seconds())
 	if err != nil {
 		slog.WarnContext(ctx, "relay_pool_handover_read_failed", "node_id", node, "error", err)
 		return nil
@@ -338,10 +337,9 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 		return out, set, required, err
 	}
 	defer tx.Rollback()
-	var capacity int64
 	var expires time.Time
 	var state string
-	err = tx.QueryRowContext(ctx, `SELECT capacity_limit,registry_expires_at,state FROM paperboat.control_tunnel_nodes WHERE id=$1 AND node_generation=$2 AND process_epoch=$3 AND roles @> ARRAY['relay']::text[] FOR UPDATE`, in.NodeID, in.Generation, in.ProcessEpoch).Scan(&capacity, &expires, &state)
+	err = tx.QueryRowContext(ctx, `SELECT registry_expires_at,state FROM paperboat.control_tunnel_nodes WHERE id=$1 AND node_generation=$2 AND process_epoch=$3 AND roles @> ARRAY['relay']::text[] FOR UPDATE`, in.NodeID, in.Generation, in.ProcessEpoch).Scan(&expires, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, set, required, invalidUsage("relay_nodes.go:160")
 	}
@@ -352,7 +350,7 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	// process that owns this generation and epoch (the update below matches both): it renews the lease. Refusing it
 	// fenced the relay, which restarted under a new epoch and invalidated every grant whenever the control plane was
 	// slow (F21-01). A process that announced its own shutdown (offline within its lease) stays shut down.
-	if state == "retired" || (state == "offline" && !in.Draining && expires.After(now)) || in.CapacityUsed > capacity {
+	if state == "retired" || (state == "offline" && !in.Draining && expires.After(now)) {
 		return out, set, required, invalidUsage("relay_nodes.go:166")
 	}
 	if state == "draining" && !in.Draining {
@@ -376,7 +374,7 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if err != nil {
 		return out, set, required, err
 	}
-	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relayRevocation{}}
+	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
 	set, required, err = relayObservedSubjects(ctx, tx, in)
 	if err != nil {
 		return relayNodeLeaseDocument{}, set, required, err
@@ -437,9 +435,9 @@ func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 	writeEdgeJSON(w, http.StatusOK, out)
 }
 
-// maxRelayObservationDocument fits a full subject list of relaylimits.MaxConnectionsPerNode subjects whose
-// identifiers are at their 256-byte limit, which the general edge document limit does not.
-const maxRelayObservationDocument = 16 << 20
+// maxRelayObservationDocument fits a relay's full subject list, whatever its length (identifiers at their 256-byte limit),
+// which the general edge document limit does not.
+const maxRelayObservationDocument = connectorprotocol.MaximumSnapshotBytes
 
 func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeObservation
@@ -462,10 +460,9 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 	writeEdgeJSON(w, http.StatusOK, out)
 }
 
-// relayNodeMayStart admits a relay process start for a node that is not retired or draining and whose
-// registered capacity is within the ceiling the relay itself enforces (shared/relaylimits).
-func relayNodeMayStart(state string, capacity int64) bool {
-	return state != "retired" && state != "draining" && capacity > 0 && capacity <= relaylimits.MaxConnectionsPerNode
+// relayNodeMayStart admits a relay process start for a node that is not retired or draining.
+func relayNodeMayStart(state string) bool {
+	return state != "retired" && state != "draining"
 }
 
 // customerOwnedNode says the node is a customer's own self-hosted edge or relay (an account or team installation). Paperboat's
