@@ -30,11 +30,12 @@ func TestWorkspaceAndTeamReadsDoNotWaitForTheTeamLockOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if err := db.Migrate(ctx, store); err != nil {
+	// A cold database migrates in minutes under -race; that cost is bounded by go test -timeout, not the body deadline.
+	if err := db.Migrate(context.Background(), store); err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 	owner, team := "wl_owner_"+suffix, "wl-team-"+suffix
 	execute := func(q string, args ...any) {
