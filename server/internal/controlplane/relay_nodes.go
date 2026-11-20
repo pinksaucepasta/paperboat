@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -574,6 +575,13 @@ ORDER BY n.id LIMIT $4`, node, now, meshFreshness.Seconds(), nodemesh.MaxPeers)
 			peers = append(peers, p)
 		}
 	}
+	// A pin two nodes report is listed for neither: a relay refuses a directory with a repeated pin whole, so one node
+	// reporting another's (public) certificate pin would otherwise freeze every relay's mesh at its last good directory.
+	reported := map[string]int{}
+	for _, p := range peers {
+		reported[p.SPKISHA256]++
+	}
+	peers = slices.DeleteFunc(peers, func(p nodemesh.Peer) bool { return reported[p.SPKISHA256] > 1 })
 	return peers, rows.Err()
 }
 
