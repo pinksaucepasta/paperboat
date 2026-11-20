@@ -81,10 +81,8 @@ func ReconcileEndpointTx(ctx context.Context, tx *db.Tx, machineID, endpointID s
 	return reconcileTx(ctx, tx, machineID, endpointID)
 }
 
-// machineWriters serializes, within this server process, the transactions that write one machine's carrier and route
-// rows (runtime attach, preview create, tunnel changes), so they queue instead of failing each other's serializable
-// commit with 40001. Waiting costs no database connection; a writer in another server process (a rolling deploy) is
-// the rare case InTx's retry still covers. Prior art: Headscale funnels node writes through one writer
+// machineWriters queues local writes to one machine's carriers and routes before they take a database
+// connection. The corresponding machine row lock orders the writes across server processes. Prior art: Headscale funnels node writes through one writer
 // (hscontrol/state/node_store.go NodeStore.writeQueue); NetBird locks the rows it writes (store.LockingStrengthUpdate).
 var machineWriters keyedlock.Locks
 
@@ -107,7 +105,7 @@ WHERE e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND `+liveEndpoint+`
 ORDER BY r.id,a.edge_node_id,a.active DESC
 ), upserted AS (
 INSERT INTO endpoint_edge_assignments AS x(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id)
-SELECT route_id,endpoint_id,edge_node_id,edge_process_epoch,session_id FROM desired
+SELECT route_id,endpoint_id,edge_node_id,edge_process_epoch,session_id FROM desired ORDER BY route_id,edge_node_id
 ON CONFLICT(route_id,edge_node_id) DO UPDATE SET
  generation=x.generation+1,observed_ready=false,
  -- A handover to another carrier on the same edge keeps the old one for the overlap (migration 228).
@@ -117,9 +115,13 @@ ON CONFLICT(route_id,edge_node_id) DO UPDATE SET
  -- Every attach and tunnel sync reconciles; an assignment that already matches is left untouched.
  WHERE x.desired<>'active' OR x.edge_process_epoch<>EXCLUDED.edge_process_epoch OR x.carrier_session_id<>EXCLUDED.carrier_session_id
 RETURNING x.route_id
+), removed AS (
+SELECT x.route_id,x.edge_node_id FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id
+WHERE e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND x.desired='active'
+AND NOT EXISTS(SELECT 1 FROM desired d WHERE d.route_id=x.route_id AND d.edge_node_id=x.edge_node_id)
+ORDER BY x.route_id,x.edge_node_id FOR NO KEY UPDATE OF x
 )
 UPDATE endpoint_edge_assignments x SET desired='removed',observed_ready=false
-FROM endpoints e WHERE e.id=x.endpoint_id AND e.agent_machine_id=$1 AND ($2='' OR e.id=$2) AND x.desired='active'
-AND NOT EXISTS(SELECT 1 FROM desired d WHERE d.route_id=x.route_id AND d.edge_node_id=x.edge_node_id)`, machineID, endpointID)
+FROM removed r WHERE x.route_id=r.route_id AND x.edge_node_id=r.edge_node_id`, machineID, endpointID)
 	return err
 }

@@ -1016,9 +1016,9 @@ func snapshotRoute(route dbsqlc.TunnelRoute) connectorprotocol.ConfigRoute {
 	}
 }
 
-// inMachineTx runs fn like db.InTx holding machine's write lock (endpoints.LockMachine), taken before the
-// transaction: a tunnel change rewrites its host machine's route assignments, which the machine's runtime attach writes
-// too, so they queue instead of failing each other's commit with 40001. No machine: a plain InTx.
+// inMachineTx orders tunnel writes against attaches and checks authority after taking the
+// team and machine fences. READ COMMITTED then lets assignment writes wait for an edge
+// observation without replaying the whole tunnel mutation.
 func (r *SQLRepository) inMachineTx(ctx context.Context, machine string, fn func(context.Context, *db.Tx) error) error {
 	if machine != "" {
 		unlock, err := endpoints.LockMachine(ctx, machine)
@@ -1027,7 +1027,23 @@ func (r *SQLRepository) inMachineTx(ctx context.Context, machine string, fn func
 		}
 		defer unlock()
 	}
-	return r.db.InTx(ctx, fn)
+	return r.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, managed := ctx.Value(tunnelManagementKey{}).(tunnelManagementScope); managed {
+			if err := teams.Lock(ctx, tx); err != nil {
+				return err
+			}
+		} else if scope, selected := workspace.FromContext(ctx); selected {
+			if err := teams.LockFor(ctx, tx, scope.TeamID); err != nil {
+				return err
+			}
+		}
+		if machine != "" {
+			if _, err := tx.Exec(ctx, `SELECT id FROM user_machines WHERE id=$1 FOR NO KEY UPDATE`, machine); err != nil {
+				return err
+			}
+		}
+		return fn(ctx, tx)
+	})
 }
 
 // tunnelMachine is the machine that hosts tunnelID, read before the transaction ("" for an unknown tunnel, which the

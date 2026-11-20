@@ -51,7 +51,7 @@ WHERE id = $1
   AND deleted_at IS NULL
   AND revoked_at IS NULL
   AND public_identity_key IS NOT NULL
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 type GetOwnedActivePreviewTunnelHostV1Params struct {

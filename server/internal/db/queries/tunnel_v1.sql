@@ -63,7 +63,7 @@ WHERE id = sqlc.arg(host_id)
   AND deleted_at IS NULL
   AND revoked_at IS NULL
   AND public_identity_key IS NOT NULL
-FOR UPDATE;
+FOR NO KEY UPDATE;
 
 -- name: GetTeamOwnerOfHostV1 :one
 -- The team that owns one of the account's live machines: a team machine gets tunnel access only from its team's grants.
