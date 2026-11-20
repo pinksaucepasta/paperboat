@@ -341,6 +341,7 @@ def windows_phases(terminal, check, status_bar, cwd_leaf=None):
         terminal.send(windows_target.typed_marker(token) + '\r')
         return token
 
+    terminal.wait_raw()  # before ssh -tt is raw the pty's own line discipline turns CR into LF, which cmd.exe ignores
     if status_bar == 'on':
         terminal.expect(STATUS_BAR_DRAWN)
     terminal.expect(say('READY'))

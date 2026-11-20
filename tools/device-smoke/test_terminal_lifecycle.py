@@ -4,6 +4,7 @@ import sys
 import time
 import unittest
 
+import terminal_lifecycle
 from terminal_lifecycle import Terminal, applications, windows_phases
 
 
@@ -29,6 +30,9 @@ class WindowsInterrupt(unittest.TestCase):
     def test_recovery_input_is_sent_after_cmd_returns(self):
         class Console:
             awaiting_prompt = False
+
+            def wait_raw(self):
+                pass
 
             def send(self, data):
                 if self.awaiting_prompt:
@@ -86,6 +90,27 @@ class TerminalCapabilities(unittest.TestCase):
                 never.wait_raw(timeout=0.5)
         finally:
             never.close()
+
+    def test_windows_phases_type_nothing_before_the_pty_is_raw(self):
+        calls = []
+
+        class Stop(Exception):
+            pass
+
+        class Fake:
+            def wait_raw(self):
+                calls.append('raw')
+
+            def expect(self, *args, **kwargs):
+                calls.append('expect')
+                raise Stop
+
+            def send(self, data):
+                calls.append('send')
+
+        with self.assertRaises(Stop):
+            terminal_lifecycle.windows_phases(Fake(), 'main', 'off')
+        self.assertEqual(['raw', 'send', 'expect'], calls)
 
     @unittest.skipUnless(hasattr(os, 'waitid'), 'non-reaping child-exit observation is required')
     def test_exit_receipt_keeps_output_after_the_child_has_already_exited(self):
