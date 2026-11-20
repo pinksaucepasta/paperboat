@@ -54,19 +54,25 @@ func (l *handshakeListener) acceptLoop() {
 func (l *handshakeListener) handshake(raw net.Conn) {
 	defer func() { <-l.pending }()
 	counted := &readCountingConn{Conn: raw}
-	connection := tls.Server(counted, l.config)
+	// A refused handshake leaves no peer state on the connection, so the check's own state is kept.
+	config, seen := l.config, tls.ConnectionState{}
+	if verify := l.config.VerifyConnection; verify != nil {
+		config = l.config.Clone()
+		config.VerifyConnection = func(state tls.ConnectionState) error { seen = state; return verify(state) }
+	}
+	connection := tls.Server(counted, config)
 	ctx, cancel := context.WithTimeout(context.Background(), l.timeout)
 	err := connection.HandshakeContext(ctx)
 	cancel()
 	if err != nil {
 		_ = raw.Close()
 		if counted.read.Load() > 0 {
+			failure := &handshakeFailure{error: errCarrierTLSHandshake, thumbprint: peerThumbprint(seen), remote: remoteIP(raw)}
 			var reason CarrierRefusal
 			if errors.As(err, &reason) {
-				l.observe(fmt.Errorf("%w: %w", errCarrierTLSHandshake, reason))
-			} else {
-				l.observe(errCarrierTLSHandshake)
+				failure.error = fmt.Errorf("%w: %w", errCarrierTLSHandshake, reason)
 			}
+			l.observe(failure)
 		}
 		return
 	}
@@ -92,6 +98,33 @@ func (l *handshakeListener) Accept() (net.Conn, error) {
 func (l *handshakeListener) Close() error {
 	l.stopOnce.Do(func() { close(l.done) })
 	return l.Listener.Close()
+}
+
+// handshakeFailure is a failed handshake with who dialled: the thumbprint of the client certificate's key
+// (what the machines table holds as public_identity_key, so a refusal can be traced to a machine; empty when
+// the peer sent none) and its IP. Both are public values, never secrets.
+type handshakeFailure struct {
+	error
+	thumbprint, remote string
+}
+
+func (f *handshakeFailure) Unwrap() error { return f.error }
+
+// FailurePeer is the key thumbprint and remote IP of a failed carrier handshake, empty for any other failure.
+func FailurePeer(err error) (thumbprint, remote string) {
+	var failure *handshakeFailure
+	if errors.As(err, &failure) {
+		return failure.thumbprint, failure.remote
+	}
+	return "", ""
+}
+
+func remoteIP(c net.Conn) string {
+	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
+	if err != nil {
+		return c.RemoteAddr().String()
+	}
+	return host
 }
 
 type readCountingConn struct {

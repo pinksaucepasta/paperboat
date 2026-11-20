@@ -2,7 +2,9 @@ package datacarrier
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
 	"sync"
@@ -76,6 +78,13 @@ func TestHTTPServiceHandshakeFailureNamesTheRefusal(t *testing.T) {
 	case got := <-failures:
 		if !errors.Is(got, errCarrierTLSHandshake) || !errors.Is(got, RefusalUnknownMachine) {
 			t.Fatalf("failure = %v, want the TLS handshake failure naming unknown_machine", got)
+		}
+		leaf, err := x509.ParseCertificate(clientTLS.Certificates[0].Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if thumbprint, remote := FailurePeer(got); thumbprint != keyThumbprint(leaf.PublicKey.(ed25519.PublicKey)) || remote != "127.0.0.1" {
+			t.Fatalf("FailurePeer = %q, %q: want the client key's thumbprint and 127.0.0.1", thumbprint, remote)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("refused handshake was not reported")

@@ -125,7 +125,8 @@ func newCarrierComponentWithTelemetry(
 			if errors.Is(err, datacarrier.ErrCarrierHTTPPanic) {
 				reporter.CaptureFailure(ctx, "process_panic", reporting.PanicFailure{})
 			} else {
-				edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "carrier_connection_failed", sharedtelemetry.OutcomeRejected, "reason", datacarrier.FailureReason(err))
+				thumbprint, remote := datacarrier.FailurePeer(err)
+				edgetelemetry.Log(ctx, sharedtelemetry.SeverityWarn, "carrier_connection_failed", sharedtelemetry.OutcomeRejected, "reason", datacarrier.FailureReason(err), "key_thumbprint", thumbprint, "remote_ip", remote)
 				reporter.ObserveFailure(ctx, "http_server", err)
 			}
 		},

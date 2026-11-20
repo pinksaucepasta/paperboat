@@ -572,6 +572,22 @@ func (r *ExpectedAdmissionRegistry) WaitForIdentity(ctx context.Context, identit
 // URI SAN selects the exact server-issued carrier session and generations.
 // This matters during replacement overlap, when the old and new short-lived
 // certificates intentionally use the same enrolled machine key.
+func keyThumbprint(publicKey ed25519.PublicKey) string {
+	digest := sha256.Sum256(publicKey)
+	return "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+// peerThumbprint is the thumbprint of the client leaf certificate's ed25519 key, or "".
+func peerThumbprint(state tls.ConnectionState) string {
+	if len(state.PeerCertificates) == 0 || state.PeerCertificates[0] == nil {
+		return ""
+	}
+	if key, ok := state.PeerCertificates[0].PublicKey.(ed25519.PublicKey); ok && len(key) == ed25519.PublicKeySize {
+		return keyThumbprint(key)
+	}
+	return ""
+}
+
 func (r *ExpectedAdmissionRegistry) PeerBinding(state tls.ConnectionState) (Identity, error) {
 	if r == nil {
 		return Identity{}, ErrAdmissionNotExpected
@@ -584,8 +600,7 @@ func (r *ExpectedAdmissionRegistry) PeerBinding(state tls.ConnectionState) (Iden
 		return Identity{}, ErrAdmissionNotExpected
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(publicKey)
-	digest := sha256.Sum256(publicKey)
-	thumbprint := "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:])
+	thumbprint := keyThumbprint(publicKey)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed {
