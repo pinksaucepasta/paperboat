@@ -139,13 +139,13 @@ func (w *edgeWildcards) Sync(ctx context.Context) error {
 	for i, n := range nodes {
 		loads[i] = n.loadNode
 	}
-	after := selectByLoad(loads, before, w.outPercent, w.inPercent)
-	if err = storeNodeLoadOut(ctx, w.db, before, after); err != nil {
+	held, over := selectByLoad(loads, overOf(before), w.outPercent, w.inPercent)
+	if err = storeNodeLoadOut(ctx, w.db, before, held, over); err != nil {
 		return err
 	}
 	var addresses []string
 	for _, n := range nodes {
-		if !after[n.id] {
+		if !held[n.id] {
 			addresses = append(addresses, n.addresses...)
 		}
 	}

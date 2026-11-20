@@ -208,7 +208,7 @@ func TestSelectByLoadTable(t *testing.T) {
 		{"unknown load stays in", false, nil, false},
 		{"unknown load of a node that was out comes back", true, nil, false},
 	} {
-		got := selectByLoad([]loadNode{node("a", "r", tc.load), steady}, map[string]bool{"a": tc.prev}, 85, 70)
+		got, _ := selectByLoad([]loadNode{node("a", "r", tc.load), steady}, map[string]bool{"a": tc.prev}, 85, 70)
 		if got["a"] != tc.out || got["b"] {
 			t.Errorf("%s: decisions %v, want a out=%v and b in", tc.name, got, tc.out)
 		}
@@ -218,13 +218,27 @@ func TestSelectByLoadTable(t *testing.T) {
 		node("a", "r1", loadOf(90)), node("b", "r1", loadOf(95)), node("c", "r1", loadOf(90)),
 		node("d", "r2", loadOf(10)), node("e", "r2", loadOf(99)),
 	}
-	got := selectByLoad(nodes, map[string]bool{}, 85, 70)
+	got, _ := selectByLoad(nodes, map[string]bool{}, 85, 70)
 	if got["a"] || !got["b"] || !got["c"] || got["d"] || !got["e"] {
 		t.Fatalf("regions: decisions %v", got)
 	}
 	// The same rule on relays: a single relay of a region stays however loaded it is.
-	if got = selectByLoad([]loadNode{node("r1", "x", loadOf(100))}, map[string]bool{"r1": true}, 85, 70); got["r1"] {
+	if got, _ = selectByLoad([]loadNode{node("r1", "x", loadOf(100))}, map[string]bool{"r1": true}, 85, 70); got["r1"] {
 		t.Fatalf("the last relay of a region was left out: %v", got)
+	}
+}
+
+// The node kept because its whole region was over is still over: the state a round starts from is the threshold
+// decision, not the forced one, so it returns only below the in threshold while another node serves.
+func TestSelectByLoadForcedSurvivorKeepsThreshold(t *testing.T) {
+	node := func(id string, load float64) loadNode { return loadNode{id: id, region: "r", load: loadOf(load)} }
+	held, over := selectByLoad([]loadNode{node("a", 90), node("b", 88)}, map[string]bool{}, 85, 70)
+	if !held["a"] || held["b"] || !over["a"] || !over["b"] {
+		t.Fatalf("round 1: held %v over %v, want b kept in rotation while both stay over", held, over)
+	}
+	held, over = selectByLoad([]loadNode{node("a", 60), node("b", 80)}, over, 85, 70)
+	if held["a"] || !held["b"] || over["a"] || !over["b"] {
+		t.Fatalf("round 2: held %v over %v, want a serving and b held out (80 is not below 70)", held, over)
 	}
 }
 
@@ -350,6 +364,16 @@ func TestRelayLoadNeverLeavesARegionEmpty(t *testing.T) {
 	var rows int
 	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.node_load_out WHERE node_id=$1`, solo).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("a relay in a disabled region was decided on: %d %v", rows, err)
+	}
+	// Next round c (88 -> 80) was kept only because all three were over: it is still judged against 70, so a (79), now
+	// the least loaded of three over nodes, is the survivor, not c.
+	f.setRelayLoad(a, 79)
+	f.setRelayLoad(c, 80)
+	if err := f.relayLoad().Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.outNodes(); !slices.Equal(got, []string{b, c}) {
+		t.Fatalf("second round held out %v, want %v: the survivor is %s (79), not %s (80)", got, []string{b, c}, a, c)
 	}
 }
 
