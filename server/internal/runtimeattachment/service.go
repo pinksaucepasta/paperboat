@@ -199,8 +199,8 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 			return err
 		}
 		type edgeRow struct {
-			node, epoch, endpoint, browserHost, pin, chain string
-			tcp, quic                                      int64
+			node, epoch, region, endpoint, browserHost, pin, chain string
+			tcp, quic                                              int64
 			// terminal: browser terminals may use this carrier, which only Paperboat's managed edges allow.
 			terminal bool
 		}
@@ -216,7 +216,7 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 			var picked []edgeRow
 			for rows.Next() {
 				edge := edgeRow{terminal: terminal}
-				if err = rows.Scan(&edge.node, &edge.epoch, &edge.endpoint, &edge.browserHost, &edge.tcp, &edge.quic, &edge.pin, &edge.chain); err != nil {
+				if err = rows.Scan(&edge.node, &edge.epoch, &edge.region, &edge.endpoint, &edge.browserHost, &edge.tcp, &edge.quic, &edge.pin, &edge.chain); err != nil {
 					return nil, err
 				}
 				if edge.tcp < 1 || edge.tcp > 65535 || edge.quic < 1 || edge.quic > 65535 || connectorprotocol.ValidateOpaqueEpoch(edge.epoch) != nil {
@@ -231,15 +231,24 @@ ORDER BY r.id LIMIT 1 FOR UPDATE OF m,r FOR SHARE OF u,e`, proof.MachineID, proo
 		}
 		// The workspace's edges carry its tunnels and previews. Whatever the mode, browser terminals use one of
 		// Paperboat's managed edges at its own domain, never a customer-run one: in a self-hosted-only workspace
-		// that is an extra carrier of its own, first so it is the machine's active (terminal) edge.
+		// that is up to MaximumManagedTerminalCarriers extra carriers, on managed nodes of different regions (the best
+		// placed node of each), first so the first is the machine's active (terminal) edge and the second its failover.
 		selected, err := pick(`paperboat.node_workspace_edge_eligible(n.id,$1,$6)`, runtimewire.MaximumRegionCarriers, mode == "managed-only")
 		if err != nil {
 			return err
 		}
 		if mode == "self-hosted-only" {
-			terminal, err := pick(`paperboat.node_managed_edge_eligible(n.id,$1,$6)`, 1, true)
+			managed, err := pick(`paperboat.node_managed_edge_eligible(n.id,$1,$6)`, runtimewire.MaximumEdgeCandidates, true)
 			if err != nil {
 				return err
+			}
+			var terminal []edgeRow
+			regions := map[string]bool{}
+			for _, edge := range managed {
+				if len(terminal) < runtimewire.MaximumManagedTerminalCarriers && !(edge.region != "" && regions[edge.region]) {
+					terminal = append(terminal, edge)
+					regions[edge.region] = true
+				}
 			}
 			selected = append(terminal, selected...)
 		}
@@ -847,7 +856,7 @@ ORDER BY g.tunnel_id LIMIT $3`, proof.MachineID, proof.UserID, runtimewire.Maxim
 // from heartbeat records without locking them (lib/reversetunnel/agentpool.go); Headscale clients choose a DERP region
 // from the map it serves (hscontrol/derp/derp.go).
 func edgeSelectQuery(eligible string) string {
-	return `SELECT n.id,n.process_epoch,n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
+	return `SELECT n.id,n.process_epoch,coalesce(n.region,''),n.carrier_endpoint_host,coalesce(n.endpoint_host,''),n.carrier_endpoint_tcp_port,n.carrier_endpoint_quic_port,n.carrier_server_spki_sha256,n.carrier_server_certificate_chain_pem
 FROM control_tunnel_nodes n LEFT JOIN machine_edge_placements p ON p.machine_id=$3 AND p.account_id=$1
 AND p.installation_generation=$4 AND p.worker_generation=$5 AND p.observed_at>now()-interval '2 minutes'
 LEFT JOIN workspace_edge_sets ws ON ws.scope_kind=CASE WHEN $6::text IS NULL THEN 'account' ELSE 'team' END AND ws.scope_id=COALESCE($6::text,$1)

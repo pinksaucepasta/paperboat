@@ -169,3 +169,64 @@ func sorted(in []string) []string {
 	slices.Sort(out)
 	return out
 }
+
+// selfHosted turns the workspace into a self-hosted-only one whose own server is the fixture's backup node (region rb),
+// and adds managed nodes: the fixture's first edge (region ra) and one in a second managed region, plus a second node
+// of ra that must not be taken for terminals (one carrier per managed region).
+func (f *regionFixture) selfHosted(t *testing.T) (secondManaged, extraInFirst string) {
+	t.Helper()
+	f.exec(t, `UPDATE control_tunnel_nodes SET tls_spki_sha256=decode(repeat('ab',32),'hex') WHERE id=$1`, f.backupNode)
+	f.exec(t, `INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'fixture','own server','tunnel','account',$3,$1,true)`, f.prefix+"_own", f.backupNode, f.account)
+	f.exec(t, `INSERT INTO selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2]::text[])`, f.account, f.prefix+"_own")
+	f.exec(t, `UPDATE workspace_edge_sets SET mode='self-hosted-only',regions=ARRAY[$2]::text[] WHERE scope_kind='account' AND scope_id=$1`, f.account, f.rb)
+	t.Cleanup(func() {
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM selfhost_pool_policies WHERE scope_id=$1`, f.account)
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM selfhost_installations WHERE id=$1`, f.prefix+"_own")
+	})
+	return f.addNode(t, "m2", "rm_"+f.prefix), f.addNode(t, "a2", f.ra)
+}
+
+func (f *regionFixture) regionOf(t *testing.T, node string) string {
+	t.Helper()
+	var region string
+	if err := f.database.SQL().QueryRowContext(f.ctx, `SELECT region FROM control_tunnel_nodes WHERE id=$1`, node).Scan(&region); err != nil {
+		t.Fatal(err)
+	}
+	return region
+}
+
+// A self-hosted-only workspace's terminals do not depend on one managed edge: its machine holds a terminal carrier on a
+// managed node of each of two managed regions (not two of one), in front of its own server.
+func TestAttachSelfHostedHoldsTwoManagedTerminalCarriersInTwoRegions(t *testing.T) {
+	f := newRegionFixture(t)
+	f.selfHosted(t)
+	nodes, out := f.attach(t)
+	if len(nodes) != 3 || nodes[2] != f.backupNode || len(out.TerminalEdgeNodeIDs) != 2 || !slices.Equal(out.TerminalEdgeNodeIDs, nodes[:2]) {
+		t.Fatalf("carriers=%v terminals=%v, want two managed terminal carriers then the own server %s", nodes, out.TerminalEdgeNodeIDs, f.backupNode)
+	}
+	if f.regionOf(t, nodes[0]) == f.regionOf(t, nodes[1]) {
+		t.Fatalf("both terminal carriers are in region %s", f.regionOf(t, nodes[0]))
+	}
+	if out.ActiveEdgeNodeID != out.TerminalEdgeNodeIDs[0] {
+		t.Fatalf("active=%q, want the first terminal carrier %q", out.ActiveEdgeNodeID, out.TerminalEdgeNodeIDs[0])
+	}
+	if held := f.held(t); len(held) != 3 {
+		t.Fatalf("held rows=%v", held)
+	}
+}
+
+// Managed region 1 down: the active terminal carrier moves to the other managed region.
+func TestManagedTerminalFailsOverToSecondRegion(t *testing.T) {
+	f := newRegionFixture(t)
+	f.selfHosted(t)
+	_, first := f.attach(t)
+	active, other := first.TerminalEdgeNodeIDs[0], first.TerminalEdgeNodeIDs[1]
+	if first.ActiveEdgeNodeID != active {
+		t.Fatalf("active=%q, want %q", first.ActiveEdgeNodeID, active)
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET ready=false WHERE region=$1 AND id LIKE $2`, f.regionOf(t, active), f.prefix+"%")
+	nodes, second := f.attach(t)
+	if second.ActiveEdgeNodeID != other || !slices.Equal(second.TerminalEdgeNodeIDs, []string{other}) || slices.Contains(nodes, active) {
+		t.Fatalf("after region %s went down: carriers=%v active=%q terminals=%v, want the terminal carrier on %s", f.regionOf(t, active), nodes, second.ActiveEdgeNodeID, second.TerminalEdgeNodeIDs, other)
+	}
+}
