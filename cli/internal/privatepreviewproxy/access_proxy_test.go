@@ -55,6 +55,9 @@ func TestAccessProxyPACIsNarrowAndContainsNoCredential(t *testing.T) {
 		{MatchType: AccessMatchOneLabelWildcard, WildcardSuffix: "private.example.test"},
 		{MatchType: AccessMatchExact, Hostname: "ONE.private.example.test"},
 	}}
+	for i := range 4097 {
+		source.routes = append(source.routes, AccessRoute{MatchType: AccessMatchExact, Hostname: fmt.Sprintf("route-%d.example.test", i)})
+	}
 	proxy, err := StartAccessProxy(ctx, AccessProxyConfig{Source: source})
 	if err != nil {
 		t.Fatal(err)
@@ -67,17 +70,17 @@ func TestAccessProxyPACIsNarrowAndContainsNoCredential(t *testing.T) {
 	body, readErr := io.ReadAll(response.Body)
 	_ = response.Body.Close()
 	if readErr != nil || response.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d body=%q err=%v", response.StatusCode, body, readErr)
+		t.Fatalf("status=%d bytes=%d err=%v", response.StatusCode, len(body), readErr)
 	}
 	text := string(body)
-	for _, required := range []string{"one.private.example.test", "dnsDomainLevels(host)", "PROXY 127.0.0.1:", "return 'DIRECT'"} {
+	for _, required := range []string{"one.private.example.test", "route-4096.example.test", "dnsDomainLevels(host)", "PROXY 127.0.0.1:", "return 'DIRECT'"} {
 		if !strings.Contains(text, required) {
-			t.Fatalf("PAC missing %q: %s", required, text)
+			t.Fatalf("PAC missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{"Bearer", "cookie", "token", "secret"} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
-			t.Fatalf("PAC contains forbidden %q: %s", forbidden, text)
+			t.Fatalf("PAC contains forbidden %q", forbidden)
 		}
 	}
 }
@@ -319,7 +322,7 @@ func TestNormalizeAccessRoutesRejectsCatchAllAndUnsafeHosts(t *testing.T) {
 		{{Hostname: "private.example.test:443"}},
 		{{MatchType: AccessMatchOneLabelWildcard, WildcardSuffix: "localhost"}},
 	} {
-		if _, err := normalizeAccessRoutes(routes, 10); !errors.Is(err, ErrAccessProxyInvalid) {
+		if _, err := normalizeAccessRoutes(routes); !errors.Is(err, ErrAccessProxyInvalid) {
 			t.Fatalf("routes=%+v error=%v", routes, err)
 		}
 	}
@@ -331,7 +334,7 @@ func TestNormalizeAccessRoutesRejectsNormalizedDuplicates(t *testing.T) {
 		{{MatchType: AccessMatchExact, Hostname: "same.example.test"}, {MatchType: AccessMatchManagedExact, Hostname: "same.example.test"}},
 		{{MatchType: AccessMatchOneLabelWildcard, Hostname: "*.private.example.test"}, {MatchType: AccessMatchOneLabelWildcard, WildcardSuffix: "private.example.test"}},
 	} {
-		if _, err := normalizeAccessRoutes(routes, 10); !errors.Is(err, ErrAccessProxyInvalid) {
+		if _, err := normalizeAccessRoutes(routes); !errors.Is(err, ErrAccessProxyInvalid) {
 			t.Fatalf("duplicate routes=%+v error=%v", routes, err)
 		}
 	}

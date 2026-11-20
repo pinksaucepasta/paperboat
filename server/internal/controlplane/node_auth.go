@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +15,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
+
+type scopedRelayObservationNodeKey struct{}
 
 func (s *EdgeService) SetNodeCredentials(resolver nodeauth.Resolver) { s.nodeCredentials = resolver }
 
@@ -45,8 +48,13 @@ func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 	if strings.HasPrefix(r.URL.Path, "/v1/edge/certificates/distributions/") {
 		return r.Header.Get("X-Paperboat-Edge-Node-ID") == node, nil
 	}
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/relay/nodes/observe" {
+		// The observation handler checks the decoded node against this credential binding.
+		*r = *r.WithContext(context.WithValue(r.Context(), scopedRelayObservationNodeKey{}, node))
+		return true, nil
+	}
 	switch r.URL.Path {
-	case "/v1/relay/nodes/start", "/v1/relay/nodes/observe", "/v1/nodes/register", "/v1/nodes/heartbeat", "/v1/edge/routes/desired-state", "/v1/edge/ingress/desired-state", "/v1/edge/inspector/access", "/v1/edge/routes/observations", "/v1/edge/usage-reports", nodemesh.PeersPath:
+	case "/v1/relay/nodes/start", "/v1/nodes/register", "/v1/nodes/heartbeat", "/v1/edge/routes/desired-state", "/v1/edge/ingress/desired-state", "/v1/edge/inspector/access", "/v1/edge/routes/observations", "/v1/edge/usage-reports", nodemesh.PeersPath:
 	default:
 		return false, nil
 	}

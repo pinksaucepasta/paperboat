@@ -3,6 +3,7 @@ package controlplane
 import (
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/shared/configsync"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/url"
 	"path"
 	"strings"
@@ -170,7 +171,7 @@ func ValidateConfigMachineRules(rules []ConfigPathRule, bindings []ConfigReposit
 		Rules    []ConfigPathRule
 		Bindings []ConfigRepositoryBinding
 	}{rules, bindings})
-	if len(encoded) > 65536 {
+	if len(encoded) > connectorprotocol.MaximumSnapshotBytes {
 		return ErrAssignmentInvalid
 	}
 	return nil

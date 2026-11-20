@@ -48,10 +48,7 @@ func TestMeshControlAcrossNamespaceRefused(t *testing.T) {
 	for _, control := range []bool{true, false} {
 		before := b.mesh.drops[dropUnpaired].Load()
 		eventually(t, func() bool {
-			select {
-			case l.out <- meshOut{src: ka, dst: dst, data: payloadOf(100), control: control}:
-			default:
-			}
+			l.out.push(queued{packet: packet{peer: ka, data: payloadOf(100), control: control}, dst: dst})
 			return b.mesh.drops[dropUnpaired].Load() > before
 		})
 	}

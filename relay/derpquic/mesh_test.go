@@ -454,7 +454,8 @@ func TestMeshQueueFullDrops(t *testing.T) {
 	if err := s.SetMesh(m); err != nil {
 		t.Fatal(err)
 	}
-	l := &meshLink{m: m, out: make(chan meshOut, 2)}
+	l := &meshLink{m: m, out: newSendQueue()}
+	l.out.push(queued{packet: packet{data: make([]byte, sendQueueBytes-2)}}) // two bytes of room
 	p, dst := &peerConn{key: key.NewNode().Public()}, key.NewNode().Public()
 	s.peers[p.key], m.holders[dst] = p, []*meshLink{l}
 	for range 5 {
@@ -462,7 +463,7 @@ func TestMeshQueueFullDrops(t *testing.T) {
 			t.Fatal("a held destination is forwarded, queue full or not")
 		}
 	}
-	if len(l.out) != 2 || m.drops[dropQueueFull].Load() != 3 || m.unreachable.Load() != 3 {
-		t.Fatalf("queued %d, dropped %d, unreachable %d", len(l.out), m.drops[dropQueueFull].Load(), m.unreachable.Load())
+	if l.out.bytes != sendQueueBytes || m.drops[dropQueueFull].Load() != 3 || m.unreachable.Load() != 3 {
+		t.Fatalf("queued %d bytes, dropped %d, unreachable %d", l.out.bytes, m.drops[dropQueueFull].Load(), m.unreachable.Load())
 	}
 }

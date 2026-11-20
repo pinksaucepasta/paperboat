@@ -611,7 +611,8 @@ func TestCloseAbortErrorIsReported(t *testing.T) {
 
 func TestDrainStopsAdmissionPreservesIdentityAndCompletes(t *testing.T) {
 	serverSession, client, clock, _, _ := testSessionPair(t)
-	drainer := &testDrainer{active: 2}
+	const initialStreams = 1<<20 + 2
+	drainer := &testDrainer{active: initialStreams}
 	client.config.Drainer = drainer
 	request, err := serverSession.BeginDrain(context.Background(), "drain_1", clock.Now().Add(20*time.Second), true)
 	if err != nil {
@@ -621,7 +622,7 @@ func TestDrainStopsAdmissionPreservesIdentityAndCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ack.Status != DrainAccepted || ack.ActiveStreams != 2 || drainer.stopCalls != 1 {
+	if ack.Status != DrainAccepted || ack.ActiveStreams != initialStreams || drainer.stopCalls != 1 {
 		t.Fatalf("drain acceptance=%+v stopCalls=%d", ack, drainer.stopCalls)
 	}
 	if err := serverSession.HandleDrainAck(context.Background(), ack); err != nil {
@@ -629,6 +630,13 @@ func TestDrainStopsAdmissionPreservesIdentityAndCompletes(t *testing.T) {
 	}
 	if _, ready, _ := serverSession.Current(); ready {
 		t.Fatal("draining session remained eligible")
+	}
+	ack, err = client.DrainProgress(context.Background(), initialStreams-1, false)
+	if err != nil || ack.Status != DrainProgress || ack.ActiveStreams != initialStreams-1 {
+		t.Fatalf("drain progress=%+v, err=%v", ack, err)
+	}
+	if err := serverSession.HandleDrainAck(context.Background(), ack); err != nil {
+		t.Fatal(err)
 	}
 	drainer.mu.Lock()
 	drainer.active = 0

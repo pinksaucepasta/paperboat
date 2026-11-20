@@ -3592,7 +3592,6 @@ const listRevokedConnectorGenerations = `-- name: ListRevokedConnectorGeneration
 SELECT machine_id, connector_id, generation FROM control_connector_generations
 WHERE state IN ('revoked','replaced')
 ORDER BY updated_at, machine_id, connector_id
-LIMIT $1
 `
 
 type ListRevokedConnectorGenerationsRow struct {
@@ -3601,8 +3600,8 @@ type ListRevokedConnectorGenerationsRow struct {
 	Generation  int64
 }
 
-func (q *Queries) ListRevokedConnectorGenerations(ctx context.Context, rowLimit int32) ([]ListRevokedConnectorGenerationsRow, error) {
-	rows, err := q.db.Query(ctx, listRevokedConnectorGenerations, rowLimit)
+func (q *Queries) ListRevokedConnectorGenerations(ctx context.Context) ([]ListRevokedConnectorGenerationsRow, error) {
+	rows, err := q.db.Query(ctx, listRevokedConnectorGenerations)
 	if err != nil {
 		return nil, err
 	}
@@ -3633,16 +3632,10 @@ SELECT revoked.jti FROM (
   WHERE m.revoked_at IS NOT NULL AND m.expires_at > $1 AND m.helper_file_session_id IS NOT NULL
 ) revoked
 ORDER BY revoked.revoked_at, revoked.jti
-LIMIT $2
 `
 
-type ListRevokedControlCredentialJTIsParams struct {
-	Now      time.Time
-	RowLimit int32
-}
-
-func (q *Queries) ListRevokedControlCredentialJTIs(ctx context.Context, arg ListRevokedControlCredentialJTIsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listRevokedControlCredentialJTIs, arg.Now, arg.RowLimit)
+func (q *Queries) ListRevokedControlCredentialJTIs(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRevokedControlCredentialJTIs, now)
 	if err != nil {
 		return nil, err
 	}
@@ -3665,11 +3658,10 @@ const listRevokedControlEnvironments = `-- name: ListRevokedControlEnvironments 
 SELECT id FROM control_environments
 WHERE desired_state = 'revoked'
 ORDER BY updated_at, id
-LIMIT $1
 `
 
-func (q *Queries) ListRevokedControlEnvironments(ctx context.Context, rowLimit int32) ([]string, error) {
-	rows, err := q.db.Query(ctx, listRevokedControlEnvironments, rowLimit)
+func (q *Queries) ListRevokedControlEnvironments(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRevokedControlEnvironments)
 	if err != nil {
 		return nil, err
 	}
@@ -3691,11 +3683,10 @@ func (q *Queries) ListRevokedControlEnvironments(ctx context.Context, rowLimit i
 const listRevokedControlSigningKeyIDs = `-- name: ListRevokedControlSigningKeyIDs :many
 SELECT key_id FROM control_signing_key_revocations
 ORDER BY revoked_at, key_id
-LIMIT $1
 `
 
-func (q *Queries) ListRevokedControlSigningKeyIDs(ctx context.Context, rowLimit int32) ([]string, error) {
-	rows, err := q.db.Query(ctx, listRevokedControlSigningKeyIDs, rowLimit)
+func (q *Queries) ListRevokedControlSigningKeyIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRevokedControlSigningKeyIDs)
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
@@ -121,7 +122,7 @@ type Policy struct {
 	// request gets its 503 at once instead of waiting.
 	previewWaits *holdSet
 	// addresses is the edge-wide per-client-address limit (ip_limits.go).
-	addresses *addressLimiter
+	addresses *addrlimit.Limiter
 }
 
 // routeHoldMax and routeHoldPerName bound the HTTP-layer holds: 256 requests at once, 64 per host. A request got
@@ -149,7 +150,7 @@ func New(config Config, next http.Handler) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0), previewWaits: newHoldSet(previewWaitMax, previewWaitPerName, 0), addresses: newAddressLimiter(addressRequestRate, addressUpgradeRate, addressStreams)}, nil
+	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0), previewWaits: newHoldSet(previewWaitMax, previewWaitPerName, 0), addresses: addrlimit.New(addressRequestRate, addressUpgradeRate, addrlimit.Streams)}, nil
 }
 
 // NewGateway builds the live public-preview gate. The target is the private
@@ -1155,7 +1156,7 @@ func (p *Policy) admitAddress(w http.ResponseWriter, r *http.Request) (func(), b
 	if p.addresses == nil {
 		return func() {}, true
 	}
-	release, ok := p.addresses.admit(p.clientIP(r), isWebSocketUpgrade(r.Header))
+	release, ok := p.addresses.Admit(p.clientIP(r), isWebSocketUpgrade(r.Header))
 	if !ok {
 		if host, valid := dispatchHost(r.Host); valid {
 			edgetelemetry.NoteRefusal(host)

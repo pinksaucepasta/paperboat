@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/net/idna"
 	"golang.org/x/net/netutil"
@@ -30,7 +31,6 @@ const (
 	AccessMatchOneLabelWildcard = "one_label_wildcard"
 
 	defaultAccessMaximumConnections = 128
-	defaultAccessMaximumRoutes      = 4096
 	defaultAccessHeaderTimeout      = 10 * time.Second
 	defaultAccessIdleTimeout        = 2 * time.Minute
 	defaultAccessOpenTimeout        = 15 * time.Second
@@ -66,7 +66,6 @@ type AccessProxyConfig struct {
 	Source             AccessSource
 	MaximumConnections int
 	gate               *peerGate // tests inject a fake owner lookup
-	MaximumRoutes      int
 	HeaderTimeout      time.Duration
 	IdleTimeout        time.Duration
 	OpenTimeout        time.Duration
@@ -81,7 +80,6 @@ type AccessProxy struct {
 	listener   net.Listener
 	server     *http.Server
 	source     AccessSource
-	maximum    int
 	openWait   time.Duration
 	runContext context.Context
 	cancel     context.CancelFunc
@@ -163,9 +161,6 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 	if config.MaximumConnections == 0 {
 		config.MaximumConnections = defaultAccessMaximumConnections
 	}
-	if config.MaximumRoutes == 0 {
-		config.MaximumRoutes = defaultAccessMaximumRoutes
-	}
 	if config.HeaderTimeout == 0 {
 		config.HeaderTimeout = defaultAccessHeaderTimeout
 	}
@@ -175,7 +170,7 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 	if config.OpenTimeout == 0 {
 		config.OpenTimeout = defaultAccessOpenTimeout
 	}
-	if ctx == nil || config.Source == nil || config.MaximumConnections < 1 || config.MaximumConnections > 4096 || config.MaximumRoutes < 1 || config.MaximumRoutes > defaultAccessMaximumRoutes || config.HeaderTimeout <= 0 || config.HeaderTimeout > time.Minute || config.IdleTimeout <= 0 || config.IdleTimeout > time.Hour || config.OpenTimeout <= 0 || config.OpenTimeout > time.Minute {
+	if ctx == nil || config.Source == nil || config.MaximumConnections < 1 || config.MaximumConnections > 4096 || config.HeaderTimeout <= 0 || config.HeaderTimeout > time.Minute || config.IdleTimeout <= 0 || config.IdleTimeout > time.Hour || config.OpenTimeout <= 0 || config.OpenTimeout > time.Minute {
 		return nil, ErrAccessProxyInvalid
 	}
 	listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(config.ListenPort))))
@@ -184,7 +179,7 @@ func StartAccessProxy(ctx context.Context, config AccessProxyConfig) (*AccessPro
 	}
 	runContext, cancel := context.WithCancel(ctx)
 	proxy := &AccessProxy{
-		listener: listener, source: config.Source, maximum: config.MaximumRoutes,
+		listener: listener, source: config.Source,
 		openWait: config.OpenTimeout, runContext: runContext, cancel: cancel, done: make(chan error, 1),
 		active: make(map[io.Closer]struct{}), snapshotGate: make(chan struct{}, 1),
 	}
@@ -271,7 +266,7 @@ func (p *AccessProxy) servePAC(writer http.ResponseWriter, request *http.Request
 		owner.writeFailure(writer, accessHTTPStatus(err), err)
 		return
 	}
-	normalized, err := normalizeAccessRoutes(routes, p.maximum)
+	normalized, err := normalizeAccessRoutes(routes)
 	if err != nil {
 		owner.writeFailure(writer, http.StatusServiceUnavailable, err)
 		return
@@ -301,7 +296,7 @@ func (p *AccessProxy) serveConnect(writer http.ResponseWriter, request *http.Req
 		owner.writeFailure(writer, accessHTTPStatus(err), err)
 		return false
 	}
-	normalized, err := normalizeAccessRoutes(routes, p.maximum)
+	normalized, err := normalizeAccessRoutes(routes)
 	if err != nil {
 		owner.writeFailure(writer, http.StatusServiceUnavailable, err)
 		return false
@@ -431,10 +426,7 @@ func (p *AccessProxy) Close() error {
 	return result
 }
 
-func normalizeAccessRoutes(routes []AccessRoute, maximum int) ([]AccessRoute, error) {
-	if len(routes) > maximum {
-		return nil, ErrAccessProxyInvalid
-	}
+func normalizeAccessRoutes(routes []AccessRoute) ([]AccessRoute, error) {
 	result := make([]AccessRoute, 0, len(routes))
 	seen := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
@@ -540,6 +532,7 @@ func renderPAC(proxyAddress string, routes []AccessRoute) ([]byte, error) {
 	var builder strings.Builder
 	builder.WriteString("function FindProxyForURL(url, host) {\n")
 	builder.WriteString("  host = host.toLowerCase().replace(/\\.$/, '');\n")
+	const trailer = "  return 'DIRECT';\n}\n"
 	for _, route := range routes {
 		switch route.MatchType {
 		case AccessMatchExact, AccessMatchManagedExact:
@@ -549,8 +542,11 @@ func renderPAC(proxyAddress string, routes []AccessRoute) ([]byte, error) {
 			encodedSuffix, _ := json.Marshal(route.WildcardSuffix)
 			fmt.Fprintf(&builder, "  if (dnsDomainIs(host, '.' + %s) && dnsDomainLevels(host) === dnsDomainLevels(%s) + 1) return %s;\n", encodedSuffix, encodedSuffix, encodedProxy)
 		}
+		if builder.Len()+len(trailer) > connectorprotocol.MaximumSnapshotBytes {
+			return nil, ErrAccessProxyInvalid
+		}
 	}
-	builder.WriteString("  return 'DIRECT';\n}\n")
+	builder.WriteString(trailer)
 	return []byte(builder.String()), nil
 }
 
@@ -667,7 +663,7 @@ func (p *AccessProxy) publishPAC(ctx context.Context, installed string) (string,
 	if err != nil {
 		return "", err
 	}
-	normalized, err := normalizeAccessRoutes(routes, p.maximum)
+	normalized, err := normalizeAccessRoutes(routes)
 	if err != nil {
 		return "", err
 	}

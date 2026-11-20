@@ -25,6 +25,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/capver"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/relayshare"
@@ -191,6 +192,9 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	if err != nil {
 		return out, failure(err, 0, false)
 	}
+	if len(body) > connectorprotocol.MaximumSnapshotBytes {
+		return out, failure(errors.New("relay control request exceeds size limit"), 0, false)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.URL+path, bytes.NewReader(body))
@@ -219,12 +223,12 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	if resp.StatusCode != http.StatusOK {
 		return out, failure(nil, resp.StatusCode, false)
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, connectorprotocol.MaximumSnapshotBytes+1))
 	if err != nil {
 		return out, failure(err, 0, true)
 	}
-	if len(raw) >= 256<<10 {
-		return out, ErrFenced
+	if len(raw) > connectorprotocol.MaximumSnapshotBytes {
+		return out, failure(errors.New("relay lease exceeds size limit"), 0, false)
 	}
 	// A lease is control data over the authenticated channel, not a signed claim: a field the server
 	// adds later must not fence every relay (AGENTS.md, internal/wirejson).

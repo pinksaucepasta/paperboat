@@ -396,10 +396,19 @@ func TestRelaySubjectsObservationBodyCarriesFullListPostgres(t *testing.T) {
 	if len(body) <= maxEdgeDocument {
 		t.Fatalf("test body is %d bytes, want more than the general limit %d", len(body), maxEdgeDocument)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/relay/nodes/observe", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	n.service.handleRelayObserve(rec, req)
+	observe := func(boundNode string) *httptest.ResponseRecorder {
+		n.service.SetNodeCredentials(scopedNodeCredential{node: boundNode})
+		req := httptest.NewRequest(http.MethodPost, "/v1/relay/nodes/observe", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer node-secret")
+		rec := httptest.NewRecorder()
+		n.service.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	if denied := observe("other_relay"); denied.Code != http.StatusUnauthorized {
+		t.Fatalf("observation with a foreign credential = %d, want 401", denied.Code)
+	}
+	rec := observe(n.id)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("observe status = %d: %s", rec.Code, rec.Body.String())
 	}

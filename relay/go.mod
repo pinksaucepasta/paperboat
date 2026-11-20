@@ -34,4 +34,4 @@ replace tailscale.com => github.com/pinksaucepasta/tailscale v1.103.0-pre.0.2026
 
 replace github.com/pinksaucepasta/paperboat/shared => ../shared
 
-replace github.com/quic-go/quic-go => ../third_party/quic-go
+replace github.com/quic-go/quic-go => github.com/pinksaucepasta/quic-go v0.61.1-paperboat.1

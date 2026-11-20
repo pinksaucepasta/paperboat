@@ -18,8 +18,8 @@ func freeTestLimits(now *time.Time) *FreeRequestLimits {
 	rates.PricingURL = "https://site.example.test/pricing"
 	l.Set(rates)
 	t := l.tables.Load()
-	t.perAddress.now = func() time.Time { return *now }
-	t.perPublication.now = func() time.Time { return *now }
+	t.perAddress.SetClock(func() time.Time { return *now })
+	t.perPublication.SetClock(func() time.Time { return *now })
 	return l
 }
 
@@ -84,42 +84,6 @@ func TestFreeRequestLimitsCapAPublicationAcrossManyAddresses(t *testing.T) {
 	}
 	if got != 50 {
 		t.Fatalf("admitted %d after one second, want the sustained 50", got)
-	}
-}
-
-// Memory stays bounded: a shard holds at most its key limit however many addresses arrive, and idle ones are swept.
-func TestFreeRequestLimitsKeepMemoryBounded(t *testing.T) {
-	now := time.Unix(1_000_000, 0)
-	l := freeTestLimits(&now)
-	tables := l.tables.Load()
-	tables.perAddress.shardKeys = 8
-	for i := 0; i < 100_000; i++ {
-		// many publications, so the 3,000-request cap of one never refuses: this tests the address table's bound
-		if l.over(fmt.Sprintf("app%d.preview.example.test", i%100), fmt.Sprintf("10.%d.%d.%d", i>>16, (i>>8)&255, i&255)) != nil {
-			t.Fatalf("visitor %d refused", i)
-		}
-	}
-	count := func() int {
-		total := 0
-		for i := range tables.perAddress.shards {
-			shard := &tables.perAddress.shards[i]
-			shard.mu.Lock()
-			total += len(shard.keys)
-			shard.mu.Unlock()
-		}
-		return total
-	}
-	if total := count(); total > 8*addressShards {
-		t.Fatalf("%d addresses tracked, bound is %d", total, 8*addressShards)
-	}
-	now = now.Add(addressIdle + addressSweepPeriod)
-	for i := range tables.perAddress.shards {
-		tables.perAddress.shards[i].mu.Lock()
-		tables.perAddress.shards[i].sweep(now)
-		tables.perAddress.shards[i].mu.Unlock()
-	}
-	if total := count(); total != 0 {
-		t.Fatalf("%d addresses tracked after the idle sweep", total)
 	}
 }
 

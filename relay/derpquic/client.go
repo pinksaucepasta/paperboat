@@ -162,7 +162,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 
 	stream.SetDeadline(time.Time{})
 	c.generation++
-	cc := &clientConn{token: token, namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, conn: conn, stream: stream, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
+	cc := &clientConn{token: token, namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, conn: conn, stream: stream, receive: make(chan packet, receiveDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
 	c.current = cc
 	c.observed.Store(cc)
 	cc.workers.Add(3)

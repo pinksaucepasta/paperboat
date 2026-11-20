@@ -37,7 +37,6 @@ type DistributionActionStore interface {
 	Pending(ctx context.Context, nodeID, epoch, after string, limit int, now time.Time) ([]DistributionAction, error)
 	// Complete records an edge result for a pending, unexpired action; false when there is none.
 	Complete(ctx context.Context, key, status, code string, now time.Time) (bool, error)
-	CountPending(context.Context, time.Time) (int, error)
 	// Purge deletes expired pending actions and results older than the retention.
 	Purge(context.Context, time.Time) error
 }
@@ -130,12 +129,6 @@ func (s sqlDistributionActionStore) Complete(ctx context.Context, key, status, c
 	return tag.RowsAffected() == 1, err
 }
 
-func (s sqlDistributionActionStore) CountPending(ctx context.Context, now time.Time) (int, error) {
-	var n int
-	err := s.db.Pool().QueryRow(ctx, `SELECT count(*) FROM paperboat.tunnel_certificate_distribution_actions WHERE status IS NULL AND expires_at > $1`, now).Scan(&n)
-	return n, err
-}
-
 func (s sqlDistributionActionStore) Purge(ctx context.Context, now time.Time) error {
 	_, err := s.db.Pool().Exec(ctx, `DELETE FROM paperboat.tunnel_certificate_distribution_actions
  WHERE (status IS NULL AND expires_at <= $1) OR completed_at <= $2`, now, now.Add(-distributionResultRetention))
@@ -196,18 +189,6 @@ func (m *MemoryDistributionActionStore) Complete(_ context.Context, key, status,
 	a.Status, a.Code, a.SealedCertificate, a.SealedPrivateKey = status, code, nil, nil
 	m.actions[key] = a
 	return true, nil
-}
-
-func (m *MemoryDistributionActionStore) CountPending(_ context.Context, now time.Time) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	n := 0
-	for _, a := range m.actions {
-		if a.Status == "" && a.Message.ExpiresAt.After(now) {
-			n++
-		}
-	}
-	return n, nil
 }
 
 func (m *MemoryDistributionActionStore) Purge(_ context.Context, now time.Time) error {

@@ -14,6 +14,6 @@ by itself. Go dependency licenses are checked by `cli/tools/verify-licenses.sh` 
 | Phosphor icons (`@phosphor-icons/react`; SVGs from `@phosphor-icons/core` inlined by the site) | console, marketing | MIT | <https://github.com/phosphor-icons> |
 | Figtree, Geist, JetBrains Mono (variable fonts: self-hosted from `@fontsource-variable/*` on the site, fetched at build by `next/font/google` in the console) | marketing, console | SIL Open Font License 1.1 | <https://fontsource.org>, <https://fonts.google.com> |
 | shadcn/ui component sources (generated into `console/components/ui`) and Base UI | console | MIT | <https://github.com/shadcn-ui/ui>, <https://github.com/mui/base-ui> |
-| BBRv1 congestion sender, adapted from Hysteria (`core/internal/congestion/bbr`), itself a port of Chromium's QUIC BBR | `third_party/quic-go/internal/congestion/bbr/` (linked into `pb`, relay and edge) | MIT (Hysteria); BSD-3-Clause (Chromium) | <https://github.com/apernet/hysteria>; full texts in `third_party/quic-go/internal/congestion/bbr/NOTICE.md` |
+| BBRv1 congestion sender, adapted from Hysteria (`core/internal/congestion/bbr`), itself a port of Chromium's QUIC BBR | `internal/congestion/bbr/` of the fork `github.com/pinksaucepasta/quic-go` (linked into `pb`, relay and edge) | MIT (Hysteria); BSD-3-Clause (Chromium) | <https://github.com/apernet/hysteria>; full texts in `internal/congestion/bbr/NOTICE.md` of the fork |
 
 When a new vendored file or asset is added, add its row here in the same commit.

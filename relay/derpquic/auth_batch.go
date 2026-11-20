@@ -93,10 +93,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 		if !sameGrantIdentity(merged, grant) {
 			return fmt.Errorf("grant part identity: %w", ErrAdmission)
 		}
-		merged, err = mergeGrants(merged, grant)
-		if err != nil {
-			return err
-		}
+		merged = mergeGrants(merged, grant)
 	}
 	now = clock()
 	if expired != nil {

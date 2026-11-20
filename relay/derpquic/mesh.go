@@ -32,8 +32,7 @@ const (
 	meshDialTimeout  = 3 * time.Second
 	meshStreamWait   = 5 * time.Second
 	meshWriteWait    = 5 * time.Second
-	meshControlDepth = 1024 // frames queued to one link before it is judged out of sync and re-established
-	meshDataDepth    = queueDepth
+	meshControlDepth = 1024        // frames queued to one link before it is judged out of sync and re-established
 	meshNeedEvery    = time.Second // one NeedGrant per route key per second
 	meshNeedKeys     = 1024
 	meshStableAfter  = 10 * time.Second // a link this old resets the reconnect backoff
@@ -108,19 +107,13 @@ type meshDialer struct {
 }
 
 // meshOut is one packet queued to a link.
-type meshOut struct {
-	src, dst key.NodePublic
-	data     []byte
-	control  bool
-}
-
 type meshLink struct {
 	m        *Mesh
 	peer     nodemesh.Peer
 	conn     *quic.Conn
 	stream   *quic.Stream
 	ctrl     chan meshFrame
-	out      chan meshOut
+	out      *sendQueue // forwarded packets (packet.peer = source route key, dst = destination), bounded in bytes like a carrier's
 	sequence atomic.Uint64
 	once     sync.Once
 	expires  time.Time // the peer certificate's NotAfter: the link never outlives it (zero: unbounded, tests only)
@@ -350,7 +343,7 @@ func (m *Mesh) accept(c *quic.Conn) {
 }
 
 func (m *Mesh) newLink(peer nodemesh.Peer, c *quic.Conn, stream *quic.Stream) *meshLink {
-	l := &meshLink{m: m, peer: peer, conn: c, stream: stream, ctrl: make(chan meshFrame, meshControlDepth), out: make(chan meshOut, meshDataDepth)}
+	l := &meshLink{m: m, peer: peer, conn: c, stream: stream, ctrl: make(chan meshFrame, meshControlDepth), out: newSendQueue()}
 	if certs := c.ConnectionState().TLS.PeerCertificates; len(certs) > 0 {
 		l.expires = certs[0].NotAfter
 	}
@@ -489,8 +482,12 @@ func (l *meshLink) writeData() {
 		select {
 		case <-ctx.Done():
 			return
-		case o := <-l.out:
-			if err := sendFragments(l.conn, &l.sequence, o.src, &o.dst, o.data, o.control); err != nil {
+		case <-l.out.wake:
+			o, ok := l.out.pop()
+			if !ok {
+				continue
+			}
+			if err := sendFragments(l.conn, &l.sequence, o.peer, &o.dst, o.data, o.control); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
@@ -604,11 +601,7 @@ func (m *Mesh) acceptGrant(l *meshLink, f meshFrame) error {
 	if old := m.remote.get(route, now); old != nil && old.via == l {
 		switch {
 		case sameGrantIdentity(old.grant, g):
-			merged, err := mergeGrants(old.grant, g)
-			if err != nil {
-				return nil
-			}
-			g = merged
+			g = mergeGrants(old.grant, g)
 		case g.Generation < old.grant.Generation:
 			return nil
 		}
@@ -669,10 +662,9 @@ func (m *Mesh) deliver(l *meshLink, p meshPacket) {
 	case !s.authorizedRemoteLocked(rs, q, p.control, now):
 		m.drop(dropUnpaired)
 	default:
-		select {
-		case q.out <- queued{packet: packet{peer: rs.root, data: p.data, control: p.control}, remote: rs}:
+		if q.out.push(queued{packet: packet{peer: rs.root, data: p.data, control: p.control}, remote: rs}) {
 			m.received.Add(1)
-		default:
+		} else {
 			m.drop(dropDeliveryFull)
 		}
 	}
@@ -695,9 +687,7 @@ func (s *Server) forwardLocked(p *peerConn, dst key.NodePublic, msg packet) bool
 		m.holderMiss.Add(1)
 		return false
 	}
-	select {
-	case l.out <- meshOut{src: routeKey(p.key, p.namespace), dst: dst, data: msg.data, control: msg.control}:
-	default:
+	if !l.out.push(queued{packet: packet{peer: routeKey(p.key, p.namespace), data: msg.data, control: msg.control}, dst: dst}) {
 		m.unreachable.Add(1)
 		m.drop(dropQueueFull)
 	}

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"net/url"
 	"strconv"
@@ -10,6 +11,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
+
+// endpointPagesMaximumBytes bounds the summed size of all pages of one endpoint answer; a var so tests can shrink it.
+var endpointPagesMaximumBytes = connectorprotocol.MaximumSnapshotBytes
 
 func ExpectedRuntimeAdmission(a runtimewire.Admission, nodeID, epoch string, now time.Time) (datacarrier.ExpectedAdmission, error) {
 	b := a.Binding
@@ -103,11 +107,20 @@ func (c *HTTPClient) EndpointAdmissions(ctx context.Context, nodeID, epoch, sinc
 	var update EndpointUpdate
 	now := time.Now().UTC()
 	page := ""
+	total := 0
 	for pages := 0; ; pages++ {
 		var result runtimewire.Snapshot
 		request := runtimewire.EdgeRequest{NodeID: nodeID, ProcessEpoch: epoch, Capabilities: edgeRuntimeCapabilities, Since: since, Page: page, WaitMilliseconds: wait.Milliseconds()}
 		if err := c.postNodeWithMaximumAndIdentity(ctx, runtimewire.EdgeEndpointPullPath, nodeID, epoch, request, &result, connectorprotocol.MaximumSnapshotBytes); err != nil {
 			return EndpointUpdate{}, err
+		}
+		pageBytes, err := json.Marshal(result)
+		if err != nil {
+			return EndpointUpdate{}, ErrControlUnavailable
+		}
+		total += len(pageBytes)
+		if total > endpointPagesMaximumBytes {
+			return EndpointUpdate{}, ErrControlUnavailable
 		}
 		if result.Schema != runtimewire.Schema || result.Carriers == nil || result.Cursor == "" || len(result.Cursor) > 64 || len(result.Next) > 1024 {
 			return EndpointUpdate{}, ErrControlUnavailable

@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,21 @@ func TestConfigRepositoryTransport(t *testing.T) {
 		}
 	}
 }
+func TestConfigMachineRulesAcceptEncodingAboveOldLimit(t *testing.T) {
+	// 256 rules x 64 selectors is about 180 KB encoded, above the old 64 KiB cap and within MaximumSnapshotBytes.
+	include := make([]string, 64)
+	for i := range include {
+		include[i] = "**/*.json"
+	}
+	rules := make([]ConfigPathRule, 256)
+	for i := range rules {
+		rules[i] = ConfigPathRule{Source: "machine", ID: fmt.Sprintf("rule%03d", i), RepositoryPath: fmt.Sprintf("r%03d", i), LocalPath: fmt.Sprintf("~/d%03d", i), Kind: "directory", Include: include}
+	}
+	if err := ValidateConfigMachineRules(rules, nil, "", ""); err != nil {
+		t.Fatalf("assignment above 64 KiB encoded rejected: %v", err)
+	}
+}
+
 func TestConfigMachineRuleValidation(t *testing.T) {
 	rule := ConfigPathRule{Source: "machine", ID: "editor", RepositoryPath: "editor", LocalPath: `C:\Users\owner\AppData\Roaming\Editor`, Kind: "directory", Include: []string{"**/*.json", "settings?.[jt]son"}, Exclude: []string{"private/**"}}
 	if err := ValidateConfigMachineRules([]ConfigPathRule{rule}, []ConfigRepositoryBinding{{RepositoryID: "repo", URL: "ssh://git@host/config.git"}}, "repo", ""); err != nil {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"testing"
 	"time"
 
@@ -127,28 +126,28 @@ func TestRelayGrantMembershipsCarryStandingTeamScopesOnce(t *testing.T) {
 	}
 }
 
-// Over the relay's merged membership bound the latest-expiring memberships are kept, the account network first
-// (F21-164: a busy host keeps its longest-lived session).
-func TestRelayGrantMembershipsKeepTheLatestWithinTheRelayBound(t *testing.T) {
+// Every membership reaches the grant, the account network first, however many there are (F21-164 once cut a busy
+// host's longest-lived sessions at 4,096), and the parts take as many as the token bound allows.
+func TestRelayGrantMembershipsKeepEveryMembershipPastTheOldCountCap(t *testing.T) {
 	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host"}}
-	// A peer's own sessions are already reduced per peer (RelayGrantScopes); many peers of other accounts are not.
+	const others = 4096 + 100
 	var peers []networkPeer
-	for i := range peernetwork.MaxMergedMemberships + 100 {
-		expires := int64(1_000 + i%50)
-		if i == 299 {
-			expires = 5_000
-		}
+	for i := range others {
 		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: fmt.Sprintf("member_%04d", i), WireGuardPublicKey: fmt.Sprintf("key_%04d", i)}},
-			Scopes: []networkScope{{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("session_%04d", i), ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: expires}}})
+			Scopes: []networkScope{{ResourceKind: "machine_access", ResourceID: fmt.Sprintf("session_%04d", i), ResourceGeneration: 1, Capability: "terminal", Direction: "accept", Port: 443, ExpiresAt: int64(1_000 + i%50)}}})
 	}
 	peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "cli", WireGuardPublicKey: "key_cli"}}, Scopes: []networkScope{
 		{ResourceKind: "machine_network", ResourceID: "network_cli", ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443}}})
 	got := relayGrantMemberships(self, peers, 9_000)
-	if len(got) != peernetwork.MaxMergedMemberships || got[0].ResourceKind != "machine_network" {
-		t.Fatalf("%d memberships, first %+v: want %d with the account network first", len(got), got[0], peernetwork.MaxMergedMemberships)
+	if len(got) != others+1 || got[0].ResourceKind != "machine_network" {
+		t.Fatalf("%d memberships, first %+v: want all %d with the account network first", len(got), got[0], others+1)
 	}
-	longest := slices.ContainsFunc(got, func(s networkScope) bool { return s.ResourceID == "session_0299" })
-	if !longest {
-		t.Fatal("the busy peer's longest-lived session was cut")
+	kept, widest := 0, 0
+	for _, part := range relayGrantMembershipParts(got) {
+		kept += len(part)
+		widest = max(widest, len(part))
+	}
+	if kept != len(got) || widest <= 256 {
+		t.Fatalf("parts hold %d of %d memberships, widest %d: want all of them and a part past the old 256", kept, len(got), widest)
 	}
 }

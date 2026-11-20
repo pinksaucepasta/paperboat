@@ -162,6 +162,14 @@ func TestSQLRepositoryManagedSSHAuthorityLifecycle(t *testing.T) {
 	if slices.Contains(revoked.RevokedKeyIDs, issuedCertificate(kept).KeyId) || checkCertificate(issuedCertificate(kept), revoked.Principal, revoked.Keys, now, "127.0.0.1") != nil {
 		t.Fatal("session B's certificate stopped working when session A was revoked")
 	}
+	// No count cap: 5000 holders whose sessions are gone are all listed (the old cap refused above 4096).
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.managed_ssh_certificate_holders (machine_id,cli_client_session_id,user_id,valid_before) SELECT $1,'gone_'||n||'_'||$2,$3,$4 FROM generate_series(1,5000) n`, machineA, suffix, userA, now.Add(testCertificates.Validity)); err != nil {
+		t.Fatal(err)
+	}
+	many, err := service.TrustedUserCAs(ctx, UserCAsRequest{ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1, Now: now})
+	if err != nil || len(many.RevokedKeyIDs) != 5001 {
+		t.Fatalf("revoked list of 5000 gone sessions + 1 = %d err=%v", len(many.RevokedKeyIDs), err)
+	}
 	// Expired holders are dropped at the next fetch: the list empties once the revoked certificates expired.
 	expired, err := service.TrustedUserCAs(ctx, UserCAsRequest{ActorUserID: userA, UserMachineID: machineA, MachineGeneration: 1, Now: now.Add(testCertificates.Validity + time.Second)})
 	if err != nil || len(expired.RevokedKeyIDs) != 0 {

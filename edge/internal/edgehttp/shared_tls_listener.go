@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
@@ -61,7 +62,7 @@ type SharedTLSListener struct {
 	held         *holdSet
 	// handshakes is the per-address TLS handshake rate; names caps one name's share of the slots, so a
 	// flood aimed at one preview cannot starve every other name (edge abuse plan, L2 and L5).
-	handshakes *addressLimiter
+	handshakes *addrlimit.Limiter
 	names      *holdSet
 }
 
@@ -160,7 +161,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
-		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(math.MaxInt, tlsNameConnections, 0)}
+		handshakes: addrlimit.New(addressHandshakeRate, addrlimit.Rate{}, 0), names: newHoldSet(math.MaxInt, tlsNameConnections, 0)}
 	l.hello, l.cancelHello = context.WithCancel(ctx)
 	go l.run()
 	return l
@@ -181,7 +182,7 @@ func (l *SharedTLSListener) run() {
 			return
 		}
 		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
-			if _, ok := l.handshakes.admit(host, false); !ok {
+			if _, ok := l.handshakes.Admit(host, false); !ok {
 				_ = conn.Close()
 				l.observe("tls_handshake_rate", errHandshakeRate)
 				continue
@@ -351,7 +352,7 @@ func (l *SharedTLSListener) previewDecisionExists(ctx context.Context, host stri
 	if l.previewHTTPSAuthority == nil || l.previewHTTPSAuthority(ctx, host) != nil {
 		return false
 	}
-	decisions, err := l.authority.Snapshot(ctx)
+	decisions, err := l.authority.SnapshotForHost(ctx, host)
 	if err != nil {
 		return false
 	}

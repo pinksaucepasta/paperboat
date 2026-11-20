@@ -11,6 +11,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -24,6 +25,9 @@ var (
 	ErrCertificateDistributionInvalid = errors.New("invalid certificate distribution message")
 	ErrCertificateDistributionAuth    = errors.New("certificate distribution message is not authenticated")
 )
+
+// certificateDistributionPagesMaximumBytes bounds the summed size of all pages of one pull; a var so tests can shrink it.
+var certificateDistributionPagesMaximumBytes = connectorprotocol.MaximumSnapshotBytes
 
 const (
 	certificateDistributionMaximumMessages = 128
@@ -113,6 +117,7 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 	result := make([]tlscert.DistributionEnvelope, 0, certificateDistributionMaximumMessages)
 	cursor := ""
 	now := time.Now().UTC()
+	total := 0
 	for {
 		var response tlscertwire.DistributionPage
 		if err := c.client.postNodeWithMaximumAndIdentity(ctx, CertificateDistributionPullPath, nodeID, processEpoch, struct {
@@ -124,6 +129,18 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 			return nil, err
 		}
 		if response.Version != 1 || len(response.Messages) > certificateDistributionMaximumMessages {
+			wipeCertificateDistributionWires(response.Messages)
+			return nil, ErrCertificateDistributionInvalid
+		}
+		// The page is measured as marshalled JSON, which carries key material, so the copy is cleared at once.
+		pageBytes, err := json.Marshal(response.Messages)
+		if err != nil {
+			wipeCertificateDistributionWires(response.Messages)
+			return nil, ErrCertificateDistributionInvalid
+		}
+		total += len(pageBytes)
+		clearControlBytes(pageBytes)
+		if total > certificateDistributionPagesMaximumBytes {
 			wipeCertificateDistributionWires(response.Messages)
 			return nil, ErrCertificateDistributionInvalid
 		}

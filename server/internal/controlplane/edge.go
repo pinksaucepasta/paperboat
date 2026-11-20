@@ -25,14 +25,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
-	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/routeobservation"
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
+	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -251,23 +252,20 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 }
 
 func (s *EdgeService) Revocations(ctx context.Context) (RevocationDocument, error) {
-	jtis, err := s.store.Queries().ListRevokedControlCredentialJTIs(ctx, dbsqlc.ListRevokedControlCredentialJTIsParams{Now: s.clock().UTC(), RowLimit: 10001})
+	jtis, err := s.store.Queries().ListRevokedControlCredentialJTIs(ctx, s.clock().UTC())
 	if err != nil {
 		return RevocationDocument{}, err
-	}
-	if len(jtis) > 10000 {
-		return RevocationDocument{}, errors.New("credential revocation feed capacity exceeded")
 	}
 
-	environments, err := s.store.Queries().ListRevokedControlEnvironments(ctx, 10000)
+	environments, err := s.store.Queries().ListRevokedControlEnvironments(ctx)
 	if err != nil {
 		return RevocationDocument{}, err
 	}
-	connectors, err := s.store.Queries().ListRevokedConnectorGenerations(ctx, 10000)
+	connectors, err := s.store.Queries().ListRevokedConnectorGenerations(ctx)
 	if err != nil {
 		return RevocationDocument{}, err
 	}
-	keyIDs, err := s.store.Queries().ListRevokedControlSigningKeyIDs(ctx, 10000)
+	keyIDs, err := s.store.Queries().ListRevokedControlSigningKeyIDs(ctx)
 	if err != nil {
 		return RevocationDocument{}, err
 	}
@@ -738,7 +736,7 @@ func (s *EdgeService) handleRevocations(w http.ResponseWriter, r *http.Request) 
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 5, err)
 		return
 	}
-	writeEdgeJSON(w, http.StatusOK, document)
+	writeEdgeSnapshot(w, r, document)
 }
 
 // TrustKeys is the mint trust document (keys plus withdrawn_key_ids) running relays and edges refresh from, so a
@@ -760,7 +758,7 @@ func (s *EdgeService) trustKeysFrom(ctx context.Context, queries *dbsqlc.Queries
 		// An operator's signing-key revocation (RevokeSigningKey) reaches relays through the same document
 		// the tunnel edges already get it in as key_ids. JWKSJSON refuses a total no client would accept.
 		var err error
-		if revoked, err = queries.ListRevokedControlSigningKeyIDs(ctx, jwks.MaxKeys+1); err != nil {
+		if revoked, err = queries.ListRevokedControlSigningKeyIDs(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -800,6 +798,10 @@ func (s *EdgeService) decodeLimit(w http.ResponseWriter, r *http.Request, target
 	defer r.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 	if err != nil || len(data) > limit || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
+		return false
+	}
+	if _, scoped := r.Context().Value(scopedRelayObservationNodeKey{}).(string); scoped && canonicaljson.RejectDuplicateFields(data) != nil {
 		writeEdgeError(w, r, http.StatusBadRequest, "invalid_request", false, 0)
 		return false
 	}
@@ -1017,6 +1019,18 @@ func writeEdgeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// writeEdgeSnapshot applies the shared bound before committing a complete response.
+func writeEdgeSnapshot(w http.ResponseWriter, r *http.Request, value any) {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw) > connectorprotocol.MaximumSnapshotBytes {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000,
+			errors.Join(err, errors.New("control snapshot could not be encoded within the size limit")))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(raw)
 }
 
 func parseTunnelEdgeConfigHash(value string) ([]byte, error) {

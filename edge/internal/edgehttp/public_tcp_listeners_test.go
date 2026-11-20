@@ -61,6 +61,10 @@ func TestPublicTCPListenersBindBeforeReadyObservation(t *testing.T) {
 	}
 }
 
+func (f *publicTCPAuthorityFixture) SnapshotForHost(ctx context.Context, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	return testSnapshotForHost(ctx, f, hostname)
+}
+
 func (f *publicTCPAuthorityFixture) Snapshot(context.Context) ([]connectorprotocol.IngressDecision, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -263,4 +267,18 @@ func TestPublicTCPListenersRefusePortsOutsideTheRange(t *testing.T) {
 	if bound != 0 || len(failures) != 3 {
 		t.Fatalf("listeners=%d failures=%d, want none bound and 3 reported", bound, len(failures))
 	}
+}
+
+func testSnapshotForHost(ctx context.Context, authority PublicTCPAuthority, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	decisions, err := authority.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matches []connectorprotocol.IngressDecision
+	for _, decision := range decisions {
+		if decision.Binding.Hostname == hostname {
+			matches = append(matches, decision)
+		}
+	}
+	return matches, nil
 }

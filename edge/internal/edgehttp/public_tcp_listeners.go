@@ -15,6 +15,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	"github.com/pinksaucepasta/paperboat/edge/internal/forward"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
@@ -24,6 +26,7 @@ import (
 
 type PublicTCPAuthority interface {
 	Snapshot(context.Context) ([]connectorprotocol.IngressDecision, error)
+	SnapshotForHost(context.Context, string) ([]connectorprotocol.IngressDecision, error)
 	ResolveDecision(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
 
@@ -58,6 +61,11 @@ type PublicTCPListeners struct {
 	sharedTLS  *SharedTLSListener
 	browser    *BrowserAccess
 	forwarding *ForwardHooks
+	// forward carries one accepted connection; tests replace it.
+	forward func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
+	// sources bounds one visitor address's open connections. A publication is never capped: how many visitors a
+	// user's service serves is theirs to decide; resource alerts watch node capacity.
+	sources *addrlimit.Limiter
 }
 
 // SetForwarding makes the shared TLS listener forward to other nodes (and take their forwarded visitors). It may be
@@ -121,7 +129,8 @@ func NewPublicTCPListeners(cfg PublicTCPListenerConfig) (*PublicTCPListeners, er
 	if cfg.Listen == nil {
 		cfg.Listen = handover.Listen
 	}
-	return &PublicTCPListeners{cfg: cfg, listeners: make(map[string]*publicTCPListener)}, nil
+	return &PublicTCPListeners{cfg: cfg, listeners: make(map[string]*publicTCPListener), forward: cfg.Routes.ForwardPublicTCP,
+		sources: addrlimit.NewInFlight(addrlimit.Streams)}, nil
 }
 
 // PrepareTCPRoutes binds every reserved socket before the route worker reports
@@ -387,16 +396,35 @@ func (p *PublicTCPListeners) accept(ctx context.Context, live *publicTCPListener
 		p.mu.Lock()
 		decision, forwardPort, hooks := live.decision, live.forwardPort, p.forwarding
 		p.mu.Unlock()
+		releaseSource, ok := p.admit(connection)
+		if !ok {
+			_ = connection.Close()
+			p.observe(ctx, "public_tcp_stream", errPublicTCPOverShare)
+			edgetelemetry.NoteRefusal(decision.Binding.Hostname)
+			continue
+		}
 		p.streams.Add(1)
 		go func() {
 			defer p.streams.Done()
+			defer releaseSource()
 			if forwardPort != 0 {
 				p.forwardTCP(ctx, connection, forwardPort, hooks)
 				return
 			}
-			p.observe(ctx, "public_tcp_stream", p.cfg.Routes.ForwardPublicTCP(ctx, connection, decision, p.cfg.Authority.ResolveDecision))
+			p.observe(ctx, "public_tcp_stream", p.forward(ctx, connection, decision, p.cfg.Authority.ResolveDecision))
 		}()
 	}
+}
+
+var errPublicTCPOverShare = errors.New("public TCP connection refused: its visitor address holds its full share of connections")
+
+// admit takes one connection from the visitor address's share.
+func (p *PublicTCPListeners) admit(connection net.Conn) (release func(), ok bool) {
+	address, _, err := net.SplitHostPort(connection.RemoteAddr().String())
+	if err != nil {
+		address = connection.RemoteAddr().String()
+	}
+	return p.sources.Admit(address, false)
 }
 
 func (p *PublicTCPListeners) observe(ctx context.Context, phase string, err error) {

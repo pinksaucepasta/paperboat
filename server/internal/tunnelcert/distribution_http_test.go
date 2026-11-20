@@ -414,12 +414,11 @@ func TestDistributionMessageTTLIsIndependentFromCertificateExpiry(t *testing.T) 
 	}
 }
 
-func TestDistributionHubExpiresWipesAndReclaimsPendingCapacity(t *testing.T) {
+func TestDistributionHubExpiresAndWipesPendingActions(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
 	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
-		Credential:     []byte("distribution-credential-012345678901234567890123456789"),
-		MaximumPending: 1,
-		Now:            func() time.Time { return now },
+		Credential: []byte("distribution-credential-012345678901234567890123456789"),
+		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, nil
 		}),
@@ -447,7 +446,31 @@ func TestDistributionHubExpiresWipesAndReclaimsPendingCapacity(t *testing.T) {
 	replacement.Bundle.CertificatePEM = []byte("replacement-certificate")
 	replacement.Bundle.PrivateKeyPEM = []byte("replacement-private-key")
 	if _, err := hub.enqueue(context.Background(), "stage", replacement); err != nil {
-		t.Fatalf("expired pending capacity was not reclaimed: %v", err)
+		t.Fatalf("replacement after expiry: %v", err)
+	}
+}
+
+// The hub keeps no total pending cap: expiry and Purge bound the queue.
+func TestDistributionHubAcceptsMoreThan4096PendingActions(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+		Credential: []byte("distribution-credential-012345678901234567890123456789"),
+		Now:        func() time.Time { return now },
+		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
+			return DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 4097; index++ {
+		request := DistributionRequest{Certificate: StoredCertificate{
+			ID: fmt.Sprintf("certificate_%05d", index), AccountID: "account_01", TunnelID: "tunnel_01", DomainID: "domain_01", Hostname: "preview.example.test",
+			DomainGeneration: 1, CertificateGeneration: 1, Fingerprint: [32]byte{1}, Issuer: "test", NotBefore: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
+		}, Bundle: CertificateBundle{CertificatePEM: []byte("certificate"), PrivateKeyPEM: []byte("private-key")}, Target: DistributionTarget{NodeID: "edge_01", ProcessEpoch: "epoch_0001", Generation: 1}}
+		if _, err := hub.enqueue(context.Background(), "stage", request); err != nil {
+			t.Fatalf("enqueue %d: %v", index, err)
+		}
 	}
 }
 

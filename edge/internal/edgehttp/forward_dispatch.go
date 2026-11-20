@@ -116,7 +116,7 @@ type hostAdmission struct {
 // dropped). It takes no connection and waits for nothing, so dispatch and Admit share it.
 func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
 	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
-	decisions, err := l.authority.Snapshot(ctx)
+	decisions, err := l.authority.SnapshotForHost(ctx, host)
 	cancel()
 	https := l.httpsHostname(host)
 	infrastructureHTTPS := host == l.infrastructureHostname && https
@@ -158,12 +158,12 @@ func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
 	}
 	// The locally admitted public preview may become ready after the cached
 	// complete snapshot was fetched. Refresh its exact authority before any TLS
-	// writes, then inspect the entire current snapshot for protocol conflicts.
+	// writes, then inspect every binding for this hostname for protocol conflicts.
 	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
 		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
 		defer stop()
 		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
-			decisions, err = l.authority.Snapshot(refresh)
+			decisions, err = l.authority.SnapshotForHost(refresh, host)
 			if err != nil {
 				return hostAdmission{}, false
 			}

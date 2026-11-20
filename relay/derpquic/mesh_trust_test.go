@@ -58,7 +58,7 @@ func TestMeshPeerRemovedClosesLinkAndWithdraws(t *testing.T) {
 func TestMeshRegisterRejectsDroppedPeer(t *testing.T) {
 	a, b := meshPair(t, false)
 	link := func(p nodemesh.Peer) *meshLink {
-		return &meshLink{m: a.mesh, peer: p, ctrl: make(chan meshFrame, meshControlDepth), out: make(chan meshOut, 1)}
+		return &meshLink{m: a.mesh, peer: p, ctrl: make(chan meshFrame, meshControlDepth), out: newSendQueue()}
 	}
 	if a.mesh.register(link(b.peer())) {
 		t.Fatal("a peer absent from the directory was registered")

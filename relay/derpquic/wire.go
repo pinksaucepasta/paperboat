@@ -29,7 +29,6 @@ const fragmentHeader = 43
 const meshFragmentHeader = 75
 const meshControlFlag = 0x80
 const maxAssemblies = 64
-const queueDepth = 64
 const (
 	frameAuth byte = 1 + iota
 	frameReady
@@ -153,6 +152,13 @@ type reassembler struct {
 	completed [128]uint64
 }
 
+// fragmentPeer is the peer a datagram is for (b is at least fragmentHeader long).
+func fragmentPeer(b []byte) key.NodePublic {
+	var raw [32]byte
+	copy(raw[:], b[8:40])
+	return key.NodePublicFromRaw32(mem.B(raw[:]))
+}
+
 func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePublic) bool) (packet, bool, error) {
 	m, ok, err := r.acceptFragment(b, now, authorize)
 	return m.packet, ok, err
@@ -178,11 +184,10 @@ func (r *reassembler) acceptFragment(b []byte, now time.Time, authorize func(key
 	if r.mesh {
 		control, index = index&meshControlFlag != 0, index&^meshControlFlag
 	}
-	var raw, rawDst [32]byte
-	copy(raw[:], b[8:40])
-	peer := key.NodePublicFromRaw32(mem.B(raw[:]))
+	peer := fragmentPeer(b)
 	var dst key.NodePublic
 	if r.mesh {
+		var rawDst [32]byte
 		copy(rawDst[:], b[40:72])
 		dst = key.NodePublicFromRaw32(mem.B(rawDst[:]))
 	}

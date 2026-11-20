@@ -368,3 +368,35 @@ func TestLegacyEdgeRouteJSONProjectsAppliedReadiness(t *testing.T) {
 		t.Fatalf("target projection = %#v", got["target"])
 	}
 }
+
+func TestEdgeRevocationsIncludesCompleteLargeSnapshotPostgres(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := t.Context()
+	prefix := fmt.Sprintf("revoked_%d_%s", time.Now().UnixNano(), strings.Repeat("x", 108))
+	const count = 10001
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_environments (id,workspace_id,desired_state,revoked_at)
+ SELECT $1||lpad(n::text,5,'0'),$1,'revoked',now() FROM generate_series(1,$2) n`, prefix, count); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), "DELETE FROM paperboat.control_environments WHERE workspace_id=$1", prefix)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/trust/revocations", nil)
+	request.Header.Set("Authorization", "Bearer edge-control-test")
+	response := httptest.NewRecorder()
+	NewEdgeService(store, "edge-control-test").Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.Len() <= 1<<20 {
+		t.Fatalf("revocation response status=%d bytes=%d", response.Code, response.Body.Len())
+	}
+	var document RevocationDocument
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	last := prefix + "10001"
+	for _, id := range document.Environments {
+		if id == last {
+			return
+		}
+	}
+	t.Fatal("latest revocation missing from complete snapshot")
+}

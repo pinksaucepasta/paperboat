@@ -1,17 +1,21 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
 )
 
 func TestUsageRejectsInvalidPagingBeforeQuery(t *testing.T) {
@@ -23,6 +27,28 @@ func TestUsageRejectsInvalidPagingBeforeQuery(t *testing.T) {
 		if w.Code != 400 {
 			t.Fatalf("query %s status %d", query, w.Code)
 		}
+	}
+}
+
+// A five-minute batch of 500 reports is over 64 KiB; the size gate must let it reach machine proof (401), not refuse it as invalid (400).
+func TestUsageNativeAcceptsLargeBatchPastSizeGate(t *testing.T) {
+	start := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
+	batch := resourceusage.NativeBatch{}
+	for i := range 500 {
+		batch.Reports = append(batch.Reports, resourceusage.NativeReport{AccessSessionID: "session-" + strconv.Itoa(i), StreamID: "stream-" + strconv.Itoa(i), Consumer: "ssh", Mode: "direct", IntervalStart: start, IntervalEnd: start.Add(time.Minute), UploadBytes: 1, DownloadBytes: 2})
+	}
+	body, err := json.Marshal(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= 64<<10 {
+		t.Fatalf("batch is %d bytes; it must exceed the old 64 KiB limit", len(body))
+	}
+	r := httptest.NewRequest("POST", "/v1/usage/native", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	resourceUsageNative(nil, nil)(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("500-report batch status %d body %s; want 401 from machine proof, not a size refusal", w.Code, w.Body.String())
 	}
 }
 
