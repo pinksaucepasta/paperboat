@@ -84,7 +84,7 @@ func (f *pinFixture) pinnedInstallation() string {
 
 func (f *pinFixture) expectedValues() (values []string) {
 	f.t.Helper()
-	if err := f.store.SQL().QueryRowContext(f.t.Context(), `SELECT coalesce(array_agg(r->>'value'),'{}') FROM paperboat.tunnel_domains d CROSS JOIN LATERAL jsonb_array_elements(d.expected_records) r WHERE d.id=$1`, f.domain).Scan(&values); err != nil {
+	if err := f.store.Pool().QueryRow(f.t.Context(), `SELECT coalesce(array_agg(r->>'value'),'{}') FROM paperboat.tunnel_domains d CROSS JOIN LATERAL jsonb_array_elements(d.expected_records) r WHERE d.id=$1`, f.domain).Scan(&values); err != nil {
 		f.t.Fatal(err)
 	}
 	return
@@ -92,7 +92,7 @@ func (f *pinFixture) expectedValues() (values []string) {
 
 func (f *pinFixture) edgeNodes() (nodes []string) {
 	f.t.Helper()
-	if err := f.store.SQL().QueryRowContext(f.t.Context(), `SELECT coalesce(array_agg(node_id),'{}') FROM paperboat.publication_edge_nodes('tunnel',$1)`, f.tunnel).Scan(&nodes); err != nil {
+	if err := f.store.Pool().QueryRow(f.t.Context(), `SELECT coalesce(array_agg(node_id),'{}') FROM paperboat.publication_edge_nodes('tunnel',$1)`, f.tunnel).Scan(&nodes); err != nil {
 		f.t.Fatal(err)
 	}
 	return
