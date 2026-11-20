@@ -25,6 +25,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeplacement"
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
@@ -83,9 +84,11 @@ func (s *Service) Attach(ctx context.Context, proof previewattachment.MachinePro
 		return runtimewire.HostAdmission{}, lockErr
 	}
 	defer unlock()
+	diagnostics.Stage(ctx, "attach_machine_lock")
 	if err := s.ensureEdgeSet(ctx, proof); err != nil {
 		return out, err
 	}
+	diagnostics.Stage(ctx, "attach_edge_set")
 	// READ COMMITTED with explicit row locks (NetBird's model, management/server/store): every read the attach decides on
 	// is either locked (the machine and route FOR UPDATE, its account and environment FOR SHARE, its own carrier rows FOR
 	// UPDATE) or this machine's own rows, which LockMachine orders. Under SERIALIZABLE, 50 machines of one account
@@ -430,6 +433,7 @@ previous_until=CASE WHEN runtime_carrier_attachments.session_id<>EXCLUDED.sessio
 		}
 		return endpoints.SyncAgentTunnelsTx(ctx, tx, proof.MachineID)
 	})
+	diagnostics.Stage(ctx, "attach_tx")
 	return out, err
 }
 

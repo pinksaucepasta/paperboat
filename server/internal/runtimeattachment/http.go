@@ -12,6 +12,7 @@ import (
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -90,6 +91,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "invalid_request")
 			return
 		}
+		diagnostics.Stage(r.Context(), "attach_read") // the access log's steps: where the request's time went
 		proof, err := h.Machine.VerifyMachineRequest(r.Context(), r, raw)
 		if err != nil {
 			if err == previewattachment.ErrUnauthorized {
@@ -99,11 +101,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		diagnostics.Stage(r.Context(), "attach_proof")
 		admission, err := h.Service.Attach(r.Context(), proof, request)
 		if err != nil {
 			serviceError(w, r, err)
 			return
 		}
+		diagnostics.Stage(r.Context(), "attach_service")
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": admission})
 		return
 	}
