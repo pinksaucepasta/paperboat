@@ -50,13 +50,6 @@ func TestGrantCheckRefusesEachBrokenRule(t *testing.T) {
 		"scope without expiry": func(g *RelayGrant) { g.Memberships[0].ExpiresAt = 0 },
 		"unknown scope":        func(g *RelayGrant) { g.Memberships[0].Capability = "teleport" },
 		"membership twice":     func(g *RelayGrant) { g.Memberships = append(g.Memberships, g.Memberships[0]) },
-		"too many memberships": func(g *RelayGrant) {
-			for len(g.Memberships) <= MaxGrantMemberships {
-				s := g.Memberships[0]
-				s.ResourceID = fmt.Sprint("network_", len(g.Memberships))
-				g.Memberships = append(g.Memberships, s)
-			}
-		},
 	} {
 		g := validTestGrant(now)
 		g.Memberships = append([]Scope(nil), g.Memberships...)
@@ -79,6 +72,25 @@ func TestReceiversDropUnknownScopesInsteadOfFailingTheGrant(t *testing.T) {
 	g.DropUnknownScopes()
 	if len(g.Memberships) != 1 || g.Memberships[0] != known || g.Check(now) != nil {
 		t.Fatalf("memberships after dropping unknown scopes: %+v", g.Memberships)
+	}
+}
+
+// No count caps a grant's memberships (4,096 merged and 256 per part once did); their bytes are bounded.
+func TestGrantWithManyMembershipsRoundTrips(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	g := validTestGrant(now)
+	for i := range 5000 {
+		s := g.Memberships[0]
+		s.ResourceID = fmt.Sprint("network_", i+2)
+		g.Memberships = append(g.Memberships, s)
+	}
+	raw, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded RelayGrant
+	if err := DecodeSigned(raw, &decoded); err != nil || decoded.Check(now) != nil || len(decoded.Memberships) != 5001 {
+		t.Fatalf("round trip of %d memberships: decode %v, check %v", len(decoded.Memberships), err, decoded.Check(now))
 	}
 }
 

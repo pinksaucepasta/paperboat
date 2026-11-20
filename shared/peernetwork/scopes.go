@@ -164,8 +164,8 @@ func AccountNetworkID(account string) string {
 }
 
 // RelayGrantMemberships is every membership a relay grant may carry for the scopes of an endpoint's relayable peers
-// (one scope list per peer), each once, the account mesh first and then the latest expiry first. The server signs a
-// bounded prefix of it (MaxMergedMemberships), for the peers its relay admits; the client builds the whole set from
+// (one scope list per peer), each once, the account mesh first and then the latest expiry first. The server signs all of
+// it, in as many parts as the token bound needs, for the peers its relay admits; the client builds the whole set from
 // its own signed configuration to refuse any membership of a grant that is not in it, so both must use this one
 // function. A per-pair machine_network scope becomes the account's one network (AccountNetworkID) in the direction
 // the endpoint holds, and a peer with a mesh scope adds nothing else (the mesh pairs it); a peer without one (a team

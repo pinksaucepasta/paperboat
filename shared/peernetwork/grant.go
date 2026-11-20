@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/clockleeway"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
@@ -21,13 +22,9 @@ import (
 const (
 	// MaxClockSkew tolerates issuer clock drift without extending a signed expiry.
 	MaxClockSkew = clockleeway.Leeway
-	// MaxGrantMemberships bounds the memberships one grant part carries.
-	MaxGrantMemberships = 256
-	// MaxMergedMemberships bounds the memberships of all parts of one grant (a team CLI reaching many shared hosts
-	// holds four per host); the relay's index costs 12 bytes per membership.
-	MaxMergedMemberships = 4096
-	// MaxGrantParts is the parts of one grant that hold MaxMergedMemberships memberships.
-	MaxGrantParts = (MaxMergedMemberships + MaxGrantMemberships - 1) / MaxGrantMemberships
+	// MaxGrantParts is the parts of one grant (a credential): the shared snapshot byte bound over one part's bytes. No
+	// count caps memberships; their bytes are bounded.
+	MaxGrantParts = connectorprotocol.MaximumSnapshotBytes / MaxGrantBytes
 	// MaxGrantIDBytes bounds a grant's account and endpoint ids.
 	MaxGrantIDBytes = 256
 )
@@ -93,9 +90,6 @@ func (g RelayGrant) Check(now time.Time) error {
 	}
 	if len(g.Memberships) == 0 {
 		return nil
-	}
-	if len(g.Memberships) > MaxGrantMemberships {
-		return invalid("grant memberships")
 	}
 	members := make(map[Scope]bool, len(g.Memberships))
 	for _, m := range g.Memberships {
