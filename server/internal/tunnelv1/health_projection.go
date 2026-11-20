@@ -15,10 +15,9 @@ type healthExecutor interface {
 // RefreshHealth projects current, exact edge-probed route readiness. A connected
 // connector alone is insufficient, and a completed operation stays historical
 // when a later outage makes the current health pending again. A route is ready
-// only when every live edge holding its active assignment has observed it ready
-// (paperboat.endpoint_route_ready, shared with preview readiness): a tunnel hostname
-// can resolve to any of those edges (the managed wildcard), so "ready on one edge"
-// sent first requests to an edge without the route (F8-06). The expiry
+// when at least one live edge holding its active assignment has observed it ready
+// (paperboat.endpoint_route_ready, shared with preview readiness), so one lagging edge does not
+// make the route flap; that edge alone answers visitors wrongly until it converges. The expiry
 // reconciler retains ownership of persisting expired summary/audit state.
 func RefreshHealth(ctx context.Context, executor healthExecutor, accountID string, tunnelIDs []string, now time.Time) error {
 	_, err := executor.Exec(ctx, `WITH locked AS MATERIALIZED (
@@ -37,7 +36,7 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  WHEN bool_or(coalesce(probe.failed,false)) THEN 'route_unavailable'
  ELSE 'pending' END AS code
  FROM locked t LEFT JOIN tunnel_routes r ON r.tunnel_id=t.id AND r.desired_state='active' AND r.deleted_at IS NULL
- LEFT JOIN LATERAL (SELECT bool_and(paperboat.endpoint_route_ready(er.id,$3)) AS ready, false AS failed
+ LEFT JOIN LATERAL (SELECT bool_and(paperboat.endpoint_route_ready(er.id,$3,false)) AS ready, false AS failed
  FROM endpoint_routes er JOIN endpoints e ON e.id=er.endpoint_id AND e.kind='tunnel' AND e.tunnel_id=t.id AND e.desired_state='active'
  WHERE er.tunnel_route_id=r.id) probe ON true
  GROUP BY t.id,t.account_id,t.desired_state,t.expires_at

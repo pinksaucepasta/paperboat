@@ -277,7 +277,8 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if err != nil || len(logs) != 1 || logs[0].Code != "tunnel_edge_ready" || logs[0].RouteID.String != route {
 		t.Fatalf("engine tunnel logs = %+v, %v; want one tunnel_edge_ready for the route", logs, err)
 	}
-	// The tunnel is ready only once every edge holding its route has observed it (F8-06).
+	// The tunnel is ready once one live edge holding its route has observed it; the edge that lags does not
+	// withdraw it (the second edge below only has to converge, not to gate readiness).
 	health := func() string {
 		t.Helper()
 		var code string
@@ -286,8 +287,15 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		}
 		return code
 	}
-	if code := health(); code != "pending" {
-		t.Fatalf("tunnel health with one of two edges ready = %s, want pending", code)
+	// A live machine has a current control session, and its environment is its own workspace.
+	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
+	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
+	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
+	if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if code := health(); code != "ready" {
+		t.Fatalf("tunnel health with one of two edges ready = %s, want ready", code)
 	}
 	backupRows, err := control.ListTunnelEdgeRouteAssignmentsForNodeV1(f.ctx, f.backupNode, f.backupEdge.ProcessEpoch)
 	if err != nil || len(backupRows) != 1 {
@@ -303,10 +311,6 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	// A live machine has a current control session, and its environment is its own workspace.
-	f.exec(t, `UPDATE control_environments SET workspace_id=$2 WHERE id=$1`, f.env, f.machine)
-	f.exec(t, `INSERT INTO machine_control_renewals(operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation) VALUES($1,$2,1,$1,now()-interval '1 minute',now()+interval '1 hour',1)`, "renew_"+f.prefix, f.machine)
-	f.exec(t, `INSERT INTO machine_control_sessions(machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at) SELECT machine_id,installation_generation,session_generation,operation_id,credential_jti,issued_at,expires_at FROM machine_control_renewals WHERE operation_id=$1`, "renew_"+f.prefix)
 	if err := tunnelv1.RefreshHealth(f.ctx, f.database.Pool(), f.account, []string{tunnel}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
