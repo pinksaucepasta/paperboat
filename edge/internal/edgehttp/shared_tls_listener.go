@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
-	"github.com/pinksaucepasta/paperboat/edge/internal/forward"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
