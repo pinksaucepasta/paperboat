@@ -1,23 +1,21 @@
 # quic-go, patched for Paperboat
 
-Upstream: github.com/quic-go/quic-go **v0.61.0**, copied unchanged except as listed here. Tests, examples, fuzzing and
-integration-test directories were left out; `internal/congestion` keeps its tests. LICENSE is upstream's.
-Used through `replace github.com/quic-go/quic-go => ../third_party/quic-go` in `cli/`, `relay/` and `edge/`.
+Upstream is github.com/quic-go/quic-go v0.61.0. The vendored subset keeps the upstream license and the congestion-control tests.
+The CLI, relay and edge modules select this copy with a Go module replacement.
 
-## Patch (one change, `internal/congestion/hybrid_slow_start.go`, marked `PAPERBOAT PATCH`)
+## PAPERBOAT PATCH (RFC 9406)
 
-HyStart (the delay check that ends slow start) used `threshold = clamp(minRTT/8, 4 ms, 16 ms)`. The patch drops the 16 ms
-upper clamp: `threshold = max(minRTT/8, 4 ms)`.
+HyStart++ compares the minimum RTT of the current round with the preceding round. Persistent delay enters Conservative Slow
+Start, which grows the congestion window by one quarter of newly acknowledged bytes. A sufficiently sampled round below
+the entry baseline resumes regular slow start. Five CSS rounds, including the entry round, end startup. The existing CUBIC
+loss and ECN response can end either phase immediately.
 
-Why: on a 500 ms path (US peers through an India relay) about 30 ms of delay jitter is normal. With the clamp at 16 ms, slow
-start ended after ~1.1 s at ~69 KB of congestion window with no loss, and congestion avoidance then added about one packet per
-round trip: ~1.4 Mbit/s whatever the plan, for any QUIC flow on a long or jittery path (direct, relay, carrier). With the
-patch a 5 Mbit/s account gets ~4.2 Mbit/s at 500 ms; paths at 250, 100 and 4 ms are unchanged (measured, see below).
+The ACK handler supplies one fresh, ACK-delay-adjusted RTT sample per eligible 1-RTT ACK frame, after applying window
+growth and loss or ECN processing. Tracking rounds in the application packet number space prevents handshake packet
+numbers from advancing them. The sender is paced and uses the RFC's uncapped acknowledged-byte growth. Its existing
+application-limited guard still applies.
 
-Tests: `internal/congestion` `TestHybridSlowStartLongPathIgnoresJitterBelowAnEighth`;
-`relay/derpquic` `TestQUICBulkOverALongPathGetsMostOfTheAccountSpeed` (fails 1.4 Mbit/s without the patch).
-
-## Updating
-
-Replace the directory with the new upstream version, re-apply the patch (grep `PAPERBOAT PATCH`), re-run both tests. Drop the
-patch if upstream makes the threshold configurable or removes the clamp (issue draft in paperboat-private/relay-500ms.md).
+When updating the vendored version, look for `PAPERBOAT PATCH (RFC 9406)` and run the congestion tests and relay
+long-path regression. The implementation follows RFC 9406, sections 4.2 and 4.3.
+For comparison, FreeBSD's NewReno implementation tracks the two round minima and the CSS entry baseline in
+`sys/netinet/cc/cc_newreno.c`.

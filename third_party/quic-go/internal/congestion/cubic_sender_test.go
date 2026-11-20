@@ -71,11 +71,11 @@ func (s *testCubicSender) SendAvailableSendWindowLen(packetLength protocol.ByteC
 
 func (s *testCubicSender) AckNPackets(n int) {
 	s.rttStats.UpdateRTT(60*time.Millisecond, 0)
-	s.sender.MaybeExitSlowStart()
 	for range n {
 		s.ackedPacketNumber++
 		s.sender.OnPacketAcked(s.ackedPacketNumber, maxDatagramSize, s.bytesInFlight, s.clock.Now())
 	}
+	s.sender.OnAckFrame(s.ackedPacketNumber, s.packetNumber-1, s.rttStats.LatestRTT()) // PAPERBOAT PATCH (RFC 9406)
 	s.bytesInFlight -= protocol.ByteCount(n) * maxDatagramSize
 	s.clock.Advance(time.Millisecond)
 }
@@ -216,9 +216,8 @@ func TestCubicSenderSlowStartPacketLoss(t *testing.T) {
 	require.Equal(t, expectedSendWindow, sender.sender.GetCongestionWindow())
 
 	// Now RTO and ensure slow start gets reset.
-	require.True(t, sender.sender.hybridSlowStart.Started())
 	sender.sender.OnRetransmissionTimeout(true)
-	require.False(t, sender.sender.hybridSlowStart.Started())
+	require.Equal(t, sender.sender.minCongestionWindow(), sender.sender.GetCongestionWindow()) // PAPERBOAT PATCH (RFC 9406)
 }
 
 func TestCubicSenderSlowStartPacketLossPRR(t *testing.T) {
@@ -485,7 +484,6 @@ func TestCubicSenderResetAfterConnectionMigration(t *testing.T) {
 	sender.sender.OnConnectionMigration()
 	require.Equal(t, defaultWindowTCP, sender.sender.GetCongestionWindow())
 	require.Equal(t, MaxCongestionWindow, sender.sender.slowStartThreshold)
-	require.False(t, sender.sender.hybridSlowStart.Started())
 }
 
 func TestCubicSenderSlowStartsUpToMaximumCongestionWindow(t *testing.T) {
@@ -504,7 +502,6 @@ func TestCubicSenderSlowStartsUpToMaximumCongestionWindow(t *testing.T) {
 	)
 
 	for i := 1; i < protocol.MaxCongestionWindowPackets; i++ {
-		sender.MaybeExitSlowStart()
 		sender.OnPacketAcked(protocol.PacketNumber(i), 1350, sender.GetCongestionWindow(), clock.Now())
 	}
 	require.Equal(t, initialMaxCongestionWindow, sender.GetCongestionWindow())
@@ -535,8 +532,7 @@ func TestCubicSenderSlowStartsPacketSizeIncrease(t *testing.T) {
 		sender.OnPacketAcked(protocol.PacketNumber(i), packetSize, sender.GetCongestionWindow(), clock.Now())
 	}
 	const maxCwnd = protocol.MaxCongestionWindowPackets * packetSize
-	require.True(t, sender.GetCongestionWindow() > maxCwnd)
-	require.True(t, sender.GetCongestionWindow() <= maxCwnd+packetSize)
+	require.Equal(t, maxCwnd, sender.GetCongestionWindow()) // PAPERBOAT PATCH (RFC 9406)
 }
 
 func TestCubicSenderLimitCwndIncreaseInCongestionAvoidance(t *testing.T) {

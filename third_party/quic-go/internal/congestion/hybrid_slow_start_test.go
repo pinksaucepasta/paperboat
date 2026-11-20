@@ -1,3 +1,4 @@
+// PAPERBOAT PATCH (RFC 9406): verify the round, delay, and CSS rules.
 package congestion
 
 import (
@@ -5,82 +6,120 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/internal/protocol"
-
 	"github.com/stretchr/testify/require"
 )
 
-func TestHybridSlowStartSimpleCase(t *testing.T) {
-	slowStart := HybridSlowStart{}
+func TestHyStartPlusPlusDelayThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		base, threshold time.Duration
+	}{
+		{"minimum", 8 * time.Millisecond, 4 * time.Millisecond},
+		{"fraction", 80 * time.Millisecond, 10 * time.Millisecond},
+		{"maximum", 500 * time.Millisecond, 16 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var h HybridSlowStart
+			// Equality ends the round. ACKs without a fresh RTT don't supply samples.
+			require.False(t, h.onAck(10, 10, tc.base))
+			for n := range protocol.PacketNumber(7) {
+				h.onAck(11+n, 40, tc.base+tc.threshold)
+			}
+			h.onAck(18, 40, 0)
+			require.Zero(t, h.cssBaseline)
+			h.onAck(19, 40, tc.base+tc.threshold)
+			require.Equal(t, tc.base+tc.threshold, h.cssBaseline)
 
-	packetNumber := protocol.PacketNumber(1)
-	endPacketNumber := protocol.PacketNumber(3)
-	slowStart.StartReceiveRound(endPacketNumber)
-
-	packetNumber++
-	require.False(t, slowStart.IsEndOfRound(packetNumber))
-
-	// Test duplicates.
-	require.False(t, slowStart.IsEndOfRound(packetNumber))
-
-	packetNumber++
-	require.False(t, slowStart.IsEndOfRound(packetNumber))
-	packetNumber++
-	require.True(t, slowStart.IsEndOfRound(packetNumber))
-
-	// Test without a new registered end_packet_number;
-	packetNumber++
-	require.True(t, slowStart.IsEndOfRound(packetNumber))
-
-	endPacketNumber = 20
-	slowStart.StartReceiveRound(endPacketNumber)
-	for packetNumber < endPacketNumber {
-		packetNumber++
-		require.False(t, slowStart.IsEndOfRound(packetNumber))
+			// The comparator is inclusive, but a sample just below the threshold
+			// prevents entry even if all the others are above it.
+			h = HybridSlowStart{}
+			h.onAck(10, 10, tc.base)
+			h.onAck(11, 40, tc.base+tc.threshold-time.Nanosecond)
+			for n := range protocol.PacketNumber(8) {
+				h.onAck(12+n, 40, tc.base+tc.threshold)
+			}
+			require.Zero(t, h.cssBaseline)
+		})
 	}
-	packetNumber++
-	require.True(t, slowStart.IsEndOfRound(packetNumber))
 }
 
-func TestHybridSlowStartWithDelay(t *testing.T) {
-	slowStart := HybridSlowStart{}
-	const rtt = 60 * time.Millisecond
-	// We expect to detect the increase at +1/8 of the RTT; hence at a typical
-	// RTT of 60ms the detection will happen at 67.5 ms.
-	const hybridStartMinSamples = 8 // Number of acks required to trigger.
-
-	endPacketNumber := protocol.PacketNumber(1)
-	endPacketNumber++
-	slowStart.StartReceiveRound(endPacketNumber)
-
-	// Will not trigger since our lowest RTT in our burst is the same as the long
-	// term RTT provided.
-	for n := range hybridStartMinSamples {
-		require.False(t, slowStart.ShouldExitSlowStart(rtt+time.Duration(n)*time.Millisecond, rtt, 100))
+func TestHyStartPlusPlusUsesPreviousRoundMinimum(t *testing.T) {
+	var h HybridSlowStart
+	h.onAck(5, 5, 50*time.Millisecond)
+	h.onAck(10, 10, 80*time.Millisecond)
+	// A comparison to the connection minimum would incorrectly enter CSS.
+	for pn := protocol.PacketNumber(11); pn <= 18; pn++ {
+		h.onAck(pn, 20, 89*time.Millisecond)
 	}
-	endPacketNumber++
-	slowStart.StartReceiveRound(endPacketNumber)
-	for n := 1; n < hybridStartMinSamples; n++ {
-		require.False(t, slowStart.ShouldExitSlowStart(rtt+(time.Duration(n)+10)*time.Millisecond, rtt, 100))
+	require.Zero(t, h.cssBaseline)
+	h.onAck(20, 30, 0)
+	for pn := protocol.PacketNumber(21); pn <= 28; pn++ {
+		h.onAck(pn, 30, 101*time.Millisecond)
 	}
-	// Expect to trigger since all packets in this burst was above the long term
-	// RTT provided.
-	require.True(t, slowStart.ShouldExitSlowStart(rtt+10*time.Millisecond, rtt, 100))
+	require.Equal(t, 101*time.Millisecond, h.cssBaseline)
 }
 
-// PAPERBOAT PATCH: a long path does not leave slow start for jitter below 1/8 of its RTT (upstream cut it at 16 ms,
-// which ended slow start on a 500 ms path after 30 ms of jitter).
-func TestHybridSlowStartLongPathIgnoresJitterBelowAnEighth(t *testing.T) {
-	const minRTT = 500 * time.Millisecond
-	for _, c := range []struct {
-		extra time.Duration
-		exit  bool
-	}{{30 * time.Millisecond, false}, {60 * time.Millisecond, false}, {70 * time.Millisecond, true}} {
-		slowStart := HybridSlowStart{}
-		slowStart.StartReceiveRound(2)
-		var exit bool
-		for range 8 {
-			exit = slowStart.ShouldExitSlowStart(minRTT+c.extra, minRTT, 100)
+func TestHyStartPlusPlusConservativeRounds(t *testing.T) {
+	for _, recover := range []bool{false, true} {
+		name := "persistent delay"
+		if recover {
+			name = "transient delay"
 		}
-		require.Equal(t, c.exit, exit, "%v over the minimum RTT", c.extra)
+		t.Run(name, func(t *testing.T) {
+			s := newTestCubicSender(true).sender
+			ack := func(pn, sent protocol.PacketNumber, rtt time.Duration, growth protocol.ByteCount) {
+				t.Helper()
+				before := s.GetCongestionWindow()
+				s.OnPacketAcked(pn, 1000, before, 0)
+				s.OnAckFrame(pn, sent, rtt)
+				require.Equal(t, growth, s.GetCongestionWindow()-before)
+			}
+			ack(10, 10, 500*time.Millisecond, 1000)
+			for pn := protocol.PacketNumber(11); pn <= 18; pn++ {
+				ack(pn, 20, 516*time.Millisecond, 1000)
+			}
+			require.True(t, s.InSlowStart())
+			ack(20, 30, 516*time.Millisecond, 250) // completes the partial CSS round
+			if recover {
+				for pn := protocol.PacketNumber(21); pn < 30; pn++ {
+					rtt := 516 * time.Millisecond
+					if pn == 29 {
+						rtt--
+					}
+					ack(pn, 30, rtt, 250)
+				}
+				ack(30, 40, 500*time.Millisecond, 1000)
+				require.True(t, s.InSlowStart())
+				return
+			}
+			for _, pn := range []protocol.PacketNumber{30, 40, 50, 60} {
+				require.True(t, s.InSlowStart())
+				ack(pn, pn+10, 516*time.Millisecond, 250)
+			}
+			require.False(t, s.InSlowStart())
+			require.Equal(t, s.GetCongestionWindow(), s.slowStartThreshold)
+		})
+	}
+}
+
+func TestHyStartPlusPlusCongestionEndsCSS(t *testing.T) {
+	for _, lostBytes := range []protocol.ByteCount{0, 1000} { // ECN and loss share the congestion event path.
+		s := newTestCubicSender(true).sender
+		s.OnAckFrame(10, 10, 500*time.Millisecond)
+		for pn := protocol.PacketNumber(11); pn <= 18; pn++ {
+			s.OnAckFrame(pn, 20, 516*time.Millisecond)
+		}
+		require.Positive(t, s.hybridSlowStart.cssBaseline)
+		s.OnPacketSent(0, 0, 22, 1000, true)
+		before := s.GetCongestionWindow()
+		s.OnCongestionEvent(21, lostBytes, before)
+		require.False(t, s.InSlowStart())
+		require.Less(t, s.GetCongestionWindow(), before)
+		s.OnRetransmissionTimeout(true)
+		require.True(t, s.InSlowStart())
+		for pn := protocol.PacketNumber(23); pn < 33; pn++ {
+			s.OnAckFrame(pn, 40, 516*time.Millisecond)
+		}
+		require.False(t, s.hybridSlowStart.started)
 	}
 }

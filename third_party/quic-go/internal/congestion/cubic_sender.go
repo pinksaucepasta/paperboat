@@ -2,6 +2,7 @@ package congestion
 
 import (
 	"fmt"
+	"time" // PAPERBOAT PATCH (RFC 9406)
 
 	"github.com/quic-go/quic-go/internal/monotime"
 	"github.com/quic-go/quic-go/internal/protocol"
@@ -152,7 +153,6 @@ func (c *cubicSender) OnPacketSent(
 		return
 	}
 	c.largestSentPacketNumber = packetNumber
-	c.hybridSlowStart.OnPacketSent(packetNumber)
 }
 
 func (c *cubicSender) CanSend(bytesInFlight protocol.ByteCount) bool {
@@ -171,10 +171,10 @@ func (c *cubicSender) GetCongestionWindow() protocol.ByteCount {
 	return c.congestionWindow
 }
 
-func (c *cubicSender) MaybeExitSlowStart() {
-	if c.InSlowStart() &&
-		c.hybridSlowStart.ShouldExitSlowStart(c.rttStats.LatestRTT(), c.rttStats.MinRTT(), c.GetCongestionWindow()/c.maxDatagramSize) {
-		// exit slow start
+// PAPERBOAT PATCH (RFC 9406): only the initial slow start on this path uses HyStart++.
+func (c *cubicSender) OnAckFrame(largestAcked, largestSent protocol.PacketNumber, rtt time.Duration) {
+	if c.InSlowStart() && !c.hybridSlowStart.disabled &&
+		c.hybridSlowStart.onAck(largestAcked, largestSent, rtt) {
 		c.slowStartThreshold = c.congestionWindow
 		c.maybeQlogStateChange(qlog.CongestionStateCongestionAvoidance)
 	}
@@ -191,9 +191,6 @@ func (c *cubicSender) OnPacketAcked(
 		return
 	}
 	c.maybeIncreaseCwnd(ackedPacketNumber, ackedBytes, priorInFlight, eventTime)
-	if c.InSlowStart() {
-		c.hybridSlowStart.OnPacketAcked(ackedPacketNumber)
-	}
 }
 
 func (c *cubicSender) OnCongestionEvent(packetNumber protocol.PacketNumber, lostBytes, priorInFlight protocol.ByteCount) {
@@ -205,6 +202,7 @@ func (c *cubicSender) OnCongestionEvent(packetNumber protocol.PacketNumber, lost
 	if packetNumber <= c.largestSentAtLastCutback {
 		return
 	}
+	c.hybridSlowStart = HybridSlowStart{disabled: true} // PAPERBOAT PATCH (RFC 9406)
 	c.lastCutbackExitedSlowstart = c.InSlowStart()
 	c.maybeQlogStateChange(qlog.CongestionStateRecovery)
 
@@ -242,8 +240,12 @@ func (c *cubicSender) maybeIncreaseCwnd(
 		return
 	}
 	if c.InSlowStart() {
-		// TCP slow start, exponential growth, increase by one for each ACK.
-		c.congestionWindow += c.maxDatagramSize
+		// PAPERBOAT PATCH (RFC 9406): pacing permits using all newly acknowledged bytes.
+		growth := ackedBytes
+		if c.hybridSlowStart.cssBaseline > 0 {
+			growth /= cssGrowthDivisor
+		}
+		c.congestionWindow = min(c.maxCongestionWindow(), c.congestionWindow+growth)
 		c.maybeQlogStateChange(qlog.CongestionStateSlowStart)
 		return
 	}
@@ -290,7 +292,7 @@ func (c *cubicSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 	if !packetsRetransmitted {
 		return
 	}
-	c.hybridSlowStart.Restart()
+	c.hybridSlowStart = HybridSlowStart{disabled: true} // PAPERBOAT PATCH (RFC 9406)
 	c.cubic.Reset()
 	c.slowStartThreshold = c.congestionWindow / 2
 	c.congestionWindow = c.minCongestionWindow()
@@ -298,7 +300,7 @@ func (c *cubicSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
 
 // OnConnectionMigration is called when the connection is migrated (?)
 func (c *cubicSender) OnConnectionMigration() {
-	c.hybridSlowStart.Restart()
+	c.hybridSlowStart = HybridSlowStart{} // PAPERBOAT PATCH (RFC 9406)
 	c.largestSentPacketNumber = protocol.InvalidPacketNumber
 	c.largestAckedPacketNumber = protocol.InvalidPacketNumber
 	c.largestSentAtLastCutback = protocol.InvalidPacketNumber

@@ -403,6 +403,7 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 	// update the RTT, if:
 	// * the largest acked is newly acknowledged, AND
 	// * at least one new ack-eliciting packet was acknowledged
+	var rttSample time.Duration // PAPERBOAT PATCH (RFC 9406)
 	if len(ackedPackets) > 0 {
 		if p := ackedPackets[len(ackedPackets)-1]; p.PacketNumber == ack.LargestAcked() && !p.isPathProbePacket && hasAckEliciting {
 			// don't use the ack delay for Initial and Handshake packets
@@ -412,12 +413,14 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 			}
 			if h.largestAckedTime.IsZero() || !p.SendTime.Before(h.largestAckedTime) {
 				h.rttStats.UpdateRTT(rcvTime.Sub(p.SendTime), ackDelay)
+				if rcvTime.After(p.SendTime) {
+					rttSample = h.rttStats.LatestRTT() // PAPERBOAT PATCH (RFC 9406)
+				}
 				if h.logger.Debug() {
 					h.logger.Debugf("\tupdated RTT: %s (σ: %s)", h.rttStats.SmoothedRTT(), h.rttStats.MeanDeviation())
 				}
 				h.largestAckedTime = p.SendTime
 			}
-			h.congestion.MaybeExitSlowStart()
 		}
 	}
 
@@ -447,6 +450,12 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 		if !p.isPathProbePacket {
 			putPacket(p.packet)
 		}
+	}
+
+	// PAPERBOAT PATCH (RFC 9406): use 1-RTT packet numbers for round boundaries.
+	// Apply ACK growth and loss/ECN processing before evaluating transitions.
+	if encLevel == protocol.Encryption1RTT {
+		h.congestion.OnAckFrame(largestAcked, pnSpace.largestSent, rttSample)
 	}
 
 	// detect spurious losses for application data packets, if the ACK was not reordered
