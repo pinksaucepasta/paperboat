@@ -2,7 +2,7 @@
 -- A workspace's edge pair is two REGIONS (a primary and a backup), not node ids: which machine of a region serves a
 -- workspace is the server's choice, so replacing a machine never changes the pair. node_ids stays (nullable, no longer
 -- read or written) for one deploy because the previous server still reads it; the next deploy drops it. An empty
--- regions array means "no restriction yet": the edge-set worker fills it from the pair node_ids named (migration 483)
+-- regions array means "no restriction yet": the edge-set worker fills it from the pair node_ids named (migration 484)
 -- or from the usable regions.
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE paperboat.workspace_edge_sets
