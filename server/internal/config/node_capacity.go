@@ -18,10 +18,14 @@ type NodeCapacity struct {
 	EdgeCPUWarnPercent float64 `json:"edge_cpu_warn_percent"`
 	// RelayRSSWarnBytes flags a relay whose resident memory is at or above it.
 	RelayRSSWarnBytes int64 `json:"relay_rss_warn_bytes"`
+	// DNSLoadOutPercent takes a managed edge out of the wildcard DNS names when its load (paperboat.node_load_percent)
+	// reaches it; DNSLoadInPercent puts it back once its load is below that. Between the two nothing changes.
+	DNSLoadOutPercent float64 `json:"dns_load_out_percent"`
+	DNSLoadInPercent  float64 `json:"dns_load_in_percent"`
 }
 
 func defaultNodeCapacity() NodeCapacity {
-	return NodeCapacity{MonthlyTrafficBytes: 20 * 1_000_000_000_000, TrafficWarnFraction: 0.8, EdgeCPUWarnPercent: 50, RelayRSSWarnBytes: 1 << 30}
+	return NodeCapacity{MonthlyTrafficBytes: 20 * 1_000_000_000_000, TrafficWarnFraction: 0.8, EdgeCPUWarnPercent: 50, RelayRSSWarnBytes: 1 << 30, DNSLoadOutPercent: 85, DNSLoadInPercent: 70}
 }
 
 func (n NodeCapacity) validate() error {
@@ -34,11 +38,14 @@ func (n NodeCapacity) validate() error {
 		return fmt.Errorf("node_capacity.edge_cpu_warn_percent must be in (0, 100]")
 	case n.RelayRSSWarnBytes < 1<<20:
 		return fmt.Errorf("node_capacity.relay_rss_warn_bytes must be at least 1 MiB")
+	case n.DNSLoadInPercent <= 0 || n.DNSLoadInPercent >= n.DNSLoadOutPercent || n.DNSLoadOutPercent > 100:
+		return fmt.Errorf("node_capacity: dns_load_in_percent and dns_load_out_percent must satisfy 0 < in < out <= 100")
 	}
 	return nil
 }
 
-// overlayNodeCapacityEnv reads PAPERBOAT_NODE_MONTHLY_TRAFFIC_BYTES, the allowance a deployment most often changes.
+// overlayNodeCapacityEnv reads PAPERBOAT_NODE_MONTHLY_TRAFFIC_BYTES, the allowance a deployment most often changes, and
+// the two wildcard DNS load thresholds.
 func overlayNodeCapacityEnv(c *Config, lookup func(string) (string, bool)) error {
 	if v, ok := lookup("PAPERBOAT_NODE_MONTHLY_TRAFFIC_BYTES"); ok && v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -46,6 +53,18 @@ func overlayNodeCapacityEnv(c *Config, lookup func(string) (string, bool)) error
 			return fmt.Errorf("PAPERBOAT_NODE_MONTHLY_TRAFFIC_BYTES must be an integer")
 		}
 		c.NodeCapacity.MonthlyTrafficBytes = n
+	}
+	for name, target := range map[string]*float64{
+		"PAPERBOAT_NODE_CAPACITY_DNS_LOAD_OUT_PERCENT": &c.NodeCapacity.DNSLoadOutPercent,
+		"PAPERBOAT_NODE_CAPACITY_DNS_LOAD_IN_PERCENT":  &c.NodeCapacity.DNSLoadInPercent,
+	} {
+		if v, ok := lookup(name); ok && v != "" {
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				return fmt.Errorf("%s must be a number", name)
+			}
+			*target = n
+		}
 	}
 	return nil
 }

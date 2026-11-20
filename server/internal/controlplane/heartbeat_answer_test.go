@@ -15,7 +15,7 @@ func TestHeartbeatAnswerIsExactlyTheIngressLimits(t *testing.T) {
 	limits := edgelimits.Default()
 	limits.Publication.BytesPerSecond = 77 << 20
 	recorder := httptest.NewRecorder()
-	writeHeartbeatAnswer(recorder, limits)
+	writeHeartbeatAnswer(recorder, limits, nil)
 	var answer struct {
 		IngressLimits edgelimits.IngressLimits `json:"ingress_limits"`
 	}

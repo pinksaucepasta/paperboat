@@ -273,6 +273,13 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		}
 		c.Certificates.Enabled = parsed
 	}
+	if value, ok := lookup("PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS: %w", err)
+		}
+		c.Certificates.ManageEdgeWildcards = parsed
+	}
 	for name, target := range map[string]*time.Duration{
 		"PAPERBOAT_BROWSER_SESSIONS_LOGIN_LIFETIME":             &c.BrowserSessions.LoginLifetime,
 		"PAPERBOAT_BROWSER_SESSIONS_LOGIN_ROTATE_BEFORE":        &c.BrowserSessions.LoginRotateBefore,

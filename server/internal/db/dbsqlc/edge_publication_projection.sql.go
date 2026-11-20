@@ -13,6 +13,7 @@ const listEdgeDNSPublicationResourcesV1 = `-- name: ListEdgeDNSPublicationResour
 SELECT owner_id AS id, max(resource_generation)::bigint AS generation FROM edge_dns_publications
 WHERE (state<>'verified' OR desired_addresses<>'[]'::jsonb OR provider_records<>'[]'::jsonb)
  AND owner_id NOT LIKE 'server_region:%' -- regional server-node names are published by servernodes.RegionalDNS
+ AND owner_id NOT LIKE 'edge_wildcard:%' -- the managed wildcard names are published by the app's edge wildcard sync
  AND owner_id > $1::text
 GROUP BY owner_id ORDER BY owner_id LIMIT $2
 `

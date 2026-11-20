@@ -15,7 +15,7 @@ func TestHeartbeatAnswerCarriesTheSharedDefaultLimits(t *testing.T) {
 	var first, second edgelimits.IngressLimits
 	for _, out := range []*edgelimits.IngressLimits{&first, &second} {
 		recorder := httptest.NewRecorder()
-		writeHeartbeatAnswer(recorder, service.ingressLimits)
+		writeHeartbeatAnswer(recorder, service.ingressLimits, nil)
 		var answer struct {
 			IngressLimits edgelimits.IngressLimits `json:"ingress_limits"`
 		}

@@ -609,16 +609,25 @@ func validateCarrierEndpoint(endpoint struct {
 	return nil
 }
 
-func (s *EdgeService) Heartbeat(ctx context.Context, r edgeNodeObservation) error {
+// Heartbeat records one edge heartbeat. The returned drain deadline (Unix seconds) is set while an operator or owner
+// drain is running: the node row is draining with a deadline still ahead (nodedrain.Begin). An edge's own shutdown
+// drain has no deadline and is not reported back. The drain itself is sticky: the query keeps state draining and
+// ready=false whatever the edge says, so only a resume brings the node back.
+func (s *EdgeService) Heartbeat(ctx context.Context, r edgeNodeObservation) (*int64, error) {
 	if r.NodeID == "" || r.ProcessEpoch == "" || r.At.IsZero() {
-		return invalidUsage("edge.go:715")
+		return nil, invalidUsage("edge.go:715")
 	}
 	observation, _ := json.Marshal(map[string]any{"active_streams": r.ActiveStreams})
-	_, err := s.store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: r.NodeID, ProcessEpoch: r.ProcessEpoch, Ready: r.Ready, Draining: r.Draining, Observation: observation, Now: sql.NullTime{Time: s.clock().UTC(), Valid: true}})
+	now := s.clock().UTC()
+	node, err := s.store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: r.NodeID, ProcessEpoch: r.ProcessEpoch, Ready: r.Ready, Draining: r.Draining, Observation: observation, Now: sql.NullTime{Time: now, Valid: true}})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	if node.State == "draining" && node.DrainDeadline.Valid && node.DrainDeadline.Time.After(now) {
+		deadline := node.DrainDeadline.Time.Unix()
+		return &deadline, nil
+	}
+	return nil, nil
 }
 
 func (s *EdgeService) Assignment(ctx context.Context, environment, machine, connector string) (dbsqlc.GetControlConnectorAssignmentRow, error) {
@@ -832,7 +841,8 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if s.refuseBelowFloor(w, r, "edge", input.Metrics) {
 		return
 	}
-	if err := s.Heartbeat(r.Context(), input); err != nil {
+	drainDeadline, err := s.Heartbeat(r.Context(), input)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			// 409 is the re-register directive: every released edge registers again on it, then retries the
 			// heartbeat (edge/internal/runtime/workers.go). Keep the status; a retired node is refused at register.
@@ -850,7 +860,7 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.recordEdgeRefusals(r.Context(), input.NodeID, input.Refusals)
 	s.recordNodeMetrics(r.Context(), "edge", input.NodeID, input.ProcessEpoch, int64(input.ActiveStreams), input.Metrics)
 	limits := s.ingressLimitsFor(r.Context(), input.NodeID)
-	writeHeartbeatAnswer(w, limits)
+	writeHeartbeatAnswer(w, limits, drainDeadline)
 }
 
 // ingressLimitsFor is the set one edge is sent. A customer-owned edge gets the zero set (no byte pacing, no Free request
@@ -863,12 +873,15 @@ func (s *EdgeService) ingressLimitsFor(ctx context.Context, nodeID string) edgel
 	return s.ingressLimits
 }
 
-// writeHeartbeatAnswer answers a recorded heartbeat with exactly the ingress limits the edge enforces (T11):
-// edges decode it strictly, and older edges ignore the body.
-func writeHeartbeatAnswer(w http.ResponseWriter, limits edgelimits.IngressLimits) {
+// writeHeartbeatAnswer answers a recorded heartbeat with exactly the ingress limits the edge enforces (T11) and,
+// while the node is drained by an operator or its owner, the Unix second its connections must be done by (the unit of
+// connectorprotocol.GoawayNotice.DrainDeadline): the edge sends GOAWAY to its carriers on the first answer that has it.
+// Edges decode the answer strictly.
+func writeHeartbeatAnswer(w http.ResponseWriter, limits edgelimits.IngressLimits, drainDeadline *int64) {
 	writeEdgeJSON(w, http.StatusOK, struct {
 		IngressLimits edgelimits.IngressLimits `json:"ingress_limits"`
-	}{limits})
+		DrainDeadline *int64                   `json:"drain_deadline,omitempty"`
+	}{limits, drainDeadline})
 }
 
 func (s *EdgeService) handleAssignment(w http.ResponseWriter, r *http.Request) {

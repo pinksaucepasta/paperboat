@@ -13580,7 +13580,9 @@
           "node_generation",
           "registry_expires_at",
           "ready",
-          "protocol_version"
+          "protocol_version",
+          "carriers",
+          "ingress_verified"
         ],
         "properties": {
           "id": {
@@ -13646,6 +13648,24 @@
           },
           "protocol_version": {
             "type": "string"
+          },
+          "carriers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Machines holding a live carrier attachment on the node; 0 means safe to retire."
+          },
+          "load_percent": {
+            "type": "number",
+            "format": "double",
+            "description": "The node's load: the worst of its sustained CPU and its connections against its own limit, from its latest report; absent when it reported nothing in the last 2 minutes."
+          },
+          "in_dns": {
+            "type": "boolean",
+            "description": "False while the wildcard DNS sync holds the ready node out of the published names because it is overloaded; absent for nodes the sync does not manage."
+          },
+          "ingress_verified": {
+            "type": "boolean",
+            "description": "The node's public ingress addresses passed the verify-ingress probe."
           }
         }
       },
@@ -50686,7 +50706,108 @@
           "503": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "Stops new connections; carriers already attached finish within the drain grace (10 minutes)."
+      }
+    },
+    "/v1/admin/nodes/{node_id}/drain-move": {
+      "post": {
+        "operationId": "drain_move_admin_node",
+        "summary": "Drain a managed node and move its machines now",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "description": "Opaque incident, ticket, or change reference; do not send prose or secrets.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draining node or exact idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorNodeMutationResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Stops new connections and wakes every machine attached to the node so it re-attaches now; existing carriers end after a short grace (90 s)."
       }
     },
     "/v1/admin/nodes/{node_id}/resume": {
@@ -52197,6 +52318,163 @@
           },
           "503": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/selfhost/installations/{installationID}/drain": {
+      "post": {
+        "operationId": "post_v1_selfhost_installations_installation_id_drain",
+        "summary": "Drain one of your own servers",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "installationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The installation in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostInstallation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Stops new connections to the installation's node. With move=true its machines are also woken to re-attach now and existing connections end after 90 seconds; otherwise they finish within 10 minutes. Servers of the same region keep serving.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "move": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/selfhost/installations/{installationID}/resume": {
+      "post": {
+        "operationId": "post_v1_selfhost_installations_installation_id_resume",
+        "summary": "Resume a drained server of your own",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "installationID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The installation in a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SelfhostInstallation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Returns a drained node to service; it becomes ready again on its next heartbeat.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
           }
         }
       }

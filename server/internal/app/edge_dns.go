@@ -48,7 +48,7 @@ func newEdgeDNSWorker(database *db.DB, cfg config.Config) (func(context.Context)
 	if err != nil {
 		return nil, err
 	}
-	return edgeDNSWorker(database, public, runtime, regional), nil
+	return edgeDNSWorker(database, public, runtime, regional, newEdgeWildcards(database, cfg, public, runtime)), nil
 }
 
 // newRegionalDNS is the regional server-node name loop (certificate + DNS), nil when not configured.
@@ -96,13 +96,14 @@ func newRegionalDNSWorker(database *db.DB, cfg config.Config) (func(context.Cont
 // wildcards), and a custom domain's CNAME points at the resource's own managed name, so nothing is
 // published any more. Each publication row that still holds records, or is not verified, has its provider records
 // deleted by exact provider id and ends up verified with none.
-// The same leader loop also points each server-node region's name at its serving nodes every 10 s.
-func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler, regional *servernodes.RegionalDNS) func(context.Context) error {
+// The same leader loop also points each server-node region's name at its serving nodes and, when configured, the
+// preview and runtime wildcard names at every ready managed edge, every 10 s.
+func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconciler, regional *servernodes.RegionalDNS, wildcards *edgeWildcards) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		cursor := ""
-		var regionalAt time.Time
+		var regionalAt, wildcardsAt time.Time
 		for {
 			finishProgress := workers.BeginIteration(ctx, time.Second)
 			cycleErr := func() error {
@@ -123,6 +124,12 @@ func edgeDNSWorker(database *db.DB, public, runtime *tunnelcert.AddressReconcile
 				if regional != nil && time.Since(regionalAt) >= 10*time.Second {
 					regionalAt = time.Now()
 					if err := regional.Sync(ctx); err != nil {
+						workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
+					}
+				}
+				if wildcards != nil && time.Since(wildcardsAt) >= 10*time.Second {
+					wildcardsAt = time.Now()
+					if err := wildcards.Sync(ctx); err != nil {
 						workers.IterationFailure(ctx, "edge_dns_publication", "edge_dns_reconcile_failed", err)
 					}
 				}

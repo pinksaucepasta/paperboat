@@ -109,6 +109,21 @@ func TestDesiredAddressPublicationValidationAndRecordMatching(t *testing.T) {
 	}
 }
 
+func TestDesiredAddressPublicationCapsAtSixteenAddresses(t *testing.T) {
+	now := time.Now()
+	desired := DesiredAddressPublication{Owner: "tunnel_1", Hostname: "*.example.test", ResourceGeneration: 1, ReadinessVersion: "ready-v1", ObservedAt: now, ValidUntil: now.Add(time.Minute)}
+	for i := range 16 {
+		desired.Addresses = append(desired.Addresses, fmt.Sprintf("8.8.8.%d", i+1))
+	}
+	if _, addresses, err := validateDesiredAddressPublication(desired); err != nil || len(addresses) != 16 {
+		t.Fatalf("16 addresses: %d %v", len(addresses), err)
+	}
+	desired.Addresses = append(desired.Addresses, "8.8.8.17")
+	if _, _, err := validateDesiredAddressPublication(desired); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("17 addresses: %v", err)
+	}
+}
+
 func TestAddressLookupHostnameUsesOneLabelWildcardProbe(t *testing.T) {
 	host := addressLookupHostname("*.example.test")
 	if !strings.HasPrefix(host, "pb-") || !strings.HasSuffix(host, ".example.test") || strings.Count(host, ".") != 2 {
@@ -530,6 +545,50 @@ func TestAddressPublishWritesEveryAddressWithoutWaitingForResolverOnPostgres(t *
 	}
 	if err := database.Pool().QueryRow(context.Background(), `SELECT state FROM edge_dns_publications WHERE hostname=$1`, host).Scan(&state); err != nil || state != "verified" {
 		t.Fatalf("state after verification = %q, %v", state, err)
+	}
+}
+
+// A full set (nine addresses here: eight edges and a v6 one) is written, then replaced address by address, within one Publish.
+func TestAddressPublishWritesNineAddressesOnPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run address publication PostgreSQL acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	host, owner := "nine-"+suffix+".example.test", "edge_wildcard:nine-"+suffix+".example.test"
+	t.Cleanup(func() {
+		_, _ = database.Pool().Exec(context.Background(), `DELETE FROM edge_dns_publications WHERE hostname=$1`, host)
+	})
+	provider := &fakeAddressProvider{}
+	reconciler, err := NewAddressReconciler(database, provider, &fakeAddressResolver{err: &net.DNSError{IsNotFound: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	desired := DesiredAddressPublication{Owner: owner, Hostname: host, ResourceGeneration: 1, ReadinessVersion: "ready_1", ObservedAt: now, ValidUntil: now.Add(time.Minute)}
+	for i := range 9 {
+		desired.Addresses = append(desired.Addresses, fmt.Sprintf("8.8.8.%d", i+1))
+	}
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.creates != 9 || len(provider.records) != 9 {
+		t.Fatalf("nine addresses: creates=%d records=%d err=%v", provider.creates, len(provider.records), err)
+	}
+	desired.ReadinessVersion, desired.ObservedAt, desired.Addresses = "ready_2", now.Add(time.Second), nil
+	for i := range 9 {
+		desired.Addresses = append(desired.Addresses, fmt.Sprintf("1.1.1.%d", i+1))
+	}
+	if err := reconciler.Publish(context.Background(), desired); err != nil || provider.deletes != 9 || provider.creates != 18 || len(provider.records) != 9 {
+		t.Fatalf("replacing all nine: deletes=%d creates=%d records=%d err=%v", provider.deletes, provider.creates, len(provider.records), err)
 	}
 }
 

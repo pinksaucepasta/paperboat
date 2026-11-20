@@ -232,6 +232,16 @@ existing sessions are not cut by address. Operator login is deliberately not blo
 `audit_events.client_ip`, so they exist for as long as the audit log keeps events (the plan's audit retention); each is marked when
 a running block contains it. Blocks and ranges are audited (`operator.ip_block_add`, `operator.ip_block_remove`).
 Relay drain stops new scheduling; resume requires a new heartbeat before ready.
+
+Draining a managed node has two actions. **Drain** (`drain`) stops new connections: the node leaves placement and the
+wildcard DNS at once, machines that hold a carrier on it keep it until the drain deadline (10 minutes), then use the
+region's other nodes (or the backup region). **Drain and move** (`drain-move`) also wakes every machine attached to
+the node so it re-attaches now, and for a relay lists the accounts it serves for handover; the node's carriers end
+after 90 seconds (longer than the wildcard record's TTL, so a visitor holding the old address still reaches a carrier
+until it expires). Both are audited (`operator.infrastructure.node.drain`, `...drain-move`), take `{"revision": n}`
+and the usual `Operator-Target`, `Operator-Reason` and `Idempotency-Key` headers. Node responses carry `carriers`,
+the number of machines holding a live carrier on the node: retire a node only when it is 0. They also carry `load_percent` (absent when the node reported nothing in 2 minutes), `in_dns` (false while the wildcard DNS sync holds a ready node out for load; see preview-tunnel-control-plane.md) and `ingress_verified`. `resume` cancels a drain
+and its handovers; the node is ready again after its next heartbeat.
 Tunnel disable/enable uses the normal configuration-generation and operation
 pipeline, so acceptance is distinct from runtime convergence. Team suspension
 preserves membership and encrypted data while fencing access; billing provider
@@ -292,7 +302,7 @@ The admin creates region records with `POST /v1/admin/regions/{region_id}/create
 then enrolls an existing relay/edge machine through
 `POST /v1/admin/nodes/{node_id}/enroll`. Creation/enrollment uses `revision: 0`;
 updates and lifecycle actions use the current returned revision. Region actions
-are `update`, `enable`, `disable`; node actions are `update`, `drain`, `resume`,
+are `update`, `enable`, `disable`; node actions are `update`, `drain`, `drain-move`, `resume`,
 `retire`, `rotate`, `verify-ingress`, `site`. `site` (`{"site":"Mumbai"}`, any non-retired node, no revision) sets the city or site shown next to the region without restarting the node. These configuration, credential, and
 public ingress verification actions require the full
 admin role. Operations staff may read `/v1/admin/regions` and `/v1/admin/nodes`.

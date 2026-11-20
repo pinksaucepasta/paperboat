@@ -42,7 +42,8 @@ type relayNodeCache struct {
 	entries map[string]relayNodeEntry
 }
 
-// relayNodes are the ready relay nodes account may use, in (region, id) order, at most maximumRelayNodeRows.
+// relayNodes are the ready relay nodes account may use, in (region, load, id) order (least loaded first within a region,
+// unknown load last), at most maximumRelayNodeRows.
 func (s *NetworkService) relayNodes(ctx context.Context, account string, now time.Time) ([]relayNodeRow, error) {
 	s.nodes.mu.Lock()
 	e, ok := s.nodes.entries[account]
@@ -53,7 +54,7 @@ func (s *NetworkService) relayNodes(ctx context.Context, account string, now tim
 	rows, err := s.store.SQL().QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,
  EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')),
  roles @> ARRAY['relay']::text[] AND transports @> ARRAY['derp_quic']::text[],roles @> ARRAY['peer_relay']::text[],peer_relay_wireguard_public_key,peer_relay_disco_public_key,host(peer_relay_virtual_address)
- FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,id LIMIT $3`,
+ FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,paperboat.node_load_percent(id) NULLS LAST,id LIMIT $3`,
 		account, now, maximumRelayNodeRows)
 	if err != nil {
 		return nil, err
