@@ -17,7 +17,14 @@ import (
 // revokes the machine's enrollment CLI session and certificates, whose triggers bump those machines' peer identities,
 // and in one serializable transaction that lost every retry to their configuration requests (the personal revoke failed
 // 4/4 so on a restored prod dump, 2026-11-20). Here 4 writers bump them without pause while the team removes the machine.
+// Deleting the team removes its machines the same way and must not lose either.
 func TestPostgresTeamMachineRemoveWhileTheEnrollersMachinesRefreshTheirConfig(t *testing.T) {
+	for _, action := range []string{"remove", "delete"} {
+		t.Run(action, func(t *testing.T) { teamRemovalUnderPeerWriters(t, action) })
+	}
+}
+
+func teamRemovalUnderPeerWriters(t *testing.T, action string) {
 	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL DSN required")
@@ -114,15 +121,19 @@ SELECT 'control_plane_signed','trw_s_'||g||'_'||$2,'trw_m_'||g||'_'||$2,$1,'trw_
 	time.Sleep(100 * time.Millisecond)
 
 	start := time.Now()
-	_, err = s.Machine(ctx, user, team, MachineRequest{OperationID: "remove", ExpectedGeneration: current.Generation, MachineID: machine(0), Action: "remove", Confirmation: machine(0)})
+	if action == "remove" {
+		_, err = s.Machine(ctx, user, team, MachineRequest{OperationID: "remove", ExpectedGeneration: current.Generation, MachineID: machine(0), Action: "remove", Confirmation: machine(0)})
+	} else {
+		_, err = s.Mutate(ctx, user, team, MutationRequest{OperationID: "delete", ExpectedGeneration: current.Generation, Action: "delete", Confirmation: team})
+	}
 	took := time.Since(start)
 	stats := store.TransactionStats()
 	if err != nil {
-		t.Fatalf("team machine removal while 4 writers refresh the enroller's other machines failed after %v: %v (serializable %+v, read committed %+v)", took, err, stats.Serializable, stats.ReadCommitted)
+		t.Fatalf("team %s while 4 writers refresh the enroller's other machines failed after %v: %v (serializable %+v, read committed %+v)", action, took, err, stats.Serializable, stats.ReadCommitted)
 	}
 	var state, machineState string
 	if err := store.SQL().QueryRowContext(ctx, `SELECT (SELECT state FROM paperboat.cli_client_sessions WHERE id=$1),(SELECT state FROM paperboat.user_machines WHERE id=$2)`, cli, machine(0)).Scan(&state, &machineState); err != nil || state == "active" || machineState != "revoked" {
 		t.Fatalf("after the removal the CLI session is %q and the machine %q (%v)", state, machineState, err)
 	}
-	t.Logf("removal took %v; serializable %+v, read committed %+v", took, stats.Serializable, stats.ReadCommitted)
+	t.Logf("%s took %v; serializable %+v, read committed %+v", action, took, stats.Serializable, stats.ReadCommitted)
 }
