@@ -162,13 +162,27 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	if err := notifyReady(); err != nil {
 		return err
 	}
+	return serveOutcome(ctx, acceptErrors, g.failures)
+}
+
+// serveOutcome is why Serve stopped. A real failure that is already there wins over a canceled ctx: the service log is the
+// only place a stopped guard can say why, and "context canceled" must not replace it when both are ready.
+func serveOutcome(ctx context.Context, acceptErrors, failures <-chan error) error {
 	select {
+	case err := <-acceptErrors:
+		return err
+	case err := <-failures:
+		return err
 	case <-ctx.Done():
-		err = ctx.Err()
-	case err = <-acceptErrors:
-	case err = <-g.failures:
+		select {
+		case err := <-acceptErrors:
+			return err
+		case err := <-failures:
+			return err
+		default:
+			return ctx.Err()
+		}
 	}
-	return err
 }
 
 // leaseAdoptionWindow is how long an inherited lease waits for its daemon to re-acquire it.

@@ -84,11 +84,22 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	cancel()
+	return awaitStopped(ctx, done)
+}
+
+// awaitStopped is the run's result. A result that is there wins over an expired ctx: the flush error it carries must not be
+// replaced by ctx.Err() when both are ready.
+func awaitStopped(ctx context.Context, done <-chan error) error {
 	select {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+		select {
+		case err := <-done:
+			return err
+		default:
+			return ctx.Err()
+		}
 	}
 }
 
