@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
@@ -30,7 +31,7 @@ AND n.transports @> ARRAY['http2','http3']::text[]
 AND n.last_heartbeat_at>$2::timestamptz-interval '30 seconds'
 AND n.registry_expires_at>$2 AND n.capacity_observed_at>$2::timestamptz-interval '30 seconds'
 AND n.drain_deadline IS NULL AND paperboat.node_workspace_edge_eligible(n.id,$1,$4)
-AND paperboat.workspace_edge_set_allows(n.id,$1,$4)
+AND paperboat.workspace_edge_set_allows(n.id,$1,$4) AND `+edgeset.ServingOnly+`
 AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL
 AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
 ORDER BY n.id LIMIT $3`, accountID, now, runtimewire.MaximumEdgeCandidates, teamID)

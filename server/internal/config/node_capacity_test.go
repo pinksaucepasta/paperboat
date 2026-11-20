@@ -28,6 +28,7 @@ func TestNodeCapacityDefaultsEnvAndBounds(t *testing.T) {
 		"in not below out":  func(n *NodeCapacity) { n.LoadInPercent = n.LoadOutPercent },
 		"in zero":           func(n *NodeCapacity) { n.LoadInPercent = 0 },
 		"out over 100":      func(n *NodeCapacity) { n.LoadOutPercent = 101 },
+		"wildcard cap below one workspace's nodes": func(n *NodeCapacity) { n.EdgeWildcardMaxNodes = 7 },
 	} {
 		n := Default().NodeCapacity
 		mutate(&n)

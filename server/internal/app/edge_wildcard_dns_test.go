@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 	"sync"
@@ -80,6 +82,7 @@ func (f *wildcardFixture) node(name, v4, v6, region, mutate string) string {
 	id := "nwc_" + name + "_" + f.stamp
 	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,public_ingress_ipv4,public_ingress_ipv6,public_ingress_verified_at) VALUES($1,'test','1.0','epoch','ready',true,now(),ARRAY['edge'],now()+interval '1 hour','test','test',ARRAY['http3','http2'],100,0,now(),nullif($2,'')::inet,nullif($3,'')::inet,now())`, id, v4, v6)
 	if region != "" {
+		f.exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, id, region) // the serving set ranks by this column
 		f.exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,decode(md5($1)||md5($1),'hex'),'\x00','{}')`, id, region)
 	}
 	if mutate != "" {
@@ -205,7 +208,7 @@ func TestSelectByLoadTable(t *testing.T) {
 		{"unknown load stays in", false, nil, false},
 		{"unknown load of a node that was out comes back", true, nil, false},
 	} {
-		got := selectByLoad([]loadNode{node("a", "r", tc.load), steady}, map[string]bool{"a": tc.prev}, 85, 70)
+		got, _ := selectByLoad([]loadNode{node("a", "r", tc.load), steady}, map[string]bool{"a": tc.prev}, 85, 70)
 		if got["a"] != tc.out || got["b"] {
 			t.Errorf("%s: decisions %v, want a out=%v and b in", tc.name, got, tc.out)
 		}
@@ -215,13 +218,27 @@ func TestSelectByLoadTable(t *testing.T) {
 		node("a", "r1", loadOf(90)), node("b", "r1", loadOf(95)), node("c", "r1", loadOf(90)),
 		node("d", "r2", loadOf(10)), node("e", "r2", loadOf(99)),
 	}
-	got := selectByLoad(nodes, map[string]bool{}, 85, 70)
+	got, _ := selectByLoad(nodes, map[string]bool{}, 85, 70)
 	if got["a"] || !got["b"] || !got["c"] || got["d"] || !got["e"] {
 		t.Fatalf("regions: decisions %v", got)
 	}
 	// The same rule on relays: a single relay of a region stays however loaded it is.
-	if got = selectByLoad([]loadNode{node("r1", "x", loadOf(100))}, map[string]bool{"r1": true}, 85, 70); got["r1"] {
+	if got, _ = selectByLoad([]loadNode{node("r1", "x", loadOf(100))}, map[string]bool{"r1": true}, 85, 70); got["r1"] {
 		t.Fatalf("the last relay of a region was left out: %v", got)
+	}
+}
+
+// The node kept because its whole region was over is still over: the state a round starts from is the threshold
+// decision, not the forced one, so it returns only below the in threshold while another node serves.
+func TestSelectByLoadForcedSurvivorKeepsThreshold(t *testing.T) {
+	node := func(id string, load float64) loadNode { return loadNode{id: id, region: "r", load: loadOf(load)} }
+	held, over := selectByLoad([]loadNode{node("a", 90), node("b", 88)}, map[string]bool{}, 85, 70)
+	if !held["a"] || held["b"] || !over["a"] || !over["b"] {
+		t.Fatalf("round 1: held %v over %v, want b kept in rotation while both stay over", held, over)
+	}
+	held, over = selectByLoad([]loadNode{node("a", 60), node("b", 80)}, over, 85, 70)
+	if held["a"] || !held["b"] || over["a"] || !over["b"] {
+		t.Fatalf("round 2: held %v over %v, want a serving and b held out (80 is not below 70)", held, over)
 	}
 }
 
@@ -348,6 +365,16 @@ func TestRelayLoadNeverLeavesARegionEmpty(t *testing.T) {
 	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.node_load_out WHERE node_id=$1`, solo).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("a relay in a disabled region was decided on: %d %v", rows, err)
 	}
+	// Next round c (88 -> 80) was kept only because all three were over: it is still judged against 70, so a (79), now
+	// the least loaded of three over nodes, is the survivor, not c.
+	f.setRelayLoad(a, 79)
+	f.setRelayLoad(c, 80)
+	if err := f.relayLoad().Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.outNodes(); !slices.Equal(got, []string{b, c}) {
+		t.Fatalf("second round held out %v, want %v: the survivor is %s (79), not %s (80)", got, []string{b, c}, a, c)
+	}
 }
 
 func TestRelayLoadStatePersistsAcrossWorkers(t *testing.T) {
@@ -384,5 +411,105 @@ func TestRelayLoadStatePersistsAcrossWorkers(t *testing.T) {
 	var rows int
 	if err := f.store.SQL().QueryRow(`SELECT count(*) FROM paperboat.node_load_out WHERE node_id=$1`, b).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("a drained relay kept its decision: %d %v", rows, err)
+	}
+}
+
+// dual adds a dual-stack node of the family's numbering: n<i> has 203.0.113.<i> and 2001:db8::<i>.
+func (f *wildcardFixture) dual(name string, i int, region, mutate string) string {
+	return f.node(name, fmt.Sprintf("203.0.113.%d", i), fmt.Sprintf("2001:db8::%d", i), region, mutate)
+}
+
+// A node held out for load takes its A and its AAAA out of the answer together, and brings both back (85 out, 70 in).
+func TestEdgeWildcardLoadRuleKeepsBothFamilies(t *testing.T) {
+	f := newWildcardFixture(t)
+	on := "wc_on_" + f.stamp
+	a, b := f.dual("a", 1, on, ""), f.dual("b", 2, on, "")
+	f.setLoad(a, 90, -1, 0)
+	f.setLoad(b, 10, -1, 0)
+	f.sync()
+	f.want("203.0.113.2", "2001:db8::2")
+	f.public.reset()
+	f.runtime.reset()
+	f.setLoad(a, 75, -1, 0) // between the thresholds the decision holds: still out with both families, so nothing is republished
+	f.sync()
+	if len(f.public.calls)+len(f.runtime.calls) != 0 {
+		t.Fatalf("a node at 75 %% came back or the set was rewritten: %+v %+v", f.public.calls, f.runtime.calls)
+	}
+	f.setLoad(a, 60, -1, 0)
+	f.sync()
+	f.want("203.0.113.1", "2001:db8::1", "203.0.113.2", "2001:db8::2")
+}
+
+// All of a region's nodes above the out threshold: the least loaded stays with its A and AAAA, the others leave with both.
+func TestEdgeWildcardNeverEmptiesRegionWithBothFamilies(t *testing.T) {
+	f := newWildcardFixture(t)
+	on := "wc_on_" + f.stamp
+	a, b, c := f.dual("a", 1, on, ""), f.dual("b", 2, on, ""), f.dual("c", 3, on, "")
+	f.setLoad(a, 90, -1, 0)
+	f.setLoad(b, 95, -1, 0)
+	f.setLoad(c, 88, -1, 0)
+	f.sync()
+	f.want("203.0.113.3", "2001:db8::3")
+}
+
+// The cap on the answer cuts the last of each region's ranks, not whole regions and not the highest node ids: regions
+// of 6, 3 and 2 nodes have a serving set of 4, 3 and 2, and a cap of 8 takes ranks round-robin across regions.
+func TestWildcardCapIsPerRegionNotByNodeId(t *testing.T) {
+	f := newWildcardFixture(t)
+	var logs bytes.Buffer
+	f.wildcard.log = slog.New(slog.NewTextHandler(&logs, nil))
+	regions := map[string]int{"wc_a_" + f.stamp: 6, "wc_b_" + f.stamp: 3, "wc_c_" + f.stamp: 2}
+	next := 1
+	address := map[string]string{} // "<region>/<rank>" -> its IPv4
+	for _, region := range []string{"wc_a_" + f.stamp, "wc_b_" + f.stamp, "wc_c_" + f.stamp} {
+		f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Cap',true)`, region)
+		t.Cleanup(func() {
+			f.exec(`DELETE FROM paperboat.managed_node_authority WHERE region_id=$1`, region)
+			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
+		})
+		for rank := 1; rank <= regions[region]; rank++ {
+			// Node ids sort by rank within a region; lowest-id-first over all regions would give a six nodes and c none.
+			address[fmt.Sprintf("%s/%d", region, rank)] = fmt.Sprintf("203.0.113.%d", next)
+			f.node(fmt.Sprintf("%s%d", region[3:4], rank), fmt.Sprintf("203.0.113.%d", next), "", region, "")
+			next++
+		}
+	}
+	a, b, c := "wc_a_"+f.stamp, "wc_b_"+f.stamp, "wc_c_"+f.stamp
+	at := func(region string, ranks ...int) (out []string) {
+		for _, rank := range ranks {
+			out = append(out, address[fmt.Sprintf("%s/%d", region, rank)])
+		}
+		return out
+	}
+	// No cap in play: every region's first four nodes (a: 1-4, b: 1-3, c: 1-2), round-robin by rank then region.
+	f.wildcard.maxNodes = 32
+	f.sync()
+	var want []string
+	want = append(want, at(a, 1)...)
+	want = append(want, at(b, 1)...)
+	want = append(want, at(c, 1)...)
+	want = append(want, at(a, 2)...)
+	want = append(want, at(b, 2)...)
+	want = append(want, at(c, 2)...)
+	want = append(want, at(a, 3)...)
+	want = append(want, at(b, 3)...)
+	want = append(want, at(a, 4)...)
+	f.want(want...)
+	if bytes.Contains(logs.Bytes(), []byte("edge_wildcard_dns_truncated")) {
+		t.Fatalf("truncation logged without a cut: %s", logs.String())
+	}
+	// A cap of 8 cuts the last rank of a (4) and keeps every region: 9 serving nodes, the 9th (a rank 4) is dropped.
+	f.wildcard.maxNodes = 8
+	f.wildcard.reconciled = nil
+	f.public.reset()
+	f.runtime.reset()
+	f.sync()
+	f.want(want[:8]...)
+	f.public.reset()
+	f.runtime.reset()
+	f.wildcard.reconciled = nil
+	f.sync()
+	if n := bytes.Count(logs.Bytes(), []byte("edge_wildcard_dns_truncated")); n != 1 {
+		t.Fatalf("truncation logged %d times for one unchanged count, want once: %s", n, logs.String())
 	}
 }
