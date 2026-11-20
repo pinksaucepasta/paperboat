@@ -196,3 +196,23 @@ func TestUpdateWhoseDaemonCannotStartIsReportedAsRolledBack(t *testing.T) {
 		t.Fatalf("json = %+v", result)
 	}
 }
+
+// A bundle install keeps whatever automatic-update setting the machine had; the CLI cannot see it, so it does not claim one.
+func TestUpdateFromABundleDoesNotClaimAnAutomaticUpdateSetting(t *testing.T) {
+	var out bytes.Buffer
+	command := &cobra.Command{Use: "update"}
+	command.Flags().Bool("json", true, "")
+	command.SetOut(&out)
+	official := installsource.Source{Version: "2026.10.20.12", Distribution: installsource.Official}
+	if err := writeUpdateFromResult(command, "2026.10.20.8", "/x/pb", official); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "automatic_update_checks") {
+		t.Fatalf("an official bundle install reported a setting it cannot know: %s", out.String())
+	}
+	out.Reset()
+	custom := installsource.Source{Version: "dev", Distribution: installsource.Custom}
+	if err := writeUpdateFromResult(command, "2026.10.20.8", "/x/pb", custom); err != nil || !strings.Contains(out.String(), `"automatic_update_checks":false`) {
+		t.Fatalf("a custom install must still report its setting: %v %s", err, out.String())
+	}
+}
