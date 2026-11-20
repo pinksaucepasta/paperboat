@@ -691,13 +691,11 @@ WHERE h.machine_id = $1 AND h.valid_before > $2
 AND (session.id IS NULL OR NOT ((m.owner_team_id IS NULL AND m.user_id = h.user_id AND m.deleted_at IS NULL)
   OR machine_capability_allowed(h.user_id, m.id, 'managed_ssh') OR machine_management_allowed(h.user_id, m.id)))
 ORDER BY h.cli_client_session_id
-LIMIT $3
 `
 
 type ListRevokedManagedSSHCertificateHoldersParams struct {
 	MachineID string
 	Now       time.Time
-	Limit     int32
 }
 
 type ListRevokedManagedSSHCertificateHoldersRow struct {
@@ -706,9 +704,9 @@ type ListRevokedManagedSSHCertificateHoldersRow struct {
 }
 
 // Holders of a still-valid certificate for the machine that may no longer log in to it: the host refuses their key IDs
-// (bounded: one row per CLI session that got a certificate within the validity; the caller caps it).
+// (bounded: one row per CLI session that got a certificate within the validity).
 func (q *Queries) ListRevokedManagedSSHCertificateHolders(ctx context.Context, arg ListRevokedManagedSSHCertificateHoldersParams) ([]ListRevokedManagedSSHCertificateHoldersRow, error) {
-	rows, err := q.db.Query(ctx, listRevokedManagedSSHCertificateHolders, arg.MachineID, arg.Now, arg.Limit)
+	rows, err := q.db.Query(ctx, listRevokedManagedSSHCertificateHolders, arg.MachineID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
