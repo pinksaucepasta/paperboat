@@ -1237,14 +1237,28 @@ func runWindowsInstallPhase(ctx context.Context, phase string, operation func() 
 		diagnosticlog.TryInfo("windows install phase", "stage", strings.ReplaceAll(phase, " ", "_"), "duration_ms", time.Since(began).Milliseconds(), "failed", err != nil)
 		result <- err
 	}()
-	select {
-	case err := <-result:
+	return awaitWindowsInstallPhase(ctx, phase, result)
+}
+
+// awaitWindowsInstallPhase is a phase's outcome. A phase that finished as the context ended finished: reporting it
+// canceled aborted the update.
+func awaitWindowsInstallPhase(ctx context.Context, phase string, result <-chan error) error {
+	finished := func(err error) error {
 		if err != nil {
 			return hostInstallFailure(windowsInstallPhaseMessage(phase), err)
 		}
 		return nil
+	}
+	select {
+	case err := <-result:
+		return finished(err)
 	case <-ctx.Done():
-		return hostInstallFailure(windowsInstallPhaseMessage(phase), ctx.Err(), context.Cause(ctx))
+		select {
+		case err := <-result:
+			return finished(err)
+		default:
+			return hostInstallFailure(windowsInstallPhaseMessage(phase), ctx.Err(), context.Cause(ctx))
+		}
 	}
 }
 

@@ -282,14 +282,7 @@ func newCarrierComponentWithTelemetry(
 			go func() { results <- privateAccess.Serve(handlerCtx, server) }()
 		}
 		if workers != 0 {
-			select {
-			case err := <-results:
-				return err
-			case <-server.Done():
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			return carrierWorkersOutcome(ctx, server.Done(), results)
 		}
 		select {
 		case <-server.Done():
@@ -354,4 +347,42 @@ func carrierHandlerLimit(nodeCapacity uint32) int {
 		return 64
 	}
 	return int(nodeCapacity)
+}
+
+// carrierWorkersOutcome is how the component ends: a worker's own failure wins over the server stopping or the
+// context ending at the same moment (the select would hide it as a clean stop), while a worker that only reports the
+// shutdown (context canceled) does not turn it into an error.
+func carrierWorkersOutcome(ctx context.Context, serverDone <-chan struct{}, results <-chan error) error {
+	settle := func(err error) error {
+		if err == nil || !errors.Is(err, context.Canceled) {
+			return err
+		}
+		select {
+		case <-serverDone:
+			return nil
+		default:
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	recheck := func(fallback error) error {
+		select {
+		case err := <-results:
+			if failure := settle(err); failure != nil {
+				return failure
+			}
+		default:
+		}
+		return fallback
+	}
+	select {
+	case err := <-results:
+		return settle(err)
+	case <-serverDone:
+		return recheck(nil)
+	case <-ctx.Done():
+		return recheck(ctx.Err())
+	}
 }

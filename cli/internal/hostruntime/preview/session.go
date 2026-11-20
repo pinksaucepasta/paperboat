@@ -784,11 +784,22 @@ func stopLease(ctx context.Context, client LeaseClient, lease Lease, idempotency
 	go func() {
 		completed <- client.Stop(ctx, lease, idempotencyKey)
 	}()
+	return awaitStop(ctx, completed)
+}
+
+// awaitStop is the Stop's outcome. A Stop that completed as the context ended is a completed Stop, not a failed one
+// (as Session.Close does): the result that is there wins over a context that is done.
+func awaitStop(ctx context.Context, completed <-chan error) error {
 	select {
 	case err := <-completed:
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+		select {
+		case err := <-completed:
+			return err
+		default:
+			return ctx.Err()
+		}
 	}
 }
 

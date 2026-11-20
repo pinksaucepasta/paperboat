@@ -264,12 +264,7 @@ func (s *JSONFileSink) Flush(ctx context.Context) error {
 		select {
 		case s.queue <- telemetryFileItem{barrier: barrier}:
 			s.lifecycleMu.Unlock()
-			select {
-			case err := <-barrier:
-				return err
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			return awaitFlushBarrier(ctx, barrier)
 		default:
 			s.lifecycleMu.Unlock()
 		}
@@ -588,4 +583,19 @@ func itoa(value int) string {
 		return "0"
 	}
 	return string([]byte{'0' + byte(value)})
+}
+
+// awaitFlushBarrier is a flush's outcome: a barrier the worker already processed wins over a context that ended with it.
+func awaitFlushBarrier(ctx context.Context, barrier <-chan error) error {
+	select {
+	case err := <-barrier:
+		return err
+	case <-ctx.Done():
+		select {
+		case err := <-barrier:
+			return err
+		default:
+			return ctx.Err()
+		}
+	}
 }
