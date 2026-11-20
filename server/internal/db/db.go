@@ -104,6 +104,11 @@ func Open(cfg config.Database) (*DB, error) {
 		_, err := conn.Exec(ctx, `SET statement_timeout = 0; SET lock_timeout = 0; SET idle_in_transaction_session_timeout = 0`)
 		return err
 	}
+	// shortcut: a failed lookup keeps the configured sizes (behind a proxy that hides the server's limit); upgrade to a hard error if prod ever sits behind one.
+	if usable, err := usableConnections(directConfig.ConnConfig); err == nil {
+		poolConfig.MaxConns, directConfig.MaxConns = fitPoolSizes(poolConfig.MaxConns, directConfig.MaxConns, usable)
+		migrationConfig.MaxConns = min(migrationConfig.MaxConns, directConfig.MaxConns)
+	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
@@ -132,6 +137,39 @@ func Open(cfg config.Database) (*DB, error) {
 	return d, nil
 }
 
+// RolloutInstances is the most servers that can hold connections at once: the active one, the two retired ones still
+// draining (deploy/rollout-server.py refuses a forward deploy at two) and a rollback's candidate, which never waits.
+const RolloutInstances = 4
+
+// migrationConns is the migration pool's size (it opens only at start, but counts against the limit while it does).
+const migrationConns = 2
+
+// usableConnections is the server's max_connections minus the ones reserved for superusers.
+func usableConnections(cfg *pgx.ConnConfig) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close(ctx)
+	var usable int
+	err = conn.QueryRow(ctx, `SELECT current_setting('max_connections')::int - current_setting('superuser_reserved_connections')::int`).Scan(&usable)
+	return usable, err
+}
+
+// fitPoolSizes shrinks the request and direct pools until RolloutInstances servers, each at its pools' peak plus the
+// migration pool, fit in usable connections (2026-11-20: 4 x 26 = 104 > 97 on prod's max_connections of 100). The
+// direct pool, which holds session state, keeps its size unless it is more than half the budget.
+func fitPoolSizes(request, direct int32, usable int) (int32, int32) {
+	budget := int32(max(usable/RolloutInstances-migrationConns, 2))
+	if request+direct <= budget {
+		return request, direct
+	}
+	direct = max(min(direct, budget/2), 1)
+	return max(budget-direct, 1), direct
+}
+
 // newPoolConfig parses dsn for a pool. Its connections start with the session settings unless cfg says the role
 // defaults provide them.
 func newPoolConfig(cfg config.Database, dsn string, maxConns int32, observer *queryObserver) (*pgxpool.Config, error) {
@@ -147,7 +185,8 @@ func newPoolConfig(cfg config.Database, dsn string, maxConns int32, observer *qu
 	poolConfig.MaxConnLifetime = 30 * time.Minute
 	// A rollout keeps up to two retired servers draining beside the active one (and a rollback adds a fourth): each
 	// opened up to MaxConns+DirectMaxConns = 26 connections at peak, held 30 minutes by pgx's default idle time, so four
-	// instances (104) exceed prod's max_connections of 100 (97 after the 3 reserved). Idle connections now go after 2 minutes.
+	// instances (104) exceed prod's max_connections of 100 (97 after the 3 reserved). Idle connections go after 2 minutes, and
+	// Open sizes the pools with fitPoolSizes so RolloutInstances servers fit whatever the limit is.
 	poolConfig.MaxConnIdleTime = 2 * time.Minute
 	poolConfig.MaxConns = maxConns
 	poolConfig.ConnConfig.Tracer = observer

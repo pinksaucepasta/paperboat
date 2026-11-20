@@ -11,13 +11,12 @@ import (
 )
 
 // withDoctorRepair runs --repair as Windows does: the privileged repair only for a paired installation.
-func withDoctorRepair(t *testing.T, enrolled bool, repair func(context.Context) error) {
-	t.Helper()
-	previous := doctorPrivilegedRepair
-	t.Cleanup(func() { doctorPrivilegedRepair = previous })
-	doctorPrivilegedRepair = func(ctx context.Context) error {
-		return repairEnrolled(ctx, func() (bool, error) { return enrolled, nil }, repair)
-	}
+func withDoctorRepair(ctx context.Context, enrolled bool, repair func(context.Context) error) context.Context {
+	return withDoctorDependencies(ctx, func(d *doctorDependencies) {
+		d.privilegedRepair = func(ctx context.Context) error {
+			return repairEnrolled(ctx, func() (bool, error) { return enrolled, nil }, repair)
+		}
+	})
 }
 
 // Windows Sandbox, installed but not paired: `pb doctor --repair` printed only "Paperboat host runtime command
@@ -25,8 +24,8 @@ func withDoctorRepair(t *testing.T, enrolled bool, repair func(context.Context) 
 // repair there: no administrator approval is asked for and the normal report follows, as on Linux.
 func TestDoctorRepairOnAnUnpairedComputerAsksForNoApprovalAndPrintsTheReport(t *testing.T) {
 	repairs := 0
-	withDoctorRepair(t, false, func(context.Context) error { repairs++; return nil })
-	checkDoctorOwnerSocketJSON(t, "doctor", "--repair", "--json") // one JSON document: the normal report
+	ctx := withDoctorRepair(t.Context(), false, func(context.Context) error { repairs++; return nil })
+	checkDoctorOwnerSocketJSON(t, ctx, "doctor", "--repair", "--json") // one JSON document: the normal report
 	if repairs != 0 {
 		t.Fatalf("an unpaired computer was repaired %d times", repairs)
 	}
@@ -36,8 +35,8 @@ func TestDoctorRepairOnAnUnpairedComputerAsksForNoApprovalAndPrintsTheReport(t *
 // ("... then check"). It repairs once, then prints the same report as plain doctor with its exit code.
 func TestDoctorRepairOnAPairedComputerRepairsOnceThenPrintsTheReport(t *testing.T) {
 	repairs := 0
-	withDoctorRepair(t, true, func(context.Context) error { repairs++; return nil })
-	checkDoctorOwnerSocketJSON(t, "doctor", "--repair", "--json")
+	ctx := withDoctorRepair(t.Context(), true, func(context.Context) error { repairs++; return nil })
+	checkDoctorOwnerSocketJSON(t, ctx, "doctor", "--repair", "--json")
 	if repairs != 1 {
 		t.Fatalf("repairs = %d, want 1", repairs)
 	}
@@ -52,8 +51,8 @@ func TestDoctorRepairFailureNamesTheStepAndNoReportFollows(t *testing.T) {
 		"the repair did not finish":                  errors.New("private detail"),
 		"this terminal runs inside a restricted job": fmt.Errorf("%w: private detail", elevation.ErrElevationRestrictedJob),
 	} {
-		withDoctorRepair(t, true, func(context.Context) error { return cause })
-		code, stdout, stderr := doctorWithoutADaemon(t, "windows", "doctor", "--repair")
+		ctx := withDoctorRepair(t.Context(), true, func(context.Context) error { return cause })
+		code, stdout, stderr := doctorWithoutADaemon(t, ctx, "windows", "doctor", "--repair")
 		if code == 0 || stdout != "" || !strings.Contains(stderr, "could not repair the installation: "+step) || !strings.Contains(stderr, "`pb doctor --repair`") ||
 			strings.Contains(stderr, "could not finish the command") || strings.Contains(stderr, "private detail") {
 			t.Fatalf("%s: code=%d stdout=%q stderr=%q", step, code, stdout, stderr)

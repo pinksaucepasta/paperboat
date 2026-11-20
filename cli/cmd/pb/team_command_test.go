@@ -14,7 +14,6 @@ import (
 )
 
 func TestTeamInviteUsesEmailBeforeSignup(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(map[bool]string{false: "text", true: "json"}[jsonOutput], func(t *testing.T) {
 			calls := 0
@@ -66,7 +65,6 @@ func TestTeamInviteUsesEmailBeforeSignup(t *testing.T) {
 }
 
 func TestTeamInvitationInventoryShowsPendingEmailVerification(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return
@@ -96,7 +94,6 @@ func TestTeamInvitationInventoryShowsPendingEmailVerification(t *testing.T) {
 
 func TestTeamDeleteRequiresExactConfirmationBeforeRequest(t *testing.T) {
 	mutated := false
-	supportedTeamFixtureVersion(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return
@@ -169,7 +166,6 @@ func TestTeamGrantRequiresGenerationAndValidPermission(t *testing.T) {
 }
 
 func TestTeamDeclineInvitation(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	for _, status := range []int{http.StatusOK, http.StatusNotFound, http.StatusConflict} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			calls := 0
@@ -241,7 +237,6 @@ func TestTeamMachineGrantRejectsAmbiguousAudienceAndImplicitCapabilities(t *test
 func TestTeamMachineTransferRequiresExactConfirmationBeforeRequest(t *testing.T) {
 	for _, action := range []string{"transfer-to-team", "transfer-to-personal", "remove"} {
 		requested := false
-		supportedTeamFixtureVersion(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if teamFixtureUpdatePolicy(w, r) {
 				return
@@ -259,7 +254,6 @@ func TestTeamMachineTransferRequiresExactConfirmationBeforeRequest(t *testing.T)
 }
 
 func TestTeamMachineTransferToPersonalSendsTheExactAction(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
@@ -283,11 +277,6 @@ func TestTeamMachineTransferToPersonalSendsTheExactAction(t *testing.T) {
 	}
 }
 
-func supportedTeamFixtureVersion(t *testing.T) {
-	previous := cliUpdateVersion
-	t.Cleanup(func() { cliUpdateVersion = previous })
-	cliUpdateVersion = func() string { return "2026.10.08.1" }
-}
 func teamFixtureUpdatePolicy(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet || r.URL.Path != "/v1/client/update-policy" {
 		return false
@@ -312,7 +301,6 @@ func (w *teamFailAtWriter) Write(p []byte) (int, error) {
 }
 
 func TestTeamHumanOutputReturnsWriterFailures(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	for _, tc := range []struct {
 		name   string
 		args   []string
@@ -358,7 +346,6 @@ func TestTeamHumanOutputReturnsWriterFailures(t *testing.T) {
 }
 
 func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return
@@ -433,12 +420,9 @@ func TestTeamGetPreservesIdentitySuspensionAndResourcePermissions(t *testing.T) 
 // success_url, cancel_url} with Idempotency-Key == operation_id returns the
 // Checkout URL; the team exists only after payment.
 func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
-	supportedTeamFixtureVersion(t)
-	previousOpen := openBrowser
 	ctx := withTimings(t.Context(), func(timings *commandTimings) { timings.teamCreatePoll = time.Millisecond })
 	var opened string
-	openBrowser = func(target string) error { opened = target; return nil }
-	t.Cleanup(func() { openBrowser = previousOpen })
+	ctx = withHostDependencies(ctx, func(d *hostDependencies) { d.openBrowser = func(target string) error { opened = target; return nil } })
 	var operations []string
 	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -498,7 +482,6 @@ func TestTeamCreateIsPaidFirstAndWaitsUntilTheTeamExists(t *testing.T) {
 }
 
 func TestTeamCreateNamesAReservedTeamAndNoWaitStopsAtCheckout(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	reserved := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
@@ -520,26 +503,23 @@ func TestTeamCreateNamesAReservedTeamAndNoWaitStopsAtCheckout(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	previousOpen := openBrowser
-	openBrowser = func(string) error { return errors.New("no browser") }
-	t.Cleanup(func() { openBrowser = previousOpen })
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) { d.openBrowser = func(string) error { return errors.New("no browser") } })
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	writeTestProfile(t, dir, configPath, server.URL)
 	base := []string{"team", "create", "acme", "--no-wait", "--accept-terms", "--server", server.URL, "--config", configPath}
 	var output bytes.Buffer
-	if code := run(t.Context(), append(base, "--json"), &output, &output); code != 0 || !strings.Contains(output.String(), `"state":"awaiting_payment"`) || !strings.Contains(output.String(), "pay_2") {
+	if code := run(ctx, append(base, "--json"), &output, &output); code != 0 || !strings.Contains(output.String(), `"state":"awaiting_payment"`) || !strings.Contains(output.String(), "pay_2") {
 		t.Fatalf("no-wait exit=%d output=%s", code, output.String())
 	}
 	reserved = true
 	output.Reset()
-	if code := run(t.Context(), base, &output, &output); code == 0 || !strings.Contains(output.String(), "already reserved") {
+	if code := run(ctx, base, &output, &output); code == 0 || !strings.Contains(output.String(), "already reserved") {
 		t.Fatalf("reserved exit=%d output=%s", code, output.String())
 	}
 }
 
 func TestTeamInviteExplainsSeatRequiredFromTheErrorCode(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return
@@ -561,7 +541,6 @@ func TestTeamInviteExplainsSeatRequiredFromTheErrorCode(t *testing.T) {
 
 // F12-01: deleting a team that still has a subscription says what to do, not "state changed".
 func TestTeamDeleteWithActiveSubscriptionSaysHowToProceed(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return
@@ -583,7 +562,6 @@ func TestTeamDeleteWithActiveSubscriptionSaysHowToProceed(t *testing.T) {
 
 // F12-06: a change refused with team_suspended names the team and says the owner restores billing.
 func TestSuspendedTeamIsNamedInTheRefusal(t *testing.T) {
-	supportedTeamFixtureVersion(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if teamFixtureUpdatePolicy(w, r) {
 			return

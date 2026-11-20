@@ -39,6 +39,20 @@ describe("the validator", () => {
   })
 })
 
+/**
+ * The same answer from a newer server: every object, at any depth, carries a field this console has never heard of. Its
+ * value copies a sibling's, so a map of strings (a new key, same value type) stays a valid map.
+ */
+function withNewerFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withNewerFields)
+  if (value && typeof value === "object") {
+    const children = Object.entries(value).map(([name, child]) => [name, withNewerFields(child)] as const)
+    if (!children.length) return value // an empty object may be a map: no sibling to copy a value type from
+    return { ...Object.fromEntries(children), field_from_a_newer_server: children[0][1] }
+  }
+  return value
+}
+
 describe("every documented operation", () => {
   const operations = documentedOperations()
   test("the console reads a meaningful number of them", () => expect(operations.length).toBeGreaterThan(100))
@@ -47,8 +61,7 @@ describe("every documented operation", () => {
     for (const key of operations) {
       const value = sample(operationSchema(key))
       expect([key, problem(operationSchema(key), value)]).toEqual([key, undefined])
-      if (value && typeof value === "object" && !Array.isArray(value))
-        expect([key, problem(operationSchema(key), { ...value, field_from_a_newer_server: { x: 1 } })]).toEqual([key, undefined])
+      expect([key, problem(operationSchema(key), withNewerFields(value))]).toEqual([key, undefined])
     }
   })
 

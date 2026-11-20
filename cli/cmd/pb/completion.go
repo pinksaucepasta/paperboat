@@ -137,7 +137,7 @@ func localCompletion(command *cobra.Command, kind, environment, prefix string) (
 func localCompletionKinds(command *cobra.Command, kinds map[string]bool, environment, prefix string) ([]string, cobra.ShellCompDirective) {
 	ctx, cancel := context.WithTimeout(shellCompletionContext(command), shellCompletionDeadline)
 	defer cancel()
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

@@ -77,20 +77,15 @@ func TestPreviewConsoleTransferPreservesURLAndCleansCanceledHandoff(t *testing.T
 			defer apiServer.Close()
 			client := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
 			carrier := &backgroundOwnerLeaseCarrier{productionOwnerLeaseCarrier: productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1)}}
-			oldClient, oldMachine, oldCarrier, oldOwner := previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand
-			oldTerminal, oldConsole := previewInteractiveTerminal, runPreviewConsoleForCommand
-			defer func() {
-				previewClientForCommand, previewMachineID, newPreviewCarrier, previewOwnerSessionClientForCommand = oldClient, oldMachine, oldCarrier, oldOwner
-				previewInteractiveTerminal, runPreviewConsoleForCommand = oldTerminal, oldConsole
-			}()
-			previewClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-			previewMachineID = func() (string, error) { return "machine_cli", nil }
-			newPreviewCarrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
+			deps := defaultPreviewDependencies()
+			deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
+			deps.machineID = func() (string, error) { return "machine_cli", nil }
+			deps.carrier = func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error) {
 				return carrier, nil
 			}
-			previewOwnerSessionClientForCommand = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
-			previewInteractiveTerminal = func(*cobra.Command) bool { return true }
-			runPreviewConsoleForCommand = func(command *cobra.Command, lease preview.Lease, target preview.LeaseTarget, visibility string, domains []string, client *api.Client, ended <-chan error, transfer func(context.Context, time.Duration) (time.Time, error)) (previewConsoleResult, error) {
+			deps.owner = func() (*preview.LocalOwnerSessionClient, error) { return ownerClient, nil }
+			deps.isTerminal = func(*cobra.Command) bool { return true }
+			deps.console = func(command *cobra.Command, lease preview.Lease, target preview.LeaseTarget, visibility string, domains []string, client *api.Client, ended <-chan error, transfer func(context.Context, time.Duration) (time.Time, error)) (previewConsoleResult, error) {
 				if lease.State != "ready" || lease.Endpoint == "" {
 					t.Fatal("console started before readiness")
 				}
@@ -126,7 +121,7 @@ func TestPreviewConsoleTransferPreservesURLAndCleansCanceledHandoff(t *testing.T
 			command.SetOut(io.Discard)
 			command.SetErr(io.Discard)
 			command.SetArgs([]string{"3000"})
-			runErr := command.ExecuteContext(context.Background())
+			runErr := command.ExecuteContext(context.WithValue(context.Background(), previewDependenciesKey{}, deps))
 			if mode == "uncertain" {
 				if runErr == nil {
 					t.Fatal("uncertain handoff not reported")
@@ -275,7 +270,8 @@ func TestPreviewConsolePollFailureObservationRecoversAndAvoidsOwnedHTTPDuplicate
 
 func TestPreviewMakeTunnelWaitsForDurableReadiness(t *testing.T) {
 	h := newWorkflowAcceptanceHarness(t)
-	h.commandContext, h.cancel = context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(h.deps.context(context.Background()))
+	h.commandContext, h.cancel = ctx, cancel
 	defer h.cancel()
 	handler := h.server.Config.Handler
 	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

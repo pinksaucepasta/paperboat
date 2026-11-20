@@ -166,10 +166,6 @@ const (
 	doctorPathReachabilityTimeout = 8 * time.Second
 )
 
-// doctorPrivilegedRepair is what --repair does before the checks: nothing on Linux and macOS, the elevated
-// repair of a paired installation on Windows.
-var doctorPrivilegedRepair = platformDoctorRepair
-
 // repairEnrolled runs the privileged repair only for a paired installation. A computer that is not installed or
 // not paired has no services to repair: it asks for no administrator approval and the checks say what to do.
 func repairEnrolled(ctx context.Context, enrolled func() (bool, error), repair func(context.Context) error) error {
@@ -197,11 +193,11 @@ func doctorCommandV1() *cobra.Command {
 				// Linux and macOS own no privileged dependency: reading the snapshot below already reinstalls and
 				// restarts the local daemon service. Windows first repairs a paired installation's services; then
 				// every platform runs the same checks and prints the same report.
-				if err := doctorPrivilegedRepair(command.Context()); err != nil {
+				if err := doctorDependenciesOf(command.Context()).privilegedRepair(command.Context()); err != nil {
 					return commandPreparationFailure{step: prepareDoctorRepair, cause: err}
 				}
 			}
-			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
+			_, snapshot, err := localDaemonSnapshot(command, installDependenciesOf(command.Context()).installService)
 			var machine *localapi.MachineStatus
 			var reportMachine *doctorpkg.Machine
 			var probes []doctorpkg.Probe
@@ -220,7 +216,7 @@ func doctorCommandV1() *cobra.Command {
 					reportMachine = &doctorpkg.Machine{ID: selected.ID, Alias: selected.Alias}
 				}
 				probes = doctorProbes(command, snapshot, machine)
-			case localDaemonStopped(commandGOOS, err):
+			case localDaemonStopped(err):
 				// Every other check reads the local service: its absence is the report (Windows test machine 2026-11-10: doctor
 				// on a machine whose services an interrupted update had stopped said only "could not finish").
 				observeLocalDoctorFailure(command.Context(), err)
@@ -315,7 +311,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 	probes = append(probes, doctorDaemonHealthProbes(snapshot.Health)...)
 	probes = append(probes, doctorLingerProbes()...)
 	probes = append(probes, doctorCarrierProbes()...)
-	probes = append(probes, doctorHostd()...)
+	probes = append(probes, doctorDependenciesOf(command.Context()).hostd()...)
 	probes = append(probes, doctorSSHSourceProbes()...)
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
@@ -517,9 +513,6 @@ func doctorServerFailure(ctx context.Context, serverURL string, check doctorpkg.
 	}
 	return check
 }
-
-// doctorHostd is swapped by tests: the host service lives at fixed system paths, not under HOME.
-var doctorHostd = doctorHostdProbes
 
 func probeDoctorLocalState(ctx context.Context) doctorpkg.Check {
 	state := collectLocalDoctor(ctx)

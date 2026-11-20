@@ -18,13 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tunnelClientForCommand = productionTunnelClientForCommand
-
-var resolveTunnelSelectorForCommand = resolveTunnelSelector
-
-var beginTunnelCreateWorkflowForCommand = beginProductionTunnelCreateWorkflow
-
-var newTunnelIdempotencyKey = func() (string, error) {
+func newTunnelIdempotencyKey() (string, error) {
 	id, err := uuid.NewRandom()
 	if err != nil {
 		return "", err
@@ -119,11 +113,7 @@ func retryTunnelRead[T any](ctx context.Context, read func() (T, error)) (T, err
 	return value, err
 }
 
-var tunnelDoctorLocalReportForCommand = collectTunnelDoctorLocalReport
-
-var tunnelDoctorHostDiagnosticsForCommand = collectTunnelHostDiagnostics
-
-var tunnelDoctorDNSCheckForCommand = func(ctx context.Context) bool {
+func tunnelDoctorDNSCheck(ctx context.Context) bool {
 	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, "localhost")
 	return err == nil && len(addresses) > 0
 }
@@ -164,7 +154,7 @@ func beginProductionTunnelCreateWorkflow(ctx context.Context, request tunnelCrea
 		RequestDigest: request.RequestDigest,
 		DomainCount:   request.DomainCount,
 		ExpiresAt:     request.ExpiresAt,
-		NewKey:        tunnelKey,
+		NewKey:        func() (string, error) { return tunnelKey(ctx) },
 	})
 }
 
@@ -332,12 +322,12 @@ func tunnelOutput(command *cobra.Command, value any, human string) error {
 }
 
 func tunnelClient(command *cobra.Command) (*api.Client, context.Context, error) {
-	client, err := tunnelClientForCommand(command)
+	client, err := tunnelDependenciesOf(command.Context()).client(command)
 	return client, command.Context(), err
 }
 
-func tunnelKey() (string, error) {
-	key, err := newTunnelIdempotencyKey()
+func tunnelKey(ctx context.Context) (string, error) {
+	key, err := tunnelDependenciesOf(ctx).newKey()
 	if err != nil {
 		return "", fmt.Errorf("create idempotency key: %w", err)
 	}

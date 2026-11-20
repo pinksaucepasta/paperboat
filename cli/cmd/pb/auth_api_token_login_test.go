@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -45,9 +44,6 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	old := loginHTTPClient
-	t.Cleanup(func() { loginHTTPClient = old })
-	loginHTTPClient = srv.Client
 	path, store := browserLoginFixture(t, srv.URL)
 	// A headless Mac or container has no usable credential store: the session goes to owner-only files
 	// (a test Mac over SSH refused the Keychain write, exit 36).
@@ -56,10 +52,11 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 	if err := headless.Save(); err != nil {
 		t.Fatal(err)
 	}
-	oldStore := authCredentialStoreAvailable
-	t.Cleanup(func() { authCredentialStoreAvailable = oldStore })
-	authCredentialStoreAvailable = func() bool { return false }
-	out, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token", secret)
+	ctx := withAuthDependencies(t.Context(), func(d *authDependencies) {
+		d.httpClient = srv.Client
+		d.credentialStoreAvailable = func() bool { return false }
+	})
+	out, err := runBrowserLogin(t, ctx, path, "login", "--api-token", secret)
 	if err != nil || !strings.Contains(out, "Signed in as agent@example.test with an API token") {
 		t.Fatalf("login: %v %s", err, out)
 	}
@@ -78,14 +75,14 @@ func TestAPITokenLoginStartsATokenSession(t *testing.T) {
 		}
 		return nil
 	})
-	if _, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token", "not-a-token"); err == nil {
+	if _, err := runBrowserLogin(t, ctx, path, "login", "--api-token", "not-a-token"); err == nil {
 		t.Fatal("a value without a pbat_ token was accepted")
 	}
-	if _, err := runBrowserLogin(t, context.Background(), path, "login", "--api-token", secret, "--fresh"); err == nil {
+	if _, err := runBrowserLogin(t, ctx, path, "login", "--api-token", secret, "--fresh"); err == nil {
 		t.Fatal("--api-token combined with --fresh")
 	}
 	t.Setenv("PAPERBOAT_API_TOKEN", secret)
-	if out, err := runBrowserLogin(t, context.Background(), path, "login"); err != nil || !strings.Contains(out, "with an API token") {
+	if out, err := runBrowserLogin(t, ctx, path, "login"); err != nil || !strings.Contains(out, "with an API token") {
 		t.Fatalf("PAPERBOAT_API_TOKEN login: %v %s", err, out)
 	}
 }

@@ -283,7 +283,7 @@ func TestWriteStatusIncludesOperationalFieldsAndSafeHealth(t *testing.T) {
 }
 
 func TestDoctorCommandUsesOwnerSocketAndStableJSON(t *testing.T) {
-	checkDoctorOwnerSocketJSON(t, "doctor", "--json")
+	checkDoctorOwnerSocketJSON(t, t.Context(), "doctor", "--json")
 }
 
 // A Linux/macOS host has no Windows-only dependency to repair: --repair must
@@ -293,10 +293,10 @@ func TestDoctorRepairOnUnixRunsTheChecks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows repairs through the privileged host runtime")
 	}
-	checkDoctorOwnerSocketJSON(t, "doctor", "--repair", "--json")
+	checkDoctorOwnerSocketJSON(t, t.Context(), "doctor", "--repair", "--json")
 }
 
-func checkDoctorOwnerSocketJSON(t *testing.T, doctorArgs ...string) {
+func checkDoctorOwnerSocketJSON(t *testing.T, commandCtx context.Context, doctorArgs ...string) {
 	t.Helper()
 	root := commandRuntimeTestRoot(t)
 	home, runtimeRoot := filepath.Join(root, "home"), filepath.Join(root, "runtime")
@@ -311,9 +311,7 @@ func checkDoctorOwnerSocketJSON(t *testing.T, doctorArgs ...string) {
 	t.Setenv("TMPDIR", runtimeRoot)
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", filepath.Join(root, "unconfigured-runtime"))
 	// Never the host's real install: a computer with Paperboat installed has a host service at fixed system paths.
-	previousHostd := doctorHostd
-	t.Cleanup(func() { doctorHostd = previousHostd })
-	doctorHostd = func() []doctorpkg.Probe { return nil }
+	commandCtx = withDoctorDependencies(commandCtx, func(d *doctorDependencies) { d.hostd = func() []doctorpkg.Probe { return nil } })
 	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/me" || request.Header.Get("Authorization") != "Bearer token" {
 			http.Error(writer, "not found", http.StatusNotFound)
@@ -324,7 +322,7 @@ func checkDoctorOwnerSocketJSON(t *testing.T, doctorArgs ...string) {
 	defer backend.Close()
 	configPath := filepath.Join(root, "config.json")
 	writeTestProfile(t, root, configPath, backend.URL)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +345,7 @@ func checkDoctorOwnerSocketJSON(t *testing.T, doctorArgs ...string) {
 	go func() { done <- server.Run(ctx) }()
 	waitForCommandSocket(t, paths.SocketPath)
 	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), append([]string{"--config", configPath}, doctorArgs...), &stdout, &stderr); code != 1 {
+	if code := run(commandCtx, append([]string{"--config", configPath}, doctorArgs...), &stdout, &stderr); code != 1 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var report doctorpkg.Report
@@ -385,7 +383,7 @@ func TestWaitCommandUsesLocalWatchAndStableExitResults(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 	t.Setenv("TMPDIR", runtimeRoot)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +451,7 @@ func TestBugreportCommandUsesDaemonBundleAndStableJSON(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 	t.Setenv("TMPDIR", runtimeRoot)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +551,7 @@ func TestLocalDaemonSnapshotInstallsOnlyForUnavailableSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(config.EnvConfigPath, configPath)
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,10 +624,8 @@ func TestCommandUsesTestSafeLocalDaemonInstaller(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"server_url":"https://api.paperboat.test"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	previous := installLocalDaemonService
 	called := false
-	installLocalDaemonService = func(_ context.Context, executable, gotConfigPath, server string) error {
+	installService := func(_ context.Context, executable, gotConfigPath, server string) error {
 		called = true
 		if !strings.HasSuffix(strings.ToLower(executable), ".test") && !strings.HasSuffix(strings.ToLower(executable), ".test.exe") {
 			t.Fatalf("expected test executable, got %q", executable)
@@ -641,10 +637,10 @@ func TestCommandUsesTestSafeLocalDaemonInstaller(t *testing.T) {
 		}
 		return errors.New("test installer sentinel")
 	}
-	t.Cleanup(func() { installLocalDaemonService = previous })
+	installCtx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.installService = installService })
 
 	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"--config", configPath, "status"}, &stdout, &stderr); code != 1 {
+	if code := run(installCtx, []string{"--config", configPath, "status"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !called {
@@ -701,15 +697,14 @@ func localDaemonReadinessTestConfig(t *testing.T, registered bool) (*config.Conf
 
 func TestEnsureLocalDaemonServiceDefersUntilMachineRegistration(t *testing.T) {
 	cfg, _ := localDaemonReadinessTestConfig(t, false)
-	previous := installLocalDaemonService
 	calls := 0
-	installLocalDaemonService = func(context.Context, string, string, string) error {
+	installService := func(context.Context, string, string, string) error {
 		calls++
 		return nil
 	}
-	t.Cleanup(func() { installLocalDaemonService = previous })
+	installCtx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.installService = installService })
 
-	if err := ensureLocalDaemonService(context.Background(), cfg); err != nil {
+	if err := ensureLocalDaemonService(installCtx, cfg); err != nil {
 		t.Fatalf("clean auth readiness error=%v", err)
 	}
 	if calls != 0 {
@@ -719,10 +714,9 @@ func TestEnsureLocalDaemonServiceDefersUntilMachineRegistration(t *testing.T) {
 
 func TestEnsureLocalDaemonServiceUsesInstallerAfterRegistration(t *testing.T) {
 	cfg, configPath := localDaemonReadinessTestConfig(t, true)
-	previous := installLocalDaemonService
 	calls := 0
 	sentinel := errors.New("test installer sentinel")
-	installLocalDaemonService = func(_ context.Context, executable, gotConfigPath, server string) error {
+	installService := func(_ context.Context, executable, gotConfigPath, server string) error {
 		calls++
 		if !strings.HasSuffix(strings.ToLower(executable), ".test") && !strings.HasSuffix(strings.ToLower(executable), ".test.exe") {
 			t.Fatalf("expected test executable, got %q", executable)
@@ -736,9 +730,9 @@ func TestEnsureLocalDaemonServiceUsesInstallerAfterRegistration(t *testing.T) {
 		}
 		return sentinel
 	}
-	t.Cleanup(func() { installLocalDaemonService = previous })
+	installCtx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.installService = installService })
 
-	if err := ensureLocalDaemonService(context.Background(), cfg); !errors.Is(err, sentinel) {
+	if err := ensureLocalDaemonService(installCtx, cfg); !errors.Is(err, sentinel) {
 		t.Fatalf("ensure error=%v", err)
 	}
 	if calls != 1 {
@@ -748,14 +742,13 @@ func TestEnsureLocalDaemonServiceUsesInstallerAfterRegistration(t *testing.T) {
 
 func TestRequireLocalDaemonServiceRejectsMissingRegistrationWithoutLaunching(t *testing.T) {
 	cfg, _ := localDaemonReadinessTestConfig(t, false)
-	previous := installLocalDaemonService
-	installLocalDaemonService = func(context.Context, string, string, string) error {
+	installService := func(context.Context, string, string, string) error {
 		t.Fatal("unregistered peer command launched the local daemon")
 		return nil
 	}
-	t.Cleanup(func() { installLocalDaemonService = previous })
+	installCtx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.installService = installService })
 
-	err := requireLocalDaemonService(context.Background(), cfg)
+	err := requireLocalDaemonService(installCtx, cfg)
 	if err == nil || !strings.Contains(err.Error(), "pb setup") {
 		t.Fatalf("missing registration error=%v", err)
 	}
@@ -763,15 +756,14 @@ func TestRequireLocalDaemonServiceRejectsMissingRegistrationWithoutLaunching(t *
 
 func TestRequireLocalDaemonServiceBoundsMissingReadiness(t *testing.T) {
 	cfg, _ := localDaemonReadinessTestConfig(t, true)
-	previous := installLocalDaemonService
 	calls := 0
-	installLocalDaemonService = func(context.Context, string, string, string) error {
+	installService := func(context.Context, string, string, string) error {
 		calls++
 		return nil
 	}
-	t.Cleanup(func() { installLocalDaemonService = previous })
+	installCtx := withInstallDependencies(t.Context(), func(d *installDependencies) { d.installService = installService })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(installCtx, 100*time.Millisecond)
 	defer cancel()
 	err := requireLocalDaemonService(ctx, cfg)
 	if !errors.Is(err, context.DeadlineExceeded) {

@@ -533,9 +533,6 @@ func actionSSHKnownHosts(command *cobra.Command, _ []string) error {
 	return err
 }
 
-// refreshAfterSSHTrustHost is replaced in tests.
-var refreshAfterSSHTrustHost = refreshLocalInventory
-
 func actionSSHTrustHost(command *cobra.Command, args []string) error {
 	client, machine, _, err := resolveSSHCommandTarget(actionContext(command, args), args[0])
 	if err != nil {
@@ -584,7 +581,7 @@ func trustSSHHost(command *cobra.Command, client *api.Client, machine api.UserMa
 	}
 	// pb ssh reads host keys from the daemon's machine list (F5-07): refresh it so the next pb ssh offers the
 	// trusted set at once instead of the old one (C066).
-	if err := refreshAfterSSHTrustHost(command.Context()); err != nil {
+	if err := sshDependenciesOf(command.Context()).refreshInventory(command.Context()); err != nil {
 		fmt.Fprintf(command.ErrOrStderr(), "pb: trusted, but this computer's machine list did not refresh yet; `pb ssh %s` can need a few seconds.\n", machine.Alias)
 	}
 	if jsonOutput {
@@ -609,7 +606,7 @@ func managedSSHDomain(ctx context.Context, client *api.Client) (string, error) {
 
 // configuredManagedSSHDomain is the alias domain from the daemon's snapshot (no request), else from the server.
 func configuredManagedSSHDomain(ctx *command.Context) (string, error) {
-	if snapshot, err := loadWarmMachineSnapshot(ctx.Context); err == nil && managedssh.ValidateAliasDomain(snapshot.SSHDomain) == nil {
+	if snapshot, err := hostDependenciesOf(ctx.Context).warmSnapshot(ctx.Context); err == nil && managedssh.ValidateAliasDomain(snapshot.SSHDomain) == nil {
 		return snapshot.SSHDomain, nil
 	}
 	dependencies, err := buildDeps(ctx)

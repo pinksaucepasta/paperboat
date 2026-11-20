@@ -42,22 +42,19 @@ func TestENVHostShowSeparatesPublicationFromObservedApplication(t *testing.T) {
 				json.NewEncoder(w).Encode(map[string]any{"data": host})
 			}))
 			defer server.Close()
-			previousBackend := environmentVariableBackendForCommand
-			previousResolver := environmentVariableResolveMachine
-			t.Cleanup(func() {
-				environmentVariableBackendForCommand = previousBackend
-				environmentVariableResolveMachine = previousResolver
-			})
 			client := api.New(server.URL, config.Credential{}, server.Client())
 			if err := client.SetWorkspace("team-one"); err != nil {
 				t.Fatal(err)
 			}
-			environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-			environmentVariableResolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
-				return api.UserMachine{ID: "machine_1", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}, nil
-			}
+			ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+				d.backendForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
+				d.resolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
+					return api.UserMachine{ID: "machine_1", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}, nil
+				}
+			})
 			var out bytes.Buffer
 			command := newEnvironmentTestCommand(strings.NewReader(""), &out)
+			command.SetContext(ctx)
 			command.Flags().Bool("json", false, "")
 			if err := command.Flags().Set("json", "true"); err != nil {
 				t.Fatal(err)
@@ -107,12 +104,12 @@ func TestENVRecoveryFromActualTeamEntitlementAPIResponse(t *testing.T) {
 	if cause == nil {
 		t.Fatal("unpaid Team source was accepted")
 	}
-	err := safeEnvironmentVariableCommandError(errors.Join(cause, nil))
+	err := safeEnvironmentVariableCommandError(t.Context(), errors.Join(cause, nil))
 	result := classifyCLIJSONError(err)
 	if !strings.Contains(result.Message, "Team Billing") || strings.Contains(result.Message, "PRIVATE") || result.Code != "team_entitlement_required" || result.Retryable {
 		t.Fatalf("actual API recovery=%#v", result)
 	}
-	mixed := safeEnvironmentVariableCommandError(errors.Join(cause, syscall.EIO))
+	mixed := safeEnvironmentVariableCommandError(t.Context(), errors.Join(cause, syscall.EIO))
 	if !errors.Is(mixed, syscall.EIO) || strings.Contains(userFacingError(mixed), "Team Billing") || classifyCommandFailure(mixed).kind != commandUnexpected {
 		t.Fatal("mixed IO failure was mislabeled as a simple entitlement rejection")
 	}

@@ -269,7 +269,7 @@ function route(req, url) {
     return { events: url.searchParams.get("event_type") === "nothing" ? [] : all, total: url.searchParams.get("event_type") === "nothing" ? 0 : all.length }
   }
   if (p === "/v1/admin/overview")
-    return { accounts: [{ state: "active", count: 110 }, { state: "suspended", count: 10 }], billing_workspaces: [{ state: "active", count: 4 }], control_operations: [{ state: "succeeded", count: 9 }], hosts: 7, hosts_ready: 5, hosts_stale: 2, relays: 2, relays_ready: 2, relays_stale: 0 }
+    return { accounts: [{ state: "active", count: 110 }, { state: "suspended", count: 10 }], billing_workspaces: [{ state: "active", count: 4 }], control_operations: [{ state: "succeeded", count: 9 }], transactional_mail: [{ state: "sent", count: 30 }], hosts: 7, hosts_ready: 5, hosts_stale: 2, relays: 2, relays_ready: 2, relays_stale: 0 }
   if (p === "/v1/admin/status") return { observed_at: "2026-11-17T09:00:00Z", build: { version: "dev-abc1234", commit: "abc1234def5678abc1234def5678abc1234def56" }, readiness: "ready", dimensions: { database: { status: "healthy" } } }
   if (p === "/v1/admin/analytics/site" || p === "/v1/admin/analytics/console") {
     if (process.env.__FIXTURE_ANALYTICS === "down") return { __status: 503, code: "analytics_unavailable", message: "The analytics provider did not answer.", reference: "support_fixture_posthog" }

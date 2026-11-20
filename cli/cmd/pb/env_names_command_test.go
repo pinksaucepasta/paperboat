@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -185,22 +186,22 @@ func namesAccessServer(t *testing.T, team bool, forbidden bool) (*httptest.Serve
 	return server, &calls
 }
 
-func useNamesAccessServer(t *testing.T, server *httptest.Server) {
+func namesAccessContext(t *testing.T, server *httptest.Server) context.Context {
 	t.Helper()
-	previous := environmentVariableBackendForCommand
-	t.Cleanup(func() { environmentVariableBackendForCommand = previous })
-	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), nil
-	}
+	return withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.backendForCommand = func(*cobra.Command) (*api.Client, error) {
+			return api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), nil
+		}
+	})
 }
 
 func TestEnvNamesAccessShowsAndSetsTheSettingForPersonalAndTeam(t *testing.T) {
 	for _, workspace := range []string{"personal", "team-one"} {
 		server, calls := namesAccessServer(t, workspace != "personal", false)
-		useNamesAccessServer(t, server)
+		ctx := namesAccessContext(t, server)
 		run := func(args ...string) string {
 			command, out, _ := namesTestCommand()
-			command.SetContext(t.Context())
+			command.SetContext(ctx)
 			if err := runEnvironmentNamesAccess(command, workspace, args); err != nil {
 				t.Fatal(err)
 			}
@@ -228,7 +229,7 @@ func TestEnvNamesAccessRejectsBadValuesAndSurfacesATeamRefusal(t *testing.T) {
 		t.Fatalf("bad value: %v", err)
 	}
 	server, _ := namesAccessServer(t, true, true)
-	useNamesAccessServer(t, server)
+	command.SetContext(namesAccessContext(t, server))
 	if err := runEnvironmentNamesAccess(command, "team-one", []string{"off"}); err == nil {
 		t.Fatal("a refusal from the server must reach the user, not read as success")
 	}

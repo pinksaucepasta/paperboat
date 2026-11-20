@@ -280,9 +280,9 @@ func TestEnvHookEmitPrintsNothingWithoutLoginOrRuntime(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(configPath), "env-hook.json"), record, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	envHookTerminal = filepath.Join(home, "tty")
-	t.Cleanup(func() { envHookTerminal = "/dev/tty" })
-	if err := os.WriteFile(envHookTerminal, nil, 0o600); err != nil {
+	terminal := filepath.Join(home, "tty")
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) { d.hookTerminal = terminal })
+	if err := os.WriteFile(terminal, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, shell := range []string{"bash", "fish", "sh"} {
@@ -292,13 +292,13 @@ func TestEnvHookEmitPrintsNothingWithoutLoginOrRuntime(t *testing.T) {
 		root.SetErr(&stderr)
 		root.SetArgs([]string{"env", "hook", "--emit", shell})
 		started := time.Now()
-		if err := root.Execute(); err != nil {
+		if err := root.ExecuteContext(ctx); err != nil {
 			t.Fatalf("%s: emit must not fail the shell: %v", shell, err)
 		}
 		if stdout.Len() != 0 || stderr.Len() != 0 || time.Since(started) > envHookBudget {
 			t.Fatalf("%s: stdout=%q stderr=%q", shell, stdout.String(), stderr.String())
 		}
-		notice, _ := os.ReadFile(envHookTerminal)
+		notice, _ := os.ReadFile(terminal)
 		if len(notice) != 0 {
 			t.Fatalf("%s: terminal notice %q", shell, notice)
 		}

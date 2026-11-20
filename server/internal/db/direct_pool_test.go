@@ -9,7 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
 
-// Session state and migrations use the direct DSN; queries keep the pooled one. Opening does not connect.
+// Session state and migrations use the direct DSN; queries keep the pooled one. Open looks up max_connections to size the pools, so an unreachable host only keeps the configured sizes.
 func TestOpenSplitsPooledAndDirectDSN(t *testing.T) {
 	cfg := config.Database{Driver: "postgres", DSN: "postgres://app:secret@pooler.example.test:6432/paperboat", DirectDSN: "postgres://app:secret@primary.example.test:5432/paperboat"}
 	store, err := Open(cfg)

@@ -135,21 +135,18 @@ func TestEnvironmentVariableSetCommandEncryptsLocallyAndHidesInput(t *testing.T)
 	if err := fixture.manager.Initialize(context.Background(), password); err != nil {
 		t.Fatal(err)
 	}
-	previousBackend := environmentVariableBackendForCommand
-	previousVault := passwordVaultForCommand
-	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New("https://api.example.test", config.Credential{AccessToken: "token"}, linuxMachinesOnlyClient(t)), nil
-	}
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
-	t.Cleanup(func() {
-		environmentVariableBackendForCommand = previousBackend
-		passwordVaultForCommand = previousVault
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.backendForCommand = func(*cobra.Command) (*api.Client, error) {
+			return api.New("https://api.example.test", config.Credential{AccessToken: "token"}, linuxMachinesOnlyClient(t)), nil
+		}
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
 	})
 
 	var output bytes.Buffer
 	command := newEnvironmentTestCommand(strings.NewReader(canary), &output)
+	command.SetContext(ctx)
 	if err := setEnvironmentVariable(command, "", "API_MODE", true); err != nil {
 		t.Fatal(err)
 	}
@@ -189,20 +186,17 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	previousBackend := environmentVariableBackendForCommand
-	previousVault := passwordVaultForCommand
-	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New("https://api.example.test", config.Credential{}, linuxMachinesOnlyClient(t)), nil
-	}
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
-	t.Cleanup(func() {
-		environmentVariableBackendForCommand = previousBackend
-		passwordVaultForCommand = previousVault
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.backendForCommand = func(*cobra.Command) (*api.Client, error) {
+			return api.New("https://api.example.test", config.Credential{}, linuxMachinesOnlyClient(t)), nil
+		}
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
 	})
 	var output bytes.Buffer
 	teamCommand := newEnvironmentTestCommand(strings.NewReader(canary), &output)
+	teamCommand.SetContext(ctx)
 	teamCommand.PersistentFlags().String("workspace", "", "")
 	if err := teamCommand.PersistentFlags().Set("workspace", "team-one"); err != nil {
 		t.Fatal(err)
@@ -230,7 +224,7 @@ func TestEnvironmentVariableSetCommandRoutesTeamScopeWithoutPlaintext(t *testing
 func TestEnvironmentVariableSetCommandHidesServerEcho(t *testing.T) {
 	const canary = "command-error-canary"
 	cause := errors.New("server echoed " + canary + "\\nwith escaped details")
-	if got := safeEnvironmentVariableCommandError(cause); got == nil || !errors.Is(got, cause) || strings.Contains(got.Error(), canary) || got.Error() != "environment variable update failed" {
+	if got := safeEnvironmentVariableCommandError(t.Context(), cause); got == nil || !errors.Is(got, cause) || strings.Contains(got.Error(), canary) || got.Error() != "environment variable update failed" {
 		t.Fatalf("unsafe command error=%v", got)
 	}
 }
@@ -238,25 +232,25 @@ func TestEnvironmentVariableSetCommandHidesServerEcho(t *testing.T) {
 func TestEnvironmentVariableSetConflictErrorUsesOnlyStableCode(t *testing.T) {
 	const canary = "conflict-secret-canary"
 	apiCause := &api.APIError{Code: "version_conflict", Message: canary, Details: map[string]any{"message": canary}}
-	err := safeEnvironmentVariableCommandError(apiCause)
+	err := safeEnvironmentVariableCommandError(t.Context(), apiCause)
 	var projected *api.APIError
 	if err == nil || !errors.As(err, &projected) || projected != apiCause || !errors.Is(err, apiCause) || strings.Contains(err.Error(), canary) || err.Error() != "environment variable scope changed; fetch it and retry" {
 		t.Fatalf("unsafe conflict error=%v", err)
 	}
 	operational := syscall.EIO
-	mixed := safeEnvironmentVariableCommandError(errors.Join(apiCause, operational))
+	mixed := safeEnvironmentVariableCommandError(t.Context(), errors.Join(apiCause, operational))
 	if !errors.Is(mixed, apiCause) || !errors.Is(mixed, operational) || mixed.Error() != "environment variable update failed" {
 		t.Fatalf("mixed API and I/O failure lost cause or received conflict-only advice: %v", mixed)
 	}
 }
 
 func TestEnvironmentVariableCommandErrorKeepsExpectedStateCauseOnlyWhenUnmixed(t *testing.T) {
-	pure := safeEnvironmentVariableCommandError(environmentmanager.ErrVaultLocked)
+	pure := safeEnvironmentVariableCommandError(t.Context(), environmentmanager.ErrVaultLocked)
 	if !errors.Is(pure, environmentmanager.ErrVaultLocked) || !strings.Contains(pure.Error(), "pb env unlock") {
 		t.Fatalf("pure locked state lost recovery guidance or cause: %v", pure)
 	}
 	operational := syscall.EIO
-	mixed := safeEnvironmentVariableCommandError(errors.Join(environmentmanager.ErrVaultLocked, operational))
+	mixed := safeEnvironmentVariableCommandError(t.Context(), errors.Join(environmentmanager.ErrVaultLocked, operational))
 	if !errors.Is(mixed, environmentmanager.ErrVaultLocked) || !errors.Is(mixed, operational) || mixed.Error() != "environment variable update failed" {
 		t.Fatalf("mixed failure was hidden or received misleading state guidance: %v", mixed)
 	}
@@ -334,22 +328,19 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	previousBackend := environmentVariableBackendForCommand
-	previousVault := passwordVaultForCommand
-	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New("https://api.example.test", config.Credential{}, nil), nil
-	}
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
-	t.Cleanup(func() {
-		environmentVariableBackendForCommand = previousBackend
-		passwordVaultForCommand = previousVault
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.backendForCommand = func(*cobra.Command) (*api.Client, error) {
+			return api.New("https://api.example.test", config.Credential{}, nil), nil
+		}
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
 	})
 
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	var preview bytes.Buffer
 	previewCommand := newEnvironmentTestCommand(strings.NewReader(""), &preview)
+	previewCommand.SetContext(ctx)
 	previewCommand.Flags().String("config", configPath, "")
 	previewCommand.Flags().String("confirm", "", "")
 	if err := unsetEnvironmentVariable(previewCommand, "", "API_MODE"); err == nil || err.(exitCodeError).code != 2 {
@@ -360,6 +351,7 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 	}
 	var output bytes.Buffer
 	command := newEnvironmentTestCommand(strings.NewReader(""), &output)
+	command.SetContext(ctx)
 	command.Flags().String("config", configPath, "")
 	command.Flags().String("confirm", "", "")
 	if err := command.Flags().Set("confirm", previewConfirmationCode(t, preview.String())); err != nil {
@@ -394,20 +386,17 @@ func TestEnvironmentVariableListCommandReportsNamesWithoutValues(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	previousBackend := environmentVariableBackendForCommand
-	previousVault := passwordVaultForCommand
-	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New("https://api.example.test", config.Credential{}, nil), nil
-	}
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
-	t.Cleanup(func() {
-		environmentVariableBackendForCommand = previousBackend
-		passwordVaultForCommand = previousVault
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.backendForCommand = func(*cobra.Command) (*api.Client, error) {
+			return api.New("https://api.example.test", config.Credential{}, nil), nil
+		}
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
 	})
 	var output bytes.Buffer
 	command := newEnvironmentTestCommand(strings.NewReader(""), &output)
+	command.SetContext(ctx)
 	if err := listEnvironmentVariablesForScope(command, "", "", true); err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +435,7 @@ func TestEnvironmentVariableScopePickerUsesGlobalScopeAndDevices(t *testing.T) {
 }
 
 func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *testing.T) {
-	grantErr := safeEnvironmentVariableCommandError(environmentmanager.ErrVaultTeamGrantRequired)
+	grantErr := safeEnvironmentVariableCommandError(t.Context(), environmentmanager.ErrVaultTeamGrantRequired)
 	if !strings.Contains(grantErr.Error(), "pb env grants sync") || strings.Contains(grantErr.Error(), "locked") {
 		t.Fatalf("missing team grant recovery: %v", grantErr)
 	}
@@ -459,7 +448,7 @@ func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *t
 		{code: "key_authorization_required", want: "pb env grants sync"},
 		{code: "forbidden", want: "do not have write access"},
 	} {
-		err := safeEnvironmentVariableCommandError(&api.APIError{Code: test.code, Message: "must not escape"})
+		err := safeEnvironmentVariableCommandError(t.Context(), &api.APIError{Code: test.code, Message: "must not escape"})
 		if err == nil || !strings.Contains(err.Error(), test.want) || strings.Contains(err.Error(), "manager") || strings.Contains(err.Error(), "authority") {
 			t.Fatalf("code=%s error=%v", test.code, err)
 		}
@@ -467,13 +456,15 @@ func TestSafeEnvironmentVariableCommandErrorUsesCurrentVaultRecoveryActions(t *t
 }
 
 func TestEnvironmentVariableTargetRejectsClientMachineLocally(t *testing.T) {
-	previous := environmentVariableResolveMachine
-	environmentVariableResolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
-		return api.UserMachine{ID: "unconfigured-machine", Alias: "unconfigured-machine"}, nil
-	}
-	defer func() { environmentVariableResolveMachine = previous }()
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.resolveMachine = func(context.Context, *api.Client, string) (api.UserMachine, error) {
+			return api.UserMachine{ID: "unconfigured-machine", Alias: "unconfigured-machine"}, nil
+		}
+	})
+	command := newEnvironmentTestCommand(strings.NewReader(""), io.Discard)
+	command.SetContext(ctx)
 
-	target, err := environmentVariableTargetForCommand(newEnvironmentTestCommand(strings.NewReader(""), io.Discard), nil, "client")
+	target, err := environmentVariableTargetForCommand(command, nil, "client")
 	if err == nil || !strings.Contains(err.Error(), "disabled on this machine") || target.machineID != "" {
 		t.Fatalf("target=%+v err=%v", target, err)
 	}
@@ -498,7 +489,7 @@ func TestENVSafeFailureKeepsRecoveryAndCauseInRealFormatter(t *testing.T) {
 		{&api.APIError{Status: 403, Code: "team_entitlement_required", Message: "PRIVATE_PROVIDER_VALUE"}, "Team Billing"},
 		{&api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}, "retry"},
 	} {
-		err := safeEnvironmentVariableCommandError(scenario.cause)
+		err := safeEnvironmentVariableCommandError(t.Context(), scenario.cause)
 		if !errors.Is(err, scenario.cause) {
 			t.Fatal("ENV recovery erased the typed cause")
 		}
@@ -520,18 +511,18 @@ func TestVaultScopeMachineOverrideUsesPrivateActiveWorkspace(t *testing.T) {
 	if err := client.SetWorkspace("team-one"); err != nil {
 		t.Fatal(err)
 	}
-	previous := environmentVariableResolveMachine
-	defer func() { environmentVariableResolveMachine = previous }()
 	for _, owned := range []bool{true, false} {
-		environmentVariableResolveMachine = func(_ context.Context, scoped *api.Client, requested string) (api.UserMachine, error) {
-			if scoped.Workspace() != "personal" || requested != "machine_1" {
-				t.Fatal("machine lookup did not use owner-only Personal authorization")
+		command.SetContext(withEnvDependencies(t.Context(), func(d *envDependencies) {
+			d.resolveMachine = func(_ context.Context, scoped *api.Client, requested string) (api.UserMachine, error) {
+				if scoped.Workspace() != "personal" || requested != "machine_1" {
+					t.Fatal("machine lookup did not use owner-only Personal authorization")
+				}
+				if !owned {
+					return api.UserMachine{}, &api.APIError{Status: 403, Code: "forbidden"}
+				}
+				return api.UserMachine{ID: "machine_1", Alias: "owned", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}, nil
 			}
-			if !owned {
-				return api.UserMachine{}, &api.APIError{Status: 403, Code: "forbidden"}
-			}
-			return api.UserMachine{ID: "machine_1", Alias: "owned", Capabilities: api.MachineCapabilities{EnvironmentInjection: api.MachineCapability{Configured: true}}}, nil
-		}
+		}))
 		target, err := vaultScopeTargetForCommand(command, client, "account_1", "", "machine_1")
 		if owned && (err != nil || target.kind != "personal" || target.owner != "account_1" || target.machine != "machine_1" || !strings.Contains(target.label, "team-one")) {
 			t.Fatalf("Personal override target=%+v error=%v", target, err)
@@ -551,7 +542,7 @@ func TestVaultScopeMachineOverrideUsesPrivateActiveWorkspace(t *testing.T) {
 
 func TestENVSourceConflictRecoveryKeepsExactMachineOutcome(t *testing.T) {
 	cause := &environmentmanager.ScopeRefreshConflict{Cause: &api.APIError{Status: 409, Code: "version_conflict", Message: "PRIVATE_PROVIDER_VALUE"}}
-	err := safeEnvironmentVariableCommandError(errors.Join(cause, nil))
+	err := safeEnvironmentVariableCommandError(t.Context(), errors.Join(cause, nil))
 	result := classifyCLIJSONError(err)
 	if result.Code != "env_source_conflict" || result.StateChanged != false || result.OutcomeUncertain || !strings.Contains(result.Message, "submit the intended edit again") || strings.Contains(result.Message, "PRIVATE") {
 		t.Fatalf("conflict result lost: %#v", result)
@@ -647,14 +638,14 @@ func TestEnvironmentPermissionDeniedFromRealClientKeepsRecoveryText(t *testing.T
 	if !errors.As(err, &rejected) || rejected.Code != "forbidden" {
 		t.Fatalf("real client error: %v", err)
 	}
-	message := safeEnvironmentVariableCommandError(err).Error()
+	message := safeEnvironmentVariableCommandError(t.Context(), err).Error()
 	if !strings.Contains(message, "do not have write access") || strings.Contains(message, "secret detail") {
 		t.Fatalf("message=%q", message)
 	}
 }
 
 func TestRotationCancelWithNothingToCancelIsExplained(t *testing.T) {
-	err := safeEnvironmentVariableCommandError(environmentmanager.ErrNoRotationInProgress)
+	err := safeEnvironmentVariableCommandError(t.Context(), environmentmanager.ErrNoRotationInProgress)
 	if !strings.Contains(err.Error(), "No personal ENV key rotation is in progress") || !strings.Contains(err.Error(), "nothing was changed") || strings.Contains(err.Error(), "pending") {
 		t.Fatalf("message=%q", err.Error())
 	}

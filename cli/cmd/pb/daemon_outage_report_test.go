@@ -9,8 +9,6 @@ import (
 )
 
 func TestDaemonReportsControlPlaneUnavailableOnlyForItsOwnOutageHealth(t *testing.T) {
-	previous := loadWarmMachineSnapshot
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
 	cases := []struct {
 		name     string
 		snapshot localapi.Snapshot
@@ -23,8 +21,10 @@ func TestDaemonReportsControlPlaneUnavailableOnlyForItsOwnOutageHealth(t *testin
 		{"no daemon", localapi.Snapshot{}, errors.New("socket"), false},
 	}
 	for _, c := range cases {
-		loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return c.snapshot, c.err }
-		if got := daemonReportsControlPlaneUnavailable(context.Background()); got != c.want {
+		ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+			d.warmSnapshot = func(context.Context) (localapi.Snapshot, error) { return c.snapshot, c.err }
+		})
+		if got := daemonReportsControlPlaneUnavailable(ctx); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -33,14 +33,12 @@ func TestDaemonReportsControlPlaneUnavailableOnlyForItsOwnOutageHealth(t *testin
 // During an outage exec resolves a machine the snapshot last saw offline (a restart looks like that) instead of
 // asking the server for 30 s; outside an outage it still asks the server.
 func TestWarmUserMachineTakesAnOfflineMachineOnlyDuringAnOutage(t *testing.T) {
-	previous := loadWarmMachineSnapshot
-	t.Cleanup(func() { loadWarmMachineSnapshot = previous })
 	snapshot := localapi.Snapshot{Machines: []localapi.MachineStatus{{ID: "mch_a", Alias: "a", Eligible: true, RuntimeState: "offline", Generation: 3}}}
-	loadWarmMachineSnapshot = func(context.Context) (localapi.Snapshot, error) { return snapshot, nil }
-	if _, ok := warmUserMachine(context.Background(), "a", false); ok {
+	ctx := withDaemonSnapshot(t, snapshot)
+	if _, ok := warmUserMachine(ctx, "a", false); ok {
 		t.Fatal("an offline machine was taken from the snapshot without an outage")
 	}
-	got, ok := warmUserMachine(context.Background(), "a", true)
+	got, ok := warmUserMachine(ctx, "a", true)
 	if !ok || got.ID != "mch_a" || got.InstallationGeneration != 3 {
 		t.Fatalf("an offline machine was not taken from the snapshot during an outage: %+v %v", got, ok)
 	}

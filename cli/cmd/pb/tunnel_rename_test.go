@@ -15,7 +15,7 @@ func TestTunnelRenameUsesCurrentResourceAndPreservesIdentity(t *testing.T) {
 	for _, stale := range []bool{false, true} {
 		t.Run(map[bool]string{false: "rename", true: "stale write"}[stale], func(t *testing.T) {
 			writes := 0
-			withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+			deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				current := validCommandTunnel()
 				if r.URL.Path != "/v1/tunnels/tun_1" {
 					t.Fatalf("unexpected resource: %s", r.URL.Path)
@@ -43,7 +43,7 @@ func TestTunnelRenameUsesCurrentResourceAndPreservesIdentity(t *testing.T) {
 					Tunnel: current, Operation: validCommandOperation("tunnel", current.ID), Changed: true,
 				}})
 			})
-			out, _, err := executeAdversarialTunnelCommand(t, "rename", "tun_1", "new-name", "--json")
+			out, _, err := executeAdversarialTunnelCommand(t, deps, "rename", "tun_1", "new-name", "--json")
 			if writes != 1 {
 				t.Fatalf("rename writes=%d error=%v", writes, err)
 			}
@@ -66,7 +66,7 @@ func TestTunnelRenameUsesCurrentResourceAndPreservesIdentity(t *testing.T) {
 // Every human view shows the address next to the name, and a rename says it is unchanged.
 func TestTunnelViewsShowThePublicAddressNextToTheName(t *testing.T) {
 	address := validCommandTunnel().StableEndpoint
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		current := validCommandTunnel()
 		switch {
 		case r.Method == http.MethodPatch:
@@ -84,19 +84,19 @@ func TestTunnelViewsShowThePublicAddressNextToTheName(t *testing.T) {
 		"show":   {"show", "tun_1"},
 		"rename": {"rename", "tun_1", "new-name"},
 	} {
-		out, _, err := executeAdversarialTunnelCommand(t, args...)
+		out, _, err := executeAdversarialTunnelCommand(t, deps, args...)
 		if err != nil || !strings.Contains(out, address) {
 			t.Errorf("%s output lacks the tunnel address %q: %q (%v)", name, address, out, err)
 		}
 	}
-	out, _, _ := executeAdversarialTunnelCommand(t, "rename", "tun_1", "new-name")
+	out, _, _ := executeAdversarialTunnelCommand(t, deps, "rename", "tun_1", "new-name")
 	if !strings.Contains(out, "new-name") || !strings.Contains(out, "unchanged") {
 		t.Errorf("rename does not say the address is unchanged: %q", out)
 	}
 }
 
 func TestTunnelExtendPatchesOnlyTheExpiryFromNow(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		current := validCommandTunnel()
 		if r.Method == http.MethodGet {
 			w.Header().Set("ETag", current.ETag)
@@ -113,10 +113,10 @@ func TestTunnelExtendPatchesOnlyTheExpiryFromNow(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: current, Operation: validCommandOperation("tunnel", current.ID), Changed: true}})
 	})
-	if out, _, err := executeAdversarialTunnelCommand(t, "extend", "tun_1", "--duration", "24h"); err != nil || !strings.Contains(out, "now expires") {
+	if out, _, err := executeAdversarialTunnelCommand(t, deps, "extend", "tun_1", "--duration", "24h"); err != nil || !strings.Contains(out, "now expires") {
 		t.Fatalf("extend: output=%q error=%v", out, err)
 	}
-	if _, _, err := executeAdversarialTunnelCommand(t, "extend", "tun_1"); err == nil {
+	if _, _, err := executeAdversarialTunnelCommand(t, deps, "extend", "tun_1"); err == nil {
 		t.Fatal("extend without --duration must be refused")
 	}
 }

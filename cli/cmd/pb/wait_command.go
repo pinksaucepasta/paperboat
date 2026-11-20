@@ -34,7 +34,7 @@ func waitCommand() *cobra.Command {
 			if timeout <= 0 || timeout > 24*time.Hour {
 				return invocationError(errors.New("--timeout must be greater than zero and no more than 24h"))
 			}
-			client, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
+			client, snapshot, err := localDaemonSnapshot(command, installDependenciesOf(command.Context()).installService)
 			if err != nil {
 				return fmt.Errorf("start local Paperboat daemon: %w", err)
 			}
@@ -225,6 +225,11 @@ func localDaemonServiceArguments(goos, configPath, server string) (string, strin
 type localDaemonConnectError struct {
 	socket string
 	cause  error
+	goos   string // the platform it was observed on: only Windows names a repair
+}
+
+func newLocalDaemonConnectError(ctx context.Context, socket string, cause error) localDaemonConnectError {
+	return localDaemonConnectError{socket: socket, cause: cause, goos: hostDependenciesOf(ctx).goos}
 }
 
 func (e localDaemonConnectError) Error() string {
@@ -241,10 +246,10 @@ const (
 
 // localDaemonStopped reports whether err is a Windows command that could not reach the local service. A service
 // that is not installed keeps its own message (pb service install).
-func localDaemonStopped(goos string, err error) bool {
-	return goos == "windows" && boundedErrorWalk(err, func(e error) bool {
-		_, stopped := e.(localDaemonConnectError)
-		return stopped
+func localDaemonStopped(err error) bool {
+	return boundedErrorWalk(err, func(e error) bool {
+		connect, stopped := e.(localDaemonConnectError)
+		return stopped && connect.goos == "windows"
 	}) && !boundedErrorWalk(err, func(e error) bool { return e == localdaemon.ErrServiceNotInstalled })
 }
 
@@ -261,7 +266,7 @@ func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 		}
 		if contextErr := ctx.Err(); contextErr != nil {
 			if lastSocketErr == nil && localDaemonSocketUnavailable(err) {
-				lastSocketErr = localDaemonConnectError{socket: socketPath, cause: err}
+				lastSocketErr = newLocalDaemonConnectError(ctx, socketPath, err)
 			}
 			if lastSocketErr != nil {
 				return localapi.Snapshot{}, errors.Join(lastSocketErr, contextErr)
@@ -271,7 +276,7 @@ func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 		if !localDaemonSocketUnavailable(err) {
 			return localapi.Snapshot{}, err
 		}
-		lastSocketErr = localDaemonConnectError{socket: socketPath, cause: err}
+		lastSocketErr = newLocalDaemonConnectError(ctx, socketPath, err)
 		select {
 		case <-ctx.Done():
 			return localapi.Snapshot{}, errors.Join(lastSocketErr, ctx.Err())
@@ -299,14 +304,14 @@ func recoverLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		if localDaemonSocketUnavailable(err) {
-			err = localDaemonConnectError{socket: socketPath, cause: err}
+			err = newLocalDaemonConnectError(ctx, socketPath, err)
 		}
 		return localapi.Snapshot{}, errors.Join(err, contextErr)
 	}
 	if !localDaemonSocketUnavailable(err) {
 		return localapi.Snapshot{}, err
 	}
-	lastSocketErr := localDaemonConnectError{socket: socketPath, cause: err}
+	lastSocketErr := newLocalDaemonConnectError(ctx, socketPath, err)
 	release, err := acquireLocalDaemonLaunch(ctx)
 	if err != nil {
 		return localapi.Snapshot{}, errors.Join(lastSocketErr, err)
@@ -323,7 +328,7 @@ func recoverLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 	if !localDaemonSocketUnavailable(err) {
 		return localapi.Snapshot{}, err
 	}
-	lastSocketErr = localDaemonConnectError{socket: socketPath, cause: err}
+	lastSocketErr = newLocalDaemonConnectError(ctx, socketPath, err)
 	if err := launch(ctx); err != nil {
 		return localapi.Snapshot{}, errors.Join(lastSocketErr, err)
 	}
@@ -352,7 +357,7 @@ func startLocalDaemonAndWaitWithin(ctx context.Context, cfg *config.Config, inst
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return nil, localapi.Snapshot{}, err
 	}
@@ -380,7 +385,7 @@ func ensureLocalDaemonService(ctx context.Context, cfg *config.Config) error {
 	if err != nil || !matches {
 		return err
 	}
-	_, _, err = startLocalDaemonAndWait(ctx, cfg, installLocalDaemonService)
+	_, _, err = startLocalDaemonAndWait(ctx, cfg, installDependenciesOf(ctx).installService)
 	return err
 }
 
@@ -395,7 +400,7 @@ func requireLocalDaemonService(ctx context.Context, cfg *config.Config) error {
 	if !matches {
 		return errors.New("this machine is not set up for the active Paperboat server; run `pb setup`")
 	}
-	_, _, err = startLocalDaemonAndWait(ctx, cfg, installLocalDaemonService)
+	_, _, err = startLocalDaemonAndWait(ctx, cfg, installDependenciesOf(ctx).installService)
 	return err
 }
 
@@ -403,7 +408,7 @@ func localDaemonSnapshot(command *cobra.Command, install localDaemonServiceInsta
 	if command == nil || install == nil {
 		return nil, localapi.Snapshot{}, errors.New("invalid local daemon client configuration")
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(command.Context()).daemonPaths()
 	if err != nil {
 		return nil, localapi.Snapshot{}, err
 	}

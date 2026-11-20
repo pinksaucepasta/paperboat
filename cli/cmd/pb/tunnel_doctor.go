@@ -176,7 +176,7 @@ func runTunnelStatus(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	tunnelID, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
+	tunnelID, err := tunnelDependenciesOf(ctx).resolve(ctx, client, args[0])
 	if err != nil {
 		return err
 	}
@@ -279,7 +279,7 @@ func runTunnelDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	tunnelID, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
+	tunnelID, err := tunnelDependenciesOf(ctx).resolve(ctx, client, args[0])
 	if err != nil {
 		return err
 	}
@@ -409,7 +409,7 @@ func buildTunnelDoctorBundle(ctx context.Context, health api.TunnelHealth, maxim
 	)
 	loadHostDiagnostics := func(collectorCtx context.Context) (tunnelHostDiagnostics, error) {
 		if !hostDiagnosticsDone {
-			hostDiagnostics, hostDiagnosticsErr = tunnelDoctorHostDiagnosticsForCommand(collectorCtx)
+			hostDiagnostics, hostDiagnosticsErr = tunnelDependenciesOf(collectorCtx).hostDiagnostics(collectorCtx)
 			hostDiagnosticsDone = true
 		}
 		return hostDiagnostics, hostDiagnosticsErr
@@ -433,7 +433,7 @@ func buildTunnelDoctorBundle(ctx context.Context, health api.TunnelHealth, maxim
 			return []supportbundle.CollectedItem{{Path: "diagnostics/host-runtime.json", Kind: supportbundle.ItemKindText, Data: append([]byte(nil), body...)}}, nil
 		}},
 		supportbundle.CollectorFunc{CollectorName: "local_evidence", CollectFunc: func(collectorCtx context.Context) ([]supportbundle.CollectedItem, error) {
-			local, collectErr := tunnelDoctorLocalReportForCommand(collectorCtx)
+			local, collectErr := tunnelDependenciesOf(collectorCtx).localReport(collectorCtx)
 			if collectErr != nil {
 				return nil, collectErr
 			}
@@ -479,7 +479,7 @@ func buildTunnelDoctorBundle(ctx context.Context, health api.TunnelHealth, maxim
 func buildTunnelDoctorEvidenceWithHost(ctx context.Context, local localDoctorReport, tunnelHealth api.TunnelHealth, localDiagnostics *tunnelHostDiagnostics) tunnelDoctorEvidence {
 	dnsReady := false
 	if ctx != nil && ctx.Err() == nil {
-		dnsReady = tunnelDoctorDNSCheckForCommand(ctx)
+		dnsReady = tunnelDependenciesOf(ctx).dnsReady(ctx)
 	}
 	runtimeCheck := doctorRuntimeCheck(local.HostRuntime)
 	clockCheck := tunnelDoctorUnavailableCheck("clock_sanity", "A trusted server clock comparison is not exposed by the tunnel health contract.")

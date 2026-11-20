@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-var progressNames = strings.Fields(`worker_breakglass worker_machines worker_config_warnings worker_config_revocation worker_preview_leases worker_tunnel_expiry worker_team_retention worker_recipe_machines worker_transactional_mail worker_team_entitlements worker_team_billing worker_team_inbox worker_stale_nodes worker_edge_dns worker_diagnostic_uploads worker_certificates worker_platform_certificates worker_selfhost_ingress worker_account_deletion worker_peer_endpoints worker_audit_streams worker_team_identity worker_edge_sets worker_mint_withdrawals worker_machine_events worker_peer_policy worker_operational_health worker_workspace_domains worker_node_capacity worker_node_load worker_node_update_notices worker_fleet_snapshot worker_presence`)
+var progressNames = strings.Fields(`worker_breakglass worker_machines worker_config_warnings worker_config_revocation worker_preview_leases worker_tunnel_expiry worker_team_retention worker_recipe_machines worker_transactional_mail worker_team_entitlements worker_team_billing worker_team_inbox worker_stale_nodes worker_edge_dns worker_diagnostic_uploads worker_certificates worker_platform_certificates worker_selfhost_ingress worker_account_deletion worker_peer_endpoints worker_audit_streams worker_team_identity worker_edge_sets worker_mint_withdrawals worker_machine_events worker_peer_policy worker_operational_health worker_workspace_domains worker_node_capacity worker_node_load worker_node_update_notices worker_release_expiry_notices worker_fleet_snapshot worker_presence`)
+
+// maxProgressWorkers bounds the worker registry (and the metric labels it feeds); raise it with progressNames.
+const maxProgressWorkers = 48
 
 const (
 	ProgressUnknown = iota
@@ -77,7 +80,7 @@ func (p *Progress) Register(name string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, exists := p.entries[name]; !exists && len(p.entries) < 32 {
+	if _, exists := p.entries[name]; !exists && len(p.entries) < maxProgressWorkers {
 		p.entries[name] = &progressEntry{registered: p.now()}
 	}
 }

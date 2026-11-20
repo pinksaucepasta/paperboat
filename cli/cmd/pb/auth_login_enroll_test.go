@@ -17,8 +17,6 @@ func TestOtherProfileServesNamesOnlyAForeignConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := serviceProfile
-	t.Cleanup(func() { serviceProfile = previous })
 	for name, test := range map[string]struct {
 		existing string
 		err      error
@@ -29,8 +27,10 @@ func TestOtherProfileServesNamesOnlyAForeignConfig(t *testing.T) {
 		"unreadable":      {err: errors.New("unreadable")},
 		"another profile": {existing: filepath.Join(dir, "other", "config.json"), other: true},
 	} {
-		serviceProfile = func() (string, error) { return test.existing, test.err }
-		got := otherProfileServes(cfg)
+		ctx := withAuthDependencies(t.Context(), func(d *authDependencies) {
+			d.serviceProfile = func() (string, error) { return test.existing, test.err }
+		})
+		got := otherProfileServes(ctx, cfg)
 		if (got != nil) != test.other || got != nil && (got.Existing != test.existing || got.Requested != own) {
 			t.Errorf("%s: %+v", name, got)
 		}

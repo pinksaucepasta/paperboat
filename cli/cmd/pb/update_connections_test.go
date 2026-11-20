@@ -13,30 +13,32 @@ import (
 // F14-02 (X-36): an inbound `pb ssh` into this machine is carried by its carrier, not its daemon; the update check must
 // count it, or `pb update` cuts a session of another machine without a word.
 func TestOpenConnectionsForUpdateCountsInboundSSH(t *testing.T) {
-	prevDaemon, prevCarrier := readDaemonConnections, readCarrierSSH
-	t.Cleanup(func() { readDaemonConnections, readCarrierSSH = prevDaemon, prevCarrier })
-	idle := func(context.Context) (liveconnections.Counts, error) { return liveconnections.Counts{}, nil }
-	readDaemonConnections = idle
-	readCarrierSSH = func(context.Context) (int, error) { return 2, nil }
-	open, err := openConnectionsForUpdate(t.Context())
+	readDaemon := func(context.Context) (liveconnections.Counts, error) { return liveconnections.Counts{}, nil }
+	readCarrier := func(context.Context) (int, error) { return 2, nil }
+	open, err := readUpdateConnections(t.Context(), readDaemon, readCarrier)
 	if err != nil || open.SSH != 2 {
 		t.Fatalf("an inbound session was not counted: %+v %v", open, err)
 	}
-	readDaemonConnections = func(context.Context) (liveconnections.Counts, error) {
+	readDaemon = func(context.Context) (liveconnections.Counts, error) {
 		return liveconnections.Counts{SSH: 1, Forwards: 1}, nil
 	}
-	if open, _ = openConnectionsForUpdate(t.Context()); open.SSH != 3 || open.Forwards != 1 {
+	if open, _ = readUpdateConnections(t.Context(), readDaemon, readCarrier); open.SSH != 3 || open.Forwards != 1 {
 		t.Fatalf("both ends: %+v", open)
 	}
-	refusal := updateOpenConnectionsFromFile(t.Context())
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.openConnections = func(ctx context.Context) (liveconnections.Counts, error) {
+			return readUpdateConnections(ctx, readDaemon, readCarrier)
+		}
+	})
+	refusal := updateOpenConnectionsFromFile(ctx)
 	if refusal == nil {
 		t.Fatal("a manual update was not refused while sessions are open")
 	}
-	readCarrierSSH = func(context.Context) (int, error) { return 0, errors.New("carrier down") }
-	readDaemonConnections = func(context.Context) (liveconnections.Counts, error) {
+	readCarrier = func(context.Context) (int, error) { return 0, errors.New("carrier down") }
+	readDaemon = func(context.Context) (liveconnections.Counts, error) {
 		return liveconnections.Counts{}, errors.New("daemon down")
 	}
-	if open, err = openConnectionsForUpdate(t.Context()); err == nil || open.Total() != 0 {
+	if open, err = readUpdateConnections(t.Context(), readDaemon, readCarrier); err == nil || open.Total() != 0 {
 		t.Fatalf("both probes down must report unconfirmed: %+v %v", open, err)
 	}
 }

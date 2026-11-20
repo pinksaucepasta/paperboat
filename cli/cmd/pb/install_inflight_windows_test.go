@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,9 @@ import (
 	"time"
 )
 
-func stageInFlightHelper(t *testing.T, state string) string {
+// stageInFlightHelper returns the staged status path and a context whose uninstall root is the staged directory;
+// helperRunning is what the process query then answers.
+func stageInFlightHelper(t *testing.T, state string, helperRunning *bool) (string, context.Context) {
 	t.Helper()
 	root := t.TempDir()
 	directory := filepath.Join(root, strings.Repeat("ab", 16))
@@ -27,19 +30,18 @@ func stageInFlightHelper(t *testing.T, state string) string {
 	if err := writeProtectedWindowsUninstallJSON(statusPath, windowsUninstallStatus{Schema: windowsUninstallStatusSchema, State: state, UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	previousRoot := windowsUninstallRoot
-	windowsUninstallRoot = func() string { return root }
-	t.Cleanup(func() { windowsUninstallRoot = previousRoot })
-	return statusPath
+	ctx := withWindowsUninstallDependencies(t.Context(), func(d *windowsUninstallDependencies) {
+		d.root = func() string { return root }
+		d.helperIsRunning = func(string) (bool, error) { return *helperRunning, nil }
+	})
+	return statusPath, ctx
 }
 
 // pb install right after pb uninstall (the helper still removing) failed local_io inside its elevated step.
 func TestInstallRefusesWhileAnUninstallHelperIsStillRemoving(t *testing.T) {
-	statusPath := stageInFlightHelper(t, "removing")
-	previous := windowsHelperIsRunning
-	t.Cleanup(func() { windowsHelperIsRunning = previous })
-	windowsHelperIsRunning = func(string) (bool, error) { return true, nil }
-	err := windowsUninstallInFlight()
+	running := true
+	statusPath, ctx := stageInFlightHelper(t, "removing", &running)
+	err := windowsUninstallInFlight(ctx)
 	if err == nil {
 		t.Fatal("an install was allowed while the uninstall helper is removing")
 	}
@@ -48,13 +50,13 @@ func TestInstallRefusesWhileAnUninstallHelperIsStillRemoving(t *testing.T) {
 			t.Fatalf("the refusal lacks %q: %q", want, userFacingError(err))
 		}
 	}
-	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
-	if err := windowsUninstallInFlight(); err != nil {
+	running = false
+	if err := windowsUninstallInFlight(ctx); err != nil {
 		t.Fatalf("a helper that is gone blocked the install: %v", err)
 	}
-	completed := stageInFlightHelper(t, "completed")
-	windowsHelperIsRunning = func(string) (bool, error) { return true, nil }
-	if err := windowsUninstallInFlight(); err != nil {
+	running = true
+	completed, completedCtx := stageInFlightHelper(t, "completed", &running)
+	if err := windowsUninstallInFlight(completedCtx); err != nil {
 		t.Fatalf("a completed uninstall (%s) blocked the install: %v", completed, err)
 	}
 }

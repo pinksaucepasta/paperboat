@@ -234,30 +234,26 @@ func newCommandVaultFixture(t *testing.T) commandVaultFixture {
 	}
 }
 
-func installPasswordVaultCommandDependencies(t *testing.T, manager environmentmanager.PasswordVault, prompts map[string][][]byte) {
+func installPasswordVaultCommandDependencies(t *testing.T, manager environmentmanager.PasswordVault, prompts map[string][][]byte) context.Context {
 	t.Helper()
-	previousManager := passwordVaultForCommand
-	previousPrompt := passwordVaultPrompt
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return manager, nil
-	}
 	positions := make(map[string]int)
-	passwordVaultPrompt = func(_ *cobra.Command, title string) ([]byte, error) {
-		values := prompts[title]
-		position := positions[title]
-		if position >= len(values) {
-			return nil, fmt.Errorf("unexpected password prompt %q", title)
+	return withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return manager, nil
 		}
-		positions[title] = position + 1
-		return bytes.Clone(values[position]), nil
-	}
-	t.Cleanup(func() {
-		passwordVaultForCommand = previousManager
-		passwordVaultPrompt = previousPrompt
+		d.passwordPrompt = func(_ *cobra.Command, title string) ([]byte, error) {
+			values := prompts[title]
+			position := positions[title]
+			if position >= len(values) {
+				return nil, fmt.Errorf("unexpected password prompt %q", title)
+			}
+			positions[title] = position + 1
+			return bytes.Clone(values[position]), nil
+		}
 	})
 }
 
-func executePasswordVaultCommand(t *testing.T, args ...string) (string, string, error) {
+func executePasswordVaultCommand(t *testing.T, ctx context.Context, args ...string) (string, string, error) {
 	t.Helper()
 	root := environmentVariablesCobraCommand()
 	root.SetArgs(append([]string(nil), args...))
@@ -265,7 +261,7 @@ func executePasswordVaultCommand(t *testing.T, args ...string) (string, string, 
 	root.SetIn(strings.NewReader(""))
 	root.SetOut(&output)
 	root.SetErr(&errorsOutput)
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	return output.String(), errorsOutput.String(), err
 }
 
@@ -313,11 +309,11 @@ func TestPasswordVaultCommandSavesRecoveryBeforePublicationAndHidesCode(t *testi
 		publicationSawFile = mode == 0o600
 		return nil
 	}
-	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{
+	ctx := installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{
 		"Master password":         [][]byte{password},
 		"Confirm master password": [][]byte{password},
 	})
-	stdout, stderr, err := executePasswordVaultCommand(t, "init", "--recovery-file", path)
+	stdout, stderr, err := executePasswordVaultCommand(t, ctx, "init", "--recovery-file", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,11 +341,11 @@ func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t 
 	password := []byte("command master password")
 	defer clear(password)
 	fixture.control.failAfterCommit = true
-	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{
+	ctx := installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{
 		"Master password":         [][]byte{password},
 		"Confirm master password": [][]byte{password},
 	})
-	stdout, stderr, err := executePasswordVaultCommand(t, "init", "--recovery-file", path)
+	stdout, stderr, err := executePasswordVaultCommand(t, ctx, "init", "--recovery-file", path)
 	if err == nil || !strings.Contains(err.Error(), "retain the new recovery file") || !strings.Contains(err.Error(), "pb env resume") {
 		t.Fatalf("commit error=%v; want actionable custody/resume guidance", err)
 	}
@@ -374,7 +370,7 @@ func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t 
 	pending.Clear()
 	assertCommandVaultNoSecret(t, fixture.secrets, code)
 
-	stdout, stderr, err = executePasswordVaultCommand(t, "resume")
+	stdout, stderr, err = executePasswordVaultCommand(t, ctx, "resume")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,12 +430,12 @@ func TestPasswordVaultCommandBadRecoveryLeavesVaultCustodyUnchanged(t *testing.T
 		path := filepath.Join(t.TempDir(), "replacement-code.txt")
 		newPassword := []byte("replacement master password")
 		defer clear(newPassword)
-		installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{
+		ctx := installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{
 			"Recovery code":               [][]byte{badCode},
 			"New master password":         [][]byte{newPassword},
 			"Confirm new master password": [][]byte{newPassword},
 		})
-		stdout, stderr, commandErr := executePasswordVaultCommand(t, "recover", "--recovery-file", path)
+		stdout, stderr, commandErr := executePasswordVaultCommand(t, ctx, "recover", "--recovery-file", path)
 		if commandErr == nil || !strings.Contains(commandErr.Error(), "retain the new recovery file") || strings.Contains(stdout, string(badCode)) || strings.Contains(stderr, string(badCode)) || strings.Contains(commandErr.Error(), string(badCode)) {
 			t.Fatalf("bad code command result: err=%v stdout=%q stderr=%q", commandErr, stdout, stderr)
 		}
@@ -466,21 +462,17 @@ func TestPasswordVaultCommandBadRecoveryLeavesVaultCustodyUnchanged(t *testing.T
 
 func TestPasswordVaultResetRequiresExactConfirmationBeforePrompt(t *testing.T) {
 	fixture := newCommandVaultFixture(t)
-	previousManager := passwordVaultForCommand
-	previousPrompt := passwordVaultPrompt
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
 	prompted := false
-	passwordVaultPrompt = func(*cobra.Command, string) ([]byte, error) {
-		prompted = true
-		return nil, errors.New("unexpected password prompt")
-	}
-	t.Cleanup(func() {
-		passwordVaultForCommand = previousManager
-		passwordVaultPrompt = previousPrompt
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
+		d.passwordPrompt = func(*cobra.Command, string) ([]byte, error) {
+			prompted = true
+			return nil, errors.New("unexpected password prompt")
+		}
 	})
-	_, _, err := executePasswordVaultCommand(t, "reset", "--confirm", "RESET ENV wrong-account")
+	_, _, err := executePasswordVaultCommand(t, ctx, "reset", "--confirm", "RESET ENV wrong-account")
 	if err == nil || !strings.Contains(err.Error(), "RESET ENV <account_id>") {
 		t.Fatalf("reset confirmation error=%v", err)
 	}
@@ -500,12 +492,12 @@ func TestPasswordVaultRemoveDeletesOnlyLocalCustodyAfterTypedConfirmation(t *tes
 		t.Fatal(err)
 	}
 	remoteBefore := fixture.control.state
-	previousManager := passwordVaultForCommand
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
-	t.Cleanup(func() { passwordVaultForCommand = previousManager })
-	if _, _, err := executePasswordVaultCommand(t, "remove", "--confirm", "REMOVE LOCAL ENV wrong-account"); err == nil {
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
+	})
+	if _, _, err := executePasswordVaultCommand(t, ctx, "remove", "--confirm", "REMOVE LOCAL ENV wrong-account"); err == nil {
 		t.Fatal("wrong local-custody confirmation unexpectedly succeeded")
 	}
 	local, err := fixture.store.LoadPasswordVault(commandVaultIssuer, commandVaultAccount)
@@ -513,7 +505,7 @@ func TestPasswordVaultRemoveDeletesOnlyLocalCustodyAfterTypedConfirmation(t *tes
 		t.Fatalf("wrong confirmation changed local custody: %v", err)
 	}
 	local.Clear()
-	stdout, _, err := executePasswordVaultCommand(t, "remove", "--confirm", "REMOVE LOCAL ENV "+commandVaultAccount)
+	stdout, _, err := executePasswordVaultCommand(t, ctx, "remove", "--confirm", "REMOVE LOCAL ENV "+commandVaultAccount)
 	if err != nil || !strings.Contains(stdout, "cloud personal and team ciphertext was not changed") {
 		t.Fatalf("remove output=%q err=%v", stdout, err)
 	}
@@ -527,12 +519,12 @@ func TestPasswordVaultRemoveDeletesOnlyLocalCustodyAfterTypedConfirmation(t *tes
 
 func TestPersonalRotationCancelRequiresAccountBoundConfirmation(t *testing.T) {
 	fixture := newCommandVaultFixture(t)
-	previousManager := passwordVaultForCommand
-	passwordVaultForCommand = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
-		return fixture.manager, nil
-	}
-	t.Cleanup(func() { passwordVaultForCommand = previousManager })
-	_, _, err := executePasswordVaultCommand(t, "rotate", "cancel", "--confirm", "CANCEL ENV ROTATE other-account")
+	ctx := withEnvDependencies(t.Context(), func(d *envDependencies) {
+		d.passwordVault = func(*cobra.Command) (environmentmanager.PasswordVault, error) {
+			return fixture.manager, nil
+		}
+	})
+	_, _, err := executePasswordVaultCommand(t, ctx, "rotate", "cancel", "--confirm", "CANCEL ENV ROTATE other-account")
 	if err == nil || !errors.Is(err, errUsage) || err.Error() != "The command arguments are invalid. Run `pb COMMAND --help` and retry." || strings.Contains(err.Error(), "other-account") {
 		t.Fatalf("rotation cancel confirmation error=%v", err)
 	}
@@ -554,14 +546,14 @@ func TestPasswordVaultUnlockRefreshesRecipientsAndKeepsPendingRecovery(t *testin
 	if err := fixture.manager.Store.LockPasswordVault(fixture.manager.Issuer, fixture.manager.AccountID); err != nil {
 		t.Fatal(err)
 	}
-	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{"Master password": {password}})
-	stdout, stderr, err := executePasswordVaultCommand(t, "unlock")
+	ctx := installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{"Master password": {password}})
+	stdout, stderr, err := executePasswordVaultCommand(t, ctx, "unlock")
 	if err != nil || fixture.control.hostRefreshes != 1 || !strings.Contains(stdout, "completed") {
 		t.Fatalf("refreshes=%d err=%v stdout=%q stderr=%q", fixture.control.hostRefreshes, err, stdout, stderr)
 	}
 	private := errors.New("PRIVATE_REFRESH_TRANSPORT")
 	fixture.control.hostRefreshError = private
-	_, _, err = executePasswordVaultCommand(t, "resume")
+	_, _, err = executePasswordVaultCommand(t, ctx, "resume")
 	var pending *envHostRefreshFailure
 	if !errors.As(err, &pending) || !errors.Is(err, private) || fixture.control.hostRefreshes != 2 {
 		t.Fatal("resume did not retain recipient refresh failure")
@@ -572,7 +564,7 @@ func TestPasswordVaultUnlockRefreshesRecipientsAndKeepsPendingRecovery(t *testin
 		t.Fatalf("unsafe pending refresh=%#v", result)
 	}
 	fixture.control.hostRefreshError = nil
-	if _, _, err = executePasswordVaultCommand(t, "resume"); err != nil || fixture.control.hostRefreshes != 3 {
+	if _, _, err = executePasswordVaultCommand(t, ctx, "resume"); err != nil || fixture.control.hostRefreshes != 3 {
 		t.Fatal("recipient refresh did not recover")
 	}
 }

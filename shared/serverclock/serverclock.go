@@ -18,6 +18,14 @@ import (
 // noise, and the server's proof window absorbs them.
 const Threshold = time.Minute
 
+// Skewed reports whether a response's Date header is at least Threshold away from local, the machine's own clock
+// (not Now: that one is already corrected by the offset this very answer teaches). A refusal that carries such a Date
+// may only mean the proof was signed with a wrong clock.
+func Skewed(response *http.Response, local time.Time) bool {
+	server, err := http.ParseTime(response.Header.Get("Date"))
+	return err == nil && server.Sub(local).Abs() >= Threshold
+}
+
 // maxRoundTrip bounds the request used to measure: a slower one cannot place the server's time.
 const maxRoundTrip = 10 * time.Second
 

@@ -37,15 +37,9 @@ var (
 // a production carrier yet.
 type previewCarrierFactory func(context.Context, preview.LeaseTarget, string, string) (preview.Carrier, error)
 
-var newPreviewCarrier previewCarrierFactory = newProductionPreviewCarrier
-
-var previewClientForCommand = func(command *cobra.Command) (*api.Client, error) {
+func productionPreviewClient(command *cobra.Command) (*api.Client, error) {
 	return backendClient(actionContext(command, nil))
 }
-
-var previewMachineID = configuredMachineID
-
-var previewOwnerSessionClientForCommand = newProductionPreviewOwnerSessionClient
 
 type previewFailureError struct {
 	message string

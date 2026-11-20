@@ -415,7 +415,7 @@ func TestReadLocalDaemonSnapshotIsReadOnly(t *testing.T) {
 		t.Setenv("XDG_RUNTIME_DIR", runtimeRoot)
 		t.Setenv("TMPDIR", runtimeRoot)
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,14 +438,14 @@ func TestReadLocalDaemonSnapshotIsReadOnly(t *testing.T) {
 	go func() { done <- server.Run(serverCtx) }()
 	waitForCommandSocket(t, paths.SocketPath)
 
-	previousInstaller := installLocalDaemonService
 	installCalls := 0
-	installLocalDaemonService = func(context.Context, string, string, string) error {
-		installCalls++
-		return errors.New("unexpected daemon installation")
-	}
-	t.Cleanup(func() { installLocalDaemonService = previousInstaller })
-	snapshot, err := readLocalDaemonSnapshot(context.Background())
+	probeCtx := withInstallDependencies(t.Context(), func(d *installDependencies) {
+		d.installService = func(context.Context, string, string, string) error {
+			installCalls++
+			return errors.New("unexpected daemon installation")
+		}
+	})
+	snapshot, err := readLocalDaemonSnapshot(probeCtx)
 	if err != nil || snapshot.DaemonVersion != "daemon-build" || snapshot.DaemonState != "ready" {
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
@@ -482,43 +482,19 @@ func TestSignedUpdateAvailableNeverOffersDowngrade(t *testing.T) {
 	}
 }
 
-func TestUpdateCheckRequiresManagedUpdater(t *testing.T) {
-	oldVersion := buildinfo.Version
-	oldSocket := updateControlSocketForCommand
-	defer func() {
-		buildinfo.Version = oldVersion
-		updateControlSocketForCommand = oldSocket
-	}()
-	buildinfo.Version = "2026.08.18.1"
-	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
-	command, _, err := newRootCommand().Find([]string{"update", "check"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	command.SetContext(context.Background())
-	command.SetOut(&output)
-	command.SetErr(&output)
-	if err := actionUpdateCheck(command, nil); err == nil {
-		t.Fatalf("expected managed updater error, output=%q", output.String())
-	}
-}
-
 func TestUpdateRequiresManagedUpdater(t *testing.T) {
 	oldVersion := buildinfo.Version
-	oldSocket := updateControlSocketForCommand
-	defer func() {
-		buildinfo.Version = oldVersion
-		updateControlSocketForCommand = oldSocket
-	}()
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
 	buildinfo.Version = "2026.08.18.1"
-	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
+	})
 	command, _, err := newRootCommand().Find([]string{"update"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	command.SetContext(context.Background())
+	command.SetContext(ctx)
 	command.SetOut(&output)
 	command.SetErr(&output)
 	if err := actionUpdate(command, nil); err == nil {
@@ -869,12 +845,12 @@ func TestUpdateFromAFileThatCouldNotBeInspectedKeepsItsLocalFailure(t *testing.T
 	}
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
-	previous := inspectUpdateCandidate
-	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
-		return installsource.Source{}, fs.ErrPermission
-	}
-	defer func() { inspectUpdateCandidate = previous }()
-	err = installStagedUpdateSource(command, context.Background(), notABuild, false)
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.inspect = func(context.Context, string) (installsource.Source, error) {
+			return installsource.Source{}, fs.ErrPermission
+		}
+	})
+	err = installStagedUpdateSource(command, ctx, notABuild, false)
 	if result := classifyCLIJSONError(err); !errors.Is(err, fs.ErrPermission) || result.Code == "update_source_unreadable" || result.Category != "local_io" {
 		t.Fatalf("a permission failure was classified %+v (%v)", result, err)
 	}
@@ -891,12 +867,12 @@ func TestUpdateFromAFileThatIsNotAPaperboatBuildIsRefusedClearly(t *testing.T) {
 	}
 	command.SetOut(&bytes.Buffer{})
 	command.SetErr(&bytes.Buffer{})
-	previous := inspectUpdateCandidate
-	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
-		return installsource.Source{}, installsource.ErrInput
-	}
-	defer func() { inspectUpdateCandidate = previous }()
-	err = installStagedUpdateSource(command, context.Background(), notABuild, false)
+	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.inspect = func(context.Context, string) (installsource.Source, error) {
+			return installsource.Source{}, installsource.ErrInput
+		}
+	})
+	err = installStagedUpdateSource(command, ctx, notABuild, false)
 	result := classifyCLIJSONError(err)
 	if result.Code != "update_source_unreadable" || !strings.Contains(result.Message, "not a Paperboat executable") || strings.Contains(result.Message, "exec format") {
 		t.Fatalf("a file that is not a build was classified %+v (%v)", result, err)

@@ -35,18 +35,18 @@ func TestTunnelIPRulesCommandReplacesOnlyTheGivenList(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": stored})
 	}))
 	defer server.Close()
-	oldClient, oldResolve := tunnelClientForCommand, resolveTunnelSelectorForCommand
-	t.Cleanup(func() { tunnelClientForCommand, resolveTunnelSelectorForCommand = oldClient, oldResolve })
-	tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) {
-		return api.New(server.URL, config.Credential{AccessToken: "client-session"}, server.Client()), nil
-	}
-	resolveTunnelSelectorForCommand = func(context.Context, *api.Client, string) (string, error) { return "tun_1", nil }
+	ctx := withTunnelDependencies(t.Context(), func(deps *tunnelDependencies) {
+		deps.client = func(*cobra.Command) (*api.Client, error) {
+			return api.New(server.URL, config.Credential{AccessToken: "client-session"}, server.Client()), nil
+		}
+		deps.resolve = func(context.Context, *api.Client, string) (string, error) { return "tun_1", nil }
+	})
 	run := func(args ...string) (string, error) {
 		command := ipRulesCommand("tunnel")
 		var out bytes.Buffer
 		command.SetOut(&out)
 		command.SetArgs(args)
-		command.SetContext(context.Background())
+		command.SetContext(ctx)
 		err := command.Execute()
 		return out.String(), err
 	}

@@ -46,7 +46,7 @@ func TestENVDecodedIntegrityKeepsHelpfulPresentationAndOneFaultOwner(t *testing.
 	if !errors.As(err, &corrupt) || !errors.Is(err, environmentmanager.ErrIntegrity) || !onlyEnvironmentIntegrityFailure(err) {
 		t.Fatal("actual API decoder cause lost its proven verification ownership")
 	}
-	presented := safeEnvironmentVariableCommandError(err)
+	presented := safeEnvironmentVariableCommandError(t.Context(), err)
 	if presented.Error() != "encrypted ENV vault verification failed" || strings.Contains(presented.Error(), canary) || !errors.As(presented, &corrupt) || classifyCommandFailure(presented).kind != commandUnexpected {
 		t.Fatal("verification presentation lost cause/privacy or suppressed unexpected capture")
 	}
@@ -58,7 +58,7 @@ func TestENVDecodedIntegrityKeepsHelpfulPresentationAndOneFaultOwner(t *testing.
 		t.Fatal("final command did not own one correlated fault")
 	}
 	mixed := errors.Join(err, syscall.EIO)
-	if onlyEnvironmentIntegrityFailure(mixed) || safeEnvironmentVariableCommandError(mixed).Error() != "environment variable update failed" || !errors.Is(mixed, syscall.EIO) {
+	if onlyEnvironmentIntegrityFailure(mixed) || safeEnvironmentVariableCommandError(t.Context(), mixed).Error() != "environment variable update failed" || !errors.Is(mixed, syscall.EIO) {
 		t.Fatal("decoder ownership concealed an independent operational fault")
 	}
 }

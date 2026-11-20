@@ -125,7 +125,7 @@ func validCommandDomain(id, hostname string) api.TunnelDomain {
 
 func TestTunnelNameSelectorResolvesToDurableID(t *testing.T) {
 	var requests []string
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		tunnel := validCommandTunnel()
 		switch {
@@ -142,7 +142,7 @@ func TestTunnelNameSelectorResolvesToDurableID(t *testing.T) {
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"show", "demo"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(requests, ",") != "GET /v1/tunnels,GET /v1/tunnels/tun_1" || !strings.Contains(output.String(), "tun_1") {
@@ -153,7 +153,7 @@ func TestTunnelNameSelectorResolvesToDurableID(t *testing.T) {
 func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
 	t.Setenv(config.EnvConfigPath, filepath.Join(t.TempDir(), "config.json"))
 	requests := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		tunnel := validCommandTunnel()
 		w.Header().Set("Content-Type", "application/json")
@@ -175,7 +175,7 @@ func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
 	var preview bytes.Buffer
 	command.SetOut(&preview)
 	command.SetArgs([]string{"delete", "tun_1"})
-	if err := command.Execute(); err == nil || err.(exitCodeError).code != 2 {
+	if err := command.ExecuteContext(deps.context(t.Context())); err == nil || err.(exitCodeError).code != 2 {
 		t.Fatalf("error = %v", err)
 	}
 	if requests != 1 {
@@ -186,7 +186,7 @@ func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
 	command = tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"delete", "tun_1", "--confirm", token, "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 3 {
@@ -198,7 +198,7 @@ func TestTunnelDeleteRequiresConfirmationAndUsesCurrentETag(t *testing.T) {
 }
 
 func TestTunnelCreateUsesCanonicalInputAndJSONOutput(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
@@ -223,7 +223,7 @@ func TestTunnelCreateUsesCanonicalInputAndJSONOutput(t *testing.T) {
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"create", "demo", "--from", "https://origin.example:443", "--private", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `"id":"tun_1"`) {
@@ -234,7 +234,7 @@ func TestTunnelCreateUsesCanonicalInputAndJSONOutput(t *testing.T) {
 func TestTunnelCreatePendingSelfhostEndpointResumesWithoutRecreatingTheDomain(t *testing.T) {
 	var requests []string
 	domainCreates := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tunnels":
@@ -285,7 +285,7 @@ func TestTunnelCreatePendingSelfhostEndpointResumesWithoutRecreatingTheDomain(t 
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"create", "demo", "--port", "8080", "--domain", "app.example.test", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -306,7 +306,7 @@ func TestTunnelCreatePendingSelfhostEndpointResumesWithoutRecreatingTheDomain(t 
 	retry := tunnelCobraCommandV1()
 	retry.SetOut(&output)
 	retry.SetArgs([]string{"create", "demo", "--port", "8080", "--domain", "app.example.test", "--json"})
-	if err := retry.Execute(); err != nil {
+	if err := retry.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if domainCreates != 1 {
@@ -335,7 +335,7 @@ func TestTunnelCreateHumanOutputExplainsPendingCustomerDomain(t *testing.T) {
 }
 
 func TestPublicTLSRouteMayLeaveTheHostnameToTheServer(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		var input api.TunnelRouteInput
 		// No GET of the tunnel: a self-hosted-only account's stable_endpoint is empty, and the server names the managed hostname.
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" || json.NewDecoder(r.Body).Decode(&input) != nil {
@@ -352,14 +352,14 @@ func TestPublicTLSRouteMayLeaveTheHostnameToTheServer(t *testing.T) {
 	})
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tls", "--to", "tcp://127.0.0.1:5432", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestTunnelCreateResolvesCanonicalOperationOnlyResponse(t *testing.T) {
 	var requests []string
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tunnels":
@@ -379,7 +379,7 @@ func TestTunnelCreateResolvesCanonicalOperationOnlyResponse(t *testing.T) {
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(requests, ","); got != "POST /v1/tunnels,GET /v1/tunnels/tun_1" {
@@ -392,7 +392,7 @@ func TestTunnelCreateResolvesCanonicalOperationOnlyResponse(t *testing.T) {
 
 func TestTunnelCreateReportsPartialDomainFailureAndUsesFreshKeys(t *testing.T) {
 	var keys []string
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if key := r.Header.Get("Idempotency-Key"); key != "" {
 			keys = append(keys, key)
 		}
@@ -412,10 +412,10 @@ func TestTunnelCreateReportsPartialDomainFailureAndUsesFreshKeys(t *testing.T) {
 		}
 	})
 	sequence := 0
-	newTunnelIdempotencyKey = func() (string, error) { sequence++; return fmt.Sprintf("idem_%d", sequence), nil }
+	deps.newKey = func() (string, error) { sequence++; return fmt.Sprintf("idem_%d", sequence), nil }
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"create", "demo", "--port", "8080", "--domain", "app.example.test"})
-	err := command.Execute()
+	err := command.ExecuteContext(deps.context(t.Context()))
 	if err == nil || !strings.Contains(err.Error(), "tunnel tun_1 was created") || !strings.Contains(err.Error(), "app.example.test") {
 		t.Fatalf("error=%v", err)
 	}
@@ -425,7 +425,7 @@ func TestTunnelCreateReportsPartialDomainFailureAndUsesFreshKeys(t *testing.T) {
 }
 
 func TestTunnelCreateReplayEmitsOneCanonicalDocument(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		value := validCommandTunnel()
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelMutation{Tunnel: value, Operation: validCommandOperation("tunnel", value.ID), Replayed: true}})
 	})
@@ -433,7 +433,7 @@ func TestTunnelCreateReplayEmitsOneCanonicalDocument(t *testing.T) {
 	command := tunnelCobraCommandV1()
 	command.SetOut(&output)
 	command.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(strings.TrimSpace(output.String()), "\n") != 0 || !strings.Contains(output.String(), `"kind":"tunnel_create"`) || !strings.Contains(output.String(), `"replayed":true`) {
@@ -442,7 +442,7 @@ func TestTunnelCreateReplayEmitsOneCanonicalDocument(t *testing.T) {
 }
 
 func TestTunnelCreateProcessRetryReportsExactExistingTunnel(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/tunnels":
 			w.Header().Set("Content-Type", "application/json")
@@ -457,7 +457,7 @@ func TestTunnelCreateProcessRetryReportsExactExistingTunnel(t *testing.T) {
 	})
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"create", "demo", "--port", "8080"})
-	err := command.Execute()
+	err := command.ExecuteContext(deps.context(t.Context()))
 	var existing *TunnelCreateExistingError
 	if !errors.As(err, &existing) || existing.TunnelID != "tun_1" || existing.Name != "demo" || existing.RecoveryCommand != "pb tunnel show tun_1" {
 		t.Fatalf("error=%#v existing=%#v", err, existing)
@@ -470,7 +470,7 @@ func TestTunnelCreateProcessRetryReportsExactExistingTunnel(t *testing.T) {
 func TestTunnelCreateInterruptedRetryReusesJournalAndCanonicalOutput(t *testing.T) {
 	createCalls := 0
 	var keys []string
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels" {
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
@@ -485,14 +485,14 @@ func TestTunnelCreateInterruptedRetryReusesJournalAndCanonicalOutput(t *testing.
 	})
 	first := tunnelCobraCommandV1()
 	first.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
-	if err := first.Execute(); err == nil {
+	if err := first.ExecuteContext(deps.context(t.Context())); err == nil {
 		t.Fatal("interrupted create unexpectedly succeeded")
 	}
 	var output bytes.Buffer
 	second := tunnelCobraCommandV1()
 	second.SetOut(&output)
 	second.SetArgs([]string{"create", "demo", "--port", "8080", "--json"})
-	if err := second.Execute(); err != nil {
+	if err := second.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	if createCalls != 2 || len(keys) != 2 || keys[0] != keys[1] || keys[0] != "idem_test" {
@@ -505,7 +505,7 @@ func TestTunnelCreateInterruptedRetryReusesJournalAndCanonicalOutput(t *testing.
 
 func TestTunnelCreateInterruptedRetryWithDifferentInputFailsBeforeNetwork(t *testing.T) {
 	createCalls := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, _ *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		createCalls++
 		value := validCommandTunnel()
 		operation := validCommandOperation("tunnel", value.ID)
@@ -514,12 +514,12 @@ func TestTunnelCreateInterruptedRetryWithDifferentInputFailsBeforeNetwork(t *tes
 	})
 	first := tunnelCobraCommandV1()
 	first.SetArgs([]string{"create", "demo", "--port", "8080"})
-	if err := first.Execute(); err == nil {
+	if err := first.ExecuteContext(deps.context(t.Context())); err == nil {
 		t.Fatal("interrupted create unexpectedly succeeded")
 	}
 	second := tunnelCobraCommandV1()
 	second.SetArgs([]string{"create", "demo", "--port", "9090"})
-	err := second.Execute()
+	err := second.ExecuteContext(deps.context(t.Context()))
 	if !errors.Is(err, tunnelcreatejournal.ErrRequestMismatch) || createCalls != 1 {
 		t.Fatalf("error=%v create calls=%d", err, createCalls)
 	}
@@ -528,7 +528,7 @@ func TestTunnelCreateInterruptedRetryWithDifferentInputFailsBeforeNetwork(t *tes
 func TestTunnelMutationWaitUsesBoundedOperationReadsAndSameMutationKey(t *testing.T) {
 	operationReads := 0
 	mutationCalls := 0
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		tunnel := validCommandTunnel()
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1":
@@ -552,7 +552,7 @@ func TestTunnelMutationWaitUsesBoundedOperationReadsAndSameMutationKey(t *testin
 		}
 	})
 	command := tunnelCobraCommandV1()
-	command.SetContext(withTimings(t.Context(), func(timings *commandTimings) { timings.tunnelOperationPoll = time.Millisecond }))
+	command.SetContext(deps.context(withTimings(t.Context(), func(timings *commandTimings) { timings.tunnelOperationPoll = time.Millisecond })))
 	command.SetArgs([]string{"pause", "tun_1", "--wait", "--timeout", "1s"})
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
@@ -564,10 +564,10 @@ func TestTunnelMutationWaitUsesBoundedOperationReadsAndSameMutationKey(t *testin
 
 func TestTunnelMutationRejectsInvalidWaitBeforeRequest(t *testing.T) {
 	requests := 0
-	withTunnelCommandClient(t, func(http.ResponseWriter, *http.Request) { requests++ })
+	deps := tunnelCommandFixture(t, func(http.ResponseWriter, *http.Request) { requests++ })
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"pause", "tun_1", "--wait", "--timeout", "500ms"})
-	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "between 1s") {
+	if err := command.ExecuteContext(deps.context(t.Context())); err == nil || !strings.Contains(err.Error(), "between 1s") {
 		t.Fatalf("error=%v", err)
 	}
 	if requests != 0 {
@@ -577,7 +577,7 @@ func TestTunnelMutationRejectsInvalidWaitBeforeRequest(t *testing.T) {
 
 func TestTunnelRoutePrivateTCPAndPathClearUseCanonicalWireShapes(t *testing.T) {
 	t.Run("public tcp add", func(t *testing.T) {
-		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 			var input api.TunnelRouteInput
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" || json.NewDecoder(r.Body).Decode(&input) != nil {
 				t.Fatalf("request=%s %s", r.Method, r.URL.Path)
@@ -594,13 +594,13 @@ func TestTunnelRoutePrivateTCPAndPathClearUseCanonicalWireShapes(t *testing.T) {
 		})
 		command := tunnelCobraCommandV1()
 		command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tcp", "--to", "tcp://127.0.0.1:5432", "--json"})
-		if err := command.Execute(); err != nil {
+		if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	t.Run("private tcp add", func(t *testing.T) {
-		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 			var input api.TunnelRouteInput
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Fatal(err)
@@ -613,13 +613,13 @@ func TestTunnelRoutePrivateTCPAndPathClearUseCanonicalWireShapes(t *testing.T) {
 		})
 		command := tunnelCobraCommandV1()
 		command.SetArgs([]string{"route", "add", "tun_1", "--name", "ssh", "--protocol", "tcp_private", "--to", "tcp://127.0.0.1:22"})
-		if err := command.Execute(); err != nil {
+		if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	t.Run("clear path", func(t *testing.T) {
-		withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 			route := api.TunnelRoute{Schema: api.TunnelV1Schema, Kind: "route", ID: "route_1", TunnelID: "tun_1", Name: "api", Protocol: "http", HostMatch: api.TunnelRouteHostMatch{Type: "catch_all"}, PathPrefix: stringPointer("/api"), Origin: api.TunnelRouteOrigin{Scheme: "http", Address: "127.0.0.1:8080", PreserveHost: true}, Priority: 0, ConnectTimeoutMS: 10000, IdleTimeoutMS: 300000, MaxConcurrentStreams: 128, DesiredState: "active", Generation: 1, ETag: `"route:route_1:1"`}
 			if r.Method == http.MethodGet {
 				if r.URL.Path != "/v1/tunnels/tun_1/routes" {
@@ -645,7 +645,7 @@ func TestTunnelRoutePrivateTCPAndPathClearUseCanonicalWireShapes(t *testing.T) {
 		})
 		command := tunnelCobraCommandV1()
 		command.SetArgs([]string{"route", "update", "tun_1", "route_1", "--clear-path"})
-		if err := command.Execute(); err != nil {
+		if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 			t.Fatal(err)
 		}
 	})

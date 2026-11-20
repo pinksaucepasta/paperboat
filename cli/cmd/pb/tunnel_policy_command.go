@@ -21,12 +21,12 @@ type lazyPolicyClient interface {
 	DeleteLazyPolicy(context.Context, string, int64) error
 }
 
-var lazyPolicyClientForCommand = func(command *cobra.Command) (lazyPolicyClient, error) {
-	return tunnelClientForCommand(command)
+func productionLazyPolicyClient(command *cobra.Command) (lazyPolicyClient, error) {
+	return tunnelDependenciesOf(command.Context()).client(command)
 }
 
 // lazyPolicyMachineID turns a machine name or ID into the stable machine ID the policy API stores.
-var lazyPolicyMachineID = func(command *cobra.Command, requested string) (string, error) {
+func lazyPolicyMachineID(command *cobra.Command, requested string) (string, error) {
 	ctx := actionContext(command, []string{requested})
 	client, err := backendClient(ctx)
 	if err != nil {
@@ -64,11 +64,11 @@ func tunnelPolicyAllowCommand() *cobra.Command {
 		if (policyID == "") != (expected == 0) || expected < 0 {
 			return invocationError(errors.New("id and generation must be provided together when updating a policy"))
 		}
-		machineID, err := lazyPolicyMachineID(command, args[0])
+		machineID, err := tunnelDependenciesOf(command.Context()).policyMachine(command, args[0])
 		if err != nil {
 			return err
 		}
-		client, err := lazyPolicyClientForCommand(command)
+		client, err := tunnelDependenciesOf(command.Context()).policyClient(command)
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func lazyPolicyLine(p api.LazyPolicy) string {
 
 func tunnelPolicyListCommand() *cobra.Command {
 	command := &cobra.Command{Use: "list", Short: "List on-demand port policies (their IDs and generations)", Args: commandArgs(cobra.NoArgs), RunE: func(command *cobra.Command, args []string) error {
-		client, err := lazyPolicyClientForCommand(command)
+		client, err := tunnelDependenciesOf(command.Context()).policyClient(command)
 		if err != nil {
 			return err
 		}
@@ -116,7 +116,7 @@ func tunnelPolicyListCommand() *cobra.Command {
 
 func tunnelPolicyGetCommand() *cobra.Command {
 	command := &cobra.Command{Use: "get <policy>", Short: "Show an on-demand port policy", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
-		client, err := lazyPolicyClientForCommand(command)
+		client, err := tunnelDependenciesOf(command.Context()).policyClient(command)
 		if err != nil {
 			return err
 		}
@@ -132,7 +132,7 @@ func tunnelPolicyGetCommand() *cobra.Command {
 
 func tunnelPolicyRevokeCommand() *cobra.Command {
 	command := &cobra.Command{Use: "revoke <policy>", Short: "Revoke an on-demand port policy", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
-		client, err := lazyPolicyClientForCommand(command)
+		client, err := tunnelDependenciesOf(command.Context()).policyClient(command)
 		if err != nil {
 			return err
 		}

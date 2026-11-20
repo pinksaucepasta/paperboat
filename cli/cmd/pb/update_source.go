@@ -20,7 +20,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 	"github.com/spf13/cobra"
 )
@@ -55,19 +54,12 @@ func stagingFailure(err, otherwise error) error {
 	return otherwise
 }
 
-var installUpdateSourceForCommand = hostruntimecmd.InstallUpdateSource
-
-// inspectUpdateCandidate reads what a staged executable is by running it, before anything is installed.
-var inspectUpdateCandidate = installsource.InspectCandidate
-
-var openConnectionsFromDaemon = openConnectionsForUpdate
-
 // updateOpenConnectionsFromFile keeps an installation from a file from silently ending open SSH
 // connections and access forwards, as the signed updater does: replacing the daemon closes them.
 // A daemon that cannot answer never blocks the install (the updater must work when the app is broken); the failed probe
 // is recorded (liveconnections.RecordUnconfirmed) so a session it cut can be explained.
 func updateOpenConnectionsFromFile(ctx context.Context) error {
-	open, err := openConnectionsFromDaemon(ctx)
+	open, err := updateDependenciesOf(ctx).openConnections(ctx)
 	if err != nil {
 		liveconnections.RecordUnconfirmed("pb update", err)
 		return nil
@@ -99,7 +91,7 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 		if err = os.Chmod(executable, 0700); err != nil {
 			return err
 		}
-		source, err = inspectUpdateCandidate(ctx, executable)
+		source, err = updateDependenciesOf(ctx).inspect(ctx, executable)
 		if err != nil {
 			if ctx.Err() != nil {
 				return err
@@ -123,7 +115,7 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 			return refusal
 		}
 	}
-	installed, err := installUpdateSourceForCommand(ctx, executable, source, bundle, force, "", selectedInstallServer(command))
+	installed, err := updateDependenciesOf(ctx).install(ctx, executable, source, bundle, force, "", selectedInstallServer(command))
 	if err != nil {
 		if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 			return commandRejection{reason: commandRejectUpdateBusy, cause: err}

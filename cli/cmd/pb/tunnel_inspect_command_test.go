@@ -71,27 +71,16 @@ func newInspectorTestServer(t *testing.T, issueStatus int, routes string) (*api.
 
 const inspectorTestRouteJSON = `{"schema":"paperboat.preview-tunnel/v1","kind":"route","id":"rte_01","tunnel_id":"tun_01","name":"web","protocol":"http","host_match":{"type":"catch_all"},"origin":{"scheme":"http","address":"127.0.0.1:3000","preserve_host":true},"priority":0,"connect_timeout_ms":10000,"idle_timeout_ms":90000,"max_concurrent_streams":128,"desired_state":"active","generation":7,"etag":"\"route:rte_01:7\""}`
 
-func inspectorTestDaemon(t *testing.T, handler http.HandlerFunc) {
+type inspectorTestEndpoint struct {
+	base   string
+	client *http.Client
+}
+
+func inspectorTestDaemon(t *testing.T, handler http.HandlerFunc) inspectorTestEndpoint {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	previousFactory := inspectorClientsForCommand
-	inspectorClientsForCommand = func(command *cobra.Command) (*inspectorClients, error) {
-		client, ctx, err := tunnelClient(command)
-		if err != nil {
-			return nil, err
-		}
-		return &inspectorClients{server: client, ctx: ctx, daemon: inspectorTestCaller{base: server.URL, client: server.Client()}}, nil
-	}
-	t.Cleanup(func() { inspectorClientsForCommand = previousFactory })
-	previousClient := tunnelClientForCommand
-	previousResolve := resolveTunnelSelectorForCommand
-	previousIssue := inspectorIssueCredential
-	t.Cleanup(func() {
-		tunnelClientForCommand = previousClient
-		resolveTunnelSelectorForCommand = previousResolve
-		inspectorIssueCredential = previousIssue
-	})
+	return inspectorTestEndpoint{base: server.URL, client: server.Client()}
 }
 
 // Command contract tests substitute only the native exchange, keeping the
@@ -120,18 +109,27 @@ func (c inspectorTestCaller) do(ctx context.Context, grant, method, path string,
 	return data, res.StatusCode, err
 }
 
-func wireInspectorTestClients(client *api.Client) {
-	tunnelClientForCommand = func(*cobra.Command) (*api.Client, error) { return client, nil }
-	resolveTunnelSelectorForCommand = func(context.Context, *api.Client, string) (string, error) { return "tun_01", nil }
+func wireInspectorTestClients(daemon inspectorTestEndpoint, client *api.Client) context.Context {
+	return withTunnelDependencies(context.Background(), func(deps *tunnelDependencies) {
+		deps.client = func(*cobra.Command) (*api.Client, error) { return client, nil }
+		deps.resolve = func(context.Context, *api.Client, string) (string, error) { return "tun_01", nil }
+		deps.inspector = func(command *cobra.Command) (*inspectorClients, error) {
+			client, ctx, err := tunnelClient(command)
+			if err != nil {
+				return nil, err
+			}
+			return &inspectorClients{server: client, ctx: ctx, daemon: inspectorTestCaller{base: daemon.base, client: daemon.client}}, nil
+		}
+	})
 }
 
-func runInspectorCommand(t *testing.T, root func() *cobra.Command, args ...string) (string, error) {
+func runInspectorCommand(t *testing.T, ctx context.Context, root func() *cobra.Command, args ...string) (string, error) {
 	t.Helper()
 	command := root()
 	var output bytes.Buffer
 	command.SetOut(&output)
 	command.SetErr(&output)
 	command.SetArgs(args)
-	err := command.Execute()
+	err := command.ExecuteContext(ctx)
 	return output.String(), err
 }

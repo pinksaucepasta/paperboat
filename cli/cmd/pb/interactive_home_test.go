@@ -16,8 +16,6 @@ import (
 )
 
 func TestInteractiveCommandPreservesConnectionAndIO(t *testing.T) {
-	original := newInteractiveRootCommand
-	t.Cleanup(func() { newInteractiveRootCommand = original })
 	input := strings.NewReader("input")
 	var output, diagnostic bytes.Buffer
 	parent := newRootCommand()
@@ -27,11 +25,10 @@ func TestInteractiveCommandPreservesConnectionAndIO(t *testing.T) {
 	_ = parent.PersistentFlags().Set("config", "/selected/config.json")
 	_ = parent.PersistentFlags().Set("server", "https://selected.example")
 	type contextMarker struct{}
-	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextMarker{}, "parent-value"))
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	parent.SetContext(ctx)
 	sentinel := errors.New("child result")
-	newInteractiveRootCommand = func() *cobra.Command {
+	newRoot := func() *cobra.Command {
 		child := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true, RunE: func(c *cobra.Command, args []string) error {
 			if c.Context().Value(contextMarker{}) != "parent-value" || c.Context().Done() != ctx.Done() || c.InOrStdin() != input || c.OutOrStdout() != &output || c.ErrOrStderr() != &diagnostic {
 				t.Error("child lost parent context or IO")
@@ -50,6 +47,7 @@ func TestInteractiveCommandPreservesConnectionAndIO(t *testing.T) {
 		child.Flags().String("server", "", "")
 		return child
 	}
+	parent.SetContext(withHomeDependencies(context.WithValue(ctx, contextMarker{}, "parent-value"), func(d *homeDependencies) { d.newRoot = newRoot }))
 	if err := executeInteractiveCommand(parent, []string{"operation", "two words"}); !errors.Is(err, sentinel) {
 		t.Fatalf("result=%v", err)
 	}
@@ -164,25 +162,25 @@ func TestHomeTextFitsTinyTerminal(t *testing.T) {
 }
 
 func TestHomeMutationFailureRemainsFailureAfterDisplay(t *testing.T) {
-	previousRoot, previousViewer := newInteractiveRootCommand, showHomeText
-	t.Cleanup(func() { newInteractiveRootCommand = previousRoot; showHomeText = previousViewer })
 	sentinel := invocationError(errors.New("mutation rejected; state unchanged"))
-	newInteractiveRootCommand = func() *cobra.Command {
-		root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
-		root.PersistentFlags().Bool("no-customization", false, "")
-		root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, args []string) error { return sentinel }})
-		return root
-	}
 	displayed := 0
-	showHomeText = func(command *cobra.Command, title, content string) error {
-		displayed++
-		if !strings.Contains(content, userFacingError(sentinel)) {
-			t.Errorf("failure omitted: %q", content)
+	ctx := withHomeDependencies(t.Context(), func(d *homeDependencies) {
+		d.newRoot = func() *cobra.Command {
+			root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
+			root.PersistentFlags().Bool("no-customization", false, "")
+			root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, args []string) error { return sentinel }})
+			return root
 		}
-		return nil
-	}
+		d.showText = func(command *cobra.Command, title, content string) error {
+			displayed++
+			if !strings.Contains(content, userFacingError(sentinel)) {
+				t.Errorf("failure omitted: %q", content)
+			}
+			return nil
+		}
+	})
 	parent := &cobra.Command{Use: "pb"}
-	parent.SetContext(context.Background())
+	parent.SetContext(ctx)
 	parent.Flags().Bool("no-customization", true, "")
 	var diagnostic bytes.Buffer
 	parent.SetErr(&diagnostic)
@@ -201,21 +199,21 @@ func TestHomeMutationFailureRemainsFailureAfterDisplay(t *testing.T) {
 // Tunnel delete from the home menu must ask in the TUI (naming the tunnel), not
 // print a confirm code the menu cannot pass back.
 func TestConfirmingHomeResultAsksInsteadOfPrintingACode(t *testing.T) {
-	previousRoot, previousViewer := newInteractiveRootCommand, showHomeText
-	t.Cleanup(func() { newInteractiveRootCommand = previousRoot; showHomeText = previousViewer })
-	showHomeText = func(*cobra.Command, string, string) error { return nil }
 	var seen []any
-	newInteractiveRootCommand = func() *cobra.Command {
-		root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
-		root.PersistentFlags().Bool("no-customization", false, "")
-		root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, _ []string) error {
-			seen = append(seen, command.Context().Value(homeInteractiveConfirmation{}))
-			return nil
-		}})
-		return root
-	}
+	ctx := withHomeDependencies(t.Context(), func(d *homeDependencies) {
+		d.showText = func(*cobra.Command, string, string) error { return nil }
+		d.newRoot = func() *cobra.Command {
+			root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
+			root.PersistentFlags().Bool("no-customization", false, "")
+			root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, _ []string) error {
+				seen = append(seen, command.Context().Value(homeInteractiveConfirmation{}))
+				return nil
+			}})
+			return root
+		}
+	})
 	parent := &cobra.Command{Use: "pb"}
-	parent.SetContext(context.Background())
+	parent.SetContext(ctx)
 	parent.Flags().Bool("no-customization", true, "")
 	parent.SetErr(&bytes.Buffer{})
 	if err := runConfirmingHomeResult(parent, []string{"mutate"}); err != nil {
@@ -235,22 +233,22 @@ func TestConfirmingHomeResultAsksInsteadOfPrintingACode(t *testing.T) {
 // A one-line success is a notice on the next menu; longer output and failures are
 // still results to read.
 func TestHomeResultShowsOneLineSuccessAsNoticeNotViewer(t *testing.T) {
-	previousRoot, previousViewer := newInteractiveRootCommand, showHomeText
-	t.Cleanup(func() { newInteractiveRootCommand = previousRoot; showHomeText = previousViewer })
 	var output string
-	newInteractiveRootCommand = func() *cobra.Command {
-		root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
-		root.PersistentFlags().Bool("no-customization", false, "")
-		root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, _ []string) error {
-			_, _ = command.OutOrStdout().Write([]byte(output))
-			return nil
-		}})
-		return root
-	}
 	var viewed []string
-	showHomeText = func(_ *cobra.Command, _, content string) error { viewed = append(viewed, content); return nil }
+	ctx := withHomeDependencies(t.Context(), func(d *homeDependencies) {
+		d.newRoot = func() *cobra.Command {
+			root := &cobra.Command{Use: "pb", SilenceErrors: true, SilenceUsage: true}
+			root.PersistentFlags().Bool("no-customization", false, "")
+			root.AddCommand(&cobra.Command{Use: "mutate", RunE: func(command *cobra.Command, _ []string) error {
+				_, _ = command.OutOrStdout().Write([]byte(output))
+				return nil
+			}})
+			return root
+		}
+		d.showText = func(_ *cobra.Command, _, content string) error { viewed = append(viewed, content); return nil }
+	})
 	parent := &cobra.Command{Use: "pb"}
-	parent.SetContext(context.Background())
+	parent.SetContext(ctx)
 	parent.Flags().Bool("no-customization", true, "")
 	parent.SetErr(&bytes.Buffer{})
 	for out, wantViewer := range map[string]bool{"Paused tunnel tun_1; status: paused\n": false, "": false, "line one\nline two\n": true, strings.Repeat("x", 120): true} {

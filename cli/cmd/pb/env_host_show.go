@@ -38,7 +38,7 @@ func hostDeliveryMetadata(context api.VaultLayerContext) vaultHostMetadata {
 	return out
 }
 func runVaultHostShow(command *cobra.Command, requestedMachine string) error {
-	client, err := environmentVariableBackendForCommand(command)
+	client, err := envDependenciesOf(command.Context()).backendForCommand(command)
 	if err != nil {
 		return err
 	}

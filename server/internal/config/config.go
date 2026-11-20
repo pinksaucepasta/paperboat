@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	"github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net"
 	"net/url"
@@ -692,7 +693,7 @@ func Default() Config {
 			AllowedScopes:              []string{"account:read", "clients:revoke", "machines:read", "machines:connect", "session:refresh", "diagnostics:upload", "previews:read", "previews:write", "tunnels:read", "tunnels:write", "operations:read", "operations:write"},
 			DeviceGrantLifetime:        10 * time.Minute,
 			AccessTokenLifetime:        15 * time.Minute,
-			RefreshTokenLifetime:       30 * 24 * time.Hour,
+			RefreshTokenLifetime:       peeridentity.MaxCertificateLifetime, // idle time a session survives: as long as a machine certificate lives
 			PollInterval:               5 * time.Second,
 			MaxClientLabelLength:       120,
 			NetworkRequestsPerMinute:   30,

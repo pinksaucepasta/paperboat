@@ -15,24 +15,23 @@ import (
 )
 
 func TestHomeConsumedFailureKeepsOriginalEvidenceAndMixedFailureVisible(t *testing.T) {
-	previous := showHomeText
-	t.Cleanup(func() { showHomeText = previous })
 	var faults []errorreport.Fault
 	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults = append(faults, fault) })
 	t.Cleanup(restore)
 	command := &cobra.Command{Use: "pb"}
-	command.SetContext(supportref.WithContext(context.Background(), supportref.New()))
 	views := 0
-	showHomeText = func(_ *cobra.Command, _, content string) error {
-		views++
-		if !strings.Contains(content, supportref.FromContext(command.Context())) {
-			t.Fatal("menu omitted its diagnostic support reference")
+	command.SetContext(withHomeDependencies(supportref.WithContext(t.Context(), supportref.New()), func(d *homeDependencies) {
+		d.showText = func(_ *cobra.Command, _, content string) error {
+			views++
+			if !strings.Contains(content, supportref.FromContext(command.Context())) {
+				t.Fatal("menu omitted its diagnostic support reference")
+			}
+			if strings.Contains(content, "PRIVATE_COMMAND_PAYLOAD") {
+				t.Fatal("menu exposed private error text")
+			}
+			return nil
 		}
-		if strings.Contains(content, "PRIVATE_COMMAND_PAYLOAD") {
-			t.Fatal("menu exposed private error text")
-		}
-		return nil
-	}
+	}))
 	calls := 0
 	err := errors.Join(&commandPrivateError{calls: &calls}, syscall.EIO)
 	if result := showHomeFailure(command, err); result != nil {
@@ -54,11 +53,10 @@ func TestHomeConsumedFailureKeepsOriginalEvidenceAndMixedFailureVisible(t *testi
 }
 
 func TestHomeViewerFailurePreservesActionCauseForFinalOwner(t *testing.T) {
-	previous := showHomeText
-	t.Cleanup(func() { showHomeText = previous })
-	showHomeText = func(_ *cobra.Command, _, _ string) error { return selector.ErrCanceled }
 	command := &cobra.Command{Use: "pb"}
-	command.SetContext(context.Background())
+	command.SetContext(withHomeDependencies(t.Context(), func(d *homeDependencies) {
+		d.showText = func(_ *cobra.Command, _, _ string) error { return selector.ErrCanceled }
+	}))
 	err := showHomeFailure(command, syscall.EIO)
 	if !errors.Is(err, syscall.EIO) || !errors.Is(err, selector.ErrCanceled) || interactiveCanceled(err) {
 		t.Fatal("closing the error viewer discarded the action failure")

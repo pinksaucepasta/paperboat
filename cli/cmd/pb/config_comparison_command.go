@@ -117,7 +117,7 @@ func configConflictCompareOnce(c *command.Context) (resultErr error) {
 	if !ok {
 		return errors.New("comparison requires CLI command context")
 	}
-	local, _, err := localDaemonSnapshot(parent, installLocalDaemonService)
+	local, _, err := localDaemonSnapshot(parent, installDependenciesOf(c.Context).installService)
 	if err != nil {
 		return err
 	}

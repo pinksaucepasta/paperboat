@@ -43,9 +43,7 @@ func workspaceMachinesServer(t *testing.T, machines map[string][]map[string]any)
 // named; several are refused with the candidates; an explicit --workspace always wins.
 func TestAMachineNameResolvesAcrossWorkspacesOnlyWhenUnique(t *testing.T) {
 	var notice bytes.Buffer
-	previous := machineResolutionNotice
-	machineResolutionNotice = &notice
-	t.Cleanup(func() { machineResolutionNotice = previous })
+	ctx := withWorkspaceDependencies(t.Context(), func(d *workspaceDependencies) { d.resolutionNotice = &notice })
 	personalClient := func(server *httptest.Server) *api.Client {
 		client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
 		if err := client.SetWorkspace("personal"); err != nil {
@@ -55,11 +53,11 @@ func TestAMachineNameResolvesAcrossWorkspacesOnlyWhenUnique(t *testing.T) {
 	}
 	unique := workspaceMachinesServer(t, map[string][]map[string]any{"test-f13-team": {{"id": "machine_pb", "alias": "test-pb"}}})
 	client := personalClient(unique)
-	machine, err := resolveUserMachine(context.Background(), client, "test-pb")
+	machine, err := resolveUserMachine(ctx, client, "test-pb")
 	if err != nil || machine.ID != "machine_pb" || client.Workspace() != "test-f13-team" || notice.String() != "test-pb (team test-f13-team)\n" {
 		t.Fatalf("unique: machine=%+v err=%v workspace=%q notice=%q", machine, err, client.Workspace(), notice.String())
 	}
-	explicit := context.WithValue(context.Background(), workspaceExplicitKey{}, true)
+	explicit := context.WithValue(ctx, workspaceExplicitKey{}, true)
 	if _, err := resolveUserMachine(explicit, personalClient(unique), "test-pb"); !errors.Is(err, resolver.ErrMachineNotFound) {
 		t.Fatalf("explicit --workspace looked elsewhere: %v", err)
 	}
@@ -68,12 +66,12 @@ func TestAMachineNameResolvesAcrossWorkspacesOnlyWhenUnique(t *testing.T) {
 		"other-team":    {{"id": "machine_other", "alias": "test-pb"}},
 	})
 	client = personalClient(several)
-	_, err = resolveUserMachine(context.Background(), client, "test-pb")
+	_, err = resolveUserMachine(ctx, client, "test-pb")
 	message := commandFailureMessage(err, classifyCommandFailure(err))
 	if !errors.Is(err, resolver.ErrMachineAmbiguous) || client.Workspace() != "personal" || !strings.Contains(message, "--workspace test-f13-team") || !strings.Contains(message, "--workspace other-team") || !strings.Contains(message, "machine_other (team other-team)") {
 		t.Fatalf("ambiguous: err=%v workspace=%q message=%q", err, client.Workspace(), message)
 	}
-	if _, err := resolveUserMachine(context.Background(), personalClient(unique), "nowhere"); !errors.Is(err, resolver.ErrMachineNotFound) {
+	if _, err := resolveUserMachine(ctx, personalClient(unique), "nowhere"); !errors.Is(err, resolver.ErrMachineNotFound) {
 		t.Fatalf("unknown: %v", err)
 	}
 }

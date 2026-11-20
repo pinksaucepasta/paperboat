@@ -127,7 +127,7 @@ func (t *Transport) observe(key [sha256.Size]byte, probe bool, response *http.Re
 	switch {
 	case err != nil:
 		// A network failure says nothing about the identity.
-	case response.StatusCode == http.StatusUnauthorized && clockSkewed(response, t.now()):
+	case response.StatusCode == http.StatusUnauthorized && serverclock.Skewed(response, t.now()):
 		// A proof signed with a clock a minute or more off is refused although the identity is good;
 		// serverclock corrects the next proof from this answer's Date, so the identity is not held back.
 	case response.StatusCode == http.StatusUnauthorized:
@@ -143,10 +143,4 @@ func (t *Transport) observe(key [sha256.Size]byte, probe bool, response *http.Re
 	case response.StatusCode < http.StatusBadRequest && key == t.rejected:
 		t.streak = 0
 	}
-}
-
-// clockSkewed reports whether the server's Date is at least serverclock.Threshold from now (local).
-func clockSkewed(response *http.Response, now time.Time) bool {
-	server, err := http.ParseTime(response.Header.Get("Date"))
-	return err == nil && server.Sub(now).Abs() >= serverclock.Threshold
 }

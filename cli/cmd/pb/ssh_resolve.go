@@ -146,9 +146,6 @@ func pendingSSHDescriptor(machine api.UserMachine, operationID string) api.SSHDe
 	return api.SSHDescriptor{OperationID: operationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
 }
 
-// refreshInventoryForSSHHostKeys is replaced in tests.
-var refreshInventoryForSSHHostKeys = refreshLocalInventory
-
 // sshHostKeysRefreshTimeout bounds the one refresh a connection waits for.
 const sshHostKeysRefreshTimeout = 5 * time.Second
 
@@ -165,7 +162,7 @@ func freshenSSHHostKeys(ctx context.Context, machine api.UserMachine, inInventor
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, sshHostKeysRefreshTimeout)
 	defer cancel()
-	if err := refreshInventoryForSSHHostKeys(refreshCtx); err == nil && inInventory {
+	if err := sshDependenciesOf(ctx).refreshInventory(refreshCtx); err == nil && inInventory {
 		if refreshed, err := resolve(); err == nil {
 			machine = refreshed
 		}

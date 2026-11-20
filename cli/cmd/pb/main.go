@@ -28,7 +28,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	filetransfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
@@ -105,25 +104,8 @@ func processComponent(args []string) string {
 
 var errUsage = errors.New("command usage error")
 
-// currentLocalDaemonPaths is kept behind a small seam so command tests can
-// use a private local API endpoint. Production callers use the platform
-// owner's stable paths supplied by localdaemon.CurrentUserPaths.
-var currentLocalDaemonPaths = localdaemon.CurrentUserPaths
-
-// installLocalDaemonService owns the one production boundary that registers
-// the local daemon. Command tests replace it with an in-process sentinel: a
-// Go test executable must never be registered as a detached daemon service.
-var installLocalDaemonService localDaemonServiceInstaller = localdaemon.InstallCurrentUserService
-
 // removeLocalDaemonService removes the current owner daemon during a fresh reset.
 var removeLocalDaemonService localDaemonServiceRemover = localdaemon.RemoveCurrentUserService
-
-var verifySetupInstallSource = hostruntimecmd.VerifyInstallSource
-var setupBackendClient = backendClient
-
-// setupHostPrerequisites prepares what setup needs from the host before pairing (Windows: OpenSSH, with an
-// administrator prompt); tests replace it so no test asks for elevation.
-var setupHostPrerequisites = setupPlatformHostPrerequisites
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return runWithReporter(ctx, args, stdout, stderr, nil)
@@ -207,7 +189,7 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 		}
 		if failure.kind == commandUnexpected {
 			diagnosticReference = reporter.CaptureFailure(faultCtx, processComponent(args), operation, "command", "unexpected_cli_failure", err).SupportReference
-			if directory, dirErr := processDiagnosticsDirectory(executed); dirErr == nil {
+			if directory, dirErr := processDiagnosticsDirectory(ctx, executed); dirErr == nil {
 				_ = recordUnexpectedFailureCause(directory, operation, diagnosticReference, err)
 			}
 		} else if failure.kind == commandOperational || failure.kind == commandDeadline || failure.kind == commandRejected {
@@ -763,7 +745,7 @@ func transferClientForCommand(cobraCommand *cobra.Command, args []string) (trans
 		return nil, api.UserMachine{}, nil, friendlyCommandError(err)
 	}
 	target := &resolver.FileTransferTarget{Endpoint: descriptor.Endpoint, SourceMachineID: descriptor.SourceMachineID, DestinationMachineID: descriptor.DestinationMachineID, InitiatingUserID: descriptor.InitiatingUserID, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID}, Policy: descriptor.Policy}
-	client, lease, err := newTransferCommandClient(ctx.Context, target, destination, newIdempotencyKey())
+	client, lease, err := installDependenciesOf(ctx.Context).transferClient(ctx.Context, target, destination, newIdempotencyKey())
 	release := func() {
 		if descriptor.Auth.AccessSessionID != "" {
 			releaseTransferAccess(ctx.Context, backend, []string{descriptor.Auth.AccessSessionID})
@@ -786,11 +768,11 @@ func (c transferCommandCloser) Close() error {
 	return c.lease.Close()
 }
 
-var newTransferCommandClient = func(ctx context.Context, target *resolver.FileTransferTarget, destination api.UserMachine, operationID string) (*filetransfer.NativeClient, io.Closer, error) {
+func openTransferCommandClient(ctx context.Context, target *resolver.FileTransferTarget, destination api.UserMachine, operationID string) (*filetransfer.NativeClient, io.Closer, error) {
 	if target == nil || target.Auth.Method != "bearer" || target.Auth.ResourceID == "" || destination.EnvironmentID == "" || destination.InstallationGeneration <= 0 || destination.ID != target.DestinationMachineID || operationID == "" {
 		return nil, nil, errors.New("server returned an invalid file transfer descriptor")
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return nil, nil, err
 	}

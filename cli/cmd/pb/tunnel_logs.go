@@ -39,7 +39,7 @@ func runTunnelLogs(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	tunnelID, err := resolveTunnelSelectorForCommand(ctx, client, args[0])
+	tunnelID, err := tunnelDependenciesOf(ctx).resolve(ctx, client, args[0])
 	if err != nil {
 		return err
 	}

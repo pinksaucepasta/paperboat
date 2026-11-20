@@ -138,6 +138,7 @@ filters. Accounts take `q` (email, name or id contains) and `status`; teams take
   quantity, period and cancellation status; no provider credentials or checkout URLs.
 - `/v1/admin/billing/workspace-operations` and `/{operation_id}`: recovery targets.
 - `/v1/admin/control-operations` and `/{operation_id}`: control recovery targets.
+- `/v1/admin/transactional-mails` and `POST /{mail_id}/redrive`: mail that stayed undelivered after 8 attempts or 23 h (invitations, deletion confirmations). Redrive puts one back in the queue with fresh attempts; a sent mail is refused. Admin: Servers, Operations tab, "Failed mail" (Overview counts it as `transactional_mail`).
 - `/v1/admin/infrastructure?kind=host|relay|tunnel`: revision, desired/observed
   state and freshness. A stale observation never reports ready. A durable tunnel
   configuration without a runtime observation reports unknown, not healthy.

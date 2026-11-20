@@ -24,7 +24,7 @@ func bugreportCommand() *cobra.Command {
 			jsonOutput, _ := command.Flags().GetBool("json")
 			record, _ := command.Flags().GetBool("record")
 			upload, _ := command.Flags().GetBool("upload")
-			localClient, _, err := localDaemonSnapshot(command, installLocalDaemonService)
+			localClient, _, err := localDaemonSnapshot(command, installDependenciesOf(command.Context()).installService)
 			if err != nil {
 				return fmt.Errorf("start local Paperboat daemon: %w", err)
 			}

@@ -45,7 +45,7 @@ func apiTokenLogin(c *command.Context, token string) error {
 	cfg.ServerURL = issuer
 	// A headless machine (SSH or CI, no unlocked Keychain) keeps the session in owner-only files, as a
 	// browser sign-in and a recipe pairing do (a test Mac over SSH: Keychain exit 36).
-	store, err := loginProfileStore(cfg, issuer)
+	store, err := loginProfileStore(c.Context, cfg, issuer)
 	if err != nil {
 		return err
 	}
@@ -58,11 +58,12 @@ func apiTokenLogin(c *command.Context, token string) error {
 func apiTokenSignIn(c *command.Context, cfg *config.Config, store config.ProfileStore, issuer, token string) error {
 	label := "API token on " + firstNonEmpty(loginDeviceName(), runtime.GOOS)
 	// On a paired machine the session becomes that machine's login, as a browser login there (F18-06).
-	machineID, err := loginLocalMachineID(cfg)
+	deps := authDependenciesOf(c.Context)
+	machineID, err := deps.localMachineID(cfg)
 	if err != nil {
 		return err
 	}
-	t, err := api.StartAPITokenSession(c.Context, issuer, token, label, apiTokenDeviceType(), runtime.GOOS, machineID, loginHTTPClient())
+	t, err := api.StartAPITokenSession(c.Context, issuer, token, label, apiTokenDeviceType(), runtime.GOOS, machineID, deps.httpClient())
 	if err != nil {
 		return fmt.Errorf("sign in with the API token: %w", friendlyCommandError(err))
 	}
@@ -70,7 +71,7 @@ func apiTokenSignIn(c *command.Context, cfg *config.Config, store config.Profile
 		return errors.New("the server returned an invalid session for the API token")
 	}
 	credential := config.Credential{AccessToken: t.AccessToken, RefreshToken: t.RefreshToken, TokenType: t.TokenType, ExpiresAt: serverclock.Now().UTC().Add(time.Duration(t.ExpiresIn) * time.Second)}
-	client := api.New(issuer, credential, loginHTTPClient())
+	client := api.New(issuer, credential, deps.httpClient())
 	me, err := client.Me(c.Context)
 	if err != nil {
 		return fmt.Errorf("check the API token's account: %w", friendlyCommandError(err))

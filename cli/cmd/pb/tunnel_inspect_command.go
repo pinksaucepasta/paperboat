@@ -182,12 +182,6 @@ func validInspectorResourceID(value string) bool {
 	return len(value) >= 1 && len(value) <= 256 && value == strings.TrimSpace(value) && !strings.ContainsAny(value, "\x00\r\n\t /\\?#%")
 }
 
-// inspectorIssueCredential is a seam for deterministic command tests: it
-// issues the caller's own server-minted grant for one exact action.
-var inspectorIssueCredential = func(ctx context.Context, client *api.Client, kind, resource, route, action string) (api.InspectorCredential, error) {
-	return client.IssueInspectorCredential(ctx, kind, resource, route, action)
-}
-
 type inspectorClients struct {
 	server  *api.Client
 	daemon  inspectorCaller
@@ -195,8 +189,6 @@ type inspectorClients struct {
 	close   func() error
 	ctx     context.Context
 }
-
-var inspectorClientsForCommand = productionInspectorClients
 
 func productionInspectorClients(command *cobra.Command) (*inspectorClients, error) {
 	d, err := buildDeps(actionContext(command, nil))
@@ -275,7 +267,7 @@ func withInspectorGrant(clients *inspectorClients, target inspectorTarget, actio
 		return errInspectorGrantDenied
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		grant, err := inspectorIssueCredential(clients.ctx, clients.server, target.kind, target.resource, target.route, action)
+		grant, err := tunnelDependenciesOf(clients.ctx).issueInspector(clients.ctx, clients.server, target.kind, target.resource, target.route, action)
 		if err != nil {
 			return err
 		}
@@ -386,7 +378,7 @@ func runTunnelInspect(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	clients, err := inspectorClientsForCommand(command)
+	clients, err := tunnelDependenciesOf(command.Context()).inspector(command)
 	if err != nil {
 		return err
 	}
@@ -413,7 +405,7 @@ func runPreviewInspect(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	clients, err := inspectorClientsForCommand(command)
+	clients, err := tunnelDependenciesOf(command.Context()).inspector(command)
 	if err != nil {
 		return err
 	}
@@ -543,7 +535,7 @@ func runTunnelReplay(command *cobra.Command, args []string) error {
 	if !validInspectorResourceID(args[0]) {
 		return errors.New("tunnel argument is invalid")
 	}
-	clients, err := inspectorClientsForCommand(command)
+	clients, err := tunnelDependenciesOf(command.Context()).inspector(command)
 	if err != nil {
 		return err
 	}
@@ -562,7 +554,7 @@ func runPreviewReplay(command *cobra.Command, args []string) error {
 	if !validInspectorResourceID(args[0]) {
 		return errors.New("preview argument is invalid")
 	}
-	clients, err := inspectorClientsForCommand(command)
+	clients, err := tunnelDependenciesOf(command.Context()).inspector(command)
 	if err != nil {
 		return err
 	}
@@ -578,7 +570,7 @@ func runInspectorReplay(command *cobra.Command, clients *inspectorClients, targe
 	}
 	key, _ := command.Flags().GetString("idempotency-key")
 	if key == "" {
-		generated, err := newTunnelIdempotencyKey()
+		generated, err := tunnelDependenciesOf(command.Context()).newKey()
 		if err != nil {
 			return err
 		}
@@ -640,4 +632,8 @@ func writeTunnelReplayResult(command *cobra.Command, result inspectorReplayResul
 	}
 	_, err := fmt.Fprintln(command.OutOrStdout(), strings.Join(lines, "\n"))
 	return err
+}
+
+func issueInspectorCredential(ctx context.Context, client *api.Client, kind, resource, route, action string) (api.InspectorCredential, error) {
+	return client.IssueInspectorCredential(ctx, kind, resource, route, action)
 }

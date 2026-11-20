@@ -95,7 +95,7 @@ func execCommandBrokerFixture(
 	if err = state.SaveRegistration(registration); err != nil {
 		t.Fatal(err)
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
 	if err != nil {
 		t.Fatal(err)
 	}

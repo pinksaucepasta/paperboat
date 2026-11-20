@@ -54,11 +54,11 @@ func actionRelayList(command *cobra.Command, _ []string) error {
 	if err != nil {
 		return friendlyCommandError(err)
 	}
-	_, _, err = startLocalDaemonAndWait(command.Context(), cfg, installLocalDaemonService)
+	_, _, err = startLocalDaemonAndWait(command.Context(), cfg, installDependenciesOf(command.Context()).installService)
 	if err != nil {
 		return err
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(command.Context()).daemonPaths()
 	if err != nil {
 		return err
 	}

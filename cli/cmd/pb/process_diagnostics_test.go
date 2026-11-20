@@ -14,11 +14,9 @@ import (
 )
 
 func TestTeardownDiagnosticsDoesNotOpenRemovedStorage(t *testing.T) {
-	previous := currentLocalDaemonPaths
-	t.Cleanup(func() { currentLocalDaemonPaths = previous })
-	currentLocalDaemonPaths = func() (localapi.Paths, error) {
-		return localapi.Paths{}, errors.New("removed storage")
-	}
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{}, errors.New("removed storage") }
+	})
 	for _, args := range [][]string{
 		{"uninstall", "--json"},
 		{"--no-customization", "uninstall", "--json"},
@@ -28,7 +26,7 @@ func TestTeardownDiagnosticsDoesNotOpenRemovedStorage(t *testing.T) {
 	} {
 		t.Run(args[0]+args[1], func(t *testing.T) {
 			var stderr bytes.Buffer
-			_, closeDiagnostics := openProcessDiagnostics(t.Context(), args, &errorreport.Reporter{}, &stderr)
+			_, closeDiagnostics := openProcessDiagnostics(ctx, args, &errorreport.Reporter{}, &stderr)
 			closeDiagnostics()
 			if stderr.Len() != 0 {
 				t.Fatalf("teardown accessed diagnostic storage: %s", stderr.String())
@@ -40,13 +38,13 @@ func TestTeardownDiagnosticsDoesNotOpenRemovedStorage(t *testing.T) {
 // The root update activation helper has no HOME, so it printed "Local
 // diagnostics could not be saved" at every update step.
 func TestUpdateServiceDiagnosticsUseItsOwnStateRoot(t *testing.T) {
-	previous := currentLocalDaemonPaths
-	t.Cleanup(func() { currentLocalDaemonPaths = previous })
-	currentLocalDaemonPaths = func() (localapi.Paths, error) { return localapi.Paths{}, errors.New("$HOME is not defined") }
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{}, errors.New("$HOME is not defined") }
+	})
 	root := t.TempDir()
 	t.Setenv("PAPERBOAT_UPDATE_STATE_ROOT", root)
 	var stderr bytes.Buffer
-	_, closeDiagnostics := openProcessDiagnostics(t.Context(), []string{"daemon", "__runtime-updated", "--activation-helper"}, &errorreport.Reporter{}, &stderr)
+	_, closeDiagnostics := openProcessDiagnostics(ctx, []string{"daemon", "__runtime-updated", "--activation-helper"}, &errorreport.Reporter{}, &stderr)
 	closeDiagnostics()
 	if stderr.Len() != 0 {
 		t.Fatalf("update helper could not save diagnostics: %s", stderr.String())
@@ -55,7 +53,7 @@ func TestUpdateServiceDiagnosticsUseItsOwnStateRoot(t *testing.T) {
 		t.Fatalf("no diagnostics under the update state root: %v %v", entries, err)
 	}
 	stderr.Reset()
-	_, closeDiagnostics = openProcessDiagnostics(t.Context(), []string{"status"}, &errorreport.Reporter{}, &stderr)
+	_, closeDiagnostics = openProcessDiagnostics(ctx, []string{"status"}, &errorreport.Reporter{}, &stderr)
 	closeDiagnostics()
 	if stderr.Len() == 0 {
 		t.Fatal("ordinary commands must keep using the user's state directory")
@@ -73,7 +71,7 @@ func TestMachineGuardDiagnosticsUseItsOwnStateDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, err := processDiagnosticsDirectory(command)
+	directory, err := processDiagnosticsDirectory(t.Context(), command)
 	if err != nil {
 		t.Fatalf("machine guard diagnostics need HOME: %v", err)
 	}
@@ -92,15 +90,13 @@ func TestRootMachineGuardInstallDiagnosticsUseGuardStateDirectory(t *testing.T) 
 	if err != nil || command.Name() != "install" {
 		t.Fatalf("find machine-guard install: %v", err)
 	}
-	old := processEUID
-	t.Cleanup(func() { processEUID = old })
 	want := filepath.Join(machineguard.DefaultStateDir, "diagnostics")
-	processEUID = func() int { return 1000 }
-	if directory, _ := processDiagnosticsDirectory(command); directory == want {
+	user := withHostDependencies(t.Context(), func(d *hostDependencies) { d.euid = func() int { return 1000 } })
+	if directory, _ := processDiagnosticsDirectory(user, command); directory == want {
 		t.Fatal("a user's machine-guard install must keep the user's diagnostics directory")
 	}
-	processEUID = func() int { return 0 }
-	if directory, err := processDiagnosticsDirectory(command); err != nil || directory != want {
+	root := withHostDependencies(t.Context(), func(d *hostDependencies) { d.euid = func() int { return 0 } })
+	if directory, err := processDiagnosticsDirectory(root, command); err != nil || directory != want {
 		t.Fatalf("root machine-guard install diagnostics = %q, %v; want %q", directory, err, want)
 	}
 }

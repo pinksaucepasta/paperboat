@@ -38,12 +38,12 @@ func addVaultScopeCommands(root *cobra.Command) {
 		Short: "Rotate personal ENV scope keys while preserving values",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
-			manager, err := passwordVaultForCommand(command)
+			manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 			if err != nil {
 				return err
 			}
 			if err := manager.RotatePersonal(command.Context()); err != nil {
-				return safeEnvironmentVariableCommandError(err)
+				return safeEnvironmentVariableCommandError(command.Context(), err)
 			}
 			if err := refreshENVLayers(command, manager, true); err != nil {
 				return err
@@ -56,7 +56,7 @@ func addVaultScopeCommands(root *cobra.Command) {
 		Short: "Cancel an uncommitted personal ENV key rotation",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
-			manager, err := passwordVaultForCommand(command)
+			manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 			if err != nil {
 				return err
 			}
@@ -66,7 +66,7 @@ func addVaultScopeCommands(root *cobra.Command) {
 				return invocationError(errors.New("rotation cancel requires --confirm `CANCEL ENV ROTATE <account_id>`"))
 			}
 			if err := manager.AbortPersonalRotation(command.Context()); err != nil {
-				return safeEnvironmentVariableCommandError(err)
+				return safeEnvironmentVariableCommandError(command.Context(), err)
 			}
 			return writeVaultMutationResult(command, map[string]any{"scope": "personal", "rotation_canceled": true}, "Canceled the personal encrypted ENV key rotation.")
 		},
@@ -137,12 +137,12 @@ func addVaultScopeCommands(root *cobra.Command) {
 			if !vaultCommandIdentifier(teamID) || confirmation != "RESET ENV TEAM "+teamID {
 				return invocationError(errors.New("team reset requires --confirm `RESET ENV TEAM <team>`"))
 			}
-			manager, err := passwordVaultForCommand(command)
+			manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 			if err != nil {
 				return err
 			}
 			if err := manager.RotateTeam(command.Context(), teamID, nil, true); err != nil {
-				return safeEnvironmentVariableCommandError(err)
+				return safeEnvironmentVariableCommandError(command.Context(), err)
 			}
 			if err := refreshENVLayers(command, manager, true); err != nil {
 				return err
@@ -163,12 +163,12 @@ func addVaultScopeCommands(root *cobra.Command) {
 		Short: "Accept pending team grants into this account's encrypted vault",
 		Args:  commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
-			manager, err := passwordVaultForCommand(command)
+			manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 			if err != nil {
 				return err
 			}
 			if err := manager.SyncTeamGrants(command.Context()); err != nil {
-				return safeEnvironmentVariableCommandError(err)
+				return safeEnvironmentVariableCommandError(command.Context(), err)
 			}
 			if err := refreshENVLayers(command, manager, true); err != nil {
 				return err
@@ -198,11 +198,11 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 	if err := validateVaultScopeFlags(team, requestedMachine); err != nil {
 		return err
 	}
-	client, err := environmentVariableBackendForCommand(command)
+	client, err := envDependenciesOf(command.Context()).backendForCommand(command)
 	if err != nil {
 		return err
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func setEnvironmentVariableForScope(command *cobra.Command, team, requestedMachi
 		return err
 	}
 	if err := manager.SetScopeVariable(command.Context(), target.kind, target.owner, target.machine, name, value); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	if err := refreshENVRecordScope(command, manager, target.kind, target.owner, target.machine); err != nil {
 		return err
@@ -238,11 +238,11 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 	if err := validateVaultScopeFlags(team, requestedMachine); err != nil {
 		return err
 	}
-	client, err := environmentVariableBackendForCommand(command)
+	client, err := envDependenciesOf(command.Context()).backendForCommand(command)
 	if err != nil {
 		return err
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func unsetEnvironmentVariableForScope(command *cobra.Command, team, requestedMac
 		return err
 	}
 	if err := manager.RemoveScopeVariable(command.Context(), target.kind, target.owner, target.machine, name); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	if err := refreshENVRecordScope(command, manager, target.kind, target.owner, target.machine); err != nil {
 		return err
@@ -370,11 +370,11 @@ func listEnvironmentVariablesForScope(command *cobra.Command, team, requestedMac
 	if err := validateVaultScopeFlags(team, requestedMachine); err != nil {
 		return err
 	}
-	client, err := environmentVariableBackendForCommand(command)
+	client, err := envDependenciesOf(command.Context()).backendForCommand(command)
 	if err != nil {
 		return err
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
@@ -384,7 +384,7 @@ func listEnvironmentVariablesForScope(command *cobra.Command, team, requestedMac
 	}
 	metadata, err := readVaultScopeMetadata(command.Context(), manager, target)
 	if err != nil {
-		return withNamesHint(safeEnvironmentVariableCommandError(err))
+		return withNamesHint(safeEnvironmentVariableCommandError(command.Context(), err))
 	}
 	if jsonOutput {
 		return writeVaultScopeMetadataJSON(command.OutOrStdout(), metadata)
@@ -478,7 +478,7 @@ func runVaultTeamCreate(command *cobra.Command, teamID string) error {
 	if !vaultCommandIdentifier(teamID) {
 		return invocationError(errors.New("team must be a valid account identifier"))
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
@@ -504,7 +504,7 @@ func runVaultTeamCreate(command *cobra.Command, teamID string) error {
 		return getErr
 	}
 	if err := manager.CreateTeamAt(command.Context(), teamID, expectedGeneration, membershipGeneration); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	return writeVaultMutationResult(command, map[string]any{"team": teamID, "created": true}, "Created encrypted ENV team "+teamID+".")
 }
@@ -513,12 +513,12 @@ func runVaultTeamGrant(command *cobra.Command, teamID, accountID string) error {
 	if !vaultCommandIdentifier(teamID) || !vaultCommandIdentifier(accountID) {
 		return invocationError(errors.New("team and account must be valid account identifiers"))
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
 	if err := manager.GrantTeam(command.Context(), teamID, accountID); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	return writeVaultMutationResult(command, map[string]any{"team": teamID, "account": accountID, "granted": true}, fmt.Sprintf("Granted account %s access to encrypted ENV team %s.", accountID, teamID))
 }
@@ -531,12 +531,12 @@ func runVaultTeamRotate(command *cobra.Command, teamID string) error {
 	if confirmation != "ROTATE ENV TEAM "+teamID {
 		return invocationError(errors.New("team rotation requires --confirm `ROTATE ENV TEAM <team>`"))
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
 	if err := manager.RotateTeam(command.Context(), teamID, nil, false); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	if err := refreshENVLayers(command, manager, true); err != nil {
 		return err
@@ -567,12 +567,12 @@ func runVaultTeamRevoke(command *cobra.Command, teamID string, remove []string, 
 		}
 		seen[accountID] = struct{}{}
 	}
-	manager, err := passwordVaultForCommand(command)
+	manager, err := envDependenciesOf(command.Context()).passwordVault(command)
 	if err != nil {
 		return err
 	}
 	if err := manager.RotateTeam(command.Context(), teamID, append([]string(nil), remove...), totalLoss); err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return safeEnvironmentVariableCommandError(command.Context(), err)
 	}
 	if err := refreshENVLayers(command, manager, true); err != nil {
 		return err

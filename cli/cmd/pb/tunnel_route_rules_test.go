@@ -12,7 +12,7 @@ import (
 
 // pb tunnel route add sends the rules the flags describe, normalized, in the route create body.
 func TestTunnelRouteAddSendsRewriteRules(t *testing.T) {
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			tunnel := validCommandTunnel()
 			w.Header().Set("ETag", tunnel.ETag)
@@ -37,7 +37,7 @@ func TestTunnelRouteAddSendsRewriteRules(t *testing.T) {
 	command.SetArgs([]string{"route", "add", "tun_1", "--name", "web", "--to", "http://127.0.0.1:3000",
 		"--request-header", "set:x-env=prod", "--request-header", "remove:X-Debug", "--response-header", "add:X-Served-By=paperboat",
 		"--rewrite-path", "/api/ -> /v1", "--redirect", "/old -> 308:/new", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -51,7 +51,7 @@ func TestTunnelRouteUpdateReplacesAndClearsRuleLists(t *testing.T) {
 		Redirects:      []tunnelrouterules.Redirect{{From: "/old", Code: 301, To: "/new"}},
 	}
 	var sent map[string]any
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRoutePage{Items: []api.TunnelRoute{current}}})
 			return
@@ -63,7 +63,7 @@ func TestTunnelRouteUpdateReplacesAndClearsRuleLists(t *testing.T) {
 	})
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"route", "update", "tun_1", "route_r1", "--response-header", "set:X-New=1", "--clear-redirects", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	rules, _ := sent["rewrite_rules"].(map[string]any)
@@ -74,7 +74,7 @@ func TestTunnelRouteUpdateReplacesAndClearsRuleLists(t *testing.T) {
 	current.RewriteRules = &tunnelrouterules.Rules{Redirects: []tunnelrouterules.Redirect{{From: "/old", Code: 301, To: "/new"}}}
 	command = tunnelCobraCommandV1()
 	command.SetArgs([]string{"route", "update", "tun_1", "route_r1", "--clear-redirects", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	if value, present := sent["rewrite_rules"]; !present || len(value.(map[string]any)) != 0 {
@@ -110,7 +110,7 @@ func TestTunnelRouteUpdateClearFlagSetToFalseClearsNothing(t *testing.T) {
 	current := validCommandRoute("route_r1", "web")
 	current.RewriteRules = &tunnelrouterules.Rules{Redirects: []tunnelrouterules.Redirect{{From: "/old", Code: 301, To: "/new"}}}
 	var sent map[string]any
-	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+	deps := tunnelCommandFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRoutePage{Items: []api.TunnelRoute{current}}})
 			return
@@ -122,7 +122,7 @@ func TestTunnelRouteUpdateClearFlagSetToFalseClearsNothing(t *testing.T) {
 	})
 	command := tunnelCobraCommandV1()
 	command.SetArgs([]string{"route", "update", "tun_1", "route_r1", "--response-header", "set:X-New=1", "--clear-redirects=false", "--json"})
-	if err := command.Execute(); err != nil {
+	if err := command.ExecuteContext(deps.context(t.Context())); err != nil {
 		t.Fatal(err)
 	}
 	rules, _ := sent["rewrite_rules"].(map[string]any)

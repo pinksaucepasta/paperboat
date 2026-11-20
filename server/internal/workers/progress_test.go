@@ -159,7 +159,7 @@ func TestProgressUnstartedAndConcurrentSnapshotsAreBounded(t *testing.T) {
 		p.Register(name)
 	}
 	registered := p.Snapshot()
-	if len(registered) == 0 || len(registered) > 32 {
+	if len(registered) == 0 || len(registered) > maxProgressWorkers {
 		t.Fatal("worker registry is empty or exceeds its bound")
 	}
 	for i := 0; i < 100; i++ {

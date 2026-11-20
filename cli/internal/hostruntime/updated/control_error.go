@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+var ErrInstallationPending = errors.New("complete Paperboat enrollment before managing updates")
+
 var ErrCustomInstallation = errors.New("The installed Paperboat is a custom build, which cannot use official updates. To switch, run `pb update --force` (it may interrupt running work) or install an official bundle with `pb update --from <file.pb-update>`.")
 
 const maxControlErrorMessage = 2048

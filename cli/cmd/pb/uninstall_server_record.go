@@ -15,7 +15,7 @@ const uninstallServerRecordTimeout = 15 * time.Second
 // disconnectOwnMachine removes this computer's machine record on the server (the call pb machine revoke makes),
 // so peers drop it at once instead of listing an uninstalled machine as offline forever (X-41). A computer that
 // was never added has no record: nothing to do.
-var disconnectOwnMachine = func(c *command.Context) error {
+func disconnectOwnMachine(c *command.Context) error {
 	machineID, err := configuredMachineID()
 	if err != nil {
 		var preparation commandPreparationFailure
@@ -39,7 +39,7 @@ var disconnectOwnMachine = func(c *command.Context) error {
 // removeOwnServerRecord runs before any local removal. A failure never stops the uninstall: it returns the
 // sentence telling the user how to remove the record themselves, "" when the record is gone.
 func removeOwnServerRecord(c *command.Context) string {
-	err := disconnectOwnMachine(c)
+	err := installDependenciesOf(c.Context).disconnectMachine(c)
 	if err == nil {
 		return ""
 	}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Skew check (release gate): the previous release's pb, edge and relay against a server built from HEAD.
+# Skew check (release gate): the previous release's pb, edge, relay and pbh against a server built from HEAD.
 # TestE2ECore in skew mode (server/internal/app, PAPERBOAT_E2E_PREVIOUS): machines on the previous pb pair with
 # the HEAD server through the previous edge and relay; every core (pair, exec, ssh, send), edge (tunnel, preview)
 # and team path runs; then the edge, relay and each machine's pb move to HEAD in place and everything runs again.
@@ -10,7 +10,7 @@
 # previous-ref is any git ref (a release tag, or origin/main before the first release exists).
 # SKEW_CHECK_PUBLISH=1 records the result as the commit status paperboat/skew-check on HEAD, which release.yml
 # requires before it publishes a release of that commit: run it on the exact release commit (the tag).
-# pb, edge, relay and the self-host harness are all built from previous-ref's source on the host.
+# pb, edge, relay, pbh and the self-host harness are all built from previous-ref's source on the host.
 set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
@@ -75,6 +75,9 @@ cd "$dest/previous-src/cli" && go build -trimpath -ldflags "-X $b.Version=dev-pr
 cd "$dest/previous-src/edge" && go build -trimpath -o "$dest/previous/paperboat-edge" ./cmd/paperboat-edge
 cd "$dest/previous-src/relay" && go build -trimpath -o "$dest/previous/paperboat-relay" ./cmd/paperboat-relay
 cd "$dest/previous-src/relay" && go test -c -o "$dest/previous/selfhost-node.test" ./selfhost
+# pbh: the binary, and its server-facing client code as a test binary the e2e runs against the HEAD server.
+cd "$dest/previous-src/helper" && go build -trimpath -o "$dest/previous/pbh" ./cmd/pbh
+cd "$dest/previous-src/helper" && go test -c -o "$dest/previous/pbh-probe.test" ./internal/containers
 # Host prep e2e.yml does on its runner: the server's test name and low ports for the edge.
 grep -q ' e2e-server.example.test$' /etc/hosts || echo "127.0.0.1 e2e-server.example.test" | sudo -n tee -a /etc/hosts >/dev/null
 sudo -n sysctl -q net.ipv4.ip_unprivileged_port_start=80

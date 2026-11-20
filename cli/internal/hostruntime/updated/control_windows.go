@@ -244,6 +244,17 @@ func handleWindowsControl(ctx context.Context, connection net.Conn, invoke func(
 	return request.Operation == "install" && response.Pending && invokeErr == nil, nil
 }
 
+func (c *windowsController) observeSignedRelease(ctx context.Context, response ControlResponse) (ControlResponse, error) {
+	c.checkMu.Lock()
+	result, err := c.scheduler.ObserveCheck(ctx, func(ctx context.Context) (autoupdate.Result, error) {
+		workerResult, resolveErr := resolveRelease(ctx, c.activeVersion, c.resolve)
+		return autoupdate.Result{Version: workerResult.Version}, resolveErr
+	})
+	c.checkMu.Unlock()
+	response.Version, response.Updated, response.Observation = result.Version, false, c.scheduler.Snapshot()
+	return response, err
+}
+
 func (c *windowsController) invoke(ctx context.Context, request ControlRequest) (ControlResponse, error) {
 	return c.invokeWithAutomatic(ctx, request, false)
 }
@@ -285,8 +296,18 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	}
 	c.config.ActiveVersion = currentVersion
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: c.activeVersion, Observation: c.scheduler.Snapshot(), Pending: !installed.Committed}
-	if !installed.Committed && (request.Operation == "check" || request.Operation == "download" || request.Operation == "install" || request.Operation == "settings" && request.Settings != nil) {
-		return response, nil
+	if !installed.Committed {
+		switch request.Operation {
+		case "check":
+			// Reading signed release metadata does not touch the uncommitted installation (see checkWhileEnrollmentPending).
+			return c.observeSignedRelease(ctx, response)
+		case "download", "install":
+			return response, nil
+		case "settings":
+			if request.Settings != nil {
+				return response, nil
+			}
+		}
 	}
 	if request.Operation == "settings" {
 		settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, request.Settings)
@@ -405,14 +426,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		// A manual check is read-only. Calling Scheduler.CheckNow here used the
 		// automatic activation callback and could stage, stop services, and roll
 		// back a release merely because the user asked what version was current.
-		c.checkMu.Lock()
-		result, err := c.scheduler.ObserveCheck(ctx, func(ctx context.Context) (autoupdate.Result, error) {
-			workerResult, resolveErr := resolveRelease(ctx, c.activeVersion, c.resolve)
-			return autoupdate.Result{Version: workerResult.Version}, resolveErr
-		})
-		c.checkMu.Unlock()
-		response.Version, response.Updated, response.Observation = result.Version, false, c.scheduler.Snapshot()
-		return response, err
+		return c.observeSignedRelease(ctx, response)
 	case "download", "install":
 		if c.config.RepositoryURL == "" {
 			return response, ErrWindowsActivationUnavailable
@@ -640,6 +654,9 @@ func (c *windowsController) activationBlockedContext(ctx context.Context) (bool,
 }
 
 func controlErrorCodeWindows(err error) string {
+	if errors.Is(err, ErrInstallationPending) {
+		return "installation_pending"
+	}
 	if errors.Is(err, ErrCustomInstallation) {
 		return "custom_installation"
 	}

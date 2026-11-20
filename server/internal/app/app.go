@@ -921,6 +921,12 @@ func New(opts Options) (*App, error) {
 			return controlplane.NodeUpdateState(ctx, release, component, version, time.Now())
 		})
 	}), progress))
+	if opts.Config.ReleaseDirectory != "" {
+		releaseNotices := announcements.New(store)
+		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_release_expiry_notices", periodicPreviewTunnelWorker(10*time.Minute, func(ctx context.Context) error {
+			return releaseExpiryNotices(ctx, opts.Config.ReleaseDirectory, releaseNotices, time.Now())
+		}), progress))
+	}
 	// The Fleet page's rollout chart: today's version counts, rewritten every 10 minutes (fleet_version_daily).
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_fleet_snapshot", periodicPreviewTunnelWorker(10*time.Minute, operatorService.SnapshotFleet), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_recipe_machines", periodicPreviewTunnelWorker(time.Minute, recipeService.CollectMachines), progress))

@@ -58,19 +58,17 @@ type updateCheckResult struct {
 	Verified         bool   `json:"verified"`
 }
 
-var updateControlSocketForCommand = updatedControlSocket
-
 const updateDaemonSnapshotTimeout = 2 * time.Second
 
 // readLocalDaemonSnapshot is deliberately a direct read-only probe. Update
 // status must report whether the authenticated daemon is actually present; it
 // must not use localDaemonSnapshot, whose recovery path can install and start
 // a daemon as a side effect.
-var readLocalDaemonSnapshot = func(ctx context.Context) (localapi.Snapshot, error) {
+func readLocalDaemonSnapshot(ctx context.Context) (localapi.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	paths, err := currentLocalDaemonPaths()
+	paths, err := hostDependenciesOf(ctx).daemonPaths()
 	if err != nil {
 		return localapi.Snapshot{}, err
 	}
@@ -86,7 +84,7 @@ var readLocalDaemonSnapshot = func(ctx context.Context) (localapi.Snapshot, erro
 func actionUpdateCheck(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 30*time.Second)
 	defer cancel()
-	client, err := newUpdateControlClient(30 * time.Second)
+	client, err := newUpdateControlClient(ctx, 30*time.Second)
 	if err != nil {
 		return err
 	}
@@ -153,14 +151,14 @@ type updateStatusResult struct {
 func actionUpdateStatus(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 10*time.Second)
 	defer cancel()
-	client, err := newUpdateControlClient(10 * time.Second)
+	client, err := newUpdateControlClient(ctx, 10*time.Second)
 	if err != nil {
 		return err
 	}
 	response, err := client.Status(ctx)
 	if err == nil {
 		var snapshot *localapi.Snapshot
-		if daemonSnapshot, snapshotErr := readLocalDaemonSnapshot(ctx); snapshotErr == nil {
+		if daemonSnapshot, snapshotErr := updateDependenciesOf(ctx).daemonSnapshot(ctx); snapshotErr == nil {
 			snapshot = &daemonSnapshot
 		}
 		result := updateStatusCommandResult(buildinfo.Version, response, snapshot)
@@ -289,7 +287,7 @@ func writeUpdateStatusResult(command *cobra.Command, result updateStatusResult) 
 func actionUpdateDownload(command *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
 	defer cancel()
-	client, err := newUpdateControlClient(15 * time.Minute)
+	client, err := newUpdateControlClient(ctx, 15*time.Minute)
 	if err != nil {
 		return err
 	}
@@ -322,7 +320,7 @@ func writeDownloadedUpdate(command *cobra.Command, response updated.ControlRespo
 	return nil
 }
 
-var updateInputIsTerminal = func(command *cobra.Command) bool {
+func updateInputIsTerminal(command *cobra.Command) bool {
 	input, ok := command.InOrStdin().(*os.File)
 	return ok && term.IsTerminal(int(input.Fd()))
 }
@@ -339,7 +337,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
 	defer cancel()
-	client, err := newUpdateControlClient(15 * time.Minute)
+	client, err := newUpdateControlClient(ctx, 15*time.Minute)
 	if err != nil {
 		return err
 	}
@@ -356,7 +354,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 			}
 			return updateControlFailure("download signed update", err)
 		}
-		if response.Candidate == nil || (!force && (updateJSON(command) || !updateInputIsTerminal(command))) {
+		if response.Candidate == nil || (!force && (updateJSON(command) || !updateDependenciesOf(ctx).inputIsTerminal(command))) {
 			return writeDownloadedUpdate(command, response)
 		}
 		if !force {
@@ -385,7 +383,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 	}
 	var snapshot *localapi.Snapshot
 	if response.Updated && !response.Pending {
-		if value, err := readLocalDaemonSnapshot(ctx); err == nil {
+		if value, err := updateDependenciesOf(ctx).daemonSnapshot(ctx); err == nil {
 			snapshot = &value
 		}
 	}
@@ -484,8 +482,8 @@ func writeUpdateResult(command *cobra.Command, result updateResult, version stri
 	return nil
 }
 
-func newUpdateControlClient(timeout time.Duration) (*updated.Client, error) {
-	socket, err := updateControlSocketForCommand()
+func newUpdateControlClient(ctx context.Context, timeout time.Duration) (*updated.Client, error) {
+	socket, err := updateDependenciesOf(ctx).socket()
 	if err != nil {
 		return nil, fmt.Errorf("resolve the current user's updater: %w", err)
 	}

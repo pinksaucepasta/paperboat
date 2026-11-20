@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
-	"io"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -17,9 +15,6 @@ import (
 
 // machineOtherWorkspacesBudget bounds the lookup in the account's other workspaces.
 const machineOtherWorkspacesBudget = 5 * time.Second
-
-// machineResolutionNotice receives the one line naming the workspace a name resolved in.
-var machineResolutionNotice io.Writer = os.Stderr
 
 // machineInWorkspaces is a machine name not found in the selected workspace that matches machines in
 // several other workspaces: the user picks one with --workspace.
@@ -79,7 +74,7 @@ func resolveInOtherWorkspaces(ctx context.Context, client *api.Client, requested
 		if err := client.SetWorkspace(found.workspace.ID); err != nil {
 			return api.UserMachine{}, err
 		}
-		_, _ = fmt.Fprintf(machineResolutionNotice, "%s (%s)\n", found.machine.Alias, describeWorkspace(found.workspace))
+		_, _ = fmt.Fprintf(workspaceDependenciesOf(ctx).resolutionNotice, "%s (%s)\n", found.machine.Alias, describeWorkspace(found.workspace))
 		return found.machine, nil
 	}
 	ambiguous := &machineInWorkspacesError{machine: requested}

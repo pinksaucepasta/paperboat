@@ -71,7 +71,7 @@ func actionUpdateSettings(command *cobra.Command, _ []string) error {
 
 	ctx, cancel := context.WithTimeout(command.Context(), 10*time.Second)
 	defer cancel()
-	client, err := newUpdateControlClient(10 * time.Second)
+	client, err := newUpdateControlClient(ctx, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -163,8 +163,13 @@ func writeUpdateSettingsResult(output io.Writer, result updateSettingsResult) er
 
 func updateControlFailure(operation string, err error) error {
 	var remote *updated.ControlError
-	if errors.As(err, &remote) && remote.Code == "custom_installation" {
-		return commandRejection{reason: commandRejectCustomUpdate}
+	if errors.As(err, &remote) {
+		switch remote.Code {
+		case "installation_pending":
+			return commandRejection{reason: commandRejectUpdateUnpaired}
+		case "custom_installation":
+			return commandRejection{reason: commandRejectCustomUpdate}
+		}
 	}
 	if errors.As(err, &remote) && openConnectionsRefusal(remote) {
 		return updateOpenConnectionsRefusal{message: remote.Message}

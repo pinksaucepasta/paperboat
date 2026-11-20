@@ -328,21 +328,6 @@ func resolveUserMachineIn(machines []api.UserMachine, requested string) (api.Use
 	return api.UserMachine{}, fmt.Errorf("%w: %q", resolver.ErrMachineNotFound, requested)
 }
 
-// resolveWarmUserMachine uses the daemon's authenticated inventory snapshot
-// for selection. Operation descriptors remain fetched from the control plane;
-// this only removes a redundant catalog round trip on an already-warm client.
-var loadWarmMachineSnapshot = func(ctx context.Context) (localapi.Snapshot, error) {
-	paths, err := currentLocalDaemonPaths()
-	if err != nil {
-		return localapi.Snapshot{}, err
-	}
-	client, err := localapi.NewClient(paths.SocketPath, 300*time.Millisecond)
-	if err != nil {
-		return localapi.Snapshot{}, err
-	}
-	return client.Snapshot(ctx)
-}
-
 // workspaceSnapshotMachines selects the daemon snapshot's machines that belong to the
 // invocation's workspace. It reports false when only the server can answer: another workspace's
 // membership is not in the snapshot, while the personal workspace is the account's own personal
@@ -388,7 +373,7 @@ func warmUserMachine(ctx context.Context, requested string, anyState bool) (api.
 	if _, local := workspaceSnapshotMachines(ctx, nil); !local {
 		return api.UserMachine{}, false
 	}
-	snapshot, err := loadWarmMachineSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).warmSnapshot(ctx)
 	if err != nil {
 		return api.UserMachine{}, false
 	}
@@ -408,7 +393,7 @@ const controlPlaneProbeTimeout = 5 * time.Second
 
 // daemonReportsControlPlaneUnavailable is the daemon's own health: its last refresh could not reach Paperboat.
 func daemonReportsControlPlaneUnavailable(ctx context.Context) bool {
-	snapshot, err := loadWarmMachineSnapshot(ctx)
+	snapshot, err := hostDependenciesOf(ctx).warmSnapshot(ctx)
 	return err == nil && len(snapshot.Health) == 1 && snapshot.Health[0].Code == "control_plane_unavailable"
 }
 

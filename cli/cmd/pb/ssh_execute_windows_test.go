@@ -32,31 +32,27 @@ func TestWindowsSSHRemoteCommandMatchesOpenSSHJoinSemantics(t *testing.T) {
 }
 
 func TestWindowsSSHCommandInputLeavesTerminalUnowned(t *testing.T) {
-	previous := isWindowsSSHCommandTerminal
-	isWindowsSSHCommandTerminal = func(int) bool { return true }
-	t.Cleanup(func() { isWindowsSSHCommandTerminal = previous })
+	ctx := withWindowsSSHDependencies(t.Context(), func(d *windowsSSHDependencies) { d.isInputTerminal = func(int) bool { return true } })
 	file, err := os.CreateTemp(t.TempDir(), "console")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	input, err := windowsSSHCommandInput(file)
+	input, err := windowsSSHCommandInput(ctx, file)
 	if err != nil || input != nil {
 		t.Fatalf("terminal input=%v error=%v", input, err)
 	}
 }
 
 func TestWindowsSSHCommandInputDuplicateCloseCancelsReadAndPreservesOriginal(t *testing.T) {
-	previous := isWindowsSSHCommandTerminal
-	isWindowsSSHCommandTerminal = func(int) bool { return false }
-	t.Cleanup(func() { isWindowsSSHCommandTerminal = previous })
+	ctx := withWindowsSSHDependencies(t.Context(), func(d *windowsSSHDependencies) { d.isInputTerminal = func(int) bool { return false } })
 	original, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer original.Close()
 	defer writer.Close()
-	input, err := windowsSSHCommandInput(original)
+	input, err := windowsSSHCommandInput(ctx, original)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,27 +81,28 @@ func TestWindowsSSHCommandInputDuplicateCloseCancelsReadAndPreservesOriginal(t *
 	}
 }
 
+func withWindowsSSHDependencies(ctx context.Context, configure func(*windowsSSHDependencies)) context.Context {
+	return withDependencies(ctx, defaultWindowsSSHDependencies, configure)
+}
+
 func TestWindowsManagedSSHDependenciesRequiresLocalDaemonBeforeDial(t *testing.T) {
-	previousBuild, previousRequire := buildWindowsManagedSSHDeps, requireWindowsManagedSSHDaemon
-	t.Cleanup(func() {
-		buildWindowsManagedSSHDeps, requireWindowsManagedSSHDaemon = previousBuild, previousRequire
-	})
 	want := errors.New("daemon unavailable")
 	cfg := &config.Config{}
-	buildWindowsManagedSSHDeps = func(*command.Context) (*deps, error) {
-		return &deps{cfg: cfg}, nil
-	}
 	called := false
-	requireWindowsManagedSSHDaemon = func(ctx context.Context, got *config.Config) error {
-		called = true
-		if ctx == nil || got != cfg {
-			t.Fatalf("require daemon context=%v config=%p want=%p", ctx, got, cfg)
-		}
-		return want
-	}
 	set := flag.NewFlagSet("ssh", flag.ContinueOnError)
 	ctx := command.NewContext(set, strings.NewReader(""))
-	ctx.Context = context.Background()
+	ctx.Context = withWindowsSSHDependencies(context.Background(), func(d *windowsSSHDependencies) {
+		d.buildDeps = func(*command.Context) (*deps, error) {
+			return &deps{cfg: cfg}, nil
+		}
+		d.requireDaemon = func(ctx context.Context, got *config.Config) error {
+			called = true
+			if ctx == nil || got != cfg {
+				t.Fatalf("require daemon context=%v config=%p want=%p", ctx, got, cfg)
+			}
+			return want
+		}
+	})
 	if _, err := windowsManagedSSHDependencies(ctx); !errors.Is(err, want) {
 		t.Fatalf("dependencies error=%v", err)
 	}

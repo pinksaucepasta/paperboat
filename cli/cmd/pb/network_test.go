@@ -1,12 +1,9 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"os"
+	"path/filepath"
 	"testing"
-
-	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 )
 
 func TestMain(m *testing.M) {
@@ -15,9 +12,21 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	// A unit test never talks to the host's real pb daemon: on a machine with a live installed daemon, TestENVNotSetUpIsNamedNotAuthentication
-	// read its snapshot (control_plane_unavailable) and named the wrong problem. Tests that need a snapshot set their own readDaemonSnapshot.
-	readDaemonSnapshot = func(context.Context) (localapi.Snapshot, error) {
-		return localapi.Snapshot{}, errors.New("unit tests do not read the host's daemon")
+	// read its snapshot (control_plane_unavailable) and named the wrong problem. The daemon's state and socket
+	// directories are private to the test process; tests that need a daemon say where it is in their own context.
+	private, err := os.MkdirTemp("", "pb-test-")
+	if err != nil {
+		panic(err)
 	}
-	os.Exit(m.Run())
+	for name, directory := range map[string]string{"XDG_STATE_HOME": "state", "XDG_RUNTIME_DIR": "runtime"} {
+		if err := os.Mkdir(filepath.Join(private, directory), 0o700); err != nil {
+			panic(err)
+		}
+		if err := os.Setenv(name, filepath.Join(private, directory)); err != nil {
+			panic(err)
+		}
+	}
+	code := m.Run()
+	_ = os.RemoveAll(private)
+	os.Exit(code)
 }

@@ -104,7 +104,7 @@ func run(args []string) error {
 		return errors.New("production signing is restricted to the macOS release workstation")
 	}
 	if len(args) == 0 {
-		return errors.New("usage: paperboat-tuf <init|publish|promote|pause|quarantine|refresh|status|validate-signers|verify-published>")
+		return errors.New("usage: paperboat-tuf <init|publish|promote|pause|quarantine|refresh|refresh-targets|status|validate-signers|verify-published>")
 	}
 	switch args[0] {
 	case "init":
@@ -142,6 +142,13 @@ func run(args []string) error {
 			return errors.New("usage: paperboat-tuf refresh -repository DIR")
 		}
 		return refresh(*repo)
+	case "refresh-targets":
+		fs := flag.NewFlagSet("refresh-targets", flag.ContinueOnError)
+		repo := fs.String("repository", "", "repository directory")
+		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+			return errors.New("usage: paperboat-tuf refresh-targets -repository DIR")
+		}
+		return refreshTargets(*repo)
 	case "promote", "pause", "quarantine":
 		fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 		repo := fs.String("repository", "", "repository directory")
@@ -591,6 +598,27 @@ func validateRefreshMetadataFreshness(root *metadata.Metadata[metadata.RootType]
 		return fmt.Errorf("cannot refresh metadata with expired targets metadata: expires %s", targets.Signed.Expires.UTC().Format(time.RFC3339Nano))
 	}
 	return nil
+}
+
+// refreshTargets renews the 90-day targets expiry (and snapshot and timestamp) without changing any target, so a
+// quiet period without releases never lets targets lapse. Unlike refresh it also works on already-expired targets (the
+// recovery path); only an expired root stops it, and that needs the root ceremony (server/docs/runbooks/release-metadata.md).
+func refreshTargets(repo string) error {
+	repo, err := validateRepository(repo, true)
+	if err != nil {
+		return err
+	}
+	root, targets, snapshot, timestamp, err := loadSet(repo)
+	if err != nil {
+		return err
+	}
+	if err := root.VerifyDelegate("targets", targets); err != nil {
+		return err
+	}
+	if err := validateOnlineSigner(root); err != nil { // also refuses an expired root
+		return err
+	}
+	return signTargetsSet(repo, root, targets, snapshot, timestamp)
 }
 
 // mutateRollout changes only the signed static deployment policy carried by

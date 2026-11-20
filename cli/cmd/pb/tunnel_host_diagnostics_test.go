@@ -133,16 +133,11 @@ func TestCollectTunnelHostDiagnosticsRejectsUnsafeResponse(t *testing.T) {
 }
 
 func TestTunnelDoctorBundleIncludesTypedHostDiagnosticsAndEvidence(t *testing.T) {
-	oldLocal, oldHost, oldDNS := tunnelDoctorLocalReportForCommand, tunnelDoctorHostDiagnosticsForCommand, tunnelDoctorDNSCheckForCommand
-	t.Cleanup(func() {
-		tunnelDoctorLocalReportForCommand = oldLocal
-		tunnelDoctorHostDiagnosticsForCommand = oldHost
-		tunnelDoctorDNSCheckForCommand = oldDNS
-	})
-	tunnelDoctorLocalReportForCommand = func(context.Context) (localDoctorReport, error) {
+	deps := defaultTunnelDependencies()
+	deps.localReport = func(context.Context) (localDoctorReport, error) {
 		return localDoctorReport{HostRuntime: "ready", IdentityState: "available", CredentialState: "available"}, nil
 	}
-	tunnelDoctorDNSCheckForCommand = func(context.Context) bool { return true }
+	deps.dnsReady = func(context.Context) bool { return true }
 	tracker, err := health.NewHealthTracker(func() time.Time { return time.Unix(100, 0).UTC() })
 	if err != nil {
 		t.Fatal(err)
@@ -172,12 +167,12 @@ func TestTunnelDoctorBundleIncludesTypedHostDiagnosticsAndEvidence(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tunnelDoctorHostDiagnosticsForCommand = func(context.Context) (tunnelHostDiagnostics, error) {
+	deps.hostDiagnostics = func(context.Context) (tunnelHostDiagnostics, error) {
 		return tunnelHostDiagnostics{Schema: tunnelHostDiagnosticsSchemaV1, Health: tracker.Snapshot(), Metrics: metrics.Snapshot(), Events: events.Snapshot()}, nil
 	}
 	dimension := api.TunnelHealthDimension{Status: "healthy", Code: "ready"}
 	tunnelHealth := api.TunnelHealth{Schema: api.TunnelV1Schema, Kind: "health", ResourceKind: "tunnel", ResourceID: "tun_1", OverallCode: "ready", Summary: "Tunnel is ready.", RepairAction: "none", Since: time.Unix(1, 0).UTC(), Dimensions: api.TunnelHealthDimensions{Service: dimension, Edge: dimension, Config: dimension, Route: dimension, Origin: dimension, DNS: dimension, Certificate: dimension, Access: dimension, Update: dimension}}
-	_, preview, err := buildTunnelDoctorBundle(t.Context(), tunnelHealth, tunnelDoctorBundleDefaultBytes)
+	_, preview, err := buildTunnelDoctorBundle(deps.context(t.Context()), tunnelHealth, tunnelDoctorBundleDefaultBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

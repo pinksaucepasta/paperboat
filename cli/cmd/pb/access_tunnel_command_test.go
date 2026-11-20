@@ -88,17 +88,15 @@ func (f *fakeAccessTunnelRuntime) Release(context.Context, accessTunnelSession) 
 	return nil
 }
 
-func withAccessTunnelRuntime(t *testing.T, runtime accessTunnelRuntime) {
-	t.Helper()
-	old := accessTunnelRuntimeForCommand
-	accessTunnelRuntimeForCommand = func() (accessTunnelRuntime, error) { return runtime, nil }
-	t.Cleanup(func() { accessTunnelRuntimeForCommand = old })
+func withAccessTunnelRuntime(ctx context.Context, runtime accessTunnelRuntime) context.Context {
+	return withAccessDependencies(ctx, func(d *accessDependencies) {
+		d.tunnelRuntime = func() (accessTunnelRuntime, error) { return runtime, nil }
+	})
 }
 
 func TestAccessTunnelCommandCancelsAndCleansUpWithoutSecrets(t *testing.T) {
 	runtime := &fakeAccessTunnelRuntime{}
-	withAccessTunnelRuntime(t, runtime)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withAccessTunnelRuntime(t.Context(), runtime))
 	output := &cancelAfterWrite{cancel: cancel}
 	command := accessTunnelCobraCommandV1()
 	command.SetContext(ctx)
@@ -123,9 +121,10 @@ func TestAccessTunnelCommandCancelsAndCleansUpWithoutSecrets(t *testing.T) {
 
 func TestAccessTunnelCommandRejectsNonLiteralLoopbackBeforeRuntime(t *testing.T) {
 	runtime := &fakeAccessTunnelRuntime{}
-	withAccessTunnelRuntime(t, runtime)
+	ctx := withAccessTunnelRuntime(t.Context(), runtime)
 	for _, listen := range []string{"localhost:0", "0.0.0.0:9000", "192.168.1.2:9000", "127.0.0.1:http"} {
 		command := accessTunnelCobraCommandV1()
+		command.SetContext(ctx)
 		command.SetArgs([]string{"tun_1", "--listen", listen})
 		if err := command.Execute(); !errors.Is(err, ErrAccessTunnelInvalid) {
 			t.Fatalf("listen=%q error=%v", listen, err)
@@ -290,8 +289,7 @@ func TestProductionAccessTunnelRuntimeKeepsMissingTokenCauseWithoutPath(t *testi
 
 func TestAccessTunnelHumanOutputIsCanonicalSafeEndpoint(t *testing.T) {
 	runtime := &fakeAccessTunnelRuntime{}
-	withAccessTunnelRuntime(t, runtime)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(withAccessTunnelRuntime(t.Context(), runtime))
 	output := &cancelAfterWrite{cancel: cancel}
 	command := accessTunnelCobraCommandV1()
 	command.SetContext(ctx)
@@ -309,8 +307,7 @@ func shortAccessTunnelHeartbeat(parent context.Context) context.Context {
 
 func TestAccessTunnelCommandBeatsWhileAliveThenReleases(t *testing.T) {
 	runtime := &fakeAccessTunnelRuntime{}
-	withAccessTunnelRuntime(t, runtime)
-	ctx, cancel := context.WithTimeout(shortAccessTunnelHeartbeat(context.Background()), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(shortAccessTunnelHeartbeat(withAccessTunnelRuntime(t.Context(), runtime)), 200*time.Millisecond)
 	defer cancel()
 	command := accessTunnelCobraCommandV1()
 	command.SetContext(ctx)
@@ -328,8 +325,7 @@ func TestAccessTunnelCommandBeatsWhileAliveThenReleases(t *testing.T) {
 
 func TestAccessTunnelCommandEndsWhenHostdForgotTheSession(t *testing.T) {
 	runtime := &fakeAccessTunnelRuntime{heartbeatErr: ErrAccessTunnelGone}
-	withAccessTunnelRuntime(t, runtime)
-	ctx, cancel := context.WithTimeout(shortAccessTunnelHeartbeat(context.Background()), 5*time.Second)
+	ctx, cancel := context.WithTimeout(shortAccessTunnelHeartbeat(withAccessTunnelRuntime(t.Context(), runtime)), 5*time.Second)
 	defer cancel()
 	command := accessTunnelCobraCommandV1()
 	command.SetContext(ctx)
