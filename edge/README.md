@@ -51,6 +51,15 @@ relative paths, or a missing carrier listener stop startup with a typed error.
 - **Limits:** `max_body_bytes` (default 100 MiB), `max_header_bytes`
   (default 32 KiB, at most 128 KiB), `control_interval`, `control_timeout`, and the optional
   `preview_carrier_interval`, `public_tcp_idle_timeout`, `request_body_idle_timeout`.
+- **Node forwarding (managed edges):** a visitor who reaches a node that does not hold the carrier is passed on,
+  as raw bytes, to the node that does (TLS is terminated on the holder only; raw TCP tunnel ports are bound on
+  every node and forwarded the same way). Optional: `forward_enabled` (default true; self-hosted edges never
+  forward), `forward_dial_timeout` and `forward_open_timeout` (3 s each), `forward_peer_interval` (10 s),
+  `forward_peer_stale_after` (50 s; at most 1 h, at least `forward_peer_interval`; how long a failing peer refresh keeps the last directory), `forward_seed_interval` (5 min), `forward_max_streams_per_peer` (4096). A forwarding node listens on every public
+  TCP tunnel port its peers hold, so it needs a high file limit. Self-hosted edge containers started by `pbh` get
+  `--ulimit nofile=1048576:1048576`. Managed edge hosts must set `LimitNOFILE=1048576` (systemd) or the equivalent
+  container ulimit themselves; no managed deploy unit lives in this repo. The edge logs `file_limit_low` at startup
+  when the soft limit is below the public TCP port range plus 1024 (the edge has no connection limit).
 - **Proxies and fixed routes:** `trusted_proxy_cidrs` and `public_routes` (host, optional path
   prefix, upstream).
 

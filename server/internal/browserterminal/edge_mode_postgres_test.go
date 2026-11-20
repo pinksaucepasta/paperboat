@@ -127,7 +127,7 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 	}
 	ticket := Ticket{UserID: account, BrowserSessionID: "ses_edge_mode", TerminalSessionID: session, Origin: "https://dashboard.example.test", Role: before.Role, PolicyGeneration: before.PolicyGeneration, TeamGeneration: before.TeamGeneration, MembershipGeneration: before.MembershipGeneration, BindingGeneration: before.BindingGeneration, BrowserPublicKeySHA256: testBrowserKeyDigest}
 	tickets := &edgeTestTickets{active: true, ticket: ticket, value: "edge-mode-ticket"}
-	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}, HoldsCarrier: CarrierHolder{DB: database}.Holds}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gateway.ServeEdgeControl(w, r, managed, epochs[managed])
 	}))

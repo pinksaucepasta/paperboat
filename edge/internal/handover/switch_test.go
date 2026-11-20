@@ -68,6 +68,9 @@ func TestMain(m *testing.M) {
 	if dir := os.Getenv("PB_HANDOVER_OLD"); dir != "" {
 		runOld(dir)
 	}
+	if dir := os.Getenv("PB_HANDOVER_MANY"); dir != "" {
+		runOldWithManySockets(dir)
+	}
 	os.Exit(m.Run())
 }
 

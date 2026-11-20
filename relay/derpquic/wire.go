@@ -22,6 +22,12 @@ const MaxControl = 128 << 10
 const MaxPacket = 2048
 const fragmentPayload = 1024
 const fragmentHeader = 43
+
+// A mesh datagram names the destination as well as the source (a second 32-byte key), so a relay that holds neither
+// can forward it: header 75 bytes + 1024 payload still fits one QUIC datagram. Bit 7 of the index byte marks a
+// control packet (discovery), which the delivering relay authorizes by the network rule, not the pair rule.
+const meshFragmentHeader = 75
+const meshControlFlag = 0x80
 const maxAssemblies = 64
 const (
 	frameAuth byte = 1 + iota
@@ -91,29 +97,41 @@ func decodeControl(b []byte) (packet, error) {
 // either of two fragments loses the whole packet, which doubled the loss the inner connection saw), and as fragments of
 // fragmentPayload only when it does not fit. Prior art: quic-go Conn.SendDatagram reports DatagramTooLargeError instead of fragmenting.
 func sendPacket(c *quic.Conn, sequence *atomic.Uint64, p packet) error {
-	if len(p.data) == 0 || len(p.data) > MaxPacket {
+	return sendFragments(c, sequence, p.peer, nil, p.data, false)
+}
+
+// sendFragments sends data as one datagram when the carrier's path MTU allows it, else as two fragments of fragmentPayload. A nil dst is the client wire
+// (the destination is the peer the datagram is addressed to); a dst is a mesh forward from src to dst.
+func sendFragments(c *quic.Conn, sequence *atomic.Uint64, src key.NodePublic, dst *key.NodePublic, data []byte, control bool) error {
+	if len(data) == 0 || len(data) > MaxPacket {
 		return ErrProtocol
 	}
 	id := sequence.Add(1)
-	k := p.peer.AppendTo(nil)
+	keys, header := src.AppendTo(nil), fragmentHeader
+	if dst != nil {
+		keys, header = dst.AppendTo(keys), meshFragmentHeader
+	}
 	datagram := func(off, end int) []byte {
-		b := make([]byte, fragmentHeader+end-off)
+		b := make([]byte, header+end-off)
 		binary.BigEndian.PutUint64(b, id)
-		copy(b[8:40], k)
-		binary.BigEndian.PutUint16(b[40:42], uint16(len(p.data)))
-		b[42] = byte(off / fragmentPayload)
-		copy(b[43:], p.data[off:end])
+		copy(b[8:], keys)
+		binary.BigEndian.PutUint16(b[header-3:], uint16(len(data)))
+		b[header-1] = byte(off / fragmentPayload)
+		if control {
+			b[header-1] |= meshControlFlag
+		}
+		copy(b[header:], data[off:end])
 		return b
 	}
-	if len(p.data) > fragmentPayload {
-		err := c.SendDatagram(datagram(0, len(p.data)))
+	if len(data) > fragmentPayload {
+		err := c.SendDatagram(datagram(0, len(data)))
 		var tooLarge *quic.DatagramTooLargeError
 		if !errors.As(err, &tooLarge) {
 			return err
 		}
 	}
-	for off := 0; off < len(p.data); off += fragmentPayload {
-		if err := c.SendDatagram(datagram(off, min(off+fragmentPayload, len(p.data)))); err != nil {
+	for off := 0; off < len(data); off += fragmentPayload {
+		if err := c.SendDatagram(datagram(off, min(off+fragmentPayload, len(data)))); err != nil {
 			return err
 		}
 	}
@@ -121,12 +139,14 @@ func sendPacket(c *quic.Conn, sequence *atomic.Uint64, p packet) error {
 }
 
 type assembly struct {
-	peer    key.NodePublic
-	size    int
-	parts   [2][]byte
-	expires time.Time
+	peer, dst key.NodePublic
+	control   bool
+	size      int
+	parts     [2][]byte
+	expires   time.Time
 }
 type reassembler struct {
+	mesh      bool // fragments carry a destination key (meshFragmentHeader)
 	pending   map[uint64]*assembly
 	highest   uint64
 	completed [128]uint64
@@ -140,31 +160,55 @@ func fragmentPeer(b []byte) key.NodePublic {
 }
 
 func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePublic) bool) (packet, bool, error) {
-	if len(b) < fragmentHeader+1 || len(b) > fragmentHeader+MaxPacket {
-		return packet{}, false, ErrProtocol
+	m, ok, err := r.acceptFragment(b, now, authorize)
+	return m.packet, ok, err
+}
+
+// meshPacket is a reassembled mesh forward: the packet (peer = source route key) and its destination route key.
+type meshPacket struct {
+	packet
+	dst key.NodePublic
+}
+
+func (r *reassembler) acceptFragment(b []byte, now time.Time, authorize func(key.NodePublic) bool) (meshPacket, bool, error) {
+	header := fragmentHeader
+	if r.mesh {
+		header = meshFragmentHeader
+	}
+	if len(b) < header+1 || len(b) > header+MaxPacket {
+		return meshPacket{}, false, ErrProtocol
 	}
 	id := binary.BigEndian.Uint64(b)
-	size := int(binary.BigEndian.Uint16(b[40:42]))
-	index := int(b[42])
+	size := int(binary.BigEndian.Uint16(b[header-3:]))
+	index, control := int(b[header-1]), false
+	if r.mesh {
+		control, index = index&meshControlFlag != 0, index&^meshControlFlag
+	}
 	peer := fragmentPeer(b)
-	part := len(b) - fragmentHeader
+	var dst key.NodePublic
+	if r.mesh {
+		var rawDst [32]byte
+		copy(rawDst[:], b[40:72])
+		dst = key.NodePublicFromRaw32(mem.B(rawDst[:]))
+	}
+	part := len(b) - header
 	// A packet is one datagram carrying all of it (index 0), or two fragments of fragmentPayload and the rest.
 	whole := index == 0 && part == size
 	if id == 0 || size < 1 || size > MaxPacket || index > 1 || index*fragmentPayload >= size || !whole && part != min(fragmentPayload, size-index*fragmentPayload) {
-		return packet{}, false, ErrProtocol
+		return meshPacket{}, false, ErrProtocol
 	}
 	if authorize != nil && !authorize(peer) {
-		return packet{}, false, nil
+		return meshPacket{}, false, nil
 	}
 	if id <= r.highest && r.highest-id >= 128 || r.completed[id%128] == id {
-		return packet{}, false, nil
+		return meshPacket{}, false, nil
 	}
 	if id > r.highest {
 		r.highest = id
 	}
 	if whole {
 		r.completed[id%128] = id
-		return packet{peer, append([]byte(nil), b[43:]...), false}, true, nil
+		return meshPacket{packet{peer, append([]byte(nil), b[header:]...), control}, dst}, true, nil
 	}
 	if r.pending == nil {
 		r.pending = make(map[uint64]*assembly)
@@ -177,27 +221,27 @@ func (r *reassembler) accept(b []byte, now time.Time, authorize func(key.NodePub
 	a := r.pending[id]
 	if a == nil {
 		if len(r.pending) >= maxAssemblies {
-			return packet{}, false, nil
+			return meshPacket{}, false, nil
 		}
-		a = &assembly{peer: peer, size: size, expires: now.Add(2 * time.Second)}
+		a = &assembly{peer: peer, dst: dst, control: control, size: size, expires: now.Add(2 * time.Second)}
 		r.pending[id] = a
 	}
-	if a.peer != peer || a.size != size {
-		return packet{}, false, ErrProtocol
+	if a.peer != peer || a.dst != dst || a.control != control || a.size != size {
+		return meshPacket{}, false, ErrProtocol
 	}
 	if a.parts[index] != nil {
-		return packet{}, false, nil
+		return meshPacket{}, false, nil
 	}
-	a.parts[index] = append([]byte(nil), b[43:]...)
+	a.parts[index] = append([]byte(nil), b[header:]...)
 	if a.parts[0] == nil || size > fragmentPayload && a.parts[1] == nil {
-		return packet{}, false, nil
+		return meshPacket{}, false, nil
 	}
 	data := make([]byte, 0, size)
 	data = append(data, a.parts[0]...)
 	data = append(data, a.parts[1]...)
 	delete(r.pending, id)
 	r.completed[id%128] = id
-	return packet{peer, data, false}, true, nil
+	return meshPacket{packet{peer: peer, data: data, control: control}, dst}, true, nil
 }
 
 // Forwarding budgets bound authenticated work per carrier and per account. Every

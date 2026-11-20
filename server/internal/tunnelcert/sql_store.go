@@ -755,6 +755,22 @@ func (l *SQLIssuanceLock) Acquire(ctx context.Context, domainID, owner string, g
 	return err == nil, err
 }
 
+// AdmitExactLeaf shares the verified parent domain's budget across hostnames, edge nodes and control replicas.
+func (l *SQLIssuanceLock) AdmitExactLeaf(ctx context.Context, domain Domain, now time.Time) error {
+	const attemptsPerMinute = 16
+	window := now.Truncate(time.Minute)
+	count, err := l.db.Queries().TakeAuthRateLimit(ctx, dbsqlc.TakeAuthRateLimitParams{
+		BucketKey: "certificate-leaf:" + domain.ID, RateWindow: window, Cutoff: window.Add(-time.Minute),
+	})
+	if err != nil {
+		return fmt.Errorf("charge exact-leaf issuance budget: %w", err)
+	}
+	if count > attemptsPerMinute {
+		return ErrIssuerRateLimited
+	}
+	return nil
+}
+
 func (l *SQLIssuanceLock) Release(ctx context.Context, domainID, owner string) error {
 	if l == nil || l.db == nil || !validIdentifier(domainID) || !validIdentifier(owner) {
 		return ErrInvalid

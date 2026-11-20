@@ -71,7 +71,7 @@ func TestGuestGatewayUsesExplicitIdentityBranch(t *testing.T) {
 	tickets := &guestTestTickets{}
 	g := &Gateway{Authorizer: a, Tickets: tickets, AllowedOrigins: []string{"https://dashboard.example.test"}}
 	ticket, stream, d, err := g.IssueGuest(context.Background(), "guest_1", "term_1", g.AllowedOrigins[0], testBrowserKeyDigest)
-	if err != nil || ticket.GuestSessionID != "guest_1" || ticket.UserID != "" || ticket.BrowserSessionID != "" || d.Role != "viewer" || stream != "wss://edge.example.test/v1/browser-terminal/machine.runtime.example.test" {
+	if err != nil || ticket.GuestSessionID != "guest_1" || ticket.UserID != "" || ticket.BrowserSessionID != "" || d.Role != "viewer" || stream != "wss://machine.runtime.example.test/v1/browser-terminal" {
 		t.Fatalf("guest issue: ticket=%+v decision=%+v stream=%q err=%v", ticket, d, stream, err)
 	}
 	if a.accountCalls != 0 || a.guestCalls != 1 {
@@ -114,7 +114,7 @@ func TestGuestEdgeDisconnectsWhenGuestSessionWithdrawn(t *testing.T) {
 	ticket := Ticket{GuestSessionID: decision.GuestSessionID, TerminalSessionID: decision.TerminalSessionID, Origin: "https://dashboard.example.test", Role: "viewer", PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}
 	tickets := &guestTestTickets{edgeTestTickets: edgeTestTickets{active: true, ticket: ticket, value: "guest-ticket"}}
 	a := &guestTestAuthorizer{decision: decision}
-	g := &Gateway{Tickets: tickets, Authorizer: a, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	g := &Gateway{Tickets: tickets, Authorizer: a, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { g.ServeEdgeControl(w, r, "edge_1", "epoch_1") }))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)

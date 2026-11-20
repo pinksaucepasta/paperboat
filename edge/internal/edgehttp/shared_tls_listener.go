@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
@@ -34,6 +35,8 @@ type SharedTLSListener struct {
 	hello       context.Context
 	cancelHello context.CancelFunc
 	ready       chan net.Conn
+	// hooks are the node-forwarding hooks, nil on a node that does not forward (SetForwarding).
+	hooks atomic.Pointer[ForwardHooks]
 	// forward carries one passthrough stream (the route registry's ForwardPublicTCP).
 	forward func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
 	done    chan struct{}
@@ -166,7 +169,7 @@ func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func (l *SharedTLSListener) run() {
 	defer close(l.done)
-	defer l.cancel()
+	defer l.stop()
 	defer l.workers.Wait()
 	for {
 		conn, err := l.Listener.Accept()
@@ -175,7 +178,7 @@ func (l *SharedTLSListener) run() {
 			l.acceptErr = err
 			l.mu.Unlock()
 			l.finishDispatches()
-			l.cancel()
+			l.stop()
 			return
 		}
 		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
@@ -187,26 +190,52 @@ func (l *SharedTLSListener) run() {
 		}
 		l.workers.Add(1)
 		l.dispatching.Add(1)
-		go func() {
-			defer l.workers.Done()
-			defer l.dispatching.Done()
-			l.dispatch(conn)
-		}()
+		l.startDispatch(conn, false, true)
 	}
 }
 
-func (l *SharedTLSListener) dispatch(conn net.Conn) {
+// startDispatch runs dispatch for a connection whose worker (and, when counted, dispatching) count is added.
+func (l *SharedTLSListener) startDispatch(conn net.Conn, forwarded, counted bool) {
+	go func() {
+		defer l.workers.Done()
+		if counted {
+			defer l.dispatching.Done()
+		}
+		l.dispatch(conn, forwarded)
+	}()
+}
+
+// stop ends the listener's context. Inject checks the context and adds its worker under the same lock, so no worker
+// is added once the final wait has begun.
+func (l *SharedTLSListener) stop() {
+	l.mu.Lock()
+	l.cancel()
+	l.mu.Unlock()
+}
+
+// dispatch routes one accepted connection. forwarded marks a visitor another node passed on (Inject): it is served
+// here or answered not-found, never forwarded again (hop limit 1).
+func (l *SharedTLSListener) dispatch(conn net.Conn, forwarded bool) {
 	owned := true
 	defer func() {
 		if owned {
 			_ = conn.Close()
 		}
 	}()
-	replay, host, err := inspectTLSInfrastructureClientHello(l.hello, conn, l.infrastructureHostname)
+	hooks := l.hooks.Load()
+	replay, info, err := inspectClientHello(l.hello, conn, l.infrastructureHostname, hooks != nil && hooks.Mesh != nil && !forwarded)
 	if err != nil {
 		l.observe("tls_dispatch", err)
 		return
 	}
+	if info.link {
+		// A peer's node link: the mesh authenticates it by certificate pin before anything else happens.
+		if hooks.Mesh.Accept(replay) == nil {
+			owned = false
+		}
+		return
+	}
+	host := info.host
 	releaseName, ok := l.names.acquireWithin(l.ctx, host, nameShareWait)
 	if !ok {
 		l.observe("tls_name_share", errNameShareFull)
@@ -219,80 +248,11 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			releaseName()
 		}
 	}()
-	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
-	decisions, err := l.authority.SnapshotForHost(ctx, host)
-	cancel()
-	https := l.httpsHostname(host)
-	infrastructureHTTPS := host == l.infrastructureHostname && https
-	if err != nil {
-		l.observe("public_tcp_reconcile", err)
-		// This exact installation name is reserved for HTTPS by server authority.
-		// Keep health/installation verification usable during control outages;
-		// dynamic route names must never fall back when authority is unavailable.
-		if !infrastructureHTTPS {
-			return
-		}
-		decisions = nil
+	adm, ok := l.resolveHost(host)
+	if !ok {
+		return
 	}
-	// Customer aliases need ingress authority even when the route matcher names
-	// a different host. Configuration membership cannot grant TLS ownership;
-	// only live server-admitted runtime/private carriers supply that exception.
-	authorizedHTTPS := l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)
-	for _, decision := range decisions {
-		if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
-			if decision.Validate(time.Now().UTC()) != nil {
-				return
-			}
-			authorizedHTTPS = true
-		}
-	}
-	// A route an operator took down still gets TLS: the HTTP layer answers it with the takedown page
-	// (451 or 403) rather than a dead connection.
-	if !authorizedHTTPS && https {
-		if taken, ok := l.authority.(interface{ Withheld(string) bool }); ok && taken.Withheld(host) {
-			authorizedHTTPS = true
-		}
-	}
-	// A preview whose owner machine is asleep gets TLS for its "machine offline" page. Its carrier is gone, so the
-	// route matcher no longer names it (https is false): the server's offline list is the authority for the name.
-	if !authorizedHTTPS {
-		if offline, ok := l.authority.(interface{ OwnerOffline(string) bool }); ok && offline.OwnerOffline(host) {
-			authorizedHTTPS = true
-		}
-	}
-	// The locally admitted public preview may become ready after the cached
-	// complete snapshot was fetched. Refresh its exact authority before any TLS
-	// writes, then inspect every binding for this hostname for protocol conflicts.
-	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
-		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
-		defer stop()
-		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
-			decisions, err = l.authority.SnapshotForHost(refresh, host)
-			if err != nil {
-				return
-			}
-			for _, decision := range decisions {
-				if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
-					if decision.Validate(time.Now().UTC()) != nil {
-						return
-					}
-					authorizedHTTPS = true
-				}
-			}
-		}
-	}
-	var selected *connectorprotocol.IngressDecision
-	for _, d := range decisions {
-		if d.Binding.Protocol != "tls" || d.Binding.Hostname != host {
-			continue
-		}
-		// Invalid/expired TLS authority is a denial, never an HTTPS fallback.
-		if https || authorizedHTTPS || selected != nil || d.Binding.PublicPort != 443 || d.Binding.ListenerID != "listener_tls_443" || d.Validate(time.Now().UTC()) != nil {
-			return
-		}
-		current := d
-		selected = &current
-	}
+	decisions, https, infrastructureHTTPS, authorizedHTTPS, selected := adm.decisions, adm.https, adm.infrastructureHTTPS, adm.authorizedHTTPS, adm.selected
 	if selected != nil {
 		owned = false
 		decision := *selected
@@ -304,6 +264,10 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			defer conn.Close()
 			l.observe("public_tcp_stream", l.forward(l.ctx, replay, decision, l.authority.ResolveDecision))
 		}()
+		return
+	}
+	if !authorizedHTTPS && !infrastructureHTTPS && !https && !forwarded && l.forwardVisitor(hooks, conn, replay, host, releaseName) {
+		owned = false
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
@@ -448,8 +412,7 @@ func (l *SharedTLSListener) observe(phase string, err error) {
 // one a name behind sign-in gets (BrowserAccess.unknownName), so nothing on it tells the two apart. host is the
 // TLS server name, never the request's Host header.
 func serveNotFoundPage(conn net.Conn, config *tls.Config, browser *BrowserAccess, host string) {
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveBrandedPage(conn, config, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "close")
 		if browser != nil {
 			peer, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
@@ -457,9 +420,7 @@ func serveNotFoundPage(conn net.Conn, config *tls.Config, browser *BrowserAccess
 			return
 		}
 		writeErrorPage(w, http.StatusNotFound, notFoundMessage)
-	})}
-	server.SetKeepAlivesEnabled(false)
-	_ = server.Serve(&oneConnListener{conn: tls.Server(conn, config)})
+	})
 }
 
 // oneConnListener hands out a single connection, then reports closed once it ends.

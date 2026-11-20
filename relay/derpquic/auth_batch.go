@@ -44,6 +44,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 	p.stream.SetReadDeadline(now.Add(5 * time.Second))
 	defer p.stream.SetReadDeadline(time.Time{})
 	var merged Grant
+	tokens := make([]string, 0, count)
 	digest := sha256.New()
 	var expired error
 	// Parts arrive over up to the read deadline: each is verified on the clock it arrives at, and
@@ -69,6 +70,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 				return ErrOverload
 			}
 		}
+		tokens = append(tokens, string(body))
 		grant, err := s.verify(string(body), p.state(), clock())
 		if errors.Is(err, ErrExpired) {
 			if expired == nil {
@@ -106,5 +108,6 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 	if err := s.admit(p, merged, now); err != nil {
 		return fmt.Errorf("admit: %w", err)
 	}
+	s.rememberTokens(p, merged, tokens)
 	return nil
 }

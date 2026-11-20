@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/cli/internal/selfupdate"
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
@@ -157,4 +158,19 @@ func bundleProofFailure(err error) bool {
 func timeoutError(err error) bool {
 	var timeout interface{ Timeout() bool }
 	return errors.As(err, &timeout) && timeout.Timeout()
+}
+
+// ReplaceBundleSource decides what a verified signed bundle may replace, under the install lock. The bundle keeps the
+// automatic-update preference of the installation it replaces (resolving a bundle defaults it on), and an install whose
+// enrollment is pending is never replaced by an older official release: a still-eligible signed release must not
+// roll back the slot the enrollment commit will verify.
+func ReplaceBundleSource(previous installsource.Source, previousPending bool, candidate installsource.Source) (installsource.Source, error) {
+	if previousPending && previous.Distribution == installsource.Official {
+		order, err := selfupdate.CompareVersions(candidate.Version, previous.Version)
+		if err != nil || order < 0 {
+			return installsource.Source{}, hostInstallFailure("the signed release "+candidate.Version+" is older than the installed "+previous.Version+"; nothing was changed", ErrInvalidRequest)
+		}
+	}
+	candidate.AutomaticUpdates = previous.AutomaticUpdates
+	return candidate, nil
 }

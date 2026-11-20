@@ -13,10 +13,12 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/quic-go/quic-go"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=keyed-peer-connection-registry
 	"tailscale.com/types/key"
@@ -54,6 +56,7 @@ type Server struct {
 	workers                                              sync.WaitGroup
 	accepted, denied, forwarded, dropped, bytesForwarded atomic.Uint64
 	lastRefusalLog                                       atomic.Int64
+	mesh                                                 *Mesh // nil: this relay is not linked to others (SetMesh)
 	// preGrant bounds one source address's connections that have not authenticated yet. It bounds an address,
 	// never the node: a peer that opens connections and stays silent holds at most its share while others
 	// connect. Prior art: Tailscale's derper gives each client a handshake deadline (derp/derpserver).
@@ -78,6 +81,10 @@ type queued struct {
 	source  *peerConn
 	service bool
 	lease   *PairLease
+	// remote is the verified grant of a sender connected to another relay (the packet arrived over the mesh); source is nil then.
+	remote *remoteSource
+	// dst is the destination route key of a packet queued on a mesh link (peer is its source); zero on a carrier's queue.
+	dst key.NodePublic
 }
 type peerConn struct {
 	conn   *quic.Conn
@@ -103,6 +110,10 @@ type peerConn struct {
 	// paired remembers the last peer this connection's grant was checked against, both signed grants at the
 	// time and the answer, so a run of datagrams to one peer, paired or not, costs one check (guarded by Server.mu).
 	paired pairMemo
+	// tokens are the signed grant tokens this carrier authenticated with (of tokenGeneration), kept to answer a mesh
+	// peer's NeedGrant; guarded by Server.mu.
+	tokens          []string
+	tokenGeneration uint64
 }
 
 type pairMemo struct {
@@ -166,6 +177,16 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 	tlsConfig.NextProtos = []string{ALPN}
 	tlsConfig.ClientAuth = tls.RequireAnyClientCert
 	tlsConfig.MinVersion = tls.VersionTLS13
+	if s.mesh != nil {
+		// A relay of the mesh dials with the mesh ALPN: it gets the mesh TLS (client certificate pinned to the lease's
+		// directory); every other client keeps the derp-v1 configuration above, which requires a grant-bound certificate.
+		tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			if slices.Contains(hello.SupportedProtos, nodemesh.RelayMeshALPN) {
+				return s.mesh.serverTLS, nil
+			}
+			return nil, nil
+		}
+	}
 	tr := &quic.Transport{Conn: socket, VerifySourceAddress: func(net.Addr) bool { return true }}
 	ln, err := tr.Listen(tlsConfig, quicConfig())
 	if err != nil {
@@ -184,6 +205,9 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 	stop := context.AfterFunc(ctx, func() { s.Close() })
 	defer stop()
 	defer s.Close()
+	if s.mesh != nil {
+		s.mesh.start(ctx)
+	}
 	for {
 		c, e := ln.Accept(ctx)
 		if e != nil {
@@ -191,6 +215,14 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 				return ctx.Err()
 			}
 			return e
+		}
+		if s.mesh != nil && c.ConnectionState().TLS.NegotiatedProtocol == nodemesh.RelayMeshALPN {
+			// A mesh link is another relay, not a client: it is neither a connection of this node's capacity nor refused by it.
+			s.mu.Lock()
+			s.workers.Add(1)
+			s.mu.Unlock()
+			go func() { defer s.workers.Done(); s.mesh.accept(c) }()
+			continue
 		}
 		s.mu.Lock()
 		if s.draining {
@@ -229,6 +261,7 @@ func (s *Server) serveConn(c *quic.Conn, release func()) {
 		for k, p := range s.peers {
 			if p.conn == c {
 				delete(s.peers, k)
+				s.mesh.announce(meshGone, k)
 			}
 		}
 		s.mu.Unlock()
@@ -256,6 +289,7 @@ func (s *Server) servePeer(p *peerConn) {
 		for k, q := range s.peers {
 			if q == p {
 				delete(s.peers, k)
+				s.mesh.announce(meshGone, k)
 			}
 		}
 		s.mu.Unlock()
@@ -464,6 +498,9 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	p.key = k
 	p.grant = g
 	s.peers[routeKey(k, p.namespace)] = p
+	if old == nil {
+		s.mesh.announce(meshPresent, routeKey(k, p.namespace))
+	}
 	// A merged part only adds peers to the admitted grant: its fence (and the peer-relay leases that hold
 	// it) stays. Comparing the whole authority costs every peer the endpoint names, on every part.
 	if previous := s.fences[id]; previous != nil && (merging || sameGrantAuthority(previous.Grant, g)) {
@@ -498,13 +535,21 @@ func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
 func (s *Server) sendAuthorized(p *peerConn, k key.NodePublic, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
+	dst := routeKey(k, p.namespace)
+	if s.peers[dst] == nil && s.mesh.holds(dst) {
+		return true // not connected here: the relay that holds it judges the pair (route forwards it)
+	}
+	return s.authorizedLocked(p, s.peers[dst], now)
 }
 
 func (s *Server) route(p *peerConn, msg packet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	q := s.peers[routeKey(msg.peer, p.namespace)]
+	dst := routeKey(msg.peer, p.namespace)
+	q := s.peers[dst]
+	if q == nil && s.forwardLocked(p, dst, msg) {
+		return
+	}
 	authorized := s.authorizedLocked(p, q, time.Now())
 	if msg.control {
 		authorized = authorized || p != nil && q != nil && s.peers[routeKey(p.key, p.namespace)] == p && s.peers[routeKey(q.key, q.namespace)] == q && controlAdmitted(p.grant, q.grant)
@@ -626,7 +671,8 @@ func (s *Server) writePackets(p *peerConn) {
 				continue
 			}
 			s.mu.Lock()
-			valid := s.authorizedLocked(msg.source, p, time.Now())
+			now := time.Now()
+			valid := msg.remote == nil && s.authorizedLocked(msg.source, p, now) || msg.remote != nil && s.authorizedRemoteLocked(msg.remote, p, msg.control, now)
 			if msg.control && !msg.service {
 				valid = valid || msg.source != nil && s.peers[routeKey(msg.source.key, msg.source.namespace)] == msg.source && s.peers[routeKey(p.key, p.namespace)] == p && controlAdmitted(msg.source.grant, p.grant)
 			}
@@ -769,6 +815,7 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 	for k, p := range s.peers {
 		if p.grant.AccountID == account && p.grant.EndpointID == endpoint {
 			delete(s.peers, k)
+			s.mesh.announce(meshGone, k)
 			p.close(1, "relay authority revoked")
 		}
 	}
@@ -819,7 +866,7 @@ func (s *Server) Close() error {
 	if s.handoverTimer != nil {
 		s.handoverTimer.Stop()
 	}
-	ln, tr := s.listener, s.transport
+	ln, tr, mesh := s.listener, s.transport, s.mesh
 	for c := range s.connections {
 		c.CloseWithError(0, "relay stopped")
 	}
@@ -827,6 +874,9 @@ func (s *Server) Close() error {
 		p.close(0, "relay stopped")
 	}
 	s.mu.Unlock()
+	if mesh != nil {
+		mesh.close()
+	}
 	if ln != nil {
 		ln.Close()
 	}
@@ -835,6 +885,11 @@ func (s *Server) Close() error {
 	}
 	return nil
 }
-func (s *Server) Wait() { s.workers.Wait() }
+func (s *Server) Wait() {
+	s.workers.Wait()
+	if s.mesh != nil {
+		s.mesh.wait()
+	}
+}
 
 func (p *peerConn) Close() error { p.close(ErrAdmission.Code, "relay authority revoked"); return nil }

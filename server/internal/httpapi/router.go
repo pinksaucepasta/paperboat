@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"log/slog"
 	"net"
 	"net/http"
@@ -375,6 +376,7 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/edge/runtime/carrier-admissions", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/carrier-observations", opts.RuntimeCarrierAttachment)
 			mux.Handle("POST /v1/edge/runtime/endpoint-admissions", opts.RuntimeCarrierAttachment)
+			mux.Handle("POST "+nodemesh.HoldersPath, opts.RuntimeCarrierAttachment)
 		}
 		if opts.PrivateAccessGrant != nil {
 			mux.Handle("POST "+privateaccess.GrantPath, opts.PrivateAccessGrant)

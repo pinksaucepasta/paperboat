@@ -66,3 +66,33 @@ func TestSetPoolHandoverRefusesAnEntryWithoutAnAccount(t *testing.T) {
 		t.Fatalf("empty account: %v", err)
 	}
 }
+
+// A carrier the handover closes is withdrawn from the mesh like every other removal: the other relay must stop
+// forwarding to it.
+func TestHandoverWithdrawsMeshPresence(t *testing.T) {
+	a, b := meshPair(t, true)
+	_, kb, _, _ := pairedClients(t, a, b)
+	eventually(t, func() bool { return a.mesh.holder(kb) != nil })
+	if err := b.server.SetPoolHandover([]Handover{{AccountID: "account", CloseAt: time.Now().Add(-time.Second)}}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return a.mesh.holder(kb) == nil })
+}
+
+// The deadline timer takes the same path: presence stays until the deadline, then is withdrawn.
+func TestHandoverTimerWithdrawsPresence(t *testing.T) {
+	a, b := meshPair(t, true)
+	_, kb, _, _ := pairedClients(t, a, b)
+	eventually(t, func() bool { return a.mesh.holder(kb) != nil })
+	deadline := time.Now().Add(500 * time.Millisecond)
+	if err := b.server.SetPoolHandover([]Handover{{AccountID: "account", CloseAt: deadline}}); err != nil {
+		t.Fatal(err)
+	}
+	if a.mesh.holder(kb) == nil {
+		t.Fatal("presence withdrawn before the handover deadline")
+	}
+	eventually(t, func() bool { return a.mesh.holder(kb) == nil })
+	if time.Now().Before(deadline) {
+		t.Fatal("presence withdrawn before the handover deadline")
+	}
+}

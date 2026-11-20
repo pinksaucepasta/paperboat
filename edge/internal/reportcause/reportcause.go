@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/edge/internal/auth"
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	"github.com/pinksaucepasta/paperboat/edge/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/edge/internal/forward"
 	"github.com/pinksaucepasta/paperboat/edge/internal/route"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
@@ -27,6 +28,9 @@ func init() {
 			"public_tcp_reconcile":     {Operation: "control_reconcile", Stage: "public_tcp_reconcile", Name: "%s_public_tcp_reconcile_failed", Code: "public_tcp_reconcile_failed"},
 			"public_tcp_listener":      {Operation: "service_lifecycle", Stage: "public_tcp_listener", Name: "%s_public_tcp_listener_failed", Code: "public_tcp_listener_failed"},
 			"public_tcp_stream":        {Operation: "connector_stream", Stage: "public_tcp_stream", Name: "%s_public_tcp_stream_failed", Code: "public_tcp_stream_failed"},
+			"forward_lookup":           {Operation: "connector_stream", Stage: "forward_lookup", Name: "%s_forward_lookup_failed", Code: "forward_lookup_failed"},
+			"forward_dial":             {Operation: "connector_stream", Stage: "forward_dial", Name: "%s_forward_dial_failed", Code: "forward_dial_failed"},
+			"forward_open":             {Operation: "connector_stream", Stage: "forward_open", Name: "%s_forward_open_failed", Code: "forward_open_failed"},
 			"tls_dispatch":             {Operation: "connector_stream", Stage: "tls_dispatch", Name: "%s_tls_dispatch_failed", Code: "tls_dispatch_failed"},
 			"control_trust":            {Operation: "control_reconcile", Stage: "control_trust", Name: "%s_control_trust_failed", Code: "control_trust_failed"},
 			"carrier_handler":          {Operation: "connector_stream", Stage: "carrier_handler", Name: "%s_carrier_handler_failed", Code: "carrier_handler_failed"},
@@ -43,8 +47,8 @@ func init() {
 			"route_reconcile":          {Operation: "control_reconcile", Stage: "reconcile", Name: "%s_route_reconcile_failed", Code: "control_reconcile_failed"},
 			"route_group_probe":        {Operation: "control_reconcile", Stage: "route_probe", Name: "%s_route_group_unavailable", Code: "route_group_unavailable"},
 		},
-		Codes:  []string{"stage_accepted", "stage_rejected", "generation_ready", "activated", "drain_started", "drain_completed", "drain_forced", "stale_generation_rejected", "stream_acquired", "stream_released", "control_trust_failed", "carrier_handler_failed", "usage_delivery_failed", "node_heartbeat_failed", "http_server_failed", "runtime_admission_failed", "runtime_observation_failed", "preview_admission_failed", "preview_observation_failed", "certificate_distribution_failed", "upstream_request_failed", "service_shutdown_failed", "control_reconcile_failed", "route_group_unavailable"},
-		Causes: []string{"trust_snapshot_invalid", "capacity_exhausted", "control_invalid", "control_unavailable", "node_observation_stale", "route_invalid", "route_state_stale", "route_unavailable", "authority_expired", "authority_rejected", "authorization_rejected", "configuration_invalid", "state_conflict", "authority_unavailable"},
+		Codes:  []string{"stage_accepted", "stage_rejected", "generation_ready", "activated", "drain_started", "drain_completed", "drain_forced", "stale_generation_rejected", "stream_acquired", "stream_released", "control_trust_failed", "carrier_handler_failed", "usage_delivery_failed", "node_heartbeat_failed", "http_server_failed", "runtime_admission_failed", "runtime_observation_failed", "preview_admission_failed", "preview_observation_failed", "certificate_distribution_failed", "upstream_request_failed", "service_shutdown_failed", "control_reconcile_failed", "route_group_unavailable", "forward_lookup_failed", "forward_dial_failed", "forward_open_failed"},
+		Causes: []string{"trust_snapshot_invalid", "capacity_exhausted", "control_invalid", "control_unavailable", "node_observation_stale", "route_invalid", "route_state_stale", "route_unavailable", "authority_expired", "authority_rejected", "authorization_rejected", "configuration_invalid", "state_conflict", "authority_unavailable", "forward_unavailable"},
 		Stages: map[string]string{
 			"control_trust":            "%s_control_trust_failed",
 			"carrier_handler":          "%s_carrier_handler_failed",
@@ -60,6 +64,9 @@ func init() {
 			"shutdown":                 "%s_service_shutdown_failed",
 			"reconcile":                "%s_route_reconcile_failed",
 			"route_probe":              "%s_route_group_unavailable",
+			"forward_lookup":           "%s_forward_lookup_failed",
+			"forward_dial":             "%s_forward_dial_failed",
+			"forward_open":             "%s_forward_open_failed",
 		},
 		Classify:   classify,
 		Reference:  requestReference,
@@ -104,6 +111,9 @@ func metrics() []reporting.Metric {
 }
 
 func classify(err error) (string, int) {
+	if reporting.SameError(err, forward.ErrUnavailable) {
+		return "forward_unavailable", 76
+	}
 	if reporting.SameError(err, auth.ErrSnapshotInvalid) {
 		return "trust_snapshot_invalid", 87
 	}

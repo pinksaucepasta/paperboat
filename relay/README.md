@@ -55,7 +55,7 @@ TLS certificate and signed-grant binding, node/epoch fencing and 60-second grant
 The carrier uses
 15-second carrier refresh, authority refresh at 30 seconds ±20% (approximately ten seconds with active regional
 recovery), bounded reliable
-control and two-fragment QUIC datagrams. WSS uses the same bounded packet frames over
+control and QUIC datagrams (one datagram per packet; two fragments only when the path MTU does not fit it). WSS uses the same bounded packet frames over
 one serialized TCP stream and therefore has TCP head-of-line blocking under loss. A configured Tailcat carrier factory replaces
 native DERP/TCP selection. Admission/protocol failures fail closed; ordinary drain and
 transport failures permit WSS reachability fallback and recovery to QUIC with current
@@ -64,6 +64,26 @@ carrier provides no WireGuard-data fallback onto QUIC reliable streams.
 Ordinary lease expiry denies further traffic but permits reconnection with fresh signed
 authority (QUIC application error 4, WSS close 4004). It does not permanently disable
 the carrier. Revocation, invalid credentials and protocol violations remain fatal.
+
+## Relay mesh
+
+Peers homed on different Paperboat-managed relays reach each other through a mesh of relay-to-relay links
+([mesh.go](derpquic/mesh.go), contract in `shared/nodemesh`). The lease's `mesh_peers` lists the other managed relays
+with the SPKI pin of each one's serving certificate (empty on a self-hosted relay: no mesh). Each pair keeps one QUIC
+connection on the relay's own UDP port with ALPN `paperboat-derp-v1`'s sibling `paperboat-derp-mesh-v1`; the lower node
+id dials, both present their serving certificate and accept only a pinned one, and clients keep the derp-v1 handshake
+unchanged. A control stream carries `Present`/`Gone` for the route keys each relay holds (a snapshot on link up; a broken
+link clears what the peer held and the redial, backed off with jitter, refloods) and `NeedGrant`/`Grant`; forwarded
+packets are QUIC datagrams naming source and destination keys.
+
+A destination connected here always wins. When it is not, a relay that holds it gets the packet once: a packet that
+arrived over the mesh is delivered here or dropped, never forwarded again. The delivering relay authorizes: it fetches the
+sender's signed grant tokens from the relay the sender is connected to (the first packet of a flow is dropped meanwhile),
+verifies them with the same issuer keys, and applies the pair rule and revocation fences itself; verified grants live in a
+bounded LRU. Accounting is once: the ingress relay charges the carrier and account budgets and counts no `BytesOut` for
+transit; the delivering relay counts the forwarded bytes. Mesh counters (`links`, `names`, `forwarded`, `accepted`,
+`holder_miss`, `unreachable`, `loop_refused`, `bytes_in`, `bytes_out`) go to the control plane in the observation's `mesh`
+field. A draining relay keeps its links and announcements until the drain deadline.
 
 A relay has no connection limit: it admits every authorized connection and capacity is watched by resource alerts.
 Forwarding is fair by byte budgets per carrier and per account (an account's speed is shared across its relays by

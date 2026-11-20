@@ -744,6 +744,7 @@ func New(opts Options) (*App, error) {
 		},
 		RecordUsageDetached: resourceUsageService.RecordBrowserDetached,
 		Tickets:             browserterminal.TicketStore{DB: store},
+		HoldsCarrier:        browserterminal.CarrierHolder{DB: store}.Holds,
 		Authorizer:          browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access, Recordings: recordingService},
 		Signer:              mintKeys,
 		Issuer:              normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),

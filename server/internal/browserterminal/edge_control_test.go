@@ -101,7 +101,7 @@ func TestEdgeControlAdmitsExactNodeAndRevokesLiveAttachment(t *testing.T) {
 	tickets := &edgeTestTickets{active: true, ticket: ticket, value: "wrong-node-ticket"}
 	decision := Decision{WorkspaceID: "personal", UserID: ticket.UserID, OwnerAccountID: ticket.UserID, TerminalSessionID: ticket.TerminalSessionID, MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: ticket.Role, PolicyGeneration: 1}
 	authorizer := &testBrowserAuthorizer{decision: decision}
-	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gateway.ServeEdgeControl(w, r, r.Header.Get("X-Node"), r.Header.Get("X-Epoch"))
 	}))
@@ -203,7 +203,7 @@ func TestEdgeAdmissionCapturesOperationalCauseAndCanRecover(t *testing.T) {
 		decision:    Decision{WorkspaceID: "personal", UserID: ticket.UserID, OwnerAccountID: ticket.UserID, TerminalSessionID: ticket.TerminalSessionID, MachineID: "mch_1", EnvironmentID: "env_1", HostWSSURL: "wss://machine.runtime.example.test/v1/browser-terminal", EdgeNodeID: "edge_1", EdgeProcessEpoch: "epoch_1", Role: ticket.Role, PolicyGeneration: 1},
 		snapshotErr: errors.Join(ErrForbidden, fmt.Errorf("helper returned %s: %w", secret, syscall.ECONNREFUSED)),
 	}
-	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	store := &edgeReportStore{}
 	reports, err := supportreport.New(store, supportreport.Config{})
 	if err != nil {
@@ -347,7 +347,7 @@ func TestEdgeControlRefusalsCarryATypedReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tickets := &edgeTestTickets{active: true, ticket: ticket, value: "one-use", used: tc.spent}
 			authorizer := &resolveErrAuthorizer{testBrowserAuthorizer: testBrowserAuthorizer{decision: decision, snapshotErr: tc.snapshot}, err: tc.resolveErr}
-			gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+			gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gateway.ServeEdgeControl(w, r, "edge_1", "epoch_1")
 			}))
@@ -391,7 +391,7 @@ func TestEdgeControlResumesACutAttachmentAndRefusesARevokedOne(t *testing.T) {
 	detaches := 0
 	attached := map[string]bool{}
 	attachedUntil := map[string]time.Time{}
-	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}, AdmissionLifetime: time.Minute,
+	gateway := &Gateway{Tickets: tickets, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}, AdmissionLifetime: time.Minute,
 		RecordUsageResumed: func(_ context.Context, attachment, terminal, node string, _, until time.Time) error {
 			usageMu.Lock()
 			defer usageMu.Unlock()

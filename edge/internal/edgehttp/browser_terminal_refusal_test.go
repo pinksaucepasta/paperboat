@@ -96,8 +96,8 @@ func TestBrowserTerminalRefusalsAreClosesTheBrowserCanRead(t *testing.T) {
 			defer edge.Close()
 			header := make(http.Header)
 			header.Set("Origin", "https://dashboard.example.test")
-			connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal/"+value.Hostname, &websocket.DialOptions{
-				Host: "edge.example.test", HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
+			connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal", &websocket.DialOptions{
+				Host: value.Hostname, HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
 				Subprotocols: []string{browserTerminalSubprotocol, browserTerminalTicketPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
 			})
 			if err != nil {

@@ -200,8 +200,9 @@ stream URL, current role, machine and owner IDs, and the machine's current publi
 transport signing key. The authenticated control plane authorizes this key; the
 browser verifies its fingerprint locally before opening the encrypted stream.
 
-The returned `wss://.../v1/browser-terminal` URL points to the selected runtime
-edge. The browser offers `paperboat.browser-terminal.e2ee.v1` and the ticket
+The returned URL is `wss://<machine runtime hostname>/v1/browser-terminal`. Any managed
+edge accepts it and forwards the connection to the edge holding the machine's carrier.
+The ticket stays single-use with a 30 s lifetime. The browser offers `paperboat.browser-terminal.e2ee.v1` and the ticket
 subprotocol. The edge sends that ticket over its node-authenticated control
 connection; the control plane consumes it once, checks the exact edge node and
 process, current policy and host process generation, and returns a host credential

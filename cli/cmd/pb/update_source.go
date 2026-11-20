@@ -206,27 +206,33 @@ func bundleExportError(err error) error {
 
 // installOfficialBundle installs the signed official release as a bundle, verified like `pb update --from <bundle>`.
 // force moves a custom installation to official bytes; a custom runtime still cannot enable automatic updates or
-// select arbitrary release URLs.
-func installOfficialBundle(command *cobra.Command, ctx context.Context, force bool) error {
+// select arbitrary release URLs. A non-empty checkedVersion binds the install to the release that was checked: a bundle
+// of another version (the release moved on, or a different one resolved) installs nothing.
+func installOfficialBundle(command *cobra.Command, ctx context.Context, force bool, checkedVersion string) error {
 	directory, err := os.MkdirTemp("", "paperboat-official-update-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(directory)
 	bundle := filepath.Join(directory, "release.pb-update")
-	if err = updateDependenciesOf(ctx).exportBundle(ctx, filepath.Join(directory, "proof"), bundle); err != nil {
+	exported, err := updateDependenciesOf(ctx).exportBundle(ctx, filepath.Join(directory, "proof"), bundle)
+	if err != nil {
 		return bundleExportError(err)
+	}
+	if checkedVersion != "" && exported != checkedVersion {
+		return commandRejection{reason: commandRejectUpdateSource, detail: "the signed release changed while updating (checked " + checkedVersion + ", fetched " + exported + "); nothing was installed, run `pb update` again"}
 	}
 	return installStagedUpdateSource(command, ctx, bundle, force)
 }
 
-func exportOfficialBundle(ctx context.Context, proofDirectory, output string) error {
+// exportOfficialBundle saves the signed release as a bundle and returns its version.
+func exportOfficialBundle(ctx context.Context, proofDirectory, output string) (string, error) {
 	repository, err := buildinfo.ReleaseRepository()
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = bootstrap.ExportUpdateBundle(ctx, repository, proofDirectory, output, nil, time.Now())
-	return err
+	index, err := bootstrap.ExportUpdateBundle(ctx, repository, proofDirectory, output, nil, time.Now())
+	return index.Version, err
 }
 
 // bundleMadeForOtherOS tells from the file magic of the executable inside a .pb-update bundle (which records no platform) that it was made

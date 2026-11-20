@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/shared/health"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
 	sharedtelemetry "github.com/pinksaucepasta/paperboat/shared/telemetry"
@@ -557,7 +558,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("schedule process carrier trust refresh: %w", err)
 	}
-	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, Metrics: nodeMetrics(), OnAnswer: func(answer control.NodeAnswer) error {
+	forwardSink := &forwardStats{NodeSink: client}
+	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: forwardSink, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, Metrics: nodeMetrics(), OnAnswer: func(answer control.NodeAnswer) error {
 		if answer.IngressLimits == nil {
 			return nil
 		}
@@ -760,7 +762,18 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
-	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageWorker, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
+	forwarding, err := newForwardComponent(forwardSpec{deployment: deployment, nodeID: cfg.NodeID, epoch: processEpoch, certificate: carrierTrust.Certificate, client: client, ready: nodeReady,
+		held: forwardHeld{matcher: routeMatcher, durable: durableRoutes, assignments: canonicalRoutes, authority: ingressAuthority}, public: publicTCP, metrics: typedMetrics, reporter: reporter, stats: forwardSink})
+	if err != nil {
+		return nil, fmt.Errorf("create node forwarding: %w", err)
+	}
+	var usageComponent edgeruntime.Component = usageWorker
+	if forwarding != nil {
+		// A forwarding node listens on every public TCP tunnel port its peers hold, up to the whole range.
+		warnIfFileLimitLow(edgeports.PublicTCPMax - edgeports.PublicTCPMin + 1)
+		usageComponent = componentPair{first: usageWorker, second: forwarding} // starts last, stops right after the carriers
+	}
+	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {
 		return publicTCP.WrapTLSListener(listener, func(host string) bool {
 			if host == deployment.ConnectorAdvertiseHost {
 				return true

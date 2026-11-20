@@ -28,6 +28,7 @@ import (
 	_ "github.com/pinksaucepasta/paperboat/relay/reportcause"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 	"go4.org/mem"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=stun-server-and-disco-keys
@@ -95,6 +96,10 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err != nil {
 		return serviceFailure{error: err, definition: "service_build"}
 	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return serviceFailure{error: err, definition: "service_build"}
+	}
 	raw, err := os.ReadFile(*keys)
 	if err != nil {
 		return serviceFailure{error: err, definition: "service_build"}
@@ -134,7 +139,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if reporter != nil {
 		controlTrace = reporter.ControlTrace
 	}
-	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, Version: version, Trust: trust, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
+	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, Version: version, Trust: trust, ServingSPKISHA256: nodemesh.SPKIPin(leaf), ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
 		reporter.ObserveFailure(reporting.WithSupportReference(ctx, reference), "control_request", err)
 	}})
 	if err != nil {
@@ -152,6 +157,13 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	}
 	server, err := derpquic.NewServer(derpquic.Verifier{Issuer: *issuer, NodeID: *node, NodeGeneration: lease.Generation, ProcessEpoch: lease.ProcessEpoch, Keys: trusted})
 	if err != nil {
+		return err
+	}
+	mesh, err := derpquic.NewMesh(derpquic.MeshConfig{Cert: pair})
+	if err != nil {
+		return serviceFailure{error: err, definition: "service_build"}
+	}
+	if err = server.SetMesh(mesh); err != nil {
 		return err
 	}
 	server.SetKeyRefresher(func() error {

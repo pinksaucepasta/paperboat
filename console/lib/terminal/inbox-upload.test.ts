@@ -7,7 +7,7 @@ import { FilePasteError } from "@/lib/terminal/file-paste"
 const fingerprint = "a".repeat(64)
 const session = { id: "term_1", machineId: "machine_1" }
 const ticket = (change: Partial<Ticket> = {}): Ticket => ({
-  stream_url: "wss://edge.example.test/stream",
+  stream_url: "wss://machine.runtime.example.test/v1/browser-terminal",
   edge_node_id: "edge-1",
   subprotocols: ["paperboat.browser-terminal.e2ee.v1", "pb-ticket.abc"],
   expires_at: new Date(Date.now() + 60_000).toISOString(),
@@ -58,8 +58,18 @@ test("a ticket for this terminal opens the connection with the pinned key, and e
   expect(seen).toEqual(["connection_1:root_1"])
 })
 
+test("the stream URL is the machine's runtime hostname, handed to the worker exactly as the server issued it", async () => {
+  // Any managed edge answers this name (a non-holder forwards the TLS stream), so the console never rewrites it
+  // to an edge host and never adds a path suffix; the browser terminal path stays /v1/browser-terminal.
+  for (const stream_url of ["wss://machine.runtime.example.test/v1/browser-terminal", "wss://m-1.runtime.example.test:8443/v1/browser-terminal"]) {
+    const { browser, calls } = fakeBrowser()
+    await openBrowserConnection(browser, { session, fetchTicket: async () => ticket({ stream_url }), onEvent: () => undefined })
+    expect(calls.config?.url).toBe(stream_url)
+  }
+})
+
 test("a ticket for another machine or an insecure address is refused and the key is discarded", async () => {
-  for (const change of [{ machine_id: "machine_2" }, { stream_url: "ws://edge.example.test/s" }, { role: "admin" as never }]) {
+  for (const change of [{ machine_id: "machine_2" }, { stream_url: "ws://machine.runtime.example.test/v1/browser-terminal" }, { stream_url: "wss://user:pw@machine.runtime.example.test/v1/browser-terminal" }, { stream_url: "wss://machine.runtime.example.test/v1/browser-terminal#frag" }, { role: "admin" as never }]) {
     const { browser, calls } = fakeBrowser()
     await expect(openBrowserConnection(browser, { session, fetchTicket: async () => ticket(change), onEvent: () => undefined })).rejects.toThrow()
     expect(calls.discarded).toEqual(["identity_1"])

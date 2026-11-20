@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
@@ -542,6 +543,43 @@ func (c *HTTPClient) ObserveRoutes(ctx context.Context, nodeID string, routes []
 		}
 	}
 	return nil
+}
+
+// Peers returns the managed edge nodes this node may link to (the server's peer directory) and this node's own
+// region; a self-hosted node gets none. The response is read tolerantly: a field a newer server adds is ignored.
+func (c *HTTPClient) Peers(ctx context.Context, nodeID, epoch string) (nodemesh.PeersResponse, error) {
+	request := nodemesh.PeersRequest{NodeID: nodeID, ProcessEpoch: epoch}
+	if request.Validate() != nil {
+		return nodemesh.PeersResponse{}, ErrControlInvalid
+	}
+	if err := c.awaitNodeReady(ctx); err != nil {
+		return nodemesh.PeersResponse{}, err
+	}
+	var output nodemesh.PeersResponse
+	if err := c.postNodeWithMaximumAndIdentity(ctx, nodemesh.PeersPath, nodeID, epoch, request, &output, maxControlDocument); err != nil {
+		return nodemesh.PeersResponse{}, err
+	}
+	return output, nil
+}
+
+// Holders returns one page of the server's snapshot of which nodes hold which names; page is the previous
+// answer's Next ("" for the first).
+func (c *HTTPClient) Holders(ctx context.Context, nodeID, epoch, page string, limit int) (nodemesh.HoldersResponse, error) {
+	request := nodemesh.HoldersRequest{NodeID: nodeID, ProcessEpoch: epoch, Page: page, Limit: limit}
+	if request.Validate() != nil {
+		return nodemesh.HoldersResponse{}, ErrControlInvalid
+	}
+	if err := c.awaitNodeReady(ctx); err != nil {
+		return nodemesh.HoldersResponse{}, err
+	}
+	var output nodemesh.HoldersResponse
+	if err := c.postNodeWithMaximumAndIdentity(ctx, nodemesh.HoldersPath, nodeID, epoch, request, &output, 16<<20); err != nil {
+		return nodemesh.HoldersResponse{}, err
+	}
+	if len(output.Holders) > request.PageLimit() {
+		return nodemesh.HoldersResponse{}, ErrControlUnavailable
+	}
+	return output, nil
 }
 
 func (c *HTTPClient) post(ctx context.Context, path string, input, output any) error {

@@ -308,8 +308,19 @@ func writePreparedUpdate(command *cobra.Command, candidate *workerupdate.Prepare
 	}
 }
 
+func askUpdateInstall(command *cobra.Command, version string) (bool, error) {
+	fmt.Fprintf(command.OutOrStdout(), "Install Paperboat %s now? [y/N] ", version)
+	answer, err := bufio.NewReader(io.LimitReader(command.InOrStdin(), 128)).ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read update approval: %w", err)
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	return answer == "y" || answer == "yes", nil
+}
+
 // updatePendingEnrollmentInstall installs the signed release when it is newer than this build; the check is the same
-// signed metadata read `pb update check` makes.
+// signed metadata read `pb update check` makes. It follows the rules of a downloaded candidate: without --force, JSON
+// or unattended runs only report the release, and a terminal asks first. The bundle is bound to the version checked here.
 func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context, client *updated.Client, force bool) error {
 	latest, err := client.Check(ctx)
 	if err != nil {
@@ -322,7 +333,26 @@ func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context,
 	if !available {
 		return writeDownloadedUpdate(command, updated.ControlResponse{})
 	}
-	return installOfficialBundle(command, ctx, force)
+	if !force && (updateJSON(command) || !updateDependenciesOf(ctx).inputIsTerminal(command)) {
+		if err := writeUpdateCheckResult(command, latest.Version, true); err != nil {
+			return err
+		}
+		if !updateJSON(command) {
+			fmt.Fprintln(command.OutOrStdout(), "Install it with `pb update` in a terminal, or `pb update --force`.")
+		}
+		return nil
+	}
+	if !force {
+		approved, err := askUpdateInstall(command, latest.Version)
+		if err != nil {
+			return err
+		}
+		if !approved {
+			fmt.Fprintln(command.OutOrStdout(), "The update was not installed.")
+			return nil
+		}
+	}
+	return installOfficialBundle(command, ctx, force, latest.Version)
 }
 
 func writeDownloadedUpdate(command *cobra.Command, response updated.ControlResponse) error {
@@ -367,7 +397,7 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 		if err != nil {
 			var controlErr *updated.ControlError
 			if force && errors.As(err, &controlErr) && controlErr.Code == "custom_installation" {
-				return installOfficialBundle(command, ctx, true)
+				return installOfficialBundle(command, ctx, true, "")
 			}
 			// Updating is fetching the signed public release, not an account feature: an install whose enrollment is still
 			// pending cannot take the updater's prepared update (it would replace the slot the enrollment commit verifies),
@@ -383,13 +413,11 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 		}
 		if !force {
 			writePreparedUpdate(command, response.Candidate)
-			fmt.Fprintf(command.OutOrStdout(), "Install Paperboat %s now? [y/N] ", response.Candidate.Version)
-			answer, err := bufio.NewReader(io.LimitReader(command.InOrStdin(), 128)).ReadString('\n')
+			approved, err := askUpdateInstall(command, response.Candidate.Version)
 			if err != nil {
-				return fmt.Errorf("read update approval: %w", err)
+				return err
 			}
-			answer = strings.TrimSpace(strings.ToLower(answer))
-			if answer != "y" && answer != "yes" {
+			if !approved {
 				fmt.Fprintln(command.OutOrStdout(), "Update remains downloaded; installation was not requested.")
 				return nil
 			}

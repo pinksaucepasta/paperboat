@@ -224,7 +224,11 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body any, 
 // the client, with response headers exposed to callers that need optimistic
 // concurrency metadata. Keeping this as a narrow extension avoids making
 // ETags or other transport headers part of every existing API method.
-func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) (resultErr error) {
+func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header) error {
+	return c.doRequestMetaLimited(ctx, method, path, body, out, headers, strict, responseHeaders, 0)
+}
+
+func (c *Client) doRequestMetaLimited(ctx context.Context, method, path string, body, out any, headers http.Header, strict bool, responseHeaders *http.Header, maxResponseBytes int64) (resultErr error) {
 	end := diagnostics.ReconnectStep(ctx, "server_call")
 	defer func() { end(resultErr) }()
 	req, encodedBody, requestSupportReference, path, err := c.newRequest(ctx, method, path, body, headers)
@@ -279,7 +283,19 @@ func (c *Client) doRequestMeta(ctx context.Context, method, path string, body, o
 	var envelope apiEnvelope
 	// A body is expected for every documented response; a decode failure on a
 	// 2xx is a real protocol error, so surface it rather than silently succeed.
-	decodeErr := json.NewDecoder(resp.Body).Decode(&envelope)
+	var decodeErr error
+	if maxResponseBytes == 0 {
+		decodeErr = json.NewDecoder(resp.Body).Decode(&envelope)
+	} else {
+		var raw []byte
+		raw, decodeErr = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+		if int64(len(raw)) > maxResponseBytes {
+			decodeErr = errors.New("response body exceeds the size limit")
+		}
+		if decodeErr == nil {
+			decodeErr = json.Unmarshal(raw, &envelope)
+		}
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return c.responseError(resp, path, requestSupportReference, envelope, decodeErr)

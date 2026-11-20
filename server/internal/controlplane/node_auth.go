@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
@@ -52,7 +54,7 @@ func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 		return true, nil
 	}
 	switch r.URL.Path {
-	case "/v1/relay/nodes/start", "/v1/nodes/register", "/v1/nodes/heartbeat", "/v1/edge/routes/desired-state", "/v1/edge/ingress/desired-state", "/v1/edge/inspector/access", "/v1/edge/routes/observations", "/v1/edge/usage-reports":
+	case "/v1/relay/nodes/start", "/v1/nodes/register", "/v1/nodes/heartbeat", "/v1/edge/routes/desired-state", "/v1/edge/ingress/desired-state", "/v1/edge/inspector/access", "/v1/edge/routes/observations", "/v1/edge/usage-reports", nodemesh.PeersPath:
 	default:
 		return false, nil
 	}

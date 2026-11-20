@@ -82,7 +82,8 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 		return err
 	}
 	defer func() { resultErr = withCleanup("installation lock cleanup failed", resultErr, lock.Close()) }()
-	if operation == "install-supplied" && input.UpdateBundle != "" {
+	fromBundle := operation == "install-supplied" && input.UpdateBundle != ""
+	if fromBundle {
 		resolved, cleanup, resolveErr := ResolveUpdateBundle(ctx, input, paths.updateState)
 		if resolveErr != nil {
 			return resolveErr
@@ -121,6 +122,11 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 		}
 		previous, err = loadInstallMetadata(paths.metadata, input.UID)
 		if err != nil && !installNotExistOnly(err) {
+			return err
+		}
+	}
+	if fromBundle && err == nil {
+		if input.Source, err = ReplaceBundleSource(previous.Source, previous.EnrollmentPending, input.Source); err != nil {
 			return err
 		}
 	}

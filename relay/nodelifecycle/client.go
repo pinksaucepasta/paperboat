@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
@@ -54,6 +55,11 @@ type Config struct {
 	Trust *jwks.Trust
 	// Version is the relay's software release, reported with each observation.
 	Version string
+	// ServingSPKISHA256 is the "sha256:" + hex pin of the relay's serving certificate, sent with start and observe so peer relays can pin it.
+	ServingSPKISHA256 string
+	// MeshPeersStaleAfter is how long the mesh directory stays trusted without a lease that carried a valid one;
+	// then it is cleared (no mesh links) until one arrives. Zero means 5 lease intervals.
+	MeshPeersStaleAfter time.Duration
 }
 
 // AccountSpeed is an account the relay holds to less than the default speed.
@@ -83,6 +89,10 @@ type Lease struct {
 	// JWKS is the issuer trust document (keys plus withdrawn_key_ids); the relay trusts exactly its keys,
 	// so a rotation or withdrawal applies within one observation.
 	JWKS json.RawMessage `json:"jwks,omitempty"`
+	// MeshPeers are the other Paperboat-managed relays this one links to (pins are the SPKI of each relay's serving
+	// certificate), decoded by meshPeers. Absent means no mesh. A list that fails to decode or validate keeps the last
+	// good one; it never fences the relay. Raw so that a malformed list cannot fail the whole lease.
+	MeshPeers json.RawMessage `json:"mesh_peers,omitempty"`
 }
 
 // PoolHandover is one account moving off this relay: its carriers close at CloseAt (Unix seconds).
@@ -120,6 +130,7 @@ type Client struct {
 	sentSubjects string
 	demandAt     time.Time // start of the window the next observation reports account demand for
 	sampler      *nodemetrics.Sampler
+	meshAt       time.Time // when a lease last carried a mesh directory that was applied
 }
 
 // subjectsDigest is the hex SHA-256 of the sorted "account\x00endpoint\n" membership lines (the
@@ -273,6 +284,14 @@ func (c *Client) save(s diskState) error {
 	return nil
 }
 
+// withServingPin adds the serving certificate pin to a start or observe body; a relay without one sends none.
+func (c *Client) withServingPin(body map[string]any) map[string]any {
+	if c.cfg.ServingSPKISHA256 != "" {
+		body["serving_spki_sha256"] = c.cfg.ServingSPKISHA256
+	}
+	return body
+}
+
 func (c *Client) Start(ctx context.Context) (Lease, error) {
 	if c.lock == nil {
 		if err := os.MkdirAll(filepath.Dir(c.cfg.StatePath), 0700); err != nil {
@@ -310,7 +329,7 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 			return Lease{}, err
 		}
 	}
-	out, err := c.post(ctx, "/v1/relay/nodes/start", map[string]any{"node_id": s.NodeID, "expected_generation": s.Generation, "process_epoch": s.PendingEpoch})
+	out, err := c.post(ctx, "/v1/relay/nodes/start", c.withServingPin(map[string]any{"node_id": s.NodeID, "expected_generation": s.Generation, "process_epoch": s.PendingEpoch}))
 	if err != nil {
 		return Lease{}, err
 	}
@@ -363,8 +382,11 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	subjects := server.AuthoritySubjects()
 	digest := subjectsDigest(subjects)
-	body := map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest}
+	body := c.withServingPin(map[string]any{"node_id": c.lease.NodeID, "node_generation": c.lease.Generation, "process_epoch": c.lease.ProcessEpoch, "ready": server.Ready() && !draining, "draining": draining, "capacity_used": stats.Connections, "subjects_digest": digest})
 	body["metrics"] = c.metrics(stats)
+	if mesh, ok := server.MeshStats(); ok {
+		body["mesh"] = mesh
+	}
 	// What each connected account offered this relay since the last observation and how much the limit held back (bytes per second): the
 	// control plane divides an account's speed among its relays by it. The first observation only opens the window.
 	taken, now := server.TakeAccountDemand(), time.Now()
@@ -382,6 +404,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	out, err := c.post(ctx, "/v1/relay/nodes/observe", body)
 	if err != nil {
+		c.expireMeshPeers(server)
 		return err
 	}
 	if out.Generation != c.lease.Generation || out.ProcessEpoch != c.lease.ProcessEpoch || !server.MatchesControlService(out.PeerRelay) {
@@ -416,6 +439,16 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 			return ErrControl
 		}
 	}
+	peers, err := meshPeers(out.MeshPeers)
+	if err == nil {
+		err = server.SetMeshPeers(peers)
+	}
+	if err != nil {
+		slog.Warn("relay mesh directory refused; keeping the last one for a bounded time", "error", err)
+		c.expireMeshPeers(server)
+	} else {
+		c.meshAt = time.Now()
+	}
 	if out.SubjectsRequired {
 		// The control plane lost or never had this set: send it in full next time, and keep the speed list, which such an
 		// answer does not carry.
@@ -433,6 +466,35 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	c.lease = out
 	return nil
+}
+
+// expireMeshPeers ends mesh trust that no lease has renewed for MeshPeersStaleAfter: the control plane may have retired
+// or re-keyed a peer, and a relay cut off from it must not keep linking on the last directory forever. Applying the
+// empty directory closes every link; the next valid lease restores it. Called with c.mu held.
+func (c *Client) expireMeshPeers(server *derpquic.Server) {
+	stale := c.cfg.MeshPeersStaleAfter
+	if stale == 0 {
+		stale = 5 * Interval
+	}
+	if c.meshAt.IsZero() || time.Since(c.meshAt) < stale || len(server.MeshPeers()) == 0 {
+		return
+	}
+	slog.Warn("relay mesh directory expired: no valid lease for it", "stale_after", stale)
+	if err := server.SetMeshPeers(nil); err != nil {
+		slog.Error("relay mesh directory could not be cleared", "error", err)
+	}
+}
+
+// meshPeers decodes a lease's mesh_peers; absent means no mesh.
+func meshPeers(raw json.RawMessage) ([]nodemesh.Peer, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var peers []nodemesh.Peer
+	if err := wirejson.Decode(raw, &peers); err != nil {
+		return nil, err
+	}
+	return peers, nil
 }
 
 // metrics is the report sent with each observation. A relay forwards payload and has no separate inbound count, so

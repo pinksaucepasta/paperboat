@@ -75,6 +75,16 @@ type Deployment struct {
 	// RequestBodyIdleTimeout cuts an HTTP upload after this long without request body bytes;
 	// zero means DefaultRequestBodyIdleTimeout.
 	RequestBodyIdleTimeout time.Duration `json:"request_body_idle_timeout,omitempty"`
+
+	// Forwarding sends a visitor whose name this node does not serve to the managed node that does (edge/internal/forward).
+	// ForwardEnabled nil means DefaultForwardEnabled; zero durations and limits mean their Default constants.
+	ForwardEnabled           *bool         `json:"forward_enabled,omitempty"`
+	ForwardDialTimeout       time.Duration `json:"forward_dial_timeout,omitempty"`
+	ForwardOpenTimeout       time.Duration `json:"forward_open_timeout,omitempty"`
+	ForwardPeerInterval      time.Duration `json:"forward_peer_interval,omitempty"`
+	ForwardPeerStaleAfter    time.Duration `json:"forward_peer_stale_after,omitempty"`
+	ForwardSeedInterval      time.Duration `json:"forward_seed_interval,omitempty"`
+	ForwardMaxStreamsPerPeer int           `json:"forward_max_streams_per_peer,omitempty"`
 }
 
 type PublicRoute struct {
@@ -216,6 +226,9 @@ func (d Deployment) validate() error {
 	}
 	if d.PublicTCPIdleTimeout != 0 && (d.PublicTCPIdleTimeout < time.Minute || d.PublicTCPIdleTimeout > 24*time.Hour) {
 		return errors.New("public_tcp_idle_timeout must be between 1m and 24h")
+	}
+	if err := d.validateForward(); err != nil {
+		return err
 	}
 	if d.RequestBodyIdleTimeout != 0 && (d.RequestBodyIdleTimeout < time.Second || d.RequestBodyIdleTimeout > time.Hour) {
 		return errors.New("request_body_idle_timeout must be between 1s and 1h")

@@ -50,6 +50,7 @@ func (s *Server) closeHandedOverLocked(now time.Time) {
 	for k, p := range s.peers {
 		if s.handedOver(p.grant.AccountID, now) {
 			delete(s.peers, k)
+			s.mesh.announce(meshGone, k) // the deferred cleanup of the carrier no longer finds the entry
 			p.close(ErrOverload.Code, ErrOverload.Message)
 		}
 	}

@@ -42,7 +42,7 @@ func TestEdgeAdmitsRecordingReplayChannelAndClosesItWhenAccessEnds(t *testing.T)
 	authorizer := &recordingTestAuthorizer{testBrowserAuthorizer{decision: recordingDecision()}}
 	issuing := &Gateway{Tickets: tickets, Authorizer: authorizer, AllowedOrigins: []string{"https://dashboard.example.test"}}
 	issued, streamURL, _, err := issuing.IssueRecording(context.Background(), "usr_1", "browser_1", testRecordingID, "https://dashboard.example.test", testBrowserKeyDigest)
-	if err != nil || issued.Role != RoleRecording || streamURL != "wss://edge-one.example.test/v1/browser-terminal/machine.runtime.example.test" {
+	if err != nil || issued.Role != RoleRecording || streamURL != "wss://machine.runtime.example.test/v1/browser-terminal" {
 		t.Fatalf("issue = %+v %q %v", issued, streamURL, err)
 	}
 	if got := tickets.issued; got.RecordingID != testRecordingID || got.TerminalSessionID != "" || got.InspectorCredentialID != "" {
@@ -58,7 +58,7 @@ func TestEdgeAdmitsRecordingReplayChannelAndClosesItWhenAccessEnds(t *testing.T)
 		t.Fatal(err)
 	}
 	ticket := Ticket{UserID: "usr_1", BrowserSessionID: "ses_1", RecordingID: testRecordingID, Origin: "https://dashboard.example.test", Role: RoleRecording, PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}
-	gateway := &Gateway{Tickets: &edgeTestTickets{active: true, ticket: ticket, value: "recording-ticket"}, Authorizer: authorizer, Signer: signer, Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
+	gateway := &Gateway{Tickets: &edgeTestTickets{active: true, ticket: ticket, value: "recording-ticket"}, Authorizer: authorizer, Signer: signer, HoldsCarrier: holdsOnly("edge_1"), Issuer: "https://api.example.test", AllowedOrigins: []string{ticket.Origin}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gateway.ServeEdgeControl(w, r, "edge_1", "epoch_1")
 	}))

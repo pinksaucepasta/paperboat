@@ -199,6 +199,19 @@
       }
     },
     {
+      "name": "paperboat_edge_forward_total",
+      "kind": "counter",
+      "labels": {
+        "outcome": [
+          "forwarded",
+          "holder_miss",
+          "loop_refused",
+          "refused",
+          "unreachable"
+        ]
+      }
+    },
+    {
       "name": "paperboat_edge_health_dimension",
       "kind": "gauge",
       "labels": {

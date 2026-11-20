@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/environmentkey"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type layerControlResponseFailure struct{ cause error }
@@ -507,7 +508,7 @@ func (s *layerEnvironmentService) VaultRecordPage(ctx context.Context, binding e
 		return out, envinject.ErrNotReady
 	}
 	path := "/v1/environment/layers/" + url.PathEscape(s.registration.MachineID) + "/records"
-	q := url.Values{"workspace": {binding.WorkspaceID}, "actor_account_id": {binding.ActorAccountID}, "owner_kind": {source.OwnerKind}, "owner_id": {source.OwnerID}, "source_machine_id": {source.MachineID}, "after_sequence": {strconv.FormatUint(after, 10)}, "through_sequence": {strconv.FormatUint(through, 10)}, "limit": {"200"}}
+	q := url.Values{"workspace": {binding.WorkspaceID}, "actor_account_id": {binding.ActorAccountID}, "owner_kind": {source.OwnerKind}, "owner_id": {source.OwnerID}, "source_machine_id": {source.MachineID}, "after_sequence": {strconv.FormatUint(after, 10)}, "through_sequence": {strconv.FormatUint(through, 10)}, "limit": {strconv.Itoa(connectorprotocol.MaximumVaultRecordsPageSize)}}
 	if cursor != "" {
 		q.Set("cursor", cursor)
 	}
@@ -538,7 +539,7 @@ func (s *layerEnvironmentService) VaultRecordPage(ctx context.Context, binding e
 	if err != nil {
 		return out, err
 	}
-	raw, err := readLayerControlBody(response, 1<<20)
+	raw, err := readLayerControlBody(response, connectorprotocol.MaximumVaultRecordsPageWireBytes)
 	if err != nil {
 		return out, err
 	}
