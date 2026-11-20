@@ -21,6 +21,8 @@ func newRegionFixture(t *testing.T) *regionFixture {
 	f.exec(t, `INSERT INTO workspace_edge_sets(scope_kind,scope_id,mode,regions) VALUES('account',$1,'managed-only',$2)`, f.account, []string{f.ra, f.rb})
 	t.Cleanup(func() {
 		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM workspace_edge_sets WHERE scope_id=$1`, f.account)
+		// Carrier rows reference their node without a cascade: delete them first or the nodes below leak into later tests.
+		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM runtime_carrier_attachments WHERE machine_id=$1`, f.machine)
 		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM control_tunnel_nodes WHERE id LIKE $1`, f.prefix+"_x%")
 	})
 	return f

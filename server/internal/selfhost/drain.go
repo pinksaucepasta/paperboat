@@ -46,6 +46,11 @@ func (s *Service) changeNodeState(ctx context.Context, actor, id string, operato
 	if err != nil {
 		return "", notFoundIsUnauthorized(err)
 	}
+	// The operator path reads (and so answers for) global installations only: through it, an account's own would drain
+	// and then not be found.
+	if operator && scope.Kind != "global" {
+		return "", ErrUnauthorized
+	}
 	if _, err = s.authorizeScope(ctx, actor, scope, true, operator); err != nil {
 		return "", err
 	}

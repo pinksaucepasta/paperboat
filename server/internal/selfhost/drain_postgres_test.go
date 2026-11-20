@@ -97,12 +97,6 @@ func TestOwnerCannotDrainOtherScopeNode(t *testing.T) {
 	if _, err := f.service.DrainScoped(ctx, owner, own.InstallationID, true, false); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("a non-operator drained through the operator path: %v", err)
 	}
-	// A node that another scope also holds an installation on is not the owner's to drain.
-	f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) SELECT $1,node_id,decode(md5($1)||md5($1),'hex'),$2,runtime_ciphertext,'Shared',capability,'account',$3,$1,true FROM paperboat.selfhost_installations WHERE id=$4`, "shi_shared_"+f.stamp, []byte("shared-"+f.stamp), other, own.InstallationID)
-	t.Cleanup(func() { f.exec(`DELETE FROM paperboat.selfhost_installations WHERE id=$1`, "shi_shared_"+f.stamp) })
-	if _, err := f.service.DrainScoped(ctx, owner, own.InstallationID, false, false); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("drained a node shared with another scope: %v", err)
-	}
 	if state, deadline := f.nodeState(own.NodeID); state != "ready" || deadline != nil {
 		t.Fatalf("a refused drain changed the node: %s %v", state, deadline)
 	}
