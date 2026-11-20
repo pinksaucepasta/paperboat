@@ -110,6 +110,9 @@ const shellDelay = {
   showing: (p) => p.locator(".shell-delay").count(),
   loaded: (p) => p.waitForFunction(() => !document.querySelector(".shell-delay"), null, { timeout: 30000 }),
 }
+// The field the user was typing in still has focus, with the caret where it was (after the last typed character).
+const focusedIn = (p, placeholder, caret) =>
+  p.evaluate(([text, at]) => document.activeElement?.getAttribute("placeholder") === text && document.activeElement.selectionStart === at, [placeholder, caret])
 const cases = [
   [
     "Tunnels: search text and the New tunnel dialog with its name",
@@ -130,11 +133,11 @@ const cases = [
       await checked(p, "Closed").click()
       await p.getByPlaceholder("Search terminals").fill("build")
     },
-    async (p) => (await pressed(p, "Closed")) && (await p.getByPlaceholder("Search terminals").inputValue()) === "build",
+    async (p) => (await pressed(p, "Closed")) && (await p.getByPlaceholder("Search terminals").inputValue()) === "build" && (await focusedIn(p, "Search terminals", 5)),
     undefined,
     async (p) => (await pressed(p, "Closed")) && (await clearSearch(p)),
   ],
-  ["Config sync: search text", "/config", async (p) => p.getByPlaceholder("Search machines").fill("laptop"), async (p) => (await p.getByPlaceholder("Search machines").inputValue()) === "laptop", undefined, async (p) => clearSearch(p)],
+  ["Config sync: search text", "/config", async (p) => p.getByPlaceholder("Search machines").fill("laptop"), async (p) => (await p.getByPlaceholder("Search machines").inputValue()) === "laptop" && (await focusedIn(p, "Search machines", 6)), undefined, async (p) => clearSearch(p)],
   [
     "Activity: the Streaming view (the filters live in the URL)",
     "/activity",
