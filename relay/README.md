@@ -67,8 +67,8 @@ the carrier. Revocation, invalid credentials and protocol violations remain fata
 
 A relay has no connection limit: it admits every authorized connection and capacity is watched by resource alerts.
 Forwarding is fair by byte budgets per carrier and per account (an account's speed is shared across its relays by
-demand). `capacity_limit` in the registry is the node's declared size, shown on the capacity page and used to rank
-relays by load, never to refuse a connection. The UDP peer-relay role allows 128
+demand). `capacity_limit` in the registry is the node's declared size, shown on the capacity page; it never ranks or
+refuses a relay (clients rank relays by measured RTT). The UDP peer-relay role allows 128
 allocations, 16 per account, and shapes forwarding to 49,152 packets/second with a
 4,096-packet burst per account. These peer-relay limits are fixed workload budgets that
 define admission fairness and bounded resource use, so installation does not expose

@@ -646,11 +646,10 @@ type regionalScore struct {
 	peerTransport string
 }
 
+// rankRegional orders by measured RTT only: a relay's declared capacity never ranks or refuses it.
 func rankRegional(scores []regionalScore) {
 	sort.Slice(scores, func(i, j int) bool {
-		// Capacity is fresh and prefiltered; use it as a proportional queueing
-		// penalty instead of conducting throughput tests on users' networks.
-		a, b := regionalQuality(scores[i]), regionalQuality(scores[j])
+		a, b := scores[i].rtt, scores[j].rtt
 		if a == b {
 			return scores[i].node.NodeID < scores[j].node.NodeID
 		}

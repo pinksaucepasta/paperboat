@@ -40,16 +40,6 @@ func validRegionalScores(scores []regionalScore) bool {
 	return true
 }
 
-// regionalQuality matches rankRegional's fresh-capacity queueing penalty: a relay that is busier relative to its declared size
-// ranks lower, but is never excluded (a relay has no connection limit).
-func regionalQuality(score regionalScore) float64 {
-	load := 0.0
-	if limit := score.node.CapacityLimit; limit > 0 {
-		load = min(float64(score.node.CapacityUsed)/float64(limit), 1)
-	}
-	return float64(score.rtt) * (1 + load)
-}
-
 func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regionalScore, string) {
 	s.offered = ""
 	if now.IsZero() || !validRegionalScores(scores) {
@@ -79,7 +69,7 @@ func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regio
 		return best, "selected_node_unreachable"
 	}
 	s.offered = active.node.NodeID
-	currentQuality, bestQuality := regionalQuality(active), regionalQuality(best)
+	currentQuality, bestQuality := float64(active.rtt), float64(best.rtt)
 	gain := currentQuality - bestQuality
 	if best.node.NodeID == s.selected || gain < float64(10*time.Millisecond) || gain < currentQuality*0.15 {
 		s.clearCandidate()
