@@ -47,7 +47,7 @@ BEGIN
  RETURN QUERY WITH resource AS (
  SELECT account_id,paperboat.publication_workspace_team(wanted_kind,wanted_resource) AS team FROM paperboat.preview_leases WHERE wanted_kind='preview' AND id=wanted_resource
  UNION ALL SELECT account_id,paperboat.publication_workspace_team(wanted_kind,wanted_resource) FROM paperboat.tunnels WHERE wanted_kind='tunnel' AND id=wanted_resource), candidates AS (
- SELECT n.id,coalesce(array_position(s.regions,n.region),9) AS region_rank,EXISTS(SELECT 1 FROM (SELECT expected_records FROM paperboat.preview_domains WHERE wanted_kind='preview' AND preview_id=wanted_resource AND deleted_at IS NULL AND ownership_state='verified' AND conflict_state='clear' UNION ALL SELECT expected_records FROM paperboat.tunnel_domains WHERE wanted_kind='tunnel' AND tunnel_id=wanted_resource AND deleted_at IS NULL AND ownership_state='verified' AND conflict_state='clear') domain CROSS JOIN LATERAL jsonb_array_elements(domain.expected_records) record WHERE record->>'value' IN(host(n.public_ingress_ipv4),host(n.public_ingress_ipv6))) AS retained FROM resource r CROSS JOIN paperboat.control_tunnel_nodes n
+ SELECT n.id,coalesce(array_position(s.regions,n.region),9) AS region_rank,EXISTS(SELECT 1 FROM (SELECT expected_records FROM paperboat.preview_domains WHERE wanted_kind='preview' AND preview_id=wanted_resource AND deleted_at IS NULL AND ownership_state='verified' AND conflict_state='clear' UNION ALL SELECT expected_records FROM paperboat.tunnel_domains WHERE wanted_kind='tunnel' AND tunnel_id=wanted_resource AND deleted_at IS NULL AND ownership_state='verified' AND conflict_state='clear') domain CROSS JOIN LATERAL jsonb_array_elements(domain.expected_records) record WHERE record->>'value' IN(host(n.public_ingress_ipv4),host(n.public_ingress_ipv6))) AS retained,row_number() OVER (PARTITION BY n.region ORDER BY n.id) AS serving_rank FROM resource r CROSS JOIN paperboat.control_tunnel_nodes n
  LEFT JOIN paperboat.workspace_edge_sets s ON s.scope_kind=CASE WHEN r.team IS NULL THEN 'account' ELSE 'team' END AND s.scope_id=coalesce(r.team,r.account_id)
  WHERE paperboat.node_workspace_edge_eligible(n.id,r.account_id,r.team)
  AND n.ready AND n.state='ready' AND n.drain_deadline IS NULL AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now()
@@ -55,7 +55,8 @@ BEGIN
  AND n.public_ingress_verified_at IS NOT NULL AND(n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
  AND (NOT EXISTS(SELECT 1 FROM paperboat.selfhost_placements WHERE resource_kind=wanted_kind AND resource_id=wanted_resource)
  OR EXISTS(SELECT 1 FROM paperboat.selfhost_placements p JOIN paperboat.selfhost_installations i ON i.id=p.installation_id WHERE p.resource_kind=wanted_kind AND p.resource_id=wanted_resource AND i.node_id=n.id)))
- SELECT id FROM candidates ORDER BY retained DESC,region_rank,id LIMIT 8;
+ -- serving_rank<=4 mirrors edgeset.ServingNodesPerRegion (MaximumRegionCarriers/2); TestPublicationNodesAreTheServingNodes checks the digit.
+ SELECT id FROM candidates WHERE serving_rank<=4 ORDER BY retained DESC,region_rank,id LIMIT 8;
 END
 $function$;
 -- +goose StatementEnd
