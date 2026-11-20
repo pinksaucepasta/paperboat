@@ -40,6 +40,22 @@ func TestResizeFilterHandlesARequestSplitAtEveryByte(t *testing.T) {
 	}
 }
 
+func TestWindowsOutputDoesNotAskTheConsoleForCursorBlinkState(t *testing.T) {
+	const query = "\x1b[?12$p"
+	const other = "\x1b[?12h\x1b[6n\x1b[?25$p"
+	for cut := 0; cut <= len(query); cut++ {
+		f := resizeFilter{stripCursorBlinkQuery: true}
+		got := string(f.strip([]byte("a"+query[:cut]))) + string(f.strip([]byte(query[cut:]+other+"b")))
+		if want := "a" + other + "b"; got != want {
+			t.Fatalf("split at %d: got %q, want %q", cut, got, want)
+		}
+	}
+	var f resizeFilter
+	if got := string(f.strip([]byte(query))); got != query {
+		t.Fatalf("query on other clients = %q, want %q", got, query)
+	}
+}
+
 // A prefix that never completes is not lost: the next byte that cannot continue it releases it, and take releases it when the stream
 // goes quiet or ends.
 func TestResizeFilterReleasesAPrefixThatNeverCompletes(t *testing.T) {

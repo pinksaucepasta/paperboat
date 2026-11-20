@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"io"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -137,7 +138,12 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		buf := make([]byte, options.outputBufferBytes)
 		var outputOffset uint64
 		// Terminal.app and ConPTY obey the host's in-band resize broadcast by resizing the window: see resizeFilter
-		resizes := &resizeWriter{out: options.output}
+		resizes := &resizeWriter{
+			out: options.output,
+			filter: resizeFilter{
+				stripCursorBlinkQuery: runtime.GOOS == "windows" && isTerminal && term.IsTerminal(int(os.Stdout.Fd())),
+			},
+		}
 		defer resizes.Flush()
 		var sink io.Writer = resizes
 		for {

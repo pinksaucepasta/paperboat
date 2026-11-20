@@ -12,9 +12,12 @@ import (
 // resizing itself for real, which pb's own size poll then reports back as the client's size: the last typer's size sticks and every other
 // window shrinks to it for good (F3-14, N1/N15 on a Windows client). A chunk may end inside a request, so a tail that could still become
 // one is held for the next chunk; the caller flushes what stays held (take) when the stream goes quiet or ends.
-type resizeFilter struct{ held []byte }
+type resizeFilter struct {
+	held                  []byte
+	stripCursorBlinkQuery bool
+}
 
-// strip returns chunk without resize requests. The result may alias chunk.
+// strip removes output sequences handled locally. The result may alias chunk.
 func (f *resizeFilter) strip(chunk []byte) []byte {
 	data := chunk
 	if len(f.held) > 0 {
@@ -32,7 +35,7 @@ func (f *resizeFilter) strip(chunk []byte) []byte {
 		}
 		out = append(out, data[:start]...)
 		data = data[start:]
-		switch end := resizeRequestEnd(data); {
+		switch end := f.filteredSequenceEnd(data); {
 		case end > 0:
 			data = data[end:]
 		case end < 0: // may still become a request: wait for more bytes
@@ -43,6 +46,21 @@ func (f *resizeFilter) strip(chunk []byte) []byte {
 			data = data[1:]
 		}
 	}
+}
+
+func (f *resizeFilter) filteredSequenceEnd(data []byte) int {
+	// Conhost answers Vim's cursor-blink query through console input. A
+	// late reply after Vim exits can be interpreted as commands by bash.
+	const cursorBlinkQuery = "\x1b[?12$p"
+	if f.stripCursorBlinkQuery {
+		if bytes.HasPrefix(data, []byte(cursorBlinkQuery)) {
+			return len(cursorBlinkQuery)
+		}
+		if bytes.HasPrefix([]byte(cursorBlinkQuery), data) {
+			return -1
+		}
+	}
+	return resizeRequestEnd(data)
 }
 
 // take returns the bytes held back and forgets them.
@@ -83,7 +101,7 @@ func resizeRequestEnd(data []byte) int {
 	return -1
 }
 
-// resizeWriter writes remote output to out without resize requests. A tail held back by the filter is written after quiet (a prefix that
+// resizeWriter writes filtered remote output to out. A tail held back by the filter is written after quiet (a prefix that
 // never completes must not be swallowed) and by Flush when the stream ends.
 type resizeWriter struct {
 	mu     sync.Mutex
