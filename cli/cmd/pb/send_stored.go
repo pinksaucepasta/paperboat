@@ -65,32 +65,47 @@ func sendStoredFiles(ctx context.Context, command *cobra.Command, client *api.Cl
 	//paperboat:allow-source-policy default-http owner=send-stored reason=per-part-context-timeout-no-redirect
 	bucket := &http.Client{Transport: http.DefaultTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("bucket redirects are refused") }}
 	put := recordingcontrol.PutObject(bucket)
-	for first := 0; first < len(prepared.Parts); first += teambucket.MaxSegmentsPerBatch {
-		count := min(teambucket.MaxSegmentsPerBatch, len(prepared.Parts)-first)
-		uploads, err := client.StoredFileUploads(ctx, request.RequestID, first, count)
-		if err != nil {
-			return friendlyCommandError(err)
-		}
-		if len(uploads.URLs) != count {
-			return errors.New("the server returned an incomplete set of stored file upload addresses; retry the transfer")
-		}
-		for i, authority := range uploads.URLs {
-			data, err := prepared.ReadPart(first + i)
+	var total, uploaded int64
+	for _, part := range prepared.Parts {
+		total += part.Bytes
+	}
+	output := newSendTransferOutput(command.ErrOrStderr(), jsonOutput, total)
+	stopOutput := output.start(ctx, nil)
+	uploadErr := func() error {
+		for first := 0; first < len(prepared.Parts); first += teambucket.MaxSegmentsPerBatch {
+			count := min(teambucket.MaxSegmentsPerBatch, len(prepared.Parts)-first)
+			uploads, err := client.StoredFileUploads(ctx, request.RequestID, first, count)
 			if err != nil {
-				return fmt.Errorf("read encrypted stored file: %w", err)
+				return friendlyCommandError(err)
 			}
-			uploadContext, cancel := context.WithTimeout(ctx, 90*time.Second)
-			err = put(uploadContext, authority, data)
-			cancel()
-			if err != nil {
-				// http.Client wraps network and redirect errors with the full presigned URL.
-				var addressError *url.Error
-				if errors.As(err, &addressError) {
-					err = errors.New("the bucket did not answer; check the connection and retry")
+			if len(uploads.URLs) != count {
+				return errors.New("the server returned an incomplete set of stored file upload addresses; retry the transfer")
+			}
+			for i, authority := range uploads.URLs {
+				data, err := prepared.ReadPart(first + i)
+				if err != nil {
+					return fmt.Errorf("read encrypted stored file: %w", err)
 				}
-				return fmt.Errorf("upload stored file part %d: %w", first+i+1, err)
+				uploadContext, cancel := context.WithTimeout(ctx, 90*time.Second)
+				err = put(uploadContext, authority, data)
+				cancel()
+				if err != nil {
+					// http.Client wraps network and redirect errors with the full presigned URL.
+					var addressError *url.Error
+					if errors.As(err, &addressError) {
+						err = errors.New("the bucket did not answer; check the connection and retry")
+					}
+					return fmt.Errorf("upload stored file part %d: %w", first+i+1, err)
+				}
+				uploaded += prepared.Parts[first+i].Bytes
+				output.committed("stored", uploaded)
 			}
 		}
+		return nil
+	}()
+	stopOutput(uploadErr == nil)
+	if uploadErr != nil {
+		return uploadErr
 	}
 	if err := client.StoredFileUploaded(ctx, request.RequestID); err != nil {
 		return friendlyCommandError(err)

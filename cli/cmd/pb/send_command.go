@@ -32,7 +32,7 @@ func sendCommand() *cobra.Command {
 	}
 	command.Flags().String("to", "", "destination machine name or ID")
 	command.Flags().String("session", "", "terminal session ID for destination context")
-	command.Flags().Bool("json", false, "print a JSON result to stdout and throttle events to stderr")
+	command.Flags().Bool("json", false, "print a JSON result to stdout and progress events to stderr")
 	command.Flags().Bool("unlimited", false, "send any size, only directly or through your own relay; waits while neither is available (default: your account's transfer mode)")
 	addSendManagementCommands(command)
 	return command
@@ -309,25 +309,18 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				progress = newTransferProgress(client, acceptance.RequestID, declared.Mode)
 				progress.set("sending", "")
 			}
-			output := sendTransferOutput{
-				out: cobraCommand.ErrOrStderr(), json: jsonOutput, total: declared.Bytes, offsets: make(map[string]int64),
-			}
+			output := newSendTransferOutput(cobraCommand.ErrOrStderr(), jsonOutput, declared.Bytes)
 			nativeClient.Committed = func(id string, offset int64) {
 				output.committed(id, offset)
 				if progress != nil {
 					progress.Committed(id, offset)
 				}
 			}
-			outputCtx, cancelOutput := context.WithCancel(ctx.Context)
-			outputDone := make(chan struct{})
+			var lookup func(context.Context)
 			if declared.Mode == "automatic" {
-				go func() {
-					defer close(outputDone)
-					output.reportBandwidth(outputCtx, client, destination.OwnerTeamID, transferProgressInterval)
-				}()
-			} else {
-				close(outputDone)
+				lookup = func(ctx context.Context) { output.reportBandwidth(ctx, client, destination.OwnerTeamID) }
 			}
+			stopOutput := output.start(ctx.Context, lookup)
 			nativeClient.DestinationName = destination.Alias
 			nativeClient.Waiting = func(message string) {
 				if progress != nil {
@@ -339,8 +332,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 				batch, sendErr = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
 				return sendErr
 			})
-			cancelOutput()
-			<-outputDone
+			stopOutput(err == nil)
 			if progress != nil {
 				if err != nil {
 					progress.finish("failed", 0)
