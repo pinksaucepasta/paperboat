@@ -4,6 +4,7 @@ import { MachineTabView } from "@/components/machine-tab-view"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrumbLink, PageHeader } from "@/components/page-header"
 import { WithSession } from "@/components/with-session"
+import { ShellScope } from "@/lib/use-shell-state"
 import { queryKeys } from "@/lib/query-keys"
 
 export default function MachineLayout({ params, children }: LayoutProps<"/machines/[machineId]">) {
@@ -24,7 +25,9 @@ async function Machine({ params, children }: Pick<LayoutProps<"/machines/[machin
   ]
   return (
     <WithSession reads={reads}>
-      <MachineShell key={machineId} machineId={machineId}>{children}</MachineShell>
+      <MachineShell key={machineId} machineId={machineId}>
+        {children}
+      </MachineShell>
     </WithSession>
   )
 }
@@ -32,7 +35,7 @@ async function Machine({ params, children }: Pick<LayoutProps<"/machines/[machin
 /** The prerendered shell: the machine page's header, tabs and open tab before the machine id is known. */
 function MachineFallback() {
   return (
-    <>
+    <ShellScope>
       <PageHeader>
         <CrumbLink href="/">Machines</CrumbLink>
         <Skeleton className="my-1.5 h-4 w-28" />
@@ -40,6 +43,6 @@ function MachineFallback() {
       <MachineSkeleton>
         <MachineTabView />
       </MachineSkeleton>
-    </>
+    </ShellScope>
   )
 }

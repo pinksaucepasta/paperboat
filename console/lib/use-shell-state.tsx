@@ -36,14 +36,12 @@ export function useShellState<T>(key: string): [T | undefined, (next: SetStateAc
 export function useShellState<T>(key: string, initial: T | (() => T)): [T, (next: SetStateAction<T>) => void]
 export function useShellState<T>(key: string, initial?: T | (() => T)): [T, (next: SetStateAction<T>) => void] {
   const shell = useContext(InShell)
+  // A shell inside a shell (the machine layout's, then the page's) adopts too, and holds the value on for the next swap.
+  const adopt = held.has(key)
   const [value, setValue] = useState<T>(() =>
-    !shell && held.has(key)
-      ? (held.get(key) as T)
-      : typeof initial === "function"
-        ? (initial as () => T)()
-        : (initial as T),
+    adopt ? (held.get(key) as T) : typeof initial === "function" ? (initial as () => T)() : (initial as T),
   )
-  const touched = useRef(false)
+  const touched = useRef(adopt)
   useLayoutEffect(() => {
     if (shell && touched.current) {
       held.set(key, value)
