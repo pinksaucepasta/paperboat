@@ -2,7 +2,7 @@
 
 import { CaretDownIcon, HardDrivesIcon } from "@phosphor-icons/react"
 import { machineOwner, edgesQuery, machineLatencyQuery, meQuery, useApiQuery, type Machine } from "@/lib/api"
-import { formatPlatform, placeName } from "@/lib/format"
+import { formatPlatform } from "@/lib/format"
 import { MachineAddressDetail } from "@/components/machine-address"
 import { Time } from "@/components/time"
 import { cn } from "@/lib/utils"
@@ -141,12 +141,12 @@ function UpdateHealth({ machine }: { machine: Machine }) {
 }
 
 /** What the machine measured to the edges and relays it can use; empty until it has reported. */
-type Relay = { id: string; region: string; self_hosted?: boolean; latency_ms?: number }
+type Relay = { id: string; name: string; self_hosted?: boolean; latency_ms?: number }
 
 /**
- * Where this machine's traffic goes: the account's two edges (previews and tunnels) and the
- * relays used when a direct path is not possible. Times are the machine's own connect times,
- * reported every few minutes, and show a dash until the machine has reported.
+ * Where this machine's traffic goes: Paperboat's edge regions (previews and tunnels), your own,
+ * and the relay regions used when a direct path is not possible. Times are the machine's best
+ * connect time to each region, reported every few minutes, and show a dash until it has reported.
  */
 function Network() {
   const machine = useCurrentMachine()
@@ -154,33 +154,42 @@ function Network() {
   const loading = useMachineLoading()
   // The loading stand-in's id is not a machine: asking for its latency answers 404.
   const { data: measured } = useApiQuery({ ...machineLatencyQuery(machine.id), enabled: !loading })
-  const edgeLatency = new Map((measured ?? []).filter((item) => item.role === "edge").map((item) => [item.node_id, item]))
+  const edgeLatency = new Map(
+    (measured ?? []).filter((item) => item.role === "edge").map((item) => [item.region, item]),
+  )
+  // Paperboat's regions, then your own regions the machine measured (their status is not listed here).
+  const tiles = [
+    ...(edges ?? []).map((edge) => ({ id: edge.id, name: edge.name, status: edge.status as string | undefined })),
+    ...[...edgeLatency.values()]
+      .filter((item) => item.self_hosted)
+      .map((item) => ({ id: item.region, name: item.name, status: undefined })),
+  ]
   const relays: Relay[] = (measured ?? [])
     .filter((item) => item.role === "relay")
-    .map((item) => ({ id: item.node_id, region: item.region, self_hosted: item.self_hosted, latency_ms: item.rtt_ms }))
+    .map((item) => ({ id: item.region, name: item.name, self_hosted: item.self_hosted, latency_ms: item.rtt_ms }))
 
   return (
     <Section title="Network">
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h3 className="text-xs text-muted-foreground">Edges</h3>
+          <h3 className="text-xs text-muted-foreground">Edge regions</h3>
           <div className="grid gap-3 sm:grid-cols-2">
             {isPending && Array.from({ length: 2 }, (_, index) => <EdgeTileSkeleton key={index} />)}
-            {isError && <p className="text-sm text-muted-foreground">Couldn’t load edges</p>}
-            {edges?.length === 0 && <p className="text-sm text-muted-foreground">No edges assigned</p>}
-            {edges?.map((edge) => (
+            {isError && <p className="text-sm text-muted-foreground">Couldn’t load regions</p>}
+            {edges && tiles.length === 0 && <p className="text-sm text-muted-foreground">No regions available</p>}
+            {tiles.map((tile) => (
               <EdgeTile
-                key={edge.id}
-                region={edge.region}
-                status={edge.status}
-                latency={edgeLatency.get(edge.id)?.rtt_ms}
-                selfHosted={edgeLatency.get(edge.id)?.self_hosted}
+                key={`${edgeLatency.get(tile.id)?.self_hosted ? "own" : "managed"}:${tile.id}`}
+                name={tile.name}
+                status={tile.status}
+                latency={edgeLatency.get(tile.id)?.rtt_ms}
+                selfHosted={edgeLatency.get(tile.id)?.self_hosted}
               />
             ))}
           </div>
         </div>
         <div className="flex flex-col gap-2">
-          <h3 className="text-xs text-muted-foreground">Relays</h3>
+          <h3 className="text-xs text-muted-foreground">Relay regions</h3>
           {relays.length > 0 ? (
             <RelayList relays={relays} />
           ) : loading ? (
@@ -208,24 +217,25 @@ function Hosting({ selfHosted, className }: { selfHosted?: boolean; className?: 
 }
 
 function EdgeTile({
-  region,
+  name,
   status,
   latency,
   selfHosted,
 }: {
-  region: string
-  status: string
+  name: string
+  /** Absent for your own regions: only their servers' states are known, on the Network page. */
+  status?: string
   latency?: number
   selfHosted?: boolean
 }) {
-  const ready = status === "ready" || status === "online"
+  const ready = status === "ready"
   return (
     <div className="surface-pattern flex flex-col gap-3 p-4">
       {/* Fixed height, so a tile with a status word lines up with one without. */}
       <div className="flex h-[1lh] items-center gap-2">
-        <span className="font-medium trim-cap">{placeName(region)}</span>
-        <StatusDot online={ready} />
-        {!ready && (
+        <span className="font-medium trim-cap">{name}</span>
+        {status && <StatusDot online={ready} />}
+        {status && !ready && (
           <span className="text-xs text-muted-foreground trim-cap">
             {status === "draining" ? "Being replaced" : "Not reachable"}
           </span>
@@ -264,7 +274,7 @@ function RelayList({ relays }: { relays: Relay[] }) {
         // The latency bar separates rows itself; no divider under it.
         <li key={relay.id} className="flex flex-col gap-2 py-3">
           <div className="flex items-baseline gap-2 text-sm">
-            <span className="truncate">{placeName(relay.region)}</span>
+            <span className="truncate">{relay.name}</span>
             {relay.self_hosted && <Hosting selfHosted className="text-xs" />}
             <Latency value={relay.latency_ms} className="ml-auto" />
           </div>

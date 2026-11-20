@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { liveOf, switchEdgesStoppingLive } from "@/lib/network"
+import { drainInstallation, liveOf, resumeInstallation, switchEdgesStoppingLive, type Installation } from "@/lib/network"
 import { ApiError } from "@/lib/api"
 
 const realFetch = globalThis.fetch
@@ -7,7 +7,8 @@ afterEach(() => {
   globalThis.fetch = realFetch
 })
 
-const edge = (id: string) => ({ id, kind: "self_hosted", region: "fsn1", site: id, status: "ready" })
+const region = (id: string) => ({ id, name: id, status: "ready" })
+const choice = { kind: "self_hosted" as const, primaryRegion: "r1", fallbackRegion: "r2" }
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } })
 const tunnel = (desired: string) => ({
@@ -38,15 +39,15 @@ test("switching stops what the server names, each its own way, and asks again un
     calls.push(call)
     if (call === "PUT edges/pair") {
       const next = asked.shift()
-      return next ? refusal(next.map((item) => JSON.parse(item)), 3) : json(200, { data: { primary: edge("s1"), fallback: edge("s2") } })
+      return next ? refusal(next.map((item) => JSON.parse(item)), 3) : json(200, { data: { kind: "self_hosted", primary: region("r1"), fallback: region("r2") } })
     }
     if (call.startsWith("GET previews/")) return json(200, { data: {} }, { etag: '"1"' })
     if (call === "GET tunnels/t1") return json(200, { data: tunnel("active") })
     if (call === "POST tunnels/t1/pause") return json(200, { data: tunnel("paused") })
     return json(200, { data: {} })
   }) as typeof fetch
-  const { pair, stopped } = await switchEdgesStoppingLive("personal", "s1", "s2")
-  expect(pair.primary.id).toBe("s1")
+  const { pair, stopped } = await switchEdgesStoppingLive("personal", choice)
+  expect(pair.primary.id).toBe("r1")
   expect(stopped.map((item) => item.id)).toEqual(["p1", "t1", "p2"])
   expect(calls.filter((call) => call.startsWith("DELETE previews/")).sort()).toEqual(["DELETE previews/p1", "DELETE previews/p2"])
   expect(calls).toContain("POST tunnels/t1/pause")
@@ -55,5 +56,32 @@ test("switching stops what the server names, each its own way, and asks again un
 
 test("a refusal that names nothing stops nothing and is shown as it is", async () => {
   globalThis.fetch = (async () => refusal([], 2)) as unknown as typeof fetch
-  await expect(switchEdgesStoppingLive("personal", "s1", "s2")).rejects.toMatchObject({ code: "previews_running" })
+  await expect(switchEdgesStoppingLive("personal", choice)).rejects.toMatchObject({ code: "previews_running" })
+})
+
+test("the pair is saved as regions, and drain and resume name the installation and the move", async () => {
+  const sent: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://console.test")
+    sent.push(`${init?.method} ${url.pathname.replace("/api/v1/", "")} ${init?.body ?? ""}`)
+    if (url.pathname.includes("selfhost/installations"))
+      return json(200, {
+        data: {
+          installation_id: "inst/1", node_id: "n", endpoint_host: "h.example.test", name: "n", region: "home", capability: "tunnel",
+          ready: false, trust_notice: "", scope_kind: "account", scope_id: "u", enrollment_state: "enrolled",
+        },
+      })
+    return json(200, { data: { kind: "self_hosted", primary: region("r1"), fallback: region("r2") } })
+  }) as typeof fetch
+  await switchEdgesStoppingLive("personal", choice)
+  const installation = { installation_id: "inst/1" } as Installation
+  await drainInstallation(installation, true)
+  await drainInstallation(installation, false)
+  await resumeInstallation(installation)
+  expect(sent).toEqual([
+    'PUT edges/pair {"kind":"self_hosted","primary_region":"r1","fallback_region":"r2"}',
+    'POST selfhost/installations/inst%2F1/drain {"move":true}',
+    'POST selfhost/installations/inst%2F1/drain {"move":false}',
+    "POST selfhost/installations/inst%2F1/resume {}",
+  ])
 })
