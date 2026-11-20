@@ -305,7 +305,7 @@ func TestSetEdgePairSelfHostedRegions(t *testing.T) {
 	if pair.Kind != "self_hosted" || pair.Primary.ID != f.own2 || pair.Primary.Name != f.own2 || regionID(pair.Fallback) != f.own1 || pair.Primary.Status != "ready" {
 		t.Fatalf("self-hosted pair=%+v", pair)
 	}
-	if policy := f.pool(f.personal); policy.Mode != "self-hosted-only" || !slices.Equal(policy.InstallationIDs, sorted(f.s1, f.s1b, f.s2)) {
+	if policy := f.pool(f.personal); policy.Mode != "self-hosted-only" || !slices.Equal(sorted(policy.InstallationIDs...), sorted(f.s1, f.s1b, f.s2)) {
 		t.Fatalf("pool after switch=%+v", policy)
 	}
 	if mode, regions, _ := f.stored(f.personal); mode != "self-hosted-only" || !slices.Equal(regions, []string{f.own2, f.own1}) {
@@ -400,7 +400,7 @@ func TestSetEdgePairRefusesMixedKindAndUnknownRegion(t *testing.T) {
 func TestNewNodeInPairRegionJoinsPool(t *testing.T) {
 	f := newPairFixture(t)
 	f.set(f.owner, f.personal, "self_hosted", f.own1, f.own2)
-	if policy := f.pool(f.personal); !slices.Equal(policy.InstallationIDs, sorted(f.s1, f.s1b, f.s2)) {
+	if policy := f.pool(f.personal); !slices.Equal(sorted(policy.InstallationIDs...), sorted(f.s1, f.s1b, f.s2)) {
 		t.Fatalf("initial pool=%v", policy.InstallationIDs)
 	}
 	// A new server in a region of the pair, and one in a region outside it.
@@ -408,7 +408,7 @@ func TestNewNodeInPairRegionJoinsPool(t *testing.T) {
 	if _, err := f.store.SQL().ExecContext(f.ctx, syncTunnelPoolSQL, "account", f.owner); err != nil {
 		t.Fatal(err)
 	}
-	if policy := f.pool(f.personal); !slices.Equal(policy.InstallationIDs, sorted(f.s1, f.s1b, f.s2, inPair)) || slices.Contains(policy.InstallationIDs, outside) {
+	if policy := f.pool(f.personal); !slices.Equal(sorted(policy.InstallationIDs...), sorted(f.s1, f.s1b, f.s2, inPair)) || slices.Contains(policy.InstallationIDs, outside) {
 		t.Fatalf("pool after enrolling into the pair=%v (outside %s)", policy.InstallationIDs, outside)
 	}
 	if got, err := f.service.EdgePair(f.ctx, f.owner, f.personal); err != nil || got.Primary.Status != "ready" {
@@ -422,7 +422,7 @@ func TestRemovedNodeLeavesPool(t *testing.T) {
 	if err := f.service.RemoveScoped(f.ctx, f.owner, f.s1b, false); err != nil {
 		t.Fatal(err)
 	}
-	if policy := f.pool(f.personal); !slices.Equal(policy.InstallationIDs, sorted(f.s1, f.s2)) {
+	if policy := f.pool(f.personal); !slices.Equal(sorted(policy.InstallationIDs...), sorted(f.s1, f.s2)) {
 		t.Fatalf("pool after removing a server=%v, want %v", policy.InstallationIDs, sorted(f.s1, f.s2))
 	}
 	// The region still has a server, so the pair still serves.
