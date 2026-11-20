@@ -54,7 +54,13 @@ func TestForwardSuccess(t *testing.T) {
 	if !strings.Contains(body, "holder=edge-a") || !strings.Contains(body, "host="+appName) || !strings.Contains(body, "remote="+local) {
 		t.Fatalf("holder did not serve the visitor at its own address %s: %q", local, body)
 	}
-	if a.hits.Load() != 1 || b.hits.Load() != 0 {
+	if !strings.Contains(body, "attested=true") {
+		t.Fatalf("the holder did not mark the forwarded visitor's address as link-attested: %q", body)
+	}
+	if _, direct, _, err := visit(t, a, appName, c.holder.pool); err != nil || !strings.Contains(direct, "attested=false") {
+		t.Fatalf("a direct visitor must not be marked attested: %q %v", direct, err)
+	}
+	if a.hits.Load() != 2 || b.hits.Load() != 0 {
 		t.Fatalf("hits a=%d b=%d", a.hits.Load(), b.hits.Load())
 	}
 	// b's own certificate is the page certificate: it cannot have terminated the visitor's TLS.
@@ -467,7 +473,7 @@ func tcpPair(t *testing.T) (server, client net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return <-accepted, client
+	return routableConn{(<-accepted).(*net.TCPConn)}, client
 }
 
 // echoTCP is a holder's raw TCP injector: it echoes the visitor and records the port it was asked for.

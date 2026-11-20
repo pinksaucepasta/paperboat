@@ -33,7 +33,15 @@ func (m *Mesh) Forward(ctx context.Context, conn net.Conn, key string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*(m.cfg.DialTimeout+m.cfg.OpenTimeout))
 	defer cancel()
+	// The visitor address is the accepted socket's own, never a forwarding header: the holder takes it as the client
+	// address of the owner's IP rules (see serveForward).
 	visitor := conn.RemoteAddr().String()
+	hello, ok := helloFor(conn, key)
+	if !ok {
+		m.holderMiss.Add(1)
+		m.outcome(OutcomeHolderMiss)
+		return &Failure{Stage: StageLookup, Err: ErrNoHolder}
+	}
 	tried := map[string]bool{}
 	var last *Failure
 	for round := range 2 {
@@ -45,7 +53,7 @@ func (m *Mesh) Forward(ctx context.Context, conn net.Conn, key string) error {
 				continue
 			}
 			tried[h.NodeID] = true
-			stream, failure := m.openStream(ctx, h, key, visitor)
+			stream, failure := m.openStream(ctx, h, key, visitor, hello)
 			if failure != nil {
 				last = failure
 				continue
@@ -72,7 +80,7 @@ func (m *Mesh) Forward(ctx context.Context, conn net.Conn, key string) error {
 // openStream opens a forward stream to node id and waits for its ack. It returns the stream when the holder took
 // the visitor, a nil stream and nil failure when the holder refused (the refusal is counted), and a failure when
 // the node could not be reached or did not answer.
-func (m *Mesh) openStream(ctx context.Context, h Holder, key, visitor string) (*streamConn, *Failure) {
+func (m *Mesh) openStream(ctx context.Context, h Holder, key, visitor string, hello []byte) (*streamConn, *Failure) {
 	id := h.NodeID
 	l, err := m.linkTo(ctx, id)
 	if err != nil {
@@ -93,7 +101,7 @@ func (m *Mesh) openStream(ctx context.Context, h Holder, key, visitor string) (*
 	var ack nodemesh.OpenAck
 	err = writeStreamKind(st, streamForward)
 	if err == nil {
-		err = nodemesh.WriteMessage(st, nodemesh.Open{V: 1, Name: key, Visitor: visitor, From: m.cfg.NodeID, Hop: nodemesh.ForwardHop})
+		err = nodemesh.WriteMessage(st, nodemesh.Open{V: 1, Name: key, Visitor: visitor, From: m.cfg.NodeID, Hop: nodemesh.ForwardHop, Hello: hello})
 	}
 	if err == nil {
 		err = nodemesh.ReadMessage(st, &ack)
@@ -121,6 +129,23 @@ func (m *Mesh) openStream(ctx context.Context, h Holder, key, visitor string) (*
 		m.outcome(OutcomeRefused)
 	}
 	return nil, nil
+}
+
+// helloConn is a visitor connection that remembers the ClientHello bytes it replays.
+type helloConn interface{ ClientHello() []byte }
+
+// helloFor is the ClientHello the holder needs before it acks an HTTPS key (none for a raw TCP key). It reports false
+// when the hostname's visitor has no hello or one over nodemesh.MaxHello: such a visitor is not forwarded.
+func helloFor(conn net.Conn, key string) ([]byte, bool) {
+	if _, tcp := nodemesh.ParseTCPKey(key); tcp {
+		return nil, true
+	}
+	h, ok := conn.(helloConn)
+	if !ok {
+		return nil, false
+	}
+	hello := h.ClientHello()
+	return hello, len(hello) > 0 && len(hello) <= nodemesh.MaxHello
 }
 
 // linkTo returns the live link to node id, dialling it when none is up.

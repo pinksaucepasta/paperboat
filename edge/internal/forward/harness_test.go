@@ -215,7 +215,8 @@ func (n *node) handler() http.Handler {
 			_, _ = io.Copy(conn, rw)
 			return
 		}
-		fmt.Fprintf(w, "holder=%s host=%s remote=%s", n.id, r.Host, r.RemoteAddr)
+		_, attested := r.Context().Value(http.LocalAddrContextKey).(interface{ AttestedVisitor() })
+		fmt.Fprintf(w, "holder=%s host=%s remote=%s attested=%t", n.id, r.Host, r.RemoteAddr, attested)
 	})
 }
 
@@ -239,7 +240,7 @@ func newNode(t *testing.T, id string, visitorCert, unknownCert tls.Certificate) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := n.public.WrapTLSListener(ln, n.held.has, n.held.has)
+	shared, err := n.public.WrapTLSListener(routableListener{ln}, n.held.has, n.held.has)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +335,7 @@ func visit(t *testing.T, via *node, name string, pool *x509.CertPool) (status in
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			conn, err := (&net.Dialer{}).DialContext(ctx, network, via.ln.Addr().String())
 			if err == nil {
-				localAddr.Store(conn.LocalAddr().String())
+				localAddr.Store(routableAddr(conn.LocalAddr()).String())
 			}
 			return conn, err
 		}}
@@ -387,4 +388,25 @@ func echoOnce(conn net.Conn, text string) error {
 		return fmt.Errorf("echo %q != %q", got, text)
 	}
 	return nil
+}
+
+// The holder refuses a forwarded visitor whose address is loopback, so the tests' loopback visitors present a
+// TEST-NET-1 address with their real port (routableAddr), as a visitor on the Internet would.
+func routableAddr(real net.Addr) net.Addr {
+	tcp := real.(*net.TCPAddr)
+	return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 7), Port: tcp.Port}
+}
+
+type routableConn struct{ *net.TCPConn }
+
+func (c routableConn) RemoteAddr() net.Addr { return routableAddr(c.TCPConn.RemoteAddr()) }
+
+type routableListener struct{ net.Listener }
+
+func (l routableListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return routableConn{conn.(*net.TCPConn)}, nil
 }
