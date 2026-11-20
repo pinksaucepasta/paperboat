@@ -441,6 +441,8 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 		t.Fatal("same-worker process replacement accepted")
 	}
 	exec(`UPDATE control_tunnel_nodes SET process_epoch='epoch_replacement' WHERE id=$1`, node)
+	// The pin only holds for the node's current epoch (edgeSelectQuery): keep it on node's replacement.
+	exec(`UPDATE machine_edge_placements SET primary_process_epoch='epoch_replacement' WHERE machine_id=$1`, machine)
 	ready(false)
 	replacement, err := service.Attach(ctx, proof, request)
 	if err != nil {
