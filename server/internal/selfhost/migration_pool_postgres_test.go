@@ -57,6 +57,22 @@ func TestPoolFixupMigrationAddsSiblingsInThePairRegions(t *testing.T) {
 	}
 }
 
+// A pair whose regions hold no active server of the owner must not empty the owner's pool: self-hosted-only needs a
+// server, and the edge-set worker (not this fixup) replaces a pair that points nowhere.
+func TestPoolFixupMigrationNeverEmptiesAPool(t *testing.T) {
+	f := newPairFixture(t)
+	f.exec(`INSERT INTO paperboat.workspace_edge_sets(scope_kind,scope_id,mode,node_ids,regions) VALUES('account',$1,'self-hosted-only',ARRAY[$2],ARRAY[$3])`, f.owner, f.n1, "nowhere_"+f.stamp)
+	f.exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2])`, f.owner, f.s1)
+	migrationUp(t, f, "488_tunnel_pool_follows_regions.sql")
+	var ids []string
+	if err := f.store.Pool().QueryRow(f.ctx, `SELECT installation_ids FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1 AND capability='tunnel'`, f.owner).Scan(&ids); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ids, []string{f.s1}) {
+		t.Fatalf("pool after the fixup=%v, want the owner's list %v kept", ids, []string{f.s1})
+	}
+}
+
 // The region backfill walks every pair in batches of 1000, so 2500 pairs take several batches and the walk still ends
 // with the rows whose nodes name no region left empty. Rerunning changes no resolved pair.
 func TestRegionBackfillMigrationIsBatchedAndTerminates(t *testing.T) {
