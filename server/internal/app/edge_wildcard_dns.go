@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -42,6 +43,8 @@ type edgeWildcards struct {
 	names []wildcardName
 	now   func() time.Time
 	log   *slog.Logger
+	// outPercent and inPercent are config.NodeCapacity.DNSLoadOutPercent / DNSLoadInPercent.
+	outPercent, inPercent float64
 	// reconciled is each name's last successfully published set; a name is published again only when its set
 	// changes or after edgeWildcardRefresh, so the provider is not rewritten every tick.
 	reconciled map[string]wildcardPublication
@@ -52,17 +55,23 @@ func newEdgeWildcards(database *db.DB, cfg config.Config, public, runtime wildca
 	if !cfg.Certificates.ManageEdgeWildcards {
 		return nil
 	}
-	return &edgeWildcards{db: database, log: slog.Default(), now: time.Now, names: []wildcardName{
-		{"*." + cfg.Preview.BaseDomain, public},
-		{"*." + cfg.RuntimeBaseDomain, runtime},
-	}}
+	return &edgeWildcards{db: database, log: slog.Default(), now: time.Now,
+		outPercent: cfg.NodeCapacity.DNSLoadOutPercent, inPercent: cfg.NodeCapacity.DNSLoadInPercent,
+		names: []wildcardName{{"*." + cfg.Preview.BaseDomain, public}, {"*." + cfg.RuntimeBaseDomain, runtime}}}
 }
 
-// readyEdgeAddresses lists the verified public ingress addresses of managed edges that serve: ready, not draining,
-// fresh heartbeat, unexpired registration, in an enabled region. The ingress probe checks every address it records
-// (IPv4 and IPv6), so an IPv6 address here has been reached.
-func (w *edgeWildcards) readyEdgeAddresses(ctx context.Context) ([]string, error) {
-	rows, err := w.db.Pool().Query(ctx, `SELECT coalesce(host(n.public_ingress_ipv4),''),coalesce(host(n.public_ingress_ipv6),'')
+// wildcardNode is one ready managed edge: its verified public ingress addresses, region and load (nil: unknown).
+type wildcardNode struct {
+	id, region string
+	addresses  []string
+	load       *float64
+}
+
+// readyEdges lists the managed edges that serve: ready, not draining, fresh heartbeat, unexpired registration, in an
+// enabled region, ingress verified. The ingress probe checks every address it records (IPv4 and IPv6), so an IPv6
+// address here has been reached.
+func (w *edgeWildcards) readyEdges(ctx context.Context) ([]wildcardNode, error) {
+	rows, err := w.db.Pool().Query(ctx, `SELECT n.id,m.region_id,coalesce(host(n.public_ingress_ipv4),''),coalesce(host(n.public_ingress_ipv6),''),paperboat.node_load_percent(n.id)
 FROM paperboat.control_tunnel_nodes n
 JOIN paperboat.managed_node_authority m ON m.node_id=n.id AND m.retired_at IS NULL
 JOIN paperboat.operator_regions r ON r.id=m.region_id AND r.enabled
@@ -74,31 +83,140 @@ ORDER BY n.id LIMIT $1`, edgeWildcardMaxNodes)
 		return nil, err
 	}
 	defer rows.Close()
-	var addresses []string
+	var nodes []wildcardNode
 	for rows.Next() {
+		var n wildcardNode
 		var v4, v6 string
-		if err = rows.Scan(&v4, &v6); err != nil {
+		var load *float32
+		if err = rows.Scan(&n.id, &n.region, &v4, &v6, &load); err != nil {
 			return nil, err
 		}
 		for _, address := range []string{v4, v6} {
 			if address != "" {
-				addresses = append(addresses, address)
+				n.addresses = append(n.addresses, address)
 			}
 		}
+		if load != nil {
+			v := float64(*load)
+			n.load = &v
+		}
+		nodes = append(nodes, n)
 	}
-	return addresses, rows.Err()
+	return nodes, rows.Err()
+}
+
+// selectWildcardNodes drops overloaded nodes from the published set, with hysteresis. A node whose load reaches
+// outPercent leaves; once out it returns only when its load is below inPercent, so nothing between the two flaps.
+// A node with unknown load is never dropped. A region is never left empty: when all its ready nodes are out, the
+// least loaded one (ties by id) stays. out is each node's previous decision; the result is the kept nodes (in input
+// order) and the new decision for every node given.
+// Prior art: Route 53 health-checked records leave an unhealthy record out of an answer but answer with all of them
+// when every record of the set is unhealthy (fail open, never an empty answer); tailscale net/netcheck/netcheck.go
+// lines 1495-1511 keeps the current preferred DERP region unless another is clearly better (hysteresis).
+func selectWildcardNodes(nodes []wildcardNode, out map[string]bool, outPercent, inPercent float64) ([]wildcardNode, map[string]bool) {
+	state := make(map[string]bool, len(nodes))
+	inRegion := map[string]int{}
+	for _, n := range nodes {
+		threshold := outPercent
+		if out[n.id] {
+			threshold = inPercent
+		}
+		state[n.id] = n.load != nil && *n.load >= threshold
+		if !state[n.id] {
+			inRegion[n.region]++
+		}
+	}
+	least := map[string]*wildcardNode{}
+	for i, n := range nodes {
+		if inRegion[n.region] > 0 {
+			continue
+		}
+		if best := least[n.region]; best == nil || *n.load < *best.load {
+			least[n.region] = &nodes[i]
+		}
+	}
+	for _, n := range least {
+		state[n.id] = false
+	}
+	var kept []wildcardNode
+	for _, n := range nodes {
+		if !state[n.id] {
+			kept = append(kept, n)
+		}
+	}
+	return kept, state
+}
+
+// loadWildcardState reads the stored decisions (node id -> held out for load).
+func (w *edgeWildcards) loadWildcardState(ctx context.Context) (map[string]bool, error) {
+	rows, err := w.db.Pool().Query(ctx, `SELECT node_id,out_for_load FROM paperboat.edge_wildcard_nodes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	state := map[string]bool{}
+	for rows.Next() {
+		var id string
+		var out bool
+		if err = rows.Scan(&id, &out); err != nil {
+			return nil, err
+		}
+		state[id] = out
+	}
+	return state, rows.Err()
+}
+
+// storeWildcardState writes the decisions that changed and forgets nodes that are no longer ready, so a node that
+// comes back later starts fresh.
+func (w *edgeWildcards) storeWildcardState(ctx context.Context, before, after map[string]bool) error {
+	var ids []string
+	var outs []bool
+	for id, out := range after {
+		if was, ok := before[id]; !ok || was != out {
+			ids, outs = append(ids, id), append(outs, out)
+		}
+	}
+	if len(ids) > 0 {
+		if _, err := w.db.Pool().Exec(ctx, `INSERT INTO paperboat.edge_wildcard_nodes(node_id,out_for_load,changed_at) SELECT id,out,now() FROM unnest($1::text[],$2::boolean[]) AS t(id,out)
+ON CONFLICT (node_id) DO UPDATE SET out_for_load=excluded.out_for_load,changed_at=now()`, ids, outs); err != nil {
+			return err
+		}
+	}
+	var gone []string
+	for id := range before {
+		if _, ok := after[id]; !ok {
+			gone = append(gone, id)
+		}
+	}
+	if len(gone) > 0 {
+		_, err := w.db.Pool().Exec(ctx, `DELETE FROM paperboat.edge_wildcard_nodes WHERE node_id=ANY($1::text[])`, gone)
+		return err
+	}
+	return nil
 }
 
 // Sync publishes every wildcard name whose set changed (or is due for a refresh). It never publishes an empty
 // set: with no ready edge the old records stay, which beats resolving to nothing. A name's failure does not stop the others.
 func (w *edgeWildcards) Sync(ctx context.Context) error {
-	addresses, err := w.readyEdgeAddresses(ctx)
+	nodes, err := w.readyEdges(ctx)
 	if err != nil {
 		return err
 	}
-	if len(addresses) == 0 {
+	if len(nodes) == 0 {
 		w.log.WarnContext(ctx, "edge_wildcard_dns_empty", "detail", "no ready managed edge; keeping the published records")
 		return nil
+	}
+	before, err := w.loadWildcardState(ctx)
+	if err != nil {
+		return err
+	}
+	kept, after := selectWildcardNodes(nodes, before, w.outPercent, w.inPercent)
+	if err = w.storeWildcardState(ctx, before, after); err != nil {
+		return err
+	}
+	var addresses []string
+	for _, n := range kept {
+		addresses = append(addresses, n.addresses...)
 	}
 	at, key := w.now().UTC(), strings.Join(addresses, ",")
 	var firstErr error
@@ -112,18 +230,23 @@ func (w *edgeWildcards) Sync(ctx context.Context) error {
 		attempt, cancel := context.WithTimeout(ctx, time.Minute)
 		err := name.publisher.Reconcile(attempt, desired)
 		cancel()
+		var published *tunnelcert.AddressPublicationError
 		switch {
 		case err == nil:
 			if w.reconciled == nil {
 				w.reconciled = map[string]wildcardPublication{}
 			}
 			w.reconciled[name.hostname] = wildcardPublication{addresses: key, at: at}
-			w.log.InfoContext(ctx, "edge_wildcard_dns_published", "name", name.hostname, "addresses", key)
+			w.log.InfoContext(ctx, "edge_wildcard_dns_published", "hostname", name.hostname, "addresses", key)
 		case tunnelcert.WaitingForDNS(err):
 			delete(w.reconciled, name.hostname) // retried next tick until DNS agrees
 		default:
 			delete(w.reconciled, name.hostname)
-			w.log.WarnContext(ctx, "edge_wildcard_dns_not_reconciled", "name", name.hostname, "error", err)
+			event := "edge_wildcard_dns_not_reconciled"
+			if errors.As(err, &published) && published.Kind == tunnelcert.AddressPublicationConflict {
+				event = "edge_wildcard_dns_conflict" // a hand-made record for the name: delete it, see the runbook
+			}
+			w.log.WarnContext(ctx, event, "hostname", name.hostname, "error", err)
 			if firstErr == nil {
 				firstErr = err
 			}

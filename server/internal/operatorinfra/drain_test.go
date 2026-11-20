@@ -59,11 +59,33 @@ func topicGenerations(t *testing.T, store *db.DB, machine string) int {
 }
 
 func TestOperatorNodeListShowsCarriers(t *testing.T) {
-	s, _, admin, node, _ := drainFixture(t)
+	s, store, admin, node, _ := drainFixture(t)
 	ctx := context.Background()
 	page, err := s.ListNodes(ctx, admin, node.RegionID, "", 10)
 	if err != nil || len(page.Items) != 1 || page.Items[0].Carriers != 1 {
 		t.Fatalf("listed carriers: %+v err=%v", page.Items, err)
+	}
+	if item := page.Items[0]; item.LoadPercent != nil || item.InDNS != nil || item.IngressVerified {
+		t.Fatalf("a node that reported nothing shows load %v in_dns %v ingress_verified %v", item.LoadPercent, item.InDNS, item.IngressVerified)
+	}
+	for _, query := range []string{
+		`INSERT INTO paperboat.node_capacity(node_id,role,process_epoch,cpu_sustained_percent,reported_at) VALUES($1,'edge','epoch',42,now())`,
+		`INSERT INTO paperboat.edge_wildcard_nodes(node_id,out_for_load) VALUES($1,true)`,
+		`UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id=$1`,
+	} {
+		if _, err = store.SQL().ExecContext(ctx, query, node.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.node_capacity WHERE node_id=$1`, node.ID)
+	})
+	page, err = s.ListNodes(ctx, admin, node.RegionID, "", 10)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("listed: %+v err=%v", page.Items, err)
+	}
+	if item := page.Items[0]; item.LoadPercent == nil || *item.LoadPercent != 42 || item.InDNS == nil || *item.InDNS || !item.IngressVerified {
+		t.Fatalf("load %v in_dns %v ingress_verified %v, want 42, false, true", item.LoadPercent, item.InDNS, item.IngressVerified)
 	}
 	drained, err := s.MutateNode(ctx, admin, "drain-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"})
 	if err != nil || drained.Node.Carriers != 1 || drained.Node.State != "draining" {

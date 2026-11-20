@@ -240,7 +240,7 @@ the node so it re-attaches now, and for a relay lists the accounts it serves for
 after 90 seconds (longer than the wildcard record's TTL, so a visitor holding the old address still reaches a carrier
 until it expires). Both are audited (`operator.infrastructure.node.drain`, `...drain-move`), take `{"revision": n}`
 and the usual `Operator-Target`, `Operator-Reason` and `Idempotency-Key` headers. Node responses carry `carriers`,
-the number of machines holding a live carrier on the node: retire a node only when it is 0. `resume` cancels a drain
+the number of machines holding a live carrier on the node: retire a node only when it is 0. They also carry `load_percent` (absent when the node reported nothing in 2 minutes), `in_dns` (false while the wildcard DNS sync holds a ready node out for load; see preview-tunnel-control-plane.md) and `ingress_verified`. `resume` cancels a drain
 and its handovers; the node is ready again after its next heartbeat.
 Tunnel disable/enable uses the normal configuration-generation and operation
 pipeline, so acceptance is distinct from runtime convergence. Team suspension

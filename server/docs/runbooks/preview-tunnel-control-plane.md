@@ -41,10 +41,31 @@ region. A node that dies, is drained or retired leaves the set on the next tick;
 passed `verify-ingress`) joins it. The server never publishes an empty set: with no ready edge it logs
 `edge_wildcard_dns_empty` and leaves the old records. Nothing to remove by hand any more.
 
-One-time step before the first enable: the existing hand-made wildcard A/AAAA records are not Paperboat-owned, so the
-first publication fails with a conflict until they are deleted. Delete the A and AAAA records of both wildcards in the
-DNS zone, then set the flag and restart the server; the first sync writes them back (one record per 10 s tick, so a set
-of three edges takes about a minute, during which visitors reach only the records already written).
+A node whose load (`load_percent` in the admin panel: the worst of its sustained CPU and its connections against its
+own limit) reaches `PAPERBOAT_NODE_CAPACITY_DNS_LOAD_OUT_PERCENT` (85) is left out of the names and comes back only
+below `PAPERBOAT_NODE_CAPACITY_DNS_LOAD_IN_PERCENT` (70); a region always keeps its least loaded ready node, and a
+node with no recent report is never dropped. The admin panel shows such a node as paused for load. Log lines:
+`edge_wildcard_dns_published` (hostname, addresses), `edge_wildcard_dns_conflict` (hostname, error),
+`edge_wildcard_dns_empty`.
+
+## Turning on the wildcard DNS sync (one time)
+
+The sync refuses to touch A/AAAA records it did not create (it reports a conflict and changes nothing), so the
+hand-made records for the two wildcard names must be deleted. Enable first, then delete, so the gap is seconds (the
+worker publishes within its 10 s loop) and not a redeploy.
+
+1. Deploy the server with `PAPERBOAT_CERTIFICATES_MANAGE_EDGE_WILDCARDS=true` (default false). It starts logging
+   `edge_wildcard_dns_conflict` every 10 s for the two names: expected until step 3.
+2. Admin panel, Infrastructure, Nodes: every managed edge shows State `ready` and Ingress verified (run Verify ingress
+   on any that does not); the Load column fills in within a minute.
+3. In the DNS provider zone of each name (the public zone for the preview wildcard under the preview base domain, the
+   runtime zone for the runtime wildcard under the runtime base domain; the zone ids are the server's
+   `PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID` and `PAPERBOAT_CERTIFICATES_DNS_ZONE_ID`) delete every A and AAAA
+   record whose name is exactly the wildcard (`*.<base domain>`). Keep everything else.
+4. Within 30 s: `dig +short A x.<preview base domain>` and `dig +short A x.<runtime base domain>` return one address
+   per ready managed edge, the server log shows `edge_wildcard_dns_published`, and there are no further conflicts.
+5. Rollback: set the flag to false and redeploy, then re-create the hand-made records. The sync leaves the records it
+   created in place until it is removed: delete those by hand first.
 
 ## Move a region to a bigger machine
 

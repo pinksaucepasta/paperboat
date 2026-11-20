@@ -13581,7 +13581,8 @@
           "registry_expires_at",
           "ready",
           "protocol_version",
-          "carriers"
+          "carriers",
+          "ingress_verified"
         ],
         "properties": {
           "id": {
@@ -13652,6 +13653,19 @@
             "type": "integer",
             "format": "int64",
             "description": "Machines holding a live carrier attachment on the node; 0 means safe to retire."
+          },
+          "load_percent": {
+            "type": "number",
+            "format": "double",
+            "description": "The node's load: the worst of its sustained CPU and its connections against its own limit, from its latest report; absent when it reported nothing in the last 2 minutes."
+          },
+          "in_dns": {
+            "type": "boolean",
+            "description": "False while the wildcard DNS sync holds the ready node out of the published names because it is overloaded; absent for nodes the sync does not manage."
+          },
+          "ingress_verified": {
+            "type": "boolean",
+            "description": "The node's public ingress addresses passed the verify-ingress probe."
           }
         }
       },
