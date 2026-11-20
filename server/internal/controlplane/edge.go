@@ -161,7 +161,11 @@ func (s *EdgeService) ObserveRoutes(ctx context.Context, nodeID string, observat
 	}
 	now := s.clock().UTC()
 	detachedCount := int64(0)
-	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// Read committed: every write below is fenced by its own WHERE (assignment generation, edge epoch, carrier session,
+	// route revision), and the health summary is recomputed by every report, so a report that queues behind another
+	// write to the same rows beats a 40001 replay (prod 2026-11-20: ObserveTx against attaches and reconciles).
+	err := s.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		detachedCount = 0
 		// Legacy routes have one observation per route ID. Canonical route
 		// replacement deliberately reports the new and old assignment for the
 		// same route in one batch, so its idempotency key is the immutable
