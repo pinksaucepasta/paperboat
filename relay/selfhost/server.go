@@ -397,6 +397,12 @@ func serve(ctx context.Context, dir string, listen func(string) (net.Listener, e
 	srv := &http.Server{Handler: Handler(dir, onClaim, observe), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 15 * time.Second, MaxHeaderBytes: 8 << 10, TLSConfig: liveTLSConfig(dir, cert), BaseContext: func(net.Listener) context.Context { return ctx }}
 	done := make(chan error, 1)
 	go func() { done <- srv.ServeTLS(listener, "", "") }()
+	return awaitServe(ctx, srv, done)
+}
+
+// awaitServe returns when ServeTLS ends or ctx does. A real ServeTLS error that arrives together with the cancel is still the
+// answer: select picks at random between the two ready cases, and the shutdown path used to report only Shutdown's own error.
+func awaitServe(ctx context.Context, srv *http.Server, done <-chan error) error {
 	select {
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -410,7 +416,9 @@ func serve(ctx context.Context, dir string, listen func(string) (net.Listener, e
 		if err != nil {
 			srv.Close()
 		}
-		<-done
+		if served := <-done; err == nil && !errors.Is(served, http.ErrServerClosed) {
+			err = served
+		}
 		return err
 	}
 }
