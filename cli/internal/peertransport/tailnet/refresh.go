@@ -254,7 +254,9 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		}
 		if err != nil {
 			var apiErr *api.APIError
-			if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
+			// 429 (rate limited) and 503 with a Retry-After (the server shedding a restart's reconnect burst) both name
+			// when to come back: the server's jittered delay spreads the fleet, a fixed backoff would not.
+			if errors.As(err, &apiErr) && (apiErr.Status == http.StatusTooManyRequests || apiErr.Status == http.StatusServiceUnavailable && apiErr.RetryAfter > 0) {
 				renewalBudget.hold(time.Now(), apiErr.RetryAfter)
 			}
 			return a.rejectRefusedAuthority(err)

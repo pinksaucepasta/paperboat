@@ -205,6 +205,10 @@ func NewRouter(opts Options) http.Handler {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	var peerNet *peerNetworkShedder
+	if opts.PeerNetwork != nil {
+		peerNet = shedPeerNetwork(opts.PeerNetwork, opts.Config.RateLimits.PeerNetworkConfigMaxInflight)
+	}
 	var handler http.Handler
 	if opts.OverrideHandler != nil {
 		handler = opts.OverrideHandler
@@ -505,7 +509,7 @@ func NewRouter(opts Options) http.Handler {
 					return requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", next))
 				}
 				mux.Handle("POST /v1/peer-network/register", peerNetworkAuth(peerNetworkRegister(opts.PeerNetwork)))
-				mux.Handle("POST /v1/peer-network/config", peerNetworkAuth(peerNetworkConfig(opts.PeerNetwork)))
+				mux.Handle("POST /v1/peer-network/config", peerNetworkAuth(peerNetworkConfig(peerNet)))
 			}
 			if opts.ManagedSSH != nil && opts.DeviceAuth != nil {
 				sshRead := func(next http.Handler) http.Handler {
@@ -757,7 +761,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.PeerNetwork != nil && opts.RuntimeIdentity != nil {
 			mux.HandleFunc("POST /v1/machine-peer-network/register", machinePeerNetworkRegister(opts.PeerNetwork, opts.RuntimeIdentity))
-			mux.HandleFunc("POST /v1/machine-peer-network/config", machinePeerNetworkConfig(opts.PeerNetwork, opts.RuntimeIdentity, ratelimit.New(opts.Config.RateLimits.MachinePeerNetworkConfigPerMinute, opts.Config.RateLimits.MachinePeerNetworkConfigBurst, opts.Config.RateLimits.MaxClients)))
+			mux.HandleFunc("POST /v1/machine-peer-network/config", machinePeerNetworkConfig(peerNet, opts.RuntimeIdentity, ratelimit.New(opts.Config.RateLimits.MachinePeerNetworkConfigPerMinute, opts.Config.RateLimits.MachinePeerNetworkConfigBurst, opts.Config.RateLimits.MaxClients)))
 		}
 		if opts.WorkspaceBilling != nil {
 			mux.Handle("POST /v1/teams", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, paidTeamCreation(opts.WorkspaceBilling, opts.Config.HTTP.AllowedOrigins)))))
