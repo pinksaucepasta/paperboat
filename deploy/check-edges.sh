@@ -53,7 +53,7 @@ for edge in "$@"; do
 	on "$target" "since=$start; stop=$stopfile; seen=' '; end=\$((\$(date +%s) + 3600))
 trap 'sudo -n pkill -f \"[d]ocker logs --follow --since \$since\" 2>/dev/null' EXIT
 while [ ! -e \$stop ] && [ \$(date +%s) -lt \$end ]; do
-	for c in \$(sudo -n docker ps -q --no-trunc --filter name=-edge); do
+	for c in \$(sudo -n docker ps -q --no-trunc --filter name=paperboat-pbh-.*-edge); do
 		case \"\$seen\" in *\" \$c \"*) ;; *) seen=\"\$seen\$c \"; sudo -n timeout 3700 docker logs --follow --since \$since \$c 2>&1 & ;; esac
 	done
 	sleep 1
