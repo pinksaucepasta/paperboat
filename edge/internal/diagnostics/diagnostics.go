@@ -88,7 +88,6 @@ func MetricDescriptors() []schema.Metric {
 		{Name: "paperboat_edge_telemetry_dropped_total", Kind: "counter"},
 		{Name: "paperboat_tunnel_active_streams", Kind: "gauge"},
 		{Name: "paperboat_tunnel_attached_routes", Kind: "gauge"},
-		{Name: "paperboat_tunnel_connector_capacity", Kind: "gauge"},
 		{Name: "paperboat_tunnel_connectors", Kind: "gauge"},
 		{Name: "paperboat_tunnel_dependency_healthy", Kind: "gauge", Labels: map[string][]string{"dependency": {"carrier", "control", "routes", "usage"}}},
 		{Name: "paperboat_tunnel_live", Kind: "gauge"},
@@ -158,7 +157,6 @@ type Snapshot struct {
 	UsagePendingReports   int                     `json:"usage_pending_reports"`
 	UsagePendingBytes     int                     `json:"usage_pending_bytes"`
 	UsageOldestAgeSeconds int64                   `json:"usage_oldest_age_seconds"`
-	Capacity              uint32                  `json:"connector_capacity"`
 	FailureCodes          []string                `json:"failure_codes,omitempty"`
 	TrafficIngressBytes   uint64                  `json:"traffic_ingress_bytes"`
 	TrafficEgressBytes    uint64                  `json:"traffic_egress_bytes"`
@@ -185,9 +183,9 @@ func snapshot(s Sources) Snapshot {
 	if s.Now != nil {
 		now = s.Now().UTC()
 	}
-	manager, pending := s.Manager(), s.Usage()
+	pending := s.Usage()
 	routeErr := s.RouteErr()
-	result := Snapshot{At: now, Node: s.Node(), Control: statusFor(s.ControlErr()), Routes: statusFor(routeErr), Usage: statusFor(s.UsageErr()), Carrier: runningStatus(s.CarrierRunning()), Connectors: s.Sessions(), ActiveStreams: s.ActiveStreams(), AttachedRoutes: s.RouteCount(), UsagePendingReports: pending.Reports, UsagePendingBytes: pending.Bytes, Capacity: manager.Capacity}
+	result := Snapshot{At: now, Node: s.Node(), Control: statusFor(s.ControlErr()), Routes: statusFor(routeErr), Usage: statusFor(s.UsageErr()), Carrier: runningStatus(s.CarrierRunning()), Connectors: s.Sessions(), ActiveStreams: s.ActiveStreams(), AttachedRoutes: s.RouteCount(), UsagePendingReports: pending.Reports, UsagePendingBytes: pending.Bytes}
 	if s.Health != nil {
 		healthSnapshot := s.Health()
 		result.Health = &healthSnapshot
@@ -275,7 +273,6 @@ func writeMetrics(w http.ResponseWriter, s Snapshot) {
 		"paperboat_tunnel_connectors " + strconv.Itoa(s.Connectors),
 		"paperboat_tunnel_active_streams " + strconv.FormatUint(uint64(s.ActiveStreams), 10),
 		"paperboat_tunnel_attached_routes " + strconv.Itoa(s.AttachedRoutes),
-		"paperboat_tunnel_connector_capacity " + strconv.FormatUint(uint64(s.Capacity), 10),
 		"paperboat_tunnel_usage_pending_reports " + strconv.Itoa(s.UsagePendingReports),
 		"paperboat_tunnel_usage_pending_bytes " + strconv.Itoa(s.UsagePendingBytes),
 		"paperboat_tunnel_usage_oldest_age_seconds " + strconv.FormatInt(s.UsageOldestAgeSeconds, 10),

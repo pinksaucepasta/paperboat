@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestCoordinatorRedistributesActiveCertificateAfterEdgeProcessReplacement(t 
 		"activate:edge_a/epoch-old-a/1", "activate:edge_b/epoch-stable-b/1",
 		"stage:edge_a/epoch-new-a/1", "ready:edge_a/epoch-new-a/1",
 		"activate:edge_a/epoch-new-a/1", "retire:edge_a/epoch-old-a/1",
-	}; fmt.Sprint(got) != fmt.Sprint(want) {
+	}; joinEvents(got) != joinEvents(want) {
 		t.Fatalf("distribution events = %v, want %v", got, want)
 	}
 
@@ -126,6 +127,7 @@ type distributionLedger struct {
 	rows             map[string]string
 	eventLog         []string
 	failActivateOnce string
+	stragglerNode    string // WaitReady for this edge node never answers: it blocks until its context ends
 }
 
 func newDistributionLedger() *distributionLedger {
@@ -141,7 +143,14 @@ func (d *distributionLedger) Stage(_ context.Context, request DistributionReques
 	return nil
 }
 
-func (d *distributionLedger) WaitReady(_ context.Context, request DistributionRequest) error {
+func (d *distributionLedger) WaitReady(ctx context.Context, request DistributionRequest) error {
+	d.mu.Lock()
+	straggler := d.stragglerNode == request.Target.NodeID
+	d.mu.Unlock()
+	if straggler {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	key := distributionLedgerKey(request.Certificate.ID, request.Target)
@@ -319,5 +328,69 @@ func TestCoordinatorProjectionRecoveryRejectsUnreadyAndPropagatesFence(t *testin
 	}
 	if err := coordinator.RecoverDomainCertificateReady(context.Background(), domain, certificate, now); !errors.Is(err, ErrGenerationConflict) || recovery.calls != 1 {
 		t.Fatalf("store fence calls=%d err=%v", recovery.calls, err)
+	}
+}
+
+// One edge that does not answer must not stop the certificate reaching the edges that do: the certificate is
+// active on the ready edge, the straggler is left staged, and it catches up through the next pass (the worker
+// finds an active certificate with a missing edge) without reissuing anything.
+func TestCoordinatorActivatesReadyEdgesAroundAStraggler(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 60*24*time.Hour)}
+	coordinator, store, _, _ := coordinatorForTest(t, issuer)
+	coordinator.config.DistributionTimeout = 200 * time.Millisecond
+	ledger := newDistributionLedger()
+	ledger.stragglerNode = "edge_b"
+	coordinator.config.Distributor = ledger
+	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
+	domain.RouteID = "route_001"
+	first, err := coordinator.Ensure(context.Background(), domain)
+	if err != nil {
+		t.Fatalf("issuance with one straggler edge = %v, want it activated on the ready edge", err)
+	}
+	if first.Certificate.State != StateActive {
+		t.Fatalf("certificate = %+v, want active", first.Certificate)
+	}
+	certificateID := first.Certificate.Reference[len("tcert_"):]
+	byNode := map[string]string{}
+	for _, edge := range domain.EdgeTargets {
+		byNode[edge.NodeID] = ledger.state(certificateID, DistributionTarget(edge))
+	}
+	if byNode["edge_a"] != "active" || byNode["edge_b"] != "staged" {
+		t.Fatalf("edge states = %v, want edge_a active and edge_b still staged", byNode)
+	}
+	for _, event := range ledger.events() {
+		if strings.HasPrefix(event, "retire:") {
+			t.Fatalf("the straggler's staged copy was rolled back: %v", ledger.events())
+		}
+	}
+	// The straggler recovers: the next pass completes it and never reissues.
+	ledger.stragglerNode = ""
+	domain.CertificateReference = first.Certificate.Reference
+	if _, err := coordinator.Ensure(context.Background(), domain); err != nil {
+		t.Fatal(err)
+	}
+	if got := ledger.state(certificateID, DistributionTarget(domain.EdgeTargets[0])); got != "active" {
+		t.Fatalf("straggler after catching up = %q, want active", got)
+	}
+	current, found, err := store.Current(context.Background(), domain.ID)
+	if err != nil || !found || current.CertificateGeneration != first.Certificate.CertificateGeneration || len(issuer.seen) != 1 {
+		t.Fatalf("catch-up reissued: current=%+v found=%v err=%v issued=%d", current, found, err, len(issuer.seen))
+	}
+}
+
+// Every edge failing to answer is still a failed issuance: nothing is activated and the staged copies are rolled back.
+func TestCoordinatorFailsWhenNoEdgeIsReady(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	issuer := &testIssuer{bundle: testBundle(t, []string{"app.example.test"}, now, 60*24*time.Hour)}
+	coordinator, _, _, _ := coordinatorForTest(t, issuer)
+	coordinator.config.DistributionTimeout = 100 * time.Millisecond
+	ledger := newDistributionLedger()
+	coordinator.config.Distributor = ledger
+	domain := testDomain("app.example.test", StrategyDelegatedDNS01)
+	domain.EdgeTargets = domain.EdgeTargets[:1]
+	ledger.stragglerNode = domain.EdgeTargets[0].NodeID
+	if _, err := coordinator.Ensure(context.Background(), domain); !errors.Is(err, ErrCertificateNotReady) {
+		t.Fatalf("issuance with no ready edge = %v, want ErrCertificateNotReady", err)
 	}
 }

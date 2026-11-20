@@ -62,6 +62,10 @@ func peerNetworkError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusConflict, "peer_network_too_large", "This account has more computers than one peer network configuration can carry. Remove computers you no longer use (pb machine list), then retry.")
 	case errors.Is(err, peersessions.ErrInvalid):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network request is invalid.")
+	case errors.Is(err, errPeerNetworkBusy):
+		w.Header().Set("Retry-After", peerNetworkBusyRetryAfter())
+		// An answer the server chose to give, not a failure: no support report per shed request in a storm.
+		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: APIError{Code: "peer_network_unavailable", Message: "Peer network authority is busy. Retry after the delay.", RequestID: requestIDFromContext(r.Context()), Details: map[string]any{}}})
 	default:
 		// The causes here are package sentinels (no keys or addresses), and the
 		// step that failed is otherwise invisible in the error-type chain.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -70,11 +71,11 @@ func TestSharedTLSNameThatCannotBeOursIsNotHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
 	var admitted atomic.Bool
 	time.AfterFunc(700*time.Millisecond, func() { admitted.Store(true) })
-	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
+	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "", func(string) bool { return admitted.Load() }, nil, nil)
 	shared.ServeUnknownNamesWithPage(serverTLS)
 	shared.routeGrace = func() time.Duration { return 5 * time.Second }
 	shared.holdableName = func(string) bool { return false }
@@ -105,9 +106,9 @@ func TestSharedTLSHoldEndsWhenTheClientLeaves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
-	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return false }, nil, nil)
+	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "", func(string) bool { return false }, nil, nil)
 	defer shared.Close()
 	shared.ServeUnknownNamesWithPage(serverTLS)
 	shared.routeGrace = func() time.Duration { return time.Minute }
@@ -163,8 +164,8 @@ func TestHTTPRouteHoldIsBounded(t *testing.T) {
 	}
 }
 
-// One name may hold at most a quarter of the listener's slots for its connections' lives, so a flood
-// aimed at one preview cannot take every slot; a closed connection gives its share back.
+// One name may hold only its share of connections for their lives, so a flood aimed at one preview cannot take
+// the node; a closed connection gives its share back. (The test narrows the share to two: one connection plus a reconnect.)
 func TestSharedTLSNameShareIsBounded(t *testing.T) {
 	match, _ := browserTestMatch()
 	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
@@ -173,9 +174,10 @@ func TestSharedTLSNameShareIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	defer registry.Close()
-	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return true }, nil, nil)
+	shared := newSharedTLSListener(raw, &takedownAuthority{}, registry, func(string) bool { return false }, "", func(string) bool { return true }, nil, nil)
+	shared.names = newHoldSet(math.MaxInt, 2, 0)
 	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
 	defer server.Close()
 	go server.ServeTLS(shared, "", "")

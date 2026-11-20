@@ -142,7 +142,6 @@ type NodeRegistration struct {
 	Artifact     string            `json:"artifact"`
 	Protocol     string            `json:"protocol"`
 	ProcessEpoch string            `json:"process_epoch"`
-	Capacity     uint32            `json:"capacity"`
 	Endpoint     ConnectorEndpoint `json:"connector_endpoint"`
 	// CarrierEndpoint is required by the connector-v1 node contract and
 	// advertises both dedicated transports.
@@ -162,8 +161,8 @@ type ConnectorEndpoint struct {
 }
 
 func (registration NodeRegistration) Validate() error {
-	if registration.NodeID == "" || registration.ProcessEpoch == "" || registration.Capacity == 0 || !ValidCarrierServerSPKISHA256(registration.CarrierServerSPKISHA256) || ValidateCarrierServerCertificateChain(registration.CarrierServerCertificateChainPEM, registration.CarrierServerSPKISHA256, registration.CarrierEndpoint.Host, time.Now().UTC()) != nil {
-		return errors.New("node registration identity and capacity are required")
+	if registration.NodeID == "" || registration.ProcessEpoch == "" || !ValidCarrierServerSPKISHA256(registration.CarrierServerSPKISHA256) || ValidateCarrierServerCertificateChain(registration.CarrierServerCertificateChainPEM, registration.CarrierServerSPKISHA256, registration.CarrierEndpoint.Host, time.Now().UTC()) != nil {
+		return errors.New("node registration identity is required")
 	}
 	if err := registration.CarrierEndpoint.Validate(); err != nil {
 		return fmt.Errorf("carrier endpoint: %w", err)

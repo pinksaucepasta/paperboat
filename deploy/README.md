@@ -62,7 +62,7 @@ removes its random disposable object. It never prints credentials or payloads.
 
 A machine on an IPv6-only network behind NAT64+DNS64 reaches IPv4-only servers only through DNS names (DNS64
 synthesizes AAAA for a name, never for an IPv4 literal). Every hosted edge and relay therefore advertises a name:
-one name per host, one `A` record each (the hosts have no global IPv6, so no `AAAA`), in a zone the operator
+one name per host, an `A` and an `AAAA` record each (the hosts have global IPv6 and the edge and relay listen on both families by default; a host without IPv6 gets the `A` only), in a zone the operator
 controls and outside the preview, tunnel and runtime base domains. The same name serves the edge carrier, the
 relay and the public HTTPS listener of that host. Install with `pbh install --endpoint-host <name>`: the carrier
 certificate gets the name as SAN and the node registers it; an existing installation refuses a changed

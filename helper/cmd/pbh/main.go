@@ -168,7 +168,14 @@ func runObserved(ctx context.Context, args []string, out io.Writer, observe func
 		cmd := exec.CommandContext(ctx, "systemctl", "status", "--no-pager", "paperboat-selfhost.service")
 		cmd.Stdout = out
 		cmd.Stderr = out
-		return cmd.Run()
+		err := cmd.Run()
+		// The installation state is root-only: as root, a failing browser HTTPS renewal shows here too.
+		if status, statusErr := selfhost.ReadPublicHTTPSStatus(defaultState); statusErr == nil {
+			if line := status.Describe(); line != "" {
+				fmt.Fprintln(out, line)
+			}
+		}
+		return err
 	case "doctor":
 		return doctor(ctx, args[1:], out)
 	case "update-apply":
@@ -206,7 +213,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.String("name", "", "installation name")
 	fs.String("region", defaultRegion, "where users see this server; add more servers with the same region to spread load and replace machines without downtime (asked on a terminal when omitted)")
 	fs.String("failure-domain", "", "independent failure domain (defaults to endpoint host)")
-	fs.String("claim-listen", "0.0.0.0:8443", "local claim HTTPS listen address")
+	fs.String("claim-listen", "[::]:8443", "local claim HTTPS listen address; its host is also where the relay and edge listen ([::] is IPv4 and IPv6, 0.0.0.0 IPv4 only)")
 	fs.String("preview-domain", "", "preview base domain")
 	fs.String("tunnel-domain", "", "durable tunnel base domain")
 	fs.String("runtime-domain", "", "runtime base domain")
@@ -428,6 +435,7 @@ func configureTLS(ctx context.Context, args []string, out io.Writer) error {
 	dir := fs.String("state-dir", defaultState, "protected installation directory")
 	cert := fs.String("https-cert", "", "browser-trusted HTTPS certificate file covering the enrolled endpoint hostname")
 	key := fs.String("https-key", "", "owner-only private key file for browser HTTPS")
+	automatic := fs.Bool("acme", false, "obtain and renew the certificate automatically (ACME HTTP-01; TCP port 80 must reach this node)")
 	noService := fs.Bool("no-service", false, "save configuration for a separately managed process; restart it to apply")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -436,8 +444,8 @@ func configureTLS(ctx context.Context, args []string, out io.Writer) error {
 		}
 		return err
 	}
-	if fs.NArg() != 0 || *cert == "" || *key == "" {
-		return commandError("configure-tls requires --https-cert and --https-key")
+	if fs.NArg() != 0 || *automatic == (*cert != "" || *key != "") || !*automatic && (*cert == "" || *key == "") {
+		return commandError("configure-tls requires either --acme or both --https-cert and --https-key")
 	}
 	if !*noService && *dir != defaultState {
 		return commandError("automatic restart requires the default state directory; use --no-service for separately managed processes")
@@ -445,21 +453,31 @@ func configureTLS(ctx context.Context, args []string, out io.Writer) error {
 	if !*noService && os.Geteuid() != 0 {
 		return elevated(ctx, append([]string{"configure-tls"}, args...), out)
 	}
-	certFile, err := stageTrustFile(*dir, publicCertFile, *cert)
-	if err != nil {
-		return err
+	var rollback func() error
+	var err error
+	if *automatic {
+		rollback, err = selfhost.ConfigureAutomaticPublicHTTPS(*dir)
+	} else {
+		certFile, stageErr := stageTrustFile(*dir, publicCertFile, *cert)
+		if stageErr != nil {
+			return stageErr
+		}
+		keyFile, stageErr := stageTrustFile(*dir, publicKeyFile, *key)
+		if stageErr != nil {
+			return stageErr
+		}
+		rollback, err = selfhost.ConfigurePublicHTTPS(*dir, certFile, keyFile)
 	}
-	keyFile, err := stageTrustFile(*dir, publicKeyFile, *key)
-	if err != nil {
-		return err
-	}
-	rollback, err := selfhost.ConfigurePublicHTTPS(*dir, certFile, keyFile)
 	var operator selfhost.OperatorError
 	if errors.As(err, &operator) {
 		return err
 	}
 	if err != nil {
 		return fmt.Errorf("%w: %w", commandError("browser HTTPS configuration was not changed; check certificate hostname, validity, key pairing, and owner-only key permissions"), err)
+	}
+	if *automatic && *noService {
+		fmt.Fprintln(out, "Automatic browser HTTPS enabled. Restart the separately managed pbh process to apply; the certificate is obtained once it runs.")
+		return nil
 	}
 	if *noService {
 		fmt.Fprintln(out, "Browser HTTPS certificate paths saved. Restart the separately managed pbh process to apply; carrier identity and enrollment are unchanged.")
@@ -477,6 +495,10 @@ func configureTLS(ctx context.Context, args []string, out io.Writer) error {
 		}
 		return fmt.Errorf("%w: %w", commandError("new certificate configuration was not applied; previous configuration and service restored"), err)
 	}
-	fmt.Fprintln(out, "Browser HTTPS certificate paths saved and self-host service restarted. Carrier identity and enrollment are unchanged. The certificate owner must renew these files and rerun pbh configure-tls to reload them.")
+	if *automatic {
+		fmt.Fprintln(out, "Automatic browser HTTPS enabled and self-host service restarted. The certificate is obtained within a minute and renewed before it expires; pbh status shows its state.")
+		return nil
+	}
+	fmt.Fprintln(out, "Browser HTTPS certificate paths saved and self-host service restarted. Carrier identity and enrollment are unchanged. The certificate owner must renew these files and rerun pbh configure-tls to reload them (or switch to pbh configure-tls --acme).")
 	return nil
 }

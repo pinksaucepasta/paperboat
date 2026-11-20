@@ -19,8 +19,6 @@ const (
 	MatchManagedExact     = "managed_exact"
 	MatchOneLabelWildcard = "one_label_wildcard"
 	MatchCatchAll         = "catch_all"
-	DefaultMaximumRoutes  = 4096
-	DefaultMaximumStreams = 16384
 	DefaultDrainTimeout   = 30 * time.Second
 )
 
@@ -32,7 +30,6 @@ var (
 	ErrGenerationConflict = errors.New("route generation conflicts with current state")
 	ErrGenerationClosed   = errors.New("route generation registry is closed")
 	ErrDrainTimeout       = errors.New("route generation drain timed out")
-	ErrStreamOverloaded   = errors.New("route generation stream capacity exhausted")
 	// ErrStreamLeaseEnded is the cause of a request context the edge ended (its route generation, carrier or
 	// lease went away), so a failure it causes is told apart from a client that left (context.Canceled).
 	ErrStreamLeaseEnded = errors.New("route stream lease ended")
@@ -41,7 +38,6 @@ var (
 type GenerationRegistryOptions struct {
 	TelemetrySink  RouteTelemetrySink
 	TelemetryClock func() time.Time
-	MaximumStreams int
 }
 
 // RouteRule is the edge-owned representation of a route match and its
@@ -184,8 +180,6 @@ func (s *generationState) markDrained() {
 // already-acquired StreamLeases while it drains.
 type GenerationRegistry struct {
 	mu               sync.RWMutex
-	maximumRoutes    int
-	maximumStreams   int
 	active           *generationState
 	pending          *generationState
 	closed           bool
@@ -194,26 +188,16 @@ type GenerationRegistry struct {
 	telemetryDropped atomic.Uint64
 }
 
-func NewGenerationRegistry(maximumRoutes int) *GenerationRegistry {
-	registry, _ := NewGenerationRegistryWithOptions(maximumRoutes, GenerationRegistryOptions{})
+func NewGenerationRegistry() *GenerationRegistry {
+	registry, _ := NewGenerationRegistryWithOptions(GenerationRegistryOptions{})
 	return registry
 }
 
-func NewGenerationRegistryWithOptions(maximumRoutes int, options GenerationRegistryOptions) (*GenerationRegistry, error) {
-	if maximumRoutes <= 0 {
-		maximumRoutes = DefaultMaximumRoutes
-	}
-	if options.MaximumStreams < 0 {
-		return nil, ErrInvalid
-	}
-	if options.MaximumStreams == 0 {
-		options.MaximumStreams = DefaultMaximumStreams
-	}
+func NewGenerationRegistryWithOptions(options GenerationRegistryOptions) (*GenerationRegistry, error) {
 	if options.TelemetryClock == nil {
 		options.TelemetryClock = time.Now
 	}
 	return &GenerationRegistry{
-		maximumRoutes: maximumRoutes, maximumStreams: options.MaximumStreams,
 		telemetrySink: options.TelemetrySink, telemetryClock: options.TelemetryClock,
 	}, nil
 }
@@ -249,7 +233,7 @@ func (g *GenerationRegistry) emitLifecycle(event LifecycleType, generation, prev
 	correlationID, ids, generations := routeTelemetryIdentity(generation, rules)
 	record := RouteTelemetryRecord{
 		At: at.UTC().Round(0), Type: event, Generation: generation, PreviousGeneration: previousGeneration,
-		RouteCount: len(rules), ActiveStreams: activeStreams, MaximumStreams: g.maximumStreams,
+		RouteCount: len(rules), ActiveStreams: activeStreams,
 		CorrelationID: correlationID, IDs: ids, Generations: generations,
 	}
 	if err := g.telemetrySink.RecordRouteTelemetry(record); err != nil {
@@ -289,7 +273,7 @@ func (g *GenerationRegistry) StageGeneration(generation uint64, rules []RouteRul
 		g.emitStageRejection(generation, rules, ErrInvalid)
 		return ErrInvalid
 	}
-	normalized, err := normalizeRules(generation, rules, g.maximumRoutes)
+	normalized, err := normalizeRules(generation, rules)
 	if err != nil {
 		g.emitStageRejection(generation, rules, err)
 		return err
@@ -584,7 +568,7 @@ func (g *GenerationRegistry) ApplyGeneration(ctx context.Context, generation uin
 	if err := g.StageGeneration(generation, rules); err != nil {
 		return err
 	}
-	normalized, err := normalizeRules(generation, rules, g.maximumRoutes)
+	normalized, err := normalizeRules(generation, rules)
 	if err != nil {
 		return err
 	}
@@ -670,14 +654,6 @@ func (g *GenerationRegistry) Acquire(ctx context.Context, host, requestPath stri
 		// The generation changed meanwhile: its rules decide, so choose again from them.
 		g.mu.Unlock()
 		return g.Acquire(ctx, host, requestPath)
-	}
-	if active.streams >= g.maximumStreams {
-		activeStreams := active.streams
-		generation := active.generation
-		rules := active.rules
-		g.mu.Unlock()
-		g.emitLifecycle(LifecycleStreamOverloaded, generation, 0, rulesForTelemetryRule(rules, rule), activeStreams)
-		return nil, RouteMatch{}, ErrStreamOverloaded
 	}
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	lease := &StreamLease{ctx: streamCtx, cancel: cancel, registry: g, state: active, match: RouteMatch{Rule: rule, Host: host, Path: requestPath, Generation: active.generation}, done: make(chan struct{})}
@@ -792,10 +768,7 @@ func (g *GenerationRegistry) Close() error {
 	return nil
 }
 
-func normalizeRules(generation uint64, rules []RouteRule, maximum int) ([]RouteRule, error) {
-	if len(rules) > maximum {
-		return nil, ErrInvalid
-	}
+func normalizeRules(generation uint64, rules []RouteRule) ([]RouteRule, error) {
 	result := make([]RouteRule, 0, len(rules))
 	seen := make(map[string]struct{}, len(rules))
 	for _, rule := range rules {

@@ -27,7 +27,6 @@ const (
 	PreviewCarrierAccessPublic  = "public"
 	PreviewCarrierAccessPrivate = "private"
 	PreviewCarrierAccessTeam    = "team"
-	maxExpectedAdmissions       = 4096
 )
 
 var (
@@ -209,7 +208,6 @@ func (a ExpectedAdmission) exactEqual(other ExpectedAdmission) bool {
 // successful pull replaces the complete node-scoped set deterministically.
 type ExpectedAdmissionRegistry struct {
 	nodeID       string
-	maximum      int
 	processEpoch string
 
 	mu      sync.RWMutex
@@ -227,19 +225,15 @@ type ExpectedAdmissionRegistry struct {
 }
 
 type ExpectedAdmissionRegistryConfig struct {
-	NodeID            string
-	ProcessEpoch      string
-	MaximumAdmissions int
+	NodeID       string
+	ProcessEpoch string
 }
 
 func NewExpectedAdmissionRegistry(config ExpectedAdmissionRegistryConfig) (*ExpectedAdmissionRegistry, error) {
-	if config.MaximumAdmissions == 0 {
-		config.MaximumAdmissions = maxExpectedAdmissions
-	}
-	if connectorprotocol.ValidateIdentifier(config.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(config.ProcessEpoch) != nil || config.MaximumAdmissions < 1 || config.MaximumAdmissions > maxExpectedAdmissions {
+	if connectorprotocol.ValidateIdentifier(config.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(config.ProcessEpoch) != nil {
 		return nil, ErrInvalidConfig
 	}
-	return &ExpectedAdmissionRegistry{nodeID: config.NodeID, processEpoch: config.ProcessEpoch, maximum: config.MaximumAdmissions, byKey: make(map[string]ExpectedAdmission), pending: make(map[string]ExpectedAdmission), changed: make(chan struct{})}, nil
+	return &ExpectedAdmissionRegistry{nodeID: config.NodeID, processEpoch: config.ProcessEpoch, byKey: make(map[string]ExpectedAdmission), pending: make(map[string]ExpectedAdmission), changed: make(chan struct{})}, nil
 }
 
 func (r *ExpectedAdmissionRegistry) NodeID() string {
@@ -261,9 +255,6 @@ func (r *ExpectedAdmissionRegistry) ProcessEpoch() string {
 func (r *ExpectedAdmissionRegistry) Replace(admissions []ExpectedAdmission, now time.Time) error {
 	if r == nil {
 		return ErrInvalidConfig
-	}
-	if len(admissions) > r.maximum {
-		return fmt.Errorf("%w: too many admissions", ErrAdmissionConflict)
 	}
 	next := make(map[string]ExpectedAdmission, len(admissions))
 	r.mu.RLock()
@@ -308,9 +299,6 @@ func (r *ExpectedAdmissionRegistry) Replace(admissions []ExpectedAdmission, now 
 func (r *ExpectedAdmissionRegistry) InstallPending(admissions []ExpectedAdmission, now time.Time) error {
 	if r == nil {
 		return ErrInvalidConfig
-	}
-	if len(admissions) > r.maximum {
-		return fmt.Errorf("%w: too many admissions", ErrAdmissionConflict)
 	}
 	next := make(map[string]ExpectedAdmission, len(admissions))
 	for _, admission := range admissions {
@@ -428,9 +416,6 @@ func (r *ExpectedAdmissionRegistry) Upsert(admission ExpectedAdmission, now time
 		if admission.AttachmentGeneration < current.AttachmentGeneration {
 			return fmt.Errorf("%w: attachment generation regressed", ErrAdmissionConflict)
 		}
-	}
-	if _, exists := r.byKey[key]; !exists && len(r.byKey) >= r.maximum {
-		return fmt.Errorf("%w: admission capacity reached", ErrAdmissionConflict)
 	}
 	r.byKey[key] = admission
 	r.publishLocked()

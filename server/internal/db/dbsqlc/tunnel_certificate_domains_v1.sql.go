@@ -13,6 +13,76 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getExactTunnelCertificateDomainForEdgeV1 = `-- name: GetExactTunnelCertificateDomainForEdgeV1 :one
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
+FROM tunnel_domains AS d
+WHERE d.match_type = 'exact'
+  AND d.hostname = $1
+  AND d.ownership_state = 'verified'
+  AND d.conflict_state = 'clear'
+  AND d.certificate_state = 'ready'
+  AND d.certificate_reference IS NOT NULL
+  AND d.deleted_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM tunnel_route_ready_edges_v1 AS a
+    WHERE a.route_id = d.route_id AND a.tunnel_id = d.tunnel_id AND a.account_id = d.account_id
+      AND a.edge_node_id = $2
+      AND a.edge_process_epoch = $3
+  )
+ORDER BY d.id
+LIMIT 1
+`
+
+type GetExactTunnelCertificateDomainForEdgeV1Params struct {
+	Hostname         string
+	EdgeNodeID       string
+	EdgeProcessEpoch string
+}
+
+// A verified custom domain the edge serves, with an active certificate: the edge asks for it when it has none (or
+// only one about to expire) because the push that carried it missed this edge.
+func (q *Queries) GetExactTunnelCertificateDomainForEdgeV1(ctx context.Context, arg GetExactTunnelCertificateDomainForEdgeV1Params) (TunnelDomain, error) {
+	row := q.db.QueryRow(ctx, getExactTunnelCertificateDomainForEdgeV1, arg.Hostname, arg.EdgeNodeID, arg.EdgeProcessEpoch)
+	var i TunnelDomain
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.TunnelID,
+		&i.RouteID,
+		&i.Hostname,
+		&i.MatchType,
+		&i.OwnershipChallengeReference,
+		&i.OwnershipState,
+		&i.DnsTarget,
+		&i.ObservedRecords,
+		&i.CertificateStrategy,
+		&i.CertificateReference,
+		&i.CertificateState,
+		&i.CertificateExpiresAt,
+		&i.CertificateRenewalAttemptedAt,
+		&i.CertificateFailureCode,
+		&i.CaaState,
+		&i.ConflictState,
+		&i.LastVerifiedAt,
+		&i.Generation,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DnsProvider,
+		&i.ExpectedRecords,
+		&i.DnsLastCheckedAt,
+		&i.DnsNextCheckAt,
+		&i.DnsTtlSeconds,
+		&i.VerificationAttempts,
+		&i.QuarantineUntil,
+		&i.CertificateRetryAt,
+		&i.CertificateFailureAttempts,
+		&i.WorkspaceDomainID,
+	)
+	return i, err
+}
+
 const listDuePreviewCertificateDomainsV1 = `-- name: ListDuePreviewCertificateDomainsV1 :many
 SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
 FROM preview_domains AS d

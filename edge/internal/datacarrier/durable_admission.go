@@ -24,7 +24,6 @@ var (
 const (
 	DurableCarrierRouteKind      = "tunnel_http_wss"
 	DurableCarrierPrivateTCPKind = "tunnel_private_tcp"
-	maxDurableAdmissions         = 4096
 )
 
 // DurableAdmission is the public, server-issued binding used to admit a
@@ -109,7 +108,6 @@ type durableAdmissionEntry struct {
 type DurableAdmissionRegistry struct {
 	nodeID       string
 	processEpoch string
-	maximum      int
 
 	mu     sync.RWMutex
 	closed bool
@@ -130,22 +128,15 @@ func (r *DurableAdmissionRegistry) Changed() <-chan struct{} {
 }
 
 type DurableAdmissionRegistryConfig struct {
-	NodeID            string
-	ProcessEpoch      string
-	MaximumAdmissions int
+	NodeID       string
+	ProcessEpoch string
 }
 
 func NewDurableAdmissionRegistry(config DurableAdmissionRegistryConfig) (*DurableAdmissionRegistry, error) {
 	if connectorprotocol.ValidateIdentifier(config.NodeID) != nil || connectorprotocol.ValidateOpaqueEpoch(config.ProcessEpoch) != nil {
 		return nil, ErrDurableAdmissionInvalid
 	}
-	if config.MaximumAdmissions == 0 {
-		config.MaximumAdmissions = maxDurableAdmissions
-	}
-	if config.MaximumAdmissions < 1 || config.MaximumAdmissions > maxDurableAdmissions {
-		return nil, ErrDurableAdmissionInvalid
-	}
-	return &DurableAdmissionRegistry{nodeID: config.NodeID, processEpoch: config.ProcessEpoch, maximum: config.MaximumAdmissions, byID: make(map[string]durableAdmissionEntry)}, nil
+	return &DurableAdmissionRegistry{nodeID: config.NodeID, processEpoch: config.ProcessEpoch, byID: make(map[string]durableAdmissionEntry)}, nil
 }
 
 func (r *DurableAdmissionRegistry) NodeID() string {
@@ -167,9 +158,6 @@ func (r *DurableAdmissionRegistry) ProcessEpoch() string {
 func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now time.Time) error {
 	if r == nil {
 		return ErrDurableAdmissionInvalid
-	}
-	if len(admissions) > r.maximum {
-		return ErrDurableAdmissionConflict
 	}
 	next := make(map[string]durableAdmissionEntry)
 	r.mu.RLock()
@@ -205,9 +193,6 @@ func (r *DurableAdmissionRegistry) Replace(admissions []DurableAdmission, now ti
 		}
 		entry.byRoute[admission.RouteID] = admission
 		next[key] = entry
-	}
-	if len(next) > r.maximum {
-		return ErrDurableAdmissionConflict
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

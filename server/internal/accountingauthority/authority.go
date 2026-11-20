@@ -17,12 +17,6 @@ import (
 // day bound in paperboat-edge/internal/usage/policy.go.
 const DeliveryWindow = 7 * 24 * time.Hour
 
-// MaximumPerNode bounds the bindings a node holds admitted at once (the edge's 4096-route registry).
-// Admission fails closed at capacity. Records past their admission stay until retain_until so a delayed
-// report is still billed, but only pruning by time removes them: they do not count, or a node that
-// admitted one short-lived preview a minute for DeliveryWindow+ refused every new one (2026-11-12, prod previews 404).
-const MaximumPerNode = 4096
-
 // ErrThrottled is the answer for a binding whose workspace used its fair-use bandwidth: the binding is admitted
 // and recorded (its bytes are still counted), but the edge carries its traffic at the throttled rate until the
 // allowance period ends. Nothing is ever refused for bandwidth.

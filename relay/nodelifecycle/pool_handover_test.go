@@ -37,7 +37,7 @@ func TestObservationAppliesPoolHandoverList(t *testing.T) {
 			gen = in.Expected + 1
 		}
 		mu.Lock()
-		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}, PoolHandover: handover}
+		out := Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}, PoolHandover: handover}
 		mu.Unlock()
 		json.NewEncoder(w).Encode(out)
 	}))

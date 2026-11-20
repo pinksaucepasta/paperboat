@@ -47,7 +47,7 @@ func TestRelayKeepsServingWhileControlDoesNotAnswer(t *testing.T) {
 			http.Error(w, "fenced", http.StatusConflict)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(2 * time.Second).Unix(), CapacityLimit: 256, Revocations: []Revocation{}})
+		_ = json.NewEncoder(w).Encode(Lease{NodeID: in.NodeID, Generation: gen, ProcessEpoch: in.Epoch, ExpiresAt: time.Now().Add(2 * time.Second).Unix(), Revocations: []Revocation{}})
 	}))
 	defer api.Close()
 	defer close(release)

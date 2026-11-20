@@ -23,7 +23,7 @@ func init() {
 		Stages:   map[string]string{"selfhost": "selfhost_failed"},
 		Classify: classify,
 		Metrics: []reporting.Metric{
-			{Name: "paperboat_relay_sessions", Kind: gauge}, {Name: "paperboat_relay_capacity_limit", Kind: gauge},
+			{Name: "paperboat_relay_sessions", Kind: gauge},
 			{Name: "paperboat_relay_admissions_total_snapshot", Kind: gauge, Labels: outcomes},
 			{Name: "paperboat_relay_packets_total_snapshot", Kind: gauge, Labels: map[string][]string{"outcome": {"forwarded", "dropped"}}},
 			{Name: "paperboat_peer_relay_allocations", Kind: gauge},

@@ -32,8 +32,6 @@ type fixture struct {
 	verifier Verifier
 	tls      *tls.Config
 	roots    *x509.CertPool
-	// connectionLimit is the node capacity start applies (the registry lease's CapacityLimit); 0 keeps the default.
-	connectionLimit int
 }
 
 func certificate(t testing.TB) tls.Certificate {
@@ -99,11 +97,6 @@ func (f *fixture) start(address string) (*Server, string, func()) {
 	server, err := NewServer(f.verifier)
 	if err != nil {
 		f.t.Fatal(err)
-	}
-	if f.connectionLimit > 0 {
-		if err := server.SetConnectionLimit(f.connectionLimit); err != nil {
-			f.t.Fatal(err)
-		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -478,34 +471,6 @@ func TestSignedTokenTampering(t *testing.T) {
 	}
 }
 
-// One account may use every slot of a node but a tenth, so others always find room; a fixed 16 per
-// account refused the 17th machine of an account on first contact.
-func TestAccountConnectionBoundAndRelease(t *testing.T) {
-	f := newFixture(t)
-	f.connectionLimit = 10
-	s, address, _ := f.start("127.0.0.1:0")
-	share := 9
-	var clients []*Client
-	for i := 0; i < share; i++ {
-		cert := certificate(t)
-		c := f.client(address, cert, f.grant(key.NewNode().Public(), cert, string(rune('a'+i))))
-		connect(t, c)
-		clients = append(clients, c)
-	}
-	cert := certificate(t)
-	g := f.grant(key.NewNode().Public(), cert, "overflow")
-	overflow := f.client(address, cert, g)
-	if err := overflow.Connect(context.Background()); !errors.Is(err, ErrOverload) {
-		t.Fatalf("account overflow: %v", err)
-	}
-	clients[0].Close()
-	eventually(t, func() bool { s.mu.Lock(); defer s.mu.Unlock(); return len(s.peers) == share-1 })
-	connect(t, overflow)
-	if stats := s.Snapshot(); stats.Accepted != uint64(share+1) || stats.Denied == 0 {
-		t.Fatalf("connection accounting: %+v", stats)
-	}
-}
-
 func TestReconnectSupersedesLiveConnection(t *testing.T) {
 	f := newFixture(t)
 	s, address, _ := f.start("127.0.0.1:0")
@@ -663,27 +628,12 @@ func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
 	}
 }
 
-func TestAnotherAccountConnectsWhileOneHoldsItsShare(t *testing.T) {
-	f := newFixture(t)
-	f.connectionLimit = 10
-	_, address, _ := f.start("127.0.0.1:0")
-	for i := range 9 {
-		cert := certificate(t)
-		connect(t, f.client(address, cert, f.grant(key.NewNode().Public(), cert, fmt.Sprintf("full-%d", i))))
-	}
-	cert := certificate(t)
-	other := f.grant(key.NewNode().Public(), cert, "other")
-	other.AccountID = "account_other"
-	connect(t, f.client(address, cert, other))
-}
-
 // A 1,000-machine account (the Pro plan) fits on one node; the per-connection memory is reported.
 func TestOneAccountRegistersAThousandMachinesOnOneNode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("1,000 real QUIC registrations")
 	}
 	f := newFixture(t)
-	f.connectionLimit = 4096
 	s, address, _ := f.start("127.0.0.1:0")
 	const machines = 1000
 	runtime.GC()

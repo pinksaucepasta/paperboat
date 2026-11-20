@@ -61,7 +61,7 @@ func newLazyPolicy(t *testing.T, registry *route.GenerationRegistry, authority *
 func TestLazyActivationBeforeBodyReadAndSingleAcquireRetry(t *testing.T) {
 	host := "p3000-abcdefghijklmnop.preview.example.test"
 	rule, decision := lazyRuleAndDecision(host)
-	registry := route.NewGenerationRegistry(4)
+	registry := route.NewGenerationRegistry()
 	body := &lazyBodyProbe{}
 	authority := &lazyAuthorityFixture{}
 	authority.decision = decision
@@ -107,7 +107,7 @@ func TestLazyActivationRequiresCredentialAndCanonicalHostname(t *testing.T) {
 				t.Fatal("unexpected activation")
 				return connectorprotocol.IngressDecision{}, nil
 			}}
-			p := newLazyPolicy(t, route.NewGenerationRegistry(1), authority, http.NotFoundHandler())
+			p := newLazyPolicy(t, route.NewGenerationRegistry(), authority, http.NotFoundHandler())
 			r := httptest.NewRequest(http.MethodPost, "https://"+tc.host+"/", nil)
 			r.Host = tc.host
 			if tc.credential {
@@ -129,7 +129,7 @@ func TestLazyActivationCancellationLeavesBodyUnread(t *testing.T) {
 		<-ctx.Done()
 		return connectorprotocol.IngressDecision{}, ctx.Err()
 	}}
-	p := newLazyPolicy(t, route.NewGenerationRegistry(1), authority, http.NotFoundHandler())
+	p := newLazyPolicy(t, route.NewGenerationRegistry(), authority, http.NotFoundHandler())
 	ctx, cancel := context.WithCancel(context.Background())
 	r := httptest.NewRequest(http.MethodPost, "https://"+host+"/", body).WithContext(ctx)
 	r.Host = host
@@ -189,7 +189,7 @@ func TestSignedInUnknownHostLooksLikeDeniedPrivateApp(t *testing.T) {
 	const denied = "secret.custom.example.test"
 	const lazy = "p3000-abcdefghijklmnop.preview.example.test"
 	rule, decision := lazyRuleAndDecision(denied)
-	registry := route.NewGenerationRegistry(4)
+	registry := route.NewGenerationRegistry()
 	if err := registry.ApplyGeneration(context.Background(), 1, []route.RouteRule{rule}, func(context.Context, []route.RouteRule) error { return nil }, time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func (*beginDeniedAuthority) Begin(context.Context, string, string) (control.Bro
 
 func TestSignedOutUnknownHostNavigationIs404(t *testing.T) {
 	authority := &beginDeniedAuthority{}
-	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: route.NewGenerationRegistry(1)}, http.NotFoundHandler())
+	p, err := New(Config{BrowserAccess: &BrowserAccess{Authority: authority}, PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: route.NewGenerationRegistry()}, http.NotFoundHandler())
 	if err != nil {
 		t.Fatal(err)
 	}

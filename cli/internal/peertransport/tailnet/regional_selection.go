@@ -32,17 +32,12 @@ func validRegionalScores(scores []regionalScore) bool {
 	seen := make(map[string]bool, len(scores))
 	for _, score := range scores {
 		n := score.node
-		if n.NodeID == "" || len(n.NodeID) > 256 || seen[n.NodeID] || score.rtt <= 0 || score.rtt > time.Minute || n.CapacityLimit == 0 || n.CapacityUsed > n.CapacityLimit {
+		if n.NodeID == "" || len(n.NodeID) > 256 || seen[n.NodeID] || score.rtt <= 0 || score.rtt > time.Minute {
 			return false
 		}
 		seen[n.NodeID] = true
 	}
 	return true
-}
-
-// regionalQuality matches rankRegional's fresh-capacity queueing penalty.
-func regionalQuality(score regionalScore) float64 {
-	return float64(score.rtt) * (1 + float64(score.node.CapacityUsed)/float64(score.node.CapacityLimit))
 }
 
 func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regionalScore, string) {
@@ -74,7 +69,7 @@ func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regio
 		return best, "selected_node_unreachable"
 	}
 	s.offered = active.node.NodeID
-	currentQuality, bestQuality := regionalQuality(active), regionalQuality(best)
+	currentQuality, bestQuality := float64(active.rtt), float64(best.rtt)
 	gain := currentQuality - bestQuality
 	if best.node.NodeID == s.selected || gain < float64(10*time.Millisecond) || gain < currentQuality*0.15 {
 		s.clearCandidate()

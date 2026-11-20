@@ -111,6 +111,33 @@ func TestRateLimitedRenewalHoldsTheBudgetForRetryAfter(t *testing.T) {
 	}
 }
 
+// A 503 that names a Retry-After (the server shedding a restart's reconnect burst) holds the budget like a 429;
+// one without it keeps the ordinary backoff.
+func TestShedRenewalHoldsTheBudgetForRetryAfter(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		retryAfter time.Duration
+		held       bool
+	}{{"with Retry-After", 7 * time.Second, true}, {"without", 0, false}} {
+		t.Run(test.name, func(t *testing.T) {
+			b := &tokenBucket{refill: time.Millisecond, burst: 5}
+			useBudget(t, b)
+			a, c, signer, _ := networkTestAuthority(t)
+			if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+				t.Fatal(err)
+			}
+			client := networkAPIFunc{configuration: func(context.Context, string) (string, error) {
+				return "", &api.APIError{Status: 503, Code: "peer_network_unavailable", RetryAfter: test.retryAfter}
+			}}
+			_ = a.Refresh(t.Context(), client)
+			wait := b.take(time.Now(), false)
+			if test.held && (wait < 6*time.Second || wait > 7*time.Second) || !test.held && wait > time.Second {
+				t.Fatalf("budget wait after a 503 %s = %v", test.name, wait)
+			}
+		})
+	}
+}
+
 // A storm of direct refreshes (one per new operation grant, as the host's stream admission made) waits for the
 // budget instead of bypassing it.
 func TestDirectRefreshStormStaysWithinTheBudget(t *testing.T) {

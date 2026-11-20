@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -226,5 +227,37 @@ func TestIngressAuthorityListsFreeOwnedHostnames(t *testing.T) {
 	}
 	if !authority.AddressAllowed("free.customer.test", "203.0.113.4") || authority.AddressAllowed("free-listed.customer.test", "203.0.113.4") {
 		t.Error("the Free mark changed who the IP lists admit")
+	}
+}
+
+// A node holds any number of decisions, throttles and takedowns: a snapshot of 5,000 of each (past the old 4,096 list
+// bound) is read whole, never refused or cut.
+func TestIngressSnapshotOfMoreThanFourThousandEntriesIsReadWhole(t *testing.T) {
+	const entries = 5000
+	now := time.Now().UTC()
+	base := ingressAuthorityTestDecision(now)
+	decisions := make([]connectorprotocol.IngressDecision, entries)
+	throttled := make([]connectorprotocol.IngressThrottle, entries)
+	blocked := make([]connectorprotocol.IngressBlock, entries)
+	for i := range entries {
+		decisions[i] = base
+		decisions[i].Binding.RouteID = fmt.Sprintf("route_%d", i)
+		throttled[i] = connectorprotocol.IngressThrottle{Hostname: fmt.Sprintf("t%d.example.test", i), Workspace: "personal:account_1", BytesPerSecond: 1000}
+		blocked[i] = connectorprotocol.IngressBlock{Hostname: fmt.Sprintf("b%d.example.test", i)}
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": decisions, "throttled": throttled, "blocked": blocked})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := client.IngressDecisions(context.Background(), base.EdgeNodeID, base.EdgeProcessEpoch, "")
+	if err != nil {
+		t.Fatalf("a %d-entry snapshot was refused: %v", entries, err)
+	}
+	if len(snapshot.Decisions) != entries || len(snapshot.Throttled) != entries || len(snapshot.Blocked) != entries {
+		t.Fatalf("snapshot cut to %d decisions, %d throttles, %d takedowns of %d", len(snapshot.Decisions), len(snapshot.Throttled), len(snapshot.Blocked), entries)
 	}
 }

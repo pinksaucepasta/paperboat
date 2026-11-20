@@ -146,7 +146,7 @@ func TestEdgeHandoverHelperProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	component, closeService, err := newCarrierComponentWithTelemetry(
-		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
+		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), nil, nil, nil, nil, nil, nil, nil, worker,
 	)
 	if err != nil {

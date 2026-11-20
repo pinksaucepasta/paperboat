@@ -10,7 +10,7 @@ import (
 // admission per carrier per poll; Changed wakes the carrier handlers.
 func TestExpectedAdmissionIndexByCarrierIdentity(t *testing.T) {
 	now := time.Now().UTC()
-	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12", MaximumAdmissions: 64})
+	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestExpectedAdmissionIndexByCarrierIdentity(t *testing.T) {
 }
 
 func TestExpectsNamesOnlyUnexpiredAdmittedHosts(t *testing.T) {
-	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12", MaximumAdmissions: 64})
+	registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func BenchmarkForIdentityWithManyAdmissions(b *testing.B) {
 	for _, total := range []int{10, 4096} {
 		b.Run(fmt.Sprintf("admissions=%d", total), func(b *testing.B) {
 			now := time.Now().UTC()
-			registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12", MaximumAdmissions: 4096})
+			registry, err := NewExpectedAdmissionRegistry(ExpectedAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_epoch12"})
 			if err != nil {
 				b.Fatal(err)
 			}

@@ -30,7 +30,7 @@ func TestCanonicalManagedAssignmentStagesFromControlProjection(t *testing.T) {
 		t.Fatalf("validate: %v", err)
 	}
 	rules := CanonicalRouteRules([]control.RouteAssignment{assignment})
-	registry := route.NewGenerationRegistry(4)
+	registry := route.NewGenerationRegistry()
 	if err := registry.StageGeneration(1, rules); err != nil {
 		t.Fatalf("stage: %v; rules=%+v", err, rules)
 	}

@@ -107,10 +107,11 @@ func ConfigurePublicHTTPS(dir, certPath, keyPath string) (rollback func() error,
 	if err := validatePublicHTTPS(s.Config.EndpointHost, certPath, keyPath, time.Now()); err != nil {
 		return nil, err
 	}
-	previousCert, previousKey := s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile
-	s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile = certPath, keyPath
+	previousCert, previousKey, previousAutomatic := s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile, s.Config.PublicHTTPSAutomatic
+	// Files given by hand replace automatic issuance: one owner of the certificate.
+	s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile, s.Config.PublicHTTPSAutomatic = certPath, keyPath, false
 	if err = save(dir, s); err != nil {
-		s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile = previousCert, previousKey
+		s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile, s.Config.PublicHTTPSAutomatic = previousCert, previousKey, previousAutomatic
 		return nil, errors.Join(err, save(dir, s))
 	}
 	return func() error {
@@ -126,7 +127,51 @@ func ConfigurePublicHTTPS(dir, certPath, keyPath string) (rollback func() error,
 		if s.Config.PublicHTTPSCertFile != certPath || s.Config.PublicHTTPSKeyFile != keyPath {
 			return errors.New("public HTTPS configuration changed concurrently; restore manually")
 		}
-		s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile = previousCert, previousKey
+		s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile, s.Config.PublicHTTPSAutomatic = previousCert, previousKey, previousAutomatic
+		return save(dir, s)
+	}, nil
+}
+
+// ConfigureAutomaticPublicHTTPS turns automatic browser HTTPS on (public_acme.go): the node then obtains the
+// certificate for its endpoint host itself and renews it. The first certificate arrives within a minute of the
+// runtime starting; until then the node serves its enrolled identity. A certificate configured by hand is replaced
+// by the automatic one once issued.
+func ConfigureAutomaticPublicHTTPS(dir string) (rollback func() error, err error) {
+	lock, err := lockState(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	s, err := load(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireManaged(s); err != nil {
+		return nil, err
+	}
+	tunnel := false
+	for _, c := range s.Config.Components {
+		tunnel = tunnel || c.Capability == "tunnel"
+	}
+	if !tunnel {
+		return nil, errors.New("browser HTTPS configuration requires the tunnel component")
+	}
+	previous := s.Config.PublicHTTPSAutomatic
+	s.Config.PublicHTTPSAutomatic = true
+	if err := save(dir, s); err != nil {
+		return nil, err
+	}
+	return func() error {
+		lock, err := lockState(dir)
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+		s, err := load(dir)
+		if err != nil {
+			return err
+		}
+		s.Config.PublicHTTPSAutomatic = previous
 		return save(dir, s)
 	}, nil
 }
@@ -147,13 +192,19 @@ func syncPublicHTTPSDeployment(dir string) error {
 	if !s.RuntimeReady {
 		return nil
 	}
-	if s.Config.PublicHTTPSCertFile != "" || s.Config.PublicHTTPSKeyFile != "" {
+	if s.Config.PublicHTTPSCertFile != "" || s.Config.PublicHTTPSKeyFile != "" || s.Config.PublicHTTPSAutomatic {
 		if err := requireManaged(s); err != nil {
 			return err
 		}
 	}
-	if err := validatePublicHTTPS(s.Config.EndpointHost, s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile, time.Now()); err != nil {
-		return err
+	certFile, keyFile := s.Config.PublicHTTPSCertFile, s.Config.PublicHTTPSKeyFile
+	if err := validatePublicHTTPS(s.Config.EndpointHost, certFile, keyFile, time.Now()); err != nil {
+		if !s.Config.PublicHTTPSAutomatic {
+			return err
+		}
+		// An automatic certificate that has expired (or was damaged) must not keep the node from starting: it
+		// serves its enrolled identity until the renewal installs a new one.
+		certFile, keyFile = "", ""
 	}
 	for _, c := range s.Config.Components {
 		if c.Capability != "tunnel" {
@@ -168,8 +219,13 @@ func syncPublicHTTPSDeployment(dir string) error {
 		if err = json.Unmarshal(raw, &deployment); err != nil {
 			return err
 		}
-		deployment["public_https_cert_file"], _ = json.Marshal(s.Config.PublicHTTPSCertFile)
-		deployment["public_https_key_file"], _ = json.Marshal(s.Config.PublicHTTPSKeyFile)
+		deployment["public_https_cert_file"], _ = json.Marshal(certFile)
+		deployment["public_https_key_file"], _ = json.Marshal(keyFile)
+		if s.Config.PublicHTTPSAutomatic {
+			deployment["public_acme_challenge_dir"], _ = json.Marshal(PublicACMEChallengeDir(dir))
+		} else {
+			delete(deployment, "public_acme_challenge_dir")
+		}
 		if err = writeJSON(path, deployment); err != nil {
 			return err
 		}

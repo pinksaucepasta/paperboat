@@ -18,9 +18,6 @@ type Handover struct {
 // live carriers now and refuses its admissions; a later one waits for a timer. It fences nothing: a grant stays valid
 // and works again once the account is no longer listed; an empty list clears every handover.
 func (s *Server) SetPoolHandover(list []Handover) error {
-	if len(list) > MaxConnections {
-		return ErrProtocol
-	}
 	handover := make(map[string]time.Time, len(list))
 	for _, h := range list {
 		if h.AccountID == "" || len(h.AccountID) > 256 {

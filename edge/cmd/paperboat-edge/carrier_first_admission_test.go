@@ -63,7 +63,7 @@ func TestCarrierArrivingBeforeFirstAdmissionWaitsForIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{MaximumRoutes: 8})
+	routes, err := edgehttp.NewDataCarrierRouteRegistry(edgehttp.DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCarrierArrivingBeforeFirstAdmissionWaitsForIt(t *testing.T) {
 	tcpAddress, quicAddress := dynamicCarrierListenAddresses(t)
 	firstAdmission := make(chan struct{})
 	component, closeService, err := newCarrierComponentWithTelemetry(
-		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
+		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durable, nil, routes, nil, nil, nil, firstAdmission,
 	)
 	if err != nil {

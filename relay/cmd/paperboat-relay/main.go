@@ -154,9 +154,6 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err != nil {
 		return err
 	}
-	if err = server.SetConnectionLimit(int(lease.CapacityLimit)); err != nil {
-		return err
-	}
 	server.SetKeyRefresher(func() error {
 		refresh, stop := context.WithTimeout(context.WithoutCancel(processCtx), 5*time.Second)
 		defer stop()
@@ -246,7 +243,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 				case <-ticker.C:
 					current := server.Snapshot()
 					reporter.ExportDrops(ctx)
-					snapshots := []reporting.Snapshot{{Name: "paperboat_relay_sessions", Kind: "gauge", Value: float64(current.Connections)}, {Name: "paperboat_relay_capacity_limit", Kind: "gauge", Value: float64(lease.CapacityLimit)}, {Name: "paperboat_relay_admissions_total", Kind: "counter", Value: float64(current.Accepted), Labels: map[string]string{"outcome": "success"}}, {Name: "paperboat_relay_admissions_total", Kind: "counter", Value: float64(current.Denied), Labels: map[string]string{"outcome": "rejected"}}, {Name: "paperboat_relay_packets_total", Kind: "counter", Value: float64(current.Forwarded), Labels: map[string]string{"outcome": "forwarded"}}, {Name: "paperboat_relay_packets_total", Kind: "counter", Value: float64(current.Dropped), Labels: map[string]string{"outcome": "dropped"}}}
+					snapshots := []reporting.Snapshot{{Name: "paperboat_relay_sessions", Kind: "gauge", Value: float64(current.Connections)}, {Name: "paperboat_relay_admissions_total", Kind: "counter", Value: float64(current.Accepted), Labels: map[string]string{"outcome": "success"}}, {Name: "paperboat_relay_admissions_total", Kind: "counter", Value: float64(current.Denied), Labels: map[string]string{"outcome": "rejected"}}, {Name: "paperboat_relay_packets_total", Kind: "counter", Value: float64(current.Forwarded), Labels: map[string]string{"outcome": "forwarded"}}, {Name: "paperboat_relay_packets_total", Kind: "counter", Value: float64(current.Dropped), Labels: map[string]string{"outcome": "dropped"}}}
 					if peerService != nil {
 						peer := peerService.Snapshot()
 						snapshots = append(snapshots, reporting.Snapshot{Name: "paperboat_peer_relay_allocations", Kind: "gauge", Value: float64(peer.Allocations)}, reporting.Snapshot{Name: "paperboat_peer_relay_admissions_total", Kind: "counter", Value: float64(peer.Admitted), Labels: map[string]string{"outcome": "success"}}, reporting.Snapshot{Name: "paperboat_peer_relay_admissions_total", Kind: "counter", Value: float64(peer.Denied), Labels: map[string]string{"outcome": "rejected"}}, reporting.Snapshot{Name: "paperboat_peer_relay_packets_total", Kind: "counter", Value: float64(peer.AuthorizedPackets)})

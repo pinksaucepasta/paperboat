@@ -59,12 +59,9 @@ func TestPoolHandoverKeepsCarriersUntilTheDeadlineThenClosesThemNonFatally(t *te
 	connect(t, f.client(address, ca, ga))
 }
 
-func TestSetPoolHandoverIsBounded(t *testing.T) {
+func TestSetPoolHandoverRefusesAnEntryWithoutAnAccount(t *testing.T) {
 	f := newFixture(t)
 	s, _, _ := f.start("127.0.0.1:0")
-	if err := s.SetPoolHandover(make([]Handover, MaxConnections+1)); !errors.Is(err, ErrProtocol) {
-		t.Fatalf("oversized list: %v", err)
-	}
 	if err := s.SetPoolHandover([]Handover{{AccountID: ""}}); !errors.Is(err, ErrProtocol) {
 		t.Fatalf("empty account: %v", err)
 	}

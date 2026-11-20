@@ -65,8 +65,10 @@ Ordinary lease expiry denies further traffic but permits reconnection with fresh
 authority (QUIC application error 4, WSS close 4004). It does not permanently disable
 the carrier. Revocation, invalid credentials and protocol violations remain fatal.
 
-Relay connection capacity is the node's registered `capacity_limit` (at most 16,384); one
-account may hold all but a tenth of those slots. The UDP peer-relay role allows 128
+A relay has no connection limit: it admits every authorized connection and capacity is watched by resource alerts.
+Forwarding is fair by byte budgets per carrier and per account (an account's speed is shared across its relays by
+demand). `capacity_limit` in the registry is the node's declared size, shown on the capacity page; it never ranks or
+refuses a relay (clients rank relays by measured RTT). The UDP peer-relay role allows 128
 allocations, 16 per account, and shapes forwarding to 49,152 packets/second with a
 4,096-packet burst per account. These peer-relay limits are fixed workload budgets that
 define admission fairness and bounded resource use, so installation does not expose

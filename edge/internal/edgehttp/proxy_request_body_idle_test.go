@@ -103,7 +103,7 @@ func TestStalledUploadThroughDurableTunnelGets408(t *testing.T) {
 	rule := replicaRule()
 	rule.Generation, rule.Target, rule.Hostname, rule.MatchType, rule.PathPrefix = 1, rule.RouteID, "upload.customer.test", route.MatchExact, "/"
 	rule.AccessMode, rule.ObservedState, rule.Node, rule.EdgeProcessEpoch, rule.EdgeFailureDomain = "public", "ready", "edge_01", "epoch_0001", "region_01"
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

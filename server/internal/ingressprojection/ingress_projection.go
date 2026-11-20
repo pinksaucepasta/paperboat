@@ -20,8 +20,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-const maximumIngressDecisions = 4096
-
 // SQLIngressSource projects current publication authority and retains its minimal
 // accounting binding for delayed signed usage.
 // Existing tunnel tables represent durable resources. Ephemeral creation and
@@ -70,9 +68,6 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wir
 	previews, err := s.publicPreviews(ctx, nodeID, epoch)
 	if err != nil {
 		return nil, err
-	}
-	if len(durable)+len(previews) > maximumIngressDecisions {
-		return nil, wire.ErrIngressDenied
 	}
 	return append(durable, previews...), nil
 }
@@ -168,8 +163,7 @@ WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND n
    AND NOT EXISTS(SELECT 1 FROM selfhost_placements sp WHERE sp.resource_kind='tunnel' AND sp.resource_id=t.id))
   OR paperboat.node_route_eligible(node.id,t.account_id,r.id))
  AND node.state='ready' AND node.ready=true AND node.last_heartbeat_at>$1::timestamptz-interval '15 seconds'
-ORDER BY x.route_id,publication.hostname,publication.publication_id
-LIMIT 4097`
+ORDER BY x.route_id,publication.hostname,publication.publication_id`
 
 // queryInWrittenJoinOrder runs one ingress projection in a read-only transaction that keeps the
 // query's written join order. The projections join about fifteen tables, views and inlined
@@ -244,9 +238,6 @@ func (s SQLIngressSource) scanIngressRows(ctx context.Context, now time.Time, qu
 	}()
 	out := make([]wire.IngressDecision, 0)
 	for rows.Next() {
-		if len(out) == maximumIngressDecisions {
-			return nil, wire.ErrIngressDenied
-		}
 		var d wire.IngressDecision
 		var routeCA string
 		b := &d.Binding

@@ -343,8 +343,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
-	// Everything of the request the document depends on: the account, the authority shape, the admitted scopes.
-	key := fmt.Sprintf("%s\x02%s\x02%t\x02%s", in.UserID, in.Authority, len(in.AdmittedScopes) > 0, liveKey(live))
+	key := policyDocKey(in, live)
 	if s.policySync != nil {
 		if err = s.policySync(ctx); err != nil {
 			return NetworkConfigResult{}, err
@@ -367,6 +366,12 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	step = time.Now()
 	defer func() { trace.sign = time.Since(step) }()
 	return s.signConfiguration(ctx, in, doc, generation, now)
+}
+
+// policyDocKey is everything of the request a cached document depends on: the account, the authority shape, the
+// admitted scopes.
+func policyDocKey(in NetworkConfigRequest, live map[string][]string) string {
+	return fmt.Sprintf("%s\x02%s\x02%t\x02%s", in.UserID, in.Authority, len(in.AdmittedScopes) > 0, liveKey(live))
 }
 
 // buildPolicy is the policy part of an endpoint's configuration, read from one snapshot: its binding, every peer

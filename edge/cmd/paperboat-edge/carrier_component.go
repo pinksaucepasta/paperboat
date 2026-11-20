@@ -173,7 +173,7 @@ func newCarrierComponentWithTelemetry(
 			if len(routeIDs) == 0 {
 				return datacarrier.ErrDurableAdmissionMissing
 			}
-			state := edgehttp.ReplicaState{Ready: true, Generation: identity.Generation, RouteIDs: routeIDs, HealthyRoutes: routeIDs, RouteBindings: routeBindings, FailureDomain: identity.HostID, Latency: time.Nanosecond, Capacity: deployment.NodeCapacity, Engine: engine}
+			state := edgehttp.ReplicaState{Ready: true, Generation: identity.Generation, RouteIDs: routeIDs, HealthyRoutes: routeIDs, RouteBindings: routeBindings, FailureDomain: identity.HostID, Latency: time.Nanosecond, Capacity: connectorprotocol.DataCarrierDefaultStreams, Engine: engine}
 			if durableRegistered {
 				if err := durableRoutes.UpdateReplicaState(server, state); err != nil {
 					return fmt.Errorf("refresh durable carrier: %w", err)

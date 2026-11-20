@@ -46,7 +46,7 @@ func (c *HTTPClient) PrivateAccessCarrierAdmissions(ctx context.Context, nodeID,
 		EdgeProcessEpoch string `json:"edge_process_epoch"`
 	}{nodeID, processEpoch}
 	var out connectorprotocol.PrivateAccessSnapshot
-	if err := c.postNodeWithMaximumAndIdentity(ctx, PrivateAccessCarrierAdmissionsPath, nodeID, processEpoch, request, &out, maxControlDocument); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, PrivateAccessCarrierAdmissionsPath, nodeID, processEpoch, request, &out, connectorprotocol.MaximumSnapshotBytes); err != nil {
 		return nil, err
 	}
 	if out.ValidateEnvelope() != nil {

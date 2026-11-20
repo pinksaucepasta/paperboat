@@ -93,7 +93,7 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", Capacity: 1, CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
+	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {
@@ -604,18 +604,16 @@ func TestHTTPClientReportsRouteObservationsInBatches(t *testing.T) {
 		sizes = append(sizes, len(input.Routes))
 		return response(http.StatusNoContent, ""), nil
 	})
-	observations := make([]RouteObservation, 1050)
+	// More routes than the old 4,096 limit: reported in batches, none refused.
+	observations := make([]RouteObservation, 5050)
 	for i := range observations {
 		observations[i] = RouteObservation{RouteID: "route_" + strconv.Itoa(i), RouteRevision: 1, EdgeNodeID: "edge", ConnectorGeneration: 1}
 	}
 	if err := client.ObserveRoutes(context.Background(), "edge", observations); err != nil {
 		t.Fatal(err)
 	}
-	if len(sizes) != 11 || sizes[0] != routeObservationBatch || sizes[10] != 50 {
-		t.Fatalf("batches = %v, want 10 of %d and one of 50", sizes, routeObservationBatch)
-	}
-	if err := client.ObserveRoutes(context.Background(), "edge", make([]RouteObservation, maxCanonicalRouteAssignments+1)); !errors.Is(err, ErrControlInvalid) {
-		t.Fatalf("more routes than a node holds = %v", err)
+	if len(sizes) != 51 || sizes[0] != routeObservationBatch || sizes[50] != 50 {
+		t.Fatalf("%d batches, first %d, last %d; want 50 of %d and one of 50", len(sizes), sizes[0], sizes[len(sizes)-1], routeObservationBatch)
 	}
 }
 

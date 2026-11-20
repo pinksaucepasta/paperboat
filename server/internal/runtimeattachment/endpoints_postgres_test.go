@@ -319,11 +319,16 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	if got := served(); len(got) != 1 || got[0] != node+"/edge_ready" {
 		t.Fatalf("preview_routes = %v, want only %s/edge_ready", got, node)
 	}
-	// Ready means every live edge holding the route serves it (paperboat.endpoint_route_ready, the tunnels' rule):
-	// both edges answer the wildcard name and do not forward, so one serving edge is not ready.
-	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
-		t.Fatalf("readiness with one of two live edges serving = %v, want not serving", err)
+	// Ready means at least one live edge holding the route serves it (paperboat.endpoint_route_ready, the tunnels'
+	// rule): the other, lagging edge only fails its own visitors and must not withdraw the route.
+	if err := gate(); err != nil {
+		t.Fatalf("readiness with one of two live edges serving = %v, want ready", err)
 	}
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, node)
+	if err := gate(); !errors.Is(err, endpoints.ErrNotServing) {
+		t.Fatalf("readiness with no live edge serving = %v, want not serving", err)
+	}
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, node)
 	exec(`UPDATE control_tunnel_nodes SET drain_deadline=now()+interval '1 hour' WHERE id=$1`, backupNode)
 	if err := gate(); err != nil {
 		t.Fatalf("readiness waited for a draining edge: %v", err)
@@ -345,8 +350,8 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 		t.Fatalf("preview_routes while the app is down = %v, want %s/ready", got, node)
 	}
 	exec(`UPDATE preview_leases SET origin_state='ready' WHERE id=$1`, lease)
-	// A managed preview's route is pending until EVERY live edge serves it: the wildcard answers with all of them
-	// and edges do not forward, so a visitor may land on any live edge.
+	// A managed preview's route is pending until at least one live edge serves it; a lagging second edge does not
+	// make it pending again.
 	store, err := previewtunnelstore.New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -371,9 +376,12 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 			t.Fatalf("%s: readiness gate = %v disagrees with pending = %v", why, err, want)
 		}
 	}
-	agree(true, "a preview served by one of two live edges")
+	agree(false, "a preview served by one of two live edges")
 	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND edge_node_id=$2`, lease, backupNode)
 	agree(false, "a preview served by every live edge")
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=false WHERE endpoint_id=$1`, lease)
+	agree(true, "a preview no live edge serves")
+	exec(`UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1`, lease)
 	// A private preview served by both edges has one preview_routes row per edge; the grant for the edge the
 	// agent's carrier is on must bind that edge's row, never the other one (macOS: wrong_route, 2026-11-05).
 	resolver, err := privateaccess.NewPreviewRouteResolver(database)
@@ -396,7 +404,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_endpoint','foreground','http','127.0.0.1:30
 	// A customer's own edge never serves a managed preview, so it is not waited for: a self-hosted edge that is
 	// live and does not hold the route must not keep every managed preview "connecting" (staging 2026-11-16,
 	// F21-168: two live edges of another account's pool held a managed preview pending forever).
-	agree(true, "setup: the unserved live edge")
+	agree(false, "setup: the unserved live edge")
 	exec(`INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'fixture','customer edge','tunnel','account',$4,$1,true)`, prefix+"_customer_edge", backupNode, []byte(strings.Repeat("k", 32)), prefix+"_other_account")
 	agree(false, "a customer's self-hosted edge that does not serve the route")
 	exec(`DELETE FROM selfhost_installations WHERE id=$1`, prefix+"_customer_edge")

@@ -118,7 +118,7 @@ func carrierAdmittedOnFirstDial(t *testing.T, pullDelay, observeDelay time.Durat
 	waitDynamicCondition(t, ctx, func() bool { source.mu.Lock(); defer source.mu.Unlock(); return source.pulls >= 1 })
 
 	component, closeService, err := newCarrierComponentWithTelemetry(
-		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
+		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), nil, nil, nil, nil, nil, nil, nil, worker,
 	)
 	if err != nil {

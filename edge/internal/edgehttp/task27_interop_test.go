@@ -282,7 +282,7 @@ func TestTask27CrossRepositoryLazyActivation(t *testing.T) {
 	if err := decision.Validate(decision.IssuedAt); err != nil {
 		t.Fatalf("fixture decision invalid: %v", err)
 	}
-	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_task27_12345678", MaximumRoutes: 1})
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "epoch_task27_12345678"})
 	if err != nil {
 		t.Fatal(err)
 	}

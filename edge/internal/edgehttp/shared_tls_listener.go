@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -32,13 +33,6 @@ type SharedTLSListener struct {
 	hello       context.Context
 	cancelHello context.CancelFunc
 	ready       chan net.Conn
-	slots       chan struct{}
-	// passthrough bounds the TLS-passthrough streams handed off from dispatch; they are long-lived,
-	// so they must not hold the dispatch slots new HTTPS connections need (audit T3).
-	passthrough chan struct{}
-	// https bounds the HTTPS connections handed to the HTTP server for their whole life; a dispatch
-	// slot is freed at hand-off (golang.org/x/net/netutil LimitListener holds its slot until Close).
-	https chan struct{}
 	// forward carries one passthrough stream (the route registry's ForwardPublicTCP).
 	forward func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
 	done    chan struct{}
@@ -129,9 +123,10 @@ const (
 	takeoverHoldReserve = 64
 )
 
-// nameShare is the most connections one TLS name may hold of the listener's slots: a quarter, and
-// never fewer than two, so one open connection plus a reconnect always fit.
-func nameShare(slots int) int { return max(2, slots/4) }
+// tlsNameConnections is the most connections one TLS name (one preview or tunnel) may hold at once, so a flood aimed at one
+// name cannot starve the rest. It bounds a name, not the node: the node has no connection limit (Tailscale's derper limits each
+// client, not the server).
+const tlsNameConnections = 1024
 
 // nameShareWait is how long a connection to a name at its share waits for one of the name's
 // connections to end. A connection's share is given back only when the HTTP server notices the
@@ -152,17 +147,17 @@ func (l *SharedTLSListener) ServeUnknownNamesWithPage(config *tls.Config) {
 	l.unknown = config
 }
 
-func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, maximumConnections int, infrastructureHostname string) (*SharedTLSListener, error) {
-	if listener == nil || authority == nil || routes == nil || httpsHostname == nil || maximumConnections < 1 || infrastructureHostname != "" && !validSNIHostname(infrastructureHostname) && net.ParseIP(infrastructureHostname) == nil {
+func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, infrastructureHostname string) (*SharedTLSListener, error) {
+	if listener == nil || authority == nil || routes == nil || httpsHostname == nil || infrastructureHostname != "" && !validSNIHostname(infrastructureHostname) && net.ParseIP(infrastructureHostname) == nil {
 		return nil, errors.New("shared TLS listener configuration is invalid")
 	}
-	return newSharedTLSListener(listener, authority, routes, httpsHostname, make(chan struct{}, maximumConnections), infrastructureHostname, nil, nil, nil), nil
+	return newSharedTLSListener(listener, authority, routes, httpsHostname, infrastructureHostname, nil, nil, nil), nil
 }
 
-func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
+func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
-		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(cap(slots), nameShare(cap(slots)), 0)}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
+		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(math.MaxInt, tlsNameConnections, 0)}
 	l.hello, l.cancelHello = context.WithCancel(ctx)
 	go l.run()
 	return l
@@ -189,31 +184,20 @@ func (l *SharedTLSListener) run() {
 				continue
 			}
 		}
-		select {
-		case l.slots <- struct{}{}:
-			l.workers.Add(1)
-			l.dispatching.Add(1)
-			go func() {
-				defer l.workers.Done()
-				// The slot is freed once, and before a refused connection is closed: the client sees the close first, so a
-				// slot still held then would refuse the client's immediate retry (a dropped connection, no dispatch).
-				var free sync.Once
-				freeSlot := func() { free.Do(func() { <-l.slots }) }
-				defer freeSlot()
-				defer l.dispatching.Done()
-				l.dispatch(conn, freeSlot)
-			}()
-		default:
-			_ = conn.Close()
-		}
+		l.workers.Add(1)
+		l.dispatching.Add(1)
+		go func() {
+			defer l.workers.Done()
+			defer l.dispatching.Done()
+			l.dispatch(conn)
+		}()
 	}
 }
 
-func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
+func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	owned := true
 	defer func() {
 		if owned {
-			freeSlot()
 			_ = conn.Close()
 		}
 	}()
@@ -312,13 +296,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 		selected = &current
 	}
 	if selected != nil {
-		// Hand the long-lived passthrough stream to its own bounded pool and free this dispatch
-		// slot; a full passthrough pool refuses only this connection.
-		select {
-		case l.passthrough <- struct{}{}:
-		default:
-			return
-		}
 		owned = false
 		decision := *selected
 		replay.(*replayTLSConn).sharedListener = true
@@ -326,7 +303,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 		go func() {
 			defer l.workers.Done()
 			defer releaseName()
-			defer func() { <-l.passthrough }()
 			defer conn.Close()
 			l.observe("public_tcp_stream", l.forward(l.ctx, replay, decision, l.authority.ResolveDecision))
 		}()
@@ -342,13 +318,8 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 			return
 		}
 	}
-	select {
-	case l.https <- struct{}{}:
-	default:
-		return
-	}
 	owned = false
-	replay.(*replayTLSConn).release = func() { <-l.https; releaseName() }
+	replay.(*replayTLSConn).release = releaseName
 	select {
 	case l.ready <- replay:
 	case <-l.ctx.Done():

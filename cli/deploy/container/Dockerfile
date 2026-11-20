@@ -9,6 +9,7 @@ WORKDIR /src
 COPY cli/go.mod cli/go.sum cli/
 COPY relay/go.mod relay/go.sum relay/
 COPY shared/go.mod shared/go.sum shared/
+COPY third_party/quic-go third_party/quic-go
 RUN printf 'go 1.27.4\n\nuse (\n\t./cli\n\t./relay\n\t./shared\n)\n' > go.work \
   && cd cli && go mod download
 COPY cli cli

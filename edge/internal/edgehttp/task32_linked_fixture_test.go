@@ -68,12 +68,12 @@ func TestTask32LinkedEdgeFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	durable, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+	durable, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer durable.Close()
-	preview, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{ProcessEpoch: descriptor.EdgeProcessEpoch, MaximumRoutes: 2})
+	preview, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{ProcessEpoch: descriptor.EdgeProcessEpoch})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net/http"
 	"time"
@@ -219,7 +220,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			serviceError(w, r, err)
 			return
 		}
-		if len(encoded) > 16<<20 {
+		if len(encoded) > connectorprotocol.MaximumSnapshotBytes {
 			cause := errors.Join(ErrUnavailable, errors.New("runtime carrier response exceeds size limit"))
 			serviceError(w, r, cause)
 			return

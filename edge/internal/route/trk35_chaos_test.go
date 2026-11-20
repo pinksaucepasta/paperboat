@@ -8,14 +8,12 @@ import (
 	"time"
 )
 
-// TestTRK35GenerationHandoffRejectsOverloadAndForceDrainsOld exercises the
-// failure ordering that matters during a hot route replacement: an exhausted
-// old generation must not admit another stream, while a ready replacement is
-// promoted before a bounded drain is forced by cancellation.
-func TestTRK35GenerationHandoffRejectsOverloadAndForceDrainsOld(t *testing.T) {
+// TestTRK35GenerationHandoffForceDrainsOld exercises the failure ordering that
+// matters during a hot route replacement: a ready replacement is promoted
+// before a bounded drain is forced by cancellation.
+func TestTRK35GenerationHandoffForceDrainsOld(t *testing.T) {
 	clock := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	registry, err := NewGenerationRegistryWithOptions(4, GenerationRegistryOptions{
-		MaximumStreams: 1,
+	registry, err := NewGenerationRegistryWithOptions(GenerationRegistryOptions{
 		TelemetryClock: func() time.Time { return clock },
 	})
 	if err != nil {
@@ -30,9 +28,6 @@ func TestTRK35GenerationHandoffRejectsOverloadAndForceDrainsOld(t *testing.T) {
 		t.Fatalf("old lease = %+v, err=%v", oldMatch, err)
 	}
 	defer oldLease.Close()
-	if _, _, err := registry.Acquire(context.Background(), "app.example.test", "/"); !errors.Is(err, ErrStreamOverloaded) {
-		t.Fatalf("overload error = %v, want ErrStreamOverloaded", err)
-	}
 
 	if err := registry.StageGeneration(2, []RouteRule{newRule}); err != nil {
 		t.Fatal(err)
@@ -61,16 +56,12 @@ func TestTRK35GenerationHandoffRejectsOverloadAndForceDrainsOld(t *testing.T) {
 	if err != nil || match.Generation != 2 || match.Rule.ID != newRule.ID {
 		t.Fatalf("replacement match = %+v, err=%v", match, err)
 	}
-	// The new generation has its own bounded capacity even while the old
-	// generation is draining.
+	// The new generation serves streams while the old generation is draining.
 	newLease, _, err := registry.Acquire(context.Background(), "app.example.test", "/")
 	if err != nil {
 		t.Fatalf("replacement acquire = %v", err)
 	}
 	defer newLease.Close()
-	if _, _, err := registry.Acquire(context.Background(), "app.example.test", "/"); !errors.Is(err, ErrStreamOverloaded) {
-		t.Fatalf("replacement overload error = %v, want ErrStreamOverloaded", err)
-	}
 
 	cancelActivation()
 	select {

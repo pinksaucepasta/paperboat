@@ -532,7 +532,7 @@ func TestTask30EdgeProcess(t *testing.T) {
 		shared, err := NewSharedTLSListener(webListener, task365FileAuthority{path: f.AuthorityPath}, registry, func(host string) bool {
 			current, err := task30ReadCurrentAuthority(ctx, f.AuthorityPath, "http")
 			return err == nil && current.Binding.Hostname == host
-		}, 128, "")
+		}, "")
 		if err != nil {
 			_ = webListener.Close()
 			t.Fatal(err)

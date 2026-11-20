@@ -27,8 +27,6 @@ var (
 
 const (
 	certificateDistributionMaximumMessages = 128
-	certificateDistributionMaximumPages    = 4096
-	certificateDistributionMaximumTotal    = 4096
 	certificateDistributionMaximumBytes    = 16 << 20
 	certificateDistributionMaximumLifetime = 10 * time.Minute
 )
@@ -115,7 +113,7 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 	result := make([]tlscert.DistributionEnvelope, 0, certificateDistributionMaximumMessages)
 	cursor := ""
 	now := time.Now().UTC()
-	for page := 0; page < certificateDistributionMaximumPages; page++ {
+	for {
 		var response tlscertwire.DistributionPage
 		if err := c.client.postNodeWithMaximumAndIdentity(ctx, CertificateDistributionPullPath, nodeID, processEpoch, struct {
 			EdgeNodeID       string `json:"edge_node_id"`
@@ -125,7 +123,7 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 		}{EdgeNodeID: nodeID, EdgeProcessEpoch: processEpoch, Limit: certificateDistributionMaximumMessages, Cursor: cursor}, &response, certificateDistributionMaximumBytes); err != nil {
 			return nil, err
 		}
-		if response.Version != 1 || len(response.Messages) > certificateDistributionMaximumMessages || len(result)+len(response.Messages) > certificateDistributionMaximumTotal {
+		if response.Version != 1 || len(response.Messages) > certificateDistributionMaximumMessages {
 			wipeCertificateDistributionWires(response.Messages)
 			return nil, ErrCertificateDistributionInvalid
 		}
@@ -153,7 +151,6 @@ func (c *CertificateDistributionClient) Pull(ctx context.Context, nodeID, proces
 		}
 		cursor = response.NextCursor
 	}
-	return nil, ErrCertificateDistributionInvalid
 }
 
 func (c *CertificateDistributionClient) Ack(ctx context.Context, envelope tlscert.DistributionEnvelope, status, code string) error {

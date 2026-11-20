@@ -7,13 +7,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 )
 
-// ErrNotServing means not every live edge has observed the preview's endpoint route yet.
-var ErrNotServing = errors.New("preview endpoint route is not served by every live edge yet")
+// ErrNotServing means no live edge has observed the preview's endpoint route yet.
+var ErrNotServing = errors.New("preview endpoint route is not served by any live edge yet")
 
 // PreviewReadiness gates a preview's readiness report: it is ready once its agent serves endpoints
-// on an edge that admits them and every live edge holding its route has observed it ready
-// (paperboat.endpoint_route_ready, the same rule as tunnel health). Both edges answer the wildcard
-// name and do not forward, so one serving edge is not enough.
+// on an edge that admits them and at least one live edge holding its route has observed it ready
+// (paperboat.endpoint_route_ready, the same rule as tunnel health): an edge that lags only fails its own visitors.
 type PreviewReadiness struct {
 	DB *db.DB
 }
@@ -26,7 +25,7 @@ func (r PreviewReadiness) RequirePreviewAttachmentReady(ctx context.Context, acc
  WHERE e.preview_lease_id=$2 AND e.account_id=$1 AND e.agent_machine_id=$3),
  EXISTS(SELECT 1 FROM preview_routes v WHERE v.endpoint AND v.preview_id=$2 AND v.account_id=$1 AND v.owner_machine_id=$3 AND v.owner_session_id=$4)
  AND EXISTS(SELECT 1 FROM endpoints e JOIN endpoint_routes er ON er.endpoint_id=e.id
- WHERE e.preview_lease_id=$2 AND e.account_id=$1 AND paperboat.endpoint_route_ready(er.id,now()))`,
+ WHERE e.preview_lease_id=$2 AND e.account_id=$1 AND paperboat.endpoint_route_ready(er.id,now(),false))`,
 		accountID, previewID, ownerMachineID, ownerSessionID).Scan(&engine, &serving)
 	if err != nil {
 		return err

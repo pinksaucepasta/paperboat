@@ -17,10 +17,6 @@
       "kind": "gauge"
     },
     {
-      "name": "paperboat_edge_admission_slots_used_percent",
-      "kind": "gauge"
-    },
-    {
       "name": "paperboat_edge_certificate_expiry_horizon_seconds",
       "kind": "gauge"
     },
@@ -620,10 +616,6 @@
     },
     {
       "name": "paperboat_tunnel_attached_routes",
-      "kind": "gauge"
-    },
-    {
-      "name": "paperboat_tunnel_connector_capacity",
       "kind": "gauge"
     },
     {

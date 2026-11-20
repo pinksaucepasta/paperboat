@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 type Config struct {
@@ -32,6 +31,9 @@ type Config struct {
 	ControlCA           string `json:"control_ca,omitempty"`
 	PublicHTTPSCertFile string `json:"public_https_cert_file,omitempty"`
 	PublicHTTPSKeyFile  string `json:"public_https_key_file,omitempty"`
+	// PublicHTTPSAutomatic: the node obtains and renews its browser HTTPS certificate itself (public_acme.go); the
+	// two paths above then point at the certificate it keeps in its state directory.
+	PublicHTTPSAutomatic bool `json:"public_https_automatic,omitempty"`
 }
 type state struct {
 	Version         int           `json:"version"`
@@ -69,11 +71,7 @@ func validateConfig(c Config) error {
 			return errors.New("invalid or duplicate capability")
 		}
 		seen[v.Capability] = true
-		limit := int64(256) // tunnel components
-		if v.Capability == "relay" {
-			limit = relaylimits.MaxConnectionsPerNode
-		}
-		if v.CapacityLimit < 1 || v.CapacityLimit > limit || v.Region == "" || v.FailureDomain == "" {
+		if v.CapacityLimit < 1 || v.Region == "" || v.FailureDomain == "" {
 			return errors.New("invalid capacity, region, or failure domain")
 		}
 		for _, p := range []int{v.TCPPort, v.QUICPort} {

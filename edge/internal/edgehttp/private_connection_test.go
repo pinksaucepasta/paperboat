@@ -9,7 +9,7 @@ import (
 
 func TestPrivateConnectionBindsExactRouteAndFencesStaleClose(t *testing.T) {
 	now := time.Now().UTC()
-	registry, _ := NewPrivateAccessConnectionRegistry(8)
+	registry := NewPrivateAccessConnectionRegistry()
 	registry.now = func() time.Time { return now }
 	request := edgePrivateAccessRequest(now)
 	request.RouteID = "route_a"
@@ -58,7 +58,7 @@ func TestPrivateConnectionDomainAliasesKeepAuthoritativeRouteBinding(t *testing.
 	now := time.Now().UTC()
 	for _, host := range []string{"app.customer.example", "one.apps.customer.example"} {
 		t.Run(host, func(t *testing.T) {
-			registry, _ := NewPrivateAccessConnectionRegistry(8)
+			registry := NewPrivateAccessConnectionRegistry()
 			registry.now = func() time.Time { return now }
 			request := edgePrivateAccessRequest(now)
 			request.Host = host

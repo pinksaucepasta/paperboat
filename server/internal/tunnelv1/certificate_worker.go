@@ -365,7 +365,31 @@ func (w *CertificateWorker) RequestExactLeaf(ctx context.Context, nodeID, proces
 		}
 		return nil
 	}
-	return tunnelcert.ErrCertificateNotReady
+	return w.requestCustomDomainLeaf(ctx, nodeID, processEpoch, host, now)
+}
+
+// requestCustomDomainLeaf answers an edge's request for a custom domain's own certificate: the edge missed the
+// push of it (or of its renewal) inside the distribution message's lifetime. Ensure redistributes the active
+// certificate to the edges that lack it (reconcileActiveDistribution), this edge included, and never reissues it.
+func (w *CertificateWorker) requestCustomDomainLeaf(ctx context.Context, nodeID, processEpoch, host string, now time.Time) error {
+	row, err := w.db.Queries().GetExactTunnelCertificateDomainForEdgeV1(ctx, dbsqlc.GetExactTunnelCertificateDomainForEdgeV1Params{Hostname: host, EdgeNodeID: nodeID, EdgeProcessEpoch: processEpoch})
+	if isSolePostgresNoRows(err) {
+		return tunnelcert.ErrCertificateNotReady
+	} else if err != nil {
+		return err
+	}
+	edges, err := w.db.Queries().ListReadyTunnelCertificateEdgesV1(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	domain, err := certificateDomainWithConfig(row, edges, now, w.renewBefore, w.issuerName)
+	if err != nil {
+		return err
+	}
+	if _, err := w.coordinator.Ensure(ctx, domain); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *CertificateWorker) Worker(interval time.Duration, limit int) workers.Worker {

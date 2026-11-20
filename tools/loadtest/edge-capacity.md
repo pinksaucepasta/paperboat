@@ -20,7 +20,7 @@ Runs, in order: `loadctl init`, `loadctl serve`, start the edge or relay contain
 | | before the fixes | after |
 |---|---|---|
 | Idle carriers | 270 KB and 0.8% of a core per 100 | same |
-| Carriers per node | 1,024 (fixed cap) | `node_capacity`, at most 4,096 admissions in all |
+| Carriers per node | 1,024 (fixed cap) | no cap |
 | Requests/s at p99 < 200 ms | 200 | 800 |
 | New TLS connections/s at p99 < 250 ms | 200 | 400 |
 | Large downloads | 260 Mbit/s, edge 34% CPU: the account byte limit (32 MiB/s), not the node | same |

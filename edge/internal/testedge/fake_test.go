@@ -62,7 +62,7 @@ func TestFakeAssignmentAndNodeLifecycle(t *testing.T) {
 	if trustErr != nil {
 		t.Fatal(trustErr)
 	}
-	if err := fake.RegisterNode(context.Background(), control.NodeRegistration{NodeID: "n", ProcessEpoch: "p", Capacity: 1, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
+	if err := fake.RegisterNode(context.Background(), control.NodeRegistration{NodeID: "n", ProcessEpoch: "p", CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fake.Heartbeat(context.Background(), control.NodeObservation{NodeID: "n", ProcessEpoch: "p", Ready: true, At: time.Unix(1, 0)}); err != nil {
@@ -71,7 +71,7 @@ func TestFakeAssignmentAndNodeLifecycle(t *testing.T) {
 	if node, ok := fake.Node("n"); !ok || !node.Ready {
 		t.Fatalf("node = %+v, %v", node, ok)
 	}
-	if registration, ok := fake.Registration("n"); !ok || registration.Capacity != 1 {
+	if registration, ok := fake.Registration("n"); !ok || registration.NodeID != "n" {
 		t.Fatalf("registration = %+v, %v", registration, ok)
 	}
 	route := control.RouteAssignment{RouteID: "r", Revision: 2, Environment: "env", Generation: 3, NodeID: "n"}

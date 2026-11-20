@@ -63,7 +63,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 	t.Run("allow duplex beyond TTL until revocation", func(t *testing.T) {
 		accessorServer, accessorClient := testEdgePreviewCarrierPair(t, accessorIdentity)
 		durableServer, durableClient := testEdgePreviewCarrierPair(t, durableIdentity)
-		registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+		registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +175,7 @@ func TestPrivateTCPFullAuthenticatedEdgePath(t *testing.T) {
 	}{{"wrong account", func(r *connectorprotocol.PrivateAccessRequest) { r.AccountID = "account_other" }, false, true, http.StatusForbidden}, {"stale assignment", func(r *connectorprotocol.PrivateAccessRequest) { r.AssignmentGeneration++ }, true, true, http.StatusServiceUnavailable}, {"removed carrier", func(*connectorprotocol.PrivateAccessRequest) {}, true, false, http.StatusServiceUnavailable}} {
 		t.Run(tc.name, func(t *testing.T) {
 			accessorServer, accessorClient := testEdgePreviewCarrierPair(t, accessorIdentity)
-			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2})
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{})
 			defer registry.Close()
 			var opened atomic.Int32
 			var negativeDurableServer *datacarrier.Server
@@ -364,7 +364,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	preview.Server, preview.OwnerMachineID, preview.OwnerSessionID = server, identity.HostID, id("session")
 	preview.ConfigContentHash, preview.ExpiresAt = "sha256:"+strings.Repeat("a", 64), request.ExpiresAt
 	preview.MachineIdentityPublicKey, preview.MachineIdentityThumbprint = "test-public-key", "test-thumbprint"
-	published, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: request.EdgeProcessEpoch, MaximumRoutes: 4})
+	published, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: request.EdgeProcessEpoch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := &ingressUsageRecorder{}
-	metering, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
+	metering, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 		fresh.ExpiresAt = fresh.IssuedAt.Add(4 * time.Second)
 		return fresh, nil
 	}
-	registry, _ := NewPrivateAccessConnectionRegistry(8)
+	registry := NewPrivateAccessConnectionRegistry()
 	// The connection's own refresh of an expired admission (production sets it in cmd/paperboat-edge); not counted
 	// in reauthorizations, which counts the transport's per-request checks.
 	registry.Revalidate = func(_ context.Context, prior connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {

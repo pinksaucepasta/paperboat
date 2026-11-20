@@ -374,6 +374,9 @@ succeeded checkout whose webhook has not arrived loses to the payment.
 ## Scale: the peer-network config is rebuilt for the whole account on every change (O(N²) fan-out)
 Measured on prod 2026-11-19 (server log "peer network configuration slow"): 2,187 slow builds in 2 hours, each 300–400 ms for an account with 88–169 peers (`build_ms` 281–382, `sign_ms` 5–12), every peer re-fetching the full document when any peer changes (a new machine, a `home_relay` change). That fan-out is why a busy account amplifies Postgres predicate-lock pressure: on 2026-11-19 08:48–08:56Z the pool (`max_pred_locks_per_transaction` 64 × 100 connections) filled and a revoke hit its 10 s deadline. Direction: send per-peer deltas (the mesh log already has `mesh_seq`) instead of the whole document, cap build cost per account, and build under a read-only snapshot (`InReadOnlySnapshot`) so a build takes no SIREAD locks. Prior art: Tailscale/headscale send map deltas (`PeersChanged`/`PeersRemoved`), not full maps.
 
+## Drop control_tunnel_nodes.capacity_limit
+drop control_tunnel_nodes.capacity_limit one deploy after nothing reads it
+
 ## Next server deploy after this release: drop recipes.source_format
 Migration 447 made `recipes.source_format` optional (the server no longer writes it: one HuJSON file format). The server of the deploy that ships 447 no longer reads the column either; the migration that drops the column ships one deploy later (AGENTS.md: a column the previous server reads is dropped one deploy after the code stops reading it): `SET LOCAL lock_timeout = '5s'; ALTER TABLE paperboat.recipes DROP COLUMN source_format;` (forward-only Down).
 

@@ -241,21 +241,6 @@ func TestWithholdBlockedListsBannedOwnersHostnames(t *testing.T) {
 	}
 }
 
-// The takedown list never passes the edge's bound (the edge refuses a longer one and keeps serving its last snapshot).
-func TestCapBlockedKeepsTheEdgesBound(t *testing.T) {
-	long := make([]wire.IngressBlock, maximumBlocked+500)
-	for i := range long {
-		long[i].Hostname = fmt.Sprintf("h%d.example.test", i)
-	}
-	got := capBlocked(long)
-	if len(got) != maximumBlocked || got[0].Hostname != "h0.example.test" {
-		t.Fatalf("capped to %d", len(got))
-	}
-	if short := capBlocked(long[:10]); len(short) != 10 {
-		t.Fatalf("a short list was cut to %d", len(short))
-	}
-}
-
 // The byte pacing, the Free request rates, the browser-terminal cap and the fair-use file throttles are Paperboat's limits on hosted traffic: a
 // Paperboat-run edge (a plain node, or a global installation) is sent them, a customer-owned edge (account or team
 // installation) never is, so the same Free publication is limited on the one and unlimited on the other.

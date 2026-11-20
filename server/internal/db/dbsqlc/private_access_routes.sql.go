@@ -27,11 +27,11 @@ WITH private_routes AS (
   FROM preview_routes AS a
   JOIN preview_leases AS p ON p.id = a.preview_id AND p.account_id = a.account_id
   JOIN control_tunnel_nodes AS n ON n.id = a.edge_node_id AND n.process_epoch = a.edge_process_epoch
-  WHERE a.edge_node_id = $2 AND a.edge_process_epoch = $3
-    AND p.access_mode = 'private' AND p.terminal_state = 'active' AND p.lease_deadline > $4
-    AND a.state = 'ready' AND a.expires_at > $4
+  WHERE a.edge_node_id = $1 AND a.edge_process_epoch = $2
+    AND p.access_mode = 'private' AND p.terminal_state = 'active' AND p.lease_deadline > $3
+    AND a.state = 'ready' AND a.expires_at > $3
     AND n.state = 'ready' AND n.ready = true
-    AND n.last_heartbeat_at > $4 - interval '2 minutes'
+    AND n.last_heartbeat_at > $3 - interval '2 minutes'
   UNION ALL
   -- Tunnel routes ride the endpoint engine (PLAN 3a): the carrier is the agent's runtime carrier.
   SELECT t.account_id, 'tunnel'::text AS resource_kind, t.id AS resource_id,
@@ -46,7 +46,7 @@ WITH private_routes AS (
          CASE WHEN r.protocol = 'http' THEN regexp_replace(COALESCE(r.match_hostname, t.stable_endpoint), '^https://', '') ELSE '' END AS hostname,
          ARRAY['h2://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_tcp_port::text,
                'h3://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_quic_port::text]::text[] AS edge_endpoints,
-         LEAST(COALESCE(t.expires_at, $4 + interval '10 minutes'), ra.expires_at, $4 + interval '10 minutes') AS expires_at,
+         LEAST(COALESCE(t.expires_at, $3 + interval '10 minutes'), ra.expires_at, $3 + interval '10 minutes') AS expires_at,
          (ra.admission->'binding'->>'tunnel_id')::text AS tunnel_id,
          (ra.admission->'binding'->>'connector_id')::text AS carrier_connector_id,
          ('epa_' || x.route_id)::text AS assignment_id, (ra.admission->>'config_content_hash')::text AS config_content_hash,
@@ -64,12 +64,12 @@ WITH private_routes AS (
     ON ra.machine_id = e.agent_machine_id AND ra.edge_node_id = x.edge_node_id
    AND ra.edge_process_epoch = x.edge_process_epoch AND ra.session_id = x.carrier_session_id
   JOIN control_tunnel_nodes AS n ON n.id = x.edge_node_id AND n.process_epoch = x.edge_process_epoch
-  WHERE x.edge_node_id = $2 AND x.edge_process_epoch = $3
+  WHERE x.edge_node_id = $1 AND x.edge_process_epoch = $2
     AND x.desired = 'active' AND x.observed_ready AND v.effective_access_mode = 'private'
     AND t.desired_state = 'active' AND t.deleted_at IS NULL AND r.desired_state = 'active' AND r.deleted_at IS NULL
-    AND ra.expires_at > $4
+    AND ra.expires_at > $3
     AND n.state = 'ready' AND n.ready = true
-    AND n.last_heartbeat_at > $4 - interval '2 minutes'
+    AND n.last_heartbeat_at > $3 - interval '2 minutes'
     AND n.carrier_endpoint_host IS NOT NULL
     AND n.carrier_endpoint_tcp_port IS NOT NULL
     AND n.carrier_endpoint_quic_port IS NOT NULL
@@ -85,11 +85,9 @@ JOIN user_machines AS machine
  AND machine.revoked_at IS NULL AND machine.deleted_at IS NULL
  AND machine.public_identity_key IS NOT NULL
 ORDER BY routes.resource_kind, routes.resource_id, routes.route_id, machine.id
-LIMIT $1
 `
 
 type ListPrivateAccessCarrierAdmissionsForEdgeV1Params struct {
-	RowLimit         int32
 	EdgeNodeID       string
 	EdgeProcessEpoch string
 	Now              time.Time
@@ -130,12 +128,7 @@ type ListPrivateAccessCarrierAdmissionsForEdgeV1Row struct {
 }
 
 func (q *Queries) ListPrivateAccessCarrierAdmissionsForEdgeV1(ctx context.Context, arg ListPrivateAccessCarrierAdmissionsForEdgeV1Params) ([]ListPrivateAccessCarrierAdmissionsForEdgeV1Row, error) {
-	rows, err := q.db.Query(ctx, listPrivateAccessCarrierAdmissionsForEdgeV1,
-		arg.RowLimit,
-		arg.EdgeNodeID,
-		arg.EdgeProcessEpoch,
-		arg.Now,
-	)
+	rows, err := q.db.Query(ctx, listPrivateAccessCarrierAdmissionsForEdgeV1, arg.EdgeNodeID, arg.EdgeProcessEpoch, arg.Now)
 	if err != nil {
 		return nil, err
 	}
@@ -219,15 +212,15 @@ WITH private_routes AS (
   FROM preview_routes AS a
   JOIN preview_leases AS p ON p.id = a.preview_id AND p.account_id = a.account_id
   JOIN control_tunnel_nodes AS n ON n.id = a.edge_node_id AND n.process_epoch = a.edge_process_epoch
-  WHERE a.account_id = $3
+  WHERE a.account_id = $2
     AND p.access_mode = 'private'
     AND p.owner_machine_id <> $1
     AND p.terminal_state = 'active'
-    AND p.lease_deadline > $4
+    AND p.lease_deadline > $3
     AND a.state = 'ready'
-    AND a.expires_at > $4
+    AND a.expires_at > $3
     AND n.state = 'ready' AND n.ready = true
-    AND n.last_heartbeat_at > $4 - interval '2 minutes'
+    AND n.last_heartbeat_at > $3 - interval '2 minutes'
   UNION ALL
   -- Tunnel routes ride the endpoint engine (PLAN 3a): the carrier is the agent's runtime carrier.
   SELECT t.account_id, 'tunnel'::text AS resource_kind, t.id AS resource_id,
@@ -242,7 +235,7 @@ WITH private_routes AS (
          CASE WHEN r.protocol = 'http' THEN regexp_replace(COALESCE(r.match_hostname, t.stable_endpoint), '^https://', '') ELSE '' END AS hostname,
          ARRAY['h2://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_tcp_port::text,
                'h3://' || n.carrier_endpoint_host || ':' || n.carrier_endpoint_quic_port::text]::text[] AS edge_endpoints,
-         LEAST(COALESCE(t.expires_at, $4 + interval '10 minutes'), ra.expires_at, $4 + interval '10 minutes') AS expires_at,
+         LEAST(COALESCE(t.expires_at, $3 + interval '10 minutes'), ra.expires_at, $3 + interval '10 minutes') AS expires_at,
          (ra.admission->'binding'->>'tunnel_id')::text AS tunnel_id,
          (ra.admission->'binding'->>'connector_id')::text AS carrier_connector_id,
          ('epa_' || x.route_id)::text AS assignment_id, (ra.admission->>'config_content_hash')::text AS config_content_hash,
@@ -260,12 +253,12 @@ WITH private_routes AS (
     ON ra.machine_id = e.agent_machine_id AND ra.edge_node_id = x.edge_node_id
    AND ra.edge_process_epoch = x.edge_process_epoch AND ra.session_id = x.carrier_session_id
   JOIN control_tunnel_nodes AS n ON n.id = x.edge_node_id AND n.process_epoch = x.edge_process_epoch
-  WHERE t.account_id = $3
+  WHERE t.account_id = $2
     AND x.desired = 'active' AND x.observed_ready AND v.effective_access_mode = 'private'
     AND t.desired_state = 'active' AND t.deleted_at IS NULL AND r.desired_state = 'active' AND r.deleted_at IS NULL
-    AND ra.expires_at > $4
+    AND ra.expires_at > $3
     AND n.state = 'ready' AND n.ready = true
-    AND n.last_heartbeat_at > $4 - interval '2 minutes'
+    AND n.last_heartbeat_at > $3 - interval '2 minutes'
     AND n.carrier_endpoint_host IS NOT NULL
     AND n.carrier_endpoint_tcp_port IS NOT NULL
     AND n.carrier_endpoint_quic_port IS NOT NULL
@@ -282,12 +275,10 @@ JOIN user_machines AS machine
  AND machine.revoked_at IS NULL AND machine.deleted_at IS NULL
  AND machine.public_identity_key IS NOT NULL
 ORDER BY routes.resource_kind, routes.resource_id, routes.route_id
-LIMIT $2
 `
 
 type ListPrivateAccessRoutesForMachineV1Params struct {
 	MachineID string
-	RowLimit  int32
 	AccountID string
 	Now       time.Time
 }
@@ -327,12 +318,7 @@ type ListPrivateAccessRoutesForMachineV1Row struct {
 }
 
 func (q *Queries) ListPrivateAccessRoutesForMachineV1(ctx context.Context, arg ListPrivateAccessRoutesForMachineV1Params) ([]ListPrivateAccessRoutesForMachineV1Row, error) {
-	rows, err := q.db.Query(ctx, listPrivateAccessRoutesForMachineV1,
-		arg.MachineID,
-		arg.RowLimit,
-		arg.AccountID,
-		arg.Now,
-	)
+	rows, err := q.db.Query(ctx, listPrivateAccessRoutesForMachineV1, arg.MachineID, arg.AccountID, arg.Now)
 	if err != nil {
 		return nil, err
 	}

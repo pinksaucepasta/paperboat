@@ -54,36 +54,37 @@ func TestLongGrantAdmittedAndRevokedByFence(t *testing.T) {
 	}
 }
 
-// Capacity must never erase a live admission high-water mark: an older signed
-// grant could otherwise be replayed for the next twelve hours.
-func TestFullFenceTableRetainsAdmissionHighWaterMarks(t *testing.T) {
+// A relay holds any number of endpoints' fences, and a table of them never erases a live admission high-water mark: an older
+// signed grant could otherwise be replayed for the next twelve hours.
+func TestAnyNumberOfFencesRetainAdmissionHighWaterMarks(t *testing.T) {
 	f := newFixture(t)
 	s, err := NewServer(f.verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
+	const endpoints = 17000 // past the old 16,384 node limit
 	soon := time.Now().Add(time.Hour).Unix()
-	for i := range MaxConnections {
+	for i := range endpoints {
 		endpoint := fmt.Sprintf("endpoint-%d", i)
 		s.fences["account\x00"+endpoint] = newGrantFence(Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account", EndpointID: endpoint, Generation: 5, ExpiresAt: soon + int64(i)}}, time.Now())
 	}
 	cert := certificate(t)
 	g := f.grant(key.NewNode().Public(), cert, "new_endpoint")
-	if err := s.admit(&peerConn{}, g, time.Now()); !errors.Is(err, ErrOverload) {
-		t.Fatalf("full fence table accepted new endpoint: %v", err)
+	if err := s.admit(&peerConn{}, g, time.Now()); err != nil {
+		t.Fatalf("a new endpoint was refused on a relay holding %d fences: %v", endpoints, err)
 	}
-	if len(s.fences) != MaxConnections || s.fences["account\x00endpoint-0"] == nil {
-		t.Fatal("capacity evicted an admission high-water mark")
+	if len(s.fences) != endpoints+1 || s.fences["account\x00endpoint-0"] == nil {
+		t.Fatal("a new endpoint evicted an admission high-water mark")
 	}
 	g.EndpointID, g.Generation = "endpoint-0", 1
 	if err := s.admit(&peerConn{}, g, time.Now()); !errors.Is(err, ErrAdmission) {
-		t.Fatalf("older grant was readmitted after capacity pressure: %v", err)
+		t.Fatalf("older grant was readmitted: %v", err)
 	}
-	if err := s.Revoke("account", "new_revocation", 2); !errors.Is(err, ErrOverload) {
-		t.Fatalf("unbounded revocation admission: %v", err)
+	if err := s.Revoke("account", "new_revocation", 2); err != nil {
+		t.Fatalf("a revocation was refused on a relay holding %d fences: %v", endpoints, err)
 	}
 	if err := s.Revoke("account", "endpoint-0", 6); err != nil {
-		t.Fatalf("existing endpoint could not be revoked at capacity: %v", err)
+		t.Fatalf("existing endpoint could not be revoked: %v", err)
 	}
 	if s.fences["account\x00endpoint-1"] == nil {
 		t.Fatal("revocation erased an unrelated fence")

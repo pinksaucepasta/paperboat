@@ -32,7 +32,7 @@ func activateMatcher(t *testing.T, registry *GenerationRegistry, generation uint
 }
 
 func TestGenerationRegistryPrecedenceAndPathBoundaries(t *testing.T) {
-	registry := NewGenerationRegistry(16)
+	registry := NewGenerationRegistry()
 	activateMatcher(t, registry, 1, []RouteRule{
 		matcherRule("catch", "", MatchCatchAll, "/", 1000),
 		matcherRule("wild", "example.test", MatchOneLabelWildcard, "/", 100),
@@ -66,7 +66,7 @@ func TestGenerationRegistryPrecedenceAndPathBoundaries(t *testing.T) {
 }
 
 func TestGenerationRegistryRejectsEqualPrecedenceOverlapAndInvalidWildcard(t *testing.T) {
-	registry := NewGenerationRegistry(16)
+	registry := NewGenerationRegistry()
 	conflict := []RouteRule{
 		matcherRule("first", "app.example.test", MatchExact, "/api", 10),
 		matcherRule("second", "app.example.test", MatchExact, "/api", 10),
@@ -85,7 +85,7 @@ func TestGenerationRegistryRejectsEqualPrecedenceOverlapAndInvalidWildcard(t *te
 }
 
 func TestGenerationRegistryIDNAAndTiePriority(t *testing.T) {
-	registry := NewGenerationRegistry(8)
+	registry := NewGenerationRegistry()
 	rule := matcherRule("unicode", "xn--bcher-kva.example.test", MatchExact, "/", 10)
 	activateMatcher(t, registry, 1, []RouteRule{rule})
 	match, err := registry.Match("bücher.example.test.", "/")
@@ -114,7 +114,7 @@ func TestGenerationRegistryIDNAAndTiePriority(t *testing.T) {
 }
 
 func TestGenerationRegistryReadyThenAtomicDrainHandoff(t *testing.T) {
-	registry := NewGenerationRegistry(8)
+	registry := NewGenerationRegistry()
 	activateMatcher(t, registry, 1, []RouteRule{matcherRule("old", "app.example.test", MatchExact, "/", 1)})
 	oldLease, oldMatch, err := registry.Acquire(context.Background(), "app.example.test", "/")
 	if err != nil || oldMatch.Rule.ID != "old" {
@@ -163,7 +163,7 @@ func TestGenerationRegistryReadyThenAtomicDrainHandoff(t *testing.T) {
 }
 
 func TestGenerationRegistryPolicyFenceCancelsOnlyAffectedRoute(t *testing.T) {
-	registry := NewGenerationRegistry(8)
+	registry := NewGenerationRegistry()
 	affected := matcherRule("affected", "private.example.test", MatchExact, "/", 1)
 	affected.RouteID, affected.AccountID, affected.TunnelID = "route_affected", "account_1", "tunnel_1"
 	unaffected := matcherRule("unaffected", "other.example.test", MatchExact, "/", 1)
@@ -207,7 +207,7 @@ func TestGenerationRegistryPolicyFenceCancelsOnlyAffectedRoute(t *testing.T) {
 }
 
 func TestGenerationRegistryDrainTimeoutAndFailedReadinessPreserveActive(t *testing.T) {
-	registry := NewGenerationRegistry(8)
+	registry := NewGenerationRegistry()
 	activateMatcher(t, registry, 1, []RouteRule{matcherRule("old", "app.example.test", MatchExact, "/", 1)})
 	if err := registry.ApplyGeneration(context.Background(), 2, []RouteRule{matcherRule("failed", "app.example.test", MatchExact, "/", 1)}, func(context.Context, []RouteRule) error {
 		return errors.New("origin not ready")
@@ -246,7 +246,7 @@ func TestGenerationRegistryDrainTimeoutAndFailedReadinessPreserveActive(t *testi
 }
 
 func TestGenerationRegistryConcurrentAcquireRelease(t *testing.T) {
-	registry := NewGenerationRegistry(8)
+	registry := NewGenerationRegistry()
 	activateMatcher(t, registry, 1, []RouteRule{matcherRule("route", "app.example.test", MatchExact, "/", 1)})
 	var wait sync.WaitGroup
 	for i := 0; i < 32; i++ {
@@ -294,7 +294,7 @@ func TestHTTPSHostnameAuthorityIgnoresPathsButNotPublicationBounds(t *testing.T)
 // A tunnel's catch-all route carries the tunnel's own hostname: the edge used to reject it as an
 // invalid route, which failed every route reconcile on that edge and left the tunnel pending.
 func TestGenerationRegistryScopesCatchAllToItsHostname(t *testing.T) {
-	registry := NewGenerationRegistry(16)
+	registry := NewGenerationRegistry()
 	activateMatcher(t, registry, 1, []RouteRule{
 		matcherRule("default", "one.example.test", MatchManagedExact, "", 100),
 		matcherRule("two", "one.example.test", MatchCatchAll, "/two", 100),
@@ -322,7 +322,7 @@ func TestGenerationRegistryScopesCatchAllToItsHostname(t *testing.T) {
 // the drain timeout used to cancel every stream on the old generation, so a 16 MiB tunnel download
 // died whenever any other route's state changed within its lifetime.
 func TestActivateGenerationKeepsStreamsOnUnchangedRoutesPastTheDrainTimeout(t *testing.T) {
-	registry := NewGenerationRegistry(8)
+	registry := NewGenerationRegistry()
 	kept := matcherRule("kept", "kept.example.test", MatchExact, "/", 1)
 	kept.RouteID, kept.AccountID, kept.TunnelID, kept.ViewerPolicyGeneration = "kept", "account", "tunnel", 1
 	removed := matcherRule("removed", "removed.example.test", MatchExact, "/", 1)

@@ -303,7 +303,7 @@ WHERE id=$1 AND state IN ('pending','running')`, operationID, input.Now, code, n
 	}
 	ready := false
 	if undoCode == "" {
-		if err := tx.QueryRow(ctx, `SELECT coalesce(bool_and(paperboat.endpoint_route_ready(er.id,$3)),false)
+		if err := tx.QueryRow(ctx, `SELECT coalesce(bool_and(paperboat.endpoint_route_ready(er.id,$3,true)),false)
 FROM paperboat.tunnel_routes tr JOIN paperboat.endpoint_routes er ON er.tunnel_route_id=tr.id
 WHERE tr.tunnel_id=$1 AND tr.protocol='http' AND tr.match_type='managed' AND tr.match_hostname=$2 AND tr.desired_state='active' AND tr.deleted_at IS NULL`,
 			tunnelID, oldHost, input.Now).Scan(&ready); err != nil {
