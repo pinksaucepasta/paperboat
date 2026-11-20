@@ -41,7 +41,7 @@ func runLazyPolicyCommand(t *testing.T, fake *fakeLazyPolicyClient, command *cob
 	lazyPolicyClientForCommand = func(*cobra.Command) (lazyPolicyClient, error) { return fake, nil }
 	lazyPolicyMachineID = func(_ *cobra.Command, requested string) (string, error) {
 		if requested == "laptop" {
-			return "machine_hp_id", nil
+			return "machine_laptop_id", nil
 		}
 		return requested, nil
 	}
@@ -75,7 +75,7 @@ func TestTunnelPolicyRevokeReadsCurrentGeneration(t *testing.T) {
 func TestTunnelPolicyAllowAcceptsAMachineName(t *testing.T) {
 	fake := &fakeLazyPolicyClient{current: api.LazyPolicy{ID: "lap_2", Generation: 1, Target: api.LazyPolicyTarget{Scheme: "http", Address: "127.0.0.1:19090"}, AccessMode: "private", ExpiresAt: time.Now().Add(time.Hour)}}
 	runLazyPolicyCommand(t, fake, tunnelPolicyAllowCommand(), "laptop", "19090")
-	if fake.upsert.MachineID != "machine_hp_id" {
+	if fake.upsert.MachineID != "machine_laptop_id" {
 		t.Fatalf("the policy stored machine %q, want the ID the name resolves to", fake.upsert.MachineID)
 	}
 }

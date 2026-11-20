@@ -94,7 +94,7 @@ def vm_states(device):
     return json.loads(device.ps('vm states', VM_STATE, timeout=120)[1])
 
 
-def hp_online(machine_id):
+def linux_online(machine_id):
     found, deadline = False, time.monotonic() + 180
     while time.monotonic() < deadline:
         queried = subprocess.run(['ssh', '-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes',
@@ -222,7 +222,7 @@ def main():
                         raise RuntimeError('doctor not healthy within 6 min of reboot: ' + doctor_last)
                     time.sleep(60)
             stamp('doctor_post_healthy')
-            if not hp_online(outcome['machine_id']):
+            if not linux_online(outcome['machine_id']):
                 raise RuntimeError('machine not online server-side after the reboot')
             stamp('online_post')
             print(json.dumps({'state': 'daemon_back_healthy'}), flush=True)

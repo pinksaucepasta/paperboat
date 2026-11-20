@@ -90,7 +90,7 @@ func TestMachineNamesAreScopedToTheOwnersDomain(t *testing.T) {
 			t.Fatalf("accepted %s in another owner's domain", name)
 		}
 	}
-	if !validSubdomainName("3000.hp.mynet.xyz", "mynet.xyz") || validSubdomainName("3000.hp.mynet.xyz", testBrowserDomain) {
+	if !validSubdomainName("3000.laptop.mynet.xyz", "mynet.xyz") || validSubdomainName("3000.laptop.mynet.xyz", testBrowserDomain) {
 		t.Fatal("port names must follow the owner's domain")
 	}
 }

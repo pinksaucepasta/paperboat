@@ -22,7 +22,7 @@ func TestBrowserNamespaceRejectsForeignNames(t *testing.T) {
 	if machine, label, err := ParseBrowserHostname(host, testBrowserDomain); err != nil || machine != "laptop" || label != "6767" {
 		t.Fatalf("parsed %q = %q, %q: %v", host, machine, label, err)
 	}
-	for _, bad := range []string{"06767.hp.local.example.test", "0.hp.local.example.test", "6767.hp.local.example.test.evil", "6767.hp.example.test", BrowserGatewayHostname} {
+	for _, bad := range []string{"06767.laptop.local.example.test", "0.laptop.local.example.test", "6767.laptop.local.example.test.evil", "6767.laptop.example.test", BrowserGatewayHostname} {
 		if _, _, err := ParseBrowserHostname(bad, testBrowserDomain); err == nil {
 			t.Fatalf("accepted %q", bad)
 		}

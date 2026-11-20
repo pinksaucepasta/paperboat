@@ -96,7 +96,7 @@ is shown; use your own domain if you set one):
 
 | You type | What you reach |
 |---|---|
-| `https://5432.hp.ppr.boats` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
+| `https://5432.laptop.ppr.boats` | Port 5432 over HTTPS, WebSocket (WSS) and HTTP |
 | `https://linux-test.ppr.boats:5432` | The same service; the port after the name selects it |
 | `https://linux-test.ppr.boats` | A page that lists the machine's published ports |
 | the machine's own `127.100.x.y` address, port 5432 | Raw TCP of any kind (a database, SSH, a game server) |

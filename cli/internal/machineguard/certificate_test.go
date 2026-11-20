@@ -27,11 +27,11 @@ func certificateGuard(t *testing.T) (*guardServer, *certificateConnection) {
 		t.Fatal(err)
 	}
 	owner := &certificateConnection{identity: "owner"}
-	return &guardServer{cfg: Config{StateDir: testStateDir(t)}, ca: ca, trustReady: true, connections: map[controlConn]string{owner: "owner"}, aliases: map[controlConn]map[string]string{owner: {"3000.hp.local.example.test": splitdns.BrowserGatewayHostname}}, leases: map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, uid: "owner", owner: owner}}}, owner
+	return &guardServer{cfg: Config{StateDir: testStateDir(t)}, ca: ca, trustReady: true, connections: map[controlConn]string{owner: "owner"}, aliases: map[controlConn]map[string]string{owner: {"3000.laptop.local.example.test": splitdns.BrowserGatewayHostname}}, leases: map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, uid: "owner", owner: owner}}}, owner
 }
 func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 	g, owner := certificateGuard(t)
-	bundle, err := g.certificate(t.Context(), owner, "owner", "3000.hp.local.example.test")
+	bundle, err := g.certificate(t.Context(), owner, "owner", "3000.laptop.local.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"laptop.local.example.test", "3000.hp.local.example.test"} {
+	for _, host := range []string{"laptop.local.example.test", "3000.laptop.local.example.test"} {
 		if leaf.VerifyHostname(host) != nil {
 			t.Fatalf("leaf lacks %s", host)
 		}
@@ -63,7 +63,7 @@ func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 	for _, tc := range []struct {
 		conn        controlConn
 		owner, host string
-	}{{foreign, "other", "3000.hp.local.example.test"}, {owner, "other", "3000.hp.local.example.test"}, {owner, "owner", "5173.hp.local.example.test"}, {owner, "owner", "other.local.example.test"}, {owner, "owner", "*.hp.local.example.test"}, {owner, "owner", "3000.hp.local.example.test.evil"}, {owner, "owner", splitdns.BrowserGatewayHostname}} {
+	}{{foreign, "other", "3000.laptop.local.example.test"}, {owner, "other", "3000.laptop.local.example.test"}, {owner, "owner", "5173.laptop.local.example.test"}, {owner, "owner", "other.local.example.test"}, {owner, "owner", "*.laptop.local.example.test"}, {owner, "owner", "3000.laptop.local.example.test.evil"}, {owner, "owner", splitdns.BrowserGatewayHostname}} {
 		if _, err := g.certificate(t.Context(), tc.conn, tc.owner, tc.host); err == nil {
 			t.Fatalf("unauthorized certificate: %s", tc.host)
 		}
@@ -75,7 +75,7 @@ func TestCertificateRequiresExactAliasAndGatewayOwnership(t *testing.T) {
 }
 func TestCertificateCachePrunesWithdrawnAliasesAndRefreshesCRL(t *testing.T) {
 	g, owner := certificateGuard(t)
-	original, err := g.certificate(t.Context(), owner, "owner", "3000.hp.local.example.test")
+	original, err := g.certificate(t.Context(), owner, "owner", "3000.laptop.local.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestCertificateCachePrunesWithdrawnAliasesAndRefreshesCRL(t *testing.T) {
 	if err != nil || next == original {
 		t.Fatal("expired CRL cache was not refreshed")
 	}
-	delete(g.aliases[owner], "3000.hp.local.example.test")
+	delete(g.aliases[owner], "3000.laptop.local.example.test")
 	g.pruneCertificates(owner, "owner")
 	if len(g.certificates[owner]) != 0 {
 		t.Fatal("withdrawn alias retained leaf cache")

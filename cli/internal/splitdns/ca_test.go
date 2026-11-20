@@ -192,7 +192,7 @@ func TestIssuedLeafUsesAP256Key(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leafPEM, keyPEM, err := ca.IssueCertificate([]string{"*.hp." + testBrowserDomain})
+	leafPEM, keyPEM, err := ca.IssueCertificate([]string{"*.laptop." + testBrowserDomain})
 	if err != nil {
 		t.Fatal(err)
 	}

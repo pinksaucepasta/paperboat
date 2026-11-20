@@ -26,10 +26,10 @@ func TestTwoOSUsersPublishTheSameMachineNameAndAClashDegradesOnlyThatName(t *tes
 		names:       map[controlConn]map[string]string{},
 		connections: map[controlConn]string{a: "1000", b: "1001", a2: "1000"},
 		leases: map[string]*guardedLease{
-			"a-hp":   {hostname: laptop, ip: "127.100.0.2", owner: a, uid: "1000"},
+			"a-laptop":   {hostname: laptop, ip: "127.100.0.2", owner: a, uid: "1000"},
 			"a-dev":  {hostname: dev, ip: "127.100.0.5", owner: a, uid: "1000"},
-			"b-hp":   {hostname: laptop, ip: "127.100.0.4", owner: b, uid: "1001"},
-			"a2-hp":  {hostname: laptop, ip: "127.100.0.6", owner: a2, uid: "1000"},
+			"b-laptop":   {hostname: laptop, ip: "127.100.0.4", owner: b, uid: "1001"},
+			"a2-laptop":  {hostname: laptop, ip: "127.100.0.6", owner: a2, uid: "1000"},
 			"a2-lab": {hostname: lab, ip: "127.100.0.7", owner: a2, uid: "1000"},
 		},
 	}
@@ -73,7 +73,7 @@ func TestTwoOSUsersInTheSameAccountGetDistinctAddressesAndBothPublishTheirNames(
 		conn controlConn
 		uid  string
 	}{{a, "1000"}, {b, "1001"}} {
-		for machine, name := range map[string]string{"m-hp": laptop, "m-lab": lab} {
+		for machine, name := range map[string]string{"m-laptop": laptop, "m-lab": lab} {
 			in, err := g.assignClaim(user.uid, request{Operation: "acquire", Account: "acct-1", Machine: machine, Hostname: name, IP: "127.100.0.9", Port: 22})
 			if err != nil {
 				t.Fatalf("uid %s, %s: %v", user.uid, machine, err)

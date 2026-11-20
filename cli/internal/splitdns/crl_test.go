@@ -95,7 +95,7 @@ func TestLocalCRLEndpointNeverForwards(t *testing.T) {
 		t.Fatal(err)
 	}
 	forwarded := false
-	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.hp.local.example.test": {Address: netip.MustParseAddr("127.100.0.2"), Port: 3000}}, RevocationList: func(ctx context.Context, path string) ([]byte, []byte, error) {
+	p, err := NewProxy(ProxyConfig{Domain: testBrowserDomain, Routes: map[string]BrowserRoute{"3000.laptop.local.example.test": {Address: netip.MustParseAddr("127.100.0.2"), Port: 3000}}, RevocationList: func(ctx context.Context, path string) ([]byte, []byte, error) {
 		der, err := ca.RevocationList(time.Now())
 		return ca.caCert.Raw, der, err
 	}, DialContext: func(context.Context, string, string) (net.Conn, error) { forwarded = true; return nil, net.ErrClosed }})

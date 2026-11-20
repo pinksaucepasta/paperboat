@@ -117,15 +117,15 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	}
 	// Changing a public configuration file cannot authorize certificate signing.
 	conn := &certificateConnection{identity: "1000"}
-	guard := &guardServer{cfg: cfg, connections: map[controlConn]string{conn: "1000"}, aliases: map[controlConn]map[string]string{conn: {"8989.hp.unapproved.xyz": splitdns.BrowserGatewayHostname}}, leases: map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, uid: "1000", owner: conn}}}
-	if _, err := guard.certificate(t.Context(), conn, "1000", "8989.hp.unapproved.xyz"); err == nil {
+	guard := &guardServer{cfg: cfg, connections: map[controlConn]string{conn: "1000"}, aliases: map[controlConn]map[string]string{conn: {"8989.laptop.unapproved.xyz": splitdns.BrowserGatewayHostname}}, leases: map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, uid: "1000", owner: conn}}}
+	if _, err := guard.certificate(t.Context(), conn, "1000", "8989.laptop.unapproved.xyz"); err == nil {
 		t.Fatal("unapproved namespace signed")
 	}
 	// The approved owner can sign its numeric route, named route, and base,
 	// but another owner cannot borrow the same CA or an unregistered port.
 	approvedConn := &certificateConnection{identity: "1001"}
-	approvedGuard := &guardServer{cfg: cfg, connections: map[controlConn]string{approvedConn: "1001"}, aliases: map[controlConn]map[string]string{approvedConn: {"8989.hp.shared.xyz": splitdns.BrowserGatewayHostname, "jellyfin.hp.shared.xyz": "8989.hp.shared.xyz"}}, leases: map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, uid: "1001", owner: approvedConn}}}
-	bundle, err := approvedGuard.certificate(t.Context(), approvedConn, "1001", "jellyfin.hp.shared.xyz")
+	approvedGuard := &guardServer{cfg: cfg, connections: map[controlConn]string{approvedConn: "1001"}, aliases: map[controlConn]map[string]string{approvedConn: {"8989.laptop.shared.xyz": splitdns.BrowserGatewayHostname, "jellyfin.laptop.shared.xyz": "8989.laptop.shared.xyz"}}, leases: map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, uid: "1001", owner: approvedConn}}}
+	bundle, err := approvedGuard.certificate(t.Context(), approvedConn, "1001", "jellyfin.laptop.shared.xyz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	}
 	pool := x509.NewCertPool()
 	pool.AddCert(root)
-	for _, host := range []string{"laptop.shared.xyz", "8989.hp.shared.xyz", "jellyfin.hp.shared.xyz"} {
+	for _, host := range []string{"laptop.shared.xyz", "8989.laptop.shared.xyz", "jellyfin.laptop.shared.xyz"} {
 		if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: pool}); err != nil {
 			t.Fatalf("trusted leaf %s: %v", host, err)
 		}
@@ -149,16 +149,16 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 			t.Fatalf("authorized host %s: %v", host, err)
 		}
 	}
-	for _, host := range []string{"3000.hp.shared.xyz", "other.hp.shared.xyz", "8989.other.shared.xyz", "8989.hp.local.example.test"} {
+	for _, host := range []string{"3000.laptop.shared.xyz", "other.laptop.shared.xyz", "8989.other.shared.xyz", "8989.laptop.local.example.test"} {
 		if _, err := approvedGuard.certificate(t.Context(), approvedConn, "1001", host); err == nil {
 			t.Fatalf("signed unauthorized host %s", host)
 		}
 	}
-	if _, err := approvedGuard.certificate(t.Context(), approvedConn, "1000", "jellyfin.hp.shared.xyz"); err == nil {
+	if _, err := approvedGuard.certificate(t.Context(), approvedConn, "1000", "jellyfin.laptop.shared.xyz"); err == nil {
 		t.Fatal("another owner borrowed domain authority")
 	}
-	delete(approvedGuard.aliases[approvedConn], "8989.hp.shared.xyz")
-	if _, err := approvedGuard.certificate(t.Context(), approvedConn, "1001", "jellyfin.hp.shared.xyz"); err == nil {
+	delete(approvedGuard.aliases[approvedConn], "8989.laptop.shared.xyz")
+	if _, err := approvedGuard.certificate(t.Context(), approvedConn, "1001", "jellyfin.laptop.shared.xyz"); err == nil {
 		t.Fatal("named alias cache survived numeric withdrawal")
 	}
 	// A trust retirement failure reports the changed selection and preserves
@@ -182,7 +182,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(state, "browser-domains.json"), []byte(`{"schema":"foreign"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if guard.runtimeStatus("1000").TrustReady || guard.certificateRequestAuthorizedDomain(conn, "1000", "8989.hp.shared.xyz", "laptop", "shared.xyz") {
+	if guard.runtimeStatus("1000").TrustReady || guard.certificateRequestAuthorizedDomain(conn, "1000", "8989.laptop.shared.xyz", "laptop", "shared.xyz") {
 		t.Fatal("malformed selection remained authorized")
 	}
 }

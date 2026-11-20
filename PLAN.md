@@ -2297,7 +2297,7 @@ to A's address, B cannot receive on A's address while A's listener is absent, bo
 (Linux: sock_diag INET_DIAG lookup by the 4-tuple, `idiag_uid`; macOS: the `net.inet.tcp.pcblist_n` entry for the
 4-tuple, `xso_uid`), and hands the connection to that uid's daemon gateway (the daemon's existing proxy, over the guard
 socket, as listeners are handed today). The daemon routes by Host/SNI among only its own routes; the guard authorizes
-nothing by hostname (GPT 2). Result: Bob's and Alice's `linux-test.<domain>` and `3000.hp.<domain>` both work, short, at the same
+nothing by hostname (GPT 2). Result: Bob's and Alice's `linux-test.<domain>` and `3000.laptop.<domain>` both work, short, at the same
 URL, each reaching their own machine; a uid without a daemon gets a refusal page.
 - Two accounts under ONE uid with the same machine name: the daemon routes both; the second account's machine gets
   `<machine>.<workspace-slug>` as its name label (the slug the user picked, never an email; visible only to that uid,

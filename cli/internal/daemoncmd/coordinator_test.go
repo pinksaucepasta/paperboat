@@ -136,10 +136,10 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 	indexBody, err := io.ReadAll(response.Body)
 	response.Body.Close()
 	tr.CloseIdleConnections()
-	if err != nil || response.StatusCode != 200 || !strings.Contains(string(indexBody), "https://6767.hp."+domain+"/") {
+	if err != nil || response.StatusCode != 200 || !strings.Contains(string(indexBody), "https://6767.laptop."+domain+"/") {
 		t.Fatalf("base HTTPS index: %s %v", indexBody, err)
 	}
-	if c.BrowserURLs()["first"][6767] != "https://6767.hp."+domain {
+	if c.BrowserURLs()["first"][6767] != "https://6767.laptop."+domain {
 		t.Fatal("numeric URL changed")
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), peers[1:]); err != nil {
@@ -149,7 +149,7 @@ func testCoordinatorSharedBrowserGateway(t *testing.T, nativeConflict bool, doma
 		t.Fatal("withdrawn machine remains published")
 	}
 	web := c.webRoutes[splitdns.BrowserGatewayHostname]
-	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "6767.hp." + domain}); err == nil {
+	if _, err := web.proxy.GetCertificate(&tls.ClientHelloInfo{ServerName: "6767.laptop." + domain}); err == nil {
 		t.Fatal("withdrawn TLS route remains admitted")
 	}
 	if err := c.replaceGuardedRoutes(t.Context(), nil); err != nil {
@@ -959,7 +959,7 @@ func TestCoordinatorBrowserGatewayWaitsForAJustStartedServiceRoute(t *testing.T)
 	}()
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(ca.CertPEM())
-	host := "7000.hp." + testBrowserDomain
+	host := "7000.laptop." + testBrowserDomain
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}}
 	request, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
 	request.Host = host

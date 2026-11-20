@@ -24,7 +24,7 @@ func TestBrowserAliasesRequireOwnedHTTPSGatewayAndCanonicalShape(t *testing.T) {
 		aliases:  map[controlConn]map[string]string{},
 		names:    map[controlConn]map[string]string{},
 	}
-	name := "6767.hp." + testBrowserDomain
+	name := "6767.laptop." + testBrowserDomain
 	aliases := map[string]string{name: splitdns.BrowserGatewayHostname}
 	if err := g.replaceAliases(t.Context(), other, "other", aliases); err == nil {
 		t.Fatal("foreign connection borrowed gateway")
@@ -32,11 +32,11 @@ func TestBrowserAliasesRequireOwnedHTTPSGatewayAndCanonicalShape(t *testing.T) {
 	for _, bad := range []string{
 		"app.office.pprbt",
 		"6767.gateway." + testBrowserDomain,
-		"06767.hp." + testBrowserDomain,
-		"0.hp." + testBrowserDomain,
-		"65536.hp." + testBrowserDomain,
+		"06767.laptop." + testBrowserDomain,
+		"0.laptop." + testBrowserDomain,
+		"65536.laptop." + testBrowserDomain,
 		"6767.other.extra." + testBrowserDomain,
-		"6767.HP." + testBrowserDomain,
+		"6767.LAPTOP." + testBrowserDomain,
 	} {
 		if err := g.replaceAliases(t.Context(), owner, "owner", map[string]string{bad: splitdns.BrowserGatewayHostname}); err == nil {
 			t.Fatalf("accepted noncanonical browser alias %q", bad)
@@ -77,7 +77,7 @@ func TestBrowserAliasesRequireOwnedHTTPSListenerAndReservationLimits(t *testing.
 		// The owner's live aliases survive pruning; the cap here is filled by other users' names.
 		connections: map[controlConn]string{owner: "owner"},
 	}
-	valid := map[string]string{"3000.hp." + testBrowserDomain: splitdns.BrowserGatewayHostname}
+	valid := map[string]string{"3000.laptop." + testBrowserDomain: splitdns.BrowserGatewayHostname}
 	if err := g.replaceAliases(context.Background(), owner, "owner", valid); err != nil {
 		t.Fatal(err)
 	}
@@ -92,28 +92,28 @@ func TestBrowserAliasesRequireOwnedHTTPSListenerAndReservationLimits(t *testing.
 	if err := g.replaceAliases(context.Background(), owner, "owner", valid); err != nil {
 		t.Fatalf("existing reservation rejected at global capacity: %v", err)
 	}
-	if err := g.replaceAliases(context.Background(), owner, "owner", map[string]string{"3001.hp." + testBrowserDomain: splitdns.BrowserGatewayHostname}); err == nil {
+	if err := g.replaceAliases(context.Background(), owner, "owner", map[string]string{"3001.laptop." + testBrowserDomain: splitdns.BrowserGatewayHostname}); err == nil {
 		t.Fatal("new alias exceeded global capacity")
 	}
-	g.reserved.Names["3001.hp."+testBrowserDomain] = "foreign"
-	if err := g.replaceAliases(context.Background(), owner, "owner", map[string]string{"3001.hp." + testBrowserDomain: splitdns.BrowserGatewayHostname}); err == nil {
+	g.reserved.Names["3001.laptop."+testBrowserDomain] = "foreign"
+	if err := g.replaceAliases(context.Background(), owner, "owner", map[string]string{"3001.laptop." + testBrowserDomain: splitdns.BrowserGatewayHostname}); err == nil {
 		t.Fatal("foreign tombstone stolen")
 	}
 }
 
 func TestAliasHostShapeUsesPublicNamespace(t *testing.T) {
-	for _, host := range []string{"80.hp." + testBrowserDomain, "65535.alias-1." + testBrowserDomain} {
+	for _, host := range []string{"80.laptop." + testBrowserDomain, "65535.alias-1." + testBrowserDomain} {
 		if !validSubdomainName(host, testBrowserDomain) {
 			t.Fatalf("valid public browser alias rejected: %s", host)
 		}
 	}
 	for _, host := range []string{
-		"0.hp." + testBrowserDomain,
-		"080.hp." + testBrowserDomain,
-		"65536.hp." + testBrowserDomain,
+		"0.laptop." + testBrowserDomain,
+		"080.laptop." + testBrowserDomain,
+		"65536.laptop." + testBrowserDomain,
 		"80.gateway." + testBrowserDomain,
-		"80.hp.extra." + testBrowserDomain,
-		"80.hp.pprbt",
+		"80.laptop.extra." + testBrowserDomain,
+		"80.laptop.pprbt",
 	} {
 		if validSubdomainName(host, testBrowserDomain) {
 			t.Fatalf("invalid public browser alias accepted: %s", host)

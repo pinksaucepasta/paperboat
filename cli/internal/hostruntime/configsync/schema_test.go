@@ -26,14 +26,14 @@ func TestSchemaAgreesWithTheReader(t *testing.T) {
 		  "pull": {"repository_id": "dotfiles", "branch": "main"}, "push": {"repository_id": "dotfiles", "url": "https://git.example.test/d.git"},
 		  "paths": {"shell/zshrc": {"local_path": "~/.zshrc", "kind": "file"}, "editor": {"local_path": "~/e", "kind": "directory", "include": ["*.json"], "exclude": []}},
 		  "os": {"windows": {"paths": {"editor": {"local_path": "%APPDATA%/editor"}}}},
-		  "machine": {"hp-1": {"mode": "pull_only"}},}`,
+		  "machine": {"laptop-1": {"mode": "pull_only"}},}`,
 	}
 	invalid := []string{
 		`{"unexpected": true}`, `{"Paths": {}}`, `{"version": 2}`, `{"version": 1.5}`, `{"mode": "sideways"}`, `{"mode": 3}`,
 		`{"enabled": "true"}`, `{"paths": 3}`, `{"os": 3}`, `{"pull": 3}`, `{"pull": {}}`, `{"pull": {"repository_id": 3}}`, `{"pull": {"repository_id": "r", "x": 1}}`,
 		`{"paths": {"a": {"include": 1}}}`, `{"paths": {"a": {"exclude": [1]}}}`, `{"paths": {"a": {"kind": "link"}}}`, `{"paths": {"a": {"local_path": ""}}}`,
 		`{"paths": {"a": {"unknown": 1}}}`, `{"os": {"plan9": {}}}`, `{"os": {"linux": {"os": {}}}}`, `{"os": {"linux": {"machine": {}}}}`,
-		`{"machine": {"HP": {}}}`, `{"machine": {"-hp": {}}}`, `{"machine": {"hp-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"laptop": {"os": {}}}}`, `{"machine": {"laptop": {"mode": 3}}}`,
+		`{"machine": {"LAPTOP": {}}}`, `{"machine": {"-laptop": {}}}`, `{"machine": {"laptop-": {}}}`, `{"machine": {"a b": {}}}`, `{"machine": {"laptop": {"os": {}}}}`, `{"machine": {"laptop": {"mode": 3}}}`,
 	}
 	for _, doc := range valid {
 		if problems := checkAgainstSchema(t, doc); problems != nil {

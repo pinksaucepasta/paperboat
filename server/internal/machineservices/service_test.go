@@ -28,7 +28,7 @@ func TestBrowserHostnameValidation(t *testing.T) {
 
 func TestNativeBrowserHostnameUsesCanonicalPortAndAccountScopedAlias(t *testing.T) {
 	host, err := NativeBrowserHostname("laptop", 3000, "local.example.test")
-	if err != nil || host != "3000.hp.local.example.test" {
+	if err != nil || host != "3000.laptop.local.example.test" {
 		t.Fatalf("host=%q err=%v", host, err)
 	}
 	for _, domain := range []string{"", "https://local.example.test", "UPPER.example.test", "bad..test", "127.0.0.1"} {
@@ -40,10 +40,10 @@ func TestNativeBrowserHostnameUsesCanonicalPortAndAccountScopedAlias(t *testing.
 	if _, err := NativeBrowserHostname("laptop", 3000, longBase); err == nil {
 		t.Fatal("published hostname exceeding DNS total length")
 	}
-	if host, err := NativeBrowserHostname("laptop", 3000, "another.example.test"); err != nil || host != "3000.hp.another.example.test" {
+	if host, err := NativeBrowserHostname("laptop", 3000, "another.example.test"); err != nil || host != "3000.laptop.another.example.test" {
 		t.Fatalf("changed domain host=%q err=%v", host, err)
 	}
-	for _, alias := range []string{"HP", "laptop.other", "laptop/path", "-hp", ""} {
+	for _, alias := range []string{"LAPTOP", "laptop.other", "laptop/path", "-laptop", ""} {
 		if _, err := NativeBrowserHostname(alias, 3000, "local.example.test"); err == nil {
 			t.Fatalf("accepted alias %q", alias)
 		}
