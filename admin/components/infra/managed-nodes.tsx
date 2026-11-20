@@ -193,10 +193,10 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
 /** Mesh links, with the failed forwards (unreachable + holder_miss) beside them, muted while there are none. */
 function MeshCell({ forward }: { forward: Node["forward"] }) {
   if (!forward) return "-"
-  const failed = forward.unreachable + forward.holder_miss
+  const failed = (forward.unreachable ?? 0) + (forward.holder_miss ?? 0)
   return (
     <span className="inline-flex items-baseline gap-1.5">
-      <Mono>{forward.links}</Mono>
+      <Mono>{forward.links ?? 0}</Mono>
       <span className={failed === 0 ? "text-muted-foreground" : "text-destructive"}><Mono>{failed} failed</Mono></span>
     </span>
   )
