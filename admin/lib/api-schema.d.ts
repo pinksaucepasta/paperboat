@@ -13160,17 +13160,26 @@ export interface components {
             registry_expires_at: string;
             ready: boolean;
             protocol_version: string;
-            /** @description Mesh counters the node last reported (shared/nodemesh Stats); absent until it reports any. */
+            /** @description Forwarding counters from the node's latest observation: an edge's visitor forwarding, a relay's mesh. Absent when the node reports none. */
             forward?: {
-                links: number;
-                names: number;
-                forwarded: number;
-                accepted: number;
-                holder_miss: number;
-                unreachable: number;
-                loop_refused: number;
-                bytes_in: number;
-                bytes_out: number;
+                /** Format: int64 */
+                links?: number;
+                /** Format: int64 */
+                names?: number;
+                /** Format: int64 */
+                forwarded?: number;
+                /** Format: int64 */
+                accepted?: number;
+                /** Format: int64 */
+                holder_miss?: number;
+                /** Format: int64 */
+                unreachable?: number;
+                /** Format: int64 */
+                loop_refused?: number;
+                /** Format: int64 */
+                bytes_in?: number;
+                /** Format: int64 */
+                bytes_out?: number;
             };
         };
         OperatorNodePage: {
