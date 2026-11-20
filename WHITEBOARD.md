@@ -392,3 +392,9 @@ Relay speed sharing (each account's relay budget split by per-relay demand), sig
 
 ## Flood protection (2026-11-20)
 Plan bandwidth limits stop big transfers, not floods of tiny requests; per-address limits stop one attacker, not a flood from many addresses (DDoS) against a preview or tunnel. Later: DDoS protection in front of the edges (e.g. Cloudflare Spectrum or an anycast scrubbing provider) and per-route request shedding.
+
+## Congestion control: BBRv3 in the quic-go fork — after launch, when funded
+
+- Today we ship BBRv1 (Hysteria's port) in our quic-go fork (`github.com/pinksaucepasta/quic-go`, branch `paperboat`); it is the only sender for every connection.
+- Later, when funded: port BBRv3 (Google, IETF draft-ietf-ccwg-bbr; Chrome quiche `bbr2` code) into the fork and re-run the benchmark, including the fairness and relay-limit tests.
+- Reason: v3 fixes v1's loss blindness and unfairness.

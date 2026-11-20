@@ -184,7 +184,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 
 	_ = nc.SetDeadline(time.Time{})
 	c.generation++
-	cc := &wssClientConn{token: token, namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
+	cc := &wssClientConn{token: token, namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, receiveDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
 	c.current = cc
 	c.observed.Store(cc)
 	cc.workers.Add(2)

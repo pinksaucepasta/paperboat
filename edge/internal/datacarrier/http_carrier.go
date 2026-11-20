@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/handover"
@@ -34,6 +35,7 @@ type HTTPService struct {
 	config         Config
 	tcp            net.Listener
 	udp            net.PacketConn
+	quic           *quic.Transport
 	h2             *http.Server
 	h3             *http3.Server
 	accepted       chan *Server
@@ -111,7 +113,18 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 		s.udp = packet
 		quicConfig := endpointQUICConfig(carrier)
 		quicConfig.MaxIncomingUniStreams = 3
-		s.h3 = &http3.Server{Handler: s.safeHandler(s.handler(*config.QUIC, "h3")), Logger: slog.New(slog.NewTextHandler(carrierHTTPDiagnosticWriter{s}, nil)), TLSConfig: tlsConfig, QUICConfig: quicConfig, MaxHeaderBytes: 16 << 10}
+		s.h3 = &http3.Server{Handler: s.safeHandler(s.handler(*config.QUIC, "h3")), Logger: slog.New(slog.NewTextHandler(carrierHTTPDiagnosticWriter{s}, nil)), TLSConfig: tlsConfig, QUICConfig: quicConfig, MaxHeaderBytes: 16 << 10,
+			ConnContext: func(ctx context.Context, c *quic.Conn) context.Context {
+				go func() {
+					select {
+					case <-c.HandshakeComplete():
+					case <-c.Context().Done():
+					}
+					settleQUICHandshake(ctx)
+				}()
+				return ctx
+			}}
+		s.quic = newQUICTransport(packet)
 		go func() {
 			// An inheriting process reads UDP only after the process it replaces has exited.
 			select {
@@ -119,7 +132,12 @@ func NewHTTPService(ctx context.Context, config ServiceConfig) (*HTTPService, er
 			case <-serviceCtx.Done():
 				return
 			}
-			if err := s.h3.Serve(packet); err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
+			// ConfigureTLSConfig and an early listener are what http3.Server.Serve itself would set up.
+			listener, err := s.quic.ListenEarly(http3.ConfigureTLSConfig(tlsConfig), quicConfig)
+			if err == nil {
+				err = s.h3.ServeListener(listener)
+			}
+			if err != nil && !errors.Is(err, http.ErrServerClosed) && serviceCtx.Err() == nil {
 				s.shutdown(carrierFailure{sentinel: errCarrierListener, cause: err})
 			}
 		}()
@@ -277,6 +295,9 @@ func (s *HTTPService) shutdown(failure error) {
 		}
 		if s.tcp != nil {
 			_ = s.tcp.Close()
+		}
+		if s.quic != nil {
+			_ = s.quic.Close()
 		}
 		if s.udp != nil {
 			_ = s.udp.Close()

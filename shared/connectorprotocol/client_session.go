@@ -544,10 +544,7 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 	countCtx, cancelCount := context.WithTimeout(ctx, c.config.AbortTimeout)
 	activeStreams, countErr := c.config.Drainer.ActiveStreams(countCtx)
 	cancelCount()
-	if countErr != nil || activeStreams > MaxActiveStreams {
-		if countErr == nil {
-			countErr = ErrInvalidInput
-		}
+	if countErr != nil {
 		c.mu.Lock()
 		if c.drain != nil && c.drain.DrainID == request.DrainID {
 			c.drainStatus = DrainRejected
@@ -573,9 +570,6 @@ func (c *ClientSession) HandleDrain(ctx context.Context, request Drain) (DrainAc
 // terminal outcomes and are idempotent for the active drain ID.
 func (c *ClientSession) DrainProgress(ctx context.Context, activeStreams uint32, forcedClose bool) (DrainAck, error) {
 	if c == nil || ctx == nil {
-		return DrainAck{}, ErrInvalidInput
-	}
-	if activeStreams > MaxActiveStreams {
 		return DrainAck{}, ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {

@@ -248,7 +248,6 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand ma
 	if customerOwned, err := s.customerOwnedNode(ctx, nodeID); err != nil || customerOwned {
 		return err // a customer-owned relay is never limited, and its accounts' demand is not Paperboat's to divide
 	}
-	s.relayDemand.record(nodeID, demand, now)
 	out.AccountMbit = s.fairUse.RelayMbitFree // an account the plan lookup did not list: Free's speed
 	accounts := make([]string, 0, len(set.list))
 	listed := map[string]bool{}
@@ -271,6 +270,7 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand ma
 	for _, account := range slow {
 		isSlow[account] = true
 	}
+	plan := make(map[string]float64, len(accounts))
 	for _, account := range accounts {
 		mbit := s.fairUse.RelayMbitFree
 		if paid[account] {
@@ -283,14 +283,15 @@ func (s *EdgeService) relayFairUse(ctx context.Context, nodeID string, demand ma
 				mbit = float64(s.fairUse.EdgeBytesPerSecond) * 8 / 1e6
 			}
 		}
-		// The relays that carry the account: those that report it, and this one even before it does (a new connection here starts at
-		// the start allowance, not at the full speed).
-		carried := s.relayDemand.demandFor(account, now)
-		if _, reported := carried[nodeID]; !reported {
-			carried[nodeID] = relayshare.Demand{}
-		}
-		if len(carried) > 1 {
-			mbit = relayshare.Shares(mbit, carried)[nodeID]
+		plan[account] = mbit
+	}
+	// An account more than one relay carries gets this relay's share of its speed (a new connection here starts at the start
+	// allowance, not at the full speed); one carried here alone is listed when its plan speed is not the default.
+	shares := s.relayDemand.divide(nodeID, demand, plan, now)
+	for _, account := range accounts {
+		mbit := plan[account]
+		if share, shared := shares[account]; shared {
+			mbit = share
 		} else if mbit == s.fairUse.RelayMbitFree {
 			continue
 		}
@@ -430,7 +431,7 @@ func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
 		return
 	}
-	writeEdgeJSON(w, http.StatusOK, out)
+	writeEdgeSnapshot(w, r, out)
 }
 
 // maxRelayObservationDocument fits a relay's full subject list, whatever its length (identifiers at their 256-byte limit),
@@ -439,7 +440,14 @@ const maxRelayObservationDocument = connectorprotocol.MaximumSnapshotBytes
 
 func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request) {
 	var in relayNodeObservation
-	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) || s.refuseBelowFloor(w, r, "relay", in.Metrics) {
+	if !s.decodeLimit(w, r, &in, maxRelayObservationDocument) {
+		return
+	}
+	if node, scoped := r.Context().Value(scopedRelayObservationNodeKey{}).(string); scoped && node != in.NodeID {
+		writeEdgeError(w, r, http.StatusUnauthorized, "unauthenticated", false, 0)
+		return
+	}
+	if s.refuseBelowFloor(w, r, "relay", in.Metrics) {
 		return
 	}
 	out, err := s.ObserveRelayNode(r.Context(), in)
@@ -455,7 +463,7 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
 		return
 	}
-	writeEdgeJSON(w, http.StatusOK, out)
+	writeEdgeSnapshot(w, r, out)
 }
 
 // relayNodeMayStart admits a relay process start for a node that is not retired or draining.

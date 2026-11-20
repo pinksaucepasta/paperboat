@@ -17,3 +17,5 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
+
+replace github.com/quic-go/quic-go => github.com/pinksaucepasta/quic-go v0.61.1-paperboat.1

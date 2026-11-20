@@ -419,3 +419,31 @@ func TestEngineFetchSeesAServedChangeThatCameWithAHubChange(t *testing.T) {
 		t.Fatal("a tunnels event or the poll does not fetch")
 	}
 }
+
+func TestFetchEngineTunnelsAcceptsLargeList(t *testing.T) {
+	const count = 1025
+	tunnels := make([]runtimewire.EngineTunnel, count)
+	snapshot := json.RawMessage(`{"name":"` + strings.Repeat("x", 16<<10) + `"}`)
+	for i := range tunnels {
+		tunnels[i] = runtimewire.EngineTunnel{
+			TunnelID: fmt.Sprintf("tunnel_%d", i), ConfigGeneration: 1, Snapshot: snapshot,
+		}
+	}
+	body, err := json.Marshal(map[string]any{"data": map[string]any{"tunnels": tunnels}})
+	if err != nil || len(body) <= 16<<20 {
+		t.Fatalf("fixture length = %d, encoding error = %v", len(body), err)
+	}
+	service := newRuntimeAttachmentTestService(t, roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != runtimewire.HostTunnelsPath {
+			return nil, fmt.Errorf("unexpected request path %s", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body))}, nil
+	}))
+	got, err := service.FetchEngineTunnels(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != count || got[count-1].TunnelID != tunnels[count-1].TunnelID || !bytes.Equal(got[count-1].Snapshot, snapshot) {
+		t.Fatal("host did not receive the complete tunnel list")
+	}
+}

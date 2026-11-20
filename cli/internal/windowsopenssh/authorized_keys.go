@@ -30,7 +30,7 @@ func revokedKeysFile(stateRoot string) string {
 }
 
 func ReconcileAuthorizedKeysContext(ctx context.Context, stateRoot string, caKeys []string, principal string, revoked []string) (bool, error) {
-	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || len(caKeys) > wire.MaxUserCAs || len(caKeys) > 0 && !wire.ValidCAPrincipal(principal) || len(revoked) > wire.MaxRevokedKeyIDs {
+	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || len(caKeys) > wire.MaxUserCAs || len(caKeys) > 0 && !wire.ValidCAPrincipal(principal) {
 		return false, ErrInvalidConfig
 	}
 	if err := ctx.Err(); err != nil {

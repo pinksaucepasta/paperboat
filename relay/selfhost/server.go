@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // Handler performs each state transition under the installation's process lock.
@@ -195,7 +197,7 @@ func authorized(r *http.Request, s state) bool {
 	return err == nil && subtle.ConstantTimeCompare(hash[:], expected) == 1
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, connectorprotocol.MaximumSnapshotBytes)
 	defer r.Body.Close()
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()

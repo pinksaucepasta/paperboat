@@ -15,6 +15,7 @@ import (
 )
 
 func TestSelfhostInventoryExhaustsPagesWithoutWorkspaceOrDisplayFilters(t *testing.T) {
+	const total = 16385
 	for _, duplicate := range []bool{false, true} {
 		t.Run(fmt.Sprint("duplicate_", duplicate), func(t *testing.T) {
 			calls, pools := 0, 0
@@ -25,7 +26,7 @@ func TestSelfhostInventoryExhaustsPagesWithoutWorkspaceOrDisplayFilters(t *testi
 				}
 				if r.URL.Path == "/v1/selfhost/pools/relay" {
 					pools++
-					fmt.Fprint(w, `{"data":{"mode":"self-hosted-only","installation_ids":["install_400"]}}`)
+					fmt.Fprintf(w, `{"data":{"mode":"self-hosted-only","installation_ids":["install_%d"]}}`, total-1)
 					return
 				}
 				if r.URL.Path != "/v1/selfhost/installations" {
@@ -38,17 +39,17 @@ func TestSelfhostInventoryExhaustsPagesWithoutWorkspaceOrDisplayFilters(t *testi
 					t.Errorf("unexpected page %s", r.URL.RawQuery)
 				}
 				calls++
-				end := min(offset+200, 401)
+				end := min(offset+200, total)
 				items := []SelfhostInstallation{}
 				for i := offset; i < end; i++ {
 					id := fmt.Sprintf("install_%d", i)
-					if duplicate && i == 400 {
+					if duplicate && i == total-1 {
 						id = "install_0"
 					}
 					items = append(items, SelfhostInstallation{InstallationID: id, NodeID: "shared_physical_node", Name: fmt.Sprintf("Node %d", i), ScopeKind: "account", ScopeID: "account_1", EnrollmentState: "enrolled", Capability: "relay", Region: "selfhost", Ready: true})
 				}
-				page := SelfhostInstallationPage{Installations: items, Pagination: Pagination{Limit: 200, Offset: offset, Total: 401}, Counts: SelfhostCounts{Ready: 401, Enrolled: 401}}
-				if end < 401 {
+				page := SelfhostInstallationPage{Installations: items, Pagination: Pagination{Limit: 200, Offset: offset, Total: total}, Counts: SelfhostCounts{Ready: total, Enrolled: total}}
+				if end < total {
 					page.Pagination.NextOffset = &end
 				}
 				json.NewEncoder(w).Encode(map[string]any{"data": page})
@@ -65,7 +66,7 @@ func TestSelfhostInventoryExhaustsPagesWithoutWorkspaceOrDisplayFilters(t *testi
 				}
 				return
 			}
-			if err != nil || len(items) != 401 || calls != 3 || pools != 1 || !items[400].Selected || pool.Mode != "self-hosted-only" {
+			if err != nil || len(items) != total || calls != (total+199)/200 || pools != 1 || !items[total-1].Selected || pool.Mode != "self-hosted-only" {
 				t.Fatalf("inventory truncated or policy lost: items=%d calls=%d pools=%d err=%v", len(items), calls, pools, err)
 			}
 		})

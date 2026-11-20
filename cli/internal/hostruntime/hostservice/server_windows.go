@@ -22,15 +22,15 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/sys/windows"
 )
 
 const (
-	ProtocolV1                       = "paperboat.host-service/v1"
-	AllowSleep                       = "allow_sleep"
-	KeepAwake                        = "keep_awake"
-	maxAuthorizedKeys                = wire.MaxUserCAs
-	windowsHostServiceMaxRequestSize = 64 << 10
+	ProtocolV1        = "paperboat.host-service/v1"
+	AllowSleep        = "allow_sleep"
+	KeepAwake         = "keep_awake"
+	maxAuthorizedKeys = wire.MaxUserCAs
 )
 
 var (
@@ -133,7 +133,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.mu.Unlock()
 	// During a hostd update the previous generation holds the pipe until the installed configuration moves past it:
 	// wait for the name, then apply the policy, so its release (below) always comes before this apply.
-	listener, err := listenHostServicePipe(ctx, s.config.SocketPath, &winio.PipeConfig{SecurityDescriptor: hostServiceSecurityDescriptor(s.config.SID), InputBufferSize: windowsHostServiceMaxRequestSize, OutputBufferSize: 16 << 10})
+	listener, err := listenHostServicePipe(ctx, s.config.SocketPath, &winio.PipeConfig{SecurityDescriptor: hostServiceSecurityDescriptor(s.config.SID), InputBufferSize: 64 << 10, OutputBufferSize: 16 << 10})
 	if err != nil {
 		return err
 	}
@@ -205,9 +205,9 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 	defer cancelRequest()
 	deadline, _ := requestCtx.Deadline()
 	_ = connection.SetDeadline(deadline)
-	reader := bufio.NewReaderSize(io.LimitReader(connection, windowsHostServiceMaxRequestSize+1), windowsHostServiceMaxRequestSize+1)
+	reader := bufio.NewReaderSize(io.LimitReader(connection, connectorprotocol.MaximumSnapshotBytes+1), connectorprotocol.MaximumSnapshotBytes+1)
 	body, err := reader.ReadBytes('\n')
-	if err != nil || len(body) == 0 || len(body) > windowsHostServiceMaxRequestSize {
+	if err != nil || len(body) == 0 || len(body) > connectorprotocol.MaximumSnapshotBytes {
 		return s.respond(connection, s.errorResponse("invalid_request"))
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -242,7 +242,7 @@ func (s *Server) serveContext(ctx context.Context, connection net.Conn) error {
 		return s.respond(connection, response)
 	}
 	if request.Operation == "reconcile_ssh_authorized_keys" {
-		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || len(request.SSHRevoked) > wire.MaxRevokedKeyIDs || s.config.AuthorizedKeys == nil {
+		if request.Mode != "" || request.Version != 0 || request.Artifact != nil || request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || s.config.AuthorizedKeys == nil {
 			return s.respond(connection, s.errorResponse("invalid_request"))
 		}
 		changed, reconcileErr := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(requestCtx, append([]string(nil), (*request.AuthorizedKeys)...), request.SSHPrincipal, append([]string(nil), request.SSHRevoked...))

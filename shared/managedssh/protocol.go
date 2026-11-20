@@ -41,7 +41,7 @@ type CertificateDocument struct {
 
 // UserCAsDocument lists the user CA public keys a machine trusts for managed SSH (at most MaxUserCAs), the principal
 // every certificate must carry (the CA lines' principals= option) and the key IDs of still-valid certificates it must
-// refuse (at most MaxRevokedKeyIDs).
+// refuse.
 type UserCAsDocument struct {
 	Type              string   `json:"type"`
 	Version           int      `json:"version"`

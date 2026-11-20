@@ -201,13 +201,12 @@ func TestTRK35CertificateRevocationEdgeFailureLeavesDurableRetryMarker(t *testin
 	}
 }
 
-func TestTRK35DistributionHubOverloadBoundsPendingAndReplayState(t *testing.T) {
+func TestTRK35DistributionHubReplayStateStaysIdempotent(t *testing.T) {
 	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
 	identity := DistributionNodeIdentity{NodeID: "edge_trk35", ProcessEpoch: "epoch_trk35_001"}
 	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
-		Credential:     []byte("distribution-credential-trk35-012345678901234567890123456789"),
-		MaximumPending: 2,
-		Now:            func() time.Time { return now },
+		Credential: []byte("distribution-credential-trk35-012345678901234567890123456789"),
+		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return identity, nil
 		}),
@@ -223,12 +222,6 @@ func TestTRK35DistributionHubOverloadBoundsPendingAndReplayState(t *testing.T) {
 			t.Fatal(err)
 		}
 		messages = append(messages, message)
-	}
-	if _, err := hub.enqueue(context.Background(), "stage", trk35DistributionRequest(3, now, identity)); !errors.Is(err, ErrDistributionTransportFailed) {
-		t.Fatalf("overload error = %v, want ErrDistributionTransportFailed", err)
-	}
-	if pending, _ := hub.store.CountPending(context.Background(), now); pending != 2 {
-		t.Fatalf("overload queue = pending %d, want bounded two entries", pending)
 	}
 
 	// A mismatched transcript is rejected without consuming the pending entry,
@@ -260,12 +253,9 @@ func TestTRK35DistributionHubOverloadBoundsPendingAndReplayState(t *testing.T) {
 		if status := trk35HandleDistributionAck(t, hub, identity, trk35DistributionAck(message)); status != http.StatusNoContent {
 			t.Fatalf("refill ACK %d status = %d", index, status)
 		}
-		if pending, _ := hub.store.CountPending(context.Background(), now); pending > hub.maximum {
-			t.Fatalf("bounded queue exceeded at %d: pending=%d", index, pending)
-		}
 	}
-	if pending, _ := hub.store.CountPending(context.Background(), now); pending != 0 {
-		t.Fatalf("final bounded queue = pending %d", pending)
+	if pending, err := hub.store.Pending(context.Background(), identity.NodeID, identity.ProcessEpoch, "", 1, now); err != nil || len(pending) != 0 {
+		t.Fatalf("final queue = pending %d, err %v", len(pending), err)
 	}
 }
 

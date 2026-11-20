@@ -2,13 +2,11 @@ package managedssh
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
-	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 // CertificateAuthority authorizes issuing for the exact machine (live CLI session, managed SSH allowed, target set),
@@ -41,12 +39,9 @@ func (r *SQLRepository) CertificateAuthority(ctx context.Context, request IssueC
 
 // revokedKeyIDs are the key IDs of still-valid certificates for the machine whose holders may no longer log in to it.
 func revokedKeyIDs(ctx context.Context, q *dbsqlc.Queries, machineID string, now time.Time) ([]string, error) {
-	rows, err := q.ListRevokedManagedSSHCertificateHolders(ctx, dbsqlc.ListRevokedManagedSSHCertificateHoldersParams{MachineID: machineID, Now: now, Limit: int32(wire.MaxRevokedKeyIDs + 1)})
+	rows, err := q.ListRevokedManagedSSHCertificateHolders(ctx, dbsqlc.ListRevokedManagedSSHCertificateHoldersParams{MachineID: machineID, Now: now})
 	if err != nil {
 		return nil, err
-	}
-	if len(rows) > wire.MaxRevokedKeyIDs {
-		return nil, errors.Join(ErrUnavailable, errors.New("more revoked managed SSH certificates than a machine can hold"))
 	}
 	ids := make([]string, len(rows))
 	for index, row := range rows {

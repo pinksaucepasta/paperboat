@@ -9,10 +9,11 @@ import (
 	"os"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/auth"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 )
 
-const maxTrustDocument = 1 << 20
+const maxTrustDocument = connectorprotocol.MaximumSnapshotBytes
 
 type Trust struct {
 	Snapshot        *auth.Snapshot

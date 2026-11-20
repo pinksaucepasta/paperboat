@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,30 @@ func krlTestCertificate(t *testing.T, ca, user ssh.Signer, keyID string) []byte 
 		t.Fatal(err)
 	}
 	return ssh.MarshalAuthorizedKey(certificate)
+}
+
+// A machine with more revoked key IDs than the old 4096 cap still gets a KRL that OpenSSH reads and that revokes the last one.
+func TestKRLListsMoreThan4096KeyIDs(t *testing.T) {
+	keygen, err := exec.LookPath("ssh-keygen")
+	if err != nil {
+		t.Skip("ssh-keygen is unavailable to cross-check the KRL")
+	}
+	ca, user := krlTestSigner(t), krlTestSigner(t)
+	ids := make([]string, 5000)
+	for index := range ids {
+		ids[index] = fmt.Sprintf("paperboat:user_a:session_%05d:machine_1", index)
+	}
+	dir := t.TempDir()
+	krlPath, certPath := filepath.Join(dir, "revoked.krl"), filepath.Join(dir, "cert.pub")
+	if err := os.WriteFile(krlPath, KRL([][]byte{ca.PublicKey().Marshal()}, ids, 1, 1_800_000_000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certPath, krlTestCertificate(t, ca, user, ids[len(ids)-1]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(keygen, "-Q", "-f", krlPath, certPath).CombinedOutput(); err == nil || !strings.Contains(string(output), "REVOKED") {
+		t.Fatalf("5000th key ID is not revoked: %v %s", err, output)
+	}
 }
 
 // The KRL revokes exactly the listed key IDs of our CAs: OpenSSH's own reader (ssh-keygen -Q, the code sshd's

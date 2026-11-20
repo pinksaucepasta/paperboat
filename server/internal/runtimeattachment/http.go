@@ -160,7 +160,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			serviceError(w, r, err)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"tunnels": tunnels}})
+		raw, err := json.Marshal(map[string]any{"data": map[string]any{"tunnels": tunnels}})
+		if err != nil || len(raw) > connectorprotocol.MaximumSnapshotBytes {
+			serviceError(w, r, errors.Join(ErrUnavailable, err, errors.New("engine tunnel list could not be encoded within the size limit")))
+			return
+		}
+		_, _ = w.Write(raw)
 		return
 	}
 	if r.URL.Path != runtimewire.EdgePullPath && r.URL.Path != runtimewire.EdgeObservePath && r.URL.Path != runtimewire.EdgeEndpointPullPath {

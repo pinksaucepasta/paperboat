@@ -69,7 +69,6 @@ type DistributionHub struct {
 	credential      []byte
 	credentialMu    sync.RWMutex
 	now             func() time.Time
-	maximum         int
 	identity        DistributionNodeIdentityResolver
 	onDemand        func(context.Context, DistributionNodeIdentity, string) error
 	store           DistributionActionStore
@@ -84,7 +83,6 @@ type DistributionHub struct {
 type DistributionHubConfig struct {
 	NodeCredentials nodeauth.Resolver
 	Credential      []byte
-	MaximumPending  int
 	// Store holds pending actions and results for every server instance; Keys seals a staged bundle in it.
 	Store        DistributionActionStore
 	Keys         MasterKeySource
@@ -122,9 +120,6 @@ func NewDistributionHub(config DistributionHubConfig) (*DistributionHub, error) 
 	if !validDistributionCredential(config.Credential) {
 		return nil, fmt.Errorf("%w: credential is required", ErrDistributionTransportInvalid)
 	}
-	if config.MaximumPending <= 0 || config.MaximumPending > 4096 {
-		config.MaximumPending = 1024
-	}
 	if config.Store == nil || config.Keys == nil || !validKeyReference(config.KeyReference) {
 		return nil, fmt.Errorf("%w: action store and master keys are required", ErrDistributionTransportInvalid)
 	}
@@ -134,7 +129,7 @@ func NewDistributionHub(config DistributionHubConfig) (*DistributionHub, error) 
 	if config.Identity == nil {
 		return nil, fmt.Errorf("%w: node identity resolver is required", ErrDistributionTransportInvalid)
 	}
-	return &DistributionHub{nodeCredentials: config.NodeCredentials, credential: append([]byte(nil), config.Credential...), now: config.Now, maximum: config.MaximumPending, identity: config.Identity, onDemand: config.OnDemand, store: config.Store, keys: config.Keys, keyReference: config.KeyReference, closedCh: make(chan struct{})}, nil
+	return &DistributionHub{nodeCredentials: config.NodeCredentials, credential: append([]byte(nil), config.Credential...), now: config.Now, identity: config.Identity, onDemand: config.OnDemand, store: config.Store, keys: config.Keys, keyReference: config.KeyReference, closedCh: make(chan struct{})}, nil
 }
 
 // Close invalidates all outstanding distribution actions and wipes every
@@ -337,11 +332,6 @@ func (h *DistributionHub) enqueue(ctx context.Context, action string, request Di
 	} else if found && existing.Status != "failed" && (existing.Status != "" || existing.Message.ExpiresAt.After(now)) {
 		clear(message.PrivateKeyPEM)
 		return existing.Message, nil
-	}
-	if pending, err := h.store.CountPending(ctx, now); err != nil {
-		return DistributionMessage{}, distributionOperationFailure{cause: err}
-	} else if pending >= h.maximum {
-		return DistributionMessage{}, ErrDistributionTransportFailed
 	}
 	row := DistributionAction{Key: key, Message: message}
 	if action == "stage" && (len(message.CertificatePEM) > 0 || len(message.PrivateKeyPEM) > 0) {

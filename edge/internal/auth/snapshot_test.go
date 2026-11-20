@@ -152,6 +152,30 @@ func TestSnapshotWatcherReleaseOwnsExactRegistration(t *testing.T) {
 	}
 }
 
+func TestSnapshotRevokesMoreThan8192Watchers(t *testing.T) {
+	snapshot := NewSnapshot()
+	claims := admission.Claims{JTI: "jti", EnvironmentID: "environment", KeyID: "key"}
+	watchers := make([]<-chan struct{}, 8193)
+	for i := range watchers {
+		done, release, err := snapshot.Watch(claims)
+		if err != nil {
+			t.Fatalf("watch %d: %v", i, err)
+		}
+		t.Cleanup(release)
+		watchers[i] = done
+	}
+	if err := snapshot.ReplaceRevocations([]byte(`{"jtis":["jti"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	for i, done := range watchers {
+		select {
+		case <-done:
+		default:
+			t.Fatalf("watch %d did not receive revocation", i)
+		}
+	}
+}
+
 // A control-plane key rotation (a staging reset, a prod rotation) reaches a running edge without a restart: the first token naming the new
 // key id refreshes the document once, further misses wait out the interval, and a failed fetch leaves the key untrusted.
 func TestSnapshotRefreshesOnUnknownKeyIDWithoutRestart(t *testing.T) {

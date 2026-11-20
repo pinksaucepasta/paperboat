@@ -35,7 +35,7 @@ func BenchmarkRelayForward(b *testing.B) {
 			}
 		}
 	}()
-	const window, size = queueDepth / 2, 1312
+	const window, size = 32, 1312
 	data := make([]byte, size)
 	data[0] = 4
 	b.SetBytes(size)

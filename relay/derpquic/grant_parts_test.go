@@ -29,9 +29,10 @@ func TestGrantsOfOneGenerationAddUpBeyondOnePartOfMemberships(t *testing.T) {
 		}
 		all = append(all, pair)
 		var parts []string
-		for start := 0; start < len(all); start += MaxGrantMemberships {
+		const perPart = 256
+		for start := 0; start < len(all); start += perPart {
 			chunk := ga
-			chunk.Memberships = all[start:min(start+MaxGrantMemberships, len(all))]
+			chunk.Memberships = all[start:min(start+perPart, len(all))]
 			parts = append(parts, f.token(chunk))
 		}
 		credential := strings.Join(parts, "\n")

@@ -169,21 +169,17 @@ func sameGrantIdentity(a, b Grant) bool {
 }
 
 // mergeGrants adds the memberships of a further grant part of the same identity; a membership named again keeps the
-// newest expiry, and the result stays within peernetwork.MaxMergedMemberships. current is never changed: a connection's
-// grant, its fence and pair leases may still hold it, so the result gets its own list and index. On an error nothing
-// is changed.
-func mergeGrants(current, next Grant) (Grant, error) {
-	memberships := mergeMemberships(current.Memberships, next.Memberships)
-	if len(memberships) > peernetwork.MaxMergedMemberships {
-		return Grant{}, ErrAdmission
-	}
+// newest expiry. The parts are already bounded in count and bytes (peernetwork.MaxGrantParts of MaxGrantBytes). current
+// is never changed: a connection's grant, its fence and pair leases may still hold it, so the result gets its own list
+// and index.
+func mergeGrants(current, next Grant) Grant {
 	merged := next
-	merged.Memberships = memberships
+	merged.Memberships = mergeMemberships(current.Memberships, next.Memberships)
 	if merged.PeerRelay == nil {
 		merged.PeerRelay = current.PeerRelay
 	}
 	merged.ExpiresAt = max(current.ExpiresAt, next.ExpiresAt)
-	return merged.withIndex(), nil
+	return merged.withIndex()
 }
 
 func allowedAdmitted(a, b Grant) bool {

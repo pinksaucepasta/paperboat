@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"io"
@@ -53,7 +54,25 @@ type Server struct {
 	workers                                              sync.WaitGroup
 	accepted, denied, forwarded, dropped, bytesForwarded atomic.Uint64
 	lastRefusalLog                                       atomic.Int64
+	// preGrant bounds one source address's connections that have not authenticated yet. It bounds an address,
+	// never the node: a peer that opens connections and stays silent holds at most its share while others
+	// connect. Prior art: Tailscale's derper gives each client a handshake deadline (derp/derpserver).
+	preGrant *addrlimit.Limiter
 }
+
+// preGrantPerAddress is how many unauthenticated connections one address may hold at once.
+const preGrantPerAddress = 16
+
+// admitPreGrant takes one unauthenticated connection from the address's share; release gives it back (also
+// when the connection authenticates or closes, and safe to call more than once).
+func (s *Server) admitPreGrant(remote string) (release func(), ok bool) {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	return s.preGrant.Admit(host, false)
+}
+
 type queued struct {
 	packet
 	source  *peerConn
@@ -76,8 +95,9 @@ type peerConn struct {
 	namespace       [32]byte
 	generationDisco key.DiscoPublic
 	grant           Grant
-	out             chan queued
+	out             *sendQueue
 	control         chan []byte
+	preGrant        func() // gives back the connection's unauthenticated share; nil when it took none
 	rate            *budget
 	sequence        atomic.Uint64
 	// paired remembers the last peer this connection's grant was checked against, both signed grants at the
@@ -92,7 +112,7 @@ type pairMemo struct {
 }
 
 func quicConfig() *quic.Config {
-	return &quic.Config{CongestionControl: quic.CongestionControlBBR, EnableDatagrams: true, HandshakeIdleTimeout: 5 * time.Second, MaxIdleTimeout: 45 * time.Second, KeepAlivePeriod: 15 * time.Second, MaxIncomingStreams: 1, MaxIncomingUniStreams: -1, InitialStreamReceiveWindow: MaxControl + 5, MaxStreamReceiveWindow: MaxControl + 5, InitialConnectionReceiveWindow: 2 * MaxControl, MaxConnectionReceiveWindow: 2 * MaxControl}
+	return &quic.Config{EnableDatagrams: true, HandshakeIdleTimeout: 5 * time.Second, MaxIdleTimeout: 45 * time.Second, KeepAlivePeriod: 15 * time.Second, MaxIncomingStreams: 1, MaxIncomingUniStreams: -1, InitialStreamReceiveWindow: MaxControl + 5, MaxStreamReceiveWindow: MaxControl + 5, InitialConnectionReceiveWindow: 2 * MaxControl, MaxConnectionReceiveWindow: 2 * MaxControl}
 }
 func NewServer(v Verifier) (*Server, error) {
 	if v.Issuer == "" || v.NodeID == "" || v.NodeGeneration == 0 || v.ProcessEpoch == "" || len(v.Keys) == 0 {
@@ -103,7 +123,7 @@ func NewServer(v Verifier) (*Server, error) {
 		return nil, err
 	}
 	v.Keys = nil
-	s := &Server{verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
+	s := &Server{verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{}), preGrant: addrlimit.NewInFlight(preGrantPerAddress)}
 	s.keys.Store(&keys)
 	return s, nil
 }
@@ -179,14 +199,30 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 			c.CloseWithError(3, "relay unavailable")
 			continue
 		}
+		s.mu.Unlock()
+		release, ok := s.admitPreGrant(c.RemoteAddr().String())
+		if !ok {
+			s.denied.Add(1)
+			c.CloseWithError(3, "relay unavailable")
+			continue
+		}
+		s.mu.Lock()
+		if s.draining {
+			s.mu.Unlock()
+			release()
+			s.denied.Add(1)
+			c.CloseWithError(3, "relay unavailable")
+			continue
+		}
 		s.connections[c] = struct{}{}
 		s.workers.Add(1)
 		s.mu.Unlock()
-		go func() { defer s.workers.Done(); s.serveConn(c) }()
+		go func() { defer s.workers.Done(); s.serveConn(c, release) }()
 	}
 }
-func (s *Server) serveConn(c *quic.Conn) {
+func (s *Server) serveConn(c *quic.Conn, release func()) {
 	defer func() {
+		release()
 		c.CloseWithError(0, "relay closed")
 		s.mu.Lock()
 		delete(s.connections, c)
@@ -203,7 +239,7 @@ func (s *Server) serveConn(c *quic.Conn) {
 	if err != nil {
 		return
 	}
-	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
+	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: newSendQueue(), control: make(chan []byte, 8), preGrant: release}
 	s.servePeer(p)
 }
 
@@ -211,6 +247,9 @@ func (s *Server) servePeer(p *peerConn) {
 	c := p.conn
 	stream := p.stream
 	defer func() {
+		if p.preGrant != nil {
+			p.preGrant()
+		}
 		p.close(0, "relay closed")
 		s.mu.Lock()
 		delete(s.wssConnections, p)
@@ -230,6 +269,9 @@ func (s *Server) servePeer(p *peerConn) {
 	if err = s.authenticate(p, kind, b); err != nil {
 		s.reject(p, err)
 		return
+	}
+	if p.preGrant != nil {
+		p.preGrant() // authenticated: the grant's own budgets bound it from here
 	}
 	stream.SetReadDeadline(time.Time{})
 	stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -268,18 +310,6 @@ func (s *Server) servePeer(p *peerConn) {
 		if !p.rate.allow(now, len(b)) || accountBudget == nil {
 			s.reject(p, ErrOverload)
 			return
-		}
-		// Payload over the account's fair-use speed waits for its tokens before the next frame is read, so the sender's TCP slows to
-		// the speed (nothing is dropped); control frames are bounded by the carrier's own budget only, so a saturated account can
-		// still ping and re-authenticate.
-		if kind == framePacket {
-			if delay, _ := accountBudget.reserve(now, len(b), time.Hour); delay > 0 {
-				select {
-				case <-time.After(delay):
-				case <-p.context().Done():
-					return
-				}
-			}
 		}
 		switch kind {
 		case frameAuth, frameAuthGeneration, frameAuthBatch:
@@ -325,6 +355,20 @@ func (s *Server) servePeer(p *peerConn) {
 				return
 			}
 			msg.control = false
+			if !s.sendAuthorized(p, msg.peer, now) { // not the account's traffic: no tokens, no demand
+				s.dropped.Add(1)
+				continue
+			}
+			// Payload over the account's fair-use speed waits for its tokens before the next frame is read, so the sender's TCP slows to
+			// the speed (nothing is dropped); control frames are bounded by the carrier's own budget only, so a saturated account can
+			// still ping and re-authenticate.
+			if delay, _ := accountBudget.reserve(now, len(b), time.Hour); delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-p.context().Done():
+					return
+				}
+			}
 			s.route(p, msg)
 		default:
 			s.reject(p, ErrProtocol)
@@ -349,7 +393,6 @@ func (s *Server) reject(p *peerConn, err error) {
 const fenceSweepEvery = time.Second
 
 func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
-	var err error
 	k, _ := ParseKey(g.WireGuardPublicKey)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -413,9 +456,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		old.close(code, "relay registration superseded")
 	}
 	if merging {
-		if g, err = mergeGrants(p.grant, g); err != nil {
-			return err
-		}
+		g = mergeGrants(p.grant, g)
 	}
 	if p.key.IsZero() {
 		s.accepted.Add(1)
@@ -452,6 +493,14 @@ func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
 	p.paired = pairMemo{peer: q, mine: p.grant.signedHash, theirs: q.grant.signedHash, allowed: allowedAdmitted(p.grant, q.grant)}
 	return p.paired.allowed
 }
+
+// sendAuthorized reports whether p may send to the peer with key k now.
+func (s *Server) sendAuthorized(p *peerConn, k key.NodePublic, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
+}
+
 func (s *Server) route(p *peerConn, msg packet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -465,9 +514,7 @@ func (s *Server) route(p *peerConn, msg packet) {
 		return
 	}
 	msg.peer = p.key
-	select {
-	case q.out <- queued{packet: msg, source: p}:
-	default:
+	if !q.out.push(queued{packet: msg, source: p}) {
 		s.dropped.Add(1)
 	}
 }
@@ -480,11 +527,7 @@ func (s *Server) readDatagrams(p *peerConn) {
 	defer p.close(0, "relay closed")
 	var r reassembler
 	forward := func(b []byte, now time.Time) bool {
-		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
-		})
+		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool { return s.sendAuthorized(p, k, now) })
 		if e != nil {
 			s.reject(p, e)
 			return false
@@ -540,6 +583,11 @@ func (s *Server) readDatagrams(p *peerConn) {
 			s.dropped.Add(1)
 			continue
 		}
+		// A datagram for a peer this one may not reach costs the carrier's budget only: it takes no account tokens and adds no demand.
+		if len(b) >= fragmentHeader && !s.sendAuthorized(p, fragmentPeer(b), now) {
+			s.dropped.Add(1)
+			continue
+		}
 		delay, ok := account.reserve(now, len(b), shapingMaxDelay)
 		if !ok {
 			s.dropped.Add(1)
@@ -572,7 +620,11 @@ func (s *Server) writePackets(p *peerConn) {
 			if writeFrame(p.stream, framePong, pong) != nil {
 				return
 			}
-		case msg := <-p.out:
+		case <-p.out.wake:
+			msg, ok := p.out.pop()
+			if !ok {
+				continue
+			}
 			s.mu.Lock()
 			valid := s.authorizedLocked(msg.source, p, time.Now())
 			if msg.control && !msg.service {
@@ -671,8 +723,10 @@ func speedBytes(mbit float64) float64 {
 }
 
 func (s *Server) rateForLocked(account string) float64 {
-	if slow, ok := s.accountSpeeds[account]; ok {
-		return min(s.accountRate, slow)
+	// A listed speed replaces the default: the control plane lists an account whose plan speed differs from it, a paid account's
+	// 100 Mbit/s as well as a Free account's slower tier (clamping to the default held every paid account to Free's 10).
+	if speed, ok := s.accountSpeeds[account]; ok {
+		return speed
 	}
 	return s.accountRate
 }

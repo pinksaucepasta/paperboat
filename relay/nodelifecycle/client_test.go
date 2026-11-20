@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relayshare"
 	"math/big"
@@ -425,5 +426,41 @@ func TestLeaseIgnoresUnknownFieldsAndRejectsTrailingData(t *testing.T) {
 				t.Fatalf("start error = %v, want ok=%v", err, tc.ok)
 			}
 		})
+	}
+}
+
+func TestRelayStartAcceptsLargeLease(t *testing.T) {
+	const count = 4097
+	speeds := make([]AccountSpeed, count)
+	for i := range speeds {
+		speeds[i] = AccountSpeed{Account: fmt.Sprintf("account_%04d_%s", i, strings.Repeat("a", 40)), Mbit: 5}
+	}
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Epoch string `json:"process_epoch"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(Lease{NodeID: "relay", Generation: 2, ProcessEpoch: in.Epoch,
+			ExpiresAt: time.Now().Add(10 * time.Second).Unix(), AccountMbit: 10, AccountSpeeds: speeds}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer api.Close()
+	client, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16),
+		NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	lease, err := client.Start(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lease.AccountSpeeds) != count || lease.AccountSpeeds[count-1] != speeds[count-1] {
+		t.Fatal("relay did not receive the complete lease")
 	}
 }

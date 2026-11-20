@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
@@ -21,9 +22,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/tunnelmanager"
 )
-
-// maximumEngineTunnels bounds one answer of the engine tunnel list.
-const maximumEngineTunnels = 1024
 
 // engineTunnelPoll is how often the list is refetched without a tunnels event.
 const engineTunnelPoll = machineevents.DefaultFallbackInterval
@@ -61,10 +59,14 @@ func (s *Service) FetchEngineTunnels(ctx context.Context) (out []runtimewire.Eng
 			Tunnels []runtimewire.EngineTunnel `json:"tunnels"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 16<<20)).Decode(&envelope); err != nil {
+	raw, err := io.ReadAll(io.LimitReader(res.Body, connectorprotocol.MaximumSnapshotBytes+1))
+	if err != nil || len(raw) > connectorprotocol.MaximumSnapshotBytes {
 		return nil, controlFailure(errors.Join(preview.ErrMachineAttachmentSessionInvalid, err))
 	}
-	if len(envelope.Data.Tunnels) > maximumEngineTunnels {
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, controlFailure(errors.Join(preview.ErrMachineAttachmentSessionInvalid, err))
+	}
+	if envelope.Data.Tunnels == nil {
 		return nil, controlFailure(preview.ErrMachineAttachmentSessionInvalid)
 	}
 	return envelope.Data.Tunnels, nil

@@ -63,23 +63,18 @@ func TestMembershipGrantsAuthorizeExactlyTheReciprocalPairs(t *testing.T) {
 	}
 }
 
-// The membership shape itself is peernetwork.RelayGrant.Check (TestGrantCheckRefusesEachBrokenRule).
-func TestMergedMembershipsStayBounded(t *testing.T) {
+// The membership shape itself is peernetwork.RelayGrant.Check (TestGrantCheckRefusesEachBrokenRule). Parts merge
+// without a count cap: the parts' bytes are the bound.
+func TestMergedMembershipsHaveNoCountCap(t *testing.T) {
 	later := time.Now().Add(time.Minute).Unix()
-	many := make([]Scope, peernetwork.MaxMergedMemberships+1)
+	const n = 5000
+	many := make([]Scope, n)
 	for i := range many {
 		many[i] = scope("machine_access", fmt.Sprintf("access_%d", i), "terminal", "dial", later)
 	}
-	merge := func(n int) error {
-		_, err := mergeGrants(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[:n-1]}}.withIndex(), Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[n-1 : n]}})
-		return err
-	}
-	// Parts of <=MaxGrantMemberships merge up to MaxMergedMemberships (a team CLI reaching many shared hosts).
-	if err := merge(MaxGrantMemberships + 1); err != nil {
-		t.Fatalf("merging %d memberships across parts was refused: %v", MaxGrantMemberships+1, err)
-	}
-	if merge(peernetwork.MaxMergedMemberships+1) == nil {
-		t.Fatal("merging past MaxMergedMemberships was accepted")
+	merged := mergeGrants(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[:n-1]}}.withIndex(), Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[n-1:]}})
+	if len(merged.Memberships) != n {
+		t.Fatalf("merged %d memberships, want %d", len(merged.Memberships), n)
 	}
 }
 

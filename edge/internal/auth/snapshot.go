@@ -14,21 +14,14 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
 )
 
-const (
-	maxSnapshotBytes     = 1 << 20
-	maxSnapshotJSONDepth = 64
-)
+const maxSnapshotJSONDepth = 64
 
-var (
-	ErrSnapshotInvalid  = errors.New("credential trust snapshot is invalid")
-	ErrSnapshotCapacity = errors.New("credential revocation watcher capacity exceeded")
-)
-
-const maximumRevocationWatchers = 8192
+var ErrSnapshotInvalid = errors.New("credential trust snapshot is invalid")
 
 type Snapshot struct {
 	mu                                         sync.RWMutex
@@ -124,11 +117,11 @@ type RevokedConnectorGeneration struct {
 }
 
 func (s *Snapshot) ReplaceRevocations(data []byte) error {
-	if len(data) == 0 || len(data) > maxSnapshotBytes {
+	if len(data) == 0 || len(data) > connectorprotocol.MaximumSnapshotBytes {
 		return ErrSnapshotInvalid
 	}
 	var document RevocationDocument
-	if snapshotJSON(data, &document) != nil || len(document.JTIs)+len(document.Environments)+len(document.Connectors)+len(document.KeyIDs) > 10000 {
+	if snapshotJSON(data, &document) != nil {
 		return ErrSnapshotInvalid
 	}
 	jtis, environments, connectors, keys := map[string]struct{}{}, map[string]struct{}{}, map[connectorGeneration]struct{}{}, map[string]struct{}{}
@@ -194,9 +187,6 @@ func (s *Snapshot) Watch(claims admission.Claims) (<-chan struct{}, func(), erro
 	if s.revokedLocked(claims) {
 		close(done)
 		return done, func() {}, nil
-	}
-	if len(s.watchers) >= maximumRevocationWatchers {
-		return nil, nil, ErrSnapshotCapacity
 	}
 	owner := &revocationOwner{}
 	s.watchers[owner] = revocationWatcher{claims: claims, done: done}

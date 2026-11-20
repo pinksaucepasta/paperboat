@@ -141,11 +141,8 @@ func (c *Client) PromoteManagedSSHHostKeys(ctx context.Context, machineID, setID
 	return set, nil
 }
 
-// validRevokedKeyIDs: at most wire.MaxRevokedKeyIDs key IDs the server issues, each for this machine.
+// validRevokedKeyIDs: key IDs the server issues, each for this machine.
 func validRevokedKeyIDs(ids []string, machineID string) bool {
-	if len(ids) > wire.MaxRevokedKeyIDs {
-		return false
-	}
 	for _, id := range ids {
 		if !wire.ValidRevokedKeyID(id) || !strings.HasSuffix(id, ":"+machineID) {
 			return false

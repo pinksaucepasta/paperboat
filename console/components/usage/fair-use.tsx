@@ -4,8 +4,8 @@ import Link from "next/link"
 import { billingQuery, fairUse, formatSpeed } from "@/lib/billing"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
+import { AllowanceBar, AllowanceHeadline, AllowanceLegend, useHostedSplit } from "@/components/usage/allowance"
 import { useTimeFormat } from "@/lib/use-time-format"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -18,6 +18,7 @@ export function FairUse() {
   const workspace = useWorkspace()
   const billing = useApiQuery(billingQuery(workspace))
   const time = useTimeFormat()
+  const split = useHostedSplit(billing.data, workspace?.id ?? "")
   if (!workspace || billing.isError) return null
   const data = billing.data
   if (!data) return <Skeleton className="h-36 w-full" />
@@ -31,7 +32,7 @@ export function FairUse() {
       data-fair-use
       data-throttled={fair.throttled}
       data-own-edges={fair.ownEdges}
-      aria-label="Traffic"
+      aria-label="Hosted allowance"
       className="flex flex-col gap-3 rounded-lg border border-divider bg-surface p-4"
     >
       {fair.ownEdges ? (
@@ -44,28 +45,19 @@ export function FairUse() {
         </>
       ) : (
         <>
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <span className="text-2xl font-medium tracking-tight tabular-nums">
-              {formatBytes(fair.used)} <span className="text-base font-normal text-muted-foreground">of {formatBytes(fair.amount)} included</span>
-            </span>
-            <span className="text-sm text-muted-foreground" data-fair-use-state>
-              {fair.throttled ? `Reduced to ${formatSpeed(fair.mbit)}${until ? ` until ${until}` : ""}` : "Full speed"}
-            </span>
-          </div>
-          <div
-            role="meter"
-            aria-label="Included traffic used"
-            aria-valuemin={0}
-            aria-valuemax={fair.amount}
-            aria-valuenow={Math.min(fair.used, fair.amount)}
-            className="flex h-1.5 overflow-hidden rounded-full bg-muted"
-          >
-            <div className={cn(fair.throttled ? "bg-muted-foreground" : "bg-primary")} style={{ width: `${fair.share * 100}%` }} />
+          <AllowanceHeadline fair={fair} until={until} speed={formatSpeed(fair.mbit)} />
+          <div className="flex flex-col gap-2.5">
+            <AllowanceBar fair={fair} split={split} />
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-sm text-muted-foreground">
+              <span className="tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)}`}</span>
+              {until && <span>Resets {until}</span>}
+            </div>
+            <AllowanceLegend split={split} />
           </div>
           <p className="text-sm text-muted-foreground">
             {formatBytes(fair.amount)} a month of traffic included
             {fair.seats ? ` (${formatBytes(fair.seats.perSeat)} × ${fair.seats.count} seat${fair.seats.count === 1 ? "" : "s"}, shared by the team)` : ""}
-            {until && !fair.throttled ? `, resets ${until}` : ""}. Edges and relays share it: previews, tunnels and relayed connections count.
+            . Edges and relays share it: previews, tunnels and relayed connections count.
             Files you upload through a console terminal count too; typing and terminal output do not, and are never slowed by it. After that, speed is
             reduced to {formatSpeed(fair.mbit)} until your next billing date. Never cut off, never billed extra.
           </p>

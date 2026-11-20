@@ -69,7 +69,7 @@ func (l *linkConn) Close() error {
 }
 
 // lossyTransfer sends for d over 50 ms and 0.5% random loss on a 50 Mbit/s link and returns the goodput in Mbit/s.
-func lossyTransfer(t *testing.T, control quic.CongestionControl, d time.Duration) float64 {
+func lossyTransfer(t *testing.T, d time.Duration) float64 {
 	t.Helper()
 	listen := func() net.PacketConn {
 		p, err := net.ListenPacket("udp4", "127.0.0.1:0")
@@ -84,7 +84,7 @@ func lossyTransfer(t *testing.T, control quic.CongestionControl, d time.Duration
 	client := &quic.Transport{Conn: newLinkConn(rawClient, 25*time.Millisecond, rate, 100*time.Millisecond, 0.005, 1)}
 	defer server.Close()
 	defer client.Close()
-	config := &quic.Config{CongestionControl: control, MaxIdleTimeout: 10 * time.Second}
+	config := &quic.Config{MaxIdleTimeout: 10 * time.Second}
 	l, err := server.Listen(&tls.Config{Certificates: []tls.Certificate{certificate(t)}, NextProtos: []string{"bulk"}}, config)
 	if err != nil {
 		t.Fatal(err)
@@ -131,15 +131,14 @@ func lossyTransfer(t *testing.T, control quic.CongestionControl, d time.Duration
 	return float64(received.Load()) * 8 / 1e6 / time.Since(start).Seconds()
 }
 
-// The benchmark's 50 ms / 0.5% cell, in process: NewReno sits at its Mathis ceiling (about 3 Mbit/s), BBR keeps the link.
-func TestBBRBeatsRenoOnLossyLongPath(t *testing.T) {
+// The benchmark's 50 ms / 0.5% cell, in process: loss-based senders sit at their Mathis ceiling (about 3 Mbit/s), BBR keeps the link.
+func TestBBRKeepsLinkRateUnderRandomLoss(t *testing.T) {
 	if testing.Short() {
-		t.Skip("takes 16 s")
+		t.Skip("takes 8 s")
 	}
-	reno := lossyTransfer(t, quic.CongestionControlReno, 8*time.Second)
-	bbr := lossyTransfer(t, quic.CongestionControlBBR, 8*time.Second)
-	t.Logf("reno %.1f Mbit/s, bbr %.1f Mbit/s", reno, bbr)
-	if bbr < 3*reno || bbr < 15 {
-		t.Fatalf("BBR %.1f Mbit/s must beat Reno %.1f Mbit/s by 3x and reach 15 Mbit/s", bbr, reno)
+	bbr := lossyTransfer(t, 8*time.Second)
+	t.Logf("bbr %.1f Mbit/s", bbr)
+	if bbr < 15 {
+		t.Fatalf("BBR %.1f Mbit/s must reach 15 Mbit/s under 0.5%% random loss", bbr)
 	}
 }

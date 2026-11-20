@@ -245,7 +245,7 @@ ON CONFLICT (machine_id, cli_client_session_id) DO UPDATE SET valid_before = GRE
 
 -- name: ListRevokedManagedSSHCertificateHolders :many
 -- Holders of a still-valid certificate for the machine that may no longer log in to it: the host refuses their key IDs
--- (bounded: one row per CLI session that got a certificate within the validity; the caller caps it).
+-- (bounded: one row per CLI session that got a certificate within the validity).
 SELECT h.user_id, h.cli_client_session_id FROM managed_ssh_certificate_holders h
 JOIN user_machines m ON m.id = h.machine_id
 LEFT JOIN cli_client_sessions session ON session.id = h.cli_client_session_id AND session.user_id = h.user_id
@@ -253,8 +253,7 @@ LEFT JOIN cli_client_sessions session ON session.id = h.cli_client_session_id AN
 WHERE h.machine_id = sqlc.arg(machine_id) AND h.valid_before > sqlc.arg(now)
 AND (session.id IS NULL OR NOT ((m.owner_team_id IS NULL AND m.user_id = h.user_id AND m.deleted_at IS NULL)
   OR machine_capability_allowed(h.user_id, m.id, 'managed_ssh') OR machine_management_allowed(h.user_id, m.id)))
-ORDER BY h.cli_client_session_id
-LIMIT sqlc.arg('limit');
+ORDER BY h.cli_client_session_id;
 
 -- name: DeleteExpiredManagedSSHCertificateHolders :exec
 DELETE FROM managed_ssh_certificate_holders WHERE machine_id = sqlc.arg(machine_id) AND valid_before <= sqlc.arg(now);

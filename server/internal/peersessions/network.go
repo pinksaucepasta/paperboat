@@ -886,7 +886,12 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 		claims := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
 			Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
 			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch}
-		for i, part := range relayGrantMembershipParts(relayGrantMemberships(self, peers, expires.Unix())) {
+		parts := relayGrantMembershipParts(relayGrantMemberships(self, peers, expires.Unix()))
+		if len(parts) > peernetwork.MaxGrantParts { // the relay refuses a longer credential
+			slog.Warn("peer network authority unavailable", "site", "network.go:relayGrantParts")
+			return nil, ErrUnavailable
+		}
+		for i, part := range parts {
 			g := claims
 			g.Memberships = part
 			if i == 0 && peerRelayReady { // the relay and the CLI merge the parts; the descriptor rides in the first
@@ -907,9 +912,9 @@ func (s *NetworkService) relayGrants(nodes []relayNodeRow, self networkBinding, 
 	return grants, nil
 }
 
-// relayGrantMembershipParts splits memberships into grant parts of at most peernetwork.MaxGrantMemberships each and
-// within the relay's token bound (the token is the base64 of the claims; identity claims and header take well under
-// 4 KiB). There is always one part, empty for an endpoint without relayable peers.
+// relayGrantMembershipParts splits memberships into grant parts within the relay's token bound (the token is the base64
+// of the claims; identity claims and header take well under 4 KiB). There is always one part, empty for an endpoint
+// without relayable peers.
 func relayGrantMembershipParts(memberships []networkScope) [][]networkScope {
 	budget := peernetwork.MaxGrantBytes*3/4 - 4<<10
 	parts := [][]networkScope{{}}
@@ -917,7 +922,7 @@ func relayGrantMembershipParts(memberships []networkScope) [][]networkScope {
 	for _, m := range memberships {
 		raw, _ := json.Marshal(m)
 		last := len(parts) - 1
-		if len(parts[last]) == peernetwork.MaxGrantMemberships || used+len(raw)+1 > budget {
+		if used+len(raw)+1 > budget {
 			parts, last, used = append(parts, nil), last+1, 0
 		}
 		parts[last] = append(parts[last], m)
@@ -932,9 +937,8 @@ func relayGrantMembershipParts(memberships []networkScope) [][]networkScope {
 // configuration, becomes the account's one network (peernetwork.AccountNetworkID) in each direction this endpoint
 // holds; the relay pairs two endpoints of one account holding it in opposite directions (derpquic membership.go). A
 // peer without a mesh scope (a team or another account's endpoint) adds its relay scopes (relayGrantScopes), each once.
-// A grant is then O(memberships), not O(peers): a mesh endpoint of any account size carries one or two. Over the
-// relay's bound the memberships with the latest expiry are kept (the mesh's first), the rule RelayGrantScopes applies
-// to one peer's sessions; a session left out reaches its peer directly only.
+// A grant is then O(memberships), not O(peers): a mesh endpoint of any account size carries one or two.
+// None is left out: relayGrantMembershipParts splits them into as many parts as the relay's token bound needs.
 func relayGrantMemberships(self networkBinding, peers []networkPeer, grantExpiry int64) []networkScope {
 	relayable := make([][]networkScope, 0, len(peers))
 	for _, peer := range peers {
@@ -942,12 +946,7 @@ func relayGrantMemberships(self networkBinding, peers []networkPeer, grantExpiry
 			relayable = append(relayable, peer.Scopes)
 		}
 	}
-	out := peernetwork.RelayGrantMemberships(self.AccountID, relayable, grantExpiry)
-	if len(out) > peernetwork.MaxMergedMemberships {
-		slog.Warn("relay grant keeps the latest memberships within the relay bound", "memberships", len(out), "site", "network.go:relayGrantMemberships")
-		out = out[:peernetwork.MaxMergedMemberships]
-	}
-	return out
+	return peernetwork.RelayGrantMemberships(self.AccountID, relayable, grantExpiry)
 }
 
 // relayGrantScopes is the part of a peer's document scopes a relay grant carries; peernetwork.RelayGrantKeepsStanding

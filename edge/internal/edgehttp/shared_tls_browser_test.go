@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
@@ -128,6 +129,10 @@ type sharedTLSOutageAuthority struct {
 	unavailable atomic.Bool
 }
 
+func (a *sharedTLSOutageAuthority) SnapshotForHost(ctx context.Context, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	return testSnapshotForHost(ctx, a, hostname)
+}
+
 func (a *sharedTLSOutageAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.IngressDecision, error) {
 	if a.unavailable.Load() {
 		return nil, errors.New("control unavailable")
@@ -149,9 +154,15 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 			_, httpDecision := browserTestMatch()
 			httpDecision.Binding.Hostname = host
 			httpDecision.ExpiresAt = time.Now().Add(8 * time.Second)
-			if host == "application.test" {
-				authority.set(httpDecision)
+			decisions := make([]connectorprotocol.IngressDecision, 4097)
+			for i := range decisions {
+				decisions[i] = httpDecision
+				decisions[i].Binding.Hostname = fmt.Sprintf("unrelated-%d.example.test", i)
 			}
+			if host == "application.test" {
+				decisions = append(decisions, httpDecision)
+			}
+			authority.set(decisions...)
 			authority.unavailable.Store(true)
 			manager, err := NewPublicTCPListeners(PublicTCPListenerConfig{ListenHost: "127.0.0.1", InfrastructureHostname: "infrastructure.test", Authority: authority, Routes: registry, PreviewHTTPSAuthority: func(context.Context, string) error { return control.ErrBrowserDenied }})
 			if err != nil {
@@ -194,7 +205,7 @@ func TestSharedTLSAuthorityOutageAndRecovery(t *testing.T) {
 			}
 			authority.unavailable.Store(false)
 			if err = dial(); err != nil {
-				t.Fatal("fresh authority did not restore HTTPS", err)
+				t.Fatal("large refreshed authority did not restore HTTPS", err)
 			}
 		})
 	}
@@ -794,6 +805,10 @@ type lateDecisionAuthority struct {
 	host      string
 	after     int32 // snapshots that answer nothing before the decision appears (a held name polls)
 	snapshots atomic.Int32
+}
+
+func (a *lateDecisionAuthority) SnapshotForHost(ctx context.Context, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	return testSnapshotForHost(ctx, a, hostname)
 }
 
 func (a *lateDecisionAuthority) Snapshot(context.Context) ([]connectorprotocol.IngressDecision, error) {

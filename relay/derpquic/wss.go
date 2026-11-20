@@ -29,6 +29,13 @@ func (s *Server) WSSHandler() http.Handler {
 			http.Error(w, "relay unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		release, ok := s.admitPreGrant(r.RemoteAddr)
+		if !ok {
+			s.denied.Add(1)
+			http.Error(w, "relay unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		defer release()
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{WSSSubprotocol}, CompressionMode: websocket.CompressionDisabled})
 		if err != nil {
 			return
@@ -40,7 +47,7 @@ func (s *Server) WSSHandler() http.Handler {
 		ctx, cancel := context.WithCancel(r.Context())
 		c.SetReadLimit(MaxControl + 5)
 		nc := wsconn.NetConn(ctx, c, websocket.MessageBinary, r.RemoteAddr)
-		p := &peerConn{stream: nc, ctx: ctx, cancel: cancel, tlsState: *r.TLS, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
+		p := &peerConn{stream: nc, ctx: ctx, cancel: cancel, tlsState: *r.TLS, rate: newBudget(carrierBytesPerSecond), out: newSendQueue(), control: make(chan []byte, 8), preGrant: release}
 		var closeOnce sync.Once
 		p.closeFn = func(code uint64, reason string) {
 			closeOnce.Do(func() {

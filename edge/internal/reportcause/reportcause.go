@@ -107,9 +107,6 @@ func classify(err error) (string, int) {
 	if reporting.SameError(err, auth.ErrSnapshotInvalid) {
 		return "trust_snapshot_invalid", 87
 	}
-	if reporting.SameError(err, auth.ErrSnapshotCapacity) {
-		return "capacity_exhausted", 86
-	}
 	if reporting.SameError(err, control.ErrControlInvalid) {
 		return "control_invalid", 85
 	}

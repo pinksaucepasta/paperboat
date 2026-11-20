@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
+	"github.com/pinksaucepasta/paperboat/edge/internal/auth"
 	"github.com/pinksaucepasta/paperboat/edge/internal/usage"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 )
@@ -269,8 +271,8 @@ func TestHTTPClientRejectsPlaintextRedirectMalformedAndOversized(t *testing.T) {
 	if _, err := oversized.Current(context.Background(), "env", "machine", "runtime"); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("oversized = %v", err)
 	}
-	if _, err := oversized.Revocations(context.Background()); !errors.Is(err, ErrControlUnavailable) {
-		t.Fatalf("oversized revocations = %v", err)
+	if _, err := oversized.JWKS(context.Background()); !errors.Is(err, ErrControlUnavailable) {
+		t.Fatalf("oversized JWKS = %v", err)
 	}
 }
 
@@ -644,5 +646,35 @@ func TestRefusedControlRequestKeepsResponderAndBodyExcerpt(t *testing.T) {
 		if responder != tc.responder || !strings.HasPrefix(body, tc.body) || len(body) > responseExcerptBytes || strings.ContainsAny(body, "\n\x1b") {
 			t.Fatalf("responder %q body %q", responder, body)
 		}
+	}
+}
+
+func TestHTTPClientInstallsLargeRevocationSnapshot(t *testing.T) {
+	const total = 10001
+	ids := make([]string, total)
+	for i := range ids {
+		ids[i] = strings.Repeat("j", 128) + strconv.Itoa(i)
+	}
+	raw, err := json.Marshal(auth.RevocationDocument{JTIs: ids})
+	if err != nil || len(raw) <= maxControlDocument {
+		t.Fatalf("fixture length = %d, encoding error = %v", len(raw), err)
+	}
+	client := controlClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/trust/revocations" {
+			return response(http.StatusNotFound, ""), nil
+		}
+		return response(http.StatusOK, string(raw)), nil
+	})
+	snapshot := auth.NewSnapshot()
+	data, err := client.Revocations(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.ReplaceRevocations(data); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := snapshot.Revoked(t.Context(), admission.Claims{JTI: ids[total-1]})
+	if err != nil || !revoked {
+		t.Fatalf("last credential revoked = %v, error = %v", revoked, err)
 	}
 }

@@ -3,8 +3,6 @@ package derpquic
 import (
 	"hash/maphash"
 	"sort"
-
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // Memberships let a grant authorize pairs without naming every peer (PLAN 3b "Relay pair authorization by
@@ -13,9 +11,6 @@ import (
 // (kind, id, generation, capability, port) in opposite directions, exactly what per-peer scopes require,
 // without one entry per peer: a mesh endpoint of a 10,000-machine account carries one membership instead
 // of 10,000 peers. The relay holds no per-peer lists: a grant is its memberships.
-
-// MaxGrantMemberships bounds the memberships one grant carries.
-const MaxGrantMemberships = peernetwork.MaxGrantMemberships
 
 type membershipKey struct {
 	kind, id, capability string

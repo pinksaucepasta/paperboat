@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,22 @@ func TestReconcileAuthorizedKeysUsesDedicatedPaperboatFile(t *testing.T) {
 	}
 	if _, err := ReconcileAuthorizedKeys(root, []string{key}, "pb:machine_1", []string{"not-a-key-id"}); err == nil {
 		t.Fatal("a revoked key ID the server never issues was written")
+	}
+}
+
+// The server may list more revoked key IDs than the old 4096 cap; they all reach the KRL.
+func TestReconcileAuthorizedKeysAcceptsMoreThan4096RevokedKeyIDs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "ssh")
+	revoked := make([]string, 5000)
+	for index := range revoked {
+		revoked[index] = fmt.Sprintf("paperboat:user_a:session_%05d:machine_1", index)
+	}
+	ca := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(testQualificationSigner(t).PublicKey())))
+	if _, err := ReconcileAuthorizedKeys(root, []string{ca}, "pb:machine_1", revoked); err != nil {
+		t.Fatalf("5000 revoked key IDs: %v", err)
+	}
+	if krl, err := os.ReadFile(revokedKeysFile(root)); err != nil || !bytes.Contains(krl, []byte(revoked[4999])) {
+		t.Fatalf("revoked keys file lacks the 5000th key ID: err=%v", err)
 	}
 }
 

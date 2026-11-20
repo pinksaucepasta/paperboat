@@ -574,7 +574,7 @@ func testExpiredLeaseRecovers(t *testing.T, fallback bool) {
 }
 
 func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
-	for _, invalid := range []string{"", "expired_invalid_shape", "expired_scope_overflow", "missing_scope_expiry"} {
+	for _, invalid := range []string{"", "expired_invalid_shape", "missing_scope_expiry"} {
 		t.Run(invalid, func(t *testing.T) {
 			f := newFixture(t)
 			cert := certificate(t)
@@ -600,13 +600,6 @@ func TestRelayReceiptRetainsAdmittedExpiryAndValidatesScopeShape(t *testing.T) {
 			if invalid == "missing_scope_expiry" {
 				bad.ExpiresAt = 0
 				a.Memberships = append(a.Memberships, bad)
-			}
-			if invalid == "expired_scope_overflow" {
-				for i := 0; i <= MaxGrantMemberships; i++ {
-					scope := old
-					scope.ResourceID = fmt.Sprintf("old_%d", i)
-					a.Memberships = append(a.Memberships, scope)
-				}
 			}
 			projected, err := f.verifier.Verify(f.token(a), tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}}, now)
 			if invalid != "" {

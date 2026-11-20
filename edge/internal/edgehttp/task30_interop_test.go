@@ -747,6 +747,10 @@ func TestTask30TwoEdgeProcessRecovery(t *testing.T) {
 // them locally. Files are task-owned 0600 fixtures, never production state.
 type task365FileAuthority struct{ path string }
 
+func (a task365FileAuthority) SnapshotForHost(ctx context.Context, hostname string) ([]connectorprotocol.IngressDecision, error) {
+	return testSnapshotForHost(ctx, a, hostname)
+}
+
 func (a task365FileAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.IngressDecision, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

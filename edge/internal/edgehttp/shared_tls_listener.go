@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/edge/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
@@ -58,7 +59,7 @@ type SharedTLSListener struct {
 	held         *holdSet
 	// handshakes is the per-address TLS handshake rate; names caps one name's share of the slots, so a
 	// flood aimed at one preview cannot starve every other name (edge abuse plan, L2 and L5).
-	handshakes *addressLimiter
+	handshakes *addrlimit.Limiter
 	names      *holdSet
 }
 
@@ -157,7 +158,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
-		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(math.MaxInt, tlsNameConnections, 0)}
+		handshakes: addrlimit.New(addressHandshakeRate, addrlimit.Rate{}, 0), names: newHoldSet(math.MaxInt, tlsNameConnections, 0)}
 	l.hello, l.cancelHello = context.WithCancel(ctx)
 	go l.run()
 	return l
@@ -178,7 +179,7 @@ func (l *SharedTLSListener) run() {
 			return
 		}
 		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
-			if _, ok := l.handshakes.admit(host, false); !ok {
+			if _, ok := l.handshakes.Admit(host, false); !ok {
 				_ = conn.Close()
 				l.observe("tls_handshake_rate", errHandshakeRate)
 				continue
@@ -219,7 +220,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		}
 	}()
 	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
-	decisions, err := l.authority.Snapshot(ctx)
+	decisions, err := l.authority.SnapshotForHost(ctx, host)
 	cancel()
 	https := l.httpsHostname(host)
 	infrastructureHTTPS := host == l.infrastructureHostname && https
@@ -232,9 +233,6 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			return
 		}
 		decisions = nil
-	}
-	if len(decisions) > 4096 {
-		return
 	}
 	// Customer aliases need ingress authority even when the route matcher names
 	// a different host. Configuration membership cannot grant TLS ownership;
@@ -264,13 +262,13 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	}
 	// The locally admitted public preview may become ready after the cached
 	// complete snapshot was fetched. Refresh its exact authority before any TLS
-	// writes, then inspect the entire current snapshot for protocol conflicts.
+	// writes, then inspect every binding for this hostname for protocol conflicts.
 	if !authorizedHTTPS && !infrastructureHTTPS && https && l.previewHTTPSAuthority != nil {
 		refresh, stop := context.WithTimeout(l.ctx, 2*time.Second)
 		defer stop()
 		if err := l.previewHTTPSAuthority(refresh, host); err == nil {
-			decisions, err = l.authority.Snapshot(refresh)
-			if err != nil || len(decisions) > 4096 {
+			decisions, err = l.authority.SnapshotForHost(refresh, host)
+			if err != nil {
 				return
 			}
 			for _, decision := range decisions {
@@ -390,8 +388,8 @@ func (l *SharedTLSListener) previewDecisionExists(ctx context.Context, host stri
 	if l.previewHTTPSAuthority == nil || l.previewHTTPSAuthority(ctx, host) != nil {
 		return false
 	}
-	decisions, err := l.authority.Snapshot(ctx)
-	if err != nil || len(decisions) > 4096 {
+	decisions, err := l.authority.SnapshotForHost(ctx, host)
+	if err != nil {
 		return false
 	}
 	for _, decision := range decisions {

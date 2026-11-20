@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 )
 
@@ -22,8 +23,8 @@ type FreeRequestLimits struct {
 
 type freeRequestTables struct {
 	rates          edgelimits.FreeRequests
-	perAddress     *addressLimiter // key: publication and visitor address
-	perPublication *addressLimiter // key: publication
+	perAddress     *addrlimit.Limiter // key: publication and visitor address
+	perPublication *addrlimit.Limiter // key: publication
 }
 
 // NewFreeRequestLimits starts unlimited until the server's first answer carries rates.
@@ -36,13 +37,13 @@ func (l *FreeRequestLimits) Set(rates edgelimits.FreeRequests) {
 	case rates == (edgelimits.FreeRequests{}):
 		l.tables.Store(nil)
 	case current == nil || current.rates != rates:
-		bucket := func(r edgelimits.Rate) addressRate {
-			return addressRate{perSecond: r.PerSecond, burst: float64(r.Burst)}
+		bucket := func(r edgelimits.Rate) addrlimit.Rate {
+			return addrlimit.Rate{PerSecond: r.PerSecond, Burst: float64(r.Burst)}
 		}
 		l.tables.Store(&freeRequestTables{
 			rates:          rates,
-			perAddress:     newAddressLimiter(bucket(rates.PerAddress), addressRate{}, 0),
-			perPublication: newAddressLimiter(bucket(rates.PerPublication), addressRate{}, 0),
+			perAddress:     addrlimit.New(bucket(rates.PerAddress), addrlimit.Rate{}, 0),
+			perPublication: addrlimit.New(bucket(rates.PerPublication), addrlimit.Rate{}, 0),
 		})
 	}
 }
@@ -56,10 +57,10 @@ func (l *FreeRequestLimits) over(publication, address string) *edgelimits.FreeRe
 	if t == nil {
 		return nil
 	}
-	if _, ok := t.perAddress.admit(publication+"\x00"+addressKey(address), false); !ok {
+	if _, ok := t.perAddress.Admit(publication+"\x00"+addrlimit.Key(address), false); !ok {
 		return &t.rates
 	}
-	if _, ok := t.perPublication.admit(publication, false); !ok {
+	if _, ok := t.perPublication.Admit(publication, false); !ok {
 		return &t.rates
 	}
 	return nil
