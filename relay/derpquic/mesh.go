@@ -654,6 +654,16 @@ func (s *Server) forwardLocked(p *peerConn, dst key.NodePublic, msg packet) bool
 	return true
 }
 
+// holds reports whether a relay of the mesh holds the route key. Nil-safe: no mesh holds nothing.
+func (m *Mesh) holds(k key.NodePublic) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.holders[k] != nil
+}
+
 // announce tells every link a route key appeared or left this relay. Called with Server.mu held.
 func (m *Mesh) announce(kind string, k key.NodePublic) {
 	if m == nil {

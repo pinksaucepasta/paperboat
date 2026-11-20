@@ -563,7 +563,11 @@ func (s *Server) readDatagrams(p *peerConn) {
 		msg, ok, e := r.accept(b, now, func(k key.NodePublic) bool {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			return s.authorizedLocked(p, s.peers[routeKey(k, p.namespace)], now)
+			dst := routeKey(k, p.namespace)
+			if s.peers[dst] == nil && s.mesh.holds(dst) {
+				return true // not connected here: the relay that holds it judges the pair (route forwards it)
+			}
+			return s.authorizedLocked(p, s.peers[dst], now)
 		})
 		if e != nil {
 			s.reject(p, e)

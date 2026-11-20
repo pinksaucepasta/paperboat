@@ -3,6 +3,7 @@ package derpquic
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
+	"go4.org/mem"
 	"tailscale.com/derp"
 	"tailscale.com/types/key"
 )
@@ -398,6 +400,13 @@ func TestMeshRestartRecovers(t *testing.T) {
 	deliverEventually(t, ca, kb, cb, ka, payloadOf(300))
 }
 
+// randomPublic is a node key without the cost of generating a key pair (20,000 of them under -race).
+func randomPublic() key.NodePublic {
+	var raw [32]byte
+	rand.Read(raw[:])
+	return key.NodePublicFromRaw32(mem.B(raw[:]))
+}
+
 func TestMeshHolderMapBounded(t *testing.T) {
 	m, err := NewMesh(MeshConfig{Cert: certificate(t)})
 	if err != nil {
@@ -409,7 +418,7 @@ func TestMeshHolderMapBounded(t *testing.T) {
 	for sent := 0; sent < peers; sent += perFrame {
 		f := meshFrame{Kind: meshPresent}
 		for range perFrame {
-			f.Keys = append(f.Keys, KeyString(key.NewNode().Public()))
+			f.Keys = append(f.Keys, KeyString(randomPublic()))
 		}
 		if err := m.handle(l, f); err != nil {
 			t.Fatal(err)
@@ -420,7 +429,7 @@ func TestMeshHolderMapBounded(t *testing.T) {
 	}
 	cache := newRemoteCache(100)
 	for range peers {
-		cache.put(&remoteSource{route: key.NewNode().Public()})
+		cache.put(&remoteSource{route: randomPublic()})
 	}
 	if cache.len() != 100 || len(cache.index) != 100 {
 		t.Fatalf("remote grant cache holds %d entries", cache.len())
