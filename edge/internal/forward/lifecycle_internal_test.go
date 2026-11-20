@@ -57,6 +57,7 @@ func internalMesh(t *testing.T, holders HoldersSource, dial func(context.Context
 		t.Fatal(err)
 	}
 	m.ctx, m.stop = context.WithCancel(context.Background())
+	m.refreshHeld() // Start does this; sendWatch needs a snapshot
 	t.Cleanup(func() { m.stop(); m.closeLinks(); m.wg.Wait() })
 	return m
 }
