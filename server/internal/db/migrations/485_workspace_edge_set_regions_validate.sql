@@ -1,4 +1,7 @@
 -- +goose Up
+-- Validation scans the table without blocking its writers (SHARE UPDATE EXCLUSIVE); the lock timeout keeps a busy
+-- table from queueing the migration behind writers.
+SET LOCAL lock_timeout = '5s';
 ALTER TABLE paperboat.workspace_edge_sets VALIDATE CONSTRAINT workspace_edge_sets_regions_size;
 
 -- +goose StatementBegin
