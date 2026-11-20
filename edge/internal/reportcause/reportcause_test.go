@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
+	"github.com/pinksaucepasta/paperboat/edge/internal/forward"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
@@ -29,5 +30,19 @@ func TestRequestFailureCarriesSupportReference(t *testing.T) {
 	fault := reporter.ObserveFailure(context.Background(), "control_request", &control.RequestFailure{SupportReference: reference})
 	if fault.SupportReference != reference || fault.Name != "edge_control_request_failed" {
 		t.Fatalf("fault=%+v", fault)
+	}
+}
+
+// A forward no holder took is reported at the stage that failed, with the one cause the visitor's page names.
+func TestForwardFailureProjection(t *testing.T) {
+	reporter, err := reporting.New("paperboat-edge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []string{forward.StageLookup, forward.StageDial, forward.StageOpen} {
+		fault := reporter.ObserveFailure(context.Background(), stage, &forward.Failure{Stage: stage, Err: errors.New("peer 192.0.2.1 unreachable")})
+		if fault.Name != "edge_"+stage+"_failed" || fault.Stage != stage || fault.Cause != "forward_unavailable" {
+			t.Fatalf("stage %s: fault=%+v", stage, fault)
+		}
 	}
 }

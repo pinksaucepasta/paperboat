@@ -51,6 +51,13 @@ relative paths, or a missing carrier listener stop startup with a typed error.
 - **Limits:** `node_capacity`, `max_body_bytes` (default 100 MiB), `max_header_bytes`
   (default 32 KiB, at most 128 KiB), `control_interval`, `control_timeout`, and the optional
   `preview_carrier_interval`, `public_tcp_idle_timeout`, `request_body_idle_timeout`.
+- **Node forwarding (managed edges):** a visitor who reaches a node that does not hold the carrier is passed on,
+  as raw bytes, to the node that does (TLS is terminated on the holder only; raw TCP tunnel ports are bound on
+  every node and forwarded the same way). Optional: `forward_enabled` (default true; self-hosted edges never
+  forward), `forward_dial_timeout` and `forward_open_timeout` (3 s each), `forward_peer_interval` (10 s),
+  `forward_seed_interval` (5 min), `forward_max_streams_per_peer` (4096). A forwarding node listens on every public
+  TCP tunnel port its peers hold: raise the process's file limit (`LimitNOFILE` or the container's `ulimit -n`) to at
+  least 65536; the edge logs `file_limit_low` at start when it is below listeners + connections + 1024.
 - **Proxies and fixed routes:** `trusted_proxy_cidrs` and `public_routes` (host, optional path
   prefix, upstream).
 

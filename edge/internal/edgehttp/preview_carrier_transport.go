@@ -391,6 +391,29 @@ func (r *DataCarrierPreviewRegistry) acquire(host string) (DataCarrierPreviewRou
 	return value, done, true
 }
 
+// HeldHosts lists the hostnames whose carrier is attached here and still live: what this node serves, which a node
+// mesh announces to its peers (a visitor who reaches another node is forwarded here).
+func (r *DataCarrierPreviewRegistry) HeldHosts() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	hosts := make([]string, 0, len(r.byHost))
+	for host, entry := range r.byHost {
+		route := entry.route
+		if route.Server == nil || route.Kind != dataCarrierPreviewRouteKind && route.Kind != dataCarrierPreviewPrivateRouteKind && route.Kind != runtimewire.RouteKind {
+			continue
+		}
+		select {
+		case <-route.Server.Done():
+		default:
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts
+}
+
 func (r *DataCarrierPreviewRegistry) Lookup(host string) (DataCarrierPreviewRoute, bool) {
 	if r == nil {
 		return DataCarrierPreviewRoute{}, false

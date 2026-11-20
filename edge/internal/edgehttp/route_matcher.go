@@ -177,6 +177,28 @@ func validPreviewMatcherPath(requestPath string) bool {
 	return requestPath != "" && strings.HasPrefix(requestPath, "/") && !strings.ContainsAny(requestPath, "\r\n\x00?#") && !strings.Contains(requestPath, "//")
 }
 
+// Held lists the hostnames the matchers that can say (the carrier-backed preview and runtime matchers) serve now.
+func (m *CompositeRouteMatcher) Held() []string {
+	if m == nil {
+		return nil
+	}
+	var held []string
+	for _, matcher := range m.matchers {
+		if owner, ok := matcher.(interface{ Held() []string }); ok {
+			held = append(held, owner.Held()...)
+		}
+	}
+	return held
+}
+
+// Held lists the preview and runtime hostnames whose carrier is attached.
+func (m *PreviewCarrierRouteMatcher) Held() []string {
+	if m == nil {
+		return nil
+	}
+	return m.registry.HeldHosts()
+}
+
 func (m *CompositeRouteMatcher) HasHTTPSHostname(host string) bool {
 	if m == nil {
 		return false
@@ -245,4 +267,38 @@ func (r *DataCarrierRouteRegistry) HasAdmittedHTTPSHostname(host string, assignm
 		}
 	}
 	return false
+}
+
+// HeldHosts lists the hostnames of the active HTTPS tunnel rules and TLS-passthrough tunnel rules that have a ready
+// replica attached here: what this node serves that no preview registry knows. Rules whose hostname is a pattern
+// are left out (a node mesh announces exact names).
+func (r *DataCarrierRouteRegistry) HeldHosts(assignments *route.Registry) []string {
+	if r == nil || assignments == nil {
+		return nil
+	}
+	_, rules, ok := assignments.CanonicalSnapshot()
+	if !ok {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	byRoute := make(map[string][]*dataCarrierRouteEntry)
+	for _, entry := range r.byKey {
+		for _, id := range entry.state.HealthyRoutes {
+			byRoute[id] = append(byRoute[id], entry)
+		}
+	}
+	var hosts []string
+	for _, rule := range rules {
+		if rule.Kind != route.TunnelHTTPSWSS && rule.Kind != route.TunnelTLS || rule.Hostname == "" || strings.ContainsAny(rule.Hostname, "*?") {
+			continue
+		}
+		for _, entry := range byRoute[carrierRouteID(rule)] {
+			if readyRouteReplica(entry, rule) {
+				hosts = append(hosts, strings.ToLower(rule.Hostname))
+				break
+			}
+		}
+	}
+	return hosts
 }

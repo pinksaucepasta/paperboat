@@ -7,9 +7,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 )
 
 // The inspection budget includes TLS record headers and read-ahead. Concurrent
@@ -75,22 +78,38 @@ func inspectTLSClientHello(ctx context.Context, connection net.Conn) (net.Conn, 
 	return inspectTLSInfrastructureClientHello(ctx, connection, "")
 }
 func inspectTLSInfrastructureClientHello(ctx context.Context, connection net.Conn, infrastructureHost string) (net.Conn, string, error) {
+	replay, info, err := inspectClientHello(ctx, connection, infrastructureHost, false)
+	return replay, info.host, err
+}
+
+// helloInfo is what the inspection learned: the exact SNI hostname, or link when the hello offers the node-link ALPN
+// (a peer's forward link has no SNI and is handed to the mesh before any name check).
+type helloInfo struct {
+	host string
+	link bool
+}
+
+// inspectClientHello is the ClientHello inspection; acceptLink lets a hello offering nodemesh.EdgeForwardALPN
+// through without a valid name.
+func inspectClientHello(ctx context.Context, connection net.Conn, infrastructureHost string, acceptLink bool) (net.Conn, helloInfo, error) {
 	if ctx == nil || connection == nil {
-		return nil, "", errClientHello
+		return nil, helloInfo{}, errClientHello
 	}
 	if _, ok := connection.(interface{ CloseWrite() error }); !ok {
-		return nil, "", errClientHello
+		return nil, helloInfo{}, errClientHello
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, clientHelloTimeout)
 	defer cancel()
 	deadline, _ := inspectCtx.Deadline()
 	if err := connection.SetReadDeadline(deadline); err != nil {
-		return nil, "", err
+		return nil, helloInfo{}, err
 	}
 	capture := &helloCapture{Conn: connection}
 	hostname := ""
+	link := false
 	parser := tls.Server(capture, &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		hostname = strings.ToLower(hello.ServerName)
+		link = acceptLink && slices.Contains(hello.SupportedProtos, nodemesh.EdgeForwardALPN)
 		return nil, errHelloInspected
 	}})
 	err := parser.HandshakeContext(inspectCtx)
@@ -98,21 +117,24 @@ func inspectTLSInfrastructureClientHello(ctx context.Context, connection net.Con
 		hostname = infrastructureHost
 	}
 	infrastructureIP := hostname == infrastructureHost && net.ParseIP(infrastructureHost) != nil
-	if !errors.Is(err, errHelloInspected) || (!validSNIHostname(hostname) && !infrastructureIP) || inspectCtx.Err() != nil {
+	if !errors.Is(err, errHelloInspected) || (!validSNIHostname(hostname) && !infrastructureIP && !link) || inspectCtx.Err() != nil {
 		cause := err
 		if errors.Is(cause, errHelloInspected) {
 			cause = nil
 		}
 		cause = errors.Join(cause, inspectCtx.Err())
 		if cause == nil {
-			return nil, "", errClientHello
+			return nil, helloInfo{}, errClientHello
 		}
-		return nil, "", &clientHelloFailure{cause: cause}
+		return nil, helloInfo{}, &clientHelloFailure{cause: cause}
 	}
 	if err := connection.SetReadDeadline(time.Time{}); err != nil {
-		return nil, "", err
+		return nil, helloInfo{}, err
 	}
-	return &replayTLSConn{Conn: connection, hostname: hostname, reader: io.MultiReader(bytes.NewReader(capture.inspected.Bytes()), connection)}, hostname, nil
+	if link {
+		hostname = ""
+	}
+	return &replayTLSConn{Conn: connection, hostname: hostname, reader: io.MultiReader(bytes.NewReader(capture.inspected.Bytes()), connection)}, helloInfo{host: hostname, link: link}, nil
 }
 
 func validSNIHostname(host string) bool {

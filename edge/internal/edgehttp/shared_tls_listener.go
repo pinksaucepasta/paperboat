@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
@@ -36,6 +37,10 @@ type SharedTLSListener struct {
 	// passthrough bounds the TLS-passthrough streams handed off from dispatch; they are long-lived,
 	// so they must not hold the dispatch slots new HTTPS connections need (audit T3).
 	passthrough chan struct{}
+	// forwarding bounds the visitors this node passes on to another node (long-lived, like passthrough); hooks are the
+	// node-forwarding hooks, nil on a node that does not forward (SetForwarding).
+	forwarding chan struct{}
+	hooks      atomic.Pointer[ForwardHooks]
 	// https bounds the HTTPS connections handed to the HTTP server for their whole life; a dispatch
 	// slot is freed at hand-off (golang.org/x/net/netutil LimitListener holds its slot until Close).
 	https chan struct{}
@@ -161,7 +166,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forwarding: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
 		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(cap(slots), nameShare(cap(slots)), 0)}
 	l.hello, l.cancelHello = context.WithCancel(ctx)
 	go l.run()
@@ -170,7 +175,7 @@ func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func (l *SharedTLSListener) run() {
 	defer close(l.done)
-	defer l.cancel()
+	defer l.stop()
 	defer l.workers.Wait()
 	for {
 		conn, err := l.Listener.Accept()
@@ -179,7 +184,7 @@ func (l *SharedTLSListener) run() {
 			l.acceptErr = err
 			l.mu.Unlock()
 			l.finishDispatches()
-			l.cancel()
+			l.stop()
 			return
 		}
 		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
@@ -193,23 +198,40 @@ func (l *SharedTLSListener) run() {
 		case l.slots <- struct{}{}:
 			l.workers.Add(1)
 			l.dispatching.Add(1)
-			go func() {
-				defer l.workers.Done()
-				// The slot is freed once, and before a refused connection is closed: the client sees the close first, so a
-				// slot still held then would refuse the client's immediate retry (a dropped connection, no dispatch).
-				var free sync.Once
-				freeSlot := func() { free.Do(func() { <-l.slots }) }
-				defer freeSlot()
-				defer l.dispatching.Done()
-				l.dispatch(conn, freeSlot)
-			}()
+			l.startDispatch(conn, false, true)
 		default:
 			_ = conn.Close()
 		}
 	}
 }
 
-func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
+// startDispatch runs dispatch for a connection whose slot is taken and whose worker (and, when counted, dispatching)
+// count is added; the slot is freed once, and before a refused connection is closed: the client sees the close first,
+// so a slot still held then would refuse the client's immediate retry (a dropped connection, no dispatch).
+func (l *SharedTLSListener) startDispatch(conn net.Conn, forwarded, counted bool) {
+	go func() {
+		defer l.workers.Done()
+		var free sync.Once
+		freeSlot := func() { free.Do(func() { <-l.slots }) }
+		defer freeSlot()
+		if counted {
+			defer l.dispatching.Done()
+		}
+		l.dispatch(conn, freeSlot, forwarded)
+	}()
+}
+
+// stop ends the listener's context. Inject checks the context and adds its worker under the same lock, so no worker
+// is added once the final wait has begun.
+func (l *SharedTLSListener) stop() {
+	l.mu.Lock()
+	l.cancel()
+	l.mu.Unlock()
+}
+
+// dispatch routes one accepted connection. forwarded marks a visitor another node passed on (Inject): it is served
+// here or answered not-found, never forwarded again (hop limit 1).
+func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func(), forwarded bool) {
 	owned := true
 	defer func() {
 		if owned {
@@ -217,11 +239,20 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 			_ = conn.Close()
 		}
 	}()
-	replay, host, err := inspectTLSInfrastructureClientHello(l.hello, conn, l.infrastructureHostname)
+	hooks := l.hooks.Load()
+	replay, info, err := inspectClientHello(l.hello, conn, l.infrastructureHostname, hooks != nil && hooks.Mesh != nil && !forwarded)
 	if err != nil {
 		l.observe("tls_dispatch", err)
 		return
 	}
+	if info.link {
+		// A peer's node link: the mesh authenticates it by certificate pin before anything else happens.
+		if hooks.Mesh.Accept(replay) == nil {
+			owned = false
+		}
+		return
+	}
+	host := info.host
 	releaseName, ok := l.names.acquireWithin(l.ctx, host, nameShareWait)
 	if !ok {
 		l.observe("tls_name_share", errNameShareFull)
@@ -330,6 +361,10 @@ func (l *SharedTLSListener) dispatch(conn net.Conn, freeSlot func()) {
 			defer conn.Close()
 			l.observe("public_tcp_stream", l.forward(l.ctx, replay, decision, l.authority.ResolveDecision))
 		}()
+		return
+	}
+	if !authorizedHTTPS && !infrastructureHTTPS && !https && !forwarded && l.forwardVisitor(hooks, conn, replay, host, releaseName) {
+		owned = false
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
@@ -479,8 +514,7 @@ func (l *SharedTLSListener) observe(phase string, err error) {
 // one a name behind sign-in gets (BrowserAccess.unknownName), so nothing on it tells the two apart. host is the
 // TLS server name, never the request's Host header.
 func serveNotFoundPage(conn net.Conn, config *tls.Config, browser *BrowserAccess, host string) {
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveBrandedPage(conn, config, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Connection", "close")
 		if browser != nil {
 			peer, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
@@ -488,9 +522,7 @@ func serveNotFoundPage(conn net.Conn, config *tls.Config, browser *BrowserAccess
 			return
 		}
 		writeErrorPage(w, http.StatusNotFound, notFoundMessage)
-	})}
-	server.SetKeepAlivesEnabled(false)
-	_ = server.Serve(&oneConnListener{conn: tls.Server(conn, config)})
+	})
 }
 
 // oneConnListener hands out a single connection, then reports closed once it ends.
