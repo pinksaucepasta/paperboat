@@ -103,13 +103,12 @@ func TestPublicTCPSourceAddressCannotHoldMoreThanItsShare(t *testing.T) {
 	waitForwarded(t, forwarded, addrlimit.Streams+1)
 }
 
-func TestPublicTCPPublicationCannotHoldMoreThanItsShare(t *testing.T) {
+// A popular service holds far more than 1,024 connections: no publication-wide cap sheds its visitors.
+func TestPublicTCPPublicationIsNotCapped(t *testing.T) {
 	queue, forwarded := sharedTCPFixture(t)
-	for i := range tlsNameConnections {
+	const visitors = 1500
+	for i := range visitors {
 		queue(fmt.Sprintf("10.%d.%d.1", i/250, i%250))
 	}
-	waitForwarded(t, forwarded, tlsNameConnections)
-	if !shed(t, queue("198.51.100.1")) {
-		t.Fatal("a connection past one publication's share was served")
-	}
+	waitForwarded(t, forwarded, visitors)
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"sort"
 	"strconv"
@@ -61,10 +60,9 @@ type PublicTCPListeners struct {
 	browser   *BrowserAccess
 	// forward carries one accepted connection; tests replace it.
 	forward func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
-	// sources bounds one visitor address's open connections; publications bounds one publication's. Neither
-	// bounds the node: capacity is watched by resource alerts, but one visitor or one link must not take it all.
-	sources      *addrlimit.Limiter
-	publications *holdSet
+	// sources bounds one visitor address's open connections. A publication is never capped: how many visitors a
+	// user's service serves is theirs to decide; resource alerts watch node capacity.
+	sources *addrlimit.Limiter
 }
 
 // SetBrowserAccess makes the unknown-name page of listeners wrapped afterwards the one the HTTP handler answers
@@ -97,7 +95,7 @@ func NewPublicTCPListeners(cfg PublicTCPListenerConfig) (*PublicTCPListeners, er
 		cfg.Listen = handover.Listen
 	}
 	return &PublicTCPListeners{cfg: cfg, listeners: make(map[string]*publicTCPListener), forward: cfg.Routes.ForwardPublicTCP,
-		sources: addrlimit.NewInFlight(addrlimit.Streams), publications: newHoldSet(math.MaxInt, tlsNameConnections, 0)}, nil
+		sources: addrlimit.NewInFlight(addrlimit.Streams)}, nil
 }
 
 // PrepareTCPRoutes binds every reserved socket before the route worker reports
@@ -271,7 +269,7 @@ func (p *PublicTCPListeners) accept(ctx context.Context, live *publicTCPListener
 		p.mu.Lock()
 		decision := live.decision
 		p.mu.Unlock()
-		releaseSource, releasePublication, ok := p.admit(connection, decision.Binding.ListenerID)
+		releaseSource, ok := p.admit(connection)
 		if !ok {
 			_ = connection.Close()
 			p.observe(ctx, "public_tcp_stream", errPublicTCPOverShare)
@@ -282,28 +280,20 @@ func (p *PublicTCPListeners) accept(ctx context.Context, live *publicTCPListener
 		go func() {
 			defer p.streams.Done()
 			defer releaseSource()
-			defer releasePublication()
 			p.observe(ctx, "public_tcp_stream", p.forward(ctx, connection, decision, p.cfg.Authority.ResolveDecision))
 		}()
 	}
 }
 
-var errPublicTCPOverShare = errors.New("public TCP connection refused: its visitor address or its publication holds its full share of connections")
+var errPublicTCPOverShare = errors.New("public TCP connection refused: its visitor address holds its full share of connections")
 
-// admit takes one connection from the visitor address's share and the publication's; on refusal it holds neither.
-func (p *PublicTCPListeners) admit(connection net.Conn, publication string) (releaseSource, releasePublication func(), ok bool) {
+// admit takes one connection from the visitor address's share.
+func (p *PublicTCPListeners) admit(connection net.Conn) (release func(), ok bool) {
 	address, _, err := net.SplitHostPort(connection.RemoteAddr().String())
 	if err != nil {
 		address = connection.RemoteAddr().String()
 	}
-	if releaseSource, ok = p.sources.Admit(address, false); !ok {
-		return nil, nil, false
-	}
-	if releasePublication, ok = p.publications.acquire(publication, true); !ok {
-		releaseSource()
-		return nil, nil, false
-	}
-	return releaseSource, releasePublication, true
+	return p.sources.Admit(address, false)
 }
 
 func (p *PublicTCPListeners) observe(ctx context.Context, phase string, err error) {
