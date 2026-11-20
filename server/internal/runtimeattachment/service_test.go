@@ -235,6 +235,8 @@ VALUES($1,'default','1.0','epoch_backup','ready',true,now(),'second-region','sec
 	service := &Service{DB: database}
 	proof := previewattachment.MachineProof{UserID: account, MachineID: machine, OperationID: "operation_runtime", InstallationGeneration: 1}
 	request := runtimewire.Request{OperationID: proof.OperationID, ProcessID: "process_runtime", WorkerGeneration: 1, InstallationGeneration: 1, RuntimeListenPort: 48080}
+	// The placement pins node as primary: the attach otherwise orders the edges by a per-machine hash.
+	exec(`INSERT INTO machine_edge_placements(machine_id,account_id,installation_generation,worker_generation,primary_node_id,primary_process_epoch,secondary_node_id,secondary_process_epoch,observed_at) VALUES($1,$2,1,1,$3,'epoch_runtime',$4,'epoch_backup',now())`, machine, account, node, backupNode)
 	edge := previewattachment.PreviewEdgeIdentity{NodeID: node, ProcessEpoch: "epoch_runtime"}
 	a, err := service.Attach(ctx, proof, request)
 	// The primary is whichever of the two edges hashes first for this machine: the answer holds exactly these two.

@@ -17,6 +17,8 @@ import (
 // helper route lookup found nothing until the attach).
 func TestWorkerHandoverKeepsTheRouteAndTheGenerationPostgres(t *testing.T) {
 	f := newAgentFixture(t, "handover")
+	// The placement pins f.node as primary: the attach otherwise orders the edges by a per-machine hash.
+	f.exec(t, `INSERT INTO machine_edge_placements(machine_id,account_id,installation_generation,worker_generation,primary_node_id,primary_process_epoch,secondary_node_id,secondary_process_epoch,observed_at) VALUES($1,$2,1,1,$3,'epoch_endpoint',$4,'epoch_backup',now())`, f.machine, f.account, f.node, f.backupNode)
 	a, err := f.service.Attach(f.ctx, f.proof, f.request)
 	if err != nil {
 		t.Fatal(err)
