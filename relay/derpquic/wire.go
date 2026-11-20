@@ -23,7 +23,6 @@ const MaxPacket = 2048
 const fragmentPayload = 1024
 const fragmentHeader = 43
 const maxAssemblies = 64
-const queueDepth = 64
 const (
 	frameAuth byte = 1 + iota
 	frameReady

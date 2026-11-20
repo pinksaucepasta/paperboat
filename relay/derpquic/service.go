@@ -177,9 +177,7 @@ func (s *Server) tryControlService(p *peerConn, msg packet) bool {
 		s.dropped.Add(1)
 		return true
 	}
-	select {
-	case p.out <- queued{packet: packet{peer: service.key, data: reply, control: true}, source: p, service: true, lease: lease}:
-	default:
+	if !p.out.push(queued{packet: packet{peer: service.key, data: reply, control: true}, source: p, service: true, lease: lease}) {
 		s.dropped.Add(1)
 	}
 	return true

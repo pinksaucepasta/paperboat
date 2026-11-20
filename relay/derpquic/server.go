@@ -95,7 +95,7 @@ type peerConn struct {
 	namespace       [32]byte
 	generationDisco key.DiscoPublic
 	grant           Grant
-	out             chan queued
+	out             *sendQueue
 	control         chan []byte
 	preGrant        func() // gives back the connection's unauthenticated share; nil when it took none
 	rate            *budget
@@ -239,7 +239,7 @@ func (s *Server) serveConn(c *quic.Conn, release func()) {
 	if err != nil {
 		return
 	}
-	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8), preGrant: release}
+	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: newSendQueue(), control: make(chan []byte, 8), preGrant: release}
 	s.servePeer(p)
 }
 
@@ -517,9 +517,7 @@ func (s *Server) route(p *peerConn, msg packet) {
 		return
 	}
 	msg.peer = p.key
-	select {
-	case q.out <- queued{packet: msg, source: p}:
-	default:
+	if !q.out.push(queued{packet: msg, source: p}) {
 		s.dropped.Add(1)
 	}
 }
@@ -625,7 +623,11 @@ func (s *Server) writePackets(p *peerConn) {
 			if writeFrame(p.stream, framePong, pong) != nil {
 				return
 			}
-		case msg := <-p.out:
+		case <-p.out.wake:
+			msg, ok := p.out.pop()
+			if !ok {
+				continue
+			}
 			s.mu.Lock()
 			valid := s.authorizedLocked(msg.source, p, time.Now())
 			if msg.control && !msg.service {
