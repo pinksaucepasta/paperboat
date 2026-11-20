@@ -308,6 +308,23 @@ func writePreparedUpdate(command *cobra.Command, candidate *workerupdate.Prepare
 	}
 }
 
+// updatePendingEnrollmentInstall installs the signed release when it is newer than this build; the check is the same
+// signed metadata read `pb update check` makes.
+func updatePendingEnrollmentInstall(command *cobra.Command, ctx context.Context, client *updated.Client, force bool) error {
+	latest, err := client.Check(ctx)
+	if err != nil {
+		return updateControlFailure("check with the Paperboat updater", err)
+	}
+	available, err := signedUpdateAvailable(buildinfo.Version, latest.Version)
+	if err != nil {
+		return fmt.Errorf("validate signed update version: %w", err)
+	}
+	if !available {
+		return writeDownloadedUpdate(command, updated.ControlResponse{})
+	}
+	return installOfficialBundle(command, ctx, force)
+}
+
 func writeDownloadedUpdate(command *cobra.Command, response updated.ControlResponse) error {
 	if updateJSON(command) {
 		return json.NewEncoder(command.OutOrStdout()).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": response})
@@ -350,7 +367,14 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 		if err != nil {
 			var controlErr *updated.ControlError
 			if force && errors.As(err, &controlErr) && controlErr.Code == "custom_installation" {
-				return actionForceOfficial(command, ctx)
+				return installOfficialBundle(command, ctx, true)
+			}
+			// Updating is fetching the signed public release, not an account feature: an install whose enrollment is still
+			// pending cannot take the updater's prepared update (it would replace the slot the enrollment commit verifies),
+			// so it installs the same signed bundle through the supplied-install transaction, which keeps the enrollment
+			// pending and re-points it at the new slot.
+			if errors.As(err, &controlErr) && controlErr.Code == "installation_pending" {
+				return updatePendingEnrollmentInstall(command, ctx, client, force)
 			}
 			return updateControlFailure("download signed update", err)
 		}

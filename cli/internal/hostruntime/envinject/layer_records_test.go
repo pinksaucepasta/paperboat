@@ -256,7 +256,8 @@ func TestLayerRecordsDeltaFailureSnapshotRecoveryAndRollback(t *testing.T) {
 
 }
 
-func TestLayerRecordFloorCapacityFailsClosed(t *testing.T) {
+// Rollback floors have no count cap: the persisted state size is the only bound.
+func TestLayerRecordFloorsHaveNoCountCapAndStateSizeFailsClosed(t *testing.T) {
 	mk := func(count int) []layerRecordFloor {
 		result := make([]layerRecordFloor, count)
 		for i := range result {
@@ -265,24 +266,17 @@ func TestLayerRecordFloorCapacityFailsClosed(t *testing.T) {
 		}
 		return result
 	}
-	floors := map[string]layerFloor{"source": {RecordFloors: mk(4096)}}
+	floors := map[string]layerFloor{"source": {RecordFloors: mk(4097)}}
 	if err := validateRecordFloors(floors); err != nil {
-		t.Fatal("supported source capacity rejected", err)
-	}
-	floors["source"] = layerFloor{RecordFloors: mk(4097)}
-	if !errors.Is(validateRecordFloors(floors), ErrResourceExhausted) {
-		t.Fatal("source record floor limit not enforced")
+		t.Fatal("source floors above the former 4096 limit rejected", err)
 	}
 	floors = map[string]layerFloor{}
 	for i := 0; i < 4; i++ {
 		floors[strconv.Itoa(i)] = layerFloor{RecordFloors: mk(4096)}
 	}
+	floors["more"] = layerFloor{RecordFloors: mk(1)}
 	if err := validateRecordFloors(floors); err != nil {
-		t.Fatal("supported total capacity rejected", err)
-	}
-	floors["overflow"] = layerFloor{RecordFloors: mk(1)}
-	if !errors.Is(validateRecordFloors(floors), ErrResourceExhausted) {
-		t.Fatal("total rollback floor limit not enforced")
+		t.Fatal("retained floors above the former 16384 limit rejected", err)
 	}
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := writeLayerState(path, make([]byte, 32), strings.Repeat("x", maximumLayerStateBytes)); !errors.Is(err, ErrResourceExhausted) {
@@ -290,5 +284,43 @@ func TestLayerRecordFloorCapacityFailsClosed(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("capacity failure persisted a partial state")
+	}
+}
+
+// 6500 records over 33 pages of 200: above the former 4096 ids and 32 pages.
+func TestFetchRecordsHasNoCountCap(t *testing.T) {
+	source := api.VaultLayerSource{VaultLayerCoordinate: api.VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: "account_1"}, KeyEpoch: 1}
+	const total, page = 6500, 200
+	pages := recordPageFunc(func(_ context.Context, _ LaunchContext, _ api.VaultLayerSource, after, through uint64, cursor string) (api.VaultRecordsPage, error) {
+		start := 0
+		if cursor != "" {
+			start, _ = strconv.Atoi(cursor)
+		}
+		end := min(start+page, total)
+		out := api.VaultRecordsPage{Sequence: 1, AfterSequence: after}
+		for i := start; i < end; i++ {
+			out.Records = append(out.Records, api.VaultRecordState{WorkspaceID: source.WorkspaceID, OwnerKind: source.OwnerKind, OwnerID: source.OwnerID, KeyEpoch: 1, RecordID: strconv.Itoa(i), Revision: 1, Sequence: 1})
+		}
+		if end < total {
+			out.NextCursor = strconv.Itoa(end)
+		}
+		return out, nil
+	})
+	store := &LayerStore{config: LayerConfig{Records: pages}}
+	records, err := store.fetchRecords(context.Background(), LaunchContext{}, source, 0, 1)
+	if err != nil || len(records) != total {
+		t.Fatalf("fetched %d records, err=%v; want %d", len(records), err, total)
+	}
+}
+
+// 9 MiB: above the former 8 MiB bound, below connectorprotocol.MaximumSnapshotBytes.
+func TestLayerStateAcceptsMoreThan8MiB(t *testing.T) {
+	path, key, value := filepath.Join(t.TempDir(), "state.json"), make([]byte, 32), strings.Repeat("x", 9<<20)
+	if err := writeLayerState(path, key, value); err != nil {
+		t.Fatal("state above the former 8 MiB bound was refused", err)
+	}
+	var got string
+	if _, err := readLayerState(path, key, &got); err != nil || got != value {
+		t.Fatal("state above the former 8 MiB bound was not read back", err)
 	}
 }

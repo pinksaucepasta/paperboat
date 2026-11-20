@@ -45,7 +45,6 @@ import { useMachineQuery } from "@/components/machine-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useShellState } from "@/lib/use-shell-state"
-import { AllowanceBar, AllowanceHeadline, AllowanceLegend, useHostedSplit } from "@/components/usage/allowance"
 
 const sources: Record<TrafficSource, string> = {
   all: "Combined",
@@ -89,12 +88,12 @@ export function UsageLimits() {
         {summary.data && <Machines summary={summary.data} />}
       </Card>
       <Card
-        label="Hosted allowance"
+        label="Traffic"
         loading={!workspace || billing.isPending}
         failed={billing.isError}
         skeleton={<AllowanceSkeleton />}
       >
-        {billing.data && workspace && <Allowance billing={billing.data} workspace={workspace.id} />}
+        {billing.data && workspace && <Allowance billing={billing.data} />}
       </Card>
       <Card
         label="Bandwidth"
@@ -227,14 +226,12 @@ function Stat({
 }
 
 /**
- * What is left of this period's ONE allowance for traffic through Paperboat's hosted edges and relays (previews, tunnels, relayed
- * connections; files uploaded through a browser terminal; its typing and output are not counted), split by relay and edge; past it the
- * slowed state and the date the period resets. Direct and self-hosted traffic are not counted here.
+ * Traffic through Paperboat's edges and relays (previews, tunnels, relayed connections; files uploaded through a browser terminal; its typing and output are not counted): ONE included amount and what is
+ * used of it, and past it the reduced speed with the date full speed returns. Direct and self-hosted traffic are not counted here.
  */
-function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspace: string }) {
+function Allowance({ billing }: { billing: BillingWorkspace }) {
   const fair = fairUse(billing)
   const time = useTimeFormat()
-  const split = useHostedSplit(billing, workspace)
   if (!fair || fair.ownEdges) {
     return (
       <div className="flex flex-1 flex-col gap-3">
@@ -248,18 +245,36 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
       </div>
     )
   }
-  const until = fair.ends ? time.date(fair.ends, "day") : undefined
   return (
     <div className="flex flex-1 flex-col gap-3" data-fair-use-card data-throttled={fair.throttled}>
-      <AllowanceHeadline fair={fair} until={until} speed={formatSpeed(fair.mbit)} />
-      {/* The floor: the meter split by relay and edge, one row of facts that may wrap, the legend. */}
+      <span className="flex items-baseline gap-2">
+        <Figure>{formatBytes(fair.used)}</Figure>
+        <span className="text-sm text-muted-foreground">
+          {fair.throttled ? `at ${formatSpeed(fair.mbit)}` : "full speed"}
+        </span>
+      </span>
       <div className="mt-auto flex flex-col gap-2.5">
-        <AllowanceBar fair={fair} split={split} />
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          <span className="tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)}`}</span>
-          {until && <span>Resets {until}</span>}
+        <div
+          role="meter"
+          aria-label="Included traffic used"
+          aria-valuemin={0}
+          aria-valuemax={fair.amount}
+          aria-valuenow={Math.min(fair.used, fair.amount)}
+          className="flex h-1.5 overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className={fair.throttled ? "bg-muted-foreground" : "bg-primary"}
+            style={{ width: `${fair.share * 100}%` }}
+          />
         </div>
-        <AllowanceLegend split={split} />
+        <div className="flex items-center justify-between gap-3 text-xs whitespace-nowrap text-muted-foreground">
+          <span className="truncate tabular-nums">{`${formatBytes(fair.used)} of ${formatBytes(fair.amount)} included`}</span>
+          {fair.ends && (
+            <span className="shrink-0">
+              {fair.throttled ? "Full speed" : "Resets"} {time.date(fair.ends, "day")}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )

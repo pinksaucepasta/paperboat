@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,8 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/liveconnections"
 	"github.com/spf13/cobra"
 )
 
@@ -290,24 +294,97 @@ func TestUpdateCheckWorksOnAnUnpairedInstall(t *testing.T) {
 	requireUpdateRequests(t, fixture, expectedUpdateRequest("check", ""))
 }
 
-// Installing replaces the slot the pending enrollment commit verifies, so it still waits for pairing, and says so.
-func TestUpdateInstallOnAnUnpairedInstallSaysItIsNotPaired(t *testing.T) {
+type pendingInstallRecord struct {
+	calls                  int
+	executable, bundle     string
+	force                  bool
+	exportedTo, exportedIn string
+}
+
+// pendingUpdateContext runs `pb update` against an updater whose enrollment is pending, with the bundle export and the
+// privileged supplied install replaced by recorders. The installed source reports the candidate's version.
+func pendingUpdateContext(t *testing.T, fixture *updateApprovalControlFixture, installed *pendingInstallRecord) context.Context {
+	t.Helper()
+	return withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
+		deps.socket = func() (string, error) { return fixture.socket, nil }
+		deps.exportBundle = func(_ context.Context, directory, output string) error {
+			installed.exportedIn, installed.exportedTo = directory, output
+			return os.WriteFile(output, []byte("bundle"), 0o600)
+		}
+		deps.openConnections = func(context.Context) (liveconnections.Counts, error) { return liveconnections.Counts{}, nil }
+		deps.install = func(_ context.Context, executable string, _ installsource.Source, bundle string, force bool, _, _ string) (string, error) {
+			installed.calls++
+			installed.executable, installed.bundle, installed.force = executable, bundle, force
+			return os.Executable()
+		}
+		deps.inspect = func(context.Context, string) (installsource.Source, error) {
+			return installsource.Source{Version: updateApprovalCandidateVersion, Distribution: installsource.Official, AutomaticUpdates: true}, nil
+		}
+	})
+}
+
+// Updating is fetching the signed public release. While the enrollment is pending the updater's prepared update would
+// replace the slot the enrollment commit verifies, so the signed bundle goes through the supplied-install transaction,
+// which keeps the enrollment pending and re-points it at the new slot.
+func TestUpdateOnAnUnpairedInstallInstallsTheSignedBundle(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = "2026.09.01.1"
 	fixture := startUpdateApprovalControlFixture(t)
 	fixture.setPending()
-	ctx := withUpdateDependencies(t.Context(), func(deps *updateDependencies) {
-		deps.socket = func() (string, error) { return fixture.socket, nil }
+	var installed pendingInstallRecord
+	var stdout, stderr bytes.Buffer
+	if code := run(pendingUpdateContext(t, fixture, &installed), []string{"update"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("unpaired update failed: %d %q %q", code, stdout.String(), stderr.String())
+	}
+	if installed.calls != 1 || installed.executable != "" || !strings.HasSuffix(installed.bundle, ".pb-update") || installed.force || installed.bundle != installed.exportedTo {
+		t.Fatalf("supplied install = %+v", installed)
+	}
+	if want := "Updated Paperboat from 2026.09.01.1 to " + updateApprovalCandidateVersion + "."; !strings.Contains(stdout.String(), want) {
+		t.Fatalf("output %q lacks %q", stdout.String(), want)
+	}
+	requireUpdateRequests(t, fixture, expectedUpdateRequest("download", ""), expectedUpdateRequest("check", ""))
+}
+
+func TestUpdateOnAnUnpairedInstallThatIsCurrentInstallsNothing(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = updateApprovalCandidateVersion
+	fixture := startUpdateApprovalControlFixture(t)
+	fixture.setPending()
+	var installed pendingInstallRecord
+	var stdout, stderr bytes.Buffer
+	if code := run(pendingUpdateContext(t, fixture, &installed), []string{"update"}, &stdout, &stderr); code != 0 || installed.calls != 0 || installed.exportedTo != "" || !strings.Contains(stdout.String(), "up to date") {
+		t.Fatalf("current unpaired update: code=%d installs=%d %q %q", code, installed.calls, stdout.String(), stderr.String())
+	}
+}
+
+func TestUpdateForceOnAnUnpairedInstallPassesForceToTheSuppliedInstall(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = "2026.09.01.1"
+	fixture := startUpdateApprovalControlFixture(t)
+	fixture.setPending()
+	var installed pendingInstallRecord
+	var stdout, stderr bytes.Buffer
+	if code := run(pendingUpdateContext(t, fixture, &installed), []string{"update", "--force"}, &stdout, &stderr); code != 0 || installed.calls != 1 || !installed.force {
+		t.Fatalf("forced unpaired update: code=%d %+v %q %q", code, installed, stdout.String(), stderr.String())
+	}
+}
+
+// The bundle is the signed release: an export that fails (bad signature, unreachable repository) installs nothing.
+func TestUpdateOnAnUnpairedInstallInstallsNothingWhenTheSignedBundleCannotBeExported(t *testing.T) {
+	oldVersion := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = oldVersion })
+	buildinfo.Version = "2026.09.01.1"
+	fixture := startUpdateApprovalControlFixture(t)
+	fixture.setPending()
+	var installed pendingInstallRecord
+	ctx := withUpdateDependencies(pendingUpdateContext(t, fixture, &installed), func(deps *updateDependencies) {
+		deps.exportBundle = func(context.Context, string, string) error { return errors.New("signature verification failed") }
 	})
 	var stdout, stderr bytes.Buffer
-	if code := run(ctx, []string{"update", "--json"}, &stdout, &stderr); code == 0 {
-		t.Fatal("an unpaired install was updated")
-	}
-	var output struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil || output.Error.Code != "machine_not_paired" || !strings.Contains(output.Error.Message, "pb pair") {
-		t.Fatalf("unpaired update error %+v (%v) %q", output, err, stdout.String())
+	if code := run(ctx, []string{"update"}, &stdout, &stderr); code == 0 || installed.calls != 0 {
+		t.Fatalf("an unverifiable bundle was installed: code=%d installs=%d", code, installed.calls)
 	}
 }

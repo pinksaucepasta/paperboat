@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 	shared "github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
@@ -19,6 +20,7 @@ type fakeBucket struct {
 	prefix    string // "none": the team has no bucket
 	deleted   []string
 	deleteErr error
+	getURL    string // when set, PresignGet returns it for every key
 }
 
 func (b *fakeBucket) StoreFor(context.Context, *db.Tx, string) (teambucket.ObjectStore, error) {
@@ -32,6 +34,9 @@ func (b *fakeBucket) PresignPut(_ context.Context, key string, size int64, diges
 	return shared.Authority{URL: "https://bucket.example.test/" + key + "?put", Headers: map[string]string{"x-amz-checksum-sha256": digest}}, nil
 }
 func (b *fakeBucket) PresignGet(_ context.Context, key string, _ time.Duration) (shared.Authority, error) {
+	if b.getURL != "" {
+		return shared.Authority{URL: b.getURL}, nil
+	}
 	return shared.Authority{URL: "https://bucket.example.test/" + key + "?get"}, nil
 }
 func (b *fakeBucket) Delete(_ context.Context, key string) error {
@@ -213,5 +218,45 @@ func TestPostgresRecordingsArchiveReplaysPastFourThousandSegments(t *testing.T) 
 	out, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{Source: recording.SourceBucket})
 	if err != nil || len(out.Segments) != segments || !out.Final {
 		t.Fatalf("replay of %d segments = %d segments, final %v, %v", segments, len(out.Segments), out.Final, err)
+	}
+}
+
+// The bucket replay answers with one presigned URL per segment; past the response bound it is refused whole, not truncated.
+func TestPostgresRecordingsArchiveReplayRefusedPastByteBound(t *testing.T) {
+	f := newFixture(t)
+	recID := "rec_" + uuid.NewString()
+	f.paid()
+	if err := f.policy(`{"rules": [{"src": ["user:` + f.member + `@example.test"], "dst": ["machine:prod"], "allow": ["recording_view"]}]}`); err != nil {
+		t.Fatal(err)
+	}
+	k1, _ := newKey(t, f.team, 1, nil)
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	const segments = 2
+	started := recording.Report{RecordingID: recID, SessionID: "sess_1", Trigger: recording.TriggerRule, KeyGeneration: 1, Accounts: []string{f.member}, StartedAt: now}
+	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return ApplyReportTx(ctx, tx, f.prod, recording.KindStarted, started)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stopped := recording.Report{RecordingID: recID, Reason: recording.ReasonSessionEnded, Bytes: segments, Segments: segments, EndedAt: now}
+	if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+		return ApplyReportTx(ctx, tx, f.prod, recording.KindStopped, stopped)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	half := connectorprotocol.MaximumSnapshotBytes/2 + 1
+	f.s.SetBuckets(&fakeBucket{prefix: "paperboat", getURL: strings.Repeat("u", half)})
+	if err := f.s.Archived(f.ctx, f.prod, recID, segments); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{Source: recording.SourceBucket})
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "archive replay") {
+		t.Fatalf("over-bound archive replay = %v, want ErrInvalid naming the archive replay step", err)
+	}
+	if len(out.Segments) != 0 {
+		t.Fatalf("refused archive replay returned %d URLs, want none", len(out.Segments))
 	}
 }

@@ -206,3 +206,56 @@ func TestPostgresVaultRecordsCASAtomicSnapshotAndDeletion(t *testing.T) {
 	}
 
 }
+
+// Tombstones of removed variables stay as current heads, so the record count of a scope has no cap of its own.
+func TestPostgresVaultRecordsBeyondFormerCountCap(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL required")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := db.Migrate(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	account := "recordmany_" + strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
+	c := VaultLayerCoordinate{WorkspaceID: "personal", OwnerKind: "personal", OwnerID: account}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, q := range []string{`DELETE FROM paperboat.environment_vault_operations WHERE account_id=$1`, `DELETE FROM paperboat.environment_vault_scopes WHERE owner_id=$1`, `DELETE FROM paperboat.users WHERE id=$1`} {
+			if _, err := store.SQL().ExecContext(cleanup, q, account); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@invalid.test','active')`, account); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, nil, nil, "https://control.example")
+	if _, err := service.PutPasswordVault(ctx, account, passwordVaultFixture(t, "https://control.example", account, 1, make([]byte, 32))); err != nil {
+		t.Fatal(err)
+	}
+	anchorRaw := vaultScopeFixture(t, fixtureScopeHeader(account, "personal", account, 1, 1, 1, make([]byte, 32)), 11)
+	if _, err := service.PutVaultScope(ctx, account, "personal", "personal", account, "", VaultScopePut{OperationID: "many_anchor_" + account, Envelope: b64Vault(anchorRaw)}); err != nil {
+		t.Fatal(err)
+	}
+	const batches = 33 // 33 x 128 = 4224 record IDs, above the former 4096
+	for b := 0; b < batches; b++ {
+		in := VaultRecordsPut{OperationID: fmt.Sprintf("many_%d_%s", b, account)}
+		for i := 0; i < MaximumVaultRecordBatch; i++ {
+			in.Records = append(in.Records, VaultRecordMutation{Envelope: vaultRecordFixture(t, c, account, fmt.Sprintf("%064x", b*MaximumVaultRecordBatch+i+1), 1, 1, true)})
+		}
+		if _, err := service.PutVaultRecords(ctx, account, c, in); err != nil {
+			t.Fatalf("batch %d (%d record IDs held): %v", b, b*MaximumVaultRecordBatch, err)
+		}
+	}
+}

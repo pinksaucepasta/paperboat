@@ -7,14 +7,15 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/quic-go/quic-go v0.61.0
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
+	github.com/xeipuuv/gojsonschema v1.2.0
 	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.50.0
 )
 
 require (
+	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
-	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
 

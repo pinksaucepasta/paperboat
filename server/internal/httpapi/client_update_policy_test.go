@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/clientupdate"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type clientUpdatePolicyStub struct{ putErr error }
@@ -179,7 +178,7 @@ func TestRequestBodyOverflowDoesNotHideOperationalFailure(t *testing.T) {
 		limit   int
 		handler http.HandlerFunc
 	}{
-		{"policy", 4096, clientUpdatePolicyPut(nil)}, {"usage", connectorprotocol.MaximumSnapshotBytes, resourceUsageNative(nil, nil)},
+		{"policy", 4096, clientUpdatePolicyPut(nil)}, {"usage", maxNativeUsageBody, resourceUsageNative(nil, nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request, logs, reference := diagnosticRequest("/v1/body-overflow")

@@ -15,7 +15,6 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
-	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {
@@ -92,10 +91,15 @@ func resourceUsageGet(service *resourceusage.Service) http.HandlerFunc {
 	}
 }
 
+// maxNativeUsageBody bounds the usage body read before machine proof: the proof signs the body's hash, so the body is
+// read first. 64 reports (resourceusage.MaxReports, enforced by RecordNative) of at most ~1.2 KiB each (field limits in
+// validateNativeReport) fit in 2 KiB per report; a larger body is never valid.
+const maxNativeUsageBody = resourceusage.MaxReports * 2 << 10
+
 func resourceUsageNative(identities machineRequestVerifier, service *resourceusage.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)
-		body, err := io.ReadAll(io.LimitReader(r.Body, connectorprotocol.MaximumSnapshotBytes+1))
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxNativeUsageBody+1))
 		if err != nil {
 			if expectedHTTPErrorOnly(err, context.Canceled) {
 				return
@@ -103,7 +107,7 @@ func resourceUsageNative(identities machineRequestVerifier, service *resourceusa
 			writeError(w, r, 503, "usage_unavailable", "Bandwidth reporting is temporarily unavailable.", err)
 			return
 		}
-		if len(body) > connectorprotocol.MaximumSnapshotBytes {
+		if len(body) > maxNativeUsageBody {
 			writeError(w, r, 400, "invalid_usage_report", "Bandwidth report is invalid.")
 			return
 		}

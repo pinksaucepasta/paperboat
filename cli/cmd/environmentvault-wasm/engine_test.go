@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	env "github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"os"
+	"strconv"
 	"testing"
 )
 
@@ -755,5 +756,51 @@ func TestConsoleFixtureIsANativeVaultWithRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		clear(payload)
+	}
+}
+
+// Tombstones of removed variables are not rotated, so the number of record IDs in a scope has no cap.
+func TestBrowserPersonalRotationHasNoRecordCountCap(t *testing.T) {
+	ctx := context.Background()
+	e, v := initialized(t)
+	defer e.clear()
+	anchor := createAnchor(t, e, v, "personal", "personal", v.Account, "")
+	live := writeRecord(t, e, v, anchor, "TOKEN", "preserved", nil)
+	live.Sequence = 1
+	records := []recordState{live}
+	for i := 0; i < 4096; i++ { // with TOKEN: 4097 record IDs, above the former limit
+		name := "GONE_" + strconv.Itoa(i)
+		idOut, err := e.run(ctx, request{Action: "record-id", Vault: v, WorkspaceID: anchor.WorkspaceID, Kind: anchor.OwnerKind, Owner: anchor.OwnerID, Machine: anchor.MachineID, Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := e.run(ctx, request{Action: "record-write", Vault: v, Scope: &anchor, WorkspaceID: anchor.WorkspaceID, Kind: anchor.OwnerKind, Owner: anchor.OwnerID, Machine: anchor.MachineID, Name: name, Deleted: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := decode(out.(map[string]any)["envelope"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writer, err := decode(anchor.WriterPublic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, err := env.ParseVaultRecord(raw, writer)
+		if err != nil || document.Claims.RecordID != idOut.(map[string]string)["record_id"] {
+			t.Fatal("tombstone fixture invalid", err)
+		}
+		c := document.Claims
+		records = append(records, recordState{WorkspaceID: c.WorkspaceID, Kind: c.OwnerKind, Owner: c.OwnerID, Machine: c.MachineID, Epoch: c.KeyEpoch, RecordID: c.RecordID, Revision: c.Revision, Deleted: true, Sequence: 1, DocumentID: digest(document.ID), WriterPublic: anchor.WriterPublic, Envelope: encoded(raw)})
+	}
+	if _, err := e.run(ctx, request{Action: "personal-rotate", Vault: v, KeyEpoch: 1, Inventory: []scopeState{anchor}}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.run(ctx, request{Action: "personal-rotate-scope", Vault: v, Scope: &anchor, RecordSequence: 1, Records: records})
+	if err != nil {
+		t.Fatal("rotation of a scope with 4097 record IDs refused:", err)
+	}
+	if replacement := out.(map[string]any)["records"].(recordReplacement); len(replacement.DocumentIDs) != 1 || replacement.DocumentIDs[0] != live.DocumentID {
+		t.Fatal("tombstones were carried over or the live record was lost")
 	}
 }

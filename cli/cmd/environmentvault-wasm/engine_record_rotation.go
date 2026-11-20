@@ -16,9 +16,6 @@ func (e *engine) rotateRecords(ctx context.Context, r request, scope env.VaultSc
 	if r.TotalLoss {
 		return out, nil
 	}
-	if len(r.Records) > 4096 {
-		return out, env.ErrInvalid
-	}
 	c := scope.Claims
 	oldKey, err := env.VaultRecordKey(oldRoot, c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID, c.KeyEpoch)
 	if err != nil {

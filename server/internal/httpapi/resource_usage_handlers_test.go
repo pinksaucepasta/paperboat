@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -30,25 +29,50 @@ func TestUsageRejectsInvalidPagingBeforeQuery(t *testing.T) {
 	}
 }
 
-// A five-minute batch of 500 reports is over 64 KiB; the size gate must let it reach machine proof (401), not refuse it as invalid (400).
+// The largest valid batch (MaxReports reports with every string at its field limit) is over 64 KiB; the size gate
+// must let it reach machine proof (401), not refuse it as invalid (400).
 func TestUsageNativeAcceptsLargeBatchPastSizeGate(t *testing.T) {
 	start := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 	batch := resourceusage.NativeBatch{}
-	for i := range 500 {
-		batch.Reports = append(batch.Reports, resourceusage.NativeReport{AccessSessionID: "session-" + strconv.Itoa(i), StreamID: "stream-" + strconv.Itoa(i), Consumer: "ssh", Mode: "direct", IntervalStart: start, IntervalEnd: start.Add(time.Minute), UploadBytes: 1, DownloadBytes: 2})
+	for range resourceusage.MaxReports {
+		batch.Reports = append(batch.Reports, resourceusage.NativeReport{AccessSessionID: strings.Repeat("s", 256), StreamID: strings.Repeat("t", 128), NodeID: strings.Repeat("n", 256), PeerAccountID: strings.Repeat("p", 256), Consumer: "ssh", Mode: "relay", IntervalStart: start, IntervalEnd: start.Add(time.Minute), UploadBytes: resourceusage.MaxCounter, DownloadBytes: resourceusage.MaxCounter})
 	}
 	body, err := json.Marshal(batch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(body) <= 64<<10 {
-		t.Fatalf("batch is %d bytes; it must exceed the old 64 KiB limit", len(body))
+	if len(body) <= 64<<10 || len(body) > maxNativeUsageBody {
+		t.Fatalf("batch is %d bytes; it must exceed 64 KiB and fit the %d byte cap", len(body), maxNativeUsageBody)
 	}
 	r := httptest.NewRequest("POST", "/v1/usage/native", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	resourceUsageNative(nil, nil)(w, r)
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("500-report batch status %d body %s; want 401 from machine proof, not a size refusal", w.Code, w.Body.String())
+		t.Fatalf("largest valid batch status %d body %s; want 401 from machine proof, not a size refusal", w.Code, w.Body.String())
+	}
+}
+
+// The body is read before machine proof, so an unauthenticated caller must not make the server buffer more than the cap.
+type countingZeroBody struct{ read int }
+
+func (b *countingZeroBody) Read(p []byte) (int, error) {
+	clear(p)
+	b.read += len(p)
+	return len(p), nil
+}
+func (*countingZeroBody) Close() error { return nil }
+
+func TestUsageNativeBoundsPreAuthBodyRead(t *testing.T) {
+	body := &countingZeroBody{}
+	r := httptest.NewRequest("POST", "/v1/usage/native", nil)
+	r.Body = body
+	w := httptest.NewRecorder()
+	resourceUsageNative(nil, nil)(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("oversized unauthenticated body status %d, want 400", w.Code)
+	}
+	if limit := resourceusage.MaxReports*2<<10 + 32<<10; body.read > limit {
+		t.Fatalf("read %d bytes before machine proof; want at most %d", body.read, limit)
 	}
 }
 
