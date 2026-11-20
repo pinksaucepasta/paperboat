@@ -166,7 +166,16 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 			return err
 		}
 		var held, live, bytes int
-		err = tx.QueryRow(ctx, `SELECT COALESCE(sum(octet_length(envelope)),0),count(*) FILTER(WHERE NOT deleted),COALESCE(sum(ciphertext_bytes) FILTER(WHERE NOT deleted),0) FROM(SELECT DISTINCT ON(record_id) deleted,ciphertext_bytes,envelope FROM environment_vault_record_versions WHERE `+recordScopePredicate+` ORDER BY record_id,revision DESC) current`, recordArgs(c, epoch)...).Scan(&held, &live, &bytes)
+		// The stored binary values expand to unpadded base64url on both read paths.
+		err = tx.QueryRow(ctx, `SELECT
+ COALESCE(sum((4::bigint * octet_length(envelope) + 2) / 3
+   + (4 * octet_length(writer_public) + 2) / 3 + octet_length(document_id) + $6::bigint),0),
+ count(*) FILTER (WHERE NOT deleted),
+ COALESCE(sum(ciphertext_bytes) FILTER (WHERE NOT deleted),0)
+ FROM (
+ SELECT DISTINCT ON (record_id) deleted, ciphertext_bytes, envelope, writer_public, document_id
+ FROM environment_vault_record_versions WHERE `+recordScopePredicate+` ORDER BY record_id, revision DESC
+ ) current`, append(recordArgs(c, epoch), connectorprotocol.VaultRecordSnapshotOverhead)...).Scan(&held, &live, &bytes)
 		if err != nil {
 			return err
 		}
@@ -179,54 +188,38 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 		}
 		out.Sequence = sequence
 		out.AfterSequence = head.Sequence
-		if err := pruneVaultRecordHistoryTx(ctx, tx, c, epoch, sequence, s.now().Add(-vaultRecordCursorLifetime)); err != nil {
+		if err := pruneVaultRecordHistoryTx(ctx, tx, c, epoch, s.now().Add(-vaultRecordCursorLifetime)); err != nil {
 			return err
 		}
 		return saveVaultOperationTx(ctx, tx, account, in.OperationID, digest, out)
 	})
 	return out, err
 }
-func pruneVaultRecordHistoryTx(ctx context.Context, tx *db.Tx, c VaultLayerCoordinate, epoch, sequence uint64, cutoff time.Time) error {
-	args := append(recordArgs(c, epoch), cutoff)
-	var floor uint64
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(sequence),0) FROM environment_vault_record_versions WHERE `+recordScopePredicate+` AND created_at<$6`, args...).Scan(&floor); err != nil {
-		return err
-	}
-	prune := func() error {
-		if floor == 0 {
-			return nil
-		}
-		_, err := tx.Exec(ctx, `DELETE FROM environment_vault_record_versions old WHERE `+`old.workspace_id=$1 AND old.owner_kind=$2 AND old.owner_id=$3 AND old.machine_id=$4 AND old.key_epoch=$5 AND old.sequence<$6 AND EXISTS(SELECT 1 FROM environment_vault_record_versions newer WHERE newer.workspace_id=old.workspace_id AND newer.owner_kind=old.owner_kind AND newer.owner_id=old.owner_id AND newer.machine_id=old.machine_id AND newer.key_epoch=old.key_epoch AND newer.record_id=old.record_id AND newer.sequence>old.sequence AND newer.sequence<=$6)`, append(recordArgs(c, epoch), floor)...)
-		return err
-	}
-	if err := prune(); err != nil {
-		return err
-	}
-	for {
-		var size int64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(octet_length(envelope)),0) FROM environment_vault_record_versions WHERE `+recordScopePredicate, recordArgs(c, epoch)...).Scan(&size); err != nil {
-			return err
-		}
-		if size <= MaximumVaultRecordHistoryBytes {
-			break
-		}
-		var next uint64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(min(sequence),0) FROM environment_vault_record_versions WHERE `+recordScopePredicate+` AND sequence>$6`, append(recordArgs(c, epoch), floor)...).Scan(&next); err != nil {
-			return err
-		}
-		if next == 0 || next > sequence {
-			return ErrLimitExceeded
-		}
-		floor = next
-		if err := prune(); err != nil {
-			return err
-		}
-	}
-	if floor > 0 {
-		_, err := tx.Exec(ctx, `UPDATE environment_vault_record_heads SET floor_sequence=GREATEST(floor_sequence,$5) WHERE workspace_id=$1 AND owner_kind=$2 AND owner_id=$3 AND machine_id=$4`, c.WorkspaceID, c.OwnerKind, c.OwnerID, c.MachineID, floor)
-		return err
-	}
-	return nil
+func pruneVaultRecordHistoryTx(ctx context.Context, tx *db.Tx, c VaultLayerCoordinate, epoch uint64, cutoff time.Time) error {
+	// A version is needed only for snapshots before the sequence that supersedes it.
+	// Retain newest history first and expire snapshots older than the new floor.
+	_, err := tx.Exec(ctx, `WITH versions AS MATERIALIZED (
+ SELECT ctid, sequence, created_at, octet_length(envelope) AS bytes,
+        lead(sequence) OVER (PARTITION BY record_id ORDER BY revision) AS superseded_at
+ FROM environment_vault_record_versions WHERE `+recordScopePredicate+`
+), history AS (
+ SELECT superseded_at, sum(sum(bytes)) OVER (ORDER BY superseded_at DESC) AS retained_bytes
+ FROM versions WHERE superseded_at IS NOT NULL GROUP BY superseded_at
+), floor AS (
+ SELECT GREATEST(
+  (SELECT COALESCE(max(sequence),0) FROM versions WHERE created_at<$6),
+  (SELECT COALESCE(max(superseded_at),0) FROM history WHERE retained_bytes>$7::bigint)
+ ) AS sequence
+), pruned AS (
+ DELETE FROM environment_vault_record_versions
+ WHERE ctid = ANY(ARRAY(
+  SELECT versions.ctid FROM versions, floor WHERE versions.superseded_at<=floor.sequence
+ ))
+)
+UPDATE environment_vault_record_heads head SET floor_sequence=floor.sequence FROM floor
+WHERE head.workspace_id=$1 AND head.owner_kind=$2 AND head.owner_id=$3 AND head.machine_id=$4
+ AND head.key_epoch=$5 AND head.floor_sequence<floor.sequence`, append(recordArgs(c, epoch), cutoff, MaximumVaultRecordHistoryBytes)...)
+	return err
 }
 
 type vaultRecordCursor struct {

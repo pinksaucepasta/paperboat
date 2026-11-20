@@ -27,6 +27,10 @@ type VaultRecordState struct {
 	Envelope     string `json:"envelope"`
 }
 
+func (s VaultRecordState) SnapshotBytes() int {
+	return len(s.Envelope) + len(s.WriterPublic) + len(s.DocumentID) + connectorprotocol.VaultRecordSnapshotOverhead
+}
+
 func (s VaultRecordState) Decode() (env.VaultRecord, error) {
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(s.Envelope)
 	if err != nil {
@@ -134,7 +138,7 @@ func (c *Client) VaultRecords(ctx context.Context, coordinate VaultLayerCoordina
 				return VaultRecordsResult{}, errors.New("inconsistent ENV record snapshot")
 			}
 			seen[r.RecordID] = true
-			total += len(r.Envelope) + len(r.WriterPublic) + len(r.DocumentID) + 512
+			total += r.SnapshotBytes()
 			if total > connectorprotocol.MaximumSnapshotBytes {
 				return VaultRecordsResult{}, errors.New("ENV record snapshot exceeded the size bound")
 			}

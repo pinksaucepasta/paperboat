@@ -166,7 +166,7 @@ func (s *LayerStore) fetchRecords(ctx context.Context, binding LaunchContext, so
 				return nil, ErrInvalidSnapshot
 			}
 			ids[record.RecordID] = true
-			total += len(record.Envelope) + len(record.WriterPublic) + len(record.DocumentID) + 512
+			total += record.SnapshotBytes()
 			if total > connectorprotocol.MaximumSnapshotBytes {
 				return nil, ErrInvalidSnapshot
 			}
