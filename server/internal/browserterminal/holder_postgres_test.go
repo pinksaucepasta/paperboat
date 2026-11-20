@@ -90,12 +90,11 @@ func newHolderFixture(t *testing.T) *holderFixture {
 	}
 	f.host = strings.ReplaceAll(machine, "_", "-") + ".runtime.example.test"
 	exec(`INSERT INTO users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,$2,true,'active')`, f.account, f.account+"@example.test")
-	exec(`INSERT INTO sessions (id,user_id,session_hash,csrf_hash,expires_at) VALUES ($1,$2,$3,$4,now()+interval '1 hour')`, f.browserSession, f.account, "hash_"+prefix, "csrf_"+prefix)
 	exec(`INSERT INTO control_environments(id,workspace_id,owner_user_id,desired_state) VALUES($1,$1,$2,'active')`, env, f.account)
 	exec(`INSERT INTO user_machines (id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,public_identity_key,installation_generation,worker_generation,configured_capabilities,observed_capabilities) VALUES ($1,$2,$3,'holder','linux','amd64','/workspace','online','occupied',true,$4,1,1,ARRAY['terminal_host']::text[],ARRAY['terminal_host']::text[])`, machine, f.account, env, base64.RawURLEncoding.EncodeToString(public))
 	exec(`INSERT INTO control_routes(id,environment_id,kind,public_host,managed_public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$3,$3,'127.0.0.1',38080)`, route, env, f.host)
 	exec(`INSERT INTO control_connector_generations(environment_id,machine_id,connector_id,generation,edge_pool,state) VALUES($1,$2,'runtime',1,'default','pending')`, env, machine)
-	for i, n := range names {
+	for i, n := range names[:2] {
 		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,endpoint_host,public_ingress_verified_at)
 VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$4,27443,27444,$5,'fixture certificate',$4,now())`,
 			f.node[n], f.epoch[n], "region-"+n, "edge-"+n+".example.test", "sha256:"+strings.Repeat(string(rune('1'+i)), 64))
@@ -129,6 +128,13 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 			held[node] = true
 		}
 	}
+	// Node c joins only now, so it cannot be given a carrier; the browser session is only needed to issue tickets.
+	for i, n := range names[2:] {
+		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,endpoint_host,public_ingress_verified_at)
+VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$4,27443,27444,$5,'fixture certificate',$4,now())`,
+			f.node[n], f.epoch[n], "region-"+n, "edge-"+n+".example.test", "sha256:"+strings.Repeat(string(rune('3'+i)), 64))
+	}
+	exec(`INSERT INTO sessions (id,user_id,session_hash,csrf_hash,expires_at) VALUES ($1,$2,$3,$4,now()+interval '1 hour')`, f.browserSession, f.account, "hash_"+prefix, "csrf_"+prefix)
 	if !held[f.node["a"]] || !held[f.node["b"]] || held[f.node["c"]] {
 		t.Fatalf("carriers are on %v, want exactly edges a and b (the fixture no longer places them)", held)
 	}
