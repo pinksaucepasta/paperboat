@@ -31,7 +31,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=load-generator-speaks-the-relay-derp-protocol
 	"tailscale.com/derp"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=load-generator-speaks-the-relay-derp-protocol
 	"tailscale.com/types/key"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
@@ -177,6 +179,7 @@ func idle(args []string) error {
 	var peers []*peer
 	begin := time.Now()
 	for i := *start; i < *start+*n; i++ {
+		//paperboat:allow-source-policy sleep owner=capacity-harness reason=load-generator-pacing-and-run-duration-not-a-retry
 		time.Sleep(time.Duration(float64(time.Second) / *rate))
 		p, err := e.newPeer(fmt.Sprintf("account_%d", i/e.accountSize), fmt.Sprintf("endpoint_%d", i), nil)
 		if err != nil {
@@ -222,6 +225,7 @@ func idle(args []string) error {
 	data, _ := json.Marshal(out)
 	fmt.Println(string(data))
 	if *hold > 0 {
+		//paperboat:allow-source-policy sleep owner=capacity-harness reason=load-generator-pacing-and-run-duration-not-a-retry
 		time.Sleep(*hold)
 	} else {
 		select {}
@@ -341,9 +345,11 @@ func flow(args []string) error {
 		}()
 	}
 	began := time.Now()
+	//paperboat:allow-source-policy sleep owner=capacity-harness reason=load-generator-pacing-and-run-duration-not-a-retry
 	time.Sleep(*duration)
 	close(stop)
 	elapsed := time.Since(began).Seconds()
+	//paperboat:allow-source-policy sleep owner=capacity-harness reason=load-generator-pacing-and-run-duration-not-a-retry
 	time.Sleep(time.Second)
 	var sent, received, bytes int64
 	for _, s := range stats {

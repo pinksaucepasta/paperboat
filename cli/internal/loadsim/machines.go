@@ -366,6 +366,7 @@ func (r *runner) ramp() {
 		}
 		if interval > 0 {
 			next = next.Add(interval)
+			//paperboat:allow-source-policy sleep owner=capacity-harness reason=load-generator-pacing-not-a-retry
 			time.Sleep(time.Until(next))
 		}
 	}
@@ -380,6 +381,7 @@ func (r *runner) connect(m *machine) {
 	var lastErr error
 	for attempt := 0; attempt < 4 && r.ctx.Err() == nil; attempt++ {
 		if attempt > 0 {
+			//paperboat:allow-source-policy sleep owner=capacity-harness reason=load-generator-pacing-not-a-retry
 			time.Sleep(time.Duration(attempt) * 2 * time.Second)
 		}
 		ctx, cancel := context.WithTimeout(r.ctx, 45*time.Second)

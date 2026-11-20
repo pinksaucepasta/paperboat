@@ -117,6 +117,7 @@ func smallStep(f httpFlags, rate int, request func(string) (int, int64, error)) 
 	next := started
 	for time.Since(started) < f.duration {
 		if sleep := time.Until(next); sleep > 0 {
+			//paperboat:allow-source-policy sleep owner=capacity-harness reason=open-loop-request-pacing-not-a-retry
 			time.Sleep(sleep)
 		}
 		// Open loop: a slow edge does not slow the sender; catch up on the schedule instead.
@@ -188,6 +189,7 @@ func largeStep(f httpFlags, request func(string) (int, int64, error)) map[string
 				total.Add(n)
 				if err != nil || status != 200 {
 					failed.Add(1)
+					//paperboat:allow-source-policy sleep owner=capacity-harness reason=open-loop-request-pacing-not-a-retry
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
