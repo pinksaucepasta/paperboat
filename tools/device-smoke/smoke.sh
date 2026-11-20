@@ -391,10 +391,14 @@ test_terminal() { # test_terminal TARGET [ID-PREFIX]
   if [ $DRIVER_UPLOADED = 0 ]; then
     printf '%s\n' "$TERM_DRIVER" | on "$CLIENT" "mkdir -p /tmp/$RUN_ID && cat > /tmp/$RUN_ID/term.py" && DRIVER_UPLOADED=1
   fi
-  # POSIX shells and PowerShell both print MARKER-42 for these lines.
-  if [ "$t" = victus ]; then line="echo $marker-\$(6*7)"; else line="echo $marker-\$((6*7))"; fi
+  # The Windows terminal starts cmd.exe. Run the arithmetic in PowerShell.
+  if [ "$t" = victus ]; then
+    line="powershell -NoProfile -Command \"Write-Output ('$marker-'+(6*7))\""
+  else
+    line="echo $marker-\$((6*7))"
+  fi
   t0=$(now)
-  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker '$line' $marker-42" 2>&1); status=$?
+  out=$(on "$CLIENT" "python3 /tmp/$RUN_ID/term.py $PB_HP $t smoke-$marker $(printf '%q' "$line") $marker-42" 2>&1); status=$?
   if [ "$status" = 0 ] && marker_present "$out" TERMINAL_OK; then record "$prefix:$t" PASS $(( $(now)-t0 ))
   else record "$prefix:$t" FAIL $(( $(now)-t0 )) "terminal or transport failed; output withheld"; fi
   cleanup_terminal "$t" "smoke-$marker" "cleanup-$prefix"

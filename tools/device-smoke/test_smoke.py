@@ -1070,6 +1070,33 @@ class UpdateFloorCheck(unittest.TestCase):
             self.run_check(self.Staging(), floor='2026.10.25.1')
 
 class TerminalDriver(unittest.TestCase):
+    def test_windows_probe_passes_one_cmd_compatible_arithmetic_line(self):
+        prologue = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
+        fixture = r"""
+DRIVER_UPLOADED=1
+exec 3>&2
+record() { :; }
+cleanup_terminal() { :; }
+on() {
+    python3() { printf '%s\n' "$@"; }
+    eval "$2" >&3
+    echo TERMINAL_OK
+}
+test_terminal victus
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            script = pathlib.Path(directory) / 'smoke.sh'
+            script.write_text(prologue + fixture)
+            result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'hp'],
+                                    env=dict(os.environ, PAPERBOAT_SMOKE_SNAPSHOT='1', PAPERBOAT_SMOKE_SOURCE_DIR=directory),
+                                    capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        _, _, target, name, line, token = result.stderr.splitlines()
+        self.assertEqual(target, 'victus')
+        marker = name.removeprefix('smoke-')
+        self.assertEqual(token, marker + '-42')
+        self.assertEqual(line, f'''powershell -NoProfile -Command "Write-Output ('{marker}-'+(6*7))"''')
+
     def test_failure_is_nonzero_and_private_output_is_withheld(self):
         driver = (HERE / 'smoke.sh').read_text().split("TERM_DRIVER=$(cat <<'PY'\n", 1)[1].split("\nPY\n)", 1)[0]
         with tempfile.TemporaryDirectory() as directory:
