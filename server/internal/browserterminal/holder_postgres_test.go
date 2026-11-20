@@ -109,7 +109,7 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 	for pass := range 2 {
 		answer, err := carriers.Attach(ctx, proof, request)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("attach pass %d: %v", pass, err)
 		}
 		admitted := []runtimewire.Admission{answer.Admission}
 		if answer.Backup != nil {
@@ -123,7 +123,7 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 			node := carrier.Binding.EdgeNodeID
 			edge := previewattachment.PreviewEdgeIdentity{NodeID: node, ProcessEpoch: carrier.Binding.EdgeProcessEpoch}
 			if err := carriers.Observe(ctx, edge, []runtimewire.Observation{{RouteID: route, SessionID: carrier.Binding.SessionID, AttachmentGeneration: carrier.AttachmentGeneration, Ready: true}}); err != nil {
-				t.Fatal(err)
+				t.Fatalf("observe on %s: %v", node, err)
 			}
 			held[node] = true
 		}
@@ -159,7 +159,7 @@ VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRA
 		t.Helper()
 		ticket, streamURL, _, err := f.gateway.Issue(ctx, f.account, f.browserSession, f.session, f.origin, testBrowserKeyDigest)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("issue: %v", err)
 		}
 		return ticket, streamURL
 	}
