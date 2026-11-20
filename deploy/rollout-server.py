@@ -162,6 +162,7 @@ class Rollout:
         before = self.current()
         # The limit keeps forward deploys from piling up processes; a rollback restores service, so it never waits
         # (2026-11-12 19:59Z: the gate's rollback of .13.4 was refused here and prod stayed on the failed build).
+        # Two retained + active + a rollback is db.RolloutInstances (4): change both together, the database pools are sized from it.
         if self.reap(before) >= 2 and not rollback:
             raise RolloutError('Two previous servers still hold live connections. '
                                'Run --reap after those sessions finish; none were stopped.')
