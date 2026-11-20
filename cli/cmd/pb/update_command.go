@@ -9,14 +9,17 @@ import (
 	"io"
 	"os"
 	"os/user"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/autoupdate"
+	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	service "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/updateflow"
@@ -98,7 +101,25 @@ func actionUpdateCheck(command *cobra.Command, _ []string) error {
 		}
 		return writeUpdateCheckResult(command, response.Version, available)
 	}
+	if errors.Is(err, updated.ErrUnavailable) && updateRegistrationMissing() {
+		return commandRejection{reason: commandRejectUpdateUnpaired}
+	}
 	return updateControlFailure("check with the Paperboat updater", err)
+}
+
+// Check can run before the updater socket is present. Read the enrollment
+// marker without opening the identity store, which could create a new key.
+func updateRegistrationMissing() bool {
+	root := strings.TrimSpace(os.Getenv("PAPERBOAT_RUNTIME_STATE_ROOT"))
+	if root == "" {
+		var err error
+		if root, err = helperconfig.DefaultStateRoot(os.Getenv); err != nil {
+			return false
+		}
+	}
+	path := filepath.Join(root, "machine-registration.json")
+	_, err := os.Lstat(path)
+	return errors.Is(atomicfile.AbsentOrBlocked(path, err), os.ErrNotExist)
 }
 
 func writeUpdateCheckResult(command *cobra.Command, latest string, available bool) error {

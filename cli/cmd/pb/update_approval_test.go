@@ -88,6 +88,8 @@ func (f *updateApprovalControlFixture) handle(connection *net.UnixConn) {
 	response := updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "ok", Version: updateApprovalCandidateVersion}
 	if decodeErr != nil {
 		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "invalid_request", ErrorMessage: "invalid local test request"}
+	} else if request.Operation == "check" {
+		response = updated.ControlResponse{Schema: updated.ControlProtocolV1, Status: "error", ErrorCode: "installation_pending"}
 	} else if request.Operation == "download" {
 		response.Candidate = &workerupdate.PreparedCandidate{
 			ID: updateApprovalCandidateID, Version: updateApprovalCandidateVersion,
@@ -251,4 +253,44 @@ func TestUpdateApprovalFlowStagesAndInstallsOnlyTheReviewedCandidate(t *testing.
 		}
 		requireUpdateRequests(t, fixture)
 	})
+}
+
+func TestUpdateCheckOnUnpairedInstallShowsHowToPair(t *testing.T) {
+	fixture := startUpdateApprovalControlFixture(t)
+	previousSocket := updateControlSocketForCommand
+	updateControlSocketForCommand = func() (string, error) { return fixture.socket, nil }
+	t.Cleanup(func() { updateControlSocketForCommand = previousSocket })
+
+	for _, mode := range []string{"human", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			args := []string{"update", "check"}
+			if mode == "json" {
+				args = append(args, "--json")
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(context.Background(), args, &stdout, &stderr); code == 0 {
+				t.Fatal("an unpaired check claimed to have verified a release")
+			}
+			message := stderr.String()
+			if mode == "json" {
+				var output struct {
+					Error struct {
+						Code    string `json:"code"`
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+					t.Fatal(err)
+				}
+				if output.Error.Code != "machine_not_paired" {
+					t.Fatalf("unpaired error code = %q", output.Error.Code)
+				}
+				message = output.Error.Message
+			}
+			if !strings.Contains(message, "not paired") || !strings.Contains(message, "pb pair") {
+				t.Fatalf("missing pairing instructions in %q", message)
+			}
+		})
+	}
+	requireUpdateRequests(t, fixture, expectedUpdateRequest("check", ""), expectedUpdateRequest("check", ""))
 }

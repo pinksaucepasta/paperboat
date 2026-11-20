@@ -285,8 +285,17 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	}
 	c.config.ActiveVersion = currentVersion
 	response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Version: c.activeVersion, Observation: c.scheduler.Snapshot(), Pending: !installed.Committed}
-	if !installed.Committed && (request.Operation == "check" || request.Operation == "download" || request.Operation == "install" || request.Operation == "settings" && request.Settings != nil) {
-		return response, nil
+	if !installed.Committed {
+		switch request.Operation {
+		case "check":
+			return response, ErrInstallationPending
+		case "download", "install":
+			return response, nil
+		case "settings":
+			if request.Settings != nil {
+				return response, nil
+			}
+		}
 	}
 	if request.Operation == "settings" {
 		settings, err := machineUpdateSettings(c.config.StateRoot, c.config.AutomaticChecks, request.Settings)
@@ -640,6 +649,9 @@ func (c *windowsController) activationBlockedContext(ctx context.Context) (bool,
 }
 
 func controlErrorCodeWindows(err error) string {
+	if errors.Is(err, ErrInstallationPending) {
+		return "installation_pending"
+	}
 	if errors.Is(err, ErrCustomInstallation) {
 		return "custom_installation"
 	}

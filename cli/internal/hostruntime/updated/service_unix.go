@@ -30,7 +30,6 @@ import (
 )
 
 var ErrInvalidConfig = errors.New("invalid paperboat-updated configuration")
-var ErrInstallationPending = errors.New("complete Paperboat enrollment before managing updates")
 
 // activationFailure retains the original error identity while exposing only a
 // finite local diagnostic reason. Error text never formats the wrapped cause.

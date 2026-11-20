@@ -482,25 +482,20 @@ func TestSignedUpdateAvailableNeverOffersDowngrade(t *testing.T) {
 	}
 }
 
-func TestUpdateCheckRequiresManagedUpdater(t *testing.T) {
-	oldVersion := buildinfo.Version
+func TestUpdateCheckMissingUpdaterOnUnpairedInstallShowsHowToPair(t *testing.T) {
+	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", t.TempDir())
 	oldSocket := updateControlSocketForCommand
-	defer func() {
-		buildinfo.Version = oldVersion
-		updateControlSocketForCommand = oldSocket
-	}()
-	buildinfo.Version = "2026.08.18.1"
-	updateControlSocketForCommand = func() (string, error) { return filepath.Join(t.TempDir(), "missing-updater.sock"), nil }
-	command, _, err := newRootCommand().Find([]string{"update", "check"})
-	if err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() { updateControlSocketForCommand = oldSocket })
+	socket := filepath.Join(t.TempDir(), "missing-updater.sock")
+	if runtime.GOOS == "windows" {
+		socket = `\.\pipe\PaperboatMissingUpdater-` + strconv.Itoa(os.Getpid())
 	}
-	var output bytes.Buffer
-	command.SetContext(context.Background())
-	command.SetOut(&output)
-	command.SetErr(&output)
-	if err := actionUpdateCheck(command, nil); err == nil {
-		t.Fatalf("expected managed updater error, output=%q", output.String())
+	updateControlSocketForCommand = func() (string, error) { return socket, nil }
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"update", "check"}, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "not paired") || !strings.Contains(stderr.String(), "pb pair") {
+		t.Fatalf("exit=%d output=%q", code, stderr.String())
 	}
 }
 

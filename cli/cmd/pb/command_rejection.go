@@ -51,6 +51,7 @@ const (
 	commandRejectDaemonDegraded
 	commandRejectAdministrator
 	commandRejectUpdateFlags
+	commandRejectUpdateUnpaired
 	commandRejectUpdatePlatform
 )
 
@@ -133,6 +134,8 @@ func (e commandRejection) Error() string {
 		return "close the terminal session before deleting its record."
 	case commandRejectMissingServer:
 		return "Paperboat server is not configured; set server_url or use --server."
+	case commandRejectUpdateUnpaired:
+		return "This machine is not paired. Run `pb pair <token>` with the enrollment token from the Paperboat dashboard, then retry."
 	case commandRejectCustomUpdate:
 		return "The installed Paperboat is a custom build, which cannot use official updates. To switch, run `pb update --force` (it may interrupt running work) or install an official bundle with `pb update --from <file.pb-update>`."
 	case commandRejectLegacyCarrierRunning:

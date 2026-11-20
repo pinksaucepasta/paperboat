@@ -163,8 +163,13 @@ func writeUpdateSettingsResult(output io.Writer, result updateSettingsResult) er
 
 func updateControlFailure(operation string, err error) error {
 	var remote *updated.ControlError
-	if errors.As(err, &remote) && remote.Code == "custom_installation" {
-		return commandRejection{reason: commandRejectCustomUpdate}
+	if errors.As(err, &remote) {
+		switch remote.Code {
+		case "installation_pending":
+			return commandRejection{reason: commandRejectUpdateUnpaired}
+		case "custom_installation":
+			return commandRejection{reason: commandRejectCustomUpdate}
+		}
 	}
 	if errors.As(err, &remote) && openConnectionsRefusal(remote) {
 		return updateOpenConnectionsRefusal{message: remote.Message}
