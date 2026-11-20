@@ -263,7 +263,16 @@ func (s *EnrollmentService) Exchange(ctx context.Context, credential string, pub
 	}
 	expiresAt := now.Add(time.Hour)
 	var result HelperIdentity
-	err = s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// READ COMMITTED: every statement below is one atomic row update or upsert (consume WHERE state='pending', activate
+	// WHERE state='pending', the machine bind, the connector upsert, the audit insert ON CONFLICT DO NOTHING), so a
+	// concurrent exchange of the same enrollment blocks on its row lock and then takes the replay path. SERIALIZABLE only
+	// added predicate-lock conflicts between enrollments that share no row (503 postgres_serialization under a burst).
+	// The one read that must hold is "the environment is still active": its row is locked FOR SHARE first, so a revoke
+	// (which updates it) waits for this exchange or is seen by it.
+	err = s.store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM control_environments WHERE id=$1 FOR SHARE`, claims.EnvironmentID); err != nil {
+			return errors.Join(err, errEnrollmentConsume)
+		}
 		enrollment, err := tx.Queries().ConsumeControlHelperEnrollment(ctx, dbsqlc.ConsumeControlHelperEnrollmentParams{ID: claims.EnrollmentID, JtiHash: jtiHash[:], Now: sql.NullTime{Time: now, Valid: true}})
 		if errors.Is(err, sql.ErrNoRows) {
 			// The exchange transaction may have committed after the client sent
