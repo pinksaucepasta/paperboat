@@ -3,8 +3,10 @@
 # TestE2ECore in skew mode (server/internal/app, PAPERBOAT_E2E_PREVIOUS): machines on the previous pb pair with
 # the HEAD server through the previous edge and relay; every core (pair, exec, ssh, send), edge (tunnel, preview)
 # and team path runs; then the edge, relay and each machine's pb move to HEAD in place and everything runs again.
-# Runs on our own host (docker + PostgreSQL in ~/.pb-test-pg-dsn), never a GitHub runner; builds happen there.
-#   tools/device-smoke/skew_check.sh [previous-ref] [host]   (default: the latest official release; host ubuntu@anvit)
+# Runs on a Linux host with docker and PostgreSQL in ~/.pb-test-pg-dsn; builds happen there. Default host: a fresh
+# linpool runner, started for this run and stopped after it (nothing else listens on its 80/443, unlike anvit, which
+# hosts the production edge and staging edges). An explicit host is used as is, never started or stopped.
+#   tools/device-smoke/skew_check.sh [previous-ref] [host]   (default: the latest official release; a new linpool runner)
 # previous-ref is any git ref (a release tag, or origin/main before the first release exists).
 # SKEW_CHECK_PUBLISH=1 records the result as the commit status paperboat/skew-check on HEAD, which release.yml
 # requires before it publishes a release of that commit: run it on the exact release commit (the tag).
@@ -12,19 +14,37 @@
 set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-prev=${1:-$(gh release view --json tagName -q .tagName)} host=${2:-ubuntu@anvit}
+prev=${1:-$(gh release view --json tagName -q .tagName)} host=${2:-}
+if [ -z "$host" ]; then
+  pool=$root/tools/device-smoke/linpool.sh
+  n=$("$pool" start 1 2 | tail -n1) && [[ $n =~ ^linpool-[0-9]+$ ]] || { echo "skew-check: no linpool runner started" >&2; exit 1; }
+  host=$n
+  trap '"$pool" stop "${host#linpool-}" >&2 || true' EXIT
+fi
 git fetch -q origin --tags
 prev_sha=$(git rev-parse --verify "$prev^{commit}")
 arch=$(ssh -o BatchMode=yes "$host" uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT
+trap '[ -z "${pool:-}" ] || "$pool" stop "${host#linpool-}" >&2 || true; rm -rf "$stage"' EXIT
 mkdir -p "$stage/head" "$stage/previous-src" "$stage/previous"
 git archive HEAD -- . ':!console' ':!marketing' ':!admin' | tar x -C "$stage/head"
 git archive "$prev_sha" -- . ':!console' ':!marketing' ':!admin' | tar x -C "$stage/previous-src"
 lane=$(printf %s "${root##*/}" | tr -c 'A-Za-z0-9._-' _)
 dest="pb-skew/$lane"
 echo "skew-check: $prev ${prev_sha:0:9} ($arch) vs HEAD $(git rev-parse --short HEAD) on $host" >&2
-ssh -o BatchMode=yes "$host" "mkdir -p '$dest'"
+# Fail fast on the host problems that held earlier runs: no docker or database, a clash on the edge's 80/443, a full disk.
+ssh -o BatchMode=yes "$host" bash -s <<'PREFLIGHT' || { echo "skew-check: $host is not ready for the e2e (see above); nothing was run" >&2; exit 1; }
+fail() { echo "skew-check preflight: $*" >&2; exit 1; }
+docker info >/dev/null 2>&1 || fail "docker is not running or not usable by $USER"
+[ -s "$HOME/.pb-test-pg-dsn" ] || fail "$HOME/.pb-test-pg-dsn is missing: the e2e needs a PostgreSQL DSN there"
+base=$(cat "$HOME/.pb-test-pg-dsn")
+psql "${base%%lane_test*}postgres?sslmode=disable" -qtAc 'select 1' >/dev/null 2>&1 || fail "PostgreSQL does not answer on the DSN in ~/.pb-test-pg-dsn"
+gw=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}') || fail "docker has no bridge network"
+busy=$(ss -ltunH | awk -v gw="$gw" '$5 ~ ("^(" gw "|0\\.0\\.0\\.0|\\*|\\[::\\]):(80|443)$") {print $1, $5}')
+[ -z "$busy" ] || fail "port 80/443 is taken on the docker bridge $gw (the e2e edge needs both): $busy"
+[ "$(df --output=avail -BG / | tail -n1 | tr -dc 0-9)" -ge 20 ] || fail "less than 20 GB free on /: $(df -h --output=avail / | tail -n1)"
+PREFLIGHT
+ssh -o BatchMode=yes "$host" "mkdir -p '$dest' \$HOME/pb-remote-test"
 rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:$dest/"
 sha=$(git rev-parse HEAD)
 set +e
@@ -32,6 +52,9 @@ ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
   "GITHUB_SHA=$sha PREV_SHA=$prev_sha flock -w 7200 \$HOME/pb-remote-test/host.lock bash -s -- $dest" <<'REMOTE'
 set -euo pipefail
 umask 022
+# A cache of this run only: no other job on the host can clean it away mid-build.
+export GOCACHE=$(mktemp -d "$HOME/pb-skew/gocache.XXXXXX")
+trap 'rm -rf "$GOCACHE"' EXIT
 dest="$HOME/$1" lane=${1##*/}
 export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local CGO_ENABLED=0
 # The previous release's pb, edge, relay and self-host harness, built from its own source.

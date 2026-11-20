@@ -1303,5 +1303,24 @@ class UpdateSurvivalMarkers(unittest.TestCase):
             self.assertEqual(update_continuity.owners(), {'g1': ['202'], 'g2': ['203']})
         self.assertEqual(run.call_args.args[0][:3], ['ps', '-U', str(os.getuid())])  # one account's owners only
 
+class SkewCheckScript(unittest.TestCase):
+    def test_a_fresh_runner_a_private_cache_and_a_preflight_that_fails_before_anything_runs(self):
+        # Three host problems held 2026.11.20.0 three times: a full disk, a shared Go cache cleaned mid-build, a 80/443 clash.
+        text = (HERE / 'skew_check.sh').read_text()
+        self.assertIn('linpool.sh', text)  # no host argument: a runner started for this run
+        self.assertIn('"$pool" stop', text)  # and stopped on every exit path
+        self.assertIn('export GOCACHE=$(mktemp -d', text)
+        for need in ('docker info', '.pb-test-pg-dsn', '(80|443)', '-ge 20'):
+            self.assertIn(need, text)
+        self.assertLess(text.index('PREFLIGHT\n'), text.index('rsync -az'))  # before anything is copied or built
+
+    def test_the_port_check_flags_the_bridge_and_wildcards_only(self):
+        line = next(l for l in (HERE / 'skew_check.sh').read_text().splitlines() if l.startswith('busy=$(ss'))
+        awk = line.split("awk -v gw=\"$gw\" '")[1].rsplit("'", 1)[0]
+        ss = 'tcp LISTEN 0 4096 10.0.0.76:443 0.0.0.0:*\nudp UNCONN 0 0 172.17.0.1:443 0.0.0.0:*\ntcp LISTEN 0 4096 *:80 *:*\ntcp LISTEN 0 4096 0.0.0.0:8443 0.0.0.0:*\n'
+        out = subprocess.run(['awk', '-v', 'gw=172.17.0.1', awk], input=ss, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(out.strip().splitlines(), ['udp 172.17.0.1:443', 'tcp *:80'])
+
+
 if __name__ == '__main__':
     unittest.main()
