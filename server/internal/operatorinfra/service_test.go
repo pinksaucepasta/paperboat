@@ -280,3 +280,58 @@ func TestOperatorNodeUpdateKeepsStoredUsageKey(t *testing.T) {
 		t.Fatalf("keyless update adding a relay role: %v", err)
 	}
 }
+
+// A node's forwarding counters come from its latest observation: an edge's "forward", a relay's "mesh"; a node that
+// reports none has none, and the same read model serves the list and a mutation's answer.
+func TestOperatorNodeListShowsForwardStats(t *testing.T) {
+	store := infraTestDB(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	admin := "infra_admin_" + x
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, admin); err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
+	region, err := s.MutateRegion(ctx, admin, "region-create-"+x, RegionMutation{Action: "create", ID: "region_" + x, DisplayName: "Test region", Reason: "case:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, suffix := range []string{"a", "b", "c"} {
+		in := NodeMutation{Action: "enroll", NodeID: "managed_" + suffix + "_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-" + suffix, EndpointHost: suffix + ".example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: bytes.Repeat([]byte{byte(suffix[0])}, 32)}
+		if _, err = s.MutateNode(ctx, admin, "enroll-"+suffix+"-"+x, in); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, in.NodeID)
+	}
+	set := func(id, observation string) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET observation=$2::jsonb WHERE id=$1`, id, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(ids[0], `{"active_streams":1,"forward":{"links":2,"names":9,"forwarded":11,"accepted":5,"holder_miss":1,"unreachable":2,"loop_refused":3,"bytes_in":100,"bytes_out":200}}`)
+	set(ids[1], `{"mesh":{"links":1,"names":4,"forwarded":7}}`)
+	set(ids[2], `{"active_streams":3}`)
+	page, err := s.ListNodes(ctx, admin, region.ID, "", 100)
+	if err != nil || len(page.Items) != 3 {
+		t.Fatalf("list: %+v err=%v", page.Items, err)
+	}
+	if f := page.Items[0].Forward; f == nil || f.Links != 2 || f.Names != 9 || f.Forwarded != 11 || f.Accepted != 5 || f.HolderMiss != 1 || f.Unreachable != 2 || f.LoopRefused != 3 || f.BytesIn != 100 || f.BytesOut != 200 {
+		t.Fatalf("edge forward stats %+v", f)
+	}
+	if f := page.Items[1].Forward; f == nil || f.Links != 1 || f.Names != 4 || f.Forwarded != 7 {
+		t.Fatalf("relay mesh stats %+v", f)
+	}
+	if page.Items[2].Forward != nil {
+		t.Fatalf("a node reporting no counters shows %+v", page.Items[2].Forward)
+	}
+	raw, err := json.Marshal(page.Items[2])
+	if err != nil || strings.Contains(string(raw), `"forward"`) {
+		t.Fatalf("a node without counters must omit forward: %s err=%v", raw, err)
+	}
+	site, err := s.MutateNode(ctx, admin, "site-"+x, NodeMutation{Action: "site", NodeID: ids[0], Reason: "case:test", Site: "Mumbai"})
+	if err != nil || site.Node.Forward == nil || site.Node.Forward.Forwarded != 11 {
+		t.Fatalf("mutation answer forward %+v err=%v", site.Node.Forward, err)
+	}
+}

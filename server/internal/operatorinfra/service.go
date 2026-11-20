@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/netip"
 	"regexp"
@@ -85,6 +86,8 @@ type Node struct {
 	CapacityLimit     int64      `json:"capacity_limit"`
 	Revision          int64      `json:"revision"`
 	Ready             bool       `json:"ready"`
+	// Forward is the node's forwarding counters from its latest observation: an edge's visitor forwarding, a relay's mesh.
+	Forward *nodemesh.Stats `json:"forward,omitempty"`
 }
 type NodeMutation struct {
 	Action                 string   `json:"action"`
@@ -436,17 +439,19 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id WHERE ($1='' OR m.region_id=$1)`, region).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
+		rows, err := tx.Query(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL),coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var v Node
-			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready); err != nil {
+			var forward []byte
+			if err = rows.Scan(&v.ID, &v.ProtocolVersion, &v.RegionID, &v.EdgePool, &v.FailureDomain, &v.State, &v.EndpointHost, &v.EndpointTCPPort, &v.EndpointQUICPort, &v.Roles, &v.Transports, &v.CapacityLimit, &v.Revision, &v.NodeGeneration, &v.ObservedAt, &v.RegistryExpiresAt, &v.Ready, &forward); err != nil {
 				rows.Close()
 				return errors.Join(err, rows.Err())
 			}
+			v.Forward = forwardStats(forward)
 			if len(out.Items) == limit {
 				out.NextAfter = out.Items[len(out.Items)-1].ID
 				break
@@ -602,7 +607,19 @@ func (s *Service) RuntimeCredential(ctx context.Context, node string) (string, e
 
 func (s *Service) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
 func readNodeTx(ctx context.Context, tx *db.Tx, id string, out *Node) error {
-	return tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL) FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready)
+	var forward []byte
+	err := tx.QueryRow(ctx, `SELECT n.id,n.protocol_version,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL),coalesce(n.observation->'forward',n.observation->'mesh') FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.ProtocolVersion, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready, &forward)
+	out.Forward = forwardStats(forward)
+	return err
+}
+
+// forwardStats reads the stored forwarding counters; an absent or unreadable value is no stats, never a failed read.
+func forwardStats(raw []byte) *nodemesh.Stats {
+	var stats nodemesh.Stats
+	if len(raw) == 0 || json.Unmarshal(raw, &stats) != nil {
+		return nil
+	}
+	return &stats
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)

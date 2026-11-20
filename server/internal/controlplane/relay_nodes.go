@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
@@ -65,6 +66,8 @@ type relayNodeObservation struct {
 	// the speed limit decides, so a relay held at its share still shows it wants more); the control plane divides the account's speed
 	// among its relays by it.
 	AccountDemand map[string]float64 `json:"account_demand,omitempty"`
+	// Mesh is the relay's relay-to-relay forwarding counters; optional, stored with the node's latest observation.
+	Mesh *nodemesh.Stats `json:"mesh,omitempty"`
 }
 
 // relayAccountSpeed is one account a relay holds to less than the default speed.
@@ -81,6 +84,9 @@ type relayNodeLeaseDocument struct {
 	CapacityLimit int64                 `json:"capacity_limit"`
 	Revocations   []relayRevocation     `json:"revocations"`
 	PeerRelay     *relayServiceIdentity `json:"peer_relay,omitempty"`
+	// MeshPeers are the other managed relay nodes this one may link to (pin = their serving certificate's SPKI pin); none for
+	// a customer-owned relay, which never meshes with Paperboat's.
+	MeshPeers []nodemesh.Peer `json:"mesh_peers,omitempty"`
 	// PoolHandover lists accounts whose relay pool no longer includes this node and when the relay closes their
 	// carriers (Unix seconds): the old relay serves them until clients have moved to the new ones. Nil leaves the
 	// relay's list as it is (the read failed); an empty list clears it.
@@ -190,6 +196,9 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 	if err != nil {
 		return relayNodeLeaseDocument{}, err
 	}
+	if out.MeshPeers, err = relayMeshPeers(ctx, tx, in.NodeID, s.clock().UTC()); err != nil {
+		return relayNodeLeaseDocument{}, err
+	}
 	return out, tx.Commit()
 }
 
@@ -199,6 +208,9 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		return out, invalidUsage("relay_nodes.go:139")
 	}
 	in.Metrics = usableMetrics(ctx, in.NodeID, in.Metrics)
+	if in.Mesh != nil && (in.Mesh.Links < 0 || in.Mesh.Names < 0) {
+		return out, invalidUsage("relay_nodes.go:mesh")
+	}
 	for account, rate := range in.AccountDemand {
 		if !relayIdentifier(account) || rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
 			return out, invalidUsage("relay_nodes.go:demand")
@@ -358,6 +370,13 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if state == "draining" && !in.Draining {
 		return out, set, required, invalidUsage("relay_nodes.go:169")
 	}
+	// The mesh counters ride in the node's stored observation (operatorinfra.Node.Forward reads them); a relay that sends none clears them.
+	observation := []byte(`{}`)
+	if in.Mesh != nil {
+		if observation, err = json.Marshal(map[string]any{"mesh": in.Mesh}); err != nil {
+			return out, set, required, err
+		}
+	}
 	expires = now.Add(relayRegistryLease)
 	operatorDraining := state == "draining"
 	state = "registered"
@@ -372,7 +391,7 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if operatorDraining {
 		state = "draining"
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $4='draining' THEN coalesce(drain_deadline,$7) ELSE NULL END,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining, in.CapacityUsed, now, expires)
+	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $4='draining' THEN coalesce(drain_deadline,$7) ELSE NULL END,observation=(coalesce(observation,'{}'::jsonb)-'mesh')||$9::jsonb,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining, in.CapacityUsed, now, expires, observation)
 	if err != nil {
 		return out, set, required, err
 	}
@@ -394,6 +413,9 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
+		return relayNodeLeaseDocument{}, set, required, err
+	}
+	if out.MeshPeers, err = relayMeshPeers(ctx, tx, in.NodeID, now); err != nil {
 		return relayNodeLeaseDocument{}, set, required, err
 	}
 	return out, set, required, tx.Commit()
@@ -475,4 +497,38 @@ func (s *EdgeService) customerOwnedNode(ctx context.Context, nodeID string) (boo
 	var owned bool
 	err := s.store.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.selfhost_installations WHERE node_id=$1 AND scope_kind IN ('account','team'))`, nodeID).Scan(&owned)
 	return owned, err
+}
+
+// relayMeshPeers are the managed relay nodes other than node that it may link to: heartbeating, ready or draining, with a
+// serving certificate pin and a QUIC endpoint. Nothing for a node that is not a managed one (a customer-owned relay), and a
+// managed relay never lists a customer-owned one: the populations are never mixed.
+func relayMeshPeers(ctx context.Context, tx *sql.Tx, node string, now time.Time) ([]nodemesh.Peer, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT n.id, coalesce(n.region,m.region_id), n.endpoint_host, n.endpoint_quic_port, n.tls_spki_sha256, n.process_epoch, n.drain_deadline IS NOT NULL
+FROM paperboat.control_tunnel_nodes n
+JOIN paperboat.managed_node_authority m ON m.node_id=n.id AND m.retired_at IS NULL
+JOIN paperboat.operator_regions region ON region.id=m.region_id AND region.enabled
+WHERE n.roles @> ARRAY['relay']::text[] AND n.transports @> ARRAY['derp_quic']::text[] AND n.state IN ('ready','draining') AND n.id<>$1
+ AND n.last_heartbeat_at>$2::timestamptz-make_interval(secs=>$3) AND octet_length(n.tls_spki_sha256)=32
+ AND n.endpoint_host IS NOT NULL AND n.endpoint_quic_port IS NOT NULL
+ AND EXISTS(SELECT 1 FROM paperboat.managed_node_authority self WHERE self.node_id=$1 AND self.retired_at IS NULL)
+ORDER BY n.id LIMIT $4`, node, now, meshFreshness.Seconds(), nodemesh.MaxPeers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var peers []nodemesh.Peer
+	for rows.Next() {
+		var p nodemesh.Peer
+		var digest []byte
+		var port int
+		if err := rows.Scan(&p.NodeID, &p.Region, &p.Host, &port, &digest, &p.ProcessEpoch, &p.Draining); err != nil {
+			return nil, err
+		}
+		p.Port, p.SPKISHA256 = uint16(port), nodemesh.PinFromDigest(digest)
+		// A row the wire cannot carry is left out, not allowed to fail the lease.
+		if p.Validate() == nil {
+			peers = append(peers, p)
+		}
+	}
+	return peers, rows.Err()
 }

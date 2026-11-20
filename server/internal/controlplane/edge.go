@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	sharedmetrics "github.com/pinksaucepasta/paperboat/shared/metrics"
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/nodemetrics"
 	"io"
 	"log/slog"
@@ -435,6 +436,8 @@ type edgeNodeObservation struct {
 	Refusals []edgeHostRefusals `json:"refusals,omitempty"`
 	// Metrics is the edge's version, CPU, memory and bytes carried; optional, an older edge sends none.
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
+	// Forward is the edge's visitor-forwarding counters (links, held names, forwarded/accepted streams); optional.
+	Forward *nodemesh.Stats `json:"forward,omitempty"`
 }
 
 type edgeHostRefusals struct {
@@ -610,7 +613,15 @@ func (s *EdgeService) Heartbeat(ctx context.Context, r edgeNodeObservation) erro
 	if r.NodeID == "" || r.ProcessEpoch == "" || r.At.IsZero() {
 		return invalidUsage("edge.go:715")
 	}
-	observation, _ := json.Marshal(map[string]any{"active_streams": r.ActiveStreams})
+	if r.Forward != nil && (r.Forward.Links < 0 || r.Forward.Names < 0) {
+		return invalidUsage("edge.go:forward")
+	}
+	// The stored observation is the operator's read of the node; forward rides in it (operatorinfra.Node.Forward).
+	stored := map[string]any{"active_streams": r.ActiveStreams}
+	if r.Forward != nil {
+		stored["forward"] = r.Forward
+	}
+	observation, _ := json.Marshal(stored)
 	_, err := s.store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: r.NodeID, ProcessEpoch: r.ProcessEpoch, Ready: r.Ready, Draining: r.Draining, Observation: observation, Now: sql.NullTime{Time: s.clock().UTC(), Valid: true}})
 	if err != nil {
 		return err
@@ -656,6 +667,7 @@ func (s *EdgeService) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/relay/nodes/observe", s.handleRelayObserve)
 	mux.HandleFunc("POST /v1/nodes/register", s.handleRegister)
 	mux.HandleFunc("POST /v1/nodes/heartbeat", s.handleHeartbeat)
+	mux.HandleFunc("POST "+nodemesh.PeersPath, s.handlePeers)
 	mux.HandleFunc("POST /v1/edge/assignments/current", s.handleAssignment)
 	mux.HandleFunc("POST /v1/edge/routes/desired-state", s.handleRoutes)
 	mux.HandleFunc("POST /v1/edge/ingress/desired-state", s.handleIngress)

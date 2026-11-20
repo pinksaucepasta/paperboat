@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
@@ -160,6 +161,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"tunnels": tunnels}})
+		return
+	}
+	if r.URL.Path == nodemesh.HoldersPath {
+		h.serveHolders(w, r, raw)
 		return
 	}
 	if r.URL.Path != runtimewire.EdgePullPath && r.URL.Path != runtimewire.EdgeObservePath && r.URL.Path != runtimewire.EdgeEndpointPullPath {
