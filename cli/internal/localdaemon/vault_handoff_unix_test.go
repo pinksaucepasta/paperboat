@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,10 +57,12 @@ func serveCustody(t *testing.T, socket string, store *localapi.VaultCustodyStore
 	done := make(chan error, 1)
 	go func() { done <- server.Run(ctx) }()
 	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, err := os.Stat(socket); err == nil {
+		// The socket file exists at bind, before listen: only a successful connect means clients can reach it.
+		if conn, err := net.DialTimeout("unix", socket, time.Second); err == nil {
+			_ = conn.Close()
 			break
 		} else if time.Now().After(deadline) {
-			t.Fatal("custody socket did not start")
+			t.Fatalf("custody socket did not accept: %v", err)
 		}
 	}
 	return func() {
