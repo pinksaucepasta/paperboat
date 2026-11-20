@@ -24,6 +24,16 @@ on:
         description: Run macOS without the race detector too (timing measurements are skipped under it)
         type: boolean
         default: false
+      shared:
+        description: Also run the shared module and the harness unit tests (false for a package shard, tools/ci-shards.py)
+        type: boolean
+        default: true
+      shard:
+        description: Label of a package shard, shown in the run title
+        default: ''
+
+# A package shard (tools/ci-shards.py dispatches several at once) is named by its label.
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.shard != '' && format('Cross-platform {0}', inputs.shard) || 'Cross-platform' }}
 
 permissions:
   contents: read
@@ -45,7 +55,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
-        module: [shared, cli]
+        # A shard dispatch (shared=false) runs the cli module only: every shard would otherwise repeat the shared module
+        # on the scarce macOS runners.
+        module: ${{ fromJSON(github.event_name == 'workflow_dispatch' && !inputs.shared && '["cli"]' || '["shared","cli"]') }}
     defaults:
       run:
         shell: bash
@@ -92,6 +104,7 @@ jobs:
   # regression fails the push that brings it, not the next device run.
   smoke:
     name: device-smoke unittest
+    if: github.event_name != 'workflow_dispatch' || inputs.shared
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
