@@ -428,19 +428,16 @@ func TestEdgeWildcardLoadRuleKeepsBothFamilies(t *testing.T) {
 	f.setLoad(b, 10, -1, 0)
 	f.sync()
 	f.want("203.0.113.2", "2001:db8::2")
-	for _, step := range []struct {
-		load float64
-		want []string
-	}{
-		{75, []string{"203.0.113.2", "2001:db8::2"}}, // between the thresholds the decision holds: still out, both families
-		{60, []string{"203.0.113.1", "2001:db8::1", "203.0.113.2", "2001:db8::2"}},
-	} {
-		f.setLoad(a, step.load, -1, 0)
-		f.public.reset()
-		f.runtime.reset()
-		f.sync()
-		f.want(step.want...)
+	f.public.reset()
+	f.runtime.reset()
+	f.setLoad(a, 75, -1, 0) // between the thresholds the decision holds: still out with both families, so nothing is republished
+	f.sync()
+	if len(f.public.calls)+len(f.runtime.calls) != 0 {
+		t.Fatalf("a node at 75 %% came back or the set was rewritten: %+v %+v", f.public.calls, f.runtime.calls)
 	}
+	f.setLoad(a, 60, -1, 0)
+	f.sync()
+	f.want("203.0.113.1", "2001:db8::1", "203.0.113.2", "2001:db8::2")
 }
 
 // All of a region's nodes above the out threshold: the least loaded stays with its A and AAAA, the others leave with both.
