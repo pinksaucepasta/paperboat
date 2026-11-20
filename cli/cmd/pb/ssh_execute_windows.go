@@ -86,6 +86,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		}
 	}
 	operationID := newSSHOperationID()
+	defer releaseOperationCredentials(cobraCommand.Context(), d, machine.ID, operationID, "managed_ssh")
 	descriptor := pendingSSHDescriptor(machine, operationID)
 	connectInfo := sshConnectInfo(machine, descriptor, client.Workspace(), destination.User)
 	connection, err := d.peerApplications.DialSSH(cobraCommand.Context(), connectInfo, operationID)

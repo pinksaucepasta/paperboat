@@ -133,6 +133,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			return d.peerApplications.DialExec(ctx, execConnectInfo(machine, current, client.Workspace()), request)
 		})
 	}
+	defer releaseOperationCredentials(c.Context, d, machine.ID, request.OperationID, "exec")
 	connection, initialUncertain, err := startExec(c.Context, request.Timeout, func(ctx context.Context) (tunnel.ExecConn, error) {
 		return dial(ctx, descriptor)
 	})

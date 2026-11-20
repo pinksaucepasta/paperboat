@@ -1788,6 +1788,7 @@ type LiveUserMachine struct {
 	MachineServicePolicyGeneration int64
 	CapabilitiesApplied            []string
 	ReporterVersion                sql.NullString
+	ReporterSha256                 sql.NullString
 }
 
 type MachineControlRenewal struct {
@@ -3515,6 +3516,7 @@ type UserMachineAccessSession struct {
 	MachineServiceTeamFence        sql.NullString
 	CredentialKind                 string
 	AdmittedSeenAt                 sql.NullTime
+	OperationKey                   sql.NullString
 }
 
 type UserMachineAvailabilityOperation struct {

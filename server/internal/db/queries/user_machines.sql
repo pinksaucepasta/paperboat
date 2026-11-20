@@ -939,11 +939,11 @@ WHERE user_id = sqlc.arg(user_id)
 -- name: CreateUserMachineAccessSession :exec
 INSERT INTO user_machine_access_sessions (
   credential_kind,id, user_machine_id, user_id, environment_id, cli_client_session_id,
-  http_base_url, helper_terminal_session_id, helper_file_session_id, expires_at, team_id, capabilities, operation_id,
+  http_base_url, helper_terminal_session_id, helper_file_session_id, expires_at, team_id, capabilities, operation_id, operation_key,
   terminal_session_id,terminal_role,terminal_grant_generation,terminal_binding_generation,terminal_membership_generation,terminal_team_generation
 ) VALUES (
   sqlc.arg(credential_kind),sqlc.arg(id), sqlc.arg(user_machine_id), sqlc.arg(user_id), sqlc.arg(environment_id), sqlc.arg(cli_client_session_id),
-  sqlc.arg(http_base_url), nullif(sqlc.arg(helper_terminal_session_id), ''), nullif(sqlc.arg(helper_file_session_id), ''), sqlc.arg(expires_at), sqlc.narg(team_id), sqlc.arg(capabilities), sqlc.arg(operation_id),
+  sqlc.arg(http_base_url), nullif(sqlc.arg(helper_terminal_session_id), ''), nullif(sqlc.arg(helper_file_session_id), ''), sqlc.arg(expires_at), sqlc.narg(team_id), sqlc.arg(capabilities), sqlc.arg(operation_id), sqlc.narg(operation_key),
   nullif(sqlc.arg(terminal_session_id),''),nullif(sqlc.arg(terminal_role),''),sqlc.narg(terminal_grant_generation),sqlc.narg(terminal_binding_generation),sqlc.narg(terminal_membership_generation),sqlc.narg(terminal_team_generation)
 );
 

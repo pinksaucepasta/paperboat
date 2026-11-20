@@ -305,6 +305,13 @@ func (c *Client) ReleaseFileTransferSessions(ctx context.Context, ids []string) 
 	return nil
 }
 
+// ReleaseOperationAccess ends the credentials issued to this client for a completed operation.
+func (c *Client) ReleaseOperationAccess(ctx context.Context, machineID, operationID, capability string) error {
+	return c.do(ctx, http.MethodPost, "/v1/operation-access-sessions/release", map[string]string{
+		"machine_id": machineID, "operation_id": operationID, "capability": capability,
+	}, nil)
+}
+
 // UserMachineConnectionReadiness polls readiness without minting a fresh
 // descriptor. Reconnects re-run UserMachineConnectionDescriptor after this reports
 // ready, matching the machine connection flow.

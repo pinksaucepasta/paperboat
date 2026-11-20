@@ -292,6 +292,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 		return errors.New("Paperboat peer transport is unavailable")
 	}
 	operationID := newSSHOperationID()
+	defer releaseOperationCredentials(command.Context(), d, machine.ID, operationID, "managed_ssh")
 	descriptor := pendingSSHDescriptor(machine, operationID)
 	workspace, err := workspaceForCommandContext(ctx)
 	if err != nil {

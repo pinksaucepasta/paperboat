@@ -34884,6 +34884,72 @@
         ]
       }
     },
+    "/v1/operation-access-sessions/release": {
+      "post": {
+        "summary": "Release exec or managed SSH access sessions",
+        "description": "Ends the authenticated CLI session's credentials for the specified machine operation after its streams close. Already released and unknown operations are ignored.",
+        "security": [
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "machine_id",
+                  "operation_id",
+                  "capability"
+                ],
+                "properties": {
+                  "machine_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "operation_id": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  },
+                  "capability": {
+                    "type": "string",
+                    "enum": [
+                      "exec",
+                      "managed_ssh"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Operation credentials released."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "post_v1_operation_access_sessions_release",
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ]
+      }
+    },
     "/v1/file-transfer-sessions/release": {
       "post": {
         "summary": "Release file transfer access sessions",

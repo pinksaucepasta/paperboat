@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
@@ -826,18 +825,6 @@ func (s *Service) operationDescriptor(ctx context.Context, kind operationKind, u
 	if s.controlSigner == nil {
 		return ExecDescriptor{}, errors.New("user-machine operation credential issuer is unavailable")
 	}
-	issuedAt := s.now().UTC()
-	expiresAt := admission.Expiry(s.controlSigner, issuedAt)
-	operationJTI := newID("token")
-	accessSessionID := newID("session")
-	token, err := s.signProcessCredential(ctx, mint.CredentialInput{
-		Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID, JTI: operationJTI,
-		IssuedAt: issuedAt, ExpiresAt: expiresAt, CredentialClass: kind.class, Scopes: []string{kind.scope},
-		EnvironmentID: row.EnvironmentID, MachineID: row.ID, SourceMachineID: sourceMachineID, UserID: userID, CLIClientSessionID: cliClientSessionID, OperationID: operationID, AssignmentID: accessSessionID,
-	})
-	if err != nil {
-		return ExecDescriptor{}, err
-	}
 	// Without an edge route the session has no edge base URL: these signed credentials are fenced by the
 	// environment, never revoked through the edge, and the client runs the operation natively.
 	httpIngressURL, endpoints := "", terminalprotocol.TerminalEndpoints{}
@@ -848,19 +835,25 @@ func (s *Service) operationDescriptor(ctx context.Context, kind operationKind, u
 		}
 		endpoints = machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL))
 	}
-	if err := s.createAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
-		ID: accessSessionID, UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID,
+	operation := operationAccess{claims: mint.CredentialInput{
+		Issuer: s.issuer, Audience: "paperboat-machine", Subject: userID,
+		CredentialClass: kind.class, Scopes: []string{kind.scope},
+		EnvironmentID: row.EnvironmentID, MachineID: row.ID, SourceMachineID: sourceMachineID,
+		UserID: userID, ActorAccountID: userID, CLIClientSessionID: cliClientSessionID, OperationID: operationID,
+	}}
+	if err := s.saveAccessSession(ctx, dbsqlc.CreateUserMachineAccessSessionParams{
+		UserMachineID: row.ID, UserID: userID, EnvironmentID: row.EnvironmentID,
 		CLIClientSessionID: cliClientSessionID, HttpBaseUrl: httpIngressURL,
-		HelperTerminalSessionID: operationJTI, HelperFileSessionID: "", ExpiresAt: expiresAt, Capabilities: []string{kind.capability}, OperationID: operationID,
-	}); err != nil {
+		HelperFileSessionID: "", Capabilities: []string{kind.capability}, OperationID: operationID,
+	}, &operation); err != nil {
 		return ExecDescriptor{}, err
 	}
 	return ExecDescriptor{
 		OperationID: operationID,
 		Environment: terminalprotocol.Environment{ID: row.EnvironmentID, Kind: terminalprotocol.EnvironmentMachine, ResourceID: row.ID, Alias: row.Alias, State: "ready", Root: row.WorkspaceRoot},
 		Endpoints:   endpoints,
-		Auth:        terminalprotocol.Auth{Method: "bearer", Token: token, ExpiresAt: expiresAt, Scopes: []string{kind.scope}, AccessSessionID: accessSessionID},
-		ExpiresAt:   expiresAt,
+		Auth:        terminalprotocol.Auth{Method: "bearer", Token: operation.token, ExpiresAt: operation.claims.ExpiresAt, Scopes: []string{kind.scope}, AccessSessionID: operation.claims.AssignmentID},
+		ExpiresAt:   operation.claims.ExpiresAt,
 	}, nil
 }
 

@@ -704,6 +704,7 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("POST /v1/machines/{machine_id}/ssh-descriptor", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, userMachineSSHDescriptor(opts.Machines)))))
 				mux.Handle("POST /v1/machines/{machine_id}/file-transfer-descriptor", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, userMachineFileTransferDescriptor(opts.Machines)))))
 				mux.Handle("POST "+fileTransferReleasePath, requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", releaseFileTransferSessions(opts.Machines))))
+				mux.Handle("POST "+operationAccessReleasePath, requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", releaseOperationAccess(opts.Machines))))
 				if opts.TeamInbox != nil && opts.AccountPreferences != nil {
 					mux.Handle("POST /v1/sends/prepare", requireBearerAuth(opts.DeviceAuth, requireScope("machines:connect", requireWorkspaceSelection(opts.Workspaces, sendPrepare(opts.Machines, opts.TeamInbox, opts.AccountPreferences)))))
 				}

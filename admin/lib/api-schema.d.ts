@@ -2993,6 +2993,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/operation-access-sessions/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release exec or managed SSH access sessions
+         * @description Ends the authenticated CLI session's credentials for the specified machine operation after its streams close. Already released and unknown operations are ignored.
+         */
+        post: operations["post_v1_operation_access_sessions_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/file-transfer-sessions/release": {
         parameters: {
             query?: never;
@@ -22112,6 +22132,37 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    post_v1_operation_access_sessions_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    machine_id: string;
+                    operation_id: string;
+                    /** @enum {string} */
+                    capability: "exec" | "managed_ssh";
+                };
+            };
+        };
+        responses: {
+            /** @description Operation credentials released. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     post_v1_file_transfer_sessions_release: {

@@ -144,15 +144,20 @@ func (s *Service) describeTags(ctx context.Context, account string, teamID any, 
 // Persist authority under the same lock as team mutations. A permission withdrawn
 // while a descriptor is prepared must never escape as an active access session.
 func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams) error {
+	return s.saveAccessSession(ctx, in, nil)
+}
+
+func (s *Service) saveAccessSession(ctx context.Context, input dbsqlc.CreateUserMachineAccessSessionParams, operation *operationAccess) error {
 	// No team write lock: an access session only reads team state and inserts its own row, so sessions do
 	// not conflict with each other, and SERIALIZABLE orders one against a concurrent membership, grant or
 	// machine revoke (one of the two retries). Under the global lock every exec/ssh/terminal setup on the
 	// platform ran one at a time (Lane A: 10 concurrent setups ~430 ms apart). Lane X S2.
 	// Prior art: NetBird management locks per account (GetAccountWithLock), Tailscale control per node;
 	// neither serializes unrelated nodes' session setup.
-	wakePeers := false
+	wakePeers, inserted := false, false
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		wakePeers = false
+		wakePeers, inserted = false, false
+		in := input
 		scope, scoped := workspace.FromContext(ctx)
 		if scoped {
 			if err := workspace.ValidateTx(ctx, tx, in.UserID, scope); err != nil {
@@ -232,6 +237,12 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 				return ErrAmbiguousTeamAccess
 			}
 		}
+		if operation != nil {
+			reused, err := s.prepareOperationAccess(ctx, tx, machine, &in, operation)
+			if err != nil || reused {
+				return err
+			}
+		}
 		if token, ok := auth.SDKSessionFromContext(ctx); ok {
 			if err := planlimits.CheckSDKCount(ctx, func(ctx context.Context, q string, args ...any) planlimits.SDKRow {
 				return tx.QueryRow(ctx, q, args...)
@@ -246,13 +257,14 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 		if err := s.recordAccessStartedTx(ctx, tx, in); err != nil {
 			return err
 		}
+		inserted = true
 		if !in.TeamID.Valid {
 			return nil // the account's own machines are always in each other's peer network
 		}
 		wakePeers = true
 		return nil
 	})
-	if err != nil {
+	if err != nil || !inserted {
 		return err
 	}
 	// A host admits exec and terminal from its standing machine_access rule (peersessions offlineCapabilities), and an
@@ -261,10 +273,10 @@ func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserM
 	// can come from an account new to the host's signed peer network, and every other capability still needs a
 	// per-session scope: those wake both refreshes now instead of leaving the connection to wait for the periodic ones.
 	_, tokenSource := auth.SDKSessionFromContext(ctx)
-	if !wakePeers && !tokenSource && onlyStandingRuleCapabilities(in.Capabilities) {
+	if !wakePeers && !tokenSource && onlyStandingRuleCapabilities(input.Capabilities) {
 		return nil
 	}
-	return s.publishAccessSession(ctx, []string{in.UserMachineID}, wakePeers)
+	return s.publishAccessSession(ctx, []string{input.UserMachineID}, wakePeers)
 }
 
 func onlyStandingRuleCapabilities(capabilities []string) bool {

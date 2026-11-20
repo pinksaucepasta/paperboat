@@ -80,6 +80,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		return errors.New("Paperboat peer transport is unavailable")
 	}
 	operationID := newSSHOperationID()
+	defer releaseOperationCredentials(command.Context(), d, machine.ID, operationID, "managed_ssh")
 	descriptor := pendingSSHDescriptor(machine, operationID)
 	probeCtx, cancel := context.WithTimeout(command.Context(), 20*time.Second)
 	defer cancel()

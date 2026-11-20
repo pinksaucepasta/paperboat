@@ -1020,12 +1020,12 @@ func (q *Queries) CreateMachineControlSession(ctx context.Context, arg CreateMac
 const createUserMachineAccessSession = `-- name: CreateUserMachineAccessSession :exec
 INSERT INTO user_machine_access_sessions (
   credential_kind,id, user_machine_id, user_id, environment_id, cli_client_session_id,
-  http_base_url, helper_terminal_session_id, helper_file_session_id, expires_at, team_id, capabilities, operation_id,
+  http_base_url, helper_terminal_session_id, helper_file_session_id, expires_at, team_id, capabilities, operation_id, operation_key,
   terminal_session_id,terminal_role,terminal_grant_generation,terminal_binding_generation,terminal_membership_generation,terminal_team_generation
 ) VALUES (
   $1,$2, $3, $4, $5, $6,
-  $7, nullif($8, ''), nullif($9, ''), $10, $11, $12, $13,
-  nullif($14,''),nullif($15,''),$16,$17,$18,$19
+  $7, nullif($8, ''), nullif($9, ''), $10, $11, $12, $13, $14,
+  nullif($15,''),nullif($16,''),$17,$18,$19,$20
 )
 `
 
@@ -1043,6 +1043,7 @@ type CreateUserMachineAccessSessionParams struct {
 	TeamID                       sql.NullString
 	Capabilities                 []string
 	OperationID                  string
+	OperationKey                 sql.NullString
 	TerminalSessionID            interface{}
 	TerminalRole                 interface{}
 	TerminalGrantGeneration      sql.NullInt64
@@ -1066,6 +1067,7 @@ func (q *Queries) CreateUserMachineAccessSession(ctx context.Context, arg Create
 		arg.TeamID,
 		arg.Capabilities,
 		arg.OperationID,
+		arg.OperationKey,
 		arg.TerminalSessionID,
 		arg.TerminalRole,
 		arg.TerminalGrantGeneration,
