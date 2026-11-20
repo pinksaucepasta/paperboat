@@ -114,7 +114,10 @@ func linkNodes(t *testing.T, a, b *meshNode) {
 func (m *Mesh) holder(k key.NodePublic) *meshLink {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.holders[k]
+	if links := m.holders[k]; len(links) > 0 {
+		return links[0]
+	}
+	return nil
 }
 
 func (m *Mesh) holderCount() int {
@@ -236,10 +239,10 @@ func TestMeshNeverReforwards(t *testing.T) {
 	_, _, ca, _ := pairedClients(t, a, b)
 	x := key.NewNode().Public() // connected nowhere; each relay believes the other holds it
 	a.mesh.mu.Lock()
-	a.mesh.holders[x] = a.mesh.links["relay-b"]
+	a.mesh.addHolderLocked(x, a.mesh.links["relay-b"])
 	a.mesh.mu.Unlock()
 	b.mesh.mu.Lock()
-	b.mesh.holders[x] = b.mesh.links["relay"]
+	b.mesh.addHolderLocked(x, b.mesh.links["relay"])
 	b.mesh.mu.Unlock()
 	eventually(t, func() bool { ca.Send(x, payloadOf(100)); return b.mesh.loopRefused.Load() > 0 })
 	time.Sleep(200 * time.Millisecond)
@@ -453,7 +456,7 @@ func TestMeshQueueFullDrops(t *testing.T) {
 	}
 	l := &meshLink{m: m, out: make(chan meshOut, 2)}
 	p, dst := &peerConn{key: key.NewNode().Public()}, key.NewNode().Public()
-	s.peers[p.key], m.holders[dst] = p, l
+	s.peers[p.key], m.holders[dst] = p, []*meshLink{l}
 	for range 5 {
 		if !s.forwardLocked(p, dst, packet{peer: dst, data: []byte("x")}) {
 			t.Fatal("a held destination is forwarded, queue full or not")

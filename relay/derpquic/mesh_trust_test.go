@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
+	"tailscale.com/types/key"
 )
 
 // shortCertificate is certificate(t) valid for d only.
@@ -92,5 +93,61 @@ func TestMeshLinkEndsAtCertExpiry(t *testing.T) {
 	time.Sleep(500 * time.Millisecond) // redials hit the expired certificate at the handshake
 	if a.mesh.stats().Links != 0 || b.mesh.stats().Links != 0 {
 		t.Fatal("a link formed with an expired certificate")
+	}
+}
+
+// holdersOf is the number of links announcing k.
+func (m *Mesh) holdersOf(k key.NodePublic) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.holders[k])
+}
+
+// TestMeshTwoHoldersSurviveOneGone: a key held through two relays during a move stays held when one withdraws it.
+func TestMeshTwoHoldersSurviveOneGone(t *testing.T) {
+	m, err := NewMesh(MeshConfig{Cert: certificate(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, second := &meshLink{m: m}, &meshLink{m: m}
+	k := randomPublic()
+	for _, l := range []*meshLink{first, second} {
+		if err := m.handle(l, meshFrame{Kind: meshPresent, Keys: []string{KeyString(k)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.handle(second, meshFrame{Kind: meshSnapshot, Keys: []string{KeyString(k)}}); err != nil || m.holdersOf(k) != 2 || m.holderCount() != 1 {
+		t.Fatalf("holders %d of %d keys (err %v), want 2 of 1", m.holdersOf(k), m.holderCount(), err)
+	}
+	if err := m.handle(second, meshFrame{Kind: meshGone, Keys: []string{KeyString(k)}}); err != nil {
+		t.Fatal(err)
+	}
+	if !m.holds(k) || m.holder(k) != first {
+		t.Fatal("one relay's Gone removed the key another still holds")
+	}
+	if err := m.handle(first, meshFrame{Kind: meshGone, Keys: []string{KeyString(k)}}); err != nil || m.holds(k) {
+		t.Fatalf("the last Gone left the key (err %v)", err)
+	}
+}
+
+// TestMeshUnregisterRemovesOnlyOwn: a broken link strips itself from every key and leaves the others' entries.
+func TestMeshUnregisterRemovesOnlyOwn(t *testing.T) {
+	m, err := NewMesh(MeshConfig{Cert: certificate(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone, kept := &meshLink{m: m, peer: nodemesh.Peer{NodeID: "x"}}, &meshLink{m: m, peer: nodemesh.Peer{NodeID: "y"}}
+	shared, own := randomPublic(), randomPublic()
+	for _, f := range []struct {
+		l    *meshLink
+		keys []string
+	}{{gone, []string{KeyString(shared), KeyString(own)}}, {kept, []string{KeyString(shared)}}} {
+		if err := m.handle(f.l, meshFrame{Kind: meshPresent, Keys: f.keys}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.unregister(gone)
+	if m.holder(shared) != kept || m.holds(own) || m.holderCount() != 1 {
+		t.Fatalf("after unregister: shared held by kept %v, own held %v, keys %d", m.holder(shared) == kept, m.holds(own), m.holderCount())
 	}
 }
