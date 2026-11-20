@@ -29,6 +29,10 @@ func TestOpenSSHExecutorHelperProcess(t *testing.T) {
 	}
 	switch mode {
 	case "supervise_signal":
+		// A group signal reaches the child and this helper separately: the child can die and Execute return (and stop
+		// listening) before the kernel delivers the helper's copy, which would then kill it with its default action.
+		// A listener kept for the helper's whole life makes the late copy harmless.
+		signal.Notify(make(chan os.Signal, 8), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		binary := "/bin/sh"
 		arguments := []string{"-c", `echo $$ > "$PB_EXECUTOR_CHILD"; exec sleep 60`}
 		err := (OpenSSHExecutor{}).Execute(context.Background(), binary, arguments, os.Environ())

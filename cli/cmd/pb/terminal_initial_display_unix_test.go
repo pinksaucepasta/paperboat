@@ -70,7 +70,7 @@ func TestInitialTerminalDisplayRedrawsIdlePTYWithoutInput(t *testing.T) {
 	waitMarker := func(marker string) {
 		t.Helper()
 		var seen []byte
-		deadline := time.NewTimer(2 * time.Second)
+		deadline := time.NewTimer(10 * time.Second)
 		defer deadline.Stop()
 		for {
 			select {

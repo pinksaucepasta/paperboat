@@ -392,7 +392,7 @@ func keepOneMiBThenCut(delay time.Duration) func(*recordingServer, int, http.Res
 
 func TestNativeSendRestartsTheRecoveryWindowWhenACutStreamHadCommittedCheckpoints(t *testing.T) {
 	saved, savedSegment := nativeRecoveryWindow, nativeSegmentBytes
-	nativeRecoveryWindow, nativeSegmentBytes = 400*time.Millisecond, 2<<20
+	nativeRecoveryWindow, nativeSegmentBytes = 2*time.Second, 2<<20
 	defer func() { nativeRecoveryWindow, nativeSegmentBytes = saved, savedSegment }()
 	data := make([]byte, 8<<20)
 	for i := range data {
@@ -403,10 +403,11 @@ func TestNativeSendRestartsTheRecoveryWindowWhenACutStreamHadCommittedCheckpoint
 		if int64(len(data))-int64(patch-1)*(1<<20) <= 1<<20 { // the last MiB is a whole segment: answer it
 			return false
 		}
-		return keepOneMiBThenCut(150*time.Millisecond)(state, patch, w, r)
+		return keepOneMiBThenCut(300*time.Millisecond)(state, patch, w, r)
 	}
 	server, state := streamServer(t, latencyManifest(item), cut)
-	// 7 cut streams of 150 ms each outlast the 400 ms window: only HEAD showing a checkpoint after each cut keeps it open.
+	// 7 cut streams of 300 ms (2.1 s together) outlast the 2 s window, though each gap is far inside it: only HEAD
+	// showing a checkpoint after each cut, which restarts the window, lets the send finish.
 	if _, err := nativeClientFor(t, server).SendBatch(t.Context(), "batch_stream", "", []Source{item}); err != nil {
 		t.Fatalf("a send whose every stream committed a checkpoint before it was cut must finish: %v", err)
 	}
