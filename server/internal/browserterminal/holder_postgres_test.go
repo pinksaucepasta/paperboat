@@ -58,7 +58,7 @@ func newHolderFixture(t *testing.T) *holderFixture {
 	env, machine, route := prefix+"_env", prefix+"_machine", prefix+"_route"
 	names := []string{"a", "b", "c"}
 	for _, n := range names {
-		f.node[n], f.epoch[n] = prefix+"_edge_"+n, "epoch_"+n
+		f.node[n], f.epoch[n] = prefix+"_edge_"+n, "epoch_edge_"+n
 	}
 	exec := func(query string, args ...any) {
 		t.Helper()
