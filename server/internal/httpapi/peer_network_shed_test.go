@@ -15,15 +15,19 @@ import (
 
 // blockingPeerNetwork holds every configuration build until release is closed, like a cold cache after a restart.
 type blockingPeerNetwork struct {
-	peerNetworkStub
 	started chan struct{}
 	release chan struct{}
 }
 
-func (b *blockingPeerNetwork) Configuration(ctx context.Context, in peersessions.NetworkConfigRequest) (peersessions.NetworkConfigResult, error) {
+func (b *blockingPeerNetwork) Register(context.Context, peersessions.NetworkRegistration) (peersessions.NetworkRegistrationResult, error) {
+	return peersessions.NetworkRegistrationResult{}, nil
+}
+
+// Configuration keeps no state: the requests run concurrently.
+func (b *blockingPeerNetwork) Configuration(context.Context, peersessions.NetworkConfigRequest) (peersessions.NetworkConfigResult, error) {
 	b.started <- struct{}{}
 	<-b.release
-	return b.peerNetworkStub.Configuration(ctx, in)
+	return peersessions.NetworkConfigResult{Configuration: "signed"}, nil
 }
 
 // A reconnect burst into a cold cache: past the in-flight bound a request is answered 503 with a jittered
