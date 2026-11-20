@@ -445,3 +445,58 @@ func tcpPair(t *testing.T) (server, client net.Conn) {
 	}
 	return <-accepted, client
 }
+
+// echoTCP is a holder's raw TCP injector: it echoes the visitor and records the port it was asked for.
+type echoTCP struct{ ports chan uint16 }
+
+func (e *echoTCP) InjectTCP(conn net.Conn, port uint16) error {
+	e.ports <- port
+	go func() {
+		defer conn.Close()
+		_, _ = io.Copy(conn, conn)
+	}()
+	return nil
+}
+
+// A raw TCP key rides the same link: the visitor's bytes reach the holder's TCP injector for that port, and a holder
+// without the injector refuses so the forwarder can move on.
+func TestForwardTCPKeyReachesTCPInjector(t *testing.T) {
+	c := newTrio(t)
+	a, b := c.node(t, "edge-a"), c.node(t, "edge-b")
+	key := nodemesh.TCPKey(24567)
+	b.held.put(key)
+	echo := &echoTCP{ports: make(chan uint16, 4)}
+	b.cfg = func(cfg *forward.Config) { cfg.TCPInjector = echo }
+	cluster(a, b)
+	eventually(t, "a to learn the port", func() bool { return holdersOf(a, key) == "edge-b" && len(a.mesh.TCPPorts()) == 1 })
+	if ports := a.mesh.TCPPorts(); ports[0] != 24567 {
+		t.Fatalf("directory ports %v", ports)
+	}
+	server, client := tcpPair(t)
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() { done <- a.mesh.Forward(context.Background(), server, key); _ = server.Close() }()
+	if err := echoOnce(client, "ping"); err != nil {
+		t.Fatal(err)
+	}
+	if port := <-echo.ports; port != 24567 {
+		t.Fatalf("injector asked for port %d", port)
+	}
+	_ = client.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	// A node that holds the key but has no TCP injector refuses; the forward then fails (no other holder).
+	c2, d := c.node(t, "edge-c"), c.node(t, "edge-d")
+	d.held.put(key)
+	cluster(c2, d)
+	eventually(t, "c to learn the port", func() bool { return holdersOf(c2, key) == "edge-d" })
+	server, client = tcpPair(t)
+	defer client.Close()
+	err := c2.mesh.Forward(context.Background(), server, key)
+	var failure *forward.Failure
+	if !errors.As(err, &failure) || !errors.Is(err, forward.ErrUnavailable) {
+		t.Fatalf("forward to a holder without a TCP injector: %v", err)
+	}
+}

@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/config"
 	"github.com/pinksaucepasta/paperboat/edge/internal/control"
@@ -39,19 +39,20 @@ type forwardHeld struct {
 	matcher     *edgehttp.CompositeRouteMatcher
 	durable     *edgehttp.DataCarrierRouteRegistry
 	assignments *route.Registry
+	authority   edgehttp.PublicTCPAuthority
 }
 
+// Held also lists the raw TCP ports and TLS-passthrough names of this node's public tunnels (its authority snapshot's
+// valid decisions with their carrier attached).
 func (h forwardHeld) Held() []string {
-	return append(h.matcher.Held(), h.durable.HeldHosts(h.assignments)...)
+	held := append(h.matcher.Held(), h.durable.HeldHosts(h.assignments)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if decisions, err := h.authority.Snapshot(ctx); err == nil {
+		held = append(held, h.durable.HeldFromDecisions(decisions)...)
+	}
+	return held
 }
-
-// errRawTCPForward: this node takes no forwarded raw TCP visitors.
-var errRawTCPForward = errors.New("raw TCP forwarding is not available on this node")
-
-// rawTCPInjector is the injector for forwarded raw TCP visitors; every forward is refused until raw TCP is wired.
-type rawTCPInjector struct{}
-
-func (rawTCPInjector) InjectTCP(net.Conn, uint16) error { return errRawTCPForward }
 
 // forwardStats puts the mesh's counters into every heartbeat observation.
 type forwardStats struct {
@@ -103,7 +104,7 @@ func newForwardComponent(spec forwardSpec) (*forwardComponent, error) {
 	sources := forwardSources{client: spec.client, nodeID: spec.nodeID, epoch: spec.epoch}
 	mesh, err := forward.New(forward.Config{
 		NodeID: spec.nodeID, Region: spec.region, Certificate: spec.certificate,
-		Peers: sources, Holders: sources, Held: spec.held, Injector: spec.public, TCPInjector: rawTCPInjector{},
+		Peers: sources, Holders: sources, Held: spec.held, Injector: spec.public, TCPInjector: spec.public,
 		DialTimeout: d.ForwardDial(), OpenTimeout: d.ForwardOpen(), PeerInterval: d.ForwardPeers(), SeedInterval: d.ForwardSeed(), MaxStreamsPerPeer: d.ForwardMaxStreams(),
 		OnFailure: func(stage string, err error) { spec.reporter.ObserveFailure(context.Background(), stage, err) },
 		OnOutcome: func(outcome string) {

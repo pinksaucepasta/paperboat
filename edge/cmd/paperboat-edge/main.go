@@ -767,12 +767,14 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	gatewayHandler = installationChallenge(cfg.NodeID, deployment.ConnectorAdvertiseHost, credential, gatewayHandler)
 	forwarding, err := newForwardComponent(forwardSpec{deployment: deployment, nodeID: cfg.NodeID, region: cfg.EdgePool, epoch: processEpoch, certificate: carrierTrust.Certificate, client: client, ready: nodeReady,
-		held: forwardHeld{matcher: routeMatcher, durable: durableRoutes, assignments: canonicalRoutes}, public: publicTCP, metrics: typedMetrics, reporter: reporter, stats: forwardSink})
+		held: forwardHeld{matcher: routeMatcher, durable: durableRoutes, assignments: canonicalRoutes, authority: ingressAuthority}, public: publicTCP, metrics: typedMetrics, reporter: reporter, stats: forwardSink})
 	if err != nil {
 		return nil, fmt.Errorf("create node forwarding: %w", err)
 	}
 	var usageComponent edgeruntime.Component = usageWorker
 	if forwarding != nil {
+		// A forwarding node listens on every public TCP tunnel port its peers hold, up to the whole range.
+		warnIfFileLimitLow(edgeports.PublicTCPMax-edgeports.PublicTCPMin+1, int(deployment.NodeCapacity)*128)
 		usageComponent = componentPair{first: usageWorker, second: forwarding} // starts last, stops right after the carriers
 	}
 	assembly, err := edgeruntime.NewAssembly(edgeruntime.AssemblySpec{Reporter: reporter, Persistence: persistence, Control: controlDependency, Carrier: carrierComponent, Certificates: certificateWorker, Runtime: runtimeWorker, Node: nodeWorker, Routes: componentPair{first: ingressAuthority, second: routeWorker}, PublicTCP: publicTCP, Usage: usageComponent, GatewayAddress: deployment.PublicHTTPSListenAddress, GatewayHandler: gatewayHandler, GatewayTLS: publicTLS, GatewayWrapListener: func(listener net.Listener) (net.Listener, error) {

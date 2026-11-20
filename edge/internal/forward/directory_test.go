@@ -102,3 +102,20 @@ func TestDirectoryBoundsOnePeersNames(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDirectoryTCPPortsListsWatchedAndSeededPortsOnly(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	d := NewDirectory("r", 10*time.Minute, func() time.Time { return now })
+	d.SetPeers([]nodemesh.Peer{peer("a", "r", false), peer("b", "r", false)})
+	if err := d.ApplyWatch("a", nodemesh.Watch{Kind: nodemesh.WatchSnapshot, Names: []string{nodemesh.TCPKey(30000), "x.example.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	d.ApplySeed([]nodemesh.Holder{{Name: nodemesh.TCPKey(20000), NodeIDs: []string{"b"}}, {Name: nodemesh.TCPKey(40000), NodeIDs: []string{"gone"}}})
+	if got := d.TCPPorts(); !slices.Equal(got, []uint16{20000, 30000}) {
+		t.Fatalf("ports %v", got)
+	}
+	now = now.Add(11 * time.Minute) // the seed expires; a's watch entry stays
+	if got := d.TCPPorts(); !slices.Equal(got, []uint16{30000}) {
+		t.Fatalf("ports after the seed expired %v", got)
+	}
+}

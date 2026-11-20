@@ -133,3 +133,7 @@ func (m *Mesh) linkTo(ctx context.Context, id string) (*link, error) {
 	}
 	return m.dial(ctx, peer)
 }
+
+// TCPPorts lists the public raw TCP ports some peer holds a tunnel for: the ports this node listens on too, to
+// forward the visitors who dial them here.
+func (m *Mesh) TCPPorts() []uint16 { return m.dir.TCPPorts() }

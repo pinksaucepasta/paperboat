@@ -275,3 +275,38 @@ func (d *Directory) Names() int {
 	}
 	return n
 }
+
+// TCPPorts lists the public ports of the raw TCP tunnels some peer holds (keys tcp:<port>), ascending. It scans the
+// key space once per call; the listener asks every reconcile tick (2 s), which a few hundred thousand keys serve.
+// shortcut: a separate port index would make this O(ports), when a node holds more than ~1M names.
+func (d *Directory) TCPPorts() []uint16 {
+	now := d.now()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	seen := map[uint16]struct{}{}
+	for key := range d.byKey {
+		if port, ok := nodemesh.ParseTCPKey(key); ok {
+			seen[port] = struct{}{}
+		}
+	}
+	for key, nodes := range d.seed {
+		port, ok := nodemesh.ParseTCPKey(key)
+		if !ok {
+			continue
+		}
+		for id, expires := range nodes {
+			if state := d.watch[id]; now.Before(expires) && (state == nil || !state.complete) {
+				if _, known := d.peers[id]; known {
+					seen[port] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	ports := make([]uint16, 0, len(seen))
+	for port := range seen {
+		ports = append(ports, port)
+	}
+	slices.Sort(ports)
+	return ports
+}
