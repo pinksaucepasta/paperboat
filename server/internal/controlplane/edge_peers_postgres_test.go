@@ -52,8 +52,8 @@ func (f *meshFixture) node(suffix, role, state string, managed bool, region stri
 		transports = "derp_quic','derp_wss"
 	}
 	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,node_generation,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256)
-VALUES($1,'default','1.0',$2,$3,$3='ready',$4,'hel',$1,ARRAY[$5]::text[],ARRAY['`+transports+`']::text[],128,0,$4,$6,1,$7,443,444,$8,27443,27444,$9,'fixture certificate',$10)`,
-		id, "epoch_"+suffix, state, now.Add(-heartbeatAge), role, now.Add(time.Hour), suffix+".node.example.test", "carrier-"+suffix+".node.example.test", pin(id), sha256Bytes(id))
+VALUES($1,'default','1.0',$2,$3,$3='ready',$4,$11,$1,ARRAY[$5]::text[],ARRAY['`+transports+`']::text[],128,0,$4,$6,1,$7,443,444,$8,27443,27444,$9,'fixture certificate',$10)`,
+		id, "epoch_"+suffix, state, now.Add(-heartbeatAge), role, now.Add(time.Hour), suffix+".node.example.test", "carrier-"+suffix+".node.example.test", pin(id), sha256Bytes(id), region)
 	if managed {
 		h := sha256.Sum256([]byte("runtime:" + id))
 		f.exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, id, region, h[:])
@@ -91,6 +91,9 @@ func TestPeersListsManagedReadyAndDrainingEdgesOnly(t *testing.T) {
 	got, err := s.EdgePeers(t.Context(), caller, "epoch_a")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.Region != f.region {
+		t.Fatalf("answer region = %q, want the caller's own region %q", got.Region, f.region)
 	}
 	peers := peerIDs(got.Peers)
 	if len(got.Peers) != 2 || len(peers) != 2 || peers[ready].NodeID == "" || peers[draining].NodeID == "" {

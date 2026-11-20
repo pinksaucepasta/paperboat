@@ -24,15 +24,18 @@ func (s *EdgeService) EdgePeers(ctx context.Context, nodeID, processEpoch string
 	out := nodemesh.PeersResponse{Peers: []nodemesh.Peer{}, ObservedAt: now}
 	var epoch string
 	var managed bool
-	err := s.store.SQL().QueryRowContext(ctx, `SELECT n.process_epoch, EXISTS(SELECT 1 FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL)
-FROM control_tunnel_nodes n WHERE n.id=$1 AND n.roles @> ARRAY['edge']::text[]`, nodeID).Scan(&epoch, &managed)
+	var region sql.NullString
+	err := s.store.SQL().QueryRowContext(ctx, `SELECT n.process_epoch, EXISTS(SELECT 1 FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),
+ coalesce(n.region,(SELECT m.region_id FROM managed_node_authority m WHERE m.node_id=n.id))
+FROM control_tunnel_nodes n WHERE n.id=$1 AND n.roles @> ARRAY['edge']::text[]`, nodeID).Scan(&epoch, &managed, &region)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && epoch != processEpoch {
 		return out, errPeersStale
 	}
 	if err != nil || !managed {
 		return out, err
 	}
-	rows, err := s.store.SQL().QueryContext(ctx, `SELECT n.id, m.region_id, n.process_epoch, n.carrier_server_spki_sha256, n.state='draining',
+	out.Region = region.String
+	rows, err := s.store.SQL().QueryContext(ctx, `SELECT n.id, coalesce(n.region,m.region_id), n.process_epoch, n.carrier_server_spki_sha256, n.state='draining',
  coalesce(CASE WHEN n.public_ingress_verified_at IS NOT NULL THEN coalesce(host(n.public_ingress_ipv4),host(n.public_ingress_ipv6)) END, n.carrier_endpoint_host),
  coalesce(n.public_https_port,443)
 FROM control_tunnel_nodes n

@@ -503,7 +503,7 @@ func (s *EdgeService) customerOwnedNode(ctx context.Context, nodeID string) (boo
 // serving certificate pin and a QUIC endpoint. Nothing for a node that is not a managed one (a customer-owned relay), and a
 // managed relay never lists a customer-owned one: the populations are never mixed.
 func relayMeshPeers(ctx context.Context, tx *sql.Tx, node string, now time.Time) ([]nodemesh.Peer, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT n.id, m.region_id, n.endpoint_host, n.endpoint_quic_port, n.tls_spki_sha256, n.process_epoch, n.drain_deadline IS NOT NULL
+	rows, err := tx.QueryContext(ctx, `SELECT n.id, coalesce(n.region,m.region_id), n.endpoint_host, n.endpoint_quic_port, n.tls_spki_sha256, n.process_epoch, n.drain_deadline IS NOT NULL
 FROM paperboat.control_tunnel_nodes n
 JOIN paperboat.managed_node_authority m ON m.node_id=n.id AND m.retired_at IS NULL
 JOIN paperboat.operator_regions region ON region.id=m.region_id AND region.enabled
