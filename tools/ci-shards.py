@@ -5,15 +5,18 @@
 
 A cross-platform dispatch has its own concurrency group, so shards run in parallel; each takes the `packages` list of its shard
 and shared=false (the shared module and the harness unit tests run once, with shard 1). The packages are listed from the cli
-module (those with test files). A package missing from the weights file weighs 5 + 2 per test file, a proxy until it is recorded.
+module (those with test files). A package missing from the weights file weighs DEFAULT seconds.
 Waits for every run and prints one line per shard: packages, result, wall seconds, failing jobs. Exit 1 if any shard failed.
-The weights file maps a cli package path (./internal/x) to its slowest seconds over the macOS and Windows jobs.
+The weights file maps a cli package path (./internal/x) to its slowest seconds over the macOS and Windows jobs (median of three runs, 2026-11-20);
+the packages it does not list took about 1.2 s each. Shard 1 also runs go build and go vet (~230 s), so it starts with that load: the other shards skip them.
 """
 import argparse, json, subprocess, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = "cross-platform.yml"
+DEFAULT = 2  # seconds of a package not in the weights file
+FIRST_SHARD_OVERHEAD = 230  # go build + go vet, which only the first shard runs
 
 
 def packages():
@@ -30,17 +33,17 @@ def packages():
 
 
 def weigh(found, weights):
-    return {pkg: weights.get(pkg, 5 + 2 * files) for pkg, files in found.items()}
+    return {pkg: weights.get(pkg, DEFAULT) for pkg in found}
 
 
 def split(weight, count):
     """Longest-processing-time first: each package goes to the lightest shard. Returns [(seconds, [packages])]."""
-    shards = [[0, []] for _ in range(count)]
+    shards = [[FIRST_SHARD_OVERHEAD if n == 0 else 0, []] for n in range(count)]
     for pkg in sorted(weight, key=lambda p: (-weight[p], p)):
         lightest = min(shards, key=lambda s: s[0])
         lightest[0] += weight[pkg]
         lightest[1].append(pkg)
-    return [(seconds, sorted(pkgs)) for seconds, pkgs in shards if pkgs]
+    return [(seconds, sorted(pkgs)) for seconds, pkgs in shards if pkgs]  # shards[0] keeps its overhead in the seconds
 
 
 def gh(*args):

@@ -13,11 +13,12 @@ class Split(unittest.TestCase):
         placed = sorted(p for _, pkgs in result for p in pkgs)
         self.assertEqual(placed, sorted(weight))
         seconds = [s for s, _ in result]
-        self.assertEqual(sum(seconds), sum(weight.values()))
+        self.assertEqual(sum(seconds), sum(weight.values()) + shards.FIRST_SHARD_OVERHEAD)
         self.assertLessEqual(max(seconds), max(weight.values()))  # no shard is worse than the biggest package alone
+        self.assertLess(result[0][0] - shards.FIRST_SHARD_OVERHEAD, sum(weight.values()) / 5)  # the first shard carries less test time
 
-    def test_a_package_without_a_recorded_weight_uses_its_test_file_count(self):
-        self.assertEqual(shards.weigh({"./a": 3, "./b": 1}, {"./b": 99}), {"./a": 11, "./b": 99})
+    def test_a_package_without_a_recorded_weight_uses_the_default(self):
+        self.assertEqual(shards.weigh({"./a": 3, "./b": 1}, {"./b": 99}), {"./a": shards.DEFAULT, "./b": 99})
 
     def test_fewer_packages_than_shards_make_fewer_shards(self):
         self.assertEqual(len(shards.split({"./a": 1, "./b": 2}, 5)), 2)
