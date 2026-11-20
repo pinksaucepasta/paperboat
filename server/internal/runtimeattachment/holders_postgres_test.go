@@ -293,9 +293,9 @@ func TestWildcardHolderSeeded(t *testing.T) {
 	session := f.carrier(t, f.node, "epoch_endpoint", true, "")
 	tunnel, label := "tunnel_"+f.prefix, uuid.NewString()
 	stable := label + ".tunnels.example.test"
-	label := strings.ReplaceAll(f.prefix, "_", "-") // endpoint_routes.hostname allows no underscore
-	domainSuffix := "wild-" + label + ".example.test"
-	routeSuffix := "routes-" + label + ".example.test"
+	dns := strings.ReplaceAll(f.prefix, "_", "-") // endpoint_routes.hostname allows no underscore
+	domainSuffix := "wild-" + dns + ".example.test"
+	routeSuffix := "routes-" + dns + ".example.test"
 	f.exec(t, `INSERT INTO tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,$1,'active','public',1,$3,$4,$5,$2)`,
 		tunnel, f.account, "endpoint_"+label, "https://"+stable, f.machine)
 	exact, wild := "exact_"+f.prefix, "wild_"+f.prefix
