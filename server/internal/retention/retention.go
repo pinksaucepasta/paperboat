@@ -217,8 +217,8 @@ var policies = []policy{
  AND NOT EXISTS(SELECT 1 FROM paperboat.device_grants g WHERE g.cli_client_session_id=cli_client_sessions.id)
  AND NOT EXISTS(SELECT 1 FROM paperboat.device_token_redemptions r WHERE r.cli_client_session_id=cli_client_sessions.id)`),
 		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
-	{"control_usage_receipts", batchOf("control_usage_receipts", `acknowledged_at < now()-make_interval(secs=>$2)`),
-		seconds(func(c config.Retention) time.Duration { return c.AcknowledgedUsageReceipts })},
+	{"control_usage_receipts", batchOf("control_usage_receipts", `created_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.UsageReceipts })},
 	{"tunnel_log_entries", batchOf("tunnel_log_entries", `occurred_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.TunnelLogs })},
 	{"team_machine_requests", batchOf("team_machine_requests", `decided_at < now()-make_interval(secs=>$2)`),

@@ -30,10 +30,12 @@ type Retention struct {
 	AbandonedEnrollments time.Duration `json:"abandoned_enrollments"`
 	// AccountDeletionJobs: a finished (done or failed) provider job of an account deletion, the proof its cleanup ran.
 	AccountDeletionJobs time.Duration `json:"account_deletion_jobs"`
-	// AcknowledgedUsageReceipts: edge usage receipts after the server acknowledged them.
-	AcknowledgedUsageReceipts time.Duration `json:"acknowledged_usage_receipts"`
-	TunnelLogs                time.Duration `json:"tunnel_logs"`
-	DecidedMachineRequests    time.Duration `json:"decided_machine_requests"`
+	// UsageReceipts: edge usage receipts, by age. A receipt only answers a replay of the same operation (the edge
+	// delivers a durable report up to accountingauthority.DeliveryWindow, 7 days, late), and a replay after deletion
+	// adds no bytes (the counter keeps the greatest value), so twice the delivery window is enough.
+	UsageReceipts          time.Duration `json:"usage_receipts"`
+	TunnelLogs             time.Duration `json:"tunnel_logs"`
+	DecidedMachineRequests time.Duration `json:"decided_machine_requests"`
 	// InboxRequests: a team inbox request (and, by cascade, its receipt outbox row) after it ended (declined, expired,
 	// revoked, consumed, completed) or after its expiry if nobody decided it.
 	InboxRequests time.Duration `json:"inbox_requests"`
@@ -72,7 +74,7 @@ func defaultRetention() Retention {
 	return Retention{
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day, EndedPublications: 30 * day,
 		FinishedEnrollments: 7 * day, AbandonedEnrollments: 30 * day, AccountDeletionJobs: 90 * day,
-		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
+		UsageReceipts: 14 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
 		SupersededMeshEntries: time.Hour, Recordings: 90 * day, NodeCapacityDaily: 90 * day, TrafficHourly: 8 * day, TrafficDaily: 400 * day, FleetDaily: 400 * day, EndedAnnouncements: 90 * day, DeletedTeams: 30 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
 }
@@ -80,7 +82,7 @@ func defaultRetention() Retention {
 func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
 	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day, r.EndedPublications < day, r.FinishedEnrollments < 2*day, r.AbandonedEnrollments < 2*day, r.AccountDeletionJobs < day,
-		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
+		r.UsageReceipts < 7*day, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
 		r.SupersededMeshEntries < time.Minute, r.NodeCapacityDaily < 35*day, r.TrafficHourly < 2*day, r.TrafficDaily < 62*day, r.FleetDaily < 35*day, r.EndedAnnouncements < day, r.DeletedTeams < day:
 		return fmt.Errorf("retention: a window is below its minimum")
 	case r.EndedSessions < accessSessionRetention:
