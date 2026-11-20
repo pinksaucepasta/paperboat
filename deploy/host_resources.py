@@ -13,6 +13,7 @@ THRESHOLDS = {"warning": 80, "critical": 90}
 HYSTERESIS = 5
 SUSTAIN_SECONDS = 180
 MAX_SAMPLE_GAP = 90  # the systemd timer runs every minute
+UNREACHABLE_AFTER = 3  # consecutive failed samples before a host is reported, so one ssh hiccup stays quiet
 
 
 def sample():
@@ -85,7 +86,7 @@ def assess(previous, current, now):
         if level != severity(old):
             action = "RECOVERED" if level == "normal" else level.upper()
             transitions.append(f"{action}: {name} at {percent:.1f}%")
-    return {"at": now, "boot": current["boot"], "cpu": current["cpu"], "resources": resources}, transitions
+    return {"at": now, "boot": current["boot"], "cpu": current["cpu"], "resources": resources, "misses": 0}, transitions
 
 
 def read_host(host, script):
@@ -119,9 +120,14 @@ def main():
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, ZeroDivisionError):
             print(f"could not sample host capacity on {host}", file=sys.stderr)
             # Invalidate continuity immediately, even if the next timer fires early.
-            state[host] = {**old, "boot": None}
+            misses = old.get("misses", 0) + 1
+            state[host] = {**old, "boot": None, "misses": misses}
             failed = True
+            if misses == UNREACHABLE_AFTER:  # a host that cannot be sampled would otherwise never alert
+                messages.append(f"host capacity {host} UNKNOWN: {misses} samples in a row failed ({now()})")
             continue
+        if old.get("misses", 0) >= UNREACHABLE_AFTER:
+            messages.append(f"host capacity {host} RECOVERED: sampling works again ({now()})")
         messages.extend(f"host capacity {host} {transition} ({now()})" for transition in transitions)
     write(path, json.dumps(state) + "\n")
     if messages:

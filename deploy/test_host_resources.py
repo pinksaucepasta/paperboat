@@ -1,5 +1,11 @@
+import os
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+import host_resources
 from host_resources import assess
 
 
@@ -30,6 +36,23 @@ class HostResourceTest(unittest.TestCase):
         self.assertEqual(alerts, [])
         _, alerts = assess(state, {"boot": "b", "cpu": [102, 102], "usage": {}}, 720)
         self.assertEqual(alerts, ["RECOVERED: CPU at 0.0%"])
+
+    def test_a_host_that_cannot_be_sampled_alerts_once_and_recovers_once(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/probe"))
+        import canary
+        sample = {"boot": "a", "cpu": [0, 0], "usage": {"memory": 10}}
+        results = [OSError("down")] * 4 + [sample]
+        sent = []
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"CANARY_RESOURCE_HOSTS": "h"}), \
+                patch.object(canary, "STATE", Path(directory)), \
+                patch.object(canary, "send_alert", sent.append), \
+                patch.object(host_resources, "read_host", side_effect=results):
+            for _ in results:
+                host_resources.main()
+        self.assertEqual(len(sent), 2)
+        self.assertIn("UNKNOWN", sent[0])
+        self.assertIn("RECOVERED", sent[1])
 
 
 if __name__ == "__main__":
