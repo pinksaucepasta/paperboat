@@ -1002,8 +1002,9 @@ FAKE_CMD = r"""
 import os, re, signal, subprocess, sys
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 env = dict(os.environ, LC_ALL='C.UTF-8')
+prompt = 'C:\\>'
 while True:
-    sys.stdout.write('C:\\>'); sys.stdout.flush()
+    print(prompt, end='', flush=True)
     line = sys.stdin.readline()
     if not line or line.strip() == 'exit':
         break
@@ -1012,6 +1013,8 @@ while True:
         script = re.fullmatch(r'powershell -NoProfile -Command "(.*)"', part)
         if setting:
             env[setting[1]] = setting[2]
+        elif part.startswith('prompt '):
+            prompt = part[len('prompt '):].replace('$G', '>')
         elif script:
             subprocess.run([sys.argv[1], '-NoProfile', '-Command', script[1]], env=env,
                            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
