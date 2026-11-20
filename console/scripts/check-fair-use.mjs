@@ -35,8 +35,8 @@ const usage = () => ({
   totals: {
     upload_bytes: 0, download_bytes: 0,
     by_path: [
-      { mode: "relay", hosting: "managed", upload_bytes: 0.3 * USED[state], download_bytes: 0.3 * USED[state] },
-      { mode: "edge", hosting: "managed", upload_bytes: 0.2 * USED[state], download_bytes: 0.2 * USED[state] },
+      { mode: "relay", hosting: "managed", upload_bytes: Math.round(0.3 * USED[state]), download_bytes: Math.round(0.3 * USED[state]) },
+      { mode: "edge", hosting: "managed", upload_bytes: Math.round(0.2 * USED[state]), download_bytes: Math.round(0.2 * USED[state]) },
       { mode: "relay", hosting: "self_hosted", upload_bytes: 7 * GB, download_bytes: 0 },
     ],
   }, resources: [], series: [],
@@ -80,10 +80,10 @@ try {
       const page = await context.newPage()
       const problems = []
       page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`))
-      page.on("console", (m) => m.type() === "error" && problems.push(`console: ${m.text()}`))
+      page.on("response", async (r) => r.status() >= 400 && problems.push(`${r.status()} ${new URL(r.url()).pathname} ${(await r.text().catch(() => "")).slice(0, 160)}`))
       await page.goto(`${origin}/usage`, { timeout: 120_000 })
       const panel = await page.waitForSelector("[data-fair-use]", { timeout: 60_000 }).catch(() => null)
-      check(`${name}/${s}: the usage page shows the public-traffic panel`, Boolean(panel), panel ? "" : `${(await page.innerText("body").catch(() => "")).replace(/\s+/g, " ").slice(0, 200)} | ${problems.slice(0, 3).join(" | ")}`)
+      check(`${name}/${s}: the usage page shows the public-traffic panel`, Boolean(panel), panel ? "" : `${(await page.innerText("body").catch(() => "")).replace(/\s+/g, " ").slice(0, 200)} | ${problems.slice(0, 8).join(" | ")}`)
       if (!panel) { failed++; await context.close(); continue }
       const homeCard = async (viewName, state) => {
         const home = await context.newPage()
