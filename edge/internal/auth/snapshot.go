@@ -23,12 +23,7 @@ const (
 	maxSnapshotJSONDepth = 64
 )
 
-var (
-	ErrSnapshotInvalid  = errors.New("credential trust snapshot is invalid")
-	ErrSnapshotCapacity = errors.New("credential revocation watcher capacity exceeded")
-)
-
-const maximumRevocationWatchers = 8192
+var ErrSnapshotInvalid = errors.New("credential trust snapshot is invalid")
 
 type Snapshot struct {
 	mu                                         sync.RWMutex
@@ -194,9 +189,6 @@ func (s *Snapshot) Watch(claims admission.Claims) (<-chan struct{}, func(), erro
 	if s.revokedLocked(claims) {
 		close(done)
 		return done, func() {}, nil
-	}
-	if len(s.watchers) >= maximumRevocationWatchers {
-		return nil, nil, ErrSnapshotCapacity
 	}
 	owner := &revocationOwner{}
 	s.watchers[owner] = revocationWatcher{claims: claims, done: done}
