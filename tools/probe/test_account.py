@@ -48,6 +48,41 @@ class Main(unittest.TestCase):
         self.assertEqual([(s["step"], s["ok"]) for s in steps], [("signin", True), ("pair", True), ("login", False), ("cleanup", True), ("signout", True)])
 
 
+class Cleanup(unittest.TestCase):
+    def cleanup(self, stop_rc=0):
+        calls = []
+
+        def pb(*args, **kwargs):
+            calls.append(" ".join(args[:2]))
+            return (stop_rc, {}) if args[0] == "service" else (0, {"server_revocation": "complete"})
+        with mock.patch.object(account, "pb", pb), mock.patch.object(account, "revoke_probe_machines", lambda state: calls.append("revoke")):
+            try:
+                account.cleanup("state")
+                error = None
+            except RuntimeError as raised:
+                error = str(raised)
+        return calls, error
+
+    def test_the_daemon_stops_before_its_machine_is_revoked(self):
+        # a daemon still running when its machine is revoked redials the edge for ~20 s: 21 refusals failed the gate of roll 913
+        calls, error = self.cleanup()
+        self.assertEqual((calls, error), (["auth logout", "service stop", "revoke"], None))
+
+    def test_a_daemon_that_will_not_stop_is_reported_but_the_machine_is_still_revoked(self):
+        calls, error = self.cleanup(stop_rc=1)
+        self.assertEqual(calls, ["auth logout", "service stop", "revoke"])
+        self.assertIn("did not stop", error)
+
+    def test_pair_stops_a_killed_runs_daemon_before_sweeping_its_machine(self):
+        calls = []
+        stop = lambda: calls.append("stop")
+        revoke = lambda state: calls.append("revoke") or (_ for _ in ()).throw(RuntimeError("stop here"))
+        with mock.patch.object(account, "stop_pair_daemon", stop), mock.patch.object(account, "revoke_probe_machines", revoke):
+            with self.assertRaises(RuntimeError):
+                account.pair("state")
+        self.assertEqual(calls, ["stop", "revoke"])
+
+
 class RunPair(unittest.TestCase):
     def pair(self, results):
         with mock.patch.object(account, "pb", side_effect=results) as pb, mock.patch.object(account, "wait_pair_host") as wait:

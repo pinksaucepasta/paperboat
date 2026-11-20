@@ -9,8 +9,8 @@ never printed), ACCOUNT_RUN (command prefix that runs its trailing arguments as 
 the container made by `CANARY_SERVER=<url> TOKEN_CMD= tools/probe/canary-setup.sh local pb-canary-pair canary-pair-1 <pb>`),
 ACCOUNT_SERVER (the control plane URL, passed as --server), PW_CHROMIUM, [PW_MODULE playwright-core index.mjs].
 Steps: signin (console_session.mjs password), pair (enrollment token from that session, the pair host joins as canary-pair-<epoch> and is
-seen online), login (CLI session revoked, a new `pb auth login` approved by the browser session, auth status signed in), cleanup (every
-canary-pair-* machine revoked by exact id, the CLI session logged out; runs on every path, also sweeps what a killed run left), signout (console_signout.mjs: /api/v1/me is 401 afterwards).
+seen online), login (CLI session revoked, a new `pb auth login` approved by the browser session, auth status signed in), cleanup (the CLI session
+logged out, the pair host's daemon stopped, then every canary-pair-* machine revoked by exact id; runs on every path, also sweeps what a killed run left), signout (console_signout.mjs: /api/v1/me is 401 afterwards).
 """
 import json, os, re, shlex, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
@@ -110,13 +110,26 @@ def revoke_probe_machines(state):
     node(HERE / "console_machines.mjs", extra={"STATE": state, "PREFIX": PREFIX})
 
 
+def stop_pair_daemon():
+    """Stop the pair host's daemon BEFORE its machine is revoked: a running daemon redials the edge for ~20 s after the revoke and every
+    redial is a carrier refusal (21 unknown_machine from this key and this host failed the edge gate of server roll 913, 2026-11-20).
+    A stopped or unregistered service is a no-op; the next run's `pb pair` installs and starts the daemon again."""
+    rc, out = pb("service", "stop", "--json", timeout=90)
+    if rc:
+        raise RuntimeError(f"the pair host's daemon did not stop (exit {rc}): {json.dumps(out)[:200]}")
+
+
 def cleanup(state):
-    """On every path: the CLI session is logged out (the server must confirm it) while its machine still exists, then the
-    probe machines are revoked through the browser session."""
+    """On every path: the CLI session is logged out (the server must confirm it) while its machine still exists, the pair host's daemon
+    is stopped, then the probe machines are revoked through the browser session."""
     problems = []
     rc, out = pb("auth", "logout", "--json")
     if rc or out.get("server_revocation") != "complete":
         problems.append(f"the server did not confirm the CLI session revocation (exit {rc}, {out.get('server_revocation')})")
+    try:
+        stop_pair_daemon()
+    except Exception as error:  # the machine is still revoked below
+        problems.append(str(error))
     try:
         revoke_probe_machines(state)
     except Exception as error:
@@ -127,6 +140,7 @@ def cleanup(state):
 
 def pair(state):
     """Add the pair host (a container) as machine canary-pair-<epoch> with a fresh enrollment token, and see it online."""
+    stop_pair_daemon()  # a killed run's daemon would redial after its machine is revoked
     revoke_probe_machines(state)  # a killed run may have left its machine: remove it before adding another
     token = subprocess.run([*NODE, str(SMOKE / "mint_enrollment_token.mjs")], env=dict(os.environ, ORIGIN=os.environ["ACCOUNT_ORIGIN"], STATE=state),
                            capture_output=True, text=True, timeout=120)
