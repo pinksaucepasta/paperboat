@@ -205,7 +205,7 @@ func doctorCommandV1() *cobra.Command {
 			switch {
 			case err == nil:
 				if snapshot.HomeRelay != nil {
-					homeRelay = &doctorpkg.HomeRelay{NodeID: snapshot.HomeRelay.NodeID, Region: snapshot.HomeRelay.Region}
+					homeRelay = &doctorpkg.HomeRelay{Region: snapshot.HomeRelay.Region}
 				}
 				if len(args) == 1 {
 					selected, selectErr := selectStatusMachine(snapshot.Machines, args[0])
