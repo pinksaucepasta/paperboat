@@ -2059,9 +2059,10 @@ type NodeCapacityDaily struct {
 }
 
 type NodeLoadOut struct {
-	NodeID     string
-	OutForLoad bool
-	ChangedAt  time.Time
+	NodeID        string
+	OutForLoad    bool
+	ChangedAt     time.Time
+	OverThreshold bool
 }
 
 type Operation struct {
