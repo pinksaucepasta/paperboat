@@ -21,7 +21,7 @@ func TestWorkerHandoverKeepsTheRouteAndTheGenerationPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.service.Observe(f.ctx, f.edge, []runtimewire.Observation{{RouteID: f.route, SessionID: a.Binding.SessionID, AttachmentGeneration: a.AttachmentGeneration, Ready: true}}); err != nil {
+	if err := f.service.Observe(f.ctx, f.edge, []runtimewire.Observation{{RouteID: f.route, SessionID: carrierOn(t, a, f.node).Binding.SessionID, AttachmentGeneration: carrierOn(t, a, f.node).AttachmentGeneration, Ready: true}}); err != nil {
 		t.Fatal(err)
 	}
 	report := func(generation int64, at time.Time) {

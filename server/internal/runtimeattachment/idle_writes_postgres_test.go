@@ -108,7 +108,7 @@ func TestCarrierReadinessNeedsAFreshHeartbeatNextToAnOldObservationOnPostgres(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.service.Observe(f.ctx, f.edge, []runtimewire.Observation{{RouteID: f.route, SessionID: a.Admission.Binding.SessionID, AttachmentGeneration: a.Admission.AttachmentGeneration, Ready: true}}); err != nil {
+	if err := f.service.Observe(f.ctx, f.edge, []runtimewire.Observation{{RouteID: f.route, SessionID: carrierOn(t, a, f.node).Binding.SessionID, AttachmentGeneration: carrierOn(t, a, f.node).AttachmentGeneration, Ready: true}}); err != nil {
 		t.Fatal(err)
 	}
 	valid := func() bool {
