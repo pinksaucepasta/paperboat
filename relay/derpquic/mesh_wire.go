@@ -228,3 +228,11 @@ func (s *Server) authorizedRemoteLocked(rs *remoteSource, q *peerConn, control b
 	}
 	return rs.paired.allowed || control && controlAdmitted(rs.grant, q.grant)
 }
+
+// MeshPeers returns the relay directory the mesh holds in node id order; nil when this relay has no mesh.
+func (s *Server) MeshPeers() []nodemesh.Peer {
+	if s.mesh == nil {
+		return nil
+	}
+	return s.mesh.peerSet.Load().Peers()
+}
