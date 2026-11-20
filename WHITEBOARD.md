@@ -383,3 +383,14 @@ Migration 447 made `recipes.source_format` optional (the server no longer writes
 - Record a country per machine and per sign-up: GeoIP of the connecting public IP at enrollment/attach (store the country only, never the address); admin shows active machines and sign-ups by country. Today nothing stores a location (`users`, `user_machines` have no country; PostHog GeoIP is on for the marketing site only).
 - Relays need no change: machines already measure every relay and pick the best (`cli/internal/peertransport/tailnet/regional_selection.go`).
 - Edges do: an account's edge pair is chosen when its first machine attaches and kept while healthy (`server/internal/edgeset/reconcile.go` `EnsureTx`, `select.go` `choose`), so a new closer edge only gets new accounts. Move existing accounts make-before-break: the machine opens a carrier to the new edge, the new edge serves once its previews/tunnels are ready, the old one drains its open requests and is dropped. Prior art: cloudflared keeps several connections to different colos and replaces them one at a time. Test: a preview keeps serving during the move.
+
+## Large regions: forward between the nodes of a region — when a region needs a 4th machine
+
+Recorded 2026-11-20 from the user's direction.
+
+A region's machines all hold a carrier from every machine of a workspace, so a visitor can land on any node (edges do not
+forward). That is fine for a few nodes per region. When a region needs more than about 3 machines, a machine stops holding a
+carrier to every node: it holds one or two, and the nodes of the region forward a visitor's request to the node that holds the
+carrier. Prior art: the Tailscale DERP mesh, where servers of a region forward packets to the server a client is connected to
+(`~/ref/tailscale/derp/derpserver/derpserver.go` `SetMeshKey`, `derp/derphttp/mesh_client.go`).
+Trigger: a region needs a 4th machine. Until then `MaximumRegionCarriers` (8, `shared/runtimeattachment/protocol.go`) bounds it.
