@@ -25,7 +25,7 @@ type forwardSources struct {
 	nodeID, epoch string
 }
 
-func (s forwardSources) Peers(ctx context.Context) ([]nodemesh.Peer, error) {
+func (s forwardSources) Peers(ctx context.Context) (nodemesh.PeersResponse, error) {
 	return s.client.Peers(ctx, s.nodeID, s.epoch)
 }
 
@@ -82,7 +82,6 @@ type forwardComponent struct {
 type forwardSpec struct {
 	deployment  config.Deployment
 	nodeID      string
-	region      string
 	epoch       string
 	certificate tls.Certificate
 	client      *control.HTTPClient
@@ -103,7 +102,7 @@ func newForwardComponent(spec forwardSpec) (*forwardComponent, error) {
 	}
 	sources := forwardSources{client: spec.client, nodeID: spec.nodeID, epoch: spec.epoch}
 	mesh, err := forward.New(forward.Config{
-		NodeID: spec.nodeID, Region: spec.region, Certificate: spec.certificate,
+		NodeID: spec.nodeID, Certificate: spec.certificate,
 		Peers: sources, Holders: sources, Held: spec.held, Injector: spec.public, TCPInjector: spec.public,
 		DialTimeout: d.ForwardDial(), OpenTimeout: d.ForwardOpen(), PeerInterval: d.ForwardPeers(), SeedInterval: d.ForwardSeed(), MaxStreamsPerPeer: d.ForwardMaxStreams(),
 		OnFailure: func(stage string, err error) { spec.reporter.ObserveFailure(context.Background(), stage, err) },

@@ -562,21 +562,21 @@ func (c *HTTPClient) ObserveRoutes(ctx context.Context, nodeID string, routes []
 	return nil
 }
 
-// Peers returns the managed edge nodes this node may link to (the server's peer directory); a self-hosted node gets
-// none. The response is read tolerantly: a field a newer server adds is ignored.
-func (c *HTTPClient) Peers(ctx context.Context, nodeID, epoch string) ([]nodemesh.Peer, error) {
+// Peers returns the managed edge nodes this node may link to (the server's peer directory) and this node's own
+// region; a self-hosted node gets none. The response is read tolerantly: a field a newer server adds is ignored.
+func (c *HTTPClient) Peers(ctx context.Context, nodeID, epoch string) (nodemesh.PeersResponse, error) {
 	request := nodemesh.PeersRequest{NodeID: nodeID, ProcessEpoch: epoch}
 	if request.Validate() != nil {
-		return nil, ErrControlInvalid
+		return nodemesh.PeersResponse{}, ErrControlInvalid
 	}
 	if err := c.awaitNodeReady(ctx); err != nil {
-		return nil, err
+		return nodemesh.PeersResponse{}, err
 	}
 	var output nodemesh.PeersResponse
 	if err := c.postNodeWithMaximumAndIdentity(ctx, nodemesh.PeersPath, nodeID, epoch, request, &output, maxControlDocument); err != nil {
-		return nil, err
+		return nodemesh.PeersResponse{}, err
 	}
-	return output.Peers, nil
+	return output, nil
 }
 
 // Holders returns one page of the server's snapshot of which nodes hold which names; page is the previous
