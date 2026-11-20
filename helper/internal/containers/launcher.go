@@ -133,12 +133,9 @@ func (l *Launcher) Run(ctx context.Context, capability, componentDir string, out
 		if adopted && ctx.Err() == nil {
 			return
 		}
-		if ctx.Err() != nil && preservesHandoff(l.StateDir, capability, imageID) {
-			return
-		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
-		if err := removeOwned(cleanup, name, owner); err != nil {
+		if err := removeRuntime(cleanup, l.StateDir, capability, ctx.Err() != nil); err != nil {
 			result = errors.Join(result, err)
 		}
 	}()
@@ -302,6 +299,10 @@ func removeOwned(ctx context.Context, name, owner string) error {
 	if err != nil || !exists {
 		return err
 	}
+	return removeOwnedContainer(ctx, name, owner, info)
+}
+
+func removeOwnedContainer(ctx context.Context, name, owner string, info containerInfo) error {
 	if info.Owner != owner {
 		return errors.New("container name belongs to another installation; nothing removed")
 	}

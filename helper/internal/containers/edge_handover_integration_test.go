@@ -13,9 +13,9 @@ import (
 
 // replacementImage commits the fixture image under a new image id whose entrypoint runs script,
 // so the launcher's "run --state-dir" arguments are ignored.
-func replacementImage(t *testing.T, ctx context.Context, base, script string) string {
+func replacementImage(t *testing.T, ctx context.Context, base, suffix, script string) string {
 	t.Helper()
-	tag := "paperboat-handover-test:" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	tag := "paperboat-handover-test:" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")) + "-" + suffix
 	scratch := "paperboat-handover-commit-" + installationOwner(t.TempDir())
 	if _, err := docker(ctx, "create", "--name", scratch, base, "true"); err != nil {
 		t.Fatal("create commit source failed")
@@ -68,7 +68,7 @@ func TestDockerEdgeInstallHandsOverWithoutStoppingTheServingContainer(t *testing
 			if mode == "dies first" {
 				script = "echo replacement failed on purpose; exit 3"
 			}
-			image := replacementImage(t, ctx, base, script)
+			image := replacementImage(t, ctx, base, "replacement", script)
 			launcher := Launcher{StateDir: dir, Images: Images{Edge: image}}
 			var journal bytes.Buffer
 			err = launcher.handOver(ctx, "tunnel", image, name, owner, &journal)

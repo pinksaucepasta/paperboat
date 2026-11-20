@@ -109,3 +109,18 @@ func ClearHandoff(dir string) error {
 	}
 	return nil
 }
+
+// Compare the handoff against the live container. The launcher may have
+// resolved an image before the current container took over the role.
+func removeRuntime(ctx context.Context, dir, role string, handoff bool) error {
+	owner := installationOwner(dir)
+	name := containerName(owner, role)
+	info, exists, err := inspectContainer(ctx, name)
+	if err != nil || !exists {
+		return err
+	}
+	if handoff && info.Owner == owner && preservesHandoff(dir, role, info.ImageID) {
+		return nil
+	}
+	return removeOwnedContainer(ctx, name, owner, info)
+}
