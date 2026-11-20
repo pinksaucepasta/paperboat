@@ -1,10 +1,15 @@
 package edgehttp
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,5 +48,25 @@ func TestCutIdleHoldsAtEveryInstantOnceTheIdleTimeoutHasPassed(t *testing.T) {
 			}
 		}
 	next:
+	}
+}
+
+// The upload was cut by the idle timeout but the transport's error is a plain stream reset / cancelled context (whichever of its read
+// and write failed first). The handler must still answer 408 and not take it for a client that left: it used to look at request.Body,
+// which http.MaxBytesReader wraps in production, so it never found the idle body and the visitor got an empty 200 (11-15% of
+// TestStalledUploadThroughDurableTunnelGets408 runs under -race).
+func TestErrorHandlerAnswers408WhenTheIdleCutSurfacedAsACancelledStream(t *testing.T) {
+	idle := &proxyRequestBody{body: io.NopCloser(strings.NewReader("")), idle: time.Millisecond}
+	idle.idleExpired.Store(true)
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), idleBodyKey{}, idle))
+	cancel() // the server cancels the request context when the idle read deadline expires
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/upload", nil).WithContext(ctx)
+	request.Body = http.MaxBytesReader(recorder, idle, 1<<20) // as the gateway wraps it
+	proxy := &httputil.ReverseProxy{}
+	configureProxyDiagnostics(proxy, nil)
+	proxy.ErrorHandler(recorder, request, errors.New("stream reset, error code: 0: context canceled"))
+	if recorder.Code != http.StatusRequestTimeout {
+		t.Fatalf("status %d, want 408", recorder.Code)
 	}
 }

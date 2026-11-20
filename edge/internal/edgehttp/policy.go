@@ -355,7 +355,7 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		}
 		// The edge's own body-idle deadline also makes the server cancel the context plainly, and the transport's
 		// error may not carry errRequestBodyIdle (whichever of its read and write failed first); that client waits.
-		if body, ok := request.Body.(*proxyRequestBody); ok && body.cutIdle() {
+		if body := idleBodyOf(request); body != nil && body.cutIdle() {
 			err = errors.Join(errRequestBodyIdle, err)
 		}
 		if clientLeft(request) && !errors.Is(err, errRequestBodyIdle) {
@@ -444,6 +444,14 @@ var errHelperAccessRevoked = errors.New("helper access revoked")
 // with no edge cause (a route, lease or credential the edge ended carries one). Nobody receives an answer then, so
 // it is no edge 5xx: nginx logs it as 499 (NGX_HTTP_CLIENT_CLOSED_REQUEST) and Caddy's reverse proxy maps
 // context.Canceled to 499 instead of 502.
+type idleBodyKey struct{}
+
+// idleBodyOf is the idle-timeout body of an upload, or nil.
+func idleBodyOf(request *http.Request) *proxyRequestBody {
+	body, _ := request.Context().Value(idleBodyKey{}).(*proxyRequestBody)
+	return body
+}
+
 func clientLeft(request *http.Request) bool {
 	ctx := request.Context()
 	return ctx.Err() != nil && context.Cause(ctx) == context.Canceled
@@ -829,7 +837,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Host = matched.Rule.HostOverride
 	}
 	if r.Body != nil && r.Body != http.NoBody {
-		r.Body = &proxyRequestBody{body: r.Body, controller: http.NewResponseController(w), idle: p.config.BodyIdleTimeout}
+		idle := &proxyRequestBody{body: r.Body, controller: http.NewResponseController(w), idle: p.config.BodyIdleTimeout}
+		r.Body = idle
+		// The error handler finds the idle body through the context: http.MaxBytesReader wraps it just below, so a type assertion on
+		// request.Body never matched and the idle fallback (cutIdle) was dead code.
+		r = r.WithContext(context.WithValue(r.Context(), idleBodyKey{}, idle))
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, p.config.MaxBodyBytes)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
