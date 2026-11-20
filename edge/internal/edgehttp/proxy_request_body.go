@@ -36,15 +36,21 @@ func (b *proxyRequestBody) Read(payload []byte) (int, error) {
 	b.idleDeadline(started.Add(b.idle))
 	n, err := b.body.Read(payload)
 	b.idleDeadline(time.Time{})
+	timedOut, interrupted := uploadReadTimeout(err), b.interrupted.Load()
+	// idleExpired is set BEFORE waiting is cleared: cutIdle (the error handler, on another goroutine) must see one of the two at every
+	// instant. Clearing waiting first left a window in which neither held, the cancelled context read as "client left", nothing was
+	// written and the visitor got an empty 200 instead of 408 (11 of 150 runs under -race, 2026-11-20).
+	if b.idle > 0 && timedOut && !interrupted {
+		b.idleExpired.Store(true)
+	}
 	b.waiting.Store(0)
 	if err == io.EOF {
 		b.finished.Store(true)
 	}
-	if b.interrupted.Load() && uploadReadTimeout(err) {
+	if interrupted && timedOut {
 		return n, &proxyUploadStopped{cause: err}
 	}
-	if b.idle > 0 && uploadReadTimeout(err) {
-		b.idleExpired.Store(true)
+	if b.idle > 0 && timedOut {
 		return n, errors.Join(errRequestBodyIdle, err)
 	}
 	return n, err
