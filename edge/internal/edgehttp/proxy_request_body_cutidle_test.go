@@ -70,3 +70,31 @@ func TestErrorHandlerAnswers408WhenTheIdleCutSurfacedAsACancelledStream(t *testi
 		t.Fatalf("status %d, want 408", recorder.Code)
 	}
 }
+
+// The transport tears the request down (Close sets interrupted) while the read is still waiting and the idle time has passed: the read
+// ends with a timeout error that the interrupt caused, but the upload was cut by the idle deadline all the same.
+func TestCutIdleHoldsWhenTheTransportInterruptsAReadThatWaitedTheWholeIdleTime(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		idle  time.Duration
+		wait  time.Duration
+		isCut bool
+	}{{"waited the idle time", time.Millisecond, 4 * time.Millisecond, true}, {"interrupted long before it", time.Hour, 0, false}} {
+		t.Run(test.name, func(t *testing.T) {
+			release := make(chan struct{})
+			body := &proxyRequestBody{body: timeoutReader{release}, controller: http.NewResponseController(httptest.NewRecorder()), idle: test.idle}
+			finished := make(chan struct{})
+			go func() { _, _ = body.Read(make([]byte, 1)); close(finished) }()
+			for body.waiting.Load() == 0 {
+				runtime.Gosched()
+			}
+			time.Sleep(test.wait)
+			body.interrupted.Store(true)
+			close(release)
+			<-finished
+			if got := body.cutIdle(); got != test.isCut {
+				t.Fatalf("cutIdle = %v, want %v", got, test.isCut)
+			}
+		})
+	}
+}

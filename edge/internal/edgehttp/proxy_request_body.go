@@ -40,7 +40,10 @@ func (b *proxyRequestBody) Read(payload []byte) (int, error) {
 	// idleExpired is set BEFORE waiting is cleared: cutIdle (the error handler, on another goroutine) must see one of the two at every
 	// instant. Clearing waiting first left a window in which neither held, the cancelled context read as "client left", nothing was
 	// written and the visitor got an empty 200 instead of 408 (11 of 150 runs under -race, 2026-11-20).
-	if b.idle > 0 && timedOut && !interrupted {
+	// A read the transport interrupted (Close, when it tears the request down after the stream reset the idle cut caused) is an idle cut
+	// all the same if it had already waited the whole idle time: judging by who ended the read lost the cut, cutIdle stayed false and the
+	// visitor got an empty 200 (38 of 300 runs under -race with only the ordering fix).
+	if b.idle > 0 && timedOut && (!interrupted || time.Since(started) >= b.idle) {
 		b.idleExpired.Store(true)
 	}
 	b.waiting.Store(0)
