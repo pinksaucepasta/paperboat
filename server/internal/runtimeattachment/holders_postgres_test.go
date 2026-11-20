@@ -261,7 +261,9 @@ VALUES($1,$2,$3,5,$4,`+extra+`,'tcp','127.0.0.1:1','not_applicable',1,'active',$
 			t.Fatalf("holder %+v", h)
 		}
 	}
-	if want := []string{nodemesh.TCPKey(24022), custom, stable}; fmt.Sprint(names) != fmt.Sprint(want) {
+	want := []string{nodemesh.TCPKey(24022), custom, stable}
+	sort.Strings(want) // key order is byte order, whatever the kind
+	if fmt.Sprint(names) != fmt.Sprint(want) {
 		t.Fatalf("keys %v, want %v: the tcp port key, the passthrough route's custom domain and its hostname, no key for the private route", names, want)
 	}
 	// The walk across both kinds is one ascending pass whatever the page size.

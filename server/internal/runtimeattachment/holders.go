@@ -26,26 +26,23 @@ AND (e.kind<>'tunnel' OR EXISTS(SELECT 1 FROM tunnels t WHERE t.id=e.tunnel_id A
 
 // heldKeys are (holder key, node id) pairs over the managed edge nodes, from the rows Service.Pull (the runtime route of each
 // carrier: its hostname) and PullEndpoints (the preview and tunnel routes riding on carriers) read for one node, here for
-// all of them (a tunnel route's custom domains too). A key is a hostname, or nodemesh.TCPKey(port) for a public raw TCP tunnel route; a private TCP route has none.
-// strict adds the validity those pulls apply (carrier valid, assignment observed ready, endpoint live); without it the pairs
-// are the cheap superset the key page is cut from.
+// all of them (a tunnel route's custom domains too). A key is a hostname, or nodemesh.TCPKey(port) for a public raw TCP tunnel
+// route; a private TCP route has none. strict adds what those pulls apply short of carrier validity (the carrier, the
+// assignment observed ready, the endpoint live) and the carrier's identity as route and epoch columns, for the caller to check
+// runtime_carrier_valid once per carrier; without it the pairs are the cheap superset the key page is cut from.
 func heldKeys(strict bool) string {
-	runtimeValid, endpointValid := "", ""
+	runtimeCols, endpointCols, carrier, endpointLive := "", "", "", ""
 	if strict {
-		runtimeValid = ` AND paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,false)`
-		endpointValid = ` AND x.observed_ready AND ` + liveEndpoint + ` AND (e.kind<>'preview' OR a.agent_capabilities @> ARRAY['endpoints']::text[])
- AND paperboat.runtime_carrier_valid(a.route_id,a.edge_node_id,a.edge_process_epoch,false)`
-	}
-	carrier := ``
-	if strict {
+		runtimeCols, endpointCols = ", a.route_id AS route, a.edge_process_epoch AS epoch", ", a.route_id, a.edge_process_epoch"
 		carrier = `JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.edge_node_id=x.edge_node_id
  AND a.edge_process_epoch=x.edge_process_epoch AND a.session_id=x.carrier_session_id`
+		endpointLive = ` AND x.observed_ready AND ` + liveEndpoint + ` AND (e.kind<>'preview' OR a.agent_capabilities @> ARRAY['endpoints']::text[])`
 	}
-	return `SELECT lower(a.admission->>'hostname') COLLATE "C" AS key, a.edge_node_id AS node
+	return `SELECT lower(a.admission->>'hostname') COLLATE "C" AS key, a.edge_node_id AS node` + runtimeCols + `
  FROM runtime_carrier_attachments a JOIN nodes n ON n.id=a.edge_node_id AND n.process_epoch=a.edge_process_epoch
- WHERE a.admission->>'hostname' IS NOT NULL` + runtimeValid + `
+ WHERE a.admission->>'hostname' IS NOT NULL
 UNION ALL
-SELECT names.key COLLATE "C", x.edge_node_id
+SELECT names.key COLLATE "C", x.edge_node_id` + endpointCols + `
  FROM endpoint_edge_assignments x JOIN nodes n ON n.id=x.edge_node_id AND n.process_epoch=x.edge_process_epoch
  JOIN endpoint_routes r ON r.id=x.route_id JOIN endpoints e ON e.id=x.endpoint_id
  LEFT JOIN tunnel_routes tr ON tr.id=r.tunnel_route_id ` + carrier + `
@@ -56,8 +53,16 @@ SELECT names.key COLLATE "C", x.edge_node_id
   SELECT d.hostname FROM tunnel_domains d WHERE tr.protocol IN ('http','tls') AND d.route_id=tr.id AND d.tunnel_id=tr.tunnel_id
    AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact'
    AND (tr.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))) names
- WHERE x.desired='active' AND r.protocol<>'private_tcp' AND (r.protocol<>'tcp' OR tr.public_tcp_port IS NOT NULL)` + endpointValid
+ WHERE x.desired='active' AND r.protocol<>'private_tcp' AND (r.protocol<>'tcp' OR tr.public_tcp_port IS NOT NULL)` + endpointLive
 }
+
+// validHolders groups the keys in ($1, $2] by node once their carrier is valid. runtime_carrier_valid (a plpgsql call of about a
+// millisecond) runs once per distinct carrier of the page, never per route: a carrier serves many names (ingressprojection does
+// the same). The CTEs are materialized so the planner cannot run the call before the key range cuts the rows.
+var validHolders = `WITH ` + holderNodes + `, cand AS MATERIALIZED (SELECT * FROM (` + heldKeys(true) + `) c WHERE key>$1::text AND key<=$2::text),
+live_carrier AS MATERIALIZED (SELECT route,node,epoch FROM (SELECT DISTINCT route,node,epoch FROM cand) d WHERE paperboat.runtime_carrier_valid(route,node,epoch,false))
+SELECT c.key, array_agg(DISTINCT c.node ORDER BY c.node) FROM cand c JOIN live_carrier v ON v.route=c.route AND v.node=c.node AND v.epoch=c.epoch
+GROUP BY c.key ORDER BY c.key`
 
 // Holders answers a managed edge node which nodes hold which keys: one page of at most limit keys after page (the last key of
 // the previous page), in key order, with next set when more follow. A caller that is not a managed node gets nothing.
@@ -94,8 +99,7 @@ func (s *Service) Holders(ctx context.Context, callerNode, page string, limit in
 	if len(keys) > limit {
 		keys, next = keys[:limit], keys[limit-1]
 	}
-	rows, err = s.DB.Pool().Query(ctx, `WITH `+holderNodes+` SELECT key, array_agg(DISTINCT node ORDER BY node) FROM (`+heldKeys(true)+`) h
-WHERE key>$1::text AND key<=$2::text GROUP BY key ORDER BY key`, page, keys[len(keys)-1])
+	rows, err = s.DB.Pool().Query(ctx, validHolders, page, keys[len(keys)-1])
 	if err != nil {
 		return nil, "", err
 	}
