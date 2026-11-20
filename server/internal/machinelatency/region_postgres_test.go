@@ -28,7 +28,6 @@ func TestNetworkLatencyIsPerRegion(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
 	ctx := context.Background()
 	if e = db.Migrate(ctx, store); e != nil {
 		t.Fatal(e)
@@ -42,6 +41,7 @@ func TestNetworkLatencyIsPerRegion(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
+	t.Cleanup(func() { store.Close() })
 	t.Cleanup(func() {
 		for _, q := range []string{
 			`DELETE FROM paperboat.user_machines WHERE id=$1`,
