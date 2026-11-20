@@ -21,8 +21,8 @@ type operationAccess struct {
 	token  string
 }
 
-// prepareOperationAccess runs after current authorization, inside the same serializable
-// transaction as the insert. Concurrent misses for the same key replay from a new snapshot.
+// prepareOperationAccess runs after authorization. An operation key serializes lookups
+// and inserts of its credentials without queuing unrelated operations.
 func (s *Service) prepareOperationAccess(ctx context.Context, tx *db.Tx, machine dbsqlc.UserMachine, in *dbsqlc.CreateUserMachineAccessSessionParams, operation *operationAccess) (bool, error) {
 	claims := operation.claims
 	claims.WorkspaceID = "personal"
@@ -41,6 +41,9 @@ func (s *Service) prepareOperationAccess(ctx context.Context, tx *db.Tx, machine
 		claims.WorkspaceID, in.TeamID.String, in.OperationID,
 	}, "\x00")))
 	in.OperationKey = sql.NullString{String: hex.EncodeToString(key[:]), Valid: true}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1885687003))`, in.OperationKey.String); err != nil {
+		return false, err
+	}
 	claims.IssuedAt = s.now().UTC()
 	claims.ExpiresAt = admission.Expiry(s.controlSigner, claims.IssuedAt)
 

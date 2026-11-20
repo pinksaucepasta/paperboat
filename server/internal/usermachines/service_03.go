@@ -325,8 +325,14 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 }
 
 func (s *Service) createSharedTerminalAccessSession(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams, sourceMachineID string, want teams.TerminalSessionDecision) error {
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := teams.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if err := lockAccessEndpointsTx(ctx, tx, in.UserID, in.CLIClientSessionID, sourceMachineID, in.UserMachineID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM user_machine_terminal_sessions WHERE id=$1 FOR SHARE`, want.SessionID); err != nil {
 			return err
 		}
 		var ready bool

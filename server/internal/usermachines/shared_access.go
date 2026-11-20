@@ -141,23 +141,25 @@ func (s *Service) describeTags(ctx context.Context, account string, teamID any, 
 	return errors.Join(rows.Err(), rows.Close())
 }
 
-// Persist authority under the same lock as team mutations. A permission withdrawn
-// while a descriptor is prepared must never escape as an active access session.
+// Persist the access session under the team and machine authority row locks.
 func (s *Service) createAccessSession(ctx context.Context, in dbsqlc.CreateUserMachineAccessSessionParams) error {
 	return s.saveAccessSession(ctx, in, nil)
 }
 
 func (s *Service) saveAccessSession(ctx context.Context, input dbsqlc.CreateUserMachineAccessSessionParams, operation *operationAccess) error {
-	// No team write lock: an access session only reads team state and inserts its own row, so sessions do
-	// not conflict with each other, and SERIALIZABLE orders one against a concurrent membership, grant or
-	// machine revoke (one of the two retries). Under the global lock every exec/ssh/terminal setup on the
-	// platform ran one at a time (Lane A: 10 concurrent setups ~430 ms apart). Lane X S2.
-	// Prior art: NetBird management locks per account (GetAccountWithLock), Tailscale control per node;
-	// neither serializes unrelated nodes' session setup.
+	// Separate grants share the authority row locks. The peer identity trigger
+	// updates its rows in key order and sees the latest generation after waiting.
 	wakePeers, inserted := false, false
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	err := s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		wakePeers, inserted = false, false
 		in := input
+		lockedTeams, err := lockAccessTeamsTx(ctx, tx, in.UserMachineID)
+		if err != nil {
+			return err
+		}
+		if err := lockAccessEndpointsTx(ctx, tx, in.UserID, in.CLIClientSessionID, in.UserMachineID); err != nil {
+			return err
+		}
 		scope, scoped := workspace.FromContext(ctx)
 		if scoped {
 			if err := workspace.ValidateTx(ctx, tx, in.UserID, scope); err != nil {
@@ -210,7 +212,7 @@ func (s *Service) saveAccessSession(ctx context.Context, input dbsqlc.CreateUser
 			}
 			in.TeamID = sql.NullString{String: scope.TeamID, Valid: true}
 		} else if !personal {
-			rows, err := tx.Query(ctx, `SELECT b.team_id FROM team_resource_bindings b WHERE b.resource_kind='machine' AND b.resource_id=$1 AND NOT EXISTS(SELECT 1 FROM unnest($3::text[]) capability WHERE NOT team_machine_capability_allowed($2,b.team_id,$1,capability)) ORDER BY b.team_id LIMIT 2`, in.UserMachineID, in.UserID, in.Capabilities)
+			rows, err := tx.Query(ctx, `SELECT b.team_id FROM team_resource_bindings b WHERE b.resource_kind='machine' AND b.resource_id=$1 AND b.team_id=ANY($4::text[]) AND NOT EXISTS(SELECT 1 FROM unnest($3::text[]) capability WHERE NOT team_machine_capability_allowed($2,b.team_id,$1,capability)) ORDER BY b.team_id LIMIT 2`, in.UserMachineID, in.UserID, in.Capabilities, lockedTeams)
 			if err != nil {
 				return err
 			}
@@ -288,11 +290,9 @@ func onlyStandingRuleCapabilities(capabilities []string) bool {
 	return true
 }
 
-// publishAccessSession wakes the hosts of a just-committed access session. It runs after the commit, not in the
-// session's SERIALIZABLE transaction (and not in a trigger): every session of one machine bumps the same topic
-// row, so concurrent setups conflicted on it, replaying until their retries ran out (40001 to the caller; 20
-// concurrent setups of one machine needed ~4 replays each). Autocommit statements just queue on the row lock.
-// A crash between commit and publish leaves the host to its periodic refresh.
+// publishAccessSession wakes the hosts after the access transaction commits,
+// keeping its authority locks out of the machine topic's write queue. A crash
+// between commit and publish leaves the host to its periodic refresh.
 func (s *Service) publishAccessSession(ctx context.Context, machineIDs []string, peers bool) error {
 	if err := machineevents.Publish(ctx, s.db.Pool(), machineIDs, machineevents.TopicMachineAccess); err != nil || !peers {
 		return err
