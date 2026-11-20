@@ -16,6 +16,11 @@ class Plan(unittest.TestCase):
         self.assertNotIn("cli", [m for m, _, _ in plan["ana@hermes"]])
         self.assertEqual(sorted(len(q) for q in plan.values())[0], 1)  # the longest job sits alone on the host that cannot run cli
 
+    def test_server_never_lands_on_the_small_host(self):
+        jobs = [("cli", ["./a"], 300), ("cli", ["./b"], 300), ("server", ["./..."], 600), ("edge", ["./..."], 130)]
+        plan = linux_ci.assign(jobs, HOSTS)
+        self.assertNotIn("server", [m for m, _, _ in plan["ana@hermes"]])
+
     def test_every_planned_job_is_a_real_module_or_a_cli_shard(self):
         for module, pkgs, seconds in linux_ci.jobs():
             self.assertIn(module, {"cli", "relay", "edge", "shared", "helper", "server"})
