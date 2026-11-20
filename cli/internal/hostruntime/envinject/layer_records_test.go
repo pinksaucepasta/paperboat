@@ -312,3 +312,15 @@ func TestFetchRecordsHasNoCountCap(t *testing.T) {
 		t.Fatalf("fetched %d records, err=%v; want %d", len(records), err, total)
 	}
 }
+
+// 9 MiB: above the former 8 MiB bound, below connectorprotocol.MaximumSnapshotBytes.
+func TestLayerStateAcceptsMoreThan8MiB(t *testing.T) {
+	path, key, value := filepath.Join(t.TempDir(), "state.json"), make([]byte, 32), strings.Repeat("x", 9<<20)
+	if err := writeLayerState(path, key, value); err != nil {
+		t.Fatal("state above the former 8 MiB bound was refused", err)
+	}
+	var got string
+	if _, err := readLayerState(path, key, &got); err != nil || got != value {
+		t.Fatal("state above the former 8 MiB bound was not read back", err)
+	}
+}
