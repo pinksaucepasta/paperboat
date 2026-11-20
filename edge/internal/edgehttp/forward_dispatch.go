@@ -192,9 +192,10 @@ func (l *SharedTLSListener) resolveHost(host string) (hostAdmission, bool) {
 	return hostAdmission{decisions: decisions, https: https, infrastructureHTTPS: infrastructureHTTPS, authorizedHTTPS: authorizedHTTPS, selected: selected}, true
 }
 
-// ServerName is the SNI of a visitor's ClientHello, by the listener's own inspection.
+// ServerName is the SNI of a visitor's ClientHello, by the listener's own inspection. It reads memory only, so it
+// does not depend on the listener's context: a draining listener must still be able to tell draining from not-held.
 func (l *SharedTLSListener) ServerName(hello []byte) (string, error) {
-	_, info, err := inspectClientHello(l.ctx, &helloBytesConn{r: bytes.NewReader(hello)}, l.infrastructureHostname, false)
+	_, info, err := inspectClientHello(context.Background(), &helloBytesConn{r: bytes.NewReader(hello)}, l.infrastructureHostname, false)
 	return info.host, err
 }
 
