@@ -691,6 +691,13 @@ TLIST=($DEVICES)
             fake.chmod(0o700)
             self.assertEqual(private_access.local_access_domain(fake), 'example.test')
 
+    def test_a_windows_source_runs_its_python_checks_on_the_controller_not_in_powershell(self):
+        # `on victus` is PowerShell, which has no python3: check scripts reach a Windows device through device_py/ctl.
+        text = (HERE / 'smoke.sh').read_text()
+        for script in ('terminal_lifecycle.py', 'session_lifecycle.py', '$script $target$extra'):
+            self.assertIn('device_py "$source" ' + ('"$script" $target$extra' if script.startswith('$') else script), text)
+        self.assertNotIn('on "$source" "python3', text)
+
     def test_a_container_stands_in_for_a_device_name(self):
         # SMOKE_CT_MAP sends a device's commands through ssh to `docker exec` in its container; devices
         # that are not mapped keep their own transport.

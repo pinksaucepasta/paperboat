@@ -585,7 +585,7 @@ test_terminal_main_pairs() {
       [ "$target" != apple ] || monitor="${APPLE_HTOP:-/opt/homebrew/bin/htop}"
       monitor=$(python3 -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$monitor")
       t0=$(now)
-      out=$(on "$source" "python3 /tmp/$RUN_ID/terminal_lifecycle.py $target --check all --monitor-path $monitor" 2>&1); status=$?
+      out=$(device_py "$source" terminal_lifecycle.py $target --check all --monitor-path $monitor 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1])
@@ -615,7 +615,7 @@ test_terminal_commands() {
         record "$id" FAIL 0 "could not stage the terminal fixture"
         continue
       fi
-      out=$(on "$source" "python3 /tmp/$RUN_ID/session_lifecycle.py $target --check manage" 2>&1); status=$?
+      out=$(device_py "$source" session_lifecycle.py $target --check manage 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1])
@@ -634,7 +634,7 @@ assert receipt["status"]=="PASS" and receipt["check"]=="session-manage" and rece
       record "$id" FAIL 0 "could not stage the terminal fixture"
       continue
     fi
-    out=$(on "$source" "python3 /tmp/$RUN_ID/terminal_lifecycle.py $source --check main --entry new" 2>&1); status=$?
+    out=$(device_py "$source" terminal_lifecycle.py $source --check main --entry new 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1])
@@ -671,7 +671,7 @@ test_terminal_features() {
         continue
       fi
       extra=""; [ "$kind" != session-sharing-owner ] || extra=" --team $SMOKE_TEAM"
-      out=$(on "$source" "python3 /tmp/$RUN_ID/$script $target$extra" 2>&1); status=$?
+      out=$(device_py "$source" "$script" $target$extra 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 receipt=json.loads(sys.argv[1].splitlines()[-1])
