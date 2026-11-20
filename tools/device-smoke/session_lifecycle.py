@@ -24,15 +24,22 @@ def selected(pb, target, name, environment=None):
     return actual, matches[0]
 
 
+def cmd_say(label, suffix=''):
+    """A cmd.exe line printing PB_<label>_<suffix> with no PowerShell start. The caret splits the token, so the echoed
+    command line cannot match it; cmd drops the caret when it runs the line (%VAR% expands only then, too)."""
+    return 'echo PB_^' + label + '_' + suffix + '\r'
+
+
 def ready(terminal, windows):
-    """Wait until the target's shell takes input. Windows: cmd.exe under ConPTY, one PowerShell line per step."""
+    """Wait until the target's shell takes input. Windows: cmd.exe under ConPTY, no PowerShell (its first start can take
+    seconds on a loaded machine), and the wait is 60 s (expect defaults to 45) for ConPTY and cmd themselves to come up."""
     if not windows:
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         return
-    token = 'PB_READY_' + uuid.uuid4().hex
-    terminal.send(windows_target.typed_marker(token) + '\r')
-    terminal.expect(token)
+    token = uuid.uuid4().hex
+    terminal.send(cmd_say('READY', token))
+    terminal.expect('PB_READY_' + token, timeout=60)
 
 
 def keep_state(terminal, windows, nonce):
@@ -41,7 +48,7 @@ def keep_state(terminal, windows, nonce):
         terminal.send("PB_DURABLE='" + nonce + "'; printf '\\nPB_DURABLE_%s\\n' \"$PB_DURABLE\"\r")
     else:
         terminal.send('set PB_DURABLE=' + nonce + '\r')
-        terminal.send(windows_target.typed_marker('PB_DURABLE_', '+$env:PB_DURABLE') + '\r')
+        terminal.send(cmd_say('DURABLE', '%PB_DURABLE%'))
     terminal.expect('PB_DURABLE_' + nonce)
 
 
@@ -49,7 +56,7 @@ def show_state(terminal, windows, nonce):
     if not windows:
         terminal.send("printf '\\nPB_REATTACHED_%s\\n' \"$PB_DURABLE\"\r")
     else:
-        terminal.send(windows_target.typed_marker('PB_REATTACHED_', '+$env:PB_DURABLE') + '\r')
+        terminal.send(cmd_say('REATTACHED', '%PB_DURABLE%'))
     terminal.expect('PB_REATTACHED_' + nonce)
 
 

@@ -6,13 +6,14 @@ import session_lifecycle
 
 class Typed:
     def __init__(self):
-        self.sent, self.expected = [], []
+        self.sent, self.expected, self.timeouts = [], [], []
 
     def send(self, data):
         self.sent.append(data)
 
     def expect(self, text, timeout=None):
         self.expected.append(text)
+        self.timeouts.append(timeout)
 
     def marker(self, label, prefix=''):
         self.send(prefix + "printf '\\nPB_" + label + "_%s\\n' 'x'\r")
@@ -27,15 +28,22 @@ class SessionLifecycleShell(unittest.TestCase):
         session_lifecycle.show_state(terminal, windows, 'abc123')
         return terminal
 
-    def test_a_windows_target_is_typed_no_bash(self):
-        typed = ''.join(self.run_all(True).sent)
-        for bashism in ('stty', 'printf', '$PB_DURABLE', "PB_DURABLE='"):
-            self.assertNotIn(bashism, typed)
+    def test_a_windows_target_is_typed_cmd_lines_with_no_bash_and_no_powershell(self):
+        terminal = self.run_all(True)
+        typed = ''.join(terminal.sent)
+        for foreign in ('stty', 'printf', '$PB_DURABLE', "PB_DURABLE='", 'powershell'):
+            self.assertNotIn(foreign, typed)
         self.assertIn('set PB_DURABLE=abc123\r', typed)
-        self.assertIn('powershell -NoProfile -Command', typed)
-        self.assertIn('$env:PB_DURABLE', typed)
-        self.assertNotIn(b'\x1b[?2004h', self.run_all(True).expected)  # cmd.exe does not enable bracketed paste
-        self.assertEqual(['PB_DURABLE_abc123', 'PB_REATTACHED_abc123'], [e for e in self.run_all(True).expected if e.endswith('abc123')])
+        # The caret keeps the echoed command line from matching the marker the line prints; %VAR% expands when it runs.
+        self.assertIn('echo PB_^DURABLE_%PB_DURABLE%\r', typed)
+        self.assertIn('echo PB_^REATTACHED_%PB_DURABLE%\r', typed)
+        self.assertRegex(typed, r'echo PB_\^READY_[0-9a-f]{32}\r')
+        self.assertNotIn(b'\x1b[?2004h', terminal.expected)  # cmd.exe does not enable bracketed paste
+        self.assertEqual(['PB_DURABLE_abc123', 'PB_REATTACHED_abc123'], [e for e in terminal.expected if e.endswith('abc123')])
+
+    def test_a_windows_target_is_given_60_seconds_to_print_ready(self):
+        terminal = self.run_all(True)
+        self.assertEqual(60, terminal.timeouts[terminal.expected.index(next(e for e in terminal.expected if e.startswith('PB_READY_')))])
 
     def test_a_unix_target_is_typed_as_before(self):
         terminal = self.run_all(False)
