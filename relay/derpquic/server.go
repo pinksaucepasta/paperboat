@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/addrlimit"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"io"
@@ -53,7 +54,25 @@ type Server struct {
 	workers                                              sync.WaitGroup
 	accepted, denied, forwarded, dropped, bytesForwarded atomic.Uint64
 	lastRefusalLog                                       atomic.Int64
+	// preGrant bounds one source address's connections that have not authenticated yet. It bounds an address,
+	// never the node: a peer that opens connections and stays silent holds at most its share while others
+	// connect. Prior art: Tailscale's derper gives each client a handshake deadline (derp/derpserver).
+	preGrant *addrlimit.Limiter
 }
+
+// preGrantPerAddress is how many unauthenticated connections one address may hold at once.
+const preGrantPerAddress = 16
+
+// admitPreGrant takes one unauthenticated connection from the address's share; release gives it back (also
+// when the connection authenticates or closes, and safe to call more than once).
+func (s *Server) admitPreGrant(remote string) (release func(), ok bool) {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	return s.preGrant.Admit(host, false)
+}
+
 type queued struct {
 	packet
 	source  *peerConn
@@ -78,6 +97,7 @@ type peerConn struct {
 	grant           Grant
 	out             chan queued
 	control         chan []byte
+	preGrant        func() // gives back the connection's unauthenticated share; nil when it took none
 	rate            *budget
 	sequence        atomic.Uint64
 	// paired remembers the last peer this connection's grant was checked against, both signed grants at the
@@ -103,7 +123,7 @@ func NewServer(v Verifier) (*Server, error) {
 		return nil, err
 	}
 	v.Keys = nil
-	s := &Server{verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{})}
+	s := &Server{verifier: v, peers: make(map[key.NodePublic]*peerConn), fences: make(map[string]*grantFence), accounts: make(map[string]*budget), accountRate: float64(accountBytesPerSecond), connections: make(map[*quic.Conn]struct{}), wssConnections: make(map[*peerConn]struct{}), preGrant: addrlimit.NewInFlight(preGrantPerAddress)}
 	s.keys.Store(&keys)
 	return s, nil
 }
@@ -179,14 +199,30 @@ func (s *Server) Serve(ctx context.Context, socket net.PacketConn, config *tls.C
 			c.CloseWithError(3, "relay unavailable")
 			continue
 		}
+		s.mu.Unlock()
+		release, ok := s.admitPreGrant(c.RemoteAddr().String())
+		if !ok {
+			s.denied.Add(1)
+			c.CloseWithError(3, "relay unavailable")
+			continue
+		}
+		s.mu.Lock()
+		if s.draining {
+			s.mu.Unlock()
+			release()
+			s.denied.Add(1)
+			c.CloseWithError(3, "relay unavailable")
+			continue
+		}
 		s.connections[c] = struct{}{}
 		s.workers.Add(1)
 		s.mu.Unlock()
-		go func() { defer s.workers.Done(); s.serveConn(c) }()
+		go func() { defer s.workers.Done(); s.serveConn(c, release) }()
 	}
 }
-func (s *Server) serveConn(c *quic.Conn) {
+func (s *Server) serveConn(c *quic.Conn, release func()) {
 	defer func() {
+		release()
 		c.CloseWithError(0, "relay closed")
 		s.mu.Lock()
 		delete(s.connections, c)
@@ -203,7 +239,7 @@ func (s *Server) serveConn(c *quic.Conn) {
 	if err != nil {
 		return
 	}
-	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8)}
+	p := &peerConn{conn: c, stream: stream, rate: newBudget(carrierBytesPerSecond), out: make(chan queued, queueDepth), control: make(chan []byte, 8), preGrant: release}
 	s.servePeer(p)
 }
 
@@ -211,6 +247,9 @@ func (s *Server) servePeer(p *peerConn) {
 	c := p.conn
 	stream := p.stream
 	defer func() {
+		if p.preGrant != nil {
+			p.preGrant()
+		}
 		p.close(0, "relay closed")
 		s.mu.Lock()
 		delete(s.wssConnections, p)
@@ -230,6 +269,9 @@ func (s *Server) servePeer(p *peerConn) {
 	if err = s.authenticate(p, kind, b); err != nil {
 		s.reject(p, err)
 		return
+	}
+	if p.preGrant != nil {
+		p.preGrant() // authenticated: the grant's own budgets bound it from here
 	}
 	stream.SetReadDeadline(time.Time{})
 	stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
