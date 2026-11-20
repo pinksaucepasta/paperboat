@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -136,14 +137,14 @@ func (r HoldersRequest) PageLimit() int {
 	return r.Limit
 }
 
-// Holder is one name and the nodes whose carrier serves it.
+// Holder is one key (see ValidKey) and the nodes whose carrier serves it.
 type Holder struct {
 	Name    string   `json:"name"`
 	NodeIDs []string `json:"node_ids"`
 }
 
 func (h Holder) Validate() error {
-	if err := ValidName(h.Name); err != nil || len(h.NodeIDs) == 0 || len(h.NodeIDs) > MaxPeers+1 {
+	if err := ValidKey(h.Name); err != nil || len(h.NodeIDs) == 0 || len(h.NodeIDs) > MaxPeers+1 {
 		return fmt.Errorf("%w: holder", ErrInvalid)
 	}
 	return nil
@@ -155,10 +156,41 @@ type HoldersResponse struct {
 	Next    string   `json:"next,omitempty"`
 }
 
+// TCPKeyPrefix starts the holder key of a raw TCP tunnel: "tcp:<public port>". Hostname keys never contain ':'.
+const TCPKeyPrefix = "tcp:"
+
+// TCPKey is the holder key of the raw TCP tunnel listening on port.
+func TCPKey(port uint16) string { return TCPKeyPrefix + strconv.Itoa(int(port)) }
+
+// ParseTCPKey returns the public port of a raw TCP key.
+func ParseTCPKey(key string) (uint16, bool) {
+	rest, ok := strings.CutPrefix(key, TCPKeyPrefix)
+	if !ok || rest == "" || rest[0] == '0' || len(rest) > 5 {
+		return 0, false
+	}
+	port, err := strconv.ParseUint(rest, 10, 16)
+	if err != nil || port == 0 {
+		return 0, false
+	}
+	return uint16(port), true
+}
+
+// ValidKey accepts what a node can hold and forward: a lower-case DNS name (HTTPS and TLS passthrough
+// tunnels, and per-session names) or a raw TCP key.
+func ValidKey(key string) error {
+	if strings.HasPrefix(key, TCPKeyPrefix) {
+		if _, ok := ParseTCPKey(key); !ok {
+			return fmt.Errorf("%w: tcp key", ErrInvalid)
+		}
+		return nil
+	}
+	return ValidName(key)
+}
+
 // Open is the first message on a forward stream, sent by the node the visitor reached.
 type Open struct {
 	V       int    `json:"v"`
-	Name    string `json:"name"`    // TLS server name the visitor asked for
+	Name    string `json:"name"`    // holder key: the TLS server name the visitor asked for, or TCPKey(port)
 	Visitor string `json:"visitor"` // visitor ip:port as the forwarding node saw it
 	From    string `json:"from"`    // forwarding node id; the holder checks it against the authenticated peer
 	Hop     int    `json:"hop"`
@@ -168,7 +200,7 @@ func (o Open) Validate() error {
 	if o.V != 1 || o.Hop != ForwardHop || o.From == "" || len(o.From) > 128 {
 		return fmt.Errorf("%w: open", ErrInvalid)
 	}
-	if err := ValidName(o.Name); err != nil {
+	if err := ValidKey(o.Name); err != nil {
 		return err
 	}
 	if _, err := netip.ParseAddrPort(o.Visitor); err != nil {
@@ -206,7 +238,7 @@ func (w Watch) Validate() error {
 		return fmt.Errorf("%w: watch names", ErrFrame)
 	}
 	for _, n := range w.Names {
-		if err := ValidName(n); err != nil {
+		if err := ValidKey(n); err != nil {
 			return err
 		}
 	}

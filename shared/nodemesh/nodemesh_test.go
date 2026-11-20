@@ -278,3 +278,27 @@ func TestHoldersRequestBounds(t *testing.T) {
 		t.Error("holder without nodes accepted")
 	}
 }
+
+func TestTCPKeys(t *testing.T) {
+	if got := TCPKey(10001); got != "tcp:10001" {
+		t.Fatalf("TCPKey: %q", got)
+	}
+	if port, ok := ParseTCPKey("tcp:10001"); !ok || port != 10001 {
+		t.Fatalf("ParseTCPKey: %d %v", port, ok)
+	}
+	for _, bad := range []string{"tcp:", "tcp:0", "tcp:01", "tcp:65536", "tcp:1x", "tcp:-1", "tcp:123456", "TCP:80"} {
+		if _, ok := ParseTCPKey(bad); ok {
+			t.Errorf("%q parsed", bad)
+		}
+		if ValidKey(bad) == nil {
+			t.Errorf("%q accepted as a key", bad)
+		}
+	}
+	if ValidKey("tcp:10001") != nil || ValidKey("a.example.test") != nil {
+		t.Fatal("valid key refused")
+	}
+	open := Open{V: 1, Name: TCPKey(10001), Visitor: "192.0.2.1:5000", From: "n1", Hop: ForwardHop}
+	if open.Validate() != nil || (Watch{Kind: WatchAdd, Names: []string{TCPKey(10001)}}).Validate() != nil || (Holder{Name: TCPKey(10001), NodeIDs: []string{"n1"}}).Validate() != nil {
+		t.Fatal("tcp key refused in a message")
+	}
+}
