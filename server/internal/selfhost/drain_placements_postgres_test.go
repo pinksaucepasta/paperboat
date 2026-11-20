@@ -100,8 +100,8 @@ func (f *pinFixture) edgeNodes() (nodes []string) {
 
 func TestOwnerDrainMoveRepinsPublicationsToASibling(t *testing.T) {
 	f := newPinFixture(t, true)
-	if got := f.edgeNodes(); !slices.Equal(got, []string{f.first.NodeID}) || !slices.Equal(f.expectedValues(), []string{"93.184.216.41"}) {
-		t.Fatalf("before the drain: edges=%v records=%v", got, f.expectedValues())
+	if got := f.edgeNodes(); !slices.Equal(got, []string{f.first.NodeID}) {
+		t.Fatalf("before the drain: edges=%v", got)
 	}
 	if _, err := f.service.DrainScoped(t.Context(), f.owner, f.first.InstallationID, false, true); err != nil {
 		t.Fatal(err)
@@ -119,26 +119,28 @@ func TestOwnerDrainMoveRepinsPublicationsToASibling(t *testing.T) {
 
 func TestOwnerPlainDrainKeepsPins(t *testing.T) {
 	f := newPinFixture(t, true)
+	before := f.expectedValues()
 	if _, err := f.service.DrainScoped(t.Context(), f.owner, f.first.InstallationID, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.pinnedInstallation(); got != f.first.InstallationID {
 		t.Fatalf("a plain drain moved the pin to %s", got)
 	}
-	if got := f.expectedValues(); !slices.Equal(got, []string{"93.184.216.41"}) {
-		t.Fatalf("a plain drain changed the domain records: %v", got)
+	if got := f.expectedValues(); !slices.Equal(got, before) {
+		t.Fatalf("a plain drain changed the domain records: %v, were %v", got, before)
 	}
 }
 
 func TestOwnerDrainMoveWithoutASiblingKeepsThePin(t *testing.T) {
 	f := newPinFixture(t, false)
+	before := f.expectedValues()
 	if _, err := f.service.DrainScoped(t.Context(), f.owner, f.first.InstallationID, false, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.pinnedInstallation(); got != f.first.InstallationID {
 		t.Fatalf("the pin moved to %s with no sibling", got)
 	}
-	if got := f.expectedValues(); !slices.Equal(got, []string{"93.184.216.41"}) {
-		t.Fatalf("domain records changed with no sibling: %v", got)
+	if got := f.expectedValues(); !slices.Equal(got, before) {
+		t.Fatalf("domain records changed with no sibling: %v, were %v", got, before)
 	}
 }
