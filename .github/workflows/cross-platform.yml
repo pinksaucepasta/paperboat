@@ -87,6 +87,12 @@ jobs:
           COUNT: ${{ inputs.count || '1' }}
           RACE: ${{ matrix.os != 'windows-latest' && !inputs.norace && '-race' || '' }}
         run: |
+          # A package list given by hand (a shard of tools/ci-shards.py) may name packages this OS excludes by build constraints, which
+          # go test refuses as "setup failed"; keep the packages that have tests here. No package left means nothing to run.
+          if [ "$PACKAGES" != "./..." ]; then
+            PACKAGES=$(go list -e -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' $PACKAGES)
+            [ -n "$PACKAGES" ] || { echo "no test packages for $RUNNER_OS in this shard"; exit 0; }
+          fi
           if [ "$RUNNER_OS" != Windows ]; then
             go test $RACE -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES
             exit
