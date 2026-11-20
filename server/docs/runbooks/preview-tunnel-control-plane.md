@@ -59,6 +59,34 @@ address and expects the nonce echoed): `timeout` means a cloud firewall drops it
 firewall rejects it, `refused` that the host answered with nothing listening. From outside the cloud you can also
 `nc -vz <edge-ip> <live tunnel port>`.
 
+## Forwarding between edge nodes
+
+Managed edge nodes forward a visitor to the node that holds the machine's carrier, so a visitor can land on any managed
+node (DNS stays round-robin over every ready, non-draining managed node of every region) and still reach the app.
+
+- **What it is.** The node the visitor reached reads the TLS server name, finds a holder in its directory and copies the
+  still-encrypted stream to it over a persistent link between the two nodes (mutual TLS, pinned to the carrier certificate
+  each node registered). The holder terminates TLS and applies every policy, so a forwarding node never decrypts and never
+  meters the visitor. A forwarded stream is never forwarded again (hop limit 1). Raw TCP tunnels are held under
+  `tcp:<port>` and forwarded the same way. HTTP/3 is not forwarded.
+- **Where the data comes from.** `POST /v1/edge/forward/peers` lists the other managed edge nodes (ready or draining,
+  heartbeating, carrier certificate registered) with their pins; `POST /v1/edge/forward/holders` pages which nodes hold
+  which names. Both answer only managed nodes, and a self-hosted node gets an empty answer and is never listed: the two
+  populations are never mixed. Nodes also tell each other what they hold over the link; the server answer is the seed and
+  the repair for a link that is not up.
+- **A draining node** keeps its links and the streams already forwarded through it until they end or the drain deadline.
+  It is no longer a new holder: it refuses new forwards (`draining`) and the forwarding node tries the next holder; peers
+  list it as draining and use it last. A node that is down has its names withdrawn when its link breaks.
+- **Counters.** Each edge reports `forward` in its heartbeat and each relay `mesh` in its observation (links, held names,
+  forwarded, accepted, holder misses, unreachable, loop refusals, bytes in and out). The operator node list shows them as
+  `forward`. Rising `unreachable` or `holder_miss` with a healthy fleet means links are down or the holder snapshot is
+  behind: check the peers answer for the nodes in question and their last heartbeat.
+- **DNS.** Nearest-region steering is not part of this: name resolution stays round-robin. Geo or latency steering needs
+  Cloudflare Load Balancing, a separate paid product (about 5 USD a month for two origins plus per-origin and
+  health-check charges; geo and latency steering and wildcard hostnames depend on the plan, some only on Enterprise;
+  all unverified and not bought). A proxied (orange cloud) record is not an option: it would terminate TLS outside our
+  trust boundary.
+
 ## DNS ownership or certificate failure
 
 1. Separate `dns` health from `certificate` health. A DNS mismatch must not

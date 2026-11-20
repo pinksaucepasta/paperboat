@@ -13646,6 +13646,57 @@
           },
           "protocol_version": {
             "type": "string"
+          },
+          "forward": {
+            "type": "object",
+            "description": "Forwarding counters from the node's latest observation: an edge's visitor forwarding, a relay's mesh. Absent when the node reports none.",
+            "properties": {
+              "links": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "names": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "forwarded": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "accepted": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "holder_miss": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "unreachable": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "loop_refused": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "bytes_in": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "bytes_out": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
           }
         }
       },
