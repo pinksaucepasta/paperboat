@@ -1,15 +1,18 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 )
@@ -221,5 +224,59 @@ func TestInTxAndSessionLockedTxReplayInjectedSerializationFailures(t *testing.T)
 		if err != nil || calls != 1 || pending() != 0 {
 			t.Fatalf("%s after two forced 40001: err=%v calls=%d pending=%d", name, err, calls, pending())
 		}
+	}
+}
+
+func TestTransactionOwnerIsSetAndLoggedOnCommitFailurePostgres(t *testing.T) {
+	store := openTransactionFailureTestDB(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	conn, err := store.Pool().Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	var original string
+	if err := conn.QueryRow(ctx, "SHOW application_name").Scan(&original); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	var tagged string
+	err = runInTxOn(ctx, conn, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(ctx context.Context, tx *Tx) error {
+		if err := tx.QueryRow(ctx, "SHOW application_name").Scan(&tagged); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+CREATE TEMP TABLE tx_owner_probe (id integer);
+CREATE FUNCTION pg_temp.fail_tx_owner_probe() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ RAISE EXCEPTION 'test commit failure' USING ERRCODE = '40001';
+END
+$$;
+CREATE CONSTRAINT TRIGGER fail_commit AFTER INSERT ON tx_owner_probe
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION pg_temp.fail_tx_owner_probe();
+INSERT INTO tx_owner_probe VALUES (1)`)
+		return err
+	})
+	if !isSerializationFailure(err) {
+		t.Fatalf("expected serialization failure at commit, got %v", err)
+	}
+	const owner = "db.TestTransactionOwnerIsSetAndLoggedOnCommitFailurePostgres"
+	if !strings.HasPrefix(tagged, owner) {
+		t.Fatalf("transaction application_name = %q, want prefix %q", tagged, owner)
+	}
+	if got := logs.String(); !strings.Contains(got, `"tx_owner":"`+owner) ||
+		!strings.Contains(got, `"stage":"commit"`) || !strings.Contains(got, `"sqlstate":"40001"`) {
+		t.Fatalf("commit warning lacks transaction attribution: %s", got)
+	}
+	var restored string
+	if err := conn.QueryRow(ctx, "SHOW application_name").Scan(&restored); err != nil || restored != original {
+		t.Fatalf("application_name after rollback = %q, want %q, error %v", restored, original, err)
 	}
 }

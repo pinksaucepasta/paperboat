@@ -10,8 +10,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -336,7 +338,12 @@ const serializableAttempts = 10
 // bounded jittered backoff. Without it, one transient conflict (two servers overlapping during a rollout, a
 // concurrent write) becomes a 503 and the client backs off for minutes. attempt must be safe to replay.
 func RetrySerializable(ctx context.Context, attempt func() error) error {
-	return retrySerializable(ctx, attempt)
+	owner := transactionOwner(reflect.ValueOf(attempt).Pointer())
+	return retrySerializable(ctx, func() error {
+		err := attempt()
+		logTransactionConflict(ctx, owner, "attempt", err)
+		return err
+	})
 }
 
 func retrySerializable(ctx context.Context, attempt func() error) error {
@@ -381,7 +388,8 @@ func BeginSerializable(ctx context.Context, database *sql.DB) (*sql.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, serializableSetup); err != nil {
+	caller, _, _, _ := runtime.Caller(1)
+	if _, err := tx.ExecContext(ctx, serializableSetup+"; "+transactionApplicationName(transactionOwner(caller))); err != nil {
 		return nil, errors.Join(fmt.Errorf("set up serializable transaction: %w", err), tx.Rollback())
 	}
 	return tx, nil
@@ -520,7 +528,8 @@ func runInTxOn(ctx context.Context, conn txBeginner, options pgx.TxOptions, fn f
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	wrapped := &Tx{tx: tx, q: dbsqlc.New(tx)}
-	setup := `SET LOCAL search_path TO paperboat`
+	owner := transactionOwner(reflect.ValueOf(fn).Pointer())
+	setup := `SET LOCAL search_path TO paperboat; ` + transactionApplicationName(owner)
 	if options.IsoLevel == pgx.Serializable {
 		setup += "; " + serializableSetup
 	}
@@ -528,7 +537,7 @@ func runInTxOn(ctx context.Context, conn txBeginner, options pgx.TxOptions, fn f
 		if rollbackErr := rollbackFailedTx(tx); rollbackErr != nil {
 			return &transactionCleanupFailure{operation: err, rollback: rollbackErr}
 		}
-		return fmt.Errorf("set transaction search path: %w", err)
+		return fmt.Errorf("set up transaction: %w", err)
 	}
 	if err := fn(ctx, wrapped); err != nil {
 		if rollbackErr := rollbackFailedTx(tx); rollbackErr != nil {
@@ -537,9 +546,35 @@ func runInTxOn(ctx context.Context, conn txBeginner, options pgx.TxOptions, fn f
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
+		logTransactionConflict(ctx, owner, "commit", err)
 		return fmt.Errorf("commit tx: %w", err)
 	}
 	return nil
+}
+
+func transactionOwner(pc uintptr) string {
+	if fn := runtime.FuncForPC(pc); fn != nil {
+		name := fn.Name()
+		return name[strings.LastIndexByte(name, '/')+1:]
+	}
+	return "unknown"
+}
+
+// SET LOCAL preserves when PostgreSQL takes the first snapshot and resets the
+// label when the transaction ends, including on connections reused by a pooler.
+func transactionApplicationName(owner string) string {
+	return "SET LOCAL application_name TO '" + strings.ReplaceAll(owner, "'", "''") + "'"
+}
+
+// PostgreSQL can report just COMMIT. Record the callback owner even when a
+// retry succeeds, without logging statement text or PostgreSQL error details.
+func logTransactionConflict(ctx context.Context, owner, stage string, err error) {
+	if isSerializationFailure(err) {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr != nil {
+			slog.WarnContext(ctx, "postgres transaction conflict", "tx_owner", owner, "stage", stage, "sqlstate", pgErr.Code)
+		}
+	}
 }
 
 func (tx *Tx) Queries() *dbsqlc.Queries {
