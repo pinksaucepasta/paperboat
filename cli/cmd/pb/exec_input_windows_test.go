@@ -202,11 +202,12 @@ func TestExecPipeInputFillsFramesFromASmallPipe(t *testing.T) {
 		}
 	}()
 	// Read as forwardExecInput does: one short in-order frame is legitimate when the writer stalls past the 2 ms
-	// coalescing window, so the guarantee is checked over the stream: 32 KiB arrives in order, and some frame is
-	// larger than the 8 KiB the pre-coalescing reader could ever return.
+	// coalescing window, so the guarantee is checked over the stream: bytes arrive in order, and some frame is
+	// larger than the 8 KiB the pre-coalescing reader could ever return. Reads run until one is (at least 32 KiB in),
+	// or the whole stream is consumed: a loaded runner may need more than 32 KiB to produce its first large frame.
 	buffer := make([]byte, 256<<10)
 	received, largest := 0, 0
-	for received < 32<<10 {
+	for received < total && (received < 32<<10 || largest <= 8<<10) {
 		n, err := readExecInput(context.Background(), reader, buffer)
 		if err != nil || n == 0 {
 			t.Fatalf("stdin read after %d bytes returned %d bytes (err %v)", received, n, err)
