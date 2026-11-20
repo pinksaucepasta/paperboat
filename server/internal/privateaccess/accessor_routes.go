@@ -236,9 +236,16 @@ func (h *AccessorHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		writeHTTPError(requestContext(r), w, 404, "not_found", "Not found.", false)
 		return
 	}
+	raw, err := json.Marshal(AccessorSnapshot{Schema: "paperboat.preview-tunnel/v1", Kind: "private_access_carrier_snapshot", Complete: true, Admissions: admissions})
+	if err != nil || len(raw) > connectorprotocol.MaximumSnapshotBytes {
+		cause := errors.Join(err, errors.New("private access snapshot could not be encoded within the size limit"))
+		capturePrivateAccessFailure(r.Context(), http.StatusServiceUnavailable, "authorization_unavailable", cause, false)
+		writeHTTPError(requestContext(r), w, 503, "private_access_unavailable", "Private access discovery is unavailable.", true)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(AccessorSnapshot{Schema: "paperboat.preview-tunnel/v1", Kind: "private_access_carrier_snapshot", Complete: true, Admissions: admissions}); err != nil {
+	if _, err := w.Write(raw); err != nil {
 		capturePrivateAccessFailure(r.Context(), http.StatusOK, "authorization_unavailable", err, false)
 	}
 }
