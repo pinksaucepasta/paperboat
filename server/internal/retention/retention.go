@@ -219,6 +219,8 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.EndedSessions })},
 	{"control_usage_receipts", batchOf("control_usage_receipts", `created_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.UsageReceipts })},
+	{"resource_bandwidth_events", batchOf("resource_bandwidth_events", `interval_end < now()-make_interval(secs=>$2)`),
+		seconds(func(config.Retention) time.Duration { return config.ResourceBandwidthWindow })},
 	{"tunnel_log_entries", batchOf("tunnel_log_entries", `occurred_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.TunnelLogs })},
 	{"team_machine_requests", batchOf("team_machine_requests", `decided_at < now()-make_interval(secs=>$2)`),

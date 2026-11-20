@@ -194,10 +194,7 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 		}
 		// Bounded opportunistic retention avoids a new maintenance service and
 		// never erases retry keys inside the accepted delivery window.
-		if _, err := tx.Exec(ctx, `DELETE FROM native_usage_authorities WHERE access_session_id IN (SELECT access_session_id FROM native_usage_authorities WHERE retain_until<$1 LIMIT 500)`, now); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `DELETE FROM resource_bandwidth_events WHERE operation_id IN (SELECT operation_id FROM resource_bandwidth_events WHERE interval_end<$1 LIMIT 500)`, now.Add(-MaxWindow))
+		_, err := tx.Exec(ctx, `DELETE FROM native_usage_authorities WHERE access_session_id IN (SELECT access_session_id FROM native_usage_authorities WHERE retain_until<$1 LIMIT 500)`, now)
 		return err
 	})
 	return receipt, err

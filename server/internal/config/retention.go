@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// ResourceBandwidthWindow is the guaranteed duration of exact workspace usage history.
+const ResourceBandwidthWindow = 90 * 24 * time.Hour
+
 // Retention bounds the tables that grow with traffic (PLAN 3b, storage). One place for every window; the
 // retention worker (internal/retention) deletes past them in bounded batches.
 type Retention struct {
