@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -411,6 +412,9 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 
 func (c *Coordinator) reconcileSnapshotLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
 	c.lastPeers, c.lastRevision, c.haveSnapshot = peers, revision, true
+	if c.deferToPendingRetry(peers, revision) {
+		return c.reconcileErr
+	}
 	before := c.PendingLocalAccessStep()
 	err := c.applySnapshotLocked(ctx, peers, revision)
 	c.reconcileErr = err
@@ -505,6 +509,36 @@ func (c *Coordinator) scheduleReconcileRetry(peers []*daemonrpc.PeerUpdate, revi
 			c.applySnapshot(peers, revision)
 		}
 	})
+}
+
+// deferToPendingRetry hands a snapshot to the retry already waiting out its backoff, so new snapshots and guard
+// checks do not re-run a failing reconcile faster than the backoff (a Mac's guard and name services ran hot in
+// such a loop). A snapshot that withdraws a machine or port still routed is never deferred.
+func (c *Coordinator) deferToPendingRetry(peers []*daemonrpc.PeerUpdate, revision uint64) bool {
+	c.retryMu.Lock()
+	pending := c.retryTimer != nil
+	if pending {
+		c.retryPeers, c.retryRevision = peers, revision
+	}
+	c.retryMu.Unlock()
+	if !pending {
+		return false
+	}
+	localPeers, _ := mapPeerSnapshot(peers, machineloopback.DefaultCIDR)
+	authorized := authorizedPorts(localPeers)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, route := range c.routes {
+		if !authorized[route.machineID+"\x00"+strconv.Itoa(route.port)] {
+			return false
+		}
+	}
+	for _, route := range c.draining {
+		if !authorized[route.machineID+"\x00"+strconv.Itoa(route.port)] {
+			return false
+		}
+	}
+	return true
 }
 
 // PendingLocalAccessStep names the local access step still being retried after the last reconciliation

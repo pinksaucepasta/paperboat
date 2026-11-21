@@ -418,10 +418,8 @@ func (c *Coordinator) resetNameGenerationLocked(ctx context.Context) {
 
 // cutWithdrawnDrainingLocked closes the draining routes the snapshot no longer authorizes (their machine and
 // port, with the same rules that build the listeners) and those whose forwards have all ended.
-func (c *Coordinator) cutWithdrawnDrainingLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate) {
-	if len(c.draining) == 0 {
-		return
-	}
+// authorizedPorts is the machine and port pairs a snapshot authorizes, keyed machineID NUL port.
+func authorizedPorts(peers []*daemonrpc.PeerUpdate) map[string]bool {
 	authorized := make(map[string]bool)
 	for _, peer := range peers {
 		if peer == nil || !peer.GetApproved() || !peer.GetOnline() || peer.GetAlias() == "" {
@@ -434,6 +432,14 @@ func (c *Coordinator) cutWithdrawnDrainingLocked(ctx context.Context, peers []*d
 			authorized[peer.GetPeerId()+"\x00"+strconv.Itoa(int(port))] = true
 		}
 	}
+	return authorized
+}
+
+func (c *Coordinator) cutWithdrawnDrainingLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate) {
+	if len(c.draining) == 0 {
+		return
+	}
+	authorized := authorizedPorts(peers)
 	var cut []*guardedRoute
 	kept := c.draining[:0]
 	for _, route := range c.draining {
