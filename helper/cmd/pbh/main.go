@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -310,7 +309,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	}
 	fresh = false
 	if !*noService {
-		if err := setupHostNetwork(ctx, execCommander, defaultHostPaths(*dir), out, slices.Contains(selected, "tunnel"), c.Listen); err != nil {
+		if err := setupHostNetwork(ctx, execCommander, defaultHostPaths(*dir), out, c); err != nil {
 			return err
 		}
 	}

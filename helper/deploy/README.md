@@ -63,9 +63,9 @@ Default inbound ports:
 | Tunnel only | 80, 443, 7272 | 443 (HTTP/3), 7273 |
 | Both | 80, 443, 7272, 7274 | 443 (HTTP/3), 7273, 7274 (STUN), 7275 |
 
-`pbh install` opens these ports in the host firewall itself (ufw, firewalld, iptables or nftables, TCP and
-UDP, the claim port from `--claim-listen` included, and the public tunnel range 10000-59999 on a tunnel
-installation) and records the rules for `pbh uninstall`; the service re-adds iptables and nftables rules on
+`pbh install` opens the ports the installed components listen on in the host firewall itself (ufw,
+firewalld, iptables or nftables; TCP and UDP as the table shows, the claim port from `--claim-listen`
+included, and the public tunnel range 10000-59999 on a tunnel installation) and records the rules for `pbh uninstall`; the service re-adds iptables and nftables rules on
 every start. The claim port stays open: pbh keeps the claim listener running, and the same code is
 accepted again when the control plane retries a trust rotation. The cloud network rules (security group,
 security list) are yours to set; the install prints them. TCP 443

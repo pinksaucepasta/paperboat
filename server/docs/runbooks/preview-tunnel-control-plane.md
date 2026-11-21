@@ -101,13 +101,14 @@ start) sets up the first two:
    `net.ipv4.ip_local_port_range = 60000 65535`, applied at once. pbh refuses, naming the cause, when another sysctl
    setting overrides it.
 2. The host firewall: if ufw, firewalld, iptables/ip6tables or nftables is filtering inbound traffic, pbh adds allow
-   rules (comment `paperboat-edge`) for TCP 443, 7272-7275, the claim port (7277 by default) and 10000-59999, and
-   UDP 443 and 7272-7275. iptables and nftables rules do not persist, so `pbh serve` re-adds them on each start;
+   rules (comment `paperboat-edge`) for the ports the installed components listen on: the claim port (7277 by
+   default), TCP 443 and UDP 443 (HTTP/3), the carrier TCP 7272 and QUIC 7273 of an edge, a relay's WSS/STUN
+   and QUIC ports, and TCP 10000-59999 on a tunnel node. iptables and nftables rules do not persist, so `pbh serve` re-adds them on each start;
    ufw and firewalld keep theirs. The claim port stays open because the claim listener keeps running and accepts
    the same code again for a trust-rotation retry.
 3. The cloud firewall (security group, security list, VPC firewall): pbh cannot change it from the host; it prints
-   "allow inbound TCP 443, 7272-7275, 7277 and 10000-59999 and UDP 443, 7272-7275 from 0.0.0.0/0 (and ::/0 for
-   IPv6)". The managed edges' Oracle Cloud lists must be changed to these ports (they allowed the old ones).
+   "allow inbound TCP 7277, 443, 7272, 10000-59999 and UDP 443, 7273 from 0.0.0.0/0 (and ::/0 for IPv6)" (the
+   ports of that node). The managed edges' Oracle Cloud lists must be changed to these ports (they allowed the old ones).
 
 `pbh uninstall` removes exactly what `/var/lib/paperboat-selfhost/hostnet.json` records pbh added (rules, sysctl
 file, and restores the previous outgoing range). `pbh doctor` reports each check and probes reachability of one test
