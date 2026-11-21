@@ -8,6 +8,8 @@
 #   linuxpool.sh stop [N...]       stop machines you started (default: all of yours)
 #   linuxpool.sh release N...      give up your claim but leave the machine running for the next worktree
 #   linuxpool.sh adopt [N]         claim a running machine nobody claims (default: the first one), print its target
+#   linuxpool.sh record N ID       remember a machine id paired on machine N (optional: revokes also find machines by name)
+#   linuxpool.sh sweep             revoke the machine records of machines that are no longer up (the pool keeper runs it)
 #
 # Machine N is the SSH host linuxpool-N: user runner (passwordless sudo, Go, gcc, postgres:17 on 127.0.0.1), reached through the jump host's loopback port
 # 22400+N with the key ~/.ssh/winpool_controller. "You" is your worktree (or LINUXPOOL_OWNER): every worktree starts its
@@ -21,6 +23,9 @@ CONF=$HOME/.ssh/linuxpool.conf
 KNOWN=$HOME/.ssh/linuxpool_known_hosts
 CLAIMS=$HOME/.ssh/linuxpool-claims # N: who started machine N
 OWNER=${LINUXPOOL_OWNER:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)}
+
+POOL=linuxpool
+. "$(dirname "$0")/pool_revoke.sh" # the end of a runner revokes its Paperboat machine records first
 
 die() { echo "linuxpool: $*" >&2; exit 1; }
 
@@ -63,6 +68,7 @@ start() {
   gh workflow run linuxpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
   for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
   flock -u 9
+  pool_revoke "${free[@]}" || echo "linuxpool: could not revoke the previous machine records of ${free[*]}; sweep retries" >&2 # leftovers of the runner that held these slots
   echo "started machines ${free[*]} for ${hours} h; waiting for SSH (about 2 minutes)" >&2
   deadline=$((SECONDS + 900))
   for n in "${free[@]}"; do
@@ -77,25 +83,29 @@ start() {
 owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
 
 stop() { # only machines this caller started: another worktree's checks are running on the others
-  local n targets=("$@")
+  local n rc=0 targets=("$@")
   [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do
     slot "$n"
     [ "$(owner "$n")" = "$OWNER" ] || die "linuxpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+    pool_revoke "$n" || rc=1 # the records go first: they stay online until the heartbeat times out after the runner ends
     ssh -o BatchMode=yes -o ConnectTimeout=15 "linuxpool-$n" 'touch /tmp/linuxpool-stop' </dev/null ||
       die "linuxpool-$n did not answer; it ends by itself after its hours"
     rm -f "$CLAIMS/$n"
     echo "linuxpool-$n stopping"
   done
+  return $rc
 }
 
 release() { # the next worktree adopts it: reuse takes seconds, a new runner minutes plus GitHub's queue
-  local n
+  local n rc=0
   for n in "$@"; do
     slot "$n"
     [ "$(owner "$n")" = "$OWNER" ] || die "linuxpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+    pool_revoke "$n" || rc=1 # your throwaway machines end with your claim; the next worktree pairs its own
     rm -f "$CLAIMS/$n"; echo "linuxpool-$n released"
   done
+  return $rc
 }
 
 adopt() {
@@ -105,9 +115,24 @@ adopt() {
   for n in ${1:-$(up)}; do
     slot "$n"
     [ -z "$(owner "$n")" ] && answers "$n" || continue
-    echo "$OWNER" > "$CLAIMS/$n"; echo "linuxpool-$n"; return
+    echo "$OWNER" > "$CLAIMS/$n"; rm -f "$CLAIMS/$n.machines"; echo "linuxpool-$n"; return
   done
   die "no running unclaimed machine (linuxpool.sh list); use linuxpool.sh start 1"
+}
+
+record() { # a machine id paired on a runner you hold
+  local n=${1:-}
+  slot "$n"
+  [ "$(owner "$n")" = "$OWNER" ] || die "linuxpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+  pool_record "$n" "${2:-}"
+}
+
+sweep() { # runners that are not up (lease over) leave their machine records online until the heartbeat times out
+  local busy dead=() n
+  mkdir -p "$CLAIMS"
+  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-2])' -mmin -15 -printf '%f\n') # a runner still starting is not dead
+  for n in $(seq "$MAX"); do grep -qx "$n" <<<"$busy" || dead+=("$n"); done
+  pool_revoke "${dead[@]}"
 }
 
 command=${1:-}
@@ -119,5 +144,7 @@ case "$command" in
   stop) configure; stop "$@" ;;
   release) configure; release "$@" ;;
   adopt) configure; adopt "$@" ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  record) configure; record "$@" ;;
+  sweep) configure; sweep ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

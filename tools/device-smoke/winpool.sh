@@ -5,6 +5,8 @@
 #   winpool.sh list              machines whose tunnel is up, and who started them
 #   winpool.sh ssh N [COMMAND]   SSH into machine N
 #   winpool.sh stop [N...]       stop machines you started (default: all of yours)
+#   winpool.sh record N ID       remember a machine id paired on machine N (optional: revokes also find machines by name)
+#   winpool.sh sweep             revoke the machine records of machines that are no longer up (the pool keeper runs it)
 #
 # Machine N is the SSH host winpool-N: administrator runneradmin, reached through the jump host's loopback port
 # 22200+N with the key ~/.ssh/winpool_controller. Point the Windows checks at it with SMOKE_WINDOWS_SSH=winpool-N
@@ -19,6 +21,9 @@ CONF=$HOME/.ssh/winpool.conf
 KNOWN=$HOME/.ssh/winpool_known_hosts
 CLAIMS=$HOME/.ssh/winpool-claims # N: who started machine N
 OWNER=${WINPOOL_OWNER:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)}
+
+POOL=winpool
+. "$(dirname "$0")/pool_revoke.sh" # the end of a runner revokes its Paperboat machine records first
 
 die() { echo "winpool: $*" >&2; exit 1; }
 
@@ -61,6 +66,7 @@ start() {
   gh workflow run winpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
   for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
   flock -u 9
+  pool_revoke "${free[@]}" || echo "winpool: could not revoke the previous machine records of ${free[*]}; sweep retries" >&2 # leftovers of the runner that held these slots
   echo "started machines ${free[*]} for ${hours} h; waiting for SSH (about 2 minutes)" >&2
   deadline=$((SECONDS + 900))
   for n in "${free[@]}"; do
@@ -75,16 +81,33 @@ start() {
 owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
 
 stop() { # only machines this caller started: another worktree's checks are running on the others
-  local n targets=("$@")
+  local n rc=0 targets=("$@")
   [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do
     slot "$n"
     [ "$(owner "$n")" = "$OWNER" ] || die "winpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+    pool_revoke "$n" || rc=1 # the records go first: they stay online until the heartbeat times out after the runner ends
     ssh -o BatchMode=yes -o ConnectTimeout=15 "winpool-$n" 'cmd /c "echo stop>C:\winpool-stop"' </dev/null ||
       die "winpool-$n did not answer; it ends by itself after its hours"
     rm -f "$CLAIMS/$n"
     echo "winpool-$n stopping"
   done
+  return $rc
+}
+
+record() { # a machine id paired on a runner you hold
+  local n=${1:-}
+  slot "$n"
+  [ "$(owner "$n")" = "$OWNER" ] || die "winpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+  pool_record "$n" "${2:-}"
+}
+
+sweep() { # runners that are not up (lease over) leave their machine records online until the heartbeat times out
+  local busy dead=() n
+  mkdir -p "$CLAIMS"
+  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-4])' -mmin -15 -printf '%f\n') # a runner still starting is not dead
+  for n in "${SLOTS[@]}"; do grep -qx "$n" <<<"$busy" || dead+=("$n"); done
+  pool_revoke "${dead[@]}"
 }
 
 command=${1:-}
@@ -94,5 +117,7 @@ case "$command" in
   list) configure; for n in $(up); do echo "winpool-$n  $(owner "$n")"; done ;;
   ssh) configure; slot "${1:-}"; n=$1; shift; exec ssh "winpool-$n" "$@" ;;
   stop) configure; stop "$@" ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  record) configure; record "$@" ;;
+  sweep) configure; sweep ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

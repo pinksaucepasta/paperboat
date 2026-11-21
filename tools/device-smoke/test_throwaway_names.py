@@ -22,8 +22,11 @@ class ThrowawayNamesTest(unittest.TestCase):
             self.assertTrue(selected(prefix + '123', self.regex), prefix)
 
     def test_check_names_match(self):
-        for name in ('test-pbu1-1795274770-again', 'sh-r1-5', 'pbt1-x', 'test-slr-9', 'test-rc-1-ab', 'worktree2-a', 'w3-x'):
+        for name in ('test-pbu1-1795274770-again', 'sh-r1-5', 'pbt1-x', 'test-slr-9', 'test-rc-1-ab', 'worktree2-a', 'w3-x', 'macpool-b1-2', 'winpool-1'):
             self.assertTrue(selected(name, self.regex), name)
+
+    def test_linuxpool_runner_names_match_the_pattern_list(self):
+        self.assertTrue(re.search(self.regex, 'linuxpool-b1-3'))
 
     def test_unlisted_names_do_not_match(self):
         for name in ('linux', 'macos', 'canary-x', 'teammate', 'prod-1', 'sh-other-1'):

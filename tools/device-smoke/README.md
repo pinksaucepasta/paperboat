@@ -74,6 +74,17 @@ tools/device-smoke/linuxpool.sh stop          # all of yours (release N keeps on
 - `remote-test.sh` runs one job per host at a time (host lock); start several hosts to run suites in parallel.
 - A host is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
 
+### Pool runners revoke their machine records (linuxpool, macpool, winpool)
+
+A runner's throwaway machines (`<pool>-<build>-<slot>`) stay "online" on the server until their heartbeat times out after
+the runner ends, which fails the deploy gate's "online before, offline after" check. So the end of a runner revokes its
+records first, by exact machine id, through `cleanup_test_account.py --pool P --slot N` (still only throwaway machines of the
+cleanup accounts, never `cleanup_protected`): `stop`, `release`, and `start` (leftovers of the slots it takes) via
+`pool_revoke.sh`; `sweep` revokes the records of every slot that is no longer up and not still starting, and the pool keeper
+(`paperboat-runner-pool`) runs `linuxpool.sh sweep` on every run. `<pool>.sh record N machine_<id>` remembers an id paired on
+slot N so its revoke is exact even after a rename; the names are looked up on the server as well. A failed revoke still
+stops the runner but exits non-zero. `POOL_REVOKE=0` turns it off. Self-test: `python3 test_pool_revoke.py`.
+
 ## Extra macOS machines (macpool)
 
 `macpool.sh` is `winpool.sh` for macOS: up to eight GitHub-hosted `macos-latest` runners (arm64, macOS 26, 3 cores) as

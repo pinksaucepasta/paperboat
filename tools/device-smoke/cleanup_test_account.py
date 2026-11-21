@@ -6,6 +6,7 @@ containers that are never removed grow its peer-network configuration until it h
 bound and native access stops for the whole account. Run after each device run.
 
 Use --prefix for one run prefix or --id for exact machine records. --all covers every configured throwaway pattern.
+--pool NAME --slot N (repeatable) narrows any of these to one GitHub pool runner's machines: aliases `NAME-<build>-N`.
 Cleanup revokes matching machines unseen for --stale (default 2 h), together with their pair-time CLI sessions.
 The local configuration protects shared test devices. Dry-run by default: it
 prints the ids it would revoke; --apply revokes them in one transaction and prints them again.
@@ -19,12 +20,14 @@ import sys
 from dev_targets import load
 from throwaway_names import throwaway_regex
 
+POOLS = ("linuxpool", "macpool", "winpool")
+
 SELECT = """
 CREATE TEMP TABLE doomed ON COMMIT DROP AS
 SELECT m.id FROM paperboat.user_machines m
 WHERE m.user_id = ANY(%(accounts)s) AND m.revoked_at IS NULL AND m.deleted_at IS NULL
   AND (m.last_seen_at IS NULL OR m.last_seen_at < now() - %(stale)s::interval)
-  AND m.alias ~ %(throwaway)s AND m.alias !~* %(protected)s
+  AND m.alias ~ %(throwaway)s AND m.alias !~* %(protected)s AND m.alias ~ %(pool)s
   AND (cardinality(%(ids)s) = 0 OR m.id = ANY(%(ids)s));
 """
 
@@ -54,6 +57,8 @@ def main():
     parser.add_argument("--account", action="append", help="test account id (repeatable); default: the shared test account")
     parser.add_argument("--stale", default="2 hours", help="revoke only machines unseen this long (PostgreSQL interval)")
     parser.add_argument("--apply", action="store_true", help="revoke; without it only list")
+    parser.add_argument("--pool", choices=POOLS, help="only machines named <pool>-...-<slot> (needs --slot)")
+    parser.add_argument("--slot", action="append", type=int, help="pool slot number (repeatable)")
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--prefix", help="the run’s throwaway alias prefix, e.g. test-")
     scope.add_argument("--all", action="store_true", help="all configured throwaway prefixes")
@@ -69,6 +74,11 @@ def main():
         if not re.fullmatch(r"[a-z][a-z0-9-]*-", args.prefix) or re.search(protected, args.prefix):
             parser.error("--prefix must be a run prefix like test- (lowercase, ending in -)")
         throwaway = "^" + re.escape(args.prefix)
+    if bool(args.pool) != bool(args.slot) or any(not 1 <= slot <= 99 for slot in args.slot or []):
+        parser.error("--pool and --slot go together (slot 1-99)")
+    pool = ""
+    if args.pool:
+        pool = "^" + args.pool + "-(.+-)?(" + "|".join(str(slot) for slot in sorted(set(args.slot))) + ")$"
     for machine_id in args.id or []:
         if not re.fullmatch(r"machine_[0-9a-f-]{36}", machine_id):
             parser.error("--id must be a full machine id (machine_<uuid>)")
@@ -78,6 +88,7 @@ def main():
     params = {
         "accounts": "ARRAY[" + ",".join(quote(a) for a in accounts) + "]::text[]",
         "stale": quote(args.stale), "throwaway": quote(throwaway), "protected": quote(protected),
+        "pool": quote(pool),
         "ids": "ARRAY[" + ",".join(quote(i) for i in args.id or []) + "]::text[]",
     }
     sql = "\\set ON_ERROR_STOP 1\nBEGIN;\nSET LOCAL search_path TO paperboat, public;\n" + SELECT % params
