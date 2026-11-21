@@ -89,3 +89,18 @@ func TestRemoveGuardImageRetriesALockedImageForABoundedTime(t *testing.T) {
 		t.Fatalf("an unrelated failure was retried: err=%v calls=%d", err, calls)
 	}
 }
+
+// A guard starved of CPU answers slowly; a reply under guardProbeTimeout still counts as ready (macpool-6, load 13-21).
+func TestWaitGuardReadyAcceptsSlowReplies(t *testing.T) {
+	err := waitGuardReady(context.Background(), 5*time.Second, func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(700 * time.Millisecond):
+			return nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("slow but ready guard was refused: %v", err)
+	}
+}

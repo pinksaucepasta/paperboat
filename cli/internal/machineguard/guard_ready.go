@@ -58,8 +58,11 @@ func lockedGuardImage(err error) bool {
 	return errors.Is(err, fs.ErrPermission) || errors.As(err, &errno) && errno == 32 // ERROR_SHARING_VIOLATION
 }
 
+// macpool-6 at load 13-21: a 10 s wait with 500 ms probes timed out and rolled back a rev12->rev15 update that
+// passes idle; the Windows start attempt already allows a minute.
 const (
-	guardInstallReadyTimeout = 10 * time.Second
+	guardInstallReadyTimeout = time.Minute
+	guardProbeTimeout        = 2 * time.Second
 	guardReadyStability      = 300 * time.Millisecond
 )
 
@@ -83,7 +86,7 @@ func waitGuardReady(ctx context.Context, timeout time.Duration, probe func(conte
 	var readySince time.Time
 	var lastErr error
 	for wait.Err() == nil {
-		probeCtx, cancel := context.WithTimeout(wait, 500*time.Millisecond)
+		probeCtx, cancel := context.WithTimeout(wait, guardProbeTimeout)
 		err := probe(probeCtx)
 		cancel()
 		if err != nil {
