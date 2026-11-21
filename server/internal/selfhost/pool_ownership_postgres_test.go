@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -53,6 +54,13 @@ func TestGlobalHostedPoolAndPendingEnrollmentOnPostgres(t *testing.T) {
 	pending := scopedInstallationFixture(t, store, key, owner, "relay")
 	exec(`UPDATE paperboat.control_tunnel_nodes SET roles=ARRAY['relay'],transports=ARRAY['derp_quic','derp_wss'] WHERE id IN($1,$2,$3)`, global.NodeID, private.NodeID, pending.NodeID)
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='global',scope_id='global' WHERE id=$1`, global.InstallationID)
+	// A global node serves in its operator region (the claim creates it).
+	globalRegion := "pool_" + strings.ToLower(randomIdentity()[:8])
+	exec(`INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1)`, globalRegion)
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_regions WHERE id=$1`, globalRegion)
+	})
+	exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, global.NodeID, globalRegion)
 	exec(`UPDATE paperboat.selfhost_installations SET claim_complete=false WHERE id=$1`, pending.InstallationID)
 	// A partially acknowledged claim must not gain authority from node readiness.
 	exec(`UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,last_heartbeat_at=now() WHERE id=$1`, pending.NodeID)
