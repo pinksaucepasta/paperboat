@@ -141,17 +141,13 @@ type connectFailingCarrier struct{ usageFakeCarrier }
 
 func (f *connectFailingCarrier) Connect(context.Context) error { return f.err }
 
-// A relay that refuses the grant as expired (code 4: its process restarted, or the grant ran out) is answered with a
-// renewal, on a failed dial and on a refused read alike; other refusals and failures leave the renewal schedule alone.
-// Before, the carrier redialed with the refused grant until the next scheduled renewal (TestE2ECore relayed phase after
-// an edge+relay restart: 213 refusals, relayed exec timed out).
-func TestExpiredRelayGrantAsksForFreshAuthority(t *testing.T) {
+func TestRejectedRelayGrantAsksForFreshAuthority(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		want int
 	}{
 		{fmt.Errorf("dial: %w", derpquic.ErrExpired), 1},
-		{derpquic.ErrAdmission, 0},
+		{derpquic.ErrAdmission, 1},
 		{io.EOF, 0},
 	} {
 		refreshes := 0

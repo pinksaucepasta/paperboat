@@ -57,7 +57,7 @@ func TestRelayGrantAndRelaySelectionSurviveALongControlOutage(t *testing.T) {
 	if _, _, _, err := recovery.snapshot(); err != nil {
 		t.Fatalf("relay recovery after the outage: %v", err)
 	}
-	if token, err := a.relayToken(node); err != nil || token == "" {
+	if token, err := a.relayToken(node, false); err != nil || token == "" {
 		t.Fatalf("relay grant for a new carrier after the outage: %q, %v", token, err)
 	}
 }

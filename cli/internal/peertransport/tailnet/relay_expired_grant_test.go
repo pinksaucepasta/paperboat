@@ -26,7 +26,7 @@ func TestExpiredRelayGrantIsRefetchedAndRetriedNotLatched(t *testing.T) {
 	a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: "epoch-expired", Generation: 1, ExpiresAt: serverclock.Now().Unix() - 1}}
 	a.relay.tokens = map[string]string{node.NodeID: "grant-expired"}
 	a.relay.mu.Unlock()
-	credential := a.relayCredential(node)
+	credential := a.relayCredential(node, false)
 	calls := 0
 	client := derpquic.NewClient(derpquic.ClientConfig{Address: "127.0.0.1:1", TLS: &tls.Config{Certificates: []tls.Certificate{{}}}, Credential: func(ctx context.Context) (string, error) {
 		calls++

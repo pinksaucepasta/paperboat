@@ -26,6 +26,7 @@ type WSSClientConfig struct {
 	URL             string
 	TLS             *tls.Config
 	Credential      func(context.Context) (string, error)
+	RenewCredential func(context.Context) (string, error) // nil uses Credential for live renewals
 	Namespace       [32]byte
 	GenerationDisco key.DiscoPublic
 	Proxy           func(*http.Request) (*url.URL, error)
@@ -368,7 +369,11 @@ func (c *WSSClient) read(cc *wssClientConn) {
 }
 func (c *WSSClient) refresh(cc *wssClientConn) {
 	defer cc.workers.Done()
-	watchCarrierAuthority(cc.ctx, c.config.Credential, cc.authorize, cc.cancel)
+	credential := c.config.RenewCredential
+	if credential == nil {
+		credential = c.config.Credential
+	}
+	watchCarrierAuthority(cc.ctx, credential, cc.authorize, cc.cancel)
 }
 
 func (cc *wssClientConn) authorize(token string) error {

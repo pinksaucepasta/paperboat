@@ -22,6 +22,7 @@ type ClientConfig struct {
 	Address         string
 	TLS             *tls.Config
 	Credential      func(context.Context) (string, error)
+	RenewCredential func(context.Context) (string, error) // nil uses Credential for live renewals
 	Namespace       [32]byte
 	GenerationDisco key.DiscoPublic
 }
@@ -364,7 +365,11 @@ func (c *Client) readData(cc *clientConn) {
 }
 func (c *Client) refresh(cc *clientConn) {
 	defer cc.workers.Done()
-	watchCarrierAuthority(cc.conn.Context(), c.config.Credential, cc.authorize, func() {
+	credential := c.config.RenewCredential
+	if credential == nil {
+		credential = c.config.Credential
+	}
+	watchCarrierAuthority(cc.conn.Context(), credential, cc.authorize, func() {
 		cc.conn.CloseWithError(quic.ApplicationErrorCode(ErrAdmission.Code), "relay authority revoked")
 	})
 }

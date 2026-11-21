@@ -514,9 +514,9 @@ func (a *Authority) verifyRelayGrantsLocked(node RegionalNode, cert *x509.Certif
 // relayCredential is the grant a carrier for node presents on each dial. A new dial that meets an expired grant
 // asks for a fresh one on demand (spaced and coalesced by Run) and fails retryably; the relay region is never
 // locked out.
-func (a *Authority) relayCredential(node RegionalNode) func(context.Context) (string, error) {
+func (a *Authority) relayCredential(node RegionalNode, renewing bool) func(context.Context) (string, error) {
 	return func(context.Context) (string, error) {
-		token, err := a.relayToken(node)
+		token, err := a.relayToken(node, renewing)
 		if errors.Is(err, ErrRelayGrantExpired) || errors.Is(err, errRelayNotCurrent) {
 			a.RequestRefresh()
 		}
@@ -534,15 +534,10 @@ func (a *Authority) relayCredential(node RegionalNode) func(context.Context) (st
 var errRelayNotCurrent = fmt.Errorf("relay is not in this machine's current relay set; waiting for fresh relay authority: %w", derpquic.ErrExpired)
 
 // relayToken is node's current grant, refused when the relay moved or its grant does not match.
-func (a *Authority) relayToken(node RegionalNode) (string, error) {
+func (a *Authority) relayToken(node RegionalNode, renewing bool) (string, error) {
 	a.relay.mu.Lock()
 	defer a.relay.mu.Unlock()
 	grant, tokens := a.relay.grants[node.NodeID], a.relay.tokens
-	if kept := a.relay.retained; kept != nil {
-		if old, ok := kept.grants[node.NodeID]; ok && old.ExpiresAt > serverclock.Now().Unix() {
-			grant, tokens = old, kept.tokens
-		}
-	}
 	current, listed := a.relay.nodes[regionalID(node.NodeID)]
 	if node.NodeID == "" || listed && (current.NodeID != node.NodeID || current.NodeGeneration != node.NodeGeneration || current.ProcessEpoch != node.ProcessEpoch || current.TLSSPKISHA256 != node.TLSSPKISHA256) {
 		return "", ErrAuthority // the relay moved: its region is redefined and magicsock builds a new carrier
@@ -550,7 +545,19 @@ func (a *Authority) relayToken(node RegionalNode) (string, error) {
 	if !listed || grant.NodeGeneration != node.NodeGeneration || grant.ProcessEpoch != node.ProcessEpoch {
 		return "", errRelayNotCurrent
 	}
-	if grant.ExpiresAt <= serverclock.Now().Unix() {
+	now := serverclock.Now().Unix()
+	if kept := a.relay.retained; kept != nil {
+		old := kept.grants[node.NodeID]
+		if old.NodeGeneration == node.NodeGeneration && old.ProcessEpoch == node.ProcessEpoch && old.ExpiresAt > now {
+			if !renewing {
+				// Authenticating with the narrowed grant would fence live carriers
+				// before they can deliver session closes. Wait out the grace.
+				return "", errRelayNotCurrent
+			}
+			grant, tokens = old, kept.tokens
+		}
+	}
+	if grant.ExpiresAt <= now {
 		return "", ErrRelayGrantExpired
 	}
 	return tokens[node.NodeID], nil
@@ -621,18 +628,19 @@ func (a *Authority) regionalCarrierFactory(config *tls.Config, namespace [32]byt
 			}
 		}
 		a.relay.mu.Unlock()
-		credential := a.relayCredential(node)
+		credential := a.relayCredential(node, false)
+		renew := a.relayCredential(node, true)
 		nodeTLS, pinErr := nodetls.ClientConfig(config, node.TLSSPKISHA256)
 		if pinErr != nil {
 			// Signed candidates are validated on ingestion; fail closed if unavailable.
 			nodeTLS = config.Clone()
 			nodeTLS.VerifyConnection = func(tls.ConnectionState) error { return nodetls.ErrIdentity }
 		}
-		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential, Namespace: namespace, GenerationDisco: disco})
+		client := derpquic.NewClient(derpquic.ClientConfig{Address: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointQUICPort))), TLS: nodeTLS.Clone(), Credential: credential, RenewCredential: renew, Namespace: namespace, GenerationDisco: disco})
 		var carrier magicsock.DERPCarrier = client
 		if node.EndpointTCPPort != 0 && contains(node.Transports, "derp_wss") {
 			u := (&url.URL{Scheme: "wss", Host: net.JoinHostPort(node.EndpointHost, strconv.Itoa(int(node.EndpointTCPPort))), Path: "/derp"}).String()
-			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential, Namespace: namespace, GenerationDisco: disco}), 5*time.Second)
+			carrier = derpquic.NewFallbackCarrier(client, derpquic.NewWSSClient(derpquic.WSSClientConfig{URL: u, TLS: nodeTLS.Clone(), Credential: credential, RenewCredential: renew, Namespace: namespace, GenerationDisco: disco}), 5*time.Second)
 		}
 		if a.options.TestOnlyDERPCarrier != nil {
 			carrier = a.options.TestOnlyDERPCarrier(carrier)

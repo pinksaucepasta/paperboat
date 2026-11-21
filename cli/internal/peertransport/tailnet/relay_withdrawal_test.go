@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 		a.relay.mu.Lock()
 		a.relay.nodes = map[tailcfg.DERPRegionID]RegionalNode{regionalID(node.NodeID): node}
 		a.relay.mu.Unlock()
-		token, err := a.relayToken(node)
+		token, err := a.relayToken(node, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,13 +75,16 @@ func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 	if presented() != paired {
 		t.Fatal("the narrowed grant was presented while the withdrawn peer's session was open")
 	}
+	if _, err := a.relayCredential(node, false)(t.Context()); !errors.Is(err, derpquic.ErrExpired) {
+		t.Fatalf("new dial during withdrawal grace should wait instead of presenting a superseded grant: %v", err)
+	}
 	// The session closes: the path is cut and the narrowed grant takes over.
 	a.mu.Lock()
 	a.admitted = nil
 	a.cutWithdrawnLocked()
 	a.mu.Unlock()
-	if presented() != narrowed {
-		t.Fatal("the narrowed grant did not take over after the withdrawn peer was cut")
+	if token, err := a.relayCredential(node, false)(t.Context()); err != nil || token != narrowed {
+		t.Fatal("new dials did not resume with the narrowed grant after the withdrawn peer was cut")
 	}
 	// A grant that adds the pair back is presented at once, even within a withdrawal grace.
 	a.mu.Lock()
@@ -91,5 +95,30 @@ func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 	again.Peers = cfg.Peers
 	if got := apply(again, true); presented() != got {
 		t.Fatal("a grant that adds a pair was held back")
+	}
+}
+
+func TestReplacementRelayUsesCurrentGrantDuringWithdrawalGrace(t *testing.T) {
+	a, _, _, _ := networkTestAuthority(t)
+	node := RegionalNode{NodeID: "relay_replacement", NodeGeneration: 1, ProcessEpoch: "epoch_new"}
+	current := peernetwork.RelayGrant{
+		NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch,
+		Generation: 2, ExpiresAt: time.Now().Add(time.Minute).Unix(),
+	}
+	old := current
+	old.Generation, old.ProcessEpoch = 1, "epoch_old"
+	a.relay.nodes = map[tailcfg.DERPRegionID]RegionalNode{regionalID(node.NodeID): node}
+	a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: current}
+	a.relay.tokens = map[string]string{node.NodeID: "current"}
+	a.relay.retained = &retainedRelayGrants{
+		grants: map[string]peernetwork.RelayGrant{node.NodeID: old},
+		tokens: map[string]string{node.NodeID: "retained"},
+	}
+
+	for _, renewing := range []bool{false, true} {
+		got, err := a.relayCredential(node, renewing)(t.Context())
+		if err != nil || got != "current" {
+			t.Errorf("replacement relay did not get its current grant (renewing=%t): %v", renewing, err)
+		}
 	}
 }
