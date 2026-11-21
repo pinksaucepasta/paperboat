@@ -68,6 +68,9 @@ func TestDistributionQueueIsScopedToTheCallersOwnCredential(t *testing.T) {
 	if code := pull(edge01Bearer, "edge_02"); code != http.StatusUnauthorized {
 		t.Fatalf("node A credential with node B header pull = %d, want 401", code)
 	}
+	if code := pull("unknown-runtime-credential-01234567890123456789", "edge_02"); code != http.StatusUnauthorized {
+		t.Fatalf("unknown credential pull = %d, want 401", code)
+	}
 	if code := pull(edge02Bearer, "edge_02"); code != http.StatusOK {
 		t.Fatalf("node B own pull = %d, want 200", code)
 	}
