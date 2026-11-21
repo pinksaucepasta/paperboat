@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,7 +21,7 @@ WHERE $1=ANY(e.regions) AND (e.scope_kind,e.scope_id)>($2,$3) AND (e.scope_kind<
 ORDER BY e.scope_kind,e.scope_id LIMIT $4`
 
 // ReplaceRegion moves every workspace whose pair holds region onto other regions now, one transaction per workspace,
-// instead of waiting for the sweep to see the region's nodes gone, and wakes each moved workspace's machines. A
+// instead of waiting for the sweep to see the region's nodes gone, and wakes each moved workspace's machines (the wake is queued with the move). A
 // workspace with no other usable region keeps its pair (ReconcileScope's rule) and is returned in kept; running it
 // again after a full move finds nothing, so a replay wakes nobody.
 func ReplaceRegion(ctx context.Context, database *db.DB, region string, now time.Time) (moved, kept int, err error) {
@@ -74,15 +73,12 @@ func ReplaceRegion(ctx context.Context, database *db.DB, region string, now time
 			}
 			if did {
 				moved++
-				// The pair is stored; a failed wake only leaves machines to see it when their attachment next refreshes.
-				if err := Wake(ctx, database.Pool(), scope); err != nil {
-					slog.ErrorContext(ctx, "edge_set_wake_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
-				}
 			} else {
 				kept++
 			}
 			kind, id = scope.Kind, scope.ID
 		}
+		DrainWakesLogged(ctx, database)
 		if len(scopes) < page {
 			return moved, kept, nil
 		}

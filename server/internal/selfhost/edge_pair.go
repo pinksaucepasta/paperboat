@@ -3,7 +3,6 @@ package selfhost
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -192,9 +191,7 @@ func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, ki
 		return EdgePair{}, err
 	}
 	// The pair is stored; a failed wake-up only leaves machines to see it when their attachment next refreshes.
-	if err = edgeset.Wake(ctx, s.database.Pool(), ws); err != nil {
-		slog.ErrorContext(ctx, "edge_pair_publish_failed", "scope_kind", ws.Kind, "scope_id", ws.ID, "error", err)
-	}
+	edgeset.DrainWakesLogged(ctx, s.database)
 	return s.readPair(ctx, actor, ws, mode, []string{primary, fallback})
 }
 

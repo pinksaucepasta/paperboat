@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -239,5 +240,74 @@ func TestOperatorNodeActionsCompareAndSet(t *testing.T) {
 	}
 	if drained.Node.Revision != node.Revision+2 || drained.Node.State != "draining" {
 		t.Fatalf("drain result %+v", drained.Node)
+	}
+}
+
+// Disabling a region through the operator action moves every workspace on it to the remaining edges and wakes each
+// machine once; a replay of the same key moves nothing and wakes nobody (production 2026-11-21).
+func TestOperatorRegionDisableMovesWorkspacesAndWakesOnce(t *testing.T) {
+	s, store, admin, node, machine := drainFixture(t)
+	ctx := context.Background()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v: %s", err, query)
+		}
+	}
+	x := fmt.Sprint(time.Now().UnixNano())
+	var user string
+	if err := store.SQL().QueryRowContext(ctx, `SELECT user_id FROM paperboat.user_machines WHERE id=$1`, machine).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	// Two serving edges elsewhere; every other edge is out so placement is deterministic.
+	var benched []string
+	if err := store.Pool().QueryRow(ctx, `WITH u AS (UPDATE paperboat.control_tunnel_nodes SET ready=false WHERE roles @> ARRAY['edge'] AND ready AND id NOT LIKE $1 RETURNING id) SELECT coalesce(array_agg(id),'{}') FROM u`, "regionmove_%"+x).Scan(&benched); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		store.Pool().Exec(context.Background(), `UPDATE paperboat.control_tunnel_nodes SET ready=true WHERE id=ANY($1)`, benched)
+	})
+	var others []string
+	for _, name := range []string{"a", "b"} {
+		id := "regionmove_" + name + "_" + x
+		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at) VALUES($1,'default','1.0','epoch','ready',true,now(),'region_'||$1,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id)
+		t.Cleanup(func() {
+			store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
+		})
+		others = append(others, "region_"+id)
+	}
+	exec(`INSERT INTO paperboat.workspace_edge_sets(scope_kind,scope_id,mode,regions,assigned_at) VALUES('account',$1,'managed-only',ARRAY[$2,$3],now())`, user, node.RegionID, others[0])
+	t.Cleanup(func() {
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.workspace_edge_sets WHERE scope_id=$1`, user)
+		store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.workspace_edge_wakes WHERE scope_id=$1`, user)
+	})
+	sum := func() int {
+		var n int
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(sum(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic IN ('tunnels','previews')`, machine).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := sum()
+	var revision int64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT revision FROM paperboat.operator_regions WHERE id=$1`, node.RegionID).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	disable := RegionMutation{Action: "disable", ID: node.RegionID, Reason: "case:test", Revision: revision}
+	if _, err := s.MutateRegion(ctx, admin, "region-disable-"+x, disable); err != nil {
+		t.Fatal(err)
+	}
+	var regions []string
+	if err := store.Pool().QueryRow(ctx, `SELECT regions FROM paperboat.workspace_edge_sets WHERE scope_kind='account' AND scope_id=$1`, user).Scan(&regions); err != nil {
+		t.Fatal(err)
+	}
+	if len(regions) != 2 || slices.Contains(regions, node.RegionID) || !slices.Contains(regions, others[0]) || !slices.Contains(regions, others[1]) {
+		t.Fatalf("pair after disable = %v, want %v", regions, others)
+	}
+	if got := sum(); got != before+2 {
+		t.Fatalf("disable woke the machine %d -> %d, want one notice (tunnels+previews)", before, got)
+	}
+	if _, err := s.MutateRegion(ctx, admin, "region-disable-"+x, disable); err != nil || sum() != before+2 {
+		t.Fatalf("replayed disable: err=%v wakes %d, want no second notice", err, sum())
 	}
 }

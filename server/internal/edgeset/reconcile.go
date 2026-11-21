@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"time"
 
@@ -169,14 +168,14 @@ func ReadLatency(ctx context.Context, q interface {
 }
 
 // Store writes the workspace's pair of regions, in order (the first is the primary, the second the backup): a
-// new row, or the next generation of the existing one. Its caller wakes the machines with Wake after commit: listing
-// them inside the serializable transaction takes predicate locks that fail revokes (TestReconcileLeavesMachinesAlone...).
+// new row, or the next generation of the existing one. It queues the wake of the workspace's machines (EnqueueWake) in
+// the same transaction; the caller drains it after commit (DrainWakes), and the sweep drains whatever a crash left.
 func Store(ctx context.Context, tx *db.Tx, scope Scope, mode string, regions []string, now time.Time) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO workspace_edge_sets(scope_kind,scope_id,mode,regions,assigned_at) VALUES($1,$2,$3,$4,$5)
 ON CONFLICT (scope_kind,scope_id) DO UPDATE SET mode=excluded.mode,regions=excluded.regions,generation=workspace_edge_sets.generation+1,assigned_at=excluded.assigned_at`, scope.Kind, scope.ID, mode, regions, now); err != nil {
 		return fmt.Errorf("store workspace edge pair: %w", err)
 	}
-	return nil
+	return EnqueueWake(ctx, tx, scope)
 }
 
 // NodeStatusSQL is the status an edge node shows account-visible inventories: ready only on a fresh
@@ -287,6 +286,8 @@ func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool) (int,
 	if full {
 		query = fullScopesSQL
 	}
+	// Wakes left by a crash between a pair's commit and its drain go out here, within SweepEvery.
+	DrainWakesLogged(ctx, database)
 	changed := 0
 	kind, id := "", ""
 	for {
@@ -325,12 +326,9 @@ func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool) (int,
 			}
 			if did {
 				changed++
-				// The pair is stored; a failed wake only leaves machines to see it when their attachment next refreshes.
-				if err := Wake(ctx, database.Pool(), scope); err != nil {
-					slog.ErrorContext(ctx, "edge_set_wake_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
-				}
 			}
 		}
+		DrainWakesLogged(ctx, database)
 		if len(scopes) < page {
 			return changed, nil
 		}

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -239,9 +238,7 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 	}
 	// The pool is stored; a failed wake-up leaves machines to see the new edges when their attachment next refreshes.
 	if flipped {
-		if err = edgeset.Wake(ctx, s.database.Pool(), edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}); err != nil {
-			slog.ErrorContext(ctx, "pool_publish_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
-		}
+		edgeset.DrainWakesLogged(ctx, s.database)
 	}
 	return p, nil
 }
@@ -294,6 +291,10 @@ func (s *Service) storePool(ctx context.Context, tx *db.Tx, actor, capability st
 		// before the domains are repointed: resolving the new edges goes through the stored pair.
 		ws := edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}
 		if _, err = edgeset.ReconcileScope(ctx, tx, ws, nil, time.Now().UTC()); err != nil {
+			return false, err
+		}
+		// A flip wakes the machines even when the pair stays (no edge of the new mode yet).
+		if err = edgeset.EnqueueWake(ctx, tx, ws); err != nil {
 			return false, err
 		}
 		if err = repointWorkspaceDomains(ctx, tx, actor, team, p.Mode); err != nil {
