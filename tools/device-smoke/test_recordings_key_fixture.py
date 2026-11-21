@@ -86,7 +86,7 @@ class Fixture(unittest.TestCase):
 class SmokeRunner(unittest.TestCase):
     """The test_recording_key_rotation function of smoke.sh, run alone with record/skipped/now stubbed."""
 
-    def run_function(self, env, fixture_out='', fixture_rc=0, rotation_out='', rotation_rc=0):
+    def run_function(self, env, fixture_out='', fixture_rc=0, rotation_out='', rotation_rc=0, ensure_rc=0):
         text = (HERE / 'smoke.sh').read_text()
         start = text.index('test_recording_key_rotation() {')
         function = text[start:text.index('\n}\n', start) + 3]
@@ -94,6 +94,9 @@ class SmokeRunner(unittest.TestCase):
             d = pathlib.Path(tmp)
             (d / 'recordings_key_fixture.sh').write_text('#!/bin/bash\necho "$@" >> %s/fixture.log\n[ "$1" = up ] || exit 0\n'
                                                          'echo %r; exit %d\n' % (d, fixture_out, fixture_rc))
+            if ensure_rc:  # the stub's ensure-key answers before it reaches the up branch
+                (d / 'recordings_key_fixture.sh').write_text((d / 'recordings_key_fixture.sh').read_text().replace(
+                    '[ "$1" = up ]', '[ "$1" != ensure-key ] || { echo "team has no recording key and the CLI cannot create generation 1 yet" >&2; exit 1; }\n[ "$1" = up ]', 1))
             (d / 'recordings_key_fixture.sh').chmod(0o755)
             (d / 'one.py').write_text('')
             (d / 'ssh').write_text('#!/bin/bash\ncat > /dev/null\ncase "$*" in *recordings_key_rotation.py*) echo %r; exit %d;; esac\n' % (rotation_out, rotation_rc))
@@ -131,4 +134,92 @@ class SmokeRunner(unittest.TestCase):
     def test_a_failed_fixture_is_a_fail_and_runs_down(self):
         out, log = self.run_function(self.ENV, 'recordings_key_fixture: pairing failed', 1)
         self.assertIn('recording-key-rotation|FAIL|fixture: recordings_key_fixture: pairing failed', out)
-        self.assertEqual(['up', 'down'], [line.split()[0] for line in log.splitlines()])
+        self.assertEqual(['ensure-key', 'up', 'down'], [line.split()[0] for line in log.splitlines()])
+
+
+    def test_a_team_without_a_recording_key_is_a_loud_fail_before_anything_is_built(self):
+        out, log = self.run_function(self.ENV, '{"name": "n", "machine_id": "machine_1"}', 0, '', 0, ensure_rc=1)
+        self.assertEqual('recording-key-rotation|FAIL|team has no recording key and the CLI cannot create generation 1 yet', out)
+        self.assertEqual(['ensure-key'], [line.split()[0] for line in log.splitlines()])  # no container, no machine
+
+
+# A host-in-a-directory: ssh runs the remote command locally, with fake sudo/docker (logged) and a fake owner pb.
+EXEC_SSH = '#!/bin/bash\nshift\nbash -c "$*"\n'
+FAKE_DOCKER = '''#!/bin/bash
+echo "docker $*" >> "$STUB_LOG"
+case "$*" in *" pair "*) echo '{"ok": true, "data": {"machine_id": "machine_0a1b-2c3d"}}' ;; esac
+case "$*" in *" -i "*) cat > /dev/null ;; esac
+'''
+FAKE_SUDO = '#!/bin/bash\nshift; [ "$1" = -n ] && shift\nexec "$@"\n'  # sudo [-n] docker ...
+FAKE_PB = '''#!/bin/bash
+echo "pb $*" >> "$STUB_LOG"
+case "$*" in
+  "machine add"*) echo '{"data": {"linux_macos_command": "PB_TOKEN='"'"'abc123'"'"'"}}' ;;
+  "team get"*) echo '{"data": {"generation": 4, "machines": [{"machine_id": "machine_0a1b-2c3d", "active": true}]}}' ;;
+  "recordings key --help") printf 'Available Commands:\\n%s' "$STUB_KEY_HELP" ;;
+  "recordings key status"*) echo "{\\"data\\": {\\"generation\\": ${STUB_KEY_GENERATION:-0}}}" ;;
+  "recordings key"*) exit "${STUB_KEY_CREATE_RC:-0}" ;;
+  "machine revoke"*" --confirm "*) exit 0 ;;
+  "machine revoke"*) echo '{"data": {"confirmation_token": "tok"}}' ;;
+esac
+'''
+
+
+class Executed(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = pathlib.Path(self.tmp.name)
+        self.log = self.d / 'log'
+        (self.d / 'home/.local/bin').mkdir(parents=True)
+        for path, body in (('ssh', EXEC_SSH), ('sudo', FAKE_SUDO), ('docker', FAKE_DOCKER), ('sleep', '#!/bin/bash\n'), ('home/.local/bin/pb', FAKE_PB)):
+            (self.d / path).write_text(body)
+            (self.d / path).chmod(0o755)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def sh(self, *args, **env):
+        e = dict(os.environ, PATH='%s:%s' % (self.d, os.environ['PATH']), HOME=str(self.d / 'home'), STUB_LOG=str(self.log), **env)
+        return subprocess.run([str(HERE / 'recordings_key_fixture.sh')] + list(args), capture_output=True, text=True, env=e, timeout=60, stdin=subprocess.DEVNULL)
+
+    def docker_lines(self):
+        return [l for l in self.log.read_text().splitlines() if l.startswith('docker ')]
+
+    def test_defaults_are_the_harness_defaults(self):
+        p = self.sh('up', 'hostx', 'sh-r1-d', 'team_1')
+        self.assertEqual(0, p.returncode, p.stderr)
+        lines = '\n'.join(self.docker_lines())
+        self.assertIn('--tmpfs /run/lock test-systemd', lines)
+        self.assertIn('exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 sh-r1-d', lines)
+        self.assertIn('systemctl start user@1000.service', lines)
+
+    def test_the_harness_container_settings_pick_the_image_and_the_user(self):
+        p = self.sh('up', 'hostx', 'sh-r1-d', 'team_1', SMOKE_CT_IMAGE='gap5-systemd', SMOKE_CT_USER='tester', SMOKE_CT_UID='1001', SMOKE_CT_DOCKER='docker')
+        self.assertEqual(0, p.returncode, p.stderr)
+        lines = '\n'.join(self.docker_lines())
+        self.assertIn('--tmpfs /run/lock gap5-systemd', lines)
+        self.assertNotIn('test-systemd', lines)
+        self.assertIn('exec -u tester -e HOME=/home/tester -e XDG_RUNTIME_DIR=/run/user/1001 sh-r1-d', lines)
+        self.assertIn('loginctl enable-linger tester', lines)
+        self.assertIn('systemctl start user@1001.service', lines)
+        self.assertIn('cp /tmp/sh-r1-d-pb sh-r1-d:/home/tester/pb', lines)
+        self.assertNotIn('pbt', lines)
+        self.assertNotIn('1000', lines)
+
+    def test_a_key_the_cli_can_read_is_accepted(self):
+        p = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP='  status  show\n  replace  r\n', STUB_KEY_GENERATION='2')
+        self.assertEqual(0, p.returncode, p.stderr)
+
+    def test_no_key_and_no_create_command_fails_loudly(self):
+        for help_text, generation in (('  replace  r\n  reset  x\n', '0'), ('  status  show\n  replace  r\n', '0')):
+            p = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP=help_text, STUB_KEY_GENERATION=generation)
+            self.assertEqual(1, p.returncode)
+            self.assertIn('team has no recording key and the CLI cannot create generation 1 yet', p.stderr)
+
+    def test_a_create_command_is_used_when_the_cli_has_one(self):
+        p = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP='  replace  r\n  init  make generation 1\n')
+        self.assertEqual(0, p.returncode, p.stderr)
+        self.assertIn('pb recordings key init --team team_1 --confirm team_1 --json', self.log.read_text())
+        failed = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP='  init  x\n', STUB_KEY_CREATE_RC='1')
+        self.assertEqual(1, failed.returncode)
+        self.assertIn('pb recordings key init failed', failed.stderr)

@@ -1060,7 +1060,13 @@ test_recording_key_rotation() {
   [ -n "$team" ] || missing+=" SMOKE_RECKEY_TEAM"
   [ -n "$vault" ] || missing+=" SMOKE_RECKEY_VAULT_PASSWORD_FILE"
   if [ -n "$missing" ]; then record recording-key-rotation SKIP 0 "needs${missing}"; return; fi
-  t0=$(now); name="sh-r1-$(date -u +%H%M%S)$RANDOM"; dir=/tmp/$name-files
+  t0=$(now)
+  # The team needs a recording key before anything can be rotated: a missing one is a failure, never a skip.
+  if ! out=$("$HERE/recordings_key_fixture.sh" ensure-key "$host" "$team" 2>&1); then
+    record recording-key-rotation FAIL $(( $(now)-t0 )) "$(tail -n 1 <<<"$out" | cut -c1-140)"
+    return
+  fi
+  name="sh-r1-$(date -u +%H%M%S)$RANDOM"; dir=/tmp/$name-files
   fixture=$("$HERE/recordings_key_fixture.sh" up "$host" "$name" "$team" 2>&1); status=$?; fixture=$(tail -n 1 <<<"$fixture")
   if [ "$status" != 0 ] || ! id=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["machine_id"])' "$fixture" 2>/dev/null); then
     "$HERE/recordings_key_fixture.sh" down "$host" "$name" "$team" >/dev/null 2>&1
