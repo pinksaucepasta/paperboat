@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -32,34 +31,25 @@ func managedSSHInstallWarnings() []string {
 func windowsManagedSSHCheck(ctx context.Context) doctorpkg.Check {
 	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
-		return doctorManagedSSHCheck(true, err, "", false)
+		return doctorManagedSSHCheck(true, err, "")
 	}
 	instance, err := hostinstall.WindowsInstanceForSID(user.User.Sid.String())
 	if err != nil {
-		return doctorManagedSSHCheck(true, err, "", false)
+		return doctorManagedSSHCheck(true, err, "")
 	}
 	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, hostinstall.ErrNotInstalled) || err == nil && installed.EnrollmentPending {
-		return doctorManagedSSHCheck(false, nil, "", false)
+		return doctorManagedSSHCheck(false, nil, "")
 	}
 	if err != nil || len(installed.Source.SHA256) < 32 {
-		return doctorManagedSSHCheck(true, errors.Join(errors.New("read installed runtime"), err), "", false)
+		return doctorManagedSSHCheck(true, errors.Join(errors.New("read installed runtime"), err), "")
 	}
 	handle, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
-		return doctorManagedSSHCheck(true, nil, "unavailable", false)
+		return doctorManagedSSHCheck(true, nil, "unavailable")
 	}
 	manager := &mgr.Mgr{Handle: handle}
 	defer manager.Disconnect()
 	state := windowsServiceState(manager, windowsopenssh.ServiceName+"-"+instance+"-"+installed.Source.SHA256[:32])
-	retrying := false
-	if state == "not_installed" {
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
-		if client, err := newUpdateControlClient(ctx, time.Second); err == nil {
-			status, err := client.Status(ctx)
-			retrying = err == nil && status.ManagedSSHRetry == installed.WindowsSSHInstallationID()
-		}
-	}
-	return doctorManagedSSHCheck(true, nil, state, retrying)
+	return doctorManagedSSHCheck(true, nil, state)
 }

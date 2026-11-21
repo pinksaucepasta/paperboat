@@ -91,6 +91,12 @@ func ClassifyInventory(record InventoryRecord, config Config) InstallationInvent
 			}
 			return result
 		}
+		// An approved, Microsoft-signed tree that winget does not list to LocalSystem (installed by a user, or
+		// before a winget list failure) is the package itself: reuse it instead of downloading it again.
+		if versionMatches(program.Version, config.ApprovedVersion) {
+			result.Class = InstallationPaperboatApproved
+			return result
+		}
 		result.Class = InstallationThirdParty
 		return result
 	}
@@ -124,4 +130,9 @@ func paperboatServiceConflicts(service ServiceRecord, config Config) bool {
 		return false
 	}
 	return !validLoopbackServiceCommand(config, resultForConfig(config), service.PathName)
+}
+
+// wingetListArgs queries only the winget source, never msstore, with its agreement accepted, not prompted for.
+func wingetListArgs() []string {
+	return []string{"list", "--exact", "--id", PackageID, "--source", "winget", "--accept-source-agreements", "--disable-interactivity"}
 }

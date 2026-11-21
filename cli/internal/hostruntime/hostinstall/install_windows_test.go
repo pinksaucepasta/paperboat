@@ -549,6 +549,16 @@ func TestWindowsActivationOrder(t *testing.T) {
 	if !errors.Is(err, busy) || strings.Join(order, ",") != "owner,ssh/2,prestage,stage-carrier,cutover" {
 		t.Fatalf("refused cutover: order %v err %v, want nothing stopped", order, err)
 	}
+	// An update whose OpenSSH cannot be obtained stops before anything is staged or stopped: the old generation serves.
+	order = nil
+	unobtainable := fmt.Errorf("%w: no App Installer", windowsopenssh.ErrInstallerUnavailable)
+	failing := activation(true, record("cutover"))
+	failing.prepareSSH = func(ctx context.Context, attempts int) error {
+		return prepareWindowsSSHWithinAttempts(ctx, attempts, func(context.Context) error { order = append(order, "ssh"); return unobtainable })
+	}
+	if err := failing.run(context.Background()); !errors.Is(err, windowsopenssh.ErrInstallerUnavailable) || strings.Join(order, ",") != "owner,ssh" {
+		t.Fatalf("unobtainable OpenSSH on update: order %v err %v, want stopped after the SSH step", order, err)
+	}
 }
 
 // The one OpenSSH preparation of an activation runs while hostd serves; a budget it outlives there is retried
