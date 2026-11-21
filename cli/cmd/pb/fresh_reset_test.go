@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/command"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/spf13/cobra"
 )
@@ -56,6 +57,7 @@ func isolatedReplacementNote(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
 	t.Setenv("APPDATA", filepath.Join(home, ".config")) // os.UserConfigDir on Windows
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, ".local", "appdata"))
 	return home
 }
 
@@ -147,16 +149,18 @@ func TestMachineReplacementErrorNamesTheServerRefusal(t *testing.T) {
 // F1-09: the note naming the old record and the local diagnostics survive the reset's wipe, so a pairing
 // that fails afterwards can still be investigated and the next one still replaces the old record.
 func TestFreshEnrollmentResetKeepsTheNoteAndDiagnosticsThroughTheWipe(t *testing.T) {
-	isolatedReplacementNote(t)
+	home := isolatedReplacementNote(t)
 	if err := bootstrap.SaveReplacement("machine_old", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	// Windows resolves the state root from the known-folder registry, not the environment: name it here.
+	paths := localapi.Paths{StateRoot: filepath.Join(home, ".local", "state", "paperboat")}
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.daemonPaths = func() (localapi.Paths, error) { return paths, nil }
+	})
 	command := freshEnrollmentResetCommand()
+	command.SetContext(ctx)
 	preserved := freshEnrollmentPreserved(command)
-	paths, err := hostDependenciesOf(t.Context()).daemonPaths()
-	if err != nil {
-		t.Fatal(err)
-	}
 	diagnostics := filepath.Join(paths.StateRoot, "diagnostics") // under XDG_STATE_HOME on Linux, Library on macOS
 	note, _ := bootstrap.ReplacementPath()
 	if len(preserved) != 2 || preserved[0] != note || preserved[1] != diagnostics {
