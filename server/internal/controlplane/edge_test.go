@@ -235,7 +235,7 @@ func TestEdgeHandlerRejectsUnauthorizedAndUnknownRoutes(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	response = httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusNotFound {
+	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("unknown route status = %d", response.Code)
 	}
 }
@@ -296,10 +296,9 @@ func TestEdgeAssignmentSerializesRevokedAsBoolean(t *testing.T) {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_environments WHERE id=$1`, environment)
 	})
 	request := httptest.NewRequest(http.MethodPost, "/v1/edge/assignments/current", strings.NewReader(`{"environment_id":"`+environment+`","machine_id":"`+machineID+`","connector_id":"runtime"}`))
-	request.Header.Set("Authorization", "Bearer edge-control-test")
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
-	NewEdgeService(store, "edge-control-test").Handler().ServeHTTP(response, request)
+	NewEdgeService(store, "edge-control-test").handleAssignment(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -314,15 +313,17 @@ func TestEdgeAssignmentSerializesRevokedAsBoolean(t *testing.T) {
 // Unknown fields are ignored (released edges and relays send what their release knows); trailing JSON is refused.
 func TestEdgeHandlerRejectsTrailingJSON(t *testing.T) {
 	service := NewEdgeService(nil, "edge-control-credential-01234567890123456789")
+	service.SetNodeCredentials(scopedNodeCredential{node: "node"})
 	for _, body := range []string{
 		`{"edge_node_id":"node"}{"edge_node_id":"other"}`,
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/v1/edge/routes/desired-state", strings.NewReader(body))
-		request.Header.Set("Authorization", "Bearer edge-control-credential-01234567890123456789")
+		request.Header.Set("Authorization", "Bearer node-secret")
 		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		service.Handler().ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest {
+		// Node binding reads one JSON document, so trailing JSON is refused before the handler decodes it.
+		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("body %q status = %d", body, response.Code)
 		}
 	}
@@ -331,8 +332,9 @@ func TestEdgeHandlerRejectsTrailingJSON(t *testing.T) {
 func TestEdgeHandlerReturnsCompleteCanonicalSnapshotForProcess(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	service := NewEdgeService(store, "edge-control-credential-01234567890123456789")
+	service.SetNodeCredentials(scopedNodeCredential{node: "edge_01"})
 	request := httptest.NewRequest(http.MethodPost, "/v1/edge/routes/desired-state", strings.NewReader(`{"edge_node_id":"edge_01","process_epoch":"epoch_0001"}`))
-	request.Header.Set("Authorization", "Bearer edge-control-credential-01234567890123456789")
+	request.Header.Set("Authorization", "Bearer node-secret")
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
@@ -382,9 +384,11 @@ func TestEdgeRevocationsIncludesCompleteLargeSnapshotPostgres(t *testing.T) {
 		_, _ = store.SQL().ExecContext(context.Background(), "DELETE FROM paperboat.control_environments WHERE workspace_id=$1", prefix)
 	})
 	request := httptest.NewRequest(http.MethodGet, "/v1/trust/revocations", nil)
-	request.Header.Set("Authorization", "Bearer edge-control-test")
+	request.Header.Set("Authorization", "Bearer node-secret")
 	response := httptest.NewRecorder()
-	NewEdgeService(store, "edge-control-test").Handler().ServeHTTP(response, request)
+	service := NewEdgeService(store, "edge-control-test")
+	service.SetNodeCredentials(scopedNodeCredential{})
+	service.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || response.Body.Len() <= 1<<20 {
 		t.Fatalf("revocation response status=%d bytes=%d", response.Code, response.Body.Len())
 	}

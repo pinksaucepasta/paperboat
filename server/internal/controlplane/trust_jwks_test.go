@@ -37,6 +37,7 @@ func TestEdgeServesMintTrustDocumentThroughRotation(t *testing.T) {
 	const credential = "managed-control-credential-012345678901"
 	signer := testMintProvider(t, "new", "old", "new")
 	service := NewEdgeService(nil, credential)
+	service.SetNodeCredentials(scopedNodeCredential{})
 	service.SetSigner(signer)
 	fetch := func(token string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodGet, "/v1/trust/jwks", nil)
@@ -56,7 +57,7 @@ func TestEdgeServesMintTrustDocumentThroughRotation(t *testing.T) {
 		} `json:"keys"`
 		Withdrawn []string `json:"withdrawn_key_ids"`
 	}
-	response := fetch(credential)
+	response := fetch("node-secret")
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &document) != nil || len(document.Keys) != 2 || len(document.Withdrawn) != 0 {
 		t.Fatalf("overlap document = %d %s", response.Code, response.Body.String())
 	}
@@ -64,16 +65,20 @@ func TestEdgeServesMintTrustDocumentThroughRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	document.Keys, document.Withdrawn = nil, nil
-	response = fetch(credential)
+	response = fetch("node-secret")
 	if json.Unmarshal(response.Body.Bytes(), &document) != nil || len(document.Keys) != 1 || document.Keys[0].Kid != "new" || len(document.Withdrawn) != 1 || document.Withdrawn[0] != "old" {
 		t.Fatalf("withdrawn document = %s", response.Body.String())
 	}
 	if signer.Withdraw([]string{"new"}) == nil {
 		t.Fatal("active key withdrawn")
 	}
+	if got := fetch(credential).Code; got != http.StatusUnauthorized {
+		t.Fatalf("shared credential status = %d", got)
+	}
 	unconfigured := NewEdgeService(nil, credential)
+	unconfigured.SetNodeCredentials(scopedNodeCredential{})
 	request := httptest.NewRequest(http.MethodGet, "/v1/trust/jwks", nil)
-	request.Header.Set("Authorization", "Bearer "+credential)
+	request.Header.Set("Authorization", "Bearer node-secret")
 	response = httptest.NewRecorder()
 	unconfigured.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable {

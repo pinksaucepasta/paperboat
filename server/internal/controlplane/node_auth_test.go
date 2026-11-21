@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
 
@@ -84,13 +86,23 @@ func TestScopedNodeControlAuthorization(t *testing.T) {
 	if ok, err := s.authorizeNodeRequest(r); err != nil || ok {
 		t.Fatal("ambiguous authorization accepted")
 	}
-	// The shared managed credential names no node: it may not register or heartbeat as one.
-	for _, path := range []string{"/v1/nodes/register", "/v1/nodes/heartbeat"} {
-		r := httptest.NewRequest("POST", path, strings.NewReader(`{"edge_node_id":"node_a"}`))
+	// The shared managed credential names no node: it reaches certificate distribution only.
+	for _, path := range []string{"/v1/nodes/register", "/v1/nodes/heartbeat", "/v1/relay/nodes/start",
+		"/v1/relay/nodes/observe", "/v1/edge/routes/observations", "/v1/edge/usage-reports",
+		"/v1/edge/inspector/access", nodemesh.PeersPath, "/v1/edge/assignments/current",
+		"/v1/edge/routes/desired-state", "/v1/edge/ingress/desired-state", "/v1/trust/revocations",
+		"/v1/trust/jwks", "/v1/edge/browser-terminal/control"} {
+		r := httptest.NewRequest("POST", path, strings.NewReader(`{"edge_node_id":"node_a","node_id":"node_a"}`))
 		r.Header.Set("Authorization", "Bearer managed-secret")
+		r.Header.Set("X-Paperboat-Edge-Node-ID", "node_a")
 		if ok, err := s.authorizeNodeRequest(r); err != nil || ok {
 			t.Fatalf("managed credential accepted on %s", path)
 		}
+	}
+	r = httptest.NewRequest("POST", "/v1/edge/certificates/distributions/d1/claim", nil)
+	r.Header.Set("Authorization", "Bearer managed-secret")
+	if ok, err := s.authorizeNodeRequest(r); err != nil || !ok {
+		t.Fatal("managed credential refused on certificate distribution")
 	}
 }
 
