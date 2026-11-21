@@ -220,7 +220,7 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$1,'linux','amd64','/w','offline','released')`, "mch_wsd_"+suffix, owner)
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,'web',$3,$4,$5,$2)`, tunnel, owner, testutil.EndpointID(tunnel), "https://"+testutil.EndpointLabel(testutil.EndpointID(tunnel))+".example.test", "mch_wsd_"+suffix)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,'web','http','managed','m.example.test','http','127.0.0.1:3000',$3,$3)`, "rte_wsd_"+suffix, tunnel, owner)
-	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,workspace_domain_id,certificate_state) VALUES($1,$2,$3,$4,$5,'exact','x','verified','t',$6,'issuing')`,
+	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,workspace_domain_id,certificate_state) VALUES($1,$2,$3,$4,$5,'exact','x','t',$6,'issuing')`,
 		"dom_wsd_"+suffix, owner, tunnel, "rte_wsd_"+suffix, "app."+hostname, view.ID)
 	var inUse *InUseError
 	if err := service.Remove(personal, owner, view.ID); !errors.As(err, &inUse) || len(inUse.Uses) != 1 || inUse.Uses[0].Name != "web" || inUse.Uses[0].Hostname != "app."+hostname {

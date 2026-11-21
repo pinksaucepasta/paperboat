@@ -139,7 +139,7 @@ func TestCertificateWorkerRetriesPreviewPlacementWithoutExitingOnPostgres(t *tes
 	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:placement','verified','edge.example.test','managed','issuing','ready','clear',$5)`, domain, account, preview, "placement-"+testutil.EndpointLabel(preview)+".example.test", "wsd_"+ws); err != nil {
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:placement','edge.example.test','managed','issuing','ready','clear',$5)`, domain, account, preview, "placement-"+testutil.EndpointLabel(preview)+".example.test", "wsd_"+ws); err != nil {
 		t.Fatal(err)
 	}
 	issuer := &placementPendingIssuer{}
