@@ -974,15 +974,6 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
          AND coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.endpoint_quic_port)=control_tunnel_nodes.endpoint_quic_port)
 RETURNING *;
 
--- name: GetControlConnectorAssignment :one
-SELECT c.generation, c.edge_pool, c.edge_node_id, (c.revoked_at IS NOT NULL OR e.desired_state = 'revoked') AS revoked
-FROM control_connector_generations c
-JOIN control_environments e ON e.id = c.environment_id
-JOIN user_machines m ON m.id = c.machine_id AND m.environment_id = c.environment_id
-WHERE c.environment_id = sqlc.arg(environment_id) AND c.machine_id = sqlc.arg(machine_id)
-  AND c.connector_id = sqlc.arg(connector_id)
-  AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND e.desired_state = 'active';
-
 -- name: GetControlConnectorGenerationForUpdate :one
 SELECT * FROM control_connector_generations
 WHERE environment_id = sqlc.arg(environment_id) AND connector_id = sqlc.arg(connector_id)

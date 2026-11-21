@@ -52,9 +52,6 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 			return response(http.StatusUnauthorized, ""), nil
 		}
 		switch r.URL.Path {
-		case "/v1/edge/assignments/current":
-			data, _ := json.Marshal(map[string]any{"connector_generation": 3, "edge_pool": "default", "edge_node_id": "edge_1", "revoked": false})
-			return response(http.StatusOK, string(data)), nil
 		case "/v1/edge/usage-reports":
 			var wire map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&wire); err != nil || wire["edge_node_id"] != "edge" || wire["route_id"] != "route" || wire["counter_epoch"] != "epoch" {
@@ -83,10 +80,6 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 			return response(http.StatusNotFound, ""), nil
 		}
 	})
-	current, err := client.Current(context.Background(), "env", "machine", "runtime")
-	if err != nil || current.Generation != 3 || current.EdgeNode != "edge_1" {
-		t.Fatalf("current = %+v, %v", current, err)
-	}
 	result, err := client.ReportUsage(context.Background(), UsageReport{OperationID: "op", Key: usageKey(), Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}})
 	if err != nil || result.Delta != 10 {
 		t.Fatalf("usage = %+v, %v", result, err)
@@ -250,25 +243,25 @@ func TestHTTPClientRejectsPlaintextRedirectMalformedAndOversized(t *testing.T) {
 		result.Header.Set("Location", "https://other.test/")
 		return result, nil
 	})
-	if _, err := client.Current(context.Background(), "env", "machine", "runtime"); !errors.Is(err, ErrControlUnavailable) {
+	if _, err := client.ReportUsage(context.Background(), UsageReport{OperationID: "op", Key: usageKey(), Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}}); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("redirect = %v", err)
 	}
 	malformed := controlClient(t, func(*http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{"connector_generation":3,"unknown":true}`), nil
 	})
-	if _, err := malformed.Current(context.Background(), "env", "machine", "runtime"); !errors.Is(err, ErrControlUnavailable) {
+	if _, err := malformed.ReportUsage(context.Background(), UsageReport{OperationID: "op", Key: usageKey(), Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}}); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("malformed = %v", err)
 	}
 	duplicate := controlClient(t, func(*http.Request) (*http.Response, error) {
-		return response(http.StatusOK, `{"connector_generation":3,"connector_generation":4,"edge_pool":"default","edge_node_id":"edge"}`), nil
+		return response(http.StatusOK, `{"disposition":"accounted","disposition":"expired_not_billed","delta":1}`), nil
 	})
-	if _, err := duplicate.Current(context.Background(), "env", "machine", "runtime"); !errors.Is(err, ErrControlUnavailable) {
+	if _, err := duplicate.ReportUsage(context.Background(), UsageReport{OperationID: "op", Key: usageKey(), Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}}); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("duplicate = %v", err)
 	}
 	oversized := controlClient(t, func(*http.Request) (*http.Response, error) {
 		return response(http.StatusOK, strings.Repeat("x", maxControlDocument+1)), nil
 	})
-	if _, err := oversized.Current(context.Background(), "env", "machine", "runtime"); !errors.Is(err, ErrControlUnavailable) {
+	if _, err := oversized.ReportUsage(context.Background(), UsageReport{OperationID: "op", Key: usageKey(), Interval: [2]time.Time{time.Unix(1, 0), time.Unix(2, 0)}}); !errors.Is(err, ErrControlUnavailable) {
 		t.Fatalf("oversized = %v", err)
 	}
 	if _, err := oversized.JWKS(context.Background()); !errors.Is(err, ErrControlUnavailable) {

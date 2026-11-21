@@ -84,7 +84,7 @@ func TestDistributionIdentityOutageIsCapturedAndPureRejectionRemainsUnauthorized
 	defer func() { cancel(); <-done }()
 
 	identityFailure := errors.Join(ErrDistributionIdentityInvalid, syscall.ECONNRESET)
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{}, identityFailure
@@ -98,7 +98,7 @@ func TestDistributionIdentityOutageIsCapturedAndPureRejectionRemainsUnauthorized
 	ctx = serverdiagnostics.WithCorrelationID(ctx, "corr_distribution_identity")
 	ctx = reporter.Context(ctx, ref)
 	request := httptest.NewRequest(http.MethodPost, CertificateDistributionPullPath, strings.NewReader(`{}`)).WithContext(ctx)
-	request.Header.Set("Authorization", "Bearer distribution-credential-012345678901234567890123456789")
+	request.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	response := httptest.NewRecorder()
 	hub.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), "connection reset") {
@@ -118,7 +118,7 @@ func TestDistributionIdentityOutageIsCapturedAndPureRejectionRemainsUnauthorized
 	})
 	denied := httptest.NewRecorder()
 	denialRequest := httptest.NewRequest(http.MethodPost, CertificateDistributionPullPath, strings.NewReader(`{}`)).WithContext(ctx)
-	denialRequest.Header.Set("Authorization", "Bearer distribution-credential-012345678901234567890123456789")
+	denialRequest.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	hub.Handler().ServeHTTP(denied, denialRequest)
 	if denied.Code != http.StatusUnauthorized {
 		t.Fatalf("pure identity rejection status=%d, want %d", denied.Code, http.StatusUnauthorized)
@@ -153,13 +153,13 @@ func TestSignedDistributionBodyIOFailurePreservesReadAndCloseCauses(t *testing.T
 		t.Fatal(err)
 	}
 	const credential = "distribution-credential-012345678901234567890123456789"
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", Credential: []byte(credential), Now: func() time.Time { return now }, Identity: resolver})
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"}, Credential: []byte(credential), Now: func() time.Time { return now }, Identity: resolver})
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := []byte(`{"edge_node_id":"edge_01","edge_process_epoch":"epoch_0001","limit":1}`)
 	request := signedDistributionRequest(t, CertificateDistributionPullPath, "edge_01", "epoch_0001", now, distributionTestNonce(71), body, privateKey)
-	request.Header.Set("Authorization", "Bearer "+credential)
+	request.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	ctx := serverdiagnostics.WithRequestID(runCtx, "req_distribution_body_io")
 	ctx = serverdiagnostics.WithCorrelationID(ctx, "corr_distribution_body_io")
 	ref := supportreport.NewReference()
@@ -188,7 +188,7 @@ func TestSignedDistributionBodyIOFailurePreservesReadAndCloseCauses(t *testing.T
 
 func TestDistributionHubBindsPullToAuthenticatedNode(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
@@ -211,7 +211,7 @@ func TestDistributionHubBindsPullToAuthenticatedNode(t *testing.T) {
 	pull := func(node, epoch string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(distributionPull{EdgeNodeID: node, EdgeProcessEpoch: epoch, Limit: 1})
 		req := httptest.NewRequest(http.MethodPost, CertificateDistributionPullPath, bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer distribution-credential-012345678901234567890123456789")
+		req.Header.Set("Authorization", "Bearer "+edge01Bearer)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Paperboat-Edge-Node-ID", node)
 		req.Header.Set("X-Paperboat-Edge-Process-Epoch", epoch)
@@ -222,7 +222,7 @@ func TestDistributionHubBindsPullToAuthenticatedNode(t *testing.T) {
 
 	crossNodeBody, _ := json.Marshal(distributionPull{EdgeNodeID: "edge_02", EdgeProcessEpoch: "epoch_0002", Limit: 1})
 	crossNode := httptest.NewRequest(http.MethodPost, server.URL+CertificateDistributionPullPath, bytes.NewReader(crossNodeBody))
-	crossNode.Header.Set("Authorization", "Bearer distribution-credential-012345678901234567890123456789")
+	crossNode.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	crossNode.Header.Set("Content-Type", "application/json")
 	crossNode.Header.Set("X-Paperboat-Edge-Node-ID", "edge_01")
 	crossNode.Header.Set("X-Paperboat-Edge-Process-Epoch", "epoch_0001")
@@ -252,7 +252,7 @@ func TestDistributionHubRequestsExactLeafThroughAuthenticatedNode(t *testing.T) 
 	credential := "distribution-credential-012345678901234567890123456789"
 	var got DistributionNodeIdentity
 	var gotHostname string
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte(credential),
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: request.Header.Get("X-Paperboat-Edge-Node-ID"), ProcessEpoch: request.Header.Get("X-Paperboat-Edge-Process-Epoch")}, nil
@@ -271,7 +271,7 @@ func TestDistributionHubRequestsExactLeafThroughAuthenticatedNode(t *testing.T) 
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, bytes.NewReader(body))
-	request.Header.Set("Authorization", "Bearer "+credential)
+	request.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Paperboat-Edge-Node-ID", "edge_01")
 	request.Header.Set("X-Paperboat-Edge-Process-Epoch", "epoch_0001")
@@ -286,7 +286,7 @@ func TestDistributionHubRequestsExactLeafThroughAuthenticatedNode(t *testing.T) 
 
 	uppercaseBody, _ := json.Marshal(distributionRequest{Hostname: "Leaf.Example.Test"})
 	uppercaseRequest := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, bytes.NewReader(uppercaseBody))
-	uppercaseRequest.Header.Set("Authorization", "Bearer "+credential)
+	uppercaseRequest.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	uppercaseRequest.Header.Set("Content-Type", "application/json")
 	uppercaseRequest.Header.Set("X-Paperboat-Edge-Node-ID", "edge_01")
 	uppercaseRequest.Header.Set("X-Paperboat-Edge-Process-Epoch", "epoch_0001")
@@ -312,7 +312,7 @@ func TestDistributionHubOnDemandMixedFailureIsReportedOnceAsUnavailable(t *testi
 
 	const credential = "distribution-credential-012345678901234567890123456789"
 	callbackErr := error(ErrGenerationConflict)
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte(credential),
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: request.Header.Get("X-Paperboat-Edge-Node-ID"), ProcessEpoch: request.Header.Get("X-Paperboat-Edge-Process-Epoch")}, nil
@@ -332,7 +332,7 @@ func TestDistributionHubOnDemandMixedFailureIsReportedOnceAsUnavailable(t *testi
 			t.Fatal(marshalErr)
 		}
 		request := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, bytes.NewReader(body)).WithContext(ctx)
-		request.Header.Set("Authorization", "Bearer "+credential)
+		request.Header.Set("Authorization", "Bearer "+edge01Bearer)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Paperboat-Edge-Node-ID", "edge_01")
 		request.Header.Set("X-Paperboat-Edge-Process-Epoch", "epoch_0001")
@@ -373,7 +373,7 @@ func TestDistributionHubOnDemandMixedFailureIsReportedOnceAsUnavailable(t *testi
 
 func TestDistributionMessageTTLIsIndependentFromCertificateExpiry(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, _ *http.Request) (DistributionNodeIdentity, error) {
@@ -416,7 +416,7 @@ func TestDistributionMessageTTLIsIndependentFromCertificateExpiry(t *testing.T) 
 
 func TestDistributionHubExpiresAndWipesPendingActions(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
@@ -453,7 +453,7 @@ func TestDistributionHubExpiresAndWipesPendingActions(t *testing.T) {
 // The hub has no fleet-wide cap. Every node has its own pending budget.
 func TestDistributionHubAcceptsMoreThan4096PendingActions(t *testing.T) {
 	now := time.Now().UTC()
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
@@ -485,7 +485,7 @@ func allZeroBytes(value []byte) bool {
 
 func TestDistributionHubPagesPendingMessagesWithStableCursor(t *testing.T) {
 	now := time.Now().UTC()
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
@@ -542,7 +542,7 @@ func TestDistributionHubPagesPendingMessagesWithStableCursor(t *testing.T) {
 
 func TestDistributionHubRejectsActionsWithoutExactStageAndCloseWakesWaiters(t *testing.T) {
 	now := time.Date(2026, time.August, 31, 12, 0, 0, 0, time.UTC)
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: []byte("distribution-credential-012345678901234567890123456789"),
 		Now:        func() time.Time { return now },
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
@@ -587,14 +587,14 @@ func TestDistributionHubRejectsActionsWithoutExactStageAndCloseWakesWaiters(t *t
 }
 
 func TestDistributionHubRequiresAuthenticatedNodeResolver(t *testing.T) {
-	if _, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", Credential: []byte("distribution-credential-012345678901234567890123456789")}); err == nil {
+	if _, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"}, Credential: []byte("distribution-credential-012345678901234567890123456789")}); err == nil {
 		t.Fatal("hub accepted body-only node identity")
 	}
 }
 
 func TestDistributionHubCloseWipesOwnedCredential(t *testing.T) {
 	credential := []byte("distribution-credential-012345678901234567890123456789")
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"},
 		Credential: credential,
 		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
 			return DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, nil
@@ -713,7 +713,7 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 
 	const credential = "distribution-credential-012345678901234567890123456789"
 	newHub := func(onDemand func(context.Context, DistributionNodeIdentity, string) error) *DistributionHub {
-		hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+		hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{"edge_01-runtime-credential": "edge_01", "edge_02-runtime-credential": "edge_02"},
 			Credential: []byte(credential),
 			Identity: DistributionNodeIdentityResolverFunc(func(_ context.Context, request *http.Request) (DistributionNodeIdentity, error) {
 				return DistributionNodeIdentity{NodeID: request.Header.Get("X-Paperboat-Edge-Node-ID"), ProcessEpoch: "epoch_0001"}, nil
@@ -728,7 +728,7 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 	send := func(hub *DistributionHub, edge string, ctx context.Context) int {
 		body, _ := json.Marshal(distributionRequest{Hostname: "fresh-preview.example.test"})
 		request := httptest.NewRequest(http.MethodPost, CertificateDistributionRequestPath, bytes.NewReader(body)).WithContext(ctx)
-		request.Header.Set("Authorization", "Bearer "+credential)
+		request.Header.Set("Authorization", "Bearer "+edge+"-runtime-credential")
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Paperboat-Edge-Node-ID", edge)
 		response := httptest.NewRecorder()

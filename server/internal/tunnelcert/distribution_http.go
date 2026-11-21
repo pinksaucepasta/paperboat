@@ -171,7 +171,7 @@ func (h *DistributionHub) Handler() http.Handler {
 	mux.HandleFunc("POST "+CertificateDistributionAckPath, h.handleAck)
 	mux.HandleFunc("POST "+CertificateDistributionRequestPath, h.handleRequest)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authorized, authErr := h.authorized(r)
+		node, authErr := h.authorizedNode(r)
 		if authErr != nil {
 			if clientClosed(r, authErr) {
 				w.WriteHeader(statusClientClosedRequest)
@@ -181,7 +181,7 @@ func (h *DistributionHub) Handler() http.Handler {
 			writeDistributionError(w, http.StatusServiceUnavailable)
 			return
 		}
-		if !authorized {
+		if node == "" {
 			writeDistributionError(w, http.StatusUnauthorized)
 			return
 		}
@@ -197,7 +197,8 @@ func (h *DistributionHub) Handler() http.Handler {
 			}
 			return
 		}
-		if !validDistributionIdentity(identity.NodeID, identity.ProcessEpoch) {
+		// The queue belongs to the node the bearer is bound to; a header or proof naming another node is refused.
+		if !validDistributionIdentity(identity.NodeID, identity.ProcessEpoch) || identity.NodeID != node {
 			writeDistributionError(w, http.StatusUnauthorized)
 			return
 		}
@@ -579,22 +580,17 @@ func (h *DistributionHub) handleAck(w http.ResponseWriter, r *http.Request) {
 	writeDistributionJSON(w, http.StatusNoContent, nil)
 }
 
-func (h *DistributionHub) authorized(r *http.Request) (bool, error) {
-	if h == nil || r == nil {
-		return false, nil
+// authorizedNode returns the node the request's own runtime credential is bound to. The shared
+// edge-control credential names no node, so it never reaches a queue; it only signs messages server-side.
+func (h *DistributionHub) authorizedNode(r *http.Request) (string, error) {
+	if h == nil || r == nil || h.nodeCredentials == nil || nodeauth.Bearer(r) == "" {
+		return "", nil
 	}
-	credential := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	h.credentialMu.RLock()
-	active := len(h.credential) >= 32
-	managed := active && hmac.Equal([]byte(credential), h.credential)
-	h.credentialMu.RUnlock()
-	if managed {
-		return true, nil
+	node, err := h.nodeCredentials.RuntimeNode(r.Context(), nodeauth.Bearer(r))
+	if err != nil && nodeauth.IsNotFound(err) {
+		return "", nil
 	}
-	if !active {
-		return false, nil
-	}
-	return nodeauth.Matches(r.Context(), h.nodeCredentials, r, "", r.Header.Get("X-Paperboat-Edge-Node-ID"))
+	return node, err
 }
 
 type distributionOperationFailure struct{ cause error }

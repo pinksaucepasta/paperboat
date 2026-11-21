@@ -45,7 +45,6 @@ func TestScopedNodeControlAuthorization(t *testing.T) {
 		{"other relay", "/v1/relay/nodes/start", `{"node_id":"node_b"}`, false},
 		{"conflicting identity", "/v1/relay/nodes/start", `{"node_id":"node_a","edge_node_id":"node_b"}`, false},
 		{"duplicate identity", "/v1/nodes/register", `{"edge_node_id":"node_b","edge_node_id":"node_a"}`, false},
-		{"unbound assignment", "/v1/edge/assignments/current", `{"environment_id":"other"}`, false},
 		{"oversized", "/v1/nodes/register", strings.Repeat(" ", maxEdgeDocument+1), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,23 +85,18 @@ func TestScopedNodeControlAuthorization(t *testing.T) {
 	if ok, err := s.authorizeNodeRequest(r); err != nil || ok {
 		t.Fatal("ambiguous authorization accepted")
 	}
-	// The shared managed credential names no node: it reaches certificate distribution only.
+	// The shared managed credential names no node: it reaches no node path, certificate distribution included.
 	for _, path := range []string{"/v1/nodes/register", "/v1/nodes/heartbeat", "/v1/relay/nodes/start",
 		"/v1/relay/nodes/observe", "/v1/edge/routes/observations", "/v1/edge/usage-reports",
-		"/v1/edge/inspector/access", nodemesh.PeersPath, "/v1/edge/assignments/current",
+		"/v1/edge/inspector/access", nodemesh.PeersPath,
 		"/v1/edge/routes/desired-state", "/v1/edge/ingress/desired-state", "/v1/trust/revocations",
-		"/v1/trust/jwks", "/v1/edge/browser-terminal/control"} {
+		"/v1/trust/jwks", "/v1/edge/browser-terminal/control", "/v1/edge/certificates/distributions/pull"} {
 		r := httptest.NewRequest("POST", path, strings.NewReader(`{"edge_node_id":"node_a","node_id":"node_a"}`))
 		r.Header.Set("Authorization", "Bearer managed-secret")
 		r.Header.Set("X-Paperboat-Edge-Node-ID", "node_a")
 		if ok, err := s.authorizeNodeRequest(r); err != nil || ok {
 			t.Fatalf("managed credential accepted on %s", path)
 		}
-	}
-	r = httptest.NewRequest("POST", "/v1/edge/certificates/distributions/d1/claim", nil)
-	r.Header.Set("Authorization", "Bearer managed-secret")
-	if ok, err := s.authorizeNodeRequest(r); err != nil || !ok {
-		t.Fatal("managed credential refused on certificate distribution")
 	}
 }
 

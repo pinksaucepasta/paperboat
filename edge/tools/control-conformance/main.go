@@ -81,10 +81,6 @@ func run(ctx context.Context, path string, output io.Writer) error {
 	if _, err := client.Heartbeat(ctx, control.NodeObservation{NodeID: value.NodeID, ProcessEpoch: value.ProcessEpoch, Ready: true, At: now}); err != nil {
 		return fmt.Errorf("heartbeat node: %w", err)
 	}
-	current, err := client.Current(ctx, value.EnvironmentID, value.MachineID, value.ConnectorID)
-	if err != nil || current.Generation != value.ConnectorGeneration || current.EdgePool != value.EdgePool || current.EdgeNode != value.NodeID || current.Revoked {
-		return fmt.Errorf("assignment mismatch: %w", errors.Join(errInvalid, err))
-	}
 	routes, err := client.DesiredRoutes(ctx, value.NodeID)
 	if err != nil || len(routes) != 1 || routes[0].RouteID != value.RouteID || routes[0].Revision != value.RouteRevision || routes[0].Environment != value.EnvironmentID || routes[0].Generation != value.ConnectorGeneration || routes[0].NodeID != value.NodeID {
 		return fmt.Errorf("route mismatch: %w", errors.Join(errInvalid, err))

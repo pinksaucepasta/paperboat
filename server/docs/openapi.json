@@ -24885,25 +24885,6 @@
         "operationId": "get_server_version"
       }
     },
-    "/v1/edge/assignments/current": {
-      "post": {
-        "summary": "Fetch current connector assignment",
-        "security": [
-          {
-            "bearerEdgeControl": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current assignment."
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "post_v1_edge_assignments_current"
-      }
-    },
     "/v1/nodes/register": {
       "post": {
         "summary": "Register tunnel node",

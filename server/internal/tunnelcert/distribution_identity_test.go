@@ -154,13 +154,13 @@ func TestDistributionHubUsesSignedNodeIdentityNotHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", Credential: []byte("distribution-credential-012345678901234567890123456789"), Now: func() time.Time { return now }, Identity: resolver})
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: NewMemoryDistributionActionStore(), Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test", NodeCredentials: testNodeBearers{edge01Bearer: "edge_01"}, Credential: []byte("distribution-credential-012345678901234567890123456789"), Now: func() time.Time { return now }, Identity: resolver})
 	if err != nil {
 		t.Fatal(err)
 	}
 	requestBody := []byte(`{"edge_node_id":"edge_01","edge_process_epoch":"epoch_0001","limit":1}`)
 	request := signedDistributionRequest(t, CertificateDistributionPullPath, "edge_01", "epoch_0001", now, distributionTestNonce(11), requestBody, privateKey)
-	request.Header.Set("Authorization", "Bearer distribution-credential-012345678901234567890123456789")
+	request.Header.Set("Authorization", "Bearer "+edge01Bearer)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Paperboat-Edge-Node-ID", "edge_02")
 	request.Header.Set("X-Paperboat-Edge-Process-Epoch", "epoch_0002")

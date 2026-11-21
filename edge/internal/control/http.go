@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/edge/internal/admission"
 	"github.com/pinksaucepasta/paperboat/shared/capver"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
@@ -209,27 +208,6 @@ func (c *HTTPClient) distributionRequestSigner() DistributionRequestSigner {
 	signer := c.signer
 	c.signerMu.RUnlock()
 	return signer
-}
-
-func (c *HTTPClient) Current(ctx context.Context, environment, machine, connector string) (admission.Current, error) {
-	request := struct {
-		Environment string `json:"environment_id"`
-		Machine     string `json:"machine_id"`
-		Connector   string `json:"connector_id"`
-	}{environment, machine, connector}
-	var response struct {
-		Generation uint64 `json:"connector_generation"`
-		EdgePool   string `json:"edge_pool"`
-		EdgeNode   string `json:"edge_node_id"`
-		Revoked    bool   `json:"revoked"`
-	}
-	if err := c.post(ctx, "/v1/edge/assignments/current", request, &response); err != nil {
-		return admission.Current{}, err
-	}
-	if response.Generation == 0 || response.EdgePool == "" || response.EdgeNode == "" {
-		return admission.Current{}, ErrControlUnavailable
-	}
-	return admission.Current{Generation: response.Generation, EdgePool: response.EdgePool, EdgeNode: response.EdgeNode, Revoked: response.Revoked}, nil
 }
 
 func (c *HTTPClient) ReportUsage(ctx context.Context, report UsageReport) (UsageResult, error) {

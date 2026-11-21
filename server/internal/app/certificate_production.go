@@ -48,11 +48,9 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 		return nil, fmt.Errorf("%w: distribution credential reference is unavailable", tunnelv1.ErrCertificateRuntimeUnavailable)
 	}
 	defer clear(distributionCredential)
-	// The edge distribution client currently authenticates with the same
-	// server-issued control credential. Keep the two configuration references
-	// explicit, but fail closed if they resolve to different bytes. A second
-	// independent bearer would let a misconfigured edge pull a different
-	// node's certificate queue.
+	// The shared credential stays server-side: it signs distribution messages for a node
+	// without its own credential and never authenticates a pull (each edge uses its own).
+	// Fail closed if the two configuration references resolve to different bytes.
 	edgeCredential := []byte(cfg.Secrets.EdgeControlCredential)
 	if subtle.ConstantTimeCompare(edgeCredential, distributionCredential) != 1 {
 		clear(edgeCredential)

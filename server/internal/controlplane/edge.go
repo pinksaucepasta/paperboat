@@ -658,10 +658,6 @@ func (s *EdgeService) Heartbeat(ctx context.Context, r edgeNodeObservation) (*in
 	return nil, nil
 }
 
-func (s *EdgeService) Assignment(ctx context.Context, environment, machine, connector string) (dbsqlc.GetControlConnectorAssignmentRow, error) {
-	return s.store.Queries().GetControlConnectorAssignment(ctx, dbsqlc.GetControlConnectorAssignmentParams{EnvironmentID: environment, MachineID: machine, ConnectorID: connector})
-}
-
 func (s *EdgeService) Routes(ctx context.Context, nodeID string) ([]dbsqlc.ListControlRoutesForNodeRow, error) {
 	return s.store.Queries().ListControlRoutesForNode(ctx, sql.NullString{String: nodeID, Valid: nodeID != ""})
 }
@@ -697,7 +693,6 @@ func (s *EdgeService) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/nodes/register", s.handleRegister)
 	mux.HandleFunc("POST /v1/nodes/heartbeat", s.handleHeartbeat)
 	mux.HandleFunc("POST "+nodemesh.PeersPath, s.handlePeers)
-	mux.HandleFunc("POST /v1/edge/assignments/current", s.handleAssignment)
 	mux.HandleFunc("POST /v1/edge/routes/desired-state", s.handleRoutes)
 	mux.HandleFunc("POST /v1/edge/ingress/desired-state", s.handleIngress)
 	mux.HandleFunc("POST /v1/edge/inspector/access", s.handleInspectorAccess)
@@ -915,27 +910,6 @@ func writeHeartbeatAnswer(w http.ResponseWriter, limits edgelimits.IngressLimits
 		IngressLimits edgelimits.IngressLimits `json:"ingress_limits"`
 		DrainDeadline *int64                   `json:"drain_deadline,omitempty"`
 	}{limits, drainDeadline})
-}
-
-func (s *EdgeService) handleAssignment(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Environment string `json:"environment_id"`
-		Machine     string `json:"machine_id"`
-		Connector   string `json:"connector_id"`
-	}
-	if !s.decode(w, r, &input) {
-		return
-	}
-	row, err := s.Assignment(r.Context(), input.Environment, input.Machine, input.Connector)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
-			writeEdgeError(w, r, http.StatusNotFound, "assignment_unavailable", false, 0, err)
-			return
-		}
-		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
-		return
-	}
-	writeEdgeJSON(w, http.StatusOK, map[string]any{"connector_generation": row.Generation, "edge_pool": row.EdgePool, "edge_node_id": row.EdgeNodeID.String, "revoked": row.Revoked.Bool})
 }
 
 func (s *EdgeService) handleRoutes(w http.ResponseWriter, r *http.Request) {

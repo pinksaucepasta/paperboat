@@ -2034,41 +2034,6 @@ func (q *Queries) GetControlConfigWarningContext(ctx context.Context, arg GetCon
 	return i, err
 }
 
-const getControlConnectorAssignment = `-- name: GetControlConnectorAssignment :one
-SELECT c.generation, c.edge_pool, c.edge_node_id, (c.revoked_at IS NOT NULL OR e.desired_state = 'revoked') AS revoked
-FROM control_connector_generations c
-JOIN control_environments e ON e.id = c.environment_id
-JOIN user_machines m ON m.id = c.machine_id AND m.environment_id = c.environment_id
-WHERE c.environment_id = $1 AND c.machine_id = $2
-  AND c.connector_id = $3
-  AND m.revoked_at IS NULL AND m.deleted_at IS NULL AND e.desired_state = 'active'
-`
-
-type GetControlConnectorAssignmentParams struct {
-	EnvironmentID string
-	MachineID     string
-	ConnectorID   string
-}
-
-type GetControlConnectorAssignmentRow struct {
-	Generation int64
-	EdgePool   string
-	EdgeNodeID sql.NullString
-	Revoked    sql.NullBool
-}
-
-func (q *Queries) GetControlConnectorAssignment(ctx context.Context, arg GetControlConnectorAssignmentParams) (GetControlConnectorAssignmentRow, error) {
-	row := q.db.QueryRow(ctx, getControlConnectorAssignment, arg.EnvironmentID, arg.MachineID, arg.ConnectorID)
-	var i GetControlConnectorAssignmentRow
-	err := row.Scan(
-		&i.Generation,
-		&i.EdgePool,
-		&i.EdgeNodeID,
-		&i.Revoked,
-	)
-	return i, err
-}
-
 const getControlConnectorGenerationForUpdate = `-- name: GetControlConnectorGenerationForUpdate :one
 SELECT environment_id, machine_id, generation, edge_pool, edge_node_id, state, admission_jti_hash, admission_operation_key, admission_request_hash, admission_credential_ciphertext, expires_at, revoked_at, version, updated_at, connector_id FROM control_connector_generations
 WHERE environment_id = $1 AND connector_id = $2

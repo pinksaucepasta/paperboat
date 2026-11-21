@@ -24,9 +24,9 @@ func (s *EdgeService) SetNodeCredentials(resolver nodeauth.Resolver) { s.nodeCre
 // binding. Account pairing and operator administration have separate handlers.
 func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 	if nodeauth.Managed(r, s.credential) {
-		// The shared credential names no node: it only reaches certificate distribution, which checks
-		// it again; every node read or write needs the node's own bound credential.
-		return strings.HasPrefix(r.URL.Path, "/v1/edge/certificates/distributions/"), nil
+		// The shared credential names no node: every node read or write, certificate distribution
+		// included, needs the node's own bound credential.
+		return false, nil
 	}
 	if s.nodeCredentials == nil || nodeauth.Bearer(r) == "" {
 		return false, nil
@@ -48,7 +48,8 @@ func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 		return r.Header.Get("X-Paperboat-Edge-Node-ID") == node && r.Header.Get("X-Paperboat-Edge-Process-Epoch") != "", nil
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/edge/certificates/distributions/") {
-		return r.Header.Get("X-Paperboat-Edge-Node-ID") == node, nil
+		// The distribution hub binds the queue to this credential's node itself.
+		return true, nil
 	}
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/relay/nodes/observe" {
 		// The observation handler checks the decoded node against this credential binding.
