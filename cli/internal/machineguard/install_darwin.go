@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
@@ -204,23 +203,12 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 	if err := controller.Apply(ctx, cfg.LaunchPath, true); err != nil {
 		return err
 	}
-	ready, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	for {
-		client, connectErr := Connect(ready, cfg.Socket)
-		if connectErr == nil {
-			connectErr = client.ReplaceNames(ready, nil)
-			client.Close()
-			if connectErr == nil {
-				return trustErr
-			}
-		}
-		select {
-		case <-ready.Done():
-			return fmt.Errorf("machine guard installed but not ready; inspect launchctl print %s and retry installation: %w", domain, ready.Err())
-		case <-time.After(100 * time.Millisecond):
-		}
+	if err := waitGuardReady(ctx, guardInstallReadyTimeout, func(probeCtx context.Context) error {
+		return probeGuardStatus(probeCtx, cfg.Socket)
+	}); err != nil {
+		return fmt.Errorf("machine guard installed but not ready; inspect launchctl print %s and retry installation: %w", domain, err)
 	}
+	return trustErr
 }
 
 func darwinCheckInstallOwnership(cfg darwinInstallConfig) error {

@@ -151,6 +151,11 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 			return fmt.Errorf("machine guard service: %w: %s", err, output)
 		}
 	}
+	if err := waitGuardReady(ctx, guardInstallReadyTimeout, func(probeCtx context.Context) error {
+		return probeGuardStatus(probeCtx, DefaultSocket)
+	}); err != nil {
+		return fmt.Errorf("machine guard installed but not ready; inspect systemctl status paperboat-machineguard.service and retry installation: %w", err)
+	}
 	return trustErr
 }
 

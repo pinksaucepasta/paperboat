@@ -18,7 +18,7 @@ func TestWaitGuardReadyOutlastsALateStartAndNamesATimeout(t *testing.T) {
 		}
 		return nil
 	}
-	if err := waitGuardReady(context.Background(), 10*time.Second, late); err != nil || calls != 5 {
+	if err := waitGuardReady(context.Background(), 10*time.Second, late); err != nil || calls <= 5 {
 		t.Fatalf("a guard that starts after four failed probes: err=%v calls=%d", err, calls)
 	}
 	never := func(context.Context) error { return errors.New("pipe not found") }
@@ -37,7 +37,7 @@ func TestWaitGuardReadyOutlastsALateStartAndNamesATimeout(t *testing.T) {
 func TestStartGuardWithRetryRestartsAStarvedStart(t *testing.T) {
 	previous, previousAttempts := guardAttemptTimeout, guardStartAttempts
 	t.Cleanup(func() { guardAttemptTimeout, guardStartAttempts = previous, previousAttempts })
-	guardAttemptTimeout, guardStartAttempts = 150*time.Millisecond, 3 // the test's own budget; production values are asserted below
+	guardAttemptTimeout, guardStartAttempts = 700*time.Millisecond, 3 // the test's own budget; production values are asserted below
 	restarts := 0
 	probe := func(context.Context) error {
 		if restarts == 0 {

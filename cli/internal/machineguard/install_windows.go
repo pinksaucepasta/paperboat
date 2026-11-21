@@ -160,15 +160,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, _ map[s
 		}
 	}
 	if err := startGuardWithRetry(ctx, func(probeCtx context.Context) error {
-		client, connectErr := Connect(probeCtx, DefaultSocket)
-		if connectErr != nil {
-			return connectErr
-		}
-		readyErr := client.ReplaceNames(probeCtx, nil)
-		if closeErr := client.Close(); readyErr == nil {
-			return closeErr
-		}
-		return readyErr
+		return probeGuardStatus(probeCtx, DefaultSocket)
 	}, func(restartCtx context.Context) error {
 		// Not running (it already exited) is fine for /End; wait until the task has left Running so /Run starts a
 		// new process instead of being ignored (IgnoreNew), then /Run must work.

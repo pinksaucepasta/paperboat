@@ -58,23 +58,52 @@ func lockedGuardImage(err error) bool {
 	return errors.Is(err, fs.ErrPermission) || errors.As(err, &errno) && errno == 32 // ERROR_SHARING_VIOLATION
 }
 
-// waitGuardReady calls probe (500 ms each) until it succeeds, timeout passes or ctx ends.
+const (
+	guardInstallReadyTimeout = 10 * time.Second
+	guardReadyStability      = 300 * time.Millisecond
+)
+
+func probeGuardStatus(ctx context.Context, socket string) error {
+	client, err := Connect(ctx, socket)
+	if err != nil {
+		return fmt.Errorf("connect to the machine guard: %w", err)
+	}
+	defer client.Close()
+	if _, err := client.Status(ctx); err != nil {
+		return fmt.Errorf("read machine guard status: %w", err)
+	}
+	return nil
+}
+
+// waitGuardReady requires repeated ready replies through the stability window.
+// A dropped connection or a non-ready reply restarts that window.
 func waitGuardReady(ctx context.Context, timeout time.Duration, probe func(context.Context) error) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	wait, stop := context.WithTimeout(ctx, timeout)
+	defer stop()
+	var readySince time.Time
+	var lastErr error
+	for wait.Err() == nil {
+		probeCtx, cancel := context.WithTimeout(wait, 500*time.Millisecond)
 		err := probe(probeCtx)
 		cancel()
-		if err == nil {
+		if err != nil {
+			lastErr = err
+			readySince = time.Time{}
+		} else if readySince.IsZero() {
+			readySince = time.Now()
+		} else if time.Since(readySince) >= guardReadyStability && wait.Err() == nil {
 			return nil
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("machine guard did not become ready: %w", err)
-		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-wait.Done():
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if lastErr == nil {
+		lastErr = wait.Err()
+	}
+	return fmt.Errorf("machine guard did not become ready: %w", lastErr)
 }

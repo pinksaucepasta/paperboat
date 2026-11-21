@@ -78,7 +78,7 @@ func assertDarwinInstallerReady(t *testing.T, socket string) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if err := client.ReplaceNames(ctx, nil); err != nil {
+	if _, err := client.Status(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -118,13 +118,13 @@ func serveDarwinInstallerReadiness(conn net.Conn) {
 			return
 		}
 		var in request
-		if json.Unmarshal(data, &in) != nil || in.Operation != "names" || len(in.Names) != 0 {
+		if json.Unmarshal(data, &in) != nil || in.Operation != "status" {
 			return
 		}
 		if _, _, err := unixConn.WriteMsgUnix([]byte{0}, nil, nil); err != nil {
 			return
 		}
-		out, _ := json.Marshal(response{})
+		out, _ := json.Marshal(response{Status: &RuntimeStatus{Ready: true}})
 		if writeFrame(unixConn, out) != nil {
 			return
 		}
