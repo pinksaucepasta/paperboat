@@ -24,7 +24,8 @@ func (s *EdgeService) SetNodeCredentials(resolver nodeauth.Resolver) { s.nodeCre
 // binding. Account pairing and operator administration have separate handlers.
 func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 	if nodeauth.Managed(r, s.credential) {
-		return true, nil
+		// The shared credential names no node, so it may never write a node's own registration or heartbeat.
+		return r.URL.Path != "/v1/nodes/register" && r.URL.Path != "/v1/nodes/heartbeat", nil
 	}
 	if s.nodeCredentials == nil || nodeauth.Bearer(r) == "" {
 		return false, nil
