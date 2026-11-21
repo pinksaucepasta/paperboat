@@ -17,7 +17,7 @@ import {
   type WorkspaceDomain,
 } from "@/lib/workspace-domains"
 import { cn } from "@/lib/utils"
-import { CommandBlock } from "@/components/add-machine-dialog"
+import { DnsHealth, DnsRecords } from "@/components/domains/dns-records"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Time } from "@/components/time"
@@ -285,12 +285,6 @@ function RemoveDomain({
   )
 }
 
-const purposes: Record<string, string> = {
-  verification: "Proves you control the domain",
-  routing: "Needed to serve names under it",
-  apex_routing: `Optional: serves the domain itself`,
-}
-
 /** A domain's panel: the DNS records with live status, the certificate, and what uses it. */
 function DomainPanel({ domain, onRemoved }: { domain: WorkspaceDomain; onRemoved: () => void }) {
   const workspace = useWorkspace()
@@ -313,15 +307,16 @@ function DomainPanel({ domain, onRemoved }: { domain: WorkspaceDomain; onRemoved
         <PanelSection
           title="DNS records"
           action={
-            <Button variant="secondary" size="sm" disabled={check.isPending} onClick={() => check.mutate()}>
-              {check.isPending ? "Checking…" : "Check now"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <DnsHealth health={domain.dns_health} />
+              <Button variant="secondary" size="sm" disabled={check.isPending} onClick={() => check.mutate()}>
+                {check.isPending ? "Checking…" : "Check now"}
+              </Button>
+            </div>
           }
         >
           {!verified && <p className="text-sm text-muted-foreground">Add these records at your DNS provider.</p>}
-          {domain.records.map((record) => (
-            <Record key={`${record.name}-${record.type}-${record.value}`} record={record} />
-          ))}
+          <DnsRecords domain={domain} />
           {domain.dns_failure && <p className="text-sm text-destructive">{domain.dns_failure.message}</p>}
           {domain.last_checked_at && (
             <p className="text-xs text-muted-foreground">
@@ -424,27 +419,6 @@ function PanelSection({
       </div>
       {children}
     </section>
-  )
-}
-
-/** One DNS record to add. Name and value stay whole on one line, scroll sideways, and copy on click. */
-function Record({ record }: { record: WorkspaceDomain["records"][number] }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <p className="text-xs text-muted-foreground">{purposes[record.purpose] ?? record.purpose}</p>
-      <dl className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-sm">
-        <dt className="text-muted-foreground">Type</dt>
-        <dd className="font-mono text-code">{record.type}</dd>
-        <dt className="text-muted-foreground">Name</dt>
-        <dd className="min-w-0">
-          <CommandBlock command={record.name} label="Copy name" />
-        </dd>
-        <dt className="text-muted-foreground">Value</dt>
-        <dd className="min-w-0">
-          <CommandBlock command={record.value} label="Copy value" />
-        </dd>
-      </dl>
-    </div>
   )
 }
 
