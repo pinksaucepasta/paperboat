@@ -1160,6 +1160,8 @@ elif sys.argv[2]=="session-limit":
  assert r["opened"]==25 and r["closed_not_counted"] and r["reopened_after_close"]==5
 elif sys.argv[2]=="tunnel-transfer":
  assert r["upload_16mib"] and r["download_16mib"]
+elif sys.argv[2]=="tunnel-address":
+ assert all(r[k] for k in ("new_serves_marker", "old_stops_serving", "console_shows_new_address"))
 elif sys.argv[2]=="tunnel-survival":
  assert all(r[k] for k in ("pause_resume", "daemon_restart", "update", "host_service_restart"))
 elif sys.argv[2]=="preview-survival":
@@ -1304,6 +1306,7 @@ test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_device_application tunnel-survival tunnel_survival.py
 test_device_application tunnel-failures tunnel_failures.py
 test_device_application tunnel-transfer tunnel_transfer.py
+test_device_application tunnel-address tunnel_address.py
 test_local_access_settings
 test_device_application doctor-lifecycle doctor_lifecycle.py
 test_device_application session-limit session_limit.py
