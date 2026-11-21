@@ -68,6 +68,7 @@ type productionNativePeerService struct {
 	lastErr         error
 	cleanupErr      error
 	startGeneration func(context.Context) (*productionNativePeerGeneration, error)
+	inbound         inboundWatchdog
 }
 
 type productionNativePeerGeneration struct {
@@ -273,12 +274,21 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
+	s.inbound.reset()
+	generationErrors := make(chan error, 3)
 	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
 		})
 	}, Observe: func(event native.Event) {
+		if trip, next := s.inbound.observe(event.Kind, event.Err); trip {
+			diagnosticlog.TryInfo("native inbound watchdog", "stage", "rebuild", "next_window", next.String())
+			select {
+			case generationErrors <- errInboundWedged:
+			default:
+			}
+		}
 		if event.Err == nil {
 			return
 		}
@@ -335,7 +345,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(err, owner.Close())
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: make(chan error, 3), identityFingerprint: self.QUICCertificateFingerprint, authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
+	generation := &productionNativePeerGeneration{cancel: cancel, owner: owner, apps: apps, errors: generationErrors, identityFingerprint: self.QUICCertificateFingerprint, authority: authority, requestRefresh: authority.RequestUrgentRefresh, control: control}
 	if len(regions) != 0 {
 		generation.region = regions[0]
 	}
