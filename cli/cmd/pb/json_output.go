@@ -129,10 +129,13 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 		result.Message = "The operation failed."
 	}
 	// A privileged install step that failed names its step here: with --json nothing is printed above.
-	var stepped interface{ FailedStep() string }
-	if errors.As(err, &stepped) {
-		result.FailedStep = stepped.FailedStep()
-	}
+	boundedErrorWalk(err, func(cause error) bool {
+		stepped, ok := cause.(interface{ FailedStep() string })
+		if ok && stepped.FailedStep() != "" {
+			result.FailedStep = stepped.FailedStep()
+		}
+		return result.FailedStep != ""
+	})
 	if boundedErrorWalk(err, func(cause error) bool { _, ok := cause.(*computerRemovedError); return ok }) {
 		result.Code, result.Category, result.StateChanged = "computer_removed", "conflict", false
 		result.Recovery = "Run pb login --fresh to add this computer again; it resets the local Paperboat setup (the Inbox is kept)."

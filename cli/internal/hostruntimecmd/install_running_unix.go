@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
@@ -363,18 +364,25 @@ func notReadyStep(stderr string) string {
 	return step
 }
 
-// privilegedFailedStep is the step the privileged child named: its last "pb: cause:" line, else its last "pb: " line
-// ("pb: Paperboat installation failed: <step>. Run pb doctor, then retry."), without the framing.
+// privilegedFailedStep is the step the privileged child named: its last "pb: cause:" line, else its last
+// "pb: Paperboat installation failed: <step>. Run pb doctor, then retry." line; printable and at most 200 bytes.
 func privilegedFailedStep(stderr string) string {
-	if step := notReadyStep(stderr); step != "" {
-		return step
-	}
-	step := ""
-	for _, line := range strings.Split(stderr, "\n") {
-		if text, ok := strings.CutPrefix(strings.TrimSpace(line), "pb: "); ok {
-			text = strings.TrimPrefix(text, "Paperboat installation failed: ")
-			step = strings.TrimSuffix(strings.TrimSuffix(text, " Run pb doctor, then retry."), ".")
+	step := notReadyStep(stderr)
+	if step == "" {
+		for _, line := range strings.Split(stderr, "\n") {
+			if text, ok := strings.CutPrefix(strings.TrimSpace(line), "pb: Paperboat installation failed: "); ok {
+				step = strings.TrimSuffix(strings.TrimSuffix(text, " Run pb doctor, then retry."), ".")
+			}
 		}
+	}
+	step = strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) {
+			return r
+		}
+		return -1
+	}, step)
+	if len(step) > 200 {
+		step = strings.ToValidUTF8(step[:200], "")
 	}
 	return step
 }

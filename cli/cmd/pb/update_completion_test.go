@@ -235,7 +235,9 @@ func TestUpdateFromABundleDoesNotClaimAnAutomaticUpdateSetting(t *testing.T) {
 
 type steppedInstallFailure struct{}
 
-func (steppedInstallFailure) Error() string      { return "installing failed at step: install Paperboat machine guard" }
+func (steppedInstallFailure) Error() string {
+	return "installing failed at step: install Paperboat machine guard"
+}
 func (steppedInstallFailure) FailedStep() string { return "install Paperboat machine guard" }
 
 // An install step failure carries its step into the JSON error and never points at output --json does not print.
