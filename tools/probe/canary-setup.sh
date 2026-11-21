@@ -22,6 +22,7 @@ on "sudo -n docker exec $ct sh -c 'rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/de
 on "sudo -n docker exec $ct sh -c 'loginctl enable-linger pbt && systemctl start user@1000.service'"
 on "sudo -n docker exec -i $ct sh -c 'cat >/home/pbt/pb && chmod 755 /home/pbt/pb && chown pbt:pbt /home/pbt/pb'" <"$bin"
 as_pbt "./pb install${CANARY_SERVER:+ --server $CANARY_SERVER}"
+on "sudo -n docker exec -i $ct python3 -" <"$here/sweep_daemons.py"
 [ -n "${TOKEN_CMD:-}" ] || exit 0
 sh -c "$TOKEN_CMD $name" | on "sudo -n docker exec -i $ct sh -c 'umask 077; cat >/home/pbt/token; chown pbt /home/pbt/token'"
 as_pbt ".local/bin/pb pair${CANARY_SERVER:+ --server $CANARY_SERVER} --enrollment-token-file /home/pbt/token --name $name --json" | head -c 400; echo

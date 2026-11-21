@@ -114,9 +114,20 @@ def stop_pair_daemon():
     """Stop the pair host's daemon BEFORE its machine is revoked: a running daemon redials the edge for ~20 s after the revoke and every
     redial is a carrier refusal (21 unknown_machine from this key and this host failed the edge gate of server roll 913, 2026-11-20).
     A stopped or unregistered service is a no-op; the next run's `pb pair` installs and starts the daemon again."""
-    rc, out = pb("service", "stop", "--json", timeout=90)
-    if rc:
-        raise RuntimeError(f"the pair host's daemon did not stop (exit {rc}): {json.dumps(out)[:200]}")
+    problems = []
+    try:
+        rc, out = pb("service", "stop", "--json", timeout=90)
+        if rc:
+            problems.append(f"the pair host's daemon did not stop (exit {rc}): {json.dumps(out)[:200]}")
+    except (OSError, subprocess.SubprocessError) as error:
+        problems.append(f"the pair host's daemon did not stop: {type(error).__name__}")
+    try:
+        subprocess.run([*shlex.split(os.environ["ACCOUNT_RUN"]), "sudo", "-n", "python3", "-"],
+                       input=(HERE / "sweep_daemons.py").read_text(), capture_output=True, text=True, check=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        problems.append(f"the pair host's foreign-config daemon sweep failed: {type(error).__name__}")
+    if problems:
+        raise RuntimeError("; ".join(problems))
 
 
 def cleanup(state):

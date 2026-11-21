@@ -55,7 +55,13 @@ class Cleanup(unittest.TestCase):
         def pb(*args, **kwargs):
             calls.append(" ".join(args[:2]))
             return (stop_rc, {}) if args[0] == "service" else (0, {"server_revocation": "complete"})
-        with mock.patch.object(account, "pb", pb), mock.patch.object(account, "revoke_probe_machines", lambda state: calls.append("revoke")):
+        def runner(*args, **kwargs):
+            calls.append("sweep")
+            return mock.Mock(returncode=0)
+
+        with mock.patch.dict(os.environ, ENV), mock.patch.object(account, "pb", pb), \
+                mock.patch.object(account.subprocess, "run", runner), \
+                mock.patch.object(account, "revoke_probe_machines", lambda state: calls.append("revoke")):
             try:
                 account.cleanup("state")
                 error = None
@@ -66,11 +72,11 @@ class Cleanup(unittest.TestCase):
     def test_the_daemon_stops_before_its_machine_is_revoked(self):
         # a daemon still running when its machine is revoked redials the edge for ~20 s: 21 refusals failed the gate of roll 913
         calls, error = self.cleanup()
-        self.assertEqual((calls, error), (["auth logout", "service stop", "revoke"], None))
+        self.assertEqual((calls, error), (["auth logout", "service stop", "sweep", "revoke"], None))
 
     def test_a_daemon_that_will_not_stop_is_reported_but_the_machine_is_still_revoked(self):
         calls, error = self.cleanup(stop_rc=1)
-        self.assertEqual(calls, ["auth logout", "service stop", "revoke"])
+        self.assertEqual(calls, ["auth logout", "service stop", "sweep", "revoke"])
         self.assertIn("did not stop", error)
 
     def test_pair_stops_a_killed_runs_daemon_before_sweeping_its_machine(self):
