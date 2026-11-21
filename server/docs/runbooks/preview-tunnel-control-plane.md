@@ -81,7 +81,7 @@ worker publishes within its 10 s loop) and not a redeploy.
 
 Enrol the new node into the same region, so the region briefly has two nodes, and swap without a gap:
 
-1. Enrol the new machine in the region (`POST /v1/admin/nodes/{node_id}/enroll`) and wait until it is `ready`.
+1. Install the new machine with `pbh install --region <id>`, claim it from the admin panel, and wait until it is `ready`.
 2. `verify-ingress` on the new node; it joins the wildcards on the next tick and machines attach to it.
 3. **Drain** the old node (`drain`, or `drain-move` to push its machines off now, see operator-admin.md). It leaves the
    wildcards at once.

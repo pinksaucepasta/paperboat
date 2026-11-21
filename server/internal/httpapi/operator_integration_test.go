@@ -370,7 +370,7 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	nodeID := "node_" + strings.ReplaceAll(user.ID, "-", "_")
 	defer func() {
 		store.Pool().Exec(ctx, `DELETE FROM operator_infrastructure_operations WHERE actor_user_id=$1`, operatorID)
-		store.Pool().Exec(ctx, `DELETE FROM managed_node_authority WHERE node_id=$1`, nodeID)
+		store.Pool().Exec(ctx, `DELETE FROM selfhost_installations WHERE node_id=$1`, nodeID)
 		store.Pool().Exec(ctx, `DELETE FROM control_tunnel_nodes WHERE id=$1`, nodeID)
 		store.Pool().Exec(ctx, `DELETE FROM operator_regions WHERE id=$1`, regionID)
 	}()
@@ -382,34 +382,22 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	if response := request("POST", regionPath, `{"revision":0,"display_name":"Test region"}`, true, infraHeaders); response.Code != 200 {
 		t.Fatalf("region creation %d %s", response.Code, response.Body.String())
 	}
-	nodeInput := operatorNodeInput{Revision: 0, RegionID: regionID, EdgePool: regionID, FailureDomain: "rack-a", EndpointHost: "relay.example.test", EndpointTCPPort: 443, EndpointQUICPort: 444, Roles: []string{"relay"}, Transports: []string{"derp_quic", "derp_wss"}, CapacityLimit: 32}
-	nodeBody, _ := json.Marshal(nodeInput)
-	infraHeaders["Operator-Target"] = nodeID
-	infraHeaders["Idempotency-Key"] = "node-enroll-" + user.ID
-	nodeResponse := request("POST", "/v1/admin/nodes/"+nodeID+"/enroll", string(nodeBody), true, infraHeaders)
-	if nodeResponse.Code != 200 {
-		t.Fatalf("node enrollment %d %s", nodeResponse.Code, nodeResponse.Body.String())
+	// A managed node is a global pbh installation in the region; there is no operator enrolment.
+	if _, err = store.Pool().Exec(ctx, `INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit) VALUES($1,$2,'1.0','epoch','relay.example.test',443,444,'relay.example.test',443,444,'registered',false,$2,'rack-a',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],32)`, nodeID, regionID); err != nil {
+		t.Fatal(err)
 	}
-	var enrolled struct {
-		Data operatorinfra.NodeMutationResult `json:"data"`
+	if _, err = store.Pool().Exec(ctx, `INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),decode(md5($1)||md5($1),'hex'),'\x00','managed fixture','relay','global','global',$1,true)`, nodeID); err != nil {
+		t.Fatal(err)
 	}
-	if err = json.Unmarshal(nodeResponse.Body.Bytes(), &enrolled); err != nil || enrolled.Data.RuntimeCredential == "" || enrolled.Data.Node.Ready {
-		t.Fatal("enrollment authority", err)
-	}
-	if resolved, err := infrastructureService.RuntimeNode(ctx, enrolled.Data.RuntimeCredential); err != nil || resolved != nodeID {
-		t.Fatal("scoped runtime credential", err)
-	}
-	if listed := request("GET", "/v1/admin/nodes", "", false); listed.Code != 200 || strings.Contains(listed.Body.String(), enrolled.Data.RuntimeCredential) {
-		t.Fatal("node list disclosed credential", listed.Code)
-	}
-	if replay := request("POST", "/v1/admin/nodes/"+nodeID+"/enroll", string(nodeBody), true, infraHeaders); replay.Code != 200 || replay.Body.String() != nodeResponse.Body.String() {
-		t.Fatal("enrollment replay changed", replay.Code)
+	if listed := request("GET", "/v1/admin/nodes", "", false); listed.Code != 200 {
+		t.Fatal("node list", listed.Code)
 	}
 	infraHeaders["Idempotency-Key"] = "node-site-" + user.ID
-	for _, body := range []string{`{"site":"Mumbai","region_id":"x"}`, `{"site":"Mumbai","revision":1}`} {
-		if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", body, true, infraHeaders); response.Code != 400 || !strings.Contains(response.Body.String(), "Only site is accepted") {
-			t.Fatalf("site action %s: %d %s", body, response.Code, response.Body.String())
-		}
+	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai","region_id":"x"}`, true, infraHeaders); response.Code != 400 {
+		t.Fatalf("site action with region: %d %s", response.Code, response.Body.String())
+	}
+	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai","revision":1}`, true, infraHeaders); response.Code != 400 || !strings.Contains(response.Body.String(), "Only site is accepted") {
+		t.Fatalf("site action with revision: %d %s", response.Code, response.Body.String())
 	}
 	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai"}`, true, infraHeaders); response.Code != 200 {
 		t.Fatalf("site action %d %s", response.Code, response.Body.String())
@@ -422,9 +410,6 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	infraHeaders["Idempotency-Key"] = "region-disable-" + user.ID
 	if response := request("POST", "/v1/admin/regions/"+regionID+"/disable", `{"revision":1}`, true, infraHeaders); response.Code != 200 {
 		t.Fatalf("disable region %d %s", response.Code, response.Body.String())
-	}
-	if _, err := infrastructureService.RuntimeNode(ctx, enrolled.Data.RuntimeCredential); err == nil {
-		t.Fatal("disabled region runtime authority accepted")
 	}
 
 	target := user.ID + "_target"

@@ -11,7 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 )
 
-// drainFixture enrolls a managed edge node in a new region and gives it one machine holding a live carrier.
+// drainFixture adds a managed edge node in a new region and gives it one machine holding a live carrier.
 func drainFixture(t *testing.T) (s *Service, store *db.DB, admin string, node Node, machine string) {
 	t.Helper()
 	store = infraTestDB(t)
@@ -30,9 +30,11 @@ func drainFixture(t *testing.T) (s *Service, store *db.DB, admin string, node No
 	if err != nil {
 		t.Fatal(err)
 	}
-	enrolled, err := s.MutateNode(ctx, admin, "node-enroll-"+x, NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)})
-	if err != nil {
-		t.Fatal(err)
+	nodeID := "managed_" + x
+	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", nodeID, region.ID, "managed:"+region.ID, "zone-a", "edge.example.test", []string{"edge"}, []string{"http3"}, 8)
+	page, err := s.ListNodes(ctx, admin, region.ID, "", 10)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("read managed node %+v %v", page, err)
 	}
 	user, env, route := "drain_user_"+x, "drain_env_"+x, "drain_route_"+x
 	machine = "drain_m_" + x
@@ -40,14 +42,14 @@ func drainFixture(t *testing.T) (s *Service, store *db.DB, admin string, node No
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, env, user)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,public_identity_key) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,rpad($1,40,'k'))`, machine, user, env)
 	exec(`INSERT INTO paperboat.control_routes(id,environment_id,kind,public_host,target_host,target_port) VALUES($1,$2,'runtime_https_wss',$1||'.runtime.example.test','127.0.0.1',38080)`, route, env)
-	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',m.public_identity_key,1,'session_'||gen_random_uuid(),'session_'||gen_random_uuid(),'{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, enrolled.Node.ID, machine)
+	exec(`INSERT INTO paperboat.runtime_carrier_attachments(route_id,machine_id,account_id,installation_generation,worker_generation,process_id,generation,edge_node_id,edge_process_epoch,public_identity_key,route_revision,session_id,preview_session_id,admission,expires_at,active) SELECT $1,m.id,m.user_id,1,1,'process',1,$2,'epoch',m.public_identity_key,1,'session_'||gen_random_uuid(),'session_'||gen_random_uuid(),'{}',now()+interval '1 hour',true FROM paperboat.user_machines m WHERE m.id=$3`, route, nodeID, machine)
 	t.Cleanup(func() {
 		bg := context.Background()
 		store.SQL().ExecContext(bg, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
 		store.SQL().ExecContext(bg, `DELETE FROM paperboat.control_environments WHERE id=$1`, env)
 		store.SQL().ExecContext(bg, `DELETE FROM paperboat.users WHERE id=$1`, user)
 	})
-	return s, store, admin, enrolled.Node, machine
+	return s, store, admin, page.Items[0], machine
 }
 
 func topicGenerations(t *testing.T, store *db.DB, machine string) int {
@@ -146,25 +148,10 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 			t.Fatalf("%s of the last serving edge: %v", action, err)
 		}
 	}
-	if _, err := s.MutateNode(ctx, admin, "update-last-"+node.ID, NodeMutation{Action: "update", NodeID: node.ID, Revision: node.Revision, RegionID: node.RegionID, EdgePool: node.EdgePool, FailureDomain: "zone-c", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8}); !errors.Is(err, ErrLastServingEdge) {
-		t.Fatalf("update of the last serving edge: %v", err)
-	}
-	// Rotation keeps the address and so the verified ingress: the last edge stays serving (until the node, redeployed
-	// with the new credential, heartbeats again; here the heartbeat is still fresh).
-	rotated, err := s.MutateNode(ctx, admin, "rotate-last-"+node.ID, NodeMutation{Action: "rotate", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"})
-	if err != nil {
-		t.Fatalf("rotate of the last serving edge: %v", err)
-	}
-	node = rotated.Node
-	if !serving(t, store, node.ID) {
-		t.Fatal("rotate took the node out of the serving set")
-	}
-	second, err := s.MutateNode(ctx, admin, "enroll-second-"+node.ID, NodeMutation{Action: "enroll", NodeID: node.ID + "_b", RegionID: node.RegionID, EdgePool: "managed:" + node.RegionID, FailureDomain: "zone-b", EndpointHost: "edge-b.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	serve(second.Node.ID)
-	if _, err = s.MutateNode(ctx, admin, "drain-with-replacement-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); err != nil {
+	second := node.ID + "_b"
+	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", second, node.RegionID, "managed:"+node.RegionID, "zone-b", "edge-b.example.test", []string{"edge"}, []string{"http3"}, 8)
+	serve(second)
+	if _, err := s.MutateNode(ctx, admin, "drain-with-replacement-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); err != nil {
 		t.Fatalf("drain with another serving edge in the region: %v", err)
 	}
 }

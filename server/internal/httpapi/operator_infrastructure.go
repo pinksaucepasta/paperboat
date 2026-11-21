@@ -11,21 +11,8 @@ type operatorRegionInput struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 type operatorNodeInput struct {
-	RegionID               string   `json:"region_id,omitempty"`
-	EdgePool               string   `json:"edge_pool,omitempty"`
-	FailureDomain          string   `json:"failure_domain,omitempty"`
-	EndpointHost           string   `json:"endpoint_host,omitempty"`
-	EndpointTCPPort        int32    `json:"endpoint_tcp_port,omitempty"`
-	EndpointQUICPort       int32    `json:"endpoint_quic_port,omitempty"`
-	Roles                  []string `json:"roles,omitempty"`
-	Transports             []string `json:"transports,omitempty"`
-	CapacityLimit          int64    `json:"capacity_limit,omitempty"`
-	Revision               int64    `json:"revision"`
-	UsagePublicKey         []byte   `json:"usage_public_key,omitempty"`
-	PeerWireGuardPublicKey []byte   `json:"peer_wireguard_public_key,omitempty"`
-	PeerDiscoPublicKey     []byte   `json:"peer_disco_public_key,omitempty"`
-	PeerVirtualAddress     string   `json:"peer_virtual_address,omitempty"`
-	Site                   string   `json:"site,omitempty"`
+	Revision int64  `json:"revision"`
+	Site     string `json:"site,omitempty"`
 }
 
 func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
@@ -87,24 +74,23 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 			writeJSON(w, 200, SuccessResponse{Data: out})
 		})))
 	}
-	for _, action := range []string{"enroll", "update", "drain", "drain-move", "resume", "retire", "rotate", "verify-ingress", "site"} {
+	for _, action := range []string{"drain", "drain-move", "resume", "retire", "verify-ingress", "site"} {
 		mux.Handle("POST /v1/admin/nodes/{node_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var in operatorNodeInput
 			r.Body = http.MaxBytesReader(w, r.Body, 8192)
 			if !decodeStrictJSON(w, r, &in) {
 				return
 			}
-			other := in.RegionID != "" || in.EdgePool != "" || in.FailureDomain != "" || in.EndpointHost != "" || in.EndpointTCPPort != 0 || in.EndpointQUICPort != 0 || len(in.Roles) != 0 || len(in.Transports) != 0 || in.CapacityLimit != 0 || len(in.UsagePublicKey) != 0 || len(in.PeerWireGuardPublicKey) != 0 || len(in.PeerDiscoPublicKey) != 0 || in.PeerVirtualAddress != ""
-			if action == "site" && (other || in.Revision != 0) {
+			if action == "site" && in.Revision != 0 {
 				writeError(w, r, 400, "invalid_request", "Only site is accepted for this node action.")
 				return
 			}
-			if action != "enroll" && action != "update" && action != "site" && (other || in.Site != "") {
+			if action != "site" && in.Site != "" {
 				writeError(w, r, 400, "invalid_request", "Only revision is accepted for this node action.")
 				return
 			}
 			p, _ := principalFromContext(r.Context())
-			out, err := service.MutateNode(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), operatorinfra.NodeMutation{Action: action, NodeID: r.PathValue("node_id"), RegionID: in.RegionID, EdgePool: in.EdgePool, FailureDomain: in.FailureDomain, EndpointHost: in.EndpointHost, EndpointTCPPort: in.EndpointTCPPort, EndpointQUICPort: in.EndpointQUICPort, Roles: in.Roles, Transports: in.Transports, CapacityLimit: in.CapacityLimit, Revision: in.Revision, UsagePublicKey: in.UsagePublicKey, PeerWireGuardPublicKey: in.PeerWireGuardPublicKey, PeerDiscoPublicKey: in.PeerDiscoPublicKey, PeerVirtualAddress: in.PeerVirtualAddress, Site: in.Site, Reason: r.Header.Get("Operator-Reason")})
+			out, err := service.MutateNode(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), operatorinfra.NodeMutation{Action: action, NodeID: r.PathValue("node_id"), Revision: in.Revision, Site: in.Site, Reason: r.Header.Get("Operator-Reason")})
 			if err != nil {
 				operatorInfrastructureError(w, r, err)
 				return

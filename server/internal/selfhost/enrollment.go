@@ -526,6 +526,16 @@ func checkEnrollExpectation(in EnrollRequest, i Inspection) error {
 // was removed after the dialog opened). A component that would start a new implicit region refuses when its slug is
 // another region's display name, so two regions never share a name.
 func checkReserveRegions(ctx context.Context, tx *sql.Tx, scope Scope, i Inspection, expectRegion string) error {
+	if scope.Kind == "global" {
+		// Paperboat's own node: its install region is an operator region (created enabled on first use), which puts it
+		// in that region's serving set, wildcard DNS and drains.
+		for _, c := range i.Components {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1) ON CONFLICT (id) DO NOTHING`, c.Region); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if expectRegion != "" {
 		known, _, err := regionKnown(ctx, tx, scope, expectRegion)
 		if err != nil {

@@ -47,7 +47,7 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 	service.TrustDocuments = func(context.Context) ([]byte, []byte, error) {
 		return json.RawMessage(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"claim-test","x":"dGVzdA"}]}`), json.RawMessage(`{"version":1,"revocations":[]}`), nil
 	}
-	newHelper := func() (string, string) {
+	newHelper := func(extra ...string) (string, string) {
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.Chmod(dir, 0700); err != nil {
@@ -60,6 +60,7 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 		address := listen.Addr().String()
 		listen.Close()
 		command := exec.Command(binary, "install", "--no-service", "--state-dir", dir, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--enable", "both")
+		command.Args = append(command.Args, extra...)
 		if output, e := command.CombinedOutput(); e != nil {
 			t.Fatalf("initialize production helper: %v: %s", e, output)
 		}
@@ -171,5 +172,38 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 	}
 	if _, err = service.Enroll(ctx, account, request, false); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("removed claim resumed: %v", err)
+	}
+	// An operator's claim of a pbh install is Paperboat's own node: global, in the operator region named at install
+	// (created on first use), and so one of the managed nodes the serving set, wildcard DNS and drains read.
+	region := "gr" + strings.ToLower(randomIdentity()[:8])
+	defer store.SQL().ExecContext(ctx, `DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
+	address, code = newHelper("--region", region)
+	service.DialAddress = func(context.Context, string) (string, error) { return address, nil }
+	managed, err := service.Enroll(ctx, account, EnrollRequest{Address: address, Code: code, Scope: Scope{Kind: "global"}}, true)
+	if err != nil || len(managed) != 2 {
+		t.Fatalf("operator global claim: %v (%d nodes)", err, len(managed))
+	}
+	defer func() {
+		for _, i := range managed {
+			store.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_usage_verification_keys WHERE edge_node_id=$1`, i.NodeID)
+			store.SQL().ExecContext(ctx, `DELETE FROM paperboat.selfhost_installations WHERE id=$1`, i.InstallationID)
+			store.SQL().ExecContext(ctx, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, i.NodeID)
+		}
+	}()
+	var enabled bool
+	if err = store.SQL().QueryRowContext(ctx, `SELECT enabled FROM paperboat.operator_regions WHERE id=$1`, region).Scan(&enabled); err != nil || !enabled {
+		t.Fatalf("global claim did not create its enabled operator region: %v", err)
+	}
+	for _, i := range managed {
+		var got string
+		if err = store.SQL().QueryRowContext(ctx, `SELECT region_id FROM paperboat.managed_node_authority WHERE node_id=$1 AND retired_at IS NULL`, i.NodeID).Scan(&got); err != nil || got != region {
+			t.Fatalf("global node %s is not a managed node of %s: %q %v", i.NodeID, region, got, err)
+		}
+	}
+	for _, i := range installs {
+		var n int
+		if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.managed_node_authority WHERE node_id=$1`, i.NodeID).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("account node counted as managed: %d %v", n, err)
+		}
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"net"
 	"os"
@@ -88,7 +87,7 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 	}
 	runtime, err := tunnelv1.NewCertificateRuntime(tunnelv1.CertificateRuntimeConfig{
 		WorkspaceCertificates:  domains,
-		NodeCredentials:        nodeauth.Composite{operatorinfra.NewService(database, cfg.Secrets.EncryptionKey), selfhost.New(database, cfg.Secrets.EncryptionKey)},
+		NodeCredentials:        nodeauth.Composite{selfhost.New(database, cfg.Secrets.EncryptionKey)},
 		Database:               database,
 		Issuer:                 issuer,
 		CAA:                    caaInspector,

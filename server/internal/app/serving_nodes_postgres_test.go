@@ -65,7 +65,7 @@ func TestServingNodesAreTheSameInDNSAndAttach(t *testing.T) {
 	for region, count := range map[string]int{"wc_a_" + f.stamp: 5, "wc_b_" + f.stamp: 2, "wc_c_" + f.stamp: 2} {
 		f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Serving',true)`, region)
 		t.Cleanup(func() {
-			f.exec(`DELETE FROM paperboat.managed_node_authority WHERE region_id=$1`, region)
+			f.exec(`DELETE FROM paperboat.selfhost_installations i USING paperboat.control_tunnel_nodes n WHERE n.id=i.node_id AND n.region=$1`, region)
 			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
 		})
 		for i := range count {
@@ -109,7 +109,7 @@ func TestPublicationNodesAreTheServingNodes(t *testing.T) {
 	for region, count := range map[string]int{regionA: 6, regionB: 2} {
 		f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Serving',true)`, region)
 		t.Cleanup(func() {
-			f.exec(`DELETE FROM paperboat.managed_node_authority WHERE region_id=$1`, region)
+			f.exec(`DELETE FROM paperboat.selfhost_installations i USING paperboat.control_tunnel_nodes n WHERE n.id=i.node_id AND n.region=$1`, region)
 			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
 		})
 		for i := range count {

@@ -6092,40 +6092,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/nodes/{node_id}/enroll": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Enroll a managed node and issue its runtime credential once */
-        post: operations["enroll_admin_node"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/nodes/{node_id}/update": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Update a managed node configuration */
-        post: operations["update_admin_node"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/nodes/{node_id}/drain": {
         parameters: {
             query?: never;
@@ -6211,23 +6177,6 @@ export interface paths {
         put?: never;
         /** Set the city or site a node shows next to its region */
         post: operations["set_admin_node_site"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/nodes/{node_id}/rotate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rotate a managed node runtime credential */
-        post: operations["rotate_admin_node_credential"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13324,8 +13273,6 @@ export interface components {
         };
         OperatorNodeMutationResult: {
             node: components["schemas"]["OperatorNode"];
-            /** @description Returned only by enroll and rotate; display once and never log. */
-            runtime_credential?: string;
         };
         RegionCreateRequest: {
             display_name: string;
@@ -13343,29 +13290,6 @@ export interface components {
         RevisionRequest: {
             /** Format: int64 */
             revision: number;
-        };
-        NodeConfigurationRequest: {
-            region_id: string;
-            edge_pool: string;
-            failure_domain: string;
-            endpoint_host: string;
-            /** Format: int32 */
-            endpoint_tcp_port: number;
-            /** Format: int32 */
-            endpoint_quic_port: number;
-            roles: string[];
-            transports: string[];
-            /** Format: int64 */
-            capacity_limit: number;
-            /** Format: int64 */
-            revision: number;
-            /** Format: byte */
-            usage_public_key?: string;
-            /** Format: byte */
-            peer_wireguard_public_key?: string;
-            /** Format: byte */
-            peer_disco_public_key?: string;
-            peer_virtual_address?: string;
         };
         SelfhostScope: {
             /** @enum {string} */
@@ -30631,85 +30555,6 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
-    enroll_admin_node: {
-        parameters: {
-            query?: never;
-            header: {
-                "Operator-Target": string;
-                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
-                "Operator-Reason": string;
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        /** @description revision must be zero; action, node_id and reason are path/header derived and rejected as unknown body fields. */
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NodeConfigurationRequest"];
-            };
-        };
-        responses: {
-            /** @description Enrolled node or exact idempotent replay; runtime_credential is sensitive one-time output. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["OperatorNodeMutationResult"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    update_admin_node: {
-        parameters: {
-            query?: never;
-            header: {
-                "Operator-Target": string;
-                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
-                "Operator-Reason": string;
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        /** @description revision must be at least one; action, node_id and reason are path/header derived and rejected as unknown body fields. */
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NodeConfigurationRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated node or exact idempotent replay. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["OperatorNodeMutationResult"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
     drain_admin_node: {
         parameters: {
             query?: never;
@@ -30890,45 +30735,6 @@ export interface operations {
         };
         responses: {
             /** @description The node with its site set, or an exact idempotent replay. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["OperatorNodeMutationResult"];
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
-    rotate_admin_node_credential: {
-        parameters: {
-            query?: never;
-            header: {
-                "Operator-Target": string;
-                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
-                "Operator-Reason": string;
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RevisionRequest"];
-            };
-        };
-        responses: {
-            /** @description Rotated node or exact idempotent replay; runtime_credential is sensitive one-time output. */
             200: {
                 headers: {
                     [name: string]: unknown;

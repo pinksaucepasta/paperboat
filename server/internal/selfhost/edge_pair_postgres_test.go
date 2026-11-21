@@ -74,7 +74,7 @@ func newPairFixture(t *testing.T) *pairFixture {
 	f.ma1, f.ma2, f.mb1, f.mc1 = f.node("ma1", f.ra, 0), f.node("ma2", f.ra, 0), f.node("mb1", f.rb, 0), f.node("mc1", f.rc, 0)
 	f.node("silent", f.rs, time.Hour)
 	// A node of a disabled region is no candidate: its managed authority names the region.
-	f.exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, f.node("disabled", f.rd, 0), f.rd, make([]byte, 32))
+	f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),$2,'encrypted','managed fixture','tunnel','global','global',$1,true)`, f.node("disabled", f.rd, 0), make([]byte, 32))
 	f.n1, f.n1b, f.n2 = f.node("n1", f.own1, 0), f.node("n1b", f.own1, 0), f.node("n2", f.own2, 0)
 	nx := f.node("nx", f.ownx, 0)
 	nt1, nt2 := f.node("nt1", f.teamr1, 0), f.node("nt2", f.teamr2, 0)
@@ -108,7 +108,6 @@ func (f *pairFixture) cleanup() {
 		{`DELETE FROM paperboat.selfhost_regions WHERE scope_id IN ($1,$2,$3)`, []any{f.owner, f.other, f.team}},
 		{`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id IN ($1,$2)`, []any{f.owner, f.team}},
 		{`DELETE FROM paperboat.selfhost_installations WHERE id LIKE $1`, []any{"%" + f.stamp}},
-		{`DELETE FROM paperboat.managed_node_authority WHERE node_id LIKE $1`, []any{"%" + f.stamp}},
 		{`DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE $1`, []any{"%" + f.stamp}},
 		{`DELETE FROM paperboat.operator_regions WHERE id=ANY($1)`, []any{[]string{f.ra, f.rb, f.rc, f.rs, f.rd}}},
 		{`DELETE FROM paperboat.user_machines WHERE user_id IN ($1,$2)`, []any{f.owner, f.other}},

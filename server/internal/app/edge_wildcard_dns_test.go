@@ -83,13 +83,13 @@ func (f *wildcardFixture) node(name, v4, v6, region, mutate string) string {
 	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,roles,registry_expires_at,region,failure_domain,transports,capacity_limit,capacity_used,capacity_observed_at,public_ingress_ipv4,public_ingress_ipv6,public_ingress_verified_at) VALUES($1,'test','1.0','epoch','ready',true,now(),ARRAY['edge'],now()+interval '1 hour','test','test',ARRAY['http3','http2'],100,0,now(),nullif($2,'')::inet,nullif($3,'')::inet,now())`, id, v4, v6)
 	if region != "" {
 		f.exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, id, region) // the serving set ranks by this column
-		f.exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,decode(md5($1)||md5($1),'hex'),'\x00','{}')`, id, region)
+		f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),decode(md5($1)||md5($1),'hex'),'\x00','managed fixture','tunnel','global','global',$1,true)`, id)
 	}
 	if mutate != "" {
 		f.exec(`UPDATE paperboat.control_tunnel_nodes SET `+mutate+` WHERE id=$1`, id)
 	}
 	f.t.Cleanup(func() {
-		f.exec(`DELETE FROM paperboat.managed_node_authority WHERE node_id=$1`, id)
+		f.exec(`DELETE FROM paperboat.selfhost_installations WHERE node_id=$1`, id)
 		f.exec(`DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
 	})
 	return id
@@ -128,7 +128,7 @@ func TestEdgeWildcardPublishesReadyNodesOnly(t *testing.T) {
 	f.node("unverified", "203.0.113.12", "", on, "public_ingress_verified_at=NULL")
 	f.node("disabled", "203.0.113.13", "", "wc_off_"+f.stamp, "")
 	f.node("retired", "203.0.113.14", "", on, "")
-	f.exec(`UPDATE paperboat.managed_node_authority SET retired_at=now() WHERE node_id=$1`, "nwc_retired_"+f.stamp)
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='retired' WHERE id=$1`, "nwc_retired_"+f.stamp)
 	f.node("selfhosted", "203.0.113.15", "", "", "") // no managed authority row: an owner's own server
 	f.node("relay", "203.0.113.16", "", on, "roles=ARRAY['relay']")
 	f.sync()
@@ -464,7 +464,7 @@ func TestWildcardCapIsPerRegionNotByNodeId(t *testing.T) {
 	for _, region := range []string{"wc_a_" + f.stamp, "wc_b_" + f.stamp, "wc_c_" + f.stamp} {
 		f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Cap',true)`, region)
 		t.Cleanup(func() {
-			f.exec(`DELETE FROM paperboat.managed_node_authority WHERE region_id=$1`, region)
+			f.exec(`DELETE FROM paperboat.selfhost_installations i USING paperboat.control_tunnel_nodes n WHERE n.id=i.node_id AND n.region=$1`, region)
 			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
 		})
 		for rank := 1; rank <= regions[region]; rank++ {
@@ -534,7 +534,7 @@ func (f *wildcardFixture) manyRegions(count int, dual bool) (v4s []string) {
 		region := fmt.Sprintf("wc_r%02d_%s", i, f.stamp)
 		f.exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Many',true)`, region)
 		f.t.Cleanup(func() {
-			f.exec(`DELETE FROM paperboat.managed_node_authority WHERE region_id=$1`, region)
+			f.exec(`DELETE FROM paperboat.selfhost_installations i USING paperboat.control_tunnel_nodes n WHERE n.id=i.node_id AND n.region=$1`, region)
 			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
 		})
 		v4, v6 := fmt.Sprintf("203.0.113.%d", i), ""

@@ -299,40 +299,22 @@ the backend implementation.
 
 ## Managed regions and runtime nodes
 
-The admin creates region records with `POST /v1/admin/regions/{region_id}/create`,
-then enrolls an existing relay/edge machine through
-`POST /v1/admin/nodes/{node_id}/enroll`. Creation/enrollment uses `revision: 0`;
-updates and lifecycle actions use the current returned revision. Region actions
-are `update`, `enable`, `disable`; node actions are `update`, `drain`, `drain-move`, `resume`,
-`retire`, `rotate`, `verify-ingress`, `site`. `site` (`{"site":"Mumbai"}`, any non-retired node, no revision) sets the city or site shown next to the region without restarting the node. These configuration, credential, and
-public ingress verification actions require the full
-admin role. Operations staff may read `/v1/admin/regions` and `/v1/admin/nodes`.
-Lists use bounded `limit`/`after`; nodes optionally filter by `region`.
+Paperboat's own relays and edges are installed exactly like a self-hoster's: `pbh install --region <id>` on the host,
+then claimed. A node claimed from the admin panel (Self-hosting → Enrol a node) is **global**: it serves every account,
+and its install region is an operator region. The claim creates that region (enabled, display name = id) if it does not
+exist; rename it with `POST /v1/admin/regions/{region_id}/update`. A node claimed from a customer's console is
+self-hosted and is none of this. There is no separate enrolment or credential for managed nodes: the claim writes the
+node's runtime credential, and the serving set, wildcard DNS, drains and ingress verification read global installations.
 
-Enrollment records the region, independent failure domain, edge pool, advertised
-hostname/ports, roles/transports and capacity. Supply public usage/peer identity keys
-where required by the role. The initial usage verification key ID is `managed:<node_id>`;
-usage and peer identity keys are immutable in node updates. Use the existing distinct-key
-provisioning/revocation APIs for signing-key lifecycle. Public key bytes use JSON's standard base64 encoding;
-no private key is uploaded. The response contains a node-scoped runtime credential,
-which the deployment installs into that node's existing control-plane credential
-configuration. List responses never contain it. Exact enrollment/rotation retries
-return the original result; replay credentials remain encrypted at rest. Rotation
-invalidates the previous credential immediately; retirement prevents new runtime
-requests. Keep the same retry key if a result is lost.
+Region actions are `create`, `update`, `enable`, `disable`; node actions are `drain`, `drain-move`, `resume`, `retire`,
+`verify-ingress` (with the node's current `revision`) and `site` (`{"site":"Mumbai"}`, no revision). They require the
+full admin role. Operations staff may read `/v1/admin/regions` and `/v1/admin/nodes`. Lists use bounded
+`limit`/`after`; nodes optionally filter by `region`.
 
-New nodes are unready until actual runtime registration and fresh observations.
-The runtime cannot change operator-approved pool/endpoints through registration.
-Disabling a region fences its managed nodes' credentials and selection eligibility,
-and drains its nodes. Re-enabling a region does not silently resume nodes: explicitly
-resume them and require fresh runtime observations. Node responses include `node_generation`, `observed_at` and `registry_expires_at`.
-Configuration updates fence the old process epoch/generation; deploy the new configuration
-and use the returned generation for relay startup. Managed nodes use only the `/nodes`
-mutation APIs; the older `/relays` controls reject them so two revision owners cannot
-compete. Configuration acceptance does not
-prove public DNS, certificates, firewall rules, or end-to-end traffic are ready.
-These APIs enroll/manage actual machines; they do not purchase or create cloud VMs.
-Self-hosted installation ownership and account pairing remain separate.
+New nodes are unready until actual runtime registration and fresh observations. Disabling a region refuses its nodes'
+heartbeats and selection, and drains them. Re-enabling does not silently resume nodes: explicitly resume them. To move
+a node to another region, remove the installation and install it again with the new `--region`. These APIs manage
+actual machines; they do not purchase or create cloud VMs.
 
 ## Backup and restore evidence
 
