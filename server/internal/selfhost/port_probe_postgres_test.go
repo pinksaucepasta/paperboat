@@ -56,12 +56,12 @@ func TestProbePortSelectsTheNodeTransportAndDestinationOnPostgres(t *testing.T) 
 		_, client := net.Pipe()
 		return client, nil
 	}
-	setHost("203.0.113.7")
+	setHost("1.1.1.1")
 	for _, test := range []struct {
 		transport string
 		port      int
 		dial      string
-	}{{"tcp", 7272, "tcp 203.0.113.7:7272"}, {"tcp", 7275, "tcp 203.0.113.7:7275"}, {"udp", 7274, "udp 203.0.113.7:7274"}} {
+	}{{"tcp", 7272, "tcp 1.1.1.1:7272"}, {"tcp", 7275, "tcp 1.1.1.1:7275"}, {"udp", 7274, "udp 1.1.1.1:7274"}} {
 		dialed = nil
 		got, err := service.ProbePort(ctx, node.RuntimeCredential, test.transport, test.port, "")
 		if err != nil || got != (PortProbe{Reachable: true, Detail: "connected"}) || len(dialed) != 1 || dialed[0] != test.dial {
