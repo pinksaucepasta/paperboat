@@ -192,6 +192,7 @@ func TestCoordinatorFailedListenerWithdrawsReadinessAndReacquires(t *testing.T) 
 		}
 		time.Sleep(time.Millisecond)
 	}
+	c.resetReconcileRetry() // the backoff wait is over: an unchanged snapshot runs again
 	if err := c.ApplyMachines(t.Context(), machines, services); err != nil {
 		t.Fatal(err)
 	}
