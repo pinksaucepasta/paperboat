@@ -3,12 +3,17 @@ package selfhost
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -124,7 +129,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		}
 		// The domain already targets the installation, so the placement does not reset it.
 		check("93.184.216.35", "verified", "A", 1)
-		exec(`UPDATE `+table+` SET ownership_state='verified',conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
+		exec(`UPDATE `+table+` SET conflict_state='quarantined',quarantine_until=now()+interval '1 hour' WHERE id=$1`, domainID)
 		if kind == "preview" {
 			exec(`UPDATE paperboat.preview_leases SET terminal_state='stopped',stopped_at=now() WHERE id=$1`, id)
 		} else {
@@ -139,21 +144,24 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if err := store.SQL().QueryRowContext(ctx, `SELECT quarantine_until IS NULL FROM `+table+` WHERE id=$1`, domainID).Scan(&quarantineCleared); err != nil || !quarantineCleared {
 			t.Fatal("placement retained quarantine")
 		}
-		result, err := store.SQL().ExecContext(ctx, `UPDATE `+table+` SET ownership_state='verified' WHERE id=$1 AND generation=1`, domainID)
-		if err != nil {
-			t.Fatal(err)
+		// A certificate write captured at generation 1 must not land after the placement reset (generation 2).
+		stale := sql.NullTime{Time: now, Valid: true}
+		if kind == "preview" {
+			_, err = store.Queries().ApplyPreviewDomainCertificateObservationV1(ctx, dbsqlc.ApplyPreviewDomainCertificateObservationV1Params{
+				CertificateState: "ready", CaaState: "ready", Now: stale, DomainID: domainID, AccountID: owner, PreviewID: id, ExpectedGeneration: 1})
+		} else {
+			_, err = store.Queries().ApplyTunnelDomainCertificateObservationV1(ctx, dbsqlc.ApplyTunnelDomainCertificateObservationV1Params{
+				CertificateState: "ready", CaaState: "ready", Now: stale, DomainID: domainID, ExpectedGeneration: 1})
 		}
-		if n, _ := result.RowsAffected(); n != 0 {
-			t.Fatal("stale DNS observation crossed generation fence")
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("stale certificate write crossed the generation fence: %v", err)
 		}
-		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
 		setPool(selfHosted)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
 		check("93.184.216.35", "verified", "A", 3)
 		// Repeating the same placement on the verified domain changes nothing: the target is unchanged.
-		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
