@@ -19,6 +19,7 @@ import (
 	helperconfig "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/config"
 	service "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/cli/internal/userpaths"
@@ -276,6 +277,11 @@ func userPaperboatRemovalPaths(command *cobra.Command) ([]string, error) {
 	}
 	if root, err := helperconfig.DefaultStateRoot(os.Getenv); err == nil {
 		paths = append(paths, root)
+	}
+	// Linux keeps the daemon's sockets and managed-SSH known_hosts under $XDG_RUNTIME_DIR/paperboat.
+	// An unsafe runtime directory is refused here and left alone rather than failing the whole uninstall.
+	if local, err := localapi.CurrentPaths(os.Geteuid()); err == nil {
+		paths = append(paths, local.StateRoot, local.RuntimeRoot)
 	}
 	if root, err := command.Flags().GetString("state-root"); err == nil && root != "" {
 		paths = append(paths, filepath.Clean(root))
