@@ -78,7 +78,9 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// A global node serves in its operator region (the claim creates it).
 	region := "boot_" + f.suffix
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1)`, region)
-	t.Cleanup(func() { database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_regions WHERE id=$1`, region) })
+	t.Cleanup(func() {
+		database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
+	})
 	exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, f.nodeID, region)
 	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='managed-only',installation_ids='{}' WHERE scope_kind='account' AND scope_id=$1`, f.accountID)
 	f.setCarrierHost(t, database, false)
