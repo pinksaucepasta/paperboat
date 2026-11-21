@@ -84,6 +84,14 @@ func TestScopedNodeControlAuthorization(t *testing.T) {
 	if ok, err := s.authorizeNodeRequest(r); err != nil || ok {
 		t.Fatal("ambiguous authorization accepted")
 	}
+	// The shared managed credential names no node: it may not register or heartbeat as one.
+	for _, path := range []string{"/v1/nodes/register", "/v1/nodes/heartbeat"} {
+		r := httptest.NewRequest("POST", path, strings.NewReader(`{"edge_node_id":"node_a"}`))
+		r.Header.Set("Authorization", "Bearer managed-secret")
+		if ok, err := s.authorizeNodeRequest(r); err != nil || ok {
+			t.Fatalf("managed credential accepted on %s", path)
+		}
+	}
 }
 
 type nodeCredentialError struct{ err error }
