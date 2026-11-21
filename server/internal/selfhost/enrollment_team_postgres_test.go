@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,7 +30,7 @@ func startTeamEnrollmentHelper(t *testing.T, binary, capability string) (string,
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	command := exec.Command(binary, "install", "--no-service", "--state-dir", directory, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--enable", capability)
+	command := exec.Command(binary, "install", "--no-service", "--state-dir", directory, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--"+capability)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("install packaged helper: %v: %s", err, output)
 	}
@@ -48,7 +47,7 @@ func startTeamEnrollmentHelper(t *testing.T, binary, capability string) (string,
 	if code == "" {
 		t.Fatal("helper omitted enrollment code")
 	}
-	command = exec.Command(binary, "serve", "--state-dir", directory, "--binary-dir", filepath.Dir(binary))
+	command = exec.Command(binary, "serve", "--state-dir", directory)
 	if err = command.Start(); err != nil {
 		t.Fatal(err)
 	}

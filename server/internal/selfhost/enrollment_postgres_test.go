@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +58,7 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 		}
 		address := listen.Addr().String()
 		listen.Close()
-		command := exec.Command(binary, "install", "--no-service", "--state-dir", dir, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--enable", "both")
+		command := exec.Command(binary, "install", "--no-service", "--state-dir", dir, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--both")
 		command.Args = append(command.Args, extra...)
 		if output, e := command.CombinedOutput(); e != nil {
 			t.Fatalf("initialize production helper: %v: %s", e, output)
@@ -78,7 +77,7 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 		if code == "" {
 			t.Fatal("helper omitted code")
 		}
-		command = exec.Command(binary, "serve", "--state-dir", dir, "--binary-dir", filepath.Dir(binary))
+		command = exec.Command(binary, "serve", "--state-dir", dir)
 		if err = command.Start(); err != nil {
 			t.Fatal(err)
 		}
