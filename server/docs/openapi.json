@@ -50585,6 +50585,96 @@
         }
       }
     },
+    "/v1/admin/regions/{region_id}": {
+      "delete": {
+        "operationId": "delete_admin_region",
+        "summary": "Delete an unused managed region",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "admin",
+        "parameters": [
+          {
+            "name": "region_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "description": "Opaque incident, ticket, or change reference; do not send prose or secrets.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deleted region, or exact idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorRegion"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "The region is still referenced, or the idempotency key conflicts.",
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/admin/nodes/{node_id}/drain": {
       "post": {
         "operationId": "drain_admin_node",

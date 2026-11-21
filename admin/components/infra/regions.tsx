@@ -104,6 +104,23 @@ function RegionActions({ region }: { region: Region }) {
         />
       ),
     })
+  actions.push({
+    key: "delete",
+    label: "Delete region",
+    destructive: true,
+    dialog: (c) => (
+      <ActionDialog
+        {...c}
+        title={`Delete ${region.id}`}
+        description="Permanently removes an unused region."
+        target={region.id}
+        destructive
+        confirmWord={region.id}
+        submitLabel="Delete region"
+        run={(h) => operatorAction("DELETE", `/v1/admin/regions/${encodeURIComponent(region.id)}`, h)}
+      />
+    ),
+  })
   return <RowMenu label={region.id} actions={actions} data-region-actions={region.id} />
 }
 

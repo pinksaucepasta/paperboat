@@ -413,6 +413,8 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 		t.Fatalf("disable region %d %s", response.Code, response.Body.String())
 	}
 
+	testOperatorRegionDelete(t, store, request, operatorID, user.ID, regionID, nodeID)
+
 	target := user.ID + "_target"
 	if _, err = store.Pool().Exec(ctx, `INSERT INTO users(id,workos_subject,primary_email,status) VALUES($1,$1,$2,'active')`, target, target+"@example.test"); err != nil {
 		t.Fatal(err)

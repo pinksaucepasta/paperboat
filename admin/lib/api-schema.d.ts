@@ -6109,6 +6109,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/regions/{region_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an unused managed region */
+        delete: operations["delete_admin_region"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/nodes/{node_id}/drain": {
         parameters: {
             query?: never;
@@ -30607,6 +30624,42 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    delete_admin_region: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                region_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deleted region, or exact idempotent replay. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorRegion"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description The region is still referenced, or the idempotency key conflicts. */
             409: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };

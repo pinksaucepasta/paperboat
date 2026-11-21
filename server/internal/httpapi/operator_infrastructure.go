@@ -74,6 +74,15 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 			writeJSON(w, 200, SuccessResponse{Data: out})
 		})))
 	}
+	mux.Handle("DELETE /v1/admin/regions/{region_id}", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, _ := principalFromContext(r.Context())
+		out, err := service.DeleteRegion(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), r.PathValue("region_id"), r.Header.Get("Operator-Reason"))
+		if err != nil {
+			operatorInfrastructureError(w, r, err)
+			return
+		}
+		writeJSON(w, 200, SuccessResponse{Data: out})
+	})))
 	for _, action := range []string{"drain", "drain-move", "resume", "retire", "verify-ingress", "site"} {
 		mux.Handle("POST /v1/admin/nodes/{node_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var in operatorNodeInput
@@ -109,6 +118,8 @@ func operatorInfrastructureError(w http.ResponseWriter, r *http.Request, err err
 		writeError(w, r, 404, "not_found", "The managed infrastructure target does not exist.")
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrLastServingEdge):
 		writeError(w, r, 409, "last_serving_edge", "This is the last serving edge of an enabled region. Bring another edge in the region up first, or disable the region.")
+	case expectedHTTPErrorOnly(err, operatorinfra.ErrRegionInUse):
+		writeError(w, r, 409, "region_in_use", "This region is still in use. Retire its nodes, re-place its workspaces, and remove any self-hosted region using this ID before retrying.")
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrConflict):
 		writeError(w, r, 409, "infrastructure_conflict", "The target state, revision or retry key conflicts. Read current state before changing the request; retry interrupted requests with their original key.")
 	default:
