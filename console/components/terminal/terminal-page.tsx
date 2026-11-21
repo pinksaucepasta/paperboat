@@ -8,7 +8,7 @@ import { Children, Fragment, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { ApiError, meQuery, useApiQuery, useMachine } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { recordingSentences } from "@/lib/recordings"
+import { ensureRecordingKey, personalWorkspace, recordingMessage, recordingSentences } from "@/lib/recordings"
 import { closeTerminal, terminalKeys, terminalQuery } from "@/lib/terminal/queries"
 import {
   terminalCanAttach,
@@ -52,6 +52,26 @@ import { ErrorMessage } from "@/components/error-reference"
  * A terminal on its own page, outside the console's sidebar: a top bar, the terminal and the
  * People panel. It is what every "open" leads to, and the page you share.
  */
+/**
+ * Starts recording; a workspace with no recording key gets generation 1 here first (ensureRecordingKey), then the
+ * start is retried while the machine picks the new key up from its policy (the server publishes it at once).
+ */
+async function startRecording(control: (action: "record-start") => Promise<string | undefined>, teamId: string | undefined) {
+  const code = await control("record-start")
+  if (code !== "recording_unavailable" || !teamId) return code
+  try {
+    if (!(await ensureRecordingKey(teamId))) return code
+  } catch (error) {
+    return recordingMessage(error)
+  }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const retried = await control("record-start")
+    if (retried !== "recording_unavailable") return retried
+  }
+  return "recording_unavailable"
+}
+
 export function TerminalPage({ id }: { id: string }) {
   const [pushed, setPushed] = useState(false)
   const query = useApiQuery(terminalQuery(id, pushed))
@@ -189,6 +209,9 @@ export function TerminalRoom({
   })
   const session = useLiveParticipants(polled, connection.participants, onPushed)
   const { data: me } = useApiQuery({ ...meQuery, enabled: !guest })
+  // Whose key the machine records with: its team's, or on a personal machine its owner's (only they can make it).
+  const recordingWorkspace =
+    target?.owner_team_id || (target && me && target.owner_account === me.id ? personalWorkspace : undefined)
   const isOwner = session.role === "owner"
   const people = peopleIn(session)
   // People opens by default once someone else is involved; a terminal of your own starts clean.
@@ -215,9 +238,10 @@ export function TerminalRoom({
                 onClick={() => {
                   // Focus stays on this button after a click, so the next Space or Enter typed into the shell would toggle recording.
                   connection.focus()
-                  void connection
-                    .controlRecording(connection.recording ? "record-stop" : "record-start")
-                    .then((code) => code && toast.error(recordingSentences[code] ?? "Recording could not be changed. Try again."))
+                  void (connection.recording
+                    ? connection.controlRecording("record-stop")
+                    : startRecording(connection.controlRecording, recordingWorkspace)
+                  ).then((code) => code && toast.error(recordingSentences[code] ?? code))
                 }}
               >
                 {connection.recording ? <StopIcon /> : <RecordIcon />}

@@ -28,14 +28,14 @@ const json = { "content-type": "application/json" }
 export const recordingSentences: Record<string, string> = {
   team_plan_required: "This team needs the Teams plan to record. Your personal recordings are free.",
   recording_forbidden: "You can't replay recordings on this machine. In a team, ask an admin for replay access.",
-  recording_key_unavailable: "There is no recording key yet. Set it up under Terminals, Recordings (in a team, an admin does it under Team, Recordings).",
+  recording_key_unavailable: "There is no recording key yet. It is created when the first recording starts in a web terminal.",
   recording_key_pending:
     "You can replay here, but nobody has given you a copy of the recording key yet. Ask a team member who can replay to open Recordings.",
   recording_key_conflict: "The recording key or a viewer's vault changed. Reload and try again.",
   recording_not_found: "This recording doesn't exist or isn't shared with you.",
   recording_deleted: "This recording was deleted from its machine.",
   machine_unavailable: "The recording's machine is offline. Replay works again once it's back online.",
-  recording_unavailable: "Recording isn't available for this terminal. Set up the recording key under Terminals, Recordings (in a team, an admin does it under Team, Recordings).",
+  recording_unavailable: "Recording isn't available for this terminal: the machine cannot record, or recordings are not enabled for its workspace.",
   recording_active: "This terminal is already being recorded.",
   recording_inactive: "This terminal isn't being recorded.",
   credential_expired: "The replay link expired. Open the recording again.",
@@ -137,6 +137,27 @@ export async function createRecordingKey(teamId: string, viewers: Required<Recor
     headers: json,
     body: JSON.stringify({ key: made.key, grants: made.grants }),
   })
+}
+
+export const recordingNeedsEnv = "Recordings are encrypted with ENV keys. Set up ENV first, then start the recording again."
+
+/**
+ * Generation 1 is made when the first recording needs it, never by a separate step. Resolves false when the key was
+ * already there, true when it was just made. Two browsers at once: the server keeps one generation 1 and refuses the
+ * other (recording_key_conflict), which goes on with the winner's key.
+ */
+export async function ensureRecordingKey(teamId: string): Promise<boolean> {
+  const state = await api<RecordingKeyState>(`${team(teamId)}/recording-key`)
+  if (state.key) return false
+  const sealable = state.viewers.filter((viewer): viewer is Required<RecordingViewer> => Boolean(viewer.sharing_public_key))
+  if (sealable.length === 0) throw new Error(recordingNeedsEnv)
+  try {
+    await createRecordingKey(teamId, sealable)
+    return true
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "recording_key_conflict") return true
+    throw error
+  }
 }
 
 /** Seals the caller's own copy (opened in the unlocked vault) for the viewers still waiting. */

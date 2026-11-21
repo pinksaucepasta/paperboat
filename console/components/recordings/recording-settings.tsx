@@ -6,10 +6,11 @@ import Link from "next/link"
 import { useState, useSyncExternalStore } from "react"
 import { ApiError, useApiQuery } from "@/lib/api"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
+import { toast } from "sonner"
 import { policyQuery, savePolicy, validatePolicy, type Policy } from "@/lib/policy"
 import {
-  createRecordingKey,
   editRecordingRules,
+  ensureRecordingKey,
   putManualStart,
   recordingKeyQuery,
   recordingMessage,
@@ -39,7 +40,7 @@ import { ErrorMessage } from "@/components/error-reference"
 import { useShellState } from "@/lib/use-shell-state"
 
 /**
- * Team → Recordings (the personal workspace's key is set up in PersonalRecordingSetup): the team recording key, who may start recordings by hand, and the policy rules that record
+ * Team → Recordings: the team recording key, who may start recordings by hand, and the policy rules that record
  * sessions or allow replay. Owners and admins change them; auditors see them.
  */
 export function RecordingSettings({
@@ -106,19 +107,10 @@ function KeySection({
   const sealable = (state?.viewers ?? []).filter((viewer): viewer is Required<RecordingViewer> =>
     Boolean(viewer.sharing_public_key),
   )
-  const create = useMutation({
-    mutationFn: () => createRecordingKey(teamId, sealable),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }),
-  })
   const [replacing, setReplacing] = useState(false)
   const [resetting, setResetting] = useState(false)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   const [asked, setAsked] = useState(false)
-  const setUp = admin && state && !state.key && (
-    <Button size="lg" disabled={create.isPending || sealable.length === 0} onClick={() => create.mutate()}>
-      {create.isPending ? "Setting up…" : "Set up"}
-    </Button>
-  )
   // Replacing needs this person's own copy of the current key: it signs the new one.
   const replaceable = admin && state?.key && state.my_key?.generation === state.key.generation
   // Resetting is for a key nobody holds any more, and only the team owner's ENV key can sign it.
@@ -144,7 +136,7 @@ function KeySection({
     </Button>
   )
   return (
-    <Section title="Recording key" action={setUp || replace || reset || undefined}>
+    <Section title="Recording key" action={replace || reset || undefined}>
       <Row label="Status">
         {!state ? (
           <Skeleton className="my-0.5 h-4 w-24" />
@@ -153,12 +145,12 @@ function KeySection({
             Ready <span className="text-muted-foreground">(generation {state.key.generation})</span>
           </span>
         ) : (
-          <span data-recording-key="missing">Not set up</span>
+          <span data-recording-key="missing">Created on the first recording</span>
         )}
       </Row>
       {state && !state.key && sealable.length === 0 && (
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          Add a replay rule first. The key is encrypted for each person who can replay.
+          Add a replay rule first. The key is encrypted for each person who can replay when the first recording starts.
         </p>
       )}
       {asked && !unlocked && (
@@ -193,11 +185,6 @@ function KeySection({
             onSuccess: () => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(teamId).queryKey }),
           }}
         />
-      )}
-      {create.isError && (
-        <p className="border-b border-divider py-3 text-sm text-destructive">
-          {<ErrorMessage error={create.error} message={recordingMessage(create.error)} />}
-        </p>
       )}
       {state?.viewers.map((viewer) => (
         <Row key={viewer.account_id} label={emails.get(viewer.account_id) ?? viewer.account_id}>
@@ -333,8 +320,12 @@ function RulesSection({ policy, admin }: { policy: Policy | undefined; admin: bo
           onClose={() => setSaving(null)}
           onDone={() => {
             setSaving(null)
-            // A replay rule adds or removes viewers, which the key section seals for.
-            void queryClient.invalidateQueries({ queryKey: recordingKeyQuery(policy.workspace).queryKey })
+            // A record rule records from now on, so it needs the key: the first one makes generation 1 (no-op after).
+            const recording = /"allow"\s*:\s*\[[^\]]*"record"/.test(saving.text)
+            void (recording ? ensureRecordingKey(policy.workspace) : Promise.resolve(false))
+              .catch((error: unknown) => toast.error(recordingMessage(error)))
+              // A replay rule adds or removes viewers, which the key section seals for.
+              .finally(() => queryClient.invalidateQueries({ queryKey: recordingKeyQuery(policy.workspace).queryKey }))
           }}
         />
       )}

@@ -617,3 +617,38 @@ func TestPostgresRecordingKeyResetIsTheOwnersAndLeavesOldRecordingsUnreadable(t 
 		t.Fatalf("the reset must be audited: %d %v", audited, err)
 	}
 }
+
+// Generation 1 is made by whichever browser starts the first recording: two at once must leave exactly one key, and
+// the other is refused with ErrKeyConflict so it goes on with the winner's.
+func TestPostgresFirstRecordingKeyRaceKeepsOneGenerationOne(t *testing.T) {
+	f := newFixture(t)
+	f.paid()
+	if err := f.policy(`{"rules": [{"src": ["user:` + f.member + `@example.test"], "dst": ["machine:prod"], "allow": ["recording_view"]}]}`); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	for _, account := range []string{f.owner, f.admin} {
+		k, _ := newKey(t, f.team, 1, nil)
+		go func() {
+			_, err := f.s.CreateKey(f.ctx, account, f.team, recording.KeyCreate{Key: k, Grants: []recording.Grant{f.grant(f.member)}})
+			errs <- err
+		}()
+	}
+	var won, lost int
+	for range 2 {
+		switch err := <-errs; {
+		case err == nil:
+			won++
+		case errors.Is(err, ErrKeyConflict):
+			lost++
+		default:
+			t.Fatalf("CreateKey = %v", err)
+		}
+	}
+	if won != 1 || lost != 1 {
+		t.Fatalf("won %d, lost %d; want exactly one generation 1", won, lost)
+	}
+	if p := f.machinePolicy(f.prod); len(p.Keys) != 1 || p.Keys[0].Generation != 1 {
+		t.Fatalf("keys after the race = %+v", p.Keys)
+	}
+}

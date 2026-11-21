@@ -4,7 +4,7 @@ import { RecordIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { ApiError, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
-import { formatDuration, personalWorkspace, recordingKeyQuery, recordingPageSize, recordingsQuery, recordingSentences, type Recording } from "@/lib/recordings"
+import { formatDuration, personalWorkspace, recordingPageSize, recordingsQuery, recordingSentences, type Recording } from "@/lib/recordings"
 import { teamQuery } from "@/lib/teams"
 import { usePageParam } from "@/lib/use-page-param"
 import { useTimeFormat } from "@/lib/use-time-format"
@@ -14,7 +14,6 @@ import { LoadError } from "@/components/load-error"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
 import { RecordingAccess } from "@/components/recordings/recording-access"
-import { PersonalRecordingSetup } from "@/components/recordings/personal-recording-setup"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -35,9 +34,7 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
   const team = useApiQuery({ ...teamQuery(teamId), enabled: Boolean(teamId) && !personal })
   const emails = new Map(team.data?.members.map((member) => [member.account_id, member.email ?? member.account_id]))
 
-  const key = useApiQuery({ ...recordingKeyQuery(teamId), enabled: personal })
   if (query.error instanceof ApiError && query.error.code === "team_plan_required") return <TeamsOnly />
-  if (personal && key.isSuccess && !key.data.key) return <PersonalRecordingSetup state={key.data} />
   const rows = query.data?.recordings ?? []
   if (query.isSuccess && query.data.total === 0)
     return (
