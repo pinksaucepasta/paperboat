@@ -117,7 +117,8 @@ def one(binary, target, mode):
             status = process.wait(35)
             output = process.stdout()
         if pid is None:
-            raise RuntimeError('exec cancellation fixture did not establish its remote process')
+            raise RuntimeError(f'exec cancellation fixture did not establish its remote process '
+                               f'(mode={mode} exit={status})')
         expected = 124 if mode == 'timeout' else 130
         terminal = [event for event in events(output) if event.get('state') == 'canceled']
         wanted = 'exec_timeout' if mode == 'timeout' else 'exec_canceled'
