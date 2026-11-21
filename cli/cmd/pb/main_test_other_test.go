@@ -3,6 +3,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -23,3 +24,8 @@ func isolateCommandCredentialLocation(t *testing.T, root string) {
 }
 
 func waitForCommandSocket(t *testing.T, _ string) { t.Helper() }
+
+// commandTestSocket names a local API endpoint no daemon serves.
+func commandTestSocket(t *testing.T, root string) string {
+	return filepath.Join(root, "local-api.sock")
+}

@@ -606,3 +606,8 @@ func waitForCommandSocket(t *testing.T, path string) {
 	}
 	t.Fatalf("local command pipe %s was not ready: %v", path, err)
 }
+
+// commandTestSocket names a local API endpoint no daemon serves: on Windows a pipe, never a file path.
+func commandTestSocket(t *testing.T, _ string) string {
+	return `\\.\pipe\paperboat-command-test-` + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+}

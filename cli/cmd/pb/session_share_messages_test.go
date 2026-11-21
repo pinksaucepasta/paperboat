@@ -42,7 +42,7 @@ func TestSharedSessionsAreFoundInEveryWorkspace(t *testing.T) {
 	writeTestProfile(t, root, configPath, backend.URL)
 	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
 		d.daemonPaths = func() (localapi.Paths, error) {
-			return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
+			return localapi.Paths{SocketPath: commandTestSocket(t, root)}, nil
 		}
 	})
 	var out, stderr bytes.Buffer

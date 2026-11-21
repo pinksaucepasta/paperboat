@@ -5,6 +5,7 @@ package main
 import (
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -45,4 +46,9 @@ func waitForCommandSocket(t *testing.T, path string) {
 		time.Sleep(delay)
 	}
 	t.Fatalf("local command socket %s was not ready", path)
+}
+
+// commandTestSocket names a local API endpoint no daemon serves.
+func commandTestSocket(t *testing.T, root string) string {
+	return filepath.Join(root, "local-api.sock")
 }
