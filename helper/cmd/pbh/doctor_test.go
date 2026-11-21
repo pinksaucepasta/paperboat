@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -47,7 +46,7 @@ func TestDoctorPassesWhenEverythingIsOpen(t *testing.T) {
 func TestDoctorNamesTheMissingRule(t *testing.T) {
 	for detail, want := range map[string]string{
 		"timeout":     "cloud firewall",
-		"unreachable": "this host's firewall rejects it",
+		"unreachable": "rejected by the network (unreachable)",
 		"refused":     "nothing listened",
 	} {
 		deps, out := doctorFixture(t, "60000 65535", nil, containers.PortProbe{Detail: detail}, nil)
@@ -182,12 +181,19 @@ func TestDoctorChecksEveryNodePort(t *testing.T) {
 	}
 }
 
-func TestNodePortsSkipsWhatTheProbeDoesNotAccept(t *testing.T) {
-	var got []string
-	for _, p := range nodePorts(selfhost.Component{Capability: "relay", TCPPort: 443, QUICPort: 7275}) {
-		got = append(got, fmt.Sprintf("%s %d %s skip=%v", p.transport, p.port, p.service, p.skip != ""))
+func TestDoctorReportsRelayOnlyListenersAsSkipped(t *testing.T) {
+	c := selfhost.Config{Components: []selfhost.Component{{Capability: "relay", TCPPort: 443, QUICPort: edgeports.RelayQUIC}}}
+	deps, out := doctorFixture(t, "60000 65535", nil, containers.PortProbe{}, nil)
+	deps.probe = func(context.Context, string, int, string) (containers.PortProbe, error) {
+		t.Fatal("relay-only install probed")
+		return containers.PortProbe{}, nil
 	}
-	if want := "tcp 443 relay skip=true,udp 443 relay STUN skip=true,udp 7275 relay QUIC skip=true"; strings.Join(got, ",") != want {
-		t.Fatalf("got %s\nwant %s", strings.Join(got, ","), want)
+	if err := runDoctor(t.Context(), c, deps, out); err != nil {
+		t.Fatalf("err %v\n%s", err, out)
+	}
+	for _, want := range []string{"does not serve tunnels", "skip TCP 443 (relay): the control plane probes only TCP 7272-7275", "skip UDP 443 (relay STUN): the control plane probes STUN only on UDP 7274", "skip UDP 7275 (relay QUIC): the control plane does not send QUIC"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

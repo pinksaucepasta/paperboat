@@ -171,7 +171,21 @@ func stunBindingSuccess(packet, request []byte) bool {
 		return false
 	}
 	length := int(binary.BigEndian.Uint16(packet[2:4]))
-	return binary.BigEndian.Uint16(packet) == 0x0101 && length%4 == 0 && len(packet) == 20+length && bytes.Equal(packet[4:20], request[4:20])
+	if binary.BigEndian.Uint16(packet) != 0x0101 || length%4 != 0 || len(packet) != 20+length || !bytes.Equal(packet[4:20], request[4:20]) {
+		return false
+	}
+	// Every attribute's padded value must fit, as ~/ref/tailscale/net/stun/stun.go foreachAttr checks.
+	for attributes := packet[20:]; len(attributes) > 0; {
+		if len(attributes) < 4 {
+			return false
+		}
+		padded := 4 + (int(binary.BigEndian.Uint16(attributes[2:4]))+3)&^3
+		if padded > len(attributes) {
+			return false
+		}
+		attributes = attributes[padded:]
+	}
+	return true
 }
 
 func classifyDialError(err error) string {
