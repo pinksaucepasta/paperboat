@@ -3,14 +3,18 @@
 
 A file left out of a commit (the usual way main stops compiling) passes in a working tree that still
 has it, so this builds each pushed commit from `git worktree add` instead. Installed by `make hooks`.
-Only modules with changes are checked; a push that touches none is instant. PB_PREPUSH_SKIP=1 skips
+Reject removal of lines introduced on origin/main in the last 48 hours without a Reverts trailer.
+Only modules with changes are built. PB_PREPUSH_SKIP=1 skips
 (do not push a tree you have not built). PB_PREPUSH_CROSS=1 also builds the cli for darwin and windows.
 """
 import fcntl
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
+from functools import lru_cache
 from pathlib import Path
 
 ZERO = "0" * 40
@@ -32,10 +36,12 @@ def tree_env(env=None):
 
 
 def git(*args, cwd=None, check=True):
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=tree_env() if cwd else None)
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                            timeout=TIMEOUT, env=tree_env() if cwd else None)
     if check and result.returncode:
-        raise RuntimeError(f"git {' '.join(args)}: {result.stderr.strip()}")
-    return result.stdout
+        detail = result.stderr.decode(errors="replace").strip()
+        raise RuntimeError(f"git {' '.join(args)}: {detail}")
+    return result.stdout.decode(errors="surrogateescape")
 
 
 def changed_paths(local, remote):
@@ -47,6 +53,63 @@ def changed_paths(local, remote):
     if not base:
         return None
     return [p for p in git("diff", "--name-only", f"{base}..{local}").splitlines() if p]
+
+
+def removed_ranges(patch):
+    for hunk in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+", patch, re.MULTILINE):
+        start = int(hunk[1])
+        count = int(hunk[2]) if hunk[2] is not None else 1
+        if count:
+            yield "-L", f"{start},{start + count - 1}"
+
+
+def recent_line_removals(local, remote, main):
+    if not main:
+        return []
+    cutoff = int(time.time()) - 48 * 60 * 60
+
+    @lru_cache(maxsize=None)
+    def on_main(commit):
+        return git("merge-base", commit, main, check=False).strip() == commit
+
+    exclude = [f"^{main}"]
+    if remote != ZERO and git("rev-parse", "--verify", f"{remote}^{{commit}}", check=False):
+        exclude.append(f"^{remote}")
+    failures = []
+    for revision in git("rev-list", "--parents", local, *exclude).splitlines():
+        commit, *parents = revision.split()
+        trailers = git("show", "-s", "--format=%(trailers:key=Reverts,valueonly,unfold)", commit)
+        allowed = {value.strip() for value in trailers.splitlines()}
+        undone = set()
+        for parent in parents:
+            entries = iter(git("diff", "--raw", "-z", "--no-abbrev", "--find-renames",
+                               "--diff-filter=DMRT", parent, commit).split("\0")[:-1])
+            for entry in entries:
+                old_mode, new_mode, old_blob, new_blob, status = entry.split()
+                path = next(entries)
+                if status.startswith("R"):
+                    next(entries)  # destination; blame uses the preimage path
+                if old_mode not in (":100644", ":100755"):
+                    continue  # only regular files have source lines to blame
+                diff_args = ("--no-ext-diff", "--no-textconv", "--unified=0", "--inter-hunk-context=0", "--no-color")
+                if new_mode in ("000000", "160000"):
+                    patch = git("--literal-pathspecs", "diff", *diff_args, parent, commit, "--", path)
+                else:
+                    patch = git("diff", *diff_args, old_blob, new_blob)
+                ranges = [arg for pair in removed_ranges(patch) for arg in pair]
+                if not ranges:
+                    continue
+                blame = git("blame", "--incremental", *ranges, parent, "--", path)
+                for line in blame.splitlines():
+                    if m := re.fullmatch(r"([0-9a-f]{40}) \d+ \d+ \d+", line):
+                        blamed = m[1]
+                    elif line.startswith("committer-time "):
+                        if int(line.split()[1]) >= cutoff and blamed not in allowed and on_main(blamed):
+                            undone.add((path, blamed))
+        for path, blamed in sorted(undone):
+            failures.append(f"{commit[:10]} removes recent origin/main lines from {path!r} ({blamed}). "
+                            f"If intentional, add a Reverts: {blamed} trailer to {commit[:10]}.")
+    return failures
 
 
 def touched(paths):
@@ -168,27 +231,32 @@ def main():
         print("pre-push: skipped (PB_PREPUSH_SKIP=1)", file=sys.stderr)
         return 0
     failed = False
+    main_tip = git("rev-parse", "--verify", "refs/remotes/origin/main", check=False).strip()
     for line in sys.stdin.read().splitlines():
         parts = line.split()
         if len(parts) != 4:
             continue
-        _, local, _, remote = parts
+        _, local, remote_ref, remote = parts
         if local == ZERO:
             continue  # deleting a ref
         try:
-            paths = changed_paths(local, remote)
-            modules = touched(paths)
-            if not modules:
-                continue
-            print(f"pre-push: building {', '.join(modules)} at {local[:10]} on a clean checkout", file=sys.stderr)
-            failures = check(local, modules, paths)
+            main = main_tip
+            if sys.argv[1:2] == ["origin"] and remote_ref == "refs/heads/main" and remote != ZERO:
+                main = git("rev-parse", "--verify", f"{remote}^{{commit}}", check=False).strip() or main
+            failures = recent_line_removals(local, remote, main)
+            if not failures:
+                paths = changed_paths(local, remote)
+                modules = touched(paths)
+                if modules:
+                    print(f"pre-push: building {', '.join(modules)} at {local[:10]} on a clean checkout", file=sys.stderr)
+                    failures = check(local, modules, paths)
         except (RuntimeError, subprocess.TimeoutExpired) as error:
             failures = [f"could not check the pushed commit: {error}"]
         for failure in failures:
             failed = True
             print(f"pre-push: {failure}", file=sys.stderr)
     if failed:
-        print("pre-push: push refused. Fix the build (did a file miss `git add`?) and push again.", file=sys.stderr)
+        print("pre-push: push refused. Resolve the errors above and push again.", file=sys.stderr)
         return 1
     return 0
 

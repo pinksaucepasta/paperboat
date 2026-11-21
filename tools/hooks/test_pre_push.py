@@ -38,6 +38,33 @@ class PrePushTest(unittest.TestCase):
         return subprocess.run([str(HOOK)], cwd=self.repo, input=f"refs/heads/main {local} refs/heads/main {remote}\n",
                               capture_output=True, text=True, env={"PATH": subprocess.os.environ["PATH"], "HOME": subprocess.os.environ["HOME"], "GOFLAGS": "-mod=mod", "GOCACHE": subprocess.os.environ.get("GOCACHE", "/tmp/pb-hook-gocache")})
 
+    def test_recent_main_lines_need_an_explicit_revert(self):
+        self.write("console/usage.txt", "usage card\n")
+        recent = self.commit("publish usage card")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", recent)
+
+        self.write("server-fix.txt", "unrelated fix\n")
+        self.write("console/usage.txt", "usage card\nnormal addition\n")
+        normal = self.commit("ordinary update")
+        result = self.push(normal, recent)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        git(self.repo, "rm", "-q", "console/usage.txt")
+        stale = self.commit("unrelated fix with a stale console tree")
+        self.write("console/usage.txt", "usage card\nnormal addition\n")
+        restored = self.commit("restore the card in a later commit")
+        result = self.push(restored, recent)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("console/usage.txt", result.stderr)
+        self.assertIn(f"Reverts: {recent}", result.stderr)
+        self.assertIn(stale[:10], result.stderr)
+
+        git(self.repo, "reset", "--hard", stale)
+        git(self.repo, "commit", "--amend", "--no-edit", "--trailer", f"Reverts: {recent}")
+        intentional = git(self.repo, "rev-parse", "HEAD")
+        result = self.push(intentional, recent)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_the_pushing_checkout_stays_on_its_branch(self):
         # Git sets GIT_DIR for hooks; with it, the build tree's forced checkout used to detach the
         # pushing checkout's HEAD at the pushed commit.
