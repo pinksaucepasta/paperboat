@@ -315,7 +315,7 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	})
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, owner, ws+".example.test")
-	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear',$5)`, "placement_domain_"+suffix, owner, preview, "custom-"+endpoint+".example.test", "wsd_"+ws)
+	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','target.example.test','managed','ready','ready','clear',$5)`, "placement_domain_"+suffix, owner, preview, "custom-"+endpoint+".example.test", "wsd_"+ws)
 	// A serving Paperboat edge: a global installation in an enabled operator region with verified ingress.
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1)`, "placement_"+suffix)
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_ipv4,public_ingress_verified_at,tls_spki_sha256) VALUES($1,$1,'1.0','fixture_managed','ready',true,now(),$2,'test',ARRAY['edge'],ARRAY['http3','http2'],10,0,now(),now()+interval '1 minute','198.51.100.7',now(),decode(md5($1)||md5($1),'hex'))`, managed, "placement_"+suffix)
@@ -347,7 +347,7 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	eligible(installation.NodeID, false)
 	var target, state, recordType string
 	var generation int64
-	if err = store.SQL().QueryRowContext(ctx, `SELECT dns_target,ownership_state,expected_records->0->>'type',generation FROM paperboat.preview_domains WHERE preview_id=$1`, preview).Scan(&target, &state, &recordType, &generation); err != nil || target != "93.184.216.35" || state != "verified" || recordType != "A" || generation != 2 {
+	if err = store.SQL().QueryRowContext(ctx, `SELECT dns_target,CASE WHEN EXISTS(SELECT 1 FROM paperboat.workspace_domains wd WHERE wd.id=workspace_domain_id AND wd.ownership_state='verified') THEN 'verified' ELSE 'failed' END,expected_records->0->>'type',generation FROM paperboat.preview_domains WHERE preview_id=$1`, preview).Scan(&target, &state, &recordType, &generation); err != nil || target != "93.184.216.35" || state != "verified" || recordType != "A" || generation != 2 {
 		t.Fatalf("placement DNS reset: %q %q %q %d %v", target, state, recordType, generation, err)
 	}
 	// The claimed edge comes up: it heartbeats ready and its public ingress (the domain's record) is verified.
