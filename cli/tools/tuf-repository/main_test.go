@@ -17,6 +17,15 @@ import (
 	"github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
+// TestMain names the release source commit so publication does not depend on running inside a git checkout
+// (a copied tree, as on a Windows test machine, has no .git).
+func TestMain(m *testing.M) {
+	if os.Getenv("PAPERBOAT_RELEASE_SOURCE_COMMIT") == "" {
+		os.Setenv("PAPERBOAT_RELEASE_SOURCE_COMMIT", strings.Repeat("c", 40))
+	}
+	os.Exit(m.Run())
+}
+
 func TestCIKeyEnvironmentAndSupportedTargets(t *testing.T) {
 	seed := bytes.Repeat([]byte{7}, ed25519.SeedSize)
 	t.Setenv("PAPERBOAT_TUF_ONLINE_KEY", base64.RawStdEncoding.EncodeToString(seed))
