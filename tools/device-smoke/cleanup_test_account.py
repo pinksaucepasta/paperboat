@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 from dev_targets import load
-THROWAWAY = r"^(worktree[a-z0-9]*-|luf14|winpool-|winrel|wina-|w[0-9]+-)"
+from throwaway_names import throwaway_regex
 
 SELECT = """
 CREATE TEMP TABLE doomed ON COMMIT DROP AS
@@ -64,9 +64,9 @@ def main():
     protected = settings.get('cleanup_protected')
     if not host or not protected:
         parser.error("set deployment_host and cleanup_protected in the local development targets")
-    throwaway = settings.get('cleanup_throwaway', THROWAWAY)
+    throwaway = throwaway_regex(settings.get('cleanup_throwaway'))
     if args.prefix:
-        if not re.fullmatch(r"[a-z][a-z0-9]*-", args.prefix) or re.search(protected, args.prefix):
+        if not re.fullmatch(r"[a-z][a-z0-9-]*-", args.prefix) or re.search(protected, args.prefix):
             parser.error("--prefix must be a run prefix like test- (lowercase, ending in -)")
         throwaway = "^" + re.escape(args.prefix)
     for machine_id in args.id or []:
