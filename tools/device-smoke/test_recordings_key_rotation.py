@@ -13,12 +13,16 @@ class Cli:
     """A stub pb: records every call in order and answers like the product (recordings_command.go)."""
 
     def __init__(self, reset_opens_old=False, fail_replace=False, status=True, first_generation=1):
-        self.status, self.first_generation = status, first_generation
+        self.status, self.first_generation, self.member_blocked = status, first_generation, set()
         self.calls, self.generation, self.reset_done, self.before_reset = [], 1, False, []
         self.reset_opens_old, self.fail_replace = reset_opens_old, fail_replace
         self.made = []
 
-    def command_result(self, _binary, *args, **_):
+    def command_result(self, binary, *args, **_):
+        if binary == 'member-pb':
+            self.calls.append(('member',) + args[:2])
+            gone = self.reset_done and args[2] in self.before_reset and not self.reset_opens_old
+            return subprocess.CompletedProcess(args, 1 if gone or args[2] in self.member_blocked else 0, '', '')
         self.calls.append(args[:3] if args[:2] == ('recordings', 'key') else args[:2])  # keeps 'key --help' and 'key status' apart from replace/reset
         if args[:3] == ('recordings', 'key', '--help'):
             return subprocess.CompletedProcess(args, 0, 'Available Commands:\n  replace  r\n' + ('  status  s\n' if self.status else ''), '')
@@ -59,7 +63,7 @@ class Cli:
             raise RuntimeError('play failed')
 
 
-def run(cli):
+def run(cli, member='member-pb'):
     patches = [mock.patch.object(krot, 'command_result', cli.command_result),
                mock.patch.object(krot.rec, 'phase_manual', cli.phase_manual),
                mock.patch.object(krot.rec, 'listing', cli.listing),
@@ -68,7 +72,7 @@ def run(cli):
     for patch in patches:
         patch.start()
     try:
-        return krot.run(TEAM, TARGET, pathlib.Path('/nonexistent'))
+        return krot.run(TEAM, TARGET, pathlib.Path('/nonexistent'), member_cmd=member)
     finally:
         mock.patch.stopall()
 
@@ -79,18 +83,20 @@ class RotationTest(unittest.TestCase):
         receipt = run(cli)
         self.assertEqual('PASS', receipt['status'])
         names = [s['step'] for s in receipt['steps']]
-        self.assertEqual(['record_old', 'key_created_by_first_recording', 'replace', 'old_readable_after_replace', 'record_new', 'reset', 'old_unreadable_after_reset',
-                          'new_unreadable_after_reset', 'listed_after_reset', 'record_after_reset'], names)
+        self.assertEqual(['record_old', 'key_created_by_first_recording', 'member_reads_first_recording', 'replace', 'old_readable_after_replace',
+                          'member_reads_old_after_replace', 'record_new', 'member_reads_new_after_replace', 'reset', 'old_unreadable_after_reset',
+                          'new_unreadable_after_reset', 'member_refused_old_after_reset', 'member_refused_new_after_reset', 'listed_after_reset',
+                          'record_after_reset', 'member_reads_after_reset'], names)
         kinds = [c[:2] if c[0] != 'recordings' or c[1] != 'key' else c for c in cli.calls]
         self.assertLess(kinds.index(('recordings', 'key', 'replace')), kinds.index(('recordings', 'key', 'reset')))
-        self.assertEqual({'replace': 2, 'reset': 3}, receipt['generations'])  # +1 at each step
+        self.assertEqual({'first': 1, 'replace': 2, 'reset': 3}, receipt['generations'])  # +1 at each step
         self.assertEqual({'record_old': 'rec_1', 'record_new': 'rec_2', 'record_after_reset': 'rec_3'}, receipt['recordings'])
 
     def test_a_reset_that_leaves_old_recordings_open_fails(self):
         receipt = run(Cli(reset_opens_old=True))
         failed = {s['step'] for s in receipt['steps'] if s['status'] == 'FAIL'}
         self.assertEqual('FAIL', receipt['status'])
-        self.assertEqual({'old_unreadable_after_reset', 'new_unreadable_after_reset'}, failed)
+        self.assertEqual({'old_unreadable_after_reset', 'new_unreadable_after_reset', 'member_refused_old_after_reset', 'member_refused_new_after_reset'}, failed)
         self.assertEqual('PASS', receipt['steps'][-1]['status'])  # no fail-fast: the later steps still ran
 
     def test_a_failed_replace_skips_what_needs_it_but_not_the_rest(self):
@@ -99,6 +105,7 @@ class RotationTest(unittest.TestCase):
         self.assertEqual('PASS', status['record_old'])
         self.assertEqual('FAIL', status['replace'])
         self.assertTrue(all(status[n] == 'SKIP' for n in ('old_readable_after_replace', 'record_new', 'reset', 'record_after_reset')))
+        self.assertEqual('PASS', status['member_reads_first_recording'])
         self.assertEqual('FAIL', receipt['status'])
 
     def test_no_secret_reaches_the_receipt(self):
@@ -126,3 +133,40 @@ class RotationTest(unittest.TestCase):
         self.assertEqual('FAIL', step['status'])
         self.assertIn('cannot read recording key generation', step['error'])
         self.assertNotIn('SKIP', [s['status'] for s in receipt['steps'] if s['step'] == 'key_created_by_first_recording'])
+
+    def failed(self, receipt):
+        return {s['step']: s['error'] for s in receipt['steps'] if s['status'] == 'FAIL'}
+
+    def test_without_a_member_command_every_member_step_fails_loudly_and_none_is_skipped(self):
+        receipt = run(Cli(), member='')
+        failed = self.failed(receipt)
+        members = [s for s in receipt['steps'] if s['step'].startswith('member_')]
+        self.assertEqual(['FAIL'] * len(members), [s['status'] for s in members])
+        self.assertIn('SMOKE_RECKEY_MEMBER_CMD is not set', failed['member_reads_first_recording'])
+        self.assertEqual('FAIL', receipt['status'])
+
+    def test_a_member_who_cannot_replay_the_old_recording_after_a_replace_fails(self):
+        cli = Cli()
+        cli.member_blocked = {'rec_1'}
+        failed = self.failed(run(cli))
+        self.assertEqual({'member_reads_first_recording', 'member_reads_old_after_replace'}, set(failed))
+        self.assertIn('rec_1', failed['member_reads_old_after_replace'])
+
+    def test_a_member_who_still_replays_after_the_reset_fails(self):
+        self.assertEqual({'old_unreadable_after_reset', 'new_unreadable_after_reset', 'member_refused_old_after_reset', 'member_refused_new_after_reset'},
+                         set(self.failed(run(Cli(reset_opens_old=True)))))
+
+    def test_a_team_that_already_had_a_key_is_refused(self):
+        failed = self.failed(run(Cli(first_generation=3)))
+        self.assertIn('already had recording key generation 3', failed['key_created_by_first_recording'])
+
+    def test_replace_must_make_the_next_generation(self):
+        cli = Cli()
+        original = cli.command_result
+
+        def skipping(binary, *args, **kw):
+            if args[:3] == ('recordings', 'key', 'replace'):
+                cli.generation += 1  # a replace that jumped two generations
+            return original(binary, *args, **kw)
+        cli.command_result = skipping
+        self.assertIn('replace made generation 3, not 2', self.failed(run(cli))['replace'])

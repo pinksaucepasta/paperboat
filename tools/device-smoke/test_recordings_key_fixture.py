@@ -96,13 +96,14 @@ class SmokeRunner(unittest.TestCase):
                                                          'echo %r; exit %d\n' % (d, fixture_out, fixture_rc))
             (d / 'recordings_key_fixture.sh').chmod(0o755)
             (d / 'one.py').write_text('')
-            (d / 'ssh').write_text('#!/bin/bash\ncat > /dev/null\ncase "$*" in *recordings_key_rotation.py*) echo %r; exit %d;; esac\n' % (rotation_out, rotation_rc))
+            (d / 'ssh').write_text('#!/bin/bash\necho "$*" >> %s/ssh.log\ncat > /dev/null\ncase "$*" in *recordings_key_rotation.py*) echo %r; exit %d;; esac\n' % (d, rotation_out, rotation_rc))
             (d / 'ssh').chmod(0o755)
             script = ('HERE=%s; SSH_OPTS=(); skipped() { return 1; }; now() { echo 0; }; '
                       'record() { echo "$1|$2|$4"; }\n%s\ntest_recording_key_rotation\n') % (d, function)
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
                                     env=dict(os.environ, PATH='%s:%s' % (d, os.environ['PATH']), **env))
             log = (d / 'fixture.log').read_text() if (d / 'fixture.log').exists() else ''
+            self.ssh_log = (d / 'ssh.log').read_text() if (d / 'ssh.log').exists() else ''
         return result.stdout.strip(), log
 
     ENV = {'SMOKE_RECKEY_HOST': 'hostx', 'SMOKE_RECKEY_TEAM': 'team_1', 'SMOKE_RECKEY_VAULT_PASSWORD_FILE': '/home/x/pw'}
@@ -132,6 +133,14 @@ class SmokeRunner(unittest.TestCase):
         out, log = self.run_function(self.ENV, 'recordings_key_fixture: pairing failed', 1)
         self.assertIn('recording-key-rotation|FAIL|fixture: recordings_key_fixture: pairing failed', out)
         self.assertEqual(['up', 'down'], [line.split()[0] for line in log.splitlines()])
+
+
+    def test_the_member_command_reaches_the_check_only_when_it_is_set(self):
+        receipt = json.dumps({'check': 'recording-key-rotation', 'status': 'PASS', 'steps': [], 'generations': {}})
+        self.run_function(self.ENV, '{"name": "n", "machine_id": "machine_1"}', 0, receipt, 0)
+        self.assertNotIn('--member-cmd', self.ssh_log)
+        self.run_function(dict(self.ENV, SMOKE_RECKEY_MEMBER_CMD='ssh member-host .local/bin/pb'), '{"name": "n", "machine_id": "machine_1"}', 0, receipt, 0)
+        self.assertIn("--member-cmd ssh\\ member-host\\ .local/bin/pb", self.ssh_log)
 
 
 # A host-in-a-directory: ssh runs the remote command locally, with fake sudo/docker (logged) and a fake owner pb.

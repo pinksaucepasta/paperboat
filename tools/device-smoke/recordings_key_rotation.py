@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """C307, C308, F25-11, F25-12: replacing and resetting the team recording key, end to end on a team machine.
 
-Usage: recordings_key_rotation.py TARGET --team TEAM [--vault-password-file FILE]
+Usage: recordings_key_rotation.py TARGET --team TEAM [--vault-password-file FILE] --member-cmd 'PB-OF-A-TEAM-MEMBER'
 TARGET is a machine of TEAM that records. The signed-in account must be the team OWNER (reset is owner-only; replace
 needs a copy of the current key) with an unlocked vault (--vault-password-file unlocks it first). Use a disposable team:
-a key chain only grows, so the team ends two generations higher. The team needs no key beforehand: its first
-recording creates generation 1 (asserted by key_created_by_first_recording).
+a key chain only grows, so the team ends two generations higher. The team must have NO recording key beforehand: its
+first recording creates generation 1 (asserted by key_created_by_first_recording). --member-cmd is a command that runs the
+pb of a plain team member who can replay (arguments are appended, e.g. 'ssh member-host .local/bin/pb'); the member's vault
+must already be unlocked. Without it the member steps FAIL (never skip): the key must open for more than its owner.
 Promises asserted (CHECKLIST F25-11, F25-12; cli/cmd/pb/recordings_command.go):
   replace: generation +1 with a copy for every viewer; older recordings STAY readable (sealed previous link); new ones work.
   reset:   generation +1 again, reported older_recordings_readable=false; recordings made before can be opened by no
@@ -17,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 import time
 
@@ -53,6 +56,23 @@ def key_generation(team):
         raise RuntimeError('cannot read recording key generation: pb recordings key status did not answer JSON') from None
 
 
+def member_pb(member_cmd, *args):
+    if not member_cmd:
+        raise RuntimeError('SMOKE_RECKEY_MEMBER_CMD is not set: a team member must replay the recordings too')
+    argv = shlex.split(member_cmd)
+    return command_result(argv[0], *argv[1:], *args, timeout=180)
+
+
+def member_reads(member_cmd, recording_id):
+    if member_pb(member_cmd, 'recordings', 'play', recording_id, '--idle-limit', '1s', '--speed', '8').returncode:
+        raise RuntimeError('a team member cannot replay %s' % recording_id)
+
+
+def member_refused(member_cmd, recording_id):
+    if not member_pb(member_cmd, 'recordings', 'play', recording_id, '--idle-limit', '1s', '--speed', '8').returncode:
+        raise RuntimeError('a team member replayed %s after the key was reset' % recording_id)
+
+
 def readable(recording_id, directory):
     rec.export_text(recording_id, directory)
     rec.played_text(recording_id)
@@ -69,7 +89,7 @@ def refused(recording_id, directory):
     return codes
 
 
-def run(team, target, directory, steps=None):
+def run(team, target, directory, steps=None, member_cmd=None):
     steps = [] if steps is None else steps
     state = {}
 
@@ -86,6 +106,9 @@ def run(team, target, directory, steps=None):
 
     def replaced():
         receipt = key_command('replace', team)
+        first = state.get('key_created_by_first_recording')
+        if isinstance(first, int) and not isinstance(first, bool) and receipt['generation'] != first + 1:
+            raise RuntimeError('replace made generation %d, not %d' % (receipt['generation'], first + 1))
         state['replace_generation'] = receipt['generation']
         return receipt
 
@@ -98,8 +121,12 @@ def run(team, target, directory, steps=None):
         return receipt
 
     def first_recording_made_the_key():
-        if key_generation(team) < 1:  # the team's first recording makes generation 1; nobody creates it by hand
+        generation = key_generation(team)  # the team's first recording makes generation 1; nobody creates it by hand
+        if generation < 1:
             raise RuntimeError("the team's first recording did not create recording key generation 1")
+        if generation != 1:
+            raise RuntimeError('the team already had recording key generation %d: use a team with no key' % generation)
+        return generation
 
     def listed():
         if not {state['record_old'], state['record_new']} <= {r['id'] for r in rec.listing(team)}:
@@ -107,18 +134,24 @@ def run(team, target, directory, steps=None):
 
     step('record_old', [], lambda: rec.phase_manual(team, target, directory))
     step('key_created_by_first_recording', ['record_old'], first_recording_made_the_key)
+    step('member_reads_first_recording', ['record_old'], lambda: member_reads(member_cmd, state['record_old']))
     step('replace', ['record_old'], replaced)
     step('old_readable_after_replace', ['replace'], lambda: readable(state['record_old'], directory))
+    step('member_reads_old_after_replace', ['replace'], lambda: member_reads(member_cmd, state['record_old']))
     step('record_new', ['replace'], lambda: rec.phase_manual(team, target, directory))
+    step('member_reads_new_after_replace', ['record_new'], lambda: member_reads(member_cmd, state['record_new']))
     step('reset', ['replace'], reset)
     step('old_unreadable_after_reset', ['reset'], lambda: refused(state['record_old'], directory))
     step('new_unreadable_after_reset', ['reset', 'record_new'], lambda: refused(state['record_new'], directory))
+    step('member_refused_old_after_reset', ['reset'], lambda: member_refused(member_cmd, state['record_old']))
+    step('member_refused_new_after_reset', ['reset', 'record_new'], lambda: member_refused(member_cmd, state['record_new']))
     step('listed_after_reset', ['reset', 'record_new'], listed)
     step('record_after_reset', ['reset'], lambda: rec.phase_manual(team, target, directory))
+    step('member_reads_after_reset', ['record_after_reset'], lambda: member_reads(member_cmd, state['record_after_reset']))
     return {'check': 'recording-key-rotation', 'target': target,
             'status': 'PASS' if all(s['status'] == 'PASS' for s in steps) else 'FAIL', 'steps': steps,
             'recordings': {k: state[k] for k in ('record_old', 'record_new', 'record_after_reset') if isinstance(state.get(k), str)},
-            'generations': {'replace': state.get('replace_generation'), 'reset': (state.get('reset') or {}).get('generation')}}
+            'generations': {'first': state.get('key_created_by_first_recording') if isinstance(state.get('key_created_by_first_recording'), int) else None, 'replace': state.get('replace_generation'), 'reset': (state.get('reset') or {}).get('generation')}}
 
 
 def main():
@@ -126,11 +159,12 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--team', required=True)
     parser.add_argument('--vault-password-file')
+    parser.add_argument('--member-cmd', default='', help="runs a team member's pb; arguments are appended")
     args = parser.parse_args()
     os.environ['PB_SMOKE_WORKSPACE'] = args.team
     rec.unlock(args.vault_password_file)
     with winhost.workdir('paperboat-keyrot-') as directory:  # removed on every exit path
-        receipt = run(args.team, args.target, directory)
+        receipt = run(args.team, args.target, directory, member_cmd=args.member_cmd)
     print(json.dumps(receipt), flush=True)
     sys.exit(0 if receipt['status'] == 'PASS' else 1)
 

@@ -1050,16 +1050,19 @@ test_env_scopes() {
 
 # PB-R1 (C307, C308, F25-11, F25-12): replacing and resetting a team's recording key. Needs SMOKE_RECKEY_TEAM (a disposable paid team
 # with a recording key, owned by the account HOST's ~/.local/bin/pb is signed in to) and SMOKE_RECKEY_VAULT_PASSWORD_FILE (a path
-# on HOST; never printed); HOST is SMOKE_RECKEY_HOST or SMOKE_LINUX_SSH. Builds its own team-visible machine (recordings_key_fixture.sh)
+# on HOST; never printed), SMOKE_RECKEY_MEMBER_CMD (runs a team member's pb from HOST, arguments appended; the member's vault unlocked);
+# the team must have no recording key yet. HOST is SMOKE_RECKEY_HOST or SMOKE_LINUX_SSH. Builds its own team-visible machine (recordings_key_fixture.sh)
 # and always removes it.
 test_recording_key_rotation() {
   skipped recording-key-rotation && return
   local host=${SMOKE_RECKEY_HOST:-${SMOKE_LINUX_SSH:-}} team=${SMOKE_RECKEY_TEAM:-} vault=${SMOKE_RECKEY_VAULT_PASSWORD_FILE:-}
-  local missing="" t0 name fixture id out status detail dir
+  local missing="" t0 name fixture id out status detail dir member=""
   [ -n "$host" ] || missing+=" SMOKE_RECKEY_HOST"
   [ -n "$team" ] || missing+=" SMOKE_RECKEY_TEAM"
   [ -n "$vault" ] || missing+=" SMOKE_RECKEY_VAULT_PASSWORD_FILE"
   if [ -n "$missing" ]; then record recording-key-rotation SKIP 0 "needs${missing}"; return; fi
+  # The member side has no default: unset, the check's member steps fail loudly.
+  [ -z "${SMOKE_RECKEY_MEMBER_CMD:-}" ] || member=" --member-cmd $(printf '%q' "$SMOKE_RECKEY_MEMBER_CMD")"
   t0=$(now); name="sh-r1-$(date -u +%H%M%S)$RANDOM"; dir=/tmp/$name-files
   fixture=$("$HERE/recordings_key_fixture.sh" up "$host" "$name" "$team" 2>&1); status=$?; fixture=$(tail -n 1 <<<"$fixture")
   if [ "$status" != 0 ] || ! id=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["machine_id"])' "$fixture" 2>/dev/null); then
@@ -1068,7 +1071,7 @@ test_recording_key_rotation() {
     return
   fi
   out=$(tar -C "$HERE" -cf - $(cd "$HERE" && ls *.py) | ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "mkdir -p $dir && tar -xf - -C $dir" 2>&1) \
-    && out=$(ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "cd $dir && timeout 2400 python3 recordings_key_rotation.py $name --team $team --vault-password-file $vault" 2>&1); status=$?
+    && out=$(ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "cd $dir && timeout 2400 python3 recordings_key_rotation.py $name --team $team --vault-password-file $vault$member" 2>&1); status=$?
   detail=$(python3 - "$out" <<'PY'
 import json, sys
 try:
