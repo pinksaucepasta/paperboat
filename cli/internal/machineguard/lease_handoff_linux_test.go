@@ -121,6 +121,9 @@ func runInOwnLoopback(t *testing.T) bool {
 	output, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
 	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() == noOwnLoopback) {
+		if hostMachineGuardActive() {
+			t.Skipf("no unprivileged network namespace here (%v) and this host runs pb's machine guard (nft table inet paperboat_machineguard or paperboat-machineguard.service active), which refuses 127.100.0.0/16 dials: skipped", err)
+		}
 		t.Logf("no usable unprivileged network namespace here (%v): running on the host loopback", err)
 		return false
 	}
@@ -128,6 +131,14 @@ func runInOwnLoopback(t *testing.T) bool {
 		t.Fatalf("in its own network namespace: %v\n%s", err, output)
 	}
 	return true
+}
+
+// hostMachineGuardActive reports whether pb's machine guard owns this host's loopback (its nft table or its service).
+func hostMachineGuardActive() bool {
+	if exec.Command("nft", "list", "table", "inet", guardTable).Run() == nil {
+		return true
+	}
+	return exec.Command("systemctl", "is-active", "--quiet", "paperboat-machineguard.service").Run() == nil
 }
 
 func TestInheritedLeaseKeepsAcceptingAndIsHandedToItsDaemon(t *testing.T) {
