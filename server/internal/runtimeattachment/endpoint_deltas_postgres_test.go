@@ -202,3 +202,54 @@ func testEdgeCertificate(t *testing.T, host string) (string, string) {
 	digest := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), "sha256:" + hex.EncodeToString(digest[:])
 }
+
+// A re-attach that replaces the carrier session (a new worker) re-points the preview's assignment in the
+// same transaction: a delta pull right after it answers the route on the new session, never as removed
+// (hypothesis for a preview 404 on 2026-11-21, assignment pinned to a session the carrier row left).
+func TestCarrierSessionReplacementKeepsEndpointRouteOnPostgres(t *testing.T) {
+	f := newAgentFixture(t, "epsession")
+	ctx := f.ctx
+	lease := f.prefix + "_session"
+	host := strings.ReplaceAll(lease, "_", "-") + ".preview.example.test"
+	f.exec(t, `INSERT INTO preview_leases(id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,owner_session_kind,target_scheme,target_address,access_mode,lease_deadline)
+VALUES($1,$2,$3,$3,$4,'owner_session_s','foreground','http','127.0.0.1:3000','public',now()+interval '10 minutes')`, lease, "https://"+host, f.account, f.machine)
+	deltas := []string{runtimewire.CapabilityEndpoints, runtimewire.CapabilityEndpointDeltas}
+	if _, err := f.service.Pull(ctx, f.edge, deltas); err != nil {
+		t.Fatal(err)
+	}
+	request := f.request
+	request.Capabilities = []string{runtimewire.CapabilityEndpoints}
+	first, err := f.service.Attach(ctx, f.proof, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		return endpoints.RegisterPreviewTx(ctx, tx, endpoints.Preview{LeaseID: lease, AccountID: f.account, AgentMachineID: f.machine, AccessMode: "public", Endpoint: "https://" + host})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	full, err := f.service.PullEndpoints(ctx, f.edge, deltas, "", "", 0)
+	if err != nil || len(flatten(full)) != 1 {
+		t.Fatalf("full endpoint pull = %+v, %v", full, err)
+	}
+	request.ProcessID, request.WorkerGeneration = "process_next", 2
+	second, err := f.service.Attach(ctx, f.proof, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Admission.Binding.SessionID == first.Admission.Binding.SessionID {
+		t.Fatal("a new worker kept the carrier session")
+	}
+	changed, err := f.service.PullEndpoints(ctx, f.edge, deltas, full.Cursor, "", 0)
+	if err != nil || len(changed.RemovedRouteIDs) != 0 || len(flatten(changed)) != 1 {
+		t.Fatalf("delta after a carrier session change = %+v, %v", changed, err)
+	}
+	var session string
+	if err := f.database.Pool().QueryRow(ctx, `SELECT carrier_session_id FROM endpoint_edge_assignments WHERE route_id=$1 AND edge_node_id=$2`, lease, f.node).Scan(&session); err != nil {
+		t.Fatal(err)
+	}
+	var carrier string
+	if err := f.database.Pool().QueryRow(ctx, `SELECT session_id FROM runtime_carrier_attachments WHERE route_id=$1 AND edge_node_id=$2`, f.route, f.node).Scan(&carrier); err != nil || session != carrier {
+		t.Fatalf("assignment session %s, carrier session %s, %v", session, carrier, err)
+	}
+}
