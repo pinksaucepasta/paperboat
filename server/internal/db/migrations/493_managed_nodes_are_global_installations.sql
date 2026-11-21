@@ -6,7 +6,7 @@ SET lock_timeout = '5s';
 DROP TABLE paperboat.managed_node_authority;
 CREATE VIEW paperboat.managed_node_authority AS
 SELECT i.node_id, n.region AS region_id, i.runtime_hash, i.runtime_ciphertext, '{}'::jsonb AS config,
-       n.node_generation::bigint AS revision,
+       n.operator_revision AS revision,
        CASE WHEN n.state='retired' THEN n.updated_at END AS retired_at, i.created_at, n.updated_at
 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
 WHERE i.scope_kind='global' AND i.state='active' AND i.claim_complete AND n.region IS NOT NULL;

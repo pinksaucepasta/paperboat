@@ -1278,7 +1278,7 @@ UPDATE control_tunnel_nodes
 SET state = 'draining', ready = false, drain_deadline = $1,
     version = version + 1, updated_at = $2
 WHERE id = $3 AND version = $4 AND state IN ('registered','ready')
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port
+RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision
 `
 
 type DrainControlTunnelNodeParams struct {
@@ -1340,6 +1340,7 @@ func (q *Queries) DrainControlTunnelNode(ctx context.Context, arg DrainControlTu
 		&i.TunnelSnapshotAt,
 		&i.Site,
 		&i.PublicHttpsPort,
+		&i.OperatorRevision,
 	)
 	return i, err
 }
@@ -2904,7 +2905,7 @@ WHERE control_tunnel_nodes.id = $5 AND control_tunnel_nodes.process_epoch = $6 A
   AND (NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=control_tunnel_nodes.id)
     OR EXISTS (SELECT 1 FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id
       WHERE m.node_id=control_tunnel_nodes.id AND m.retired_at IS NULL AND r.enabled))
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port
+RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision
 `
 
 type HeartbeatControlTunnelNodeParams struct {
@@ -2970,6 +2971,7 @@ func (q *Queries) HeartbeatControlTunnelNode(ctx context.Context, arg HeartbeatC
 		&i.TunnelSnapshotAt,
 		&i.Site,
 		&i.PublicHttpsPort,
+		&i.OperatorRevision,
 	)
 	return i, err
 }
@@ -3706,7 +3708,7 @@ func (q *Queries) ListRevokedControlSigningKeyIDs(ctx context.Context) ([]string
 }
 
 const listStaleControlTunnelNodesForUpdate = `-- name: ListStaleControlTunnelNodesForUpdate :many
-SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port FROM control_tunnel_nodes
+SELECT id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision FROM control_tunnel_nodes
 WHERE state IN ('registered','ready') AND (last_heartbeat_at IS NULL OR last_heartbeat_at <= $1)
 ORDER BY coalesce(last_heartbeat_at, created_at), id
 FOR UPDATE SKIP LOCKED LIMIT $2
@@ -3770,6 +3772,7 @@ func (q *Queries) ListStaleControlTunnelNodesForUpdate(ctx context.Context, arg 
 			&i.TunnelSnapshotAt,
 			&i.Site,
 			&i.PublicHttpsPort,
+			&i.OperatorRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -4485,7 +4488,7 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
          AND coalesce(EXCLUDED.carrier_endpoint_host, control_tunnel_nodes.endpoint_host)=control_tunnel_nodes.endpoint_host
          AND coalesce(EXCLUDED.carrier_endpoint_tcp_port, control_tunnel_nodes.endpoint_tcp_port)=control_tunnel_nodes.endpoint_tcp_port
          AND coalesce(EXCLUDED.carrier_endpoint_quic_port, control_tunnel_nodes.endpoint_quic_port)=control_tunnel_nodes.endpoint_quic_port)
-RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port
+RETURNING id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, state, ready, capacity, observation, last_heartbeat_at, drain_deadline, version, created_at, updated_at, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, node_generation, region, failure_domain, roles, transports, capacity_limit, capacity_used, capacity_observed_at, registry_expires_at, allowed_account_ids, peer_relay_wireguard_public_key, peer_relay_disco_public_key, peer_relay_virtual_address, public_ingress_ipv4, public_ingress_ipv6, public_ingress_verified_at, tls_spki_sha256, endpoints_epoch, tunnel_endpoints_epoch, tunnel_snapshot_at, site, public_https_port, operator_revision
 `
 
 type RegisterControlTunnelNodeParams struct {
@@ -4570,6 +4573,7 @@ func (q *Queries) RegisterControlTunnelNode(ctx context.Context, arg RegisterCon
 		&i.TunnelSnapshotAt,
 		&i.Site,
 		&i.PublicHttpsPort,
+		&i.OperatorRevision,
 	)
 	return i, err
 }
