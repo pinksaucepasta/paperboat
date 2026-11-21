@@ -80,8 +80,6 @@ github.com/pinksaucepasta/paperboat/server/internal/httpapi TestTask43ServeTermi
 github.com/pinksaucepasta/paperboat/server/internal/httpapi TestTask44ConnectedCollaboration
 github.com/pinksaucepasta/paperboat/server/internal/peersessions TestEmitCompatNetworkConfiguration
 github.com/pinksaucepasta/paperboat/server/internal/selfhost TestLiveGlobalNodeReadinessDeploymentProbe
-github.com/pinksaucepasta/paperboat/server/internal/selfhost TestPackagedHelperEnrollmentOnPostgres
-github.com/pinksaucepasta/paperboat/server/internal/selfhost TestPackagedHelperTeamEnrollmentAndPlacementOnPostgres
 github.com/pinksaucepasta/paperboat/server/internal/supportreport TestLiveSentryDeploymentProbe
 github.com/pinksaucepasta/paperboat/server/internal/supportreport TestLiveSentryFailureRecovery
 github.com/pinksaucepasta/paperboat/server/internal/tunnelcert TestACMEIssuerPebbleWildcard
