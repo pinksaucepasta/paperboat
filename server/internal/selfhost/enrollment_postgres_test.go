@@ -61,7 +61,7 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 		}
 		address := listen.Addr().String()
 		listen.Close()
-		command := exec.Command(binary, "install", "--no-service", "--state-dir", dir, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--both")
+		command := exec.Command(binary, "install", "--no-service", "--state-dir", dir, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--both", "--relay-image", "example.test/relay:test", "--edge-image", "example.test/edge:test")
 		command.Args = append(command.Args, extra...)
 		if output, e := command.CombinedOutput(); e != nil {
 			t.Fatalf("initialize production helper: %v: %s", e, output)

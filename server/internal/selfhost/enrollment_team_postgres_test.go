@@ -30,7 +30,7 @@ func startTeamEnrollmentHelper(t *testing.T, binary, capability string) (string,
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	command := exec.Command(binary, "install", "--no-service", "--state-dir", directory, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--"+capability)
+	command := exec.Command(binary, "install", "--no-service", "--state-dir", directory, "--endpoint-host", "93.184.216.35", "--claim-listen", address, "--"+capability, "--relay-image", "example.test/relay:test", "--edge-image", "example.test/edge:test")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("install packaged helper: %v: %s", err, output)
 	}
