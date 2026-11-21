@@ -39093,7 +39093,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
                     source: string;
                     payload: {
                         [key: string]: unknown;
@@ -39140,7 +39139,6 @@ export interface operations {
                     "application/json": {
                         data: {
                             reports: {
-                                /** @enum {string} */
                                 source: string;
                                 payload: {
                                     [key: string]: unknown;
