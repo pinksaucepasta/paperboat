@@ -1247,12 +1247,10 @@ test_device_application approve-refusals approve_refusals.py
 test_tunnel_domain
 test_carrier_throughput
 test_device_application config-sync config_sync.py
-test_device_application config-survival config_survival.py
 test_reset_lifecycle
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_device_application tunnel-survival tunnel_survival.py
 test_device_application tunnel-failures tunnel_failures.py
-test_device_application preview-survival preview_survival.py
 test_device_application tunnel-transfer tunnel_transfer.py
 test_local_access_settings
 test_device_application doctor-lifecycle doctor_lifecycle.py
@@ -1264,6 +1262,9 @@ for t in "${TLIST[@]}"; do
   skipped ssh-long || collect "ssh-long:$t" "long-ssh-$t" SSHFINAL "$LONG_SSH"
   skipped exec-long || collect "exec-long:$t" "long-exec-$t" FINAL "$LONG_EXEC"
 done
+# Restart/update checks interrupt live connections by design, so they run after the long holds finish.
+test_device_application config-survival config_survival.py
+test_device_application preview-survival preview_survival.py
 
 if [ -n "$UPDATE_DIR" ]; then
   for t in "${TLIST[@]}"; do update_target "$t"; done
