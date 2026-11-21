@@ -3,6 +3,7 @@ package selfhost
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"os"
 	"strings"
 	"testing"
@@ -85,9 +86,13 @@ VALUES($1,'default','1.0','epoch','ready',true,now(),CASE WHEN $1=$2 THEN $3 ELS
 	})
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id) VALUES($1,$2,'api tunnel','active',$3,$4,$5,'actor')`, tunnel, owner, tunnelEndpoint, "https://"+managedTunnelTarget, machine)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, tunnel)
-	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:test','verified',$6,'managed','ready','ready','clear')`, "flip_td_"+stamp, owner, tunnel, route, "t."+stamp+".example.test", managedTunnelTarget)
+	wsT := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+wsT, owner, wsT+".example.test")
+	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact','dns:test','verified',$6,'managed','ready','ready','clear',$7)`, "flip_td_"+stamp, owner, tunnel, route, "t."+stamp+".example.test", managedTunnelTarget, "wsd_"+wsT)
 	exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,created_at,lease_deadline) VALUES('foreground',$1,$2,$3,'actor',$4,'session','http','127.0.0.1:3000',now()-interval '1 hour',now()+interval '10 minutes')`, preview, "https://"+managedPreviewTarget, owner, machine)
-	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified',$5,'managed','ready','ready','clear')`, "flip_pd_"+stamp, owner, preview, "p."+stamp+".example.test", managedPreviewTarget)
+	wsP := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+wsP, owner, wsP+".example.test")
+	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified',$5,'managed','ready','ready','clear',$6)`, "flip_pd_"+stamp, owner, preview, "p."+stamp+".example.test", managedPreviewTarget, "wsd_"+wsP)
 	exec(`INSERT INTO paperboat.native_usage_authorities(access_session_id,machine_id,installation_generation,workspace_id,resource_kind,resource_id,resource_name,machine_name,capabilities,admitted_at,expires_at,retain_until,edge_node_id)
  VALUES($1,$2,1,'personal:'||$3,'terminal',$4,'build shell','Work laptop',ARRAY['terminal'],now(),now()+interval '5 minutes',now()+interval '7 days',$5)`, "flip_att_"+stamp, machine, owner, "flip_term_"+stamp, m1)
 	service := New(store, "edge-flip-test-key")

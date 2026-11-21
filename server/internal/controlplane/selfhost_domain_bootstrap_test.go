@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/google/uuid"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,8 +54,10 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	}
 	domain := "domain_" + f.suffix
 	hostname := "custom-" + f.suffix + ".example.test"
-	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state)
- VALUES($1,$2,$3,$4,$5,'exact','dns:test','pending','target.example.test','managed','pending','unknown','clear')`, domain, f.accountID, f.tunnelID, f.routeID, hostname)
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.accountID, ws+".example.test")
+	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+ VALUES($1,$2,$3,$4,$5,'exact','dns:test','pending','target.example.test','managed','pending','unknown','clear',$6)`, domain, f.accountID, f.tunnelID, f.routeID, hostname, "wsd_"+ws)
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("unverified custom domain admitted: %+v", rows)
 	}
