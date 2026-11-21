@@ -359,7 +359,7 @@ func StableTargetHostname(endpoint string) (string, error) {
 	return host, nil
 }
 
-// verified is the binding's workspace domain verification (the only owner of that fact).
+// DomainViewFromRow renders a binding using its workspace domain's verification state.
 func DomainViewFromRow(row dbsqlc.PreviewDomain, verified bool) DomainView {
 	view := DomainView{Schema: Schema, Kind: Kind, ID: row.ID, AccountID: row.AccountID, TargetKind: TargetKind, PreviewID: row.PreviewID,
 		Hostname: row.Hostname, MatchType: row.MatchType, State: wireState(row, verified), Generation: row.Generation,
