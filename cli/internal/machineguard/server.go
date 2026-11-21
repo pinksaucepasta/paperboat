@@ -333,6 +333,26 @@ func (g *guardServer) awaitDeparture(ctx context.Context, owner controlConn) boo
 	}
 }
 
+// cacheIdentity keeps lookup's first success: the guard account does not change while the guard runs, and each
+// lookup (two /usr/bin/id runs on macOS) woke opendirectoryd on every new listener and PF apply.
+func cacheIdentity(lookup func(context.Context) (uint32, uint32, error)) func(context.Context) (uint32, uint32, error) {
+	var mu sync.Mutex
+	var uid, gid uint32
+	found := false
+	return func(ctx context.Context) (uint32, uint32, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !found {
+			u, g, err := lookup(ctx)
+			if err != nil {
+				return 0, 0, err
+			}
+			uid, gid, found = u, g, true
+		}
+		return uid, gid, nil
+	}
+}
+
 // operationTimeout is below the client's exchangeTimeout, so a slow pfctl/ifconfig/nft run still answers in time.
 const operationTimeout = 9 * time.Second
 
