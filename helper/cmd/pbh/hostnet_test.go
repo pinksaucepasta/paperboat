@@ -496,17 +496,20 @@ func TestUninstallRemovesEveryCommentedRuleWithoutARecord(t *testing.T) {
 // a delete replays the decoded arguments.
 func TestSplitIptablesLineDecodesQuotedArguments(t *testing.T) {
 	line := `-A INPUT -p tcp -m comment --comment "note --comment paperboat-edge here" -j ACCEPT`
-	args := splitIptablesLine(line)
+	args, _ := splitIptablesLine(line)
 	want := []string{"-A", "INPUT", "-p", "tcp", "-m", "comment", "--comment", "note --comment paperboat-edge here", "-j", "ACCEPT"}
 	if strings.Join(args, "|") != strings.Join(want, "|") || ownedIptablesRule(args) {
 		t.Fatalf("args %q owned=%v", args, ownedIptablesRule(args))
 	}
-	own := splitIptablesLine("-A INPUT -p udp -m multiport --dports 443,7273 -m comment --comment paperboat-edge -j ACCEPT")
+	own, _ := splitIptablesLine("-A INPUT -p udp -m multiport --dports 443,7273 -m comment --comment paperboat-edge -j ACCEPT")
 	if !ownedIptablesRule(own) || len(own) != 14 {
 		t.Fatalf("own rule args %q", own)
 	}
-	if got := splitIptablesLine(`-A INPUT --comment "a \"b\" c" -j ACCEPT`); got[3] != `a "b" c` {
+	if got, ok := splitIptablesLine(`-A INPUT --comment "a \"b\" c" -j ACCEPT`); !ok || got[3] != `a "b" c` {
 		t.Fatalf("escaped quotes: %q", got)
+	}
+	if _, ok := splitIptablesLine(`-A INPUT --comment "unbalanced -j ACCEPT`); ok {
+		t.Fatal("an open quote was accepted")
 	}
 }
 
@@ -517,10 +520,11 @@ func TestUninstallReportsEveryKindOfFailedListing(t *testing.T) {
 		kind, failing, message string
 		wantErr                bool
 	}{
-		"ip6tables permission":  {"iptables", "ip6tables", "Permission denied", true},
-		"ip6tables no ipv6":     {"iptables", "ip6tables", "can't initialize ip6tables table `filter': Table does not exist", false},
-		"nft permission":        {"nft", "nft", "Operation not permitted", true},
-		"iptables backend dead": {"iptables", "iptables", "Resource temporarily unavailable", true},
+		"ip6tables permission":    {"iptables", "ip6tables", "Permission denied", true},
+		"ip6tables no ipv6":       {"iptables", "ip6tables", "can't initialize ip6tables table `filter': Table does not exist", false},
+		"nft permission":          {"nft", "nft", "Operation not permitted", true},
+		"iptables backend dead":   {"iptables", "iptables", "Resource temporarily unavailable", true},
+		"ip6tables legacy denied": {"iptables", "ip6tables", "ip6tables v1.8: can't initialize ip6tables table `filter': Permission denied (you must be root)", true},
 	} {
 		f := newFakeHost(t, "60000 65535")
 		f.answers = map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "ip6tables -S INPUT": "-P INPUT DROP\n"}
@@ -555,5 +559,18 @@ func TestUninstallDoesNotReportSuccessWhenTheRuleListFails(t *testing.T) {
 	}
 	if _, statErr := os.Stat(f.paths.record); statErr != nil {
 		t.Fatalf("the record was dropped although rules may remain: %v", statErr)
+	}
+}
+
+// A rule listing with an open quote cannot be read safely: it is an error, nothing is deleted, the record stays.
+func TestUninstallRefusesAnUnbalancedRuleListing(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"iptables -S INPUT": "-P INPUT DROP\n-A INPUT -m comment --comment \"broken -j ACCEPT\n-A INPUT -p tcp -m multiport --dports 443 -m comment --comment paperboat-edge -j ACCEPT\n"}
+	err := firewallRemove(t.Context(), f.run, "iptables", nil)
+	if err == nil || !strings.Contains(err.Error(), "unbalanced quote") {
+		t.Fatalf("err %v", err)
+	}
+	if f.called("iptables -D") != 1 { // the readable owned rule is still removed; the broken line is reported
+		t.Fatalf("calls %v", f.calls)
 	}
 }

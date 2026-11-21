@@ -463,12 +463,12 @@ func nftRulePresent(listed string, rules []firewallRule, proto string) bool {
 
 // noIPv6Filtering recognizes ip6tables failing because the kernel has no IPv6 filter table.
 func noIPv6Filtering(output string) bool {
-	return strings.Contains(output, "can't initialize ip6tables") || strings.Contains(output, "Address family not supported")
+	return strings.Contains(output, "Table does not exist") || strings.Contains(output, "Address family not supported")
 }
 
-// splitIptablesLine splits an `iptables -S` line into its arguments, undoing the double quotes (and backslash
+// splitIptablesLine splits an `iptables -S` line into its arguments (false when a quote is left open), undoing the double quotes (and backslash
 // escapes inside them) iptables puts around values with spaces, so a delete replays the exact arguments.
-func splitIptablesLine(line string) []string {
+func splitIptablesLine(line string) ([]string, bool) {
 	var args []string
 	var current strings.Builder
 	inQuote, started := false, false
@@ -493,7 +493,7 @@ func splitIptablesLine(line string) []string {
 	if started {
 		args = append(args, current.String())
 	}
-	return args
+	return args, !inQuote
 }
 
 // ownedIptablesRule reports whether an `iptables -S` rule is one pbh added: its --comment argument is exactly ours.
@@ -572,7 +572,11 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 				continue
 			}
 			for _, line := range strings.Split(listed, "\n") {
-				fields := splitIptablesLine(line)
+				fields, ok := splitIptablesLine(line)
+				if !ok {
+					errs = append(errs, fmt.Errorf("%s -S INPUT: unbalanced quote in rule %q", tool, line))
+					continue
+				}
 				if len(fields) < 3 || fields[0] != "-A" || fields[1] != "INPUT" || !ownedIptablesRule(fields) {
 					continue
 				}

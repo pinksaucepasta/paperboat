@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -37,7 +38,7 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	touched, err := stopServices(ctx, execCommander, systemUnitDir, certificateEnvFile, *removeData)
+	touched, err := stopServices(ctx, systemctlCommander, systemUnitDir, certificateEnvFile, *removeData)
 	if err != nil {
 		return err
 	}
@@ -47,14 +48,12 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	if err := containers.Teardown(ctx, defaultState); err != nil {
 		return err
 	}
-	removed, err := removeMainUnit(ctx, execCommander, systemUnitDir)
+	removed, err := removeMainUnit(ctx, systemctlCommander, systemUnitDir)
 	if err != nil {
 		return err
 	}
-	if touched || removed { // a host without systemd units (--no-service) has nothing to reload
-		if _, err := execCommander(ctx, "systemctl", "daemon-reload"); err != nil {
-			return err
-		}
+	if err := reloadSystemd(ctx, systemctlCommander, touched || removed, systemdRuntimeDir); err != nil {
+		return err
 	}
 	if err := os.RemoveAll(defaultBinaries); err != nil {
 		return err
@@ -96,7 +95,7 @@ func stopServices(ctx context.Context, run commander, unitDir, envFile string, r
 		return touched, err
 	}
 	if _, err := run(ctx, "systemctl", "stop", selfhostUnitName); err != nil {
-		return true, fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
+		return true, fmt.Errorf("%w: %w", commandError("could not stop self-host service; the edge certificate units may already be removed, rerun pbh uninstall after fixing the cause"), err)
 	}
 	return true, nil
 }
@@ -109,12 +108,36 @@ func removeMainUnit(ctx context.Context, run commander, unitDir string) (bool, e
 		return false, err
 	}
 	if _, err := run(ctx, "systemctl", "disable", selfhostUnitName); err != nil {
-		return true, err
+		return true, fmt.Errorf("%w: %w", commandError("could not disable the self-host service; containers and firewall rules are already removed, rerun pbh uninstall"), err)
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return true, err
 	}
 	return true, nil
+}
+
+// systemctlCommander runs systemctl under the uninstall deadline itself (execCommander caps a command at 20 s,
+// which is for host-network commands).
+func systemctlCommander(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return string(out), err
+}
+
+// systemdRuntimeDir exists while systemd is the running init.
+const systemdRuntimeDir = "/run/systemd/system"
+
+// reloadSystemd reloads unit files after units were removed, and also on a rerun where an earlier reload failed
+// after the files were gone; a host without systemd (--no-service) has nothing to reload.
+func reloadSystemd(ctx context.Context, run commander, unitsRemoved bool, runtimeDir string) error {
+	if !unitsRemoved {
+		if _, err := os.Stat(runtimeDir); err != nil {
+			return nil
+		}
+	}
+	if _, err := run(ctx, "systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("%w: %w", commandError("could not reload systemd; rerun pbh uninstall"), err)
+	}
+	return nil
 }
 
 // unitExists is false only when the file is absent; any other stat failure is an error, not "nothing to do".

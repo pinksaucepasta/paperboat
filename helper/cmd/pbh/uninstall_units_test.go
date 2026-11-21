@@ -117,3 +117,25 @@ func TestUninstallTreatsAStatFailureAsAnError(t *testing.T) {
 		t.Fatal("a stat failure (the unit directory is a file) was treated as no units")
 	}
 }
+
+// A reload that failed after the unit files were deleted is retried on the next run on a systemd host, and a
+// host without systemd (--no-service) is never asked to reload.
+func TestReloadSystemdRetriesWhereSystemdRunsAndSkipsWhereItDoesNot(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"systemctl daemon-reload": ""}
+	runtime := t.TempDir()
+	if err := reloadSystemd(t.Context(), f.run, false, runtime); err != nil || f.called("systemctl daemon-reload") != 1 {
+		t.Fatalf("rerun on a systemd host: err %v calls %v", err, f.calls)
+	}
+	f.calls = nil
+	if err := reloadSystemd(t.Context(), f.run, false, filepath.Join(runtime, "absent")); err != nil || len(f.calls) != 0 {
+		t.Fatalf("no-service host: err %v calls %v", err, f.calls)
+	}
+	if err := reloadSystemd(t.Context(), f.run, true, filepath.Join(runtime, "absent")); err != nil || f.called("systemctl daemon-reload") != 1 {
+		t.Fatalf("units removed: err %v calls %v", err, f.calls)
+	}
+	failing := newFakeHost(t, "60000 65535") // reload not answered: fails
+	if err := reloadSystemd(t.Context(), failing.run, true, runtime); err == nil || !strings.Contains(err.Error(), "rerun pbh uninstall") {
+		t.Fatalf("err %v", err)
+	}
+}
