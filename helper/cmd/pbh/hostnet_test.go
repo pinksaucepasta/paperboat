@@ -158,10 +158,10 @@ func TestSetupRefusesWhenAnotherSysctlOverridesTheRange(t *testing.T) {
 	}
 }
 
-func TestDetectFirewall(t *testing.T) {
+func TestDetectFirewalls(t *testing.T) {
 	for name, test := range map[string]struct {
 		answers map[string]string
-		want    string
+		want    string // the kinds, joined by +
 	}{
 		"ufw":                   {map[string]string{"ufw status": "Status: active\n"}, "ufw"},
 		"ufw inactive":          {map[string]string{"ufw status": "Status: inactive\n"}, ""},
@@ -172,10 +172,14 @@ func TestDetectFirewall(t *testing.T) {
 		"ip6tables only drop":   {map[string]string{"iptables -S INPUT": "-P INPUT ACCEPT\n", "ip6tables -S INPUT": "-P INPUT DROP\n"}, "iptables"},
 		"nft only":              {map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "nft"},
 		"nothing":               {map[string]string{}, ""},
+		// iptables-nft keeps its INPUT chain in `table ip filter`: that is iptables', not a native nft chain.
+		"iptables-nft only": {map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "iptables"},
+		// A native nft chain beside a dropping iptables: an accept in one does not open the other.
+		"iptables and native nft": {map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\ntable inet mine {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "iptables+nft"},
 	} {
 		f := newFakeHost(t, "60000 65535")
 		f.answers = test.answers
-		if got := detectFirewall(t.Context(), f.run); got != test.want {
+		if got := strings.Join(detectFirewalls(t.Context(), f.run), "+"); got != test.want {
 			t.Errorf("%s: detected %q, want %q", name, got, test.want)
 		}
 	}
@@ -332,7 +336,7 @@ func TestReapplyRebuildsBothProtocolsOnlyForRuntimeOnlyFirewalls(t *testing.T) {
 		f := newFakeHost(t, "60000 65535")
 		f.answers = map[string]string{"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "", "nft list ruleset": ruleset, "nft list chain inet filter input": "",
 			`nft insert rule inet filter input tcp dport { 443, 7272, 7277, 10000-59999 } accept comment "paperboat-edge"`: "", `nft insert rule inet filter input udp dport { 443, 7273 } accept comment "paperboat-edge"`: ""}
-		if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: kind, Rules: testRules}); err != nil {
+		if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewalls: kindList(kind), Rules: testRules}); err != nil {
 			t.Fatal(err)
 		}
 		reapplyHostFirewall(t.Context(), f.run, f.paths, &strings.Builder{})
@@ -346,7 +350,7 @@ func TestReapplyRebuildsBothProtocolsOnlyForRuntimeOnlyFirewalls(t *testing.T) {
 	// A record without rules is reported, not turned into an empty rule.
 	f := newFakeHost(t, "60000 65535")
 	var out strings.Builder
-	if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: "iptables"}); err != nil {
+	if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewalls: []string{"iptables"}}); err != nil {
 		t.Fatal(err)
 	}
 	reapplyHostFirewall(t.Context(), f.run, f.paths, &out)
@@ -545,7 +549,7 @@ func TestUninstallReportsEveryKindOfFailedListing(t *testing.T) {
 // A listing that fails for a reason other than a missing tool is an error, and the record stays for a rerun.
 func TestUninstallDoesNotReportSuccessWhenTheRuleListFails(t *testing.T) {
 	f := newFakeHost(t, "60000 65535")
-	if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: "iptables", Rules: testRules}); err != nil {
+	if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewalls: []string{"iptables"}, Rules: testRules}); err != nil {
 		t.Fatal(err)
 	}
 	failing := func(ctx context.Context, name string, args ...string) (string, error) {
@@ -773,5 +777,117 @@ func TestFirewalldRetryReloadsWhatIsConfiguredButNotLive(t *testing.T) {
 	f.answers["firewall-cmd --zone=public --query-port=443/tcp"] = "yes\n"
 	if _, err := firewallAdd(t.Context(), f.run, "firewalld", []firewallRule{{"tcp", "443"}}); err != nil || f.called("firewall-cmd --reload") != 0 {
 		t.Fatalf("a rule that is live was reloaded: err %v calls %v", err, f.calls)
+	}
+}
+
+func kindList(kind string) []string {
+	if kind == "" {
+		return nil
+	}
+	return []string{kind}
+}
+
+// pbh reads command output in English, whatever language the host runs in.
+func TestExecCommanderRunsInTheCLocale(t *testing.T) {
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+	t.Setenv("LANGUAGE", "de")
+	for name, run := range map[string]commander{"host commands": execCommander, "systemctl": systemctlCommander} {
+		out, err := run(t.Context(), "sh", "-c", "echo $LC_ALL/$LANGUAGE")
+		if err != nil || strings.TrimSpace(out) != "C/C" {
+			t.Errorf("%s: locale %q err %v", name, out, err)
+		}
+	}
+}
+
+// A host that drops in iptables and in a native nft chain needs a rule in each; doctor checks both, uninstall
+// removes both, and the service re-opens both after a reboot.
+func TestMixedIptablesAndNftHostIsOpenedCheckedAndClosedInBoth(t *testing.T) {
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
+	const nftTCP = `tcp dport { 443, 7272, 7277, 10000-59999 } accept comment "paperboat-edge"`
+	const nftUDP = `udp dport { 443, 7273 } accept comment "paperboat-edge"`
+	ruleset := "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\ntable inet mine {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"
+	f := newFakeHost(t, "32768 60999")
+	f.answers = map[string]string{
+		"iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": ruleset, "nft list chain inet mine input": "",
+		"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "",
+		"nft insert rule inet mine input " + nftTCP: "", "nft insert rule inet mine input " + nftUDP: "",
+	}
+	var out strings.Builder
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out, testConfig); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	record, _ := readHostnetRecord(f.paths.record)
+	if strings.Join(record.Firewalls, "+") != "iptables+nft" || f.called("iptables -I INPUT 1") != 2 || f.called("nft insert rule inet mine input") != 2 || f.called("nft insert rule ip filter") != 0 {
+		t.Fatalf("record %+v calls %v", record, f.calls)
+	}
+	// Doctor: iptables has both rules, the nft chain does not yet.
+	f.answers["iptables -C INPUT "+tcp], f.answers["iptables -C INPUT "+udp] = "", ""
+	if firewallRulePresent(t.Context(), f.run, "iptables", testRules) != true || firewallRulePresent(t.Context(), f.run, "nft", testRules) {
+		t.Fatal("per-kind presence wrong")
+	}
+	// Reapply after a reboot flushed the rules: both are rebuilt.
+	delete(f.answers, "iptables -C INPUT "+tcp)
+	delete(f.answers, "iptables -C INPUT "+udp)
+	f.calls = nil
+	reapplyHostFirewall(t.Context(), f.run, f.paths, &strings.Builder{})
+	if f.called("iptables -I INPUT 1")+f.called("nft insert rule inet mine input") != 4 {
+		t.Fatalf("calls %v", f.calls)
+	}
+	// Uninstall: both are scanned by comment.
+	f.calls = nil
+	f.answers["iptables -S INPUT"] = "-P INPUT DROP\n-A INPUT " + tcp + "\n-A INPUT " + udp + "\n"
+	f.answers["iptables -D INPUT "+tcp], f.answers["iptables -D INPUT "+udp] = "", ""
+	f.answers["nft -a list ruleset"] = "table inet mine { # handle 1\n\tchain input { # handle 1\n\t\t" + nftTCP + " # handle 7\n\t\t" + nftUDP + " # handle 8\n\t}\n}\n"
+	f.answers["nft delete rule inet mine input handle 7"], f.answers["nft delete rule inet mine input handle 8"] = "", ""
+	if err := removeHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil || f.called("iptables -D INPUT") != 2 || f.called("nft delete rule inet mine input") != 2 {
+		t.Fatalf("err %v calls %v", err, f.calls)
+	}
+}
+
+// ufw answering "Rule updated" means it replaced a rule: no ownership is recorded and the install says so.
+func TestUfwRuleUpdatedIsAnErrorNotAnOwnedRule(t *testing.T) {
+	for _, answer := range []string{"Rule updated\n", "Rules updated\nRule updated (v6)\n"} {
+		f := newFakeHost(t, "60000 65535")
+		f.answers = map[string]string{"ufw status": "Status: active\n", "ufw allow 7277/tcp": answer}
+		added, err := firewallAdd(t.Context(), f.run, "ufw", testRules)
+		if err == nil || !strings.Contains(err.Error(), "updated an existing rule") || len(added) != 0 {
+			t.Fatalf("%q: added %v err %v", answer, added, err)
+		}
+	}
+	// A skipped rule is never recorded: nothing was created.
+	if got := ufwOwned("443/tcp", "Skipping adding existing rule\nSkipping adding existing rule (v6)\n"); got != "" {
+		t.Fatalf("owned %q for rules that already existed", got)
+	}
+}
+
+// IPv4 and IPv6 uplinks in different zones: the rules go into both, are recorded per zone, and removed per zone.
+func TestFirewalldSplitIPv4AndIPv6ZonesAreBothOpened(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{
+		"firewall-cmd --get-default-zone": "public\n",
+		"ip -4 -o route show default":     "default via 10.0.0.1 dev ens3\n", "ip -6 -o route show default": "default via fe80::1 dev ens4\n",
+		"firewall-cmd --get-zone-of-interface=ens3": "dmz\n", "firewall-cmd --get-zone-of-interface=ens4": "external\n",
+		"firewall-cmd --reload": "success",
+	}
+	for _, zone := range []string{"dmz", "external"} {
+		f.answers["firewall-cmd --permanent --zone="+zone+" --add-port=443/tcp"] = "success"
+		f.answers["firewall-cmd --permanent --zone="+zone+" --remove-port=443/tcp"] = "success"
+		f.answers["firewall-cmd --zone="+zone+" --query-port=443/tcp"] = "yes\n"
+	}
+	rules := []firewallRule{{"tcp", "443"}}
+	added, err := firewallAdd(t.Context(), f.run, "firewalld", rules)
+	if err != nil || strings.Join(added, ",") != "dmz 443/tcp,external 443/tcp" {
+		t.Fatalf("added %v err %v", added, err)
+	}
+	if !firewallRulePresent(t.Context(), f.run, "firewalld", rules) {
+		t.Fatal("open in both zones but not counted as open")
+	}
+	f.answers["firewall-cmd --zone=external --query-port=443/tcp"] = "no\n"
+	if firewallRulePresent(t.Context(), f.run, "firewalld", rules) {
+		t.Fatal("the IPv6 uplink's zone is closed but the host counted as open")
+	}
+	if err := firewallRemove(t.Context(), f.run, "firewalld", added); err != nil || f.called("firewall-cmd --permanent --zone=dmz --remove-port=443/tcp") != 1 || f.called("firewall-cmd --permanent --zone=external --remove-port=443/tcp") != 1 {
+		t.Fatalf("err %v calls %v", err, f.calls)
 	}
 }

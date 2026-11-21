@@ -52,14 +52,23 @@ type commander func(ctx context.Context, name string, args ...string) (string, e
 func execCommander(ctx context.Context, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	out, err := localeC(exec.CommandContext(ctx, name, args...)).CombinedOutput()
 	return string(out), err
+}
+
+// localeC runs a command with the C locale: ufw, firewall-cmd, iptables, nft and ip translate their output, and
+// pbh reads it ("Rule added", "Status: active", "yes").
+func localeC(cmd *exec.Cmd) *exec.Cmd {
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANGUAGE=C")
+	return cmd
 }
 
 // hostnetRecord is what pbh changed, kept so uninstall removes exactly that.
 type hostnetRecord struct {
-	Firewall string   `json:"firewall,omitempty"`
-	Added    []string `json:"added,omitempty"`
+	// Firewalls are the filtering layers pbh opened ports in: ufw or firewalld alone, or iptables and/or nft (a host can
+	// drop in both).
+	Firewalls []string `json:"firewalls,omitempty"`
+	Added     []string `json:"added,omitempty"`
 	// Rules is what the firewall rules were built from, so a runtime-only firewall is re-opened with the same set.
 	Rules            []firewallRule `json:"rules,omitempty"`
 	SysctlWritten    bool           `json:"sysctl_written,omitempty"`
@@ -181,18 +190,18 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 		_ = writeHostnetRecord(paths.record, record)
 		return err
 	}
-	if record.Firewall == "" {
-		record.Firewall = detectFirewall(ctx, run)
-	}
-	if record.Firewall != "" {
+	record.Firewalls = mergeStrings(record.Firewalls, detectFirewalls(ctx, run))
+	if len(record.Firewalls) > 0 {
 		record.Rules = hostFirewallRules(c)
-		added, err := firewallAdd(ctx, run, record.Firewall, record.Rules)
-		record.Added = mergeStrings(record.Added, added)
-		if err != nil {
-			_ = writeHostnetRecord(paths.record, record)
-			return fmt.Errorf("%w: %w", commandError(fmt.Sprintf("opening the %s host firewall for %s failed; add the rule by hand or rerun as root", record.Firewall, rulesText(record.Rules))), err)
+		for _, kind := range record.Firewalls {
+			added, err := firewallAdd(ctx, run, kind, record.Rules)
+			record.Added = mergeStrings(record.Added, added)
+			if err != nil {
+				_ = writeHostnetRecord(paths.record, record)
+				return fmt.Errorf("%w: %w", commandError(fmt.Sprintf("opening the %s host firewall for %s failed; add the rule by hand or rerun as root", kind, rulesText(record.Rules))), err)
+			}
+			fmt.Fprintf(out, "Host firewall (%s): %s allowed.\n", kind, rulesText(record.Rules))
 		}
-		fmt.Fprintf(out, "Host firewall (%s): %s allowed.\n", record.Firewall, rulesText(record.Rules))
 	} else {
 		fmt.Fprintln(out, "No active host firewall found; nothing to open on this host.")
 	}
@@ -300,25 +309,27 @@ func currentOutgoing(path string) (string, error) {
 	return fields[0] + " " + fields[1], nil
 }
 
-// detectFirewall names the host firewall that is filtering inbound traffic, or "".
-func detectFirewall(ctx context.Context, run commander) string {
+// detectFirewalls names the host firewalls that are filtering inbound traffic: ufw or firewalld (front ends that own
+// their rules), else iptables and/or nft, which can both drop on one host: an accept in one does not open the
+// other's drop, so a rule is needed in each. Empty when nothing filters.
+func detectFirewalls(ctx context.Context, run commander) []string {
 	if out, err := run(ctx, "ufw", "status"); err == nil && strings.Contains(out, "Status: active") {
-		return "ufw"
+		return []string{"ufw"}
 	}
 	if out, err := run(ctx, "firewall-cmd", "--state"); err == nil && strings.TrimSpace(out) == "running" {
-		return "firewalld"
+		return []string{"firewalld"}
 	}
+	var kinds []string
 	for _, tool := range []string{"iptables", "ip6tables"} { // a host can filter only IPv6
 		if out, err := run(ctx, tool, "-S", "INPUT"); err == nil && inputFiltered(out) {
-			return "iptables"
+			kinds = append(kinds, "iptables")
+			break
 		}
 	}
-	if out, err := run(ctx, "nft", "list", "ruleset"); err == nil {
-		if len(nftInputChains(out)) > 0 {
-			return "nft"
-		}
+	if out, err := run(ctx, "nft", "list", "ruleset"); err == nil && len(nftInputChains(out)) > 0 {
+		kinds = append(kinds, "nft")
 	}
-	return ""
+	return kinds
 }
 
 // inputFiltered reports whether an `iptables -S INPUT` listing drops what it does not allow.
@@ -334,6 +345,12 @@ func inputFiltered(listing string) bool {
 
 type nftChainRef struct{ family, table, chain string }
 
+// xtablesChain is the INPUT chain iptables-nft keeps in its own "filter" table: iptables manages it (and cannot list
+// a native nft rule inserted there), so it is handled through iptables, not nft.
+func xtablesChain(family, table, chain string) bool {
+	return (family == "ip" || family == "ip6") && table == "filter" && chain == "INPUT"
+}
+
 // nftInputChains finds every filter base chain that hooks input with policy drop in the ip, ip6 and inet families
 // (arp and bridge chains do not take tcp/udp rules): a host can filter IPv4 and IPv6 in separate tables, and a
 // rule in only one of them leaves the other family closed.
@@ -347,7 +364,7 @@ func nftInputChains(ruleset string) []nftChainRef {
 			family, table, chain = fields[1], fields[2], ""
 		case len(fields) >= 2 && fields[0] == "chain":
 			chain = fields[1]
-		case chain != "" && slices.Contains([]string{"ip", "ip6", "inet"}, family) && strings.HasPrefix(strings.TrimSpace(line), "type filter hook input ") && strings.Contains(line, "policy drop"):
+		case chain != "" && slices.Contains([]string{"ip", "ip6", "inet"}, family) && !xtablesChain(family, table, chain) && strings.HasPrefix(strings.TrimSpace(line), "type filter hook input ") && strings.Contains(line, "policy drop"):
 			chains = append(chains, nftChainRef{family, table, chain})
 		}
 	}
@@ -405,6 +422,11 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 			out, err := run(ctx, "ufw", "allow", spec)
 			if err != nil {
 				return added, err
+			}
+			if ufwUpdated(out) {
+				// The preflight keeps ufw from replacing a rule; if it did anyway, say so instead of recording or
+				// ignoring a change pbh cannot undo.
+				return added, fmt.Errorf("ufw updated an existing rule for %s instead of adding one (%q); check ufw status numbered and restore it", spec, strings.TrimSpace(out))
 			}
 			if entry := ufwOwned(spec, out); entry != "" {
 				added = append(added, entry)
@@ -617,6 +639,11 @@ func ufwAllows(status, spec string, v6 bool) bool {
 	return false
 }
 
+// ufwUpdated reports whether an `ufw allow` answer says it replaced a rule ("Rule updated", "Rules updated").
+func ufwUpdated(output string) bool {
+	return strings.Contains(strings.ToLower(output), "updated")
+}
+
 // ufwOwned says what pbh added for `ufw allow spec`: ufw answers per address family ("Rule added", "Rule added
 // (v6)", "Skipping adding existing rule [(v6)]"). Both families new (or IPv6 off) is the plain spec; only one new
 // family is "spec v4" or "spec v6", so uninstall removes just that row and not the administrator's other one.
@@ -790,19 +817,22 @@ func reapplyHostFirewall(ctx context.Context, run commander, paths hostPaths, ou
 	if err != nil {
 		return
 	}
-	if record.Firewall == "iptables" || record.Firewall == "nft" {
+	for _, kind := range record.Firewalls {
+		if kind != "iptables" && kind != "nft" {
+			continue
+		}
 		if len(record.Rules) == 0 {
 			fmt.Fprintf(out, "pbh: the host network record lists no firewall rules to re-open; run pbh install again\n")
-		} else {
-			// Rules the service recreates are pbh's, so uninstall must remove them too.
-			added, err := firewallAdd(ctx, run, record.Firewall, record.Rules)
-			if len(added) > 0 {
-				record.Added = mergeStrings(record.Added, added)
-				_ = writeHostnetRecord(paths.record, record)
-			}
-			if err != nil {
-				fmt.Fprintf(out, "pbh: could not re-open the %s host firewall for %s: %v\n", record.Firewall, rulesText(record.Rules), err)
-			}
+			break
+		}
+		// Rules the service recreates are pbh's, so uninstall must remove them too.
+		added, err := firewallAdd(ctx, run, kind, record.Rules)
+		if len(added) > 0 {
+			record.Added = mergeStrings(record.Added, added)
+			_ = writeHostnetRecord(paths.record, record)
+		}
+		if err != nil {
+			fmt.Fprintf(out, "pbh: could not re-open the %s host firewall for %s: %v\n", kind, rulesText(record.Rules), err)
 		}
 	}
 	if record.Guard {
@@ -822,8 +852,8 @@ func removeHostNetwork(ctx context.Context, run commander, paths hostPaths, out 
 	var errs []error
 	// iptables and nft rules are found by their comment whether or not the record lists them; ufw and
 	// firewalld rules carry no comment, so those are removed from the record.
-	kinds := []string{record.Firewall}
-	if record.Firewall == "" {
+	kinds := record.Firewalls
+	if len(kinds) == 0 {
 		kinds = []string{"iptables", "nft"}
 	}
 	for _, kind := range kinds {
@@ -832,7 +862,7 @@ func removeHostNetwork(ctx context.Context, run commander, paths hostPaths, out 
 		}
 		if err := firewallRemove(ctx, run, kind, record.Added); err != nil {
 			errs = append(errs, fmt.Errorf("remove %s rules: %w", kind, err))
-		} else if record.Firewall != "" {
+		} else if len(record.Firewalls) > 0 {
 			fmt.Fprintf(out, "Removed the %s host firewall rules pbh added.\n", kind)
 		}
 	}

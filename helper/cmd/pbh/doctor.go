@@ -89,9 +89,14 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	}
 	current, err := currentOutgoing(d.paths.proc)
 	report(err == nil && current == outgoingRange, "outgoing port range is "+outgoingRange+", clear of the public range", fmt.Sprintf("outgoing port range is %q; run pbh install to move it to %s (public TCP ports %d-%d would collide with outgoing connections)", current, outgoingRange, edgeports.PublicTCPMin, edgeports.PublicTCPMax))
-	kind := detectFirewall(ctx, d.run)
 	rules := hostFirewallRules(c)
-	report(kind == "" || firewallRulePresent(ctx, d.run, kind, rules), "host firewall ("+firewallLabel(kind)+") lets "+rulesText(rules)+" in", "the "+kind+" host firewall does not allow "+rulesText(rules)+"; run pbh install as root to add the rule")
+	kinds := detectFirewalls(ctx, d.run)
+	if len(kinds) == 0 {
+		report(true, "host firewall (none active) lets "+rulesText(rules)+" in", "")
+	}
+	for _, kind := range kinds {
+		report(firewallRulePresent(ctx, d.run, kind, rules), "host firewall ("+kind+") lets "+rulesText(rules)+" in", "the "+kind+" host firewall does not allow "+rulesText(rules)+"; run pbh install as root to add the rule")
+	}
 	report(edgeGuardPresent(ctx, d.run), "per-address connection limits are on (nftables table "+edgeGuardTable+")", "per-address connection limits are off; install nftables and run pbh install as root")
 	nonceBytes := make([]byte, 24)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -199,13 +204,6 @@ func nodePortAdvice(name, transport string, port int, capability, detail string)
 	default:
 		return prefix + "check result '" + detail + "'; verify the endpoint host and firewalls"
 	}
-}
-
-func firewallLabel(kind string) string {
-	if kind == "" {
-		return "none active"
-	}
-	return kind
 }
 
 // reachabilityAdvice turns what the control plane saw into the rule that is missing.

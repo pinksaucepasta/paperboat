@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,5 +204,51 @@ func TestUninstallRetryAfterAFailedReloadAtTheEntryPoint(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Remove the node from Dashboard") {
 		t.Fatalf("output %q", out.String())
+	}
+}
+
+// The command line: arguments are checked, a non-root run re-executes under sudo and removes nothing itself, and
+// with root the real wiring runs the flow; --remove-data (with its confirmation) deletes the local data, a plain
+// uninstall keeps it.
+func TestUninstallCommandLineWiring(t *testing.T) {
+	root := t.TempDir()
+	newEnv := func(removed *int, removeErr error) uninstallEnv {
+		f := newFakeHost(t, "60000 65535")
+		unitDir := filepath.Join(root, "units"+fmt.Sprint(*removed))
+		_ = os.MkdirAll(unitDir, 0o755)
+		return uninstallEnv{
+			systemctl: func(context.Context, string, ...string) (string, error) { return "", nil }, run: f.run,
+			unitDir: unitDir, certEnv: filepath.Join(unitDir, "none.env"), runtimeDir: filepath.Join(root, "no-systemd"), paths: f.paths,
+			binaries: filepath.Join(root, "lib"), binary: filepath.Join(root, "pbh"),
+			teardown: func(context.Context) error { return nil }, removeLocal: func() error { *removed++; return removeErr },
+		}
+	}
+	defer func(r func() bool, e func() uninstallEnv) { isRoot, uninstallEnvFor = r, e }(isRoot, uninstallEnvFor)
+	for name, test := range map[string]struct {
+		args        []string
+		wantRemoved int
+		wantErr     string
+		removeErr   error
+		wantOutput  string
+	}{
+		"keeps data":             {args: nil, wantOutput: "retained for reinstall"},
+		"removes data":           {args: []string{"--remove-data", "--confirm-remove-data"}, wantRemoved: 1, wantOutput: "confirmed local data removed"},
+		"needs the confirmation": {args: []string{"--remove-data"}, wantErr: "requires both"},
+		"stray argument":         {args: []string{"extra"}, wantErr: "unexpected uninstall arguments"},
+		"data removal fails":     {args: []string{"--remove-data", "--confirm-remove-data"}, wantRemoved: 1, removeErr: errors.New("disk error"), wantErr: "disk error"},
+	} {
+		removed := 0
+		isRoot, uninstallEnvFor = func() bool { return true }, func() uninstallEnv { return newEnv(&removed, test.removeErr) }
+		var out strings.Builder
+		err := uninstall(t.Context(), test.args, &out)
+		if (test.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), test.wantErr)) || removed != test.wantRemoved || !strings.Contains(out.String(), test.wantOutput) {
+			t.Errorf("%s: err %v removed %d output %q", name, err, removed, out.String())
+		}
+	}
+	// The default wiring points at the real host paths and the real elevation, with nothing missing.
+	env := defaultUninstallEnv()
+	if env.systemctl == nil || env.run == nil || env.teardown == nil || env.removeLocal == nil || env.unitDir != systemUnitDir || env.certEnv != certificateEnvFile ||
+		env.runtimeDir != systemdRuntimeDir || env.binaries != defaultBinaries || env.binary != "/usr/local/bin/pbh" || env.paths != defaultHostPaths(defaultState) {
+		t.Fatalf("default env %+v", env)
 	}
 }
