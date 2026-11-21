@@ -68,8 +68,9 @@ func TestProbePortSelectsTheNodeTransportAndDestinationOnPostgres(t *testing.T) 
 			t.Errorf("%s %d: got %+v err %v dialed %v", test.transport, test.port, got, err, dialed)
 		}
 	}
-	if _, err := service.ProbePort(ctx, randomToken(32), "tcp", 7272, ""); !errors.Is(err, ErrUnauthorized) {
-		t.Errorf("unknown credential: err %v", err)
+	dialed = nil
+	if _, err := service.ProbePort(ctx, randomToken(32), "tcp", 7272, ""); !errors.Is(err, ErrUnauthorized) || len(dialed) != 0 {
+		t.Errorf("unknown credential: err %v dialed %v", err, dialed)
 	}
 	for _, host := range []string{"::1", "fd00::5", "fe80::1", "127.0.0.1"} {
 		setHost(host)

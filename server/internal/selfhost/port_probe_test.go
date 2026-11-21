@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -163,6 +164,15 @@ func TestAnswersSTUN(t *testing.T) {
 			binary.BigEndian.PutUint16(reply[2:], uint16(len(reply)-20))
 			return reply
 		}, mismatch},
+		"attribute runs past the packet": {func(r []byte) []byte { reply := stunSuccess(r); reply[23] = 12; return reply }, mismatch},
+		"valid first KiB, extra bytes after": {func(r []byte) []byte {
+			reply := stunSuccess(r)
+			software := stunResponseMax - len(reply) - 4 // a SOFTWARE attribute filling the KiB
+			reply = append(reply, 0x80, 0x22, byte(software>>8), byte(software))
+			reply = append(reply, make([]byte, software)...)
+			binary.BigEndian.PutUint16(reply[2:], uint16(len(reply)-20))
+			return append(reply, make([]byte, 200)...)
+		}, mismatch},
 		"fills the buffer exactly": {func(r []byte) []byte {
 			reply := append(stunSuccess(r), make([]byte, stunResponseMax+1-32)...)
 			binary.BigEndian.PutUint16(reply[2:], uint16(len(reply)-20))
@@ -223,5 +233,37 @@ func TestProbeNodePortReturnsPromptlyWhenCanceled(t *testing.T) {
 	})
 	if got.Reachable || !dialed {
 		t.Fatalf("canceled before dial: got %+v", got)
+	}
+}
+
+// stalledConn counts writes and holds each read until release, then reports a read timeout, so a test
+// controls exactly when the first STUN try ends.
+type stalledConn struct {
+	net.Conn
+	writes  atomic.Int32
+	wrote   chan struct{}
+	release chan struct{}
+}
+
+func (c *stalledConn) Write(b []byte) (int, error) {
+	if c.writes.Add(1) == 1 {
+		close(c.wrote)
+	}
+	return len(b), nil
+}
+func (c *stalledConn) Read([]byte) (int, error)    { <-c.release; return 0, os.ErrDeadlineExceeded }
+func (c *stalledConn) SetDeadline(time.Time) error { return nil }
+func (c *stalledConn) Close() error                { return nil }
+
+func TestAnswersSTUNSendsNoRetryAfterCancel(t *testing.T) {
+	conn := &stalledConn{wrote: make(chan struct{}), release: make(chan struct{})}
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan PortProbe, 1)
+	go func() { result <- answersSTUN(ctx, conn) }()
+	<-conn.wrote
+	cancel()
+	close(conn.release)
+	if got := <-result; got != (PortProbe{Detail: "timeout"}) || conn.writes.Load() != 1 {
+		t.Fatalf("got %+v after %d writes; a canceled probe must not retry", got, conn.writes.Load())
 	}
 }

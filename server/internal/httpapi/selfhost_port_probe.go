@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
@@ -18,16 +19,18 @@ func (h *SelfhostHandlers) PortProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Transport string `json:"transport"`
-		Port      int    `json:"port"`
-		Nonce     string `json:"nonce"`
+		Transport string          `json:"transport"`
+		Port      int             `json:"port"`
+		Nonce     json.RawMessage `json:"nonce"`
 	}
+	var nonce string
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
-	if decoder.Decode(&in) != nil {
+	// One object only; nonce absent or a string, never null.
+	if decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF || in.Nonce != nil && (string(in.Nonce) == "null" || json.Unmarshal(in.Nonce, &nonce) != nil) {
 		writeError(w, r, 400, "invalid_request", "Send {\"transport\": \"tcp\"|\"udp\", \"port\": <port>, \"nonce\": <16-64 URL-safe characters, public TCP ports only>}.", nil)
 		return
 	}
-	out, err := h.Service.ProbePort(r.Context(), credential, in.Transport, in.Port, in.Nonce)
+	out, err := h.Service.ProbePort(r.Context(), credential, in.Transport, in.Port, nonce)
 	switch {
 	case errors.Is(err, selfhost.ErrPortProbeInvalid):
 		writeError(w, r, 400, "invalid_request", "Probe a public TCP tunnel port with a 16-64 URL-safe character nonce, a TCP edge or relay node port without one, or the relay's STUN port on UDP.", nil)

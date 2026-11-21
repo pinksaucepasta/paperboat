@@ -73,10 +73,6 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	for _, component := range c.Components {
 		tunnel = tunnel || component.Capability == "tunnel"
 	}
-	if !tunnel {
-		fmt.Fprintln(out, "This installation does not serve tunnels; public TCP ports need no host setup.")
-		return nil
-	}
 	problems := 0
 	report := func(ok bool, good, bad string) {
 		if ok {
@@ -85,6 +81,11 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		}
 		problems++
 		fmt.Fprintln(out, "FIX  "+bad)
+	}
+	if !tunnel {
+		fmt.Fprintln(out, "This installation does not serve tunnels; public TCP ports need no host setup.")
+		listeners(ctx, c, d, false, out, report)
+		return nil
 	}
 	current, err := currentOutgoing(d.paths.proc)
 	report(err == nil && current == outgoingRange, "outgoing port range is "+outgoingRange+", clear of the public range", fmt.Sprintf("outgoing port range is %q; run pbh install to move it to %s (public TCP ports %d-%d would collide with outgoing connections)", current, outgoingRange, edgeports.PublicTCPMin, edgeports.PublicTCPMax))
@@ -108,21 +109,7 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	} else {
 		report(result.Reachable, fmt.Sprintf("test port %d is reachable from the control plane", port), reachabilityAdvice(port, result.Detail, rules))
 	}
-	for _, component := range c.Components {
-		for _, p := range nodePorts(component) {
-			name := fmt.Sprintf("%s %d (%s)", strings.ToUpper(p.transport), p.port, p.service)
-			if p.skip != "" {
-				fmt.Fprintf(out, "skip %s: %s; make sure inbound %s %d is allowed\n", name, p.skip, strings.ToUpper(p.transport), p.port)
-				continue
-			}
-			result, err := d.probe(ctx, p.transport, p.port, "")
-			if err != nil {
-				report(false, "", "the control plane could not check "+name+" ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
-				continue
-			}
-			report(result.Reachable, name+" is reachable from the control plane", nodePortAdvice(name, p.transport, p.port, component.Capability, result.Detail))
-		}
-	}
+	listeners(ctx, c, d, true, out, report)
 	state, err := d.ingress(ctx, c.EndpointHost)
 	if err != nil {
 		report(false, "", "could not read the endpoint host status from the control plane ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
@@ -139,6 +126,29 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		return commandError(fmt.Sprintf("%d problem(s) found; fix them and rerun pbh doctor", problems))
 	}
 	return nil
+}
+
+// listeners reports every edge and relay listener of c: probed from the control plane when canProbe (the
+// probe needs the tunnel component's credential) and the probe accepts the port, otherwise a skip line.
+func listeners(ctx context.Context, c selfhost.Config, d doctorDeps, canProbe bool, out io.Writer, report func(ok bool, good, bad string)) {
+	for _, component := range c.Components {
+		for _, p := range nodePorts(component) {
+			name := fmt.Sprintf("%s %d (%s)", strings.ToUpper(p.transport), p.port, p.service)
+			if p.skip == "" && !canProbe {
+				p.skip = "only an installation with a tunnel component can ask the control plane to probe"
+			}
+			if p.skip != "" {
+				fmt.Fprintf(out, "skip %s: %s; make sure inbound %s %d is allowed\n", name, p.skip, strings.ToUpper(p.transport), p.port)
+				continue
+			}
+			result, err := d.probe(ctx, p.transport, p.port, "")
+			if err != nil {
+				report(false, "", "the control plane could not check "+name+" ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
+				continue
+			}
+			report(result.Reachable, name+" is reachable from the control plane", nodePortAdvice(name, p.transport, p.port, component.Capability, result.Detail))
+		}
+	}
 }
 
 type nodePort struct {
@@ -203,9 +213,9 @@ func reachabilityAdvice(port int, detail string, rules []firewallRule) string {
 	prefix := fmt.Sprintf("test port %d is not reachable from the control plane: ", port)
 	switch detail {
 	case "timeout":
-		return prefix + "the connection timed out, so a cloud firewall is dropping it; add " + cloudRule(rules) + " (security group, security list or VPC firewall)"
+		return prefix + "timed out, usually a cloud firewall drop; add " + cloudRule(rules) + " (security group, security list or VPC firewall)"
 	case "unreachable":
-		return prefix + "this host's firewall rejects it; run pbh install as root to open " + rulesText(rules) + " (or add the rule by hand)"
+		return prefix + "rejected by the network (unreachable), usually this host's firewall or routing; run pbh install as root to open " + rulesText(rules) + " (or add the rule by hand)"
 	case "refused":
 		return prefix + "the host answered but nothing listened; another firewall layer or a port forward is in the way"
 	case "nonce_mismatch":
