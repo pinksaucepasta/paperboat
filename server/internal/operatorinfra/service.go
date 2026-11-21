@@ -448,7 +448,6 @@ func forwardStats(raw []byte) *nodemesh.Stats {
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 var regionIdentifier = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-var endpointName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 
 // validSite: a short display name (a city), printable, no surrounding space.
 func validSite(v string) bool {
