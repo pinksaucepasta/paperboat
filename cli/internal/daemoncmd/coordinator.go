@@ -9,7 +9,6 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -411,8 +410,9 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 }
 
 func (c *Coordinator) reconcileSnapshotLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
+	unchanged := c.haveSnapshot && slices.EqualFunc(c.lastPeers, peers, samePeer)
 	c.lastPeers, c.lastRevision, c.haveSnapshot = peers, revision, true
-	if c.deferToPendingRetry(peers, revision) {
+	if unchanged && c.deferToPendingRetry(peers, revision) {
 		return c.reconcileErr
 	}
 	before := c.PendingLocalAccessStep()
@@ -511,34 +511,23 @@ func (c *Coordinator) scheduleReconcileRetry(peers []*daemonrpc.PeerUpdate, revi
 	})
 }
 
-// deferToPendingRetry hands a snapshot to the retry already waiting out its backoff, so new snapshots and guard
-// checks do not re-run a failing reconcile faster than the backoff (a Mac's guard and name services ran hot in
-// such a loop). A snapshot that withdraws a machine or port still routed is never deferred.
+// deferToPendingRetry hands an unchanged snapshot to the retry already waiting out its backoff, so repeated
+// snapshots and guard checks do not re-run a failing reconcile faster than the backoff (a Mac's guard and name
+// services ran hot in such a loop). A changed snapshot runs at once: it may withdraw access or fix the failure.
 func (c *Coordinator) deferToPendingRetry(peers []*daemonrpc.PeerUpdate, revision uint64) bool {
 	c.retryMu.Lock()
-	pending := c.retryTimer != nil
-	if pending {
-		c.retryPeers, c.retryRevision = peers, revision
-	}
-	c.retryMu.Unlock()
-	if !pending {
+	defer c.retryMu.Unlock()
+	if c.retryTimer == nil {
 		return false
 	}
-	localPeers, _ := mapPeerSnapshot(peers, machineloopback.DefaultCIDR)
-	authorized := authorizedPorts(localPeers)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, route := range c.routes {
-		if !authorized[route.machineID+"\x00"+strconv.Itoa(route.port)] {
-			return false
-		}
-	}
-	for _, route := range c.draining {
-		if !authorized[route.machineID+"\x00"+strconv.Itoa(route.port)] {
-			return false
-		}
-	}
+	c.retryPeers, c.retryRevision = peers, revision
 	return true
+}
+
+func samePeer(a, b *daemonrpc.PeerUpdate) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.PeerId == b.PeerId && a.Alias == b.Alias &&
+		a.AssignedIp == b.AssignedIp && a.Online == b.Online && a.Approved == b.Approved &&
+		slices.Equal(a.ExportedPorts, b.ExportedPorts))
 }
 
 // PendingLocalAccessStep names the local access step still being retried after the last reconciliation

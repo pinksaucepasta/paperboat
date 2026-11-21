@@ -137,6 +137,7 @@ func TestCoordinatorReconciliationReportsOneEpisodeAndRecovery(t *testing.T) {
 		t.Fatalf("episode ownership incorrect: %+v presentations %d", faults, presentations)
 	}
 	fail = false
+	c.resetReconcileRetry() // the backoff wait is over: an unchanged snapshot runs again
 	if err := c.ApplyMachines(ctx, machines, nil); err != nil {
 		t.Fatal(err)
 	}
