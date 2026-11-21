@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -564,7 +565,7 @@ func commandLocalAPIServerConfig(path string, source localapi.SnapshotSource) (l
 
 func commandRuntimeTestRoot(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t) // owned by the user even under an elevated token, as the credential lock requires
 	t.Setenv("LOCALAPPDATA", root)
 	t.Setenv("APPDATA", root)
 	previous := []string{xdg.Home, xdg.ConfigHome, xdg.CacheHome, xdg.DataHome, xdg.StateHome, xdg.RuntimeDir}

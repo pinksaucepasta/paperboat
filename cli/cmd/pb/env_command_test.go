@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/spf13/cobra"
 )
 
@@ -103,7 +104,7 @@ type environmentVariableErrorReader struct{ cause error }
 func (r environmentVariableErrorReader) Read([]byte) (int, error) { return 0, r.cause }
 
 func TestEnvironmentVariableValueFileIsBoundedAndRequiresAbsolutePath(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	path := filepath.Join(root, "value.txt")
 	const canary = "file-secret-canary"
 	if err := os.WriteFile(path, []byte(canary), 0o600); err != nil {
@@ -337,7 +338,7 @@ func TestEnvironmentVariableUnsetCommandUsesEncryptedManagerAndYes(t *testing.T)
 		}
 	})
 
-	configPath := filepath.Join(t.TempDir(), "config.json")
+	configPath := filepath.Join(shorttemp.Dir(t), "config.json")
 	var preview bytes.Buffer
 	previewCommand := newEnvironmentTestCommand(strings.NewReader(""), &preview)
 	previewCommand.SetContext(ctx)

@@ -131,6 +131,7 @@ func TestConfigSyncSourceInitNoOverwriteOrLinkedParent(t *testing.T) {
 	if err := os.Mkdir(link, 0700); err != nil {
 		t.Fatal(err)
 	}
+	shorttemp.OwnByUser(t, link) // as the user's own unelevated token would create it
 	if err := initMachineConfigSource(recoveryPath); err != nil {
 		t.Fatalf("source initialization did not recover after repairing its parent: %v", err)
 	}
