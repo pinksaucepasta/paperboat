@@ -40,6 +40,8 @@ type cliJSONError struct {
 	OutcomeUncertain bool   `json:"outcome_uncertain"`
 	SupportReference string `json:"support_reference,omitempty"`
 	Recovery         string `json:"recovery,omitempty"`
+	// FailedStep is the step that stopped a rolled-back update, as it appears in Message.
+	FailedStep string `json:"failed_step,omitempty"`
 }
 
 type cliJSONEnvelope struct {
@@ -286,6 +288,7 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			if typed.reason == commandRejectUpdateNotReady {
 				result.Code, result.StateChanged, result.Retryable = "update_rolled_back", false, true
 				result.Recovery = "Run `pb doctor` to see why the background service cannot start, then try the update again."
+				result.FailedStep = typed.detail
 			}
 			if typed.reason == commandRejectInsufficientSpace {
 				result.Code, result.StateChanged, result.Retryable = "insufficient_disk_space", false, false

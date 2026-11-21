@@ -205,6 +205,10 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 			set(commandRejected, commandRejection{reason: commandRejectUpdateNotReady})
 			continue
 		}
+		if notReady, ok := current.(*hostinstall.UpdateNotReadyError); ok {
+			set(commandRejected, commandRejection{reason: commandRejectUpdateNotReady, detail: notReady.Step})
+			continue
+		}
 		switch owner := current.(type) {
 		case accessTunnelCauseError:
 			switch owner.classification {
@@ -487,6 +491,9 @@ func soleCommandOwner(err error) error {
 		}
 		if err == hostinstall.ErrUpdateNotReady {
 			return commandRejection{reason: commandRejectUpdateNotReady}
+		}
+		if notReady, ok := err.(*hostinstall.UpdateNotReadyError); ok {
+			return commandRejection{reason: commandRejectUpdateNotReady, detail: notReady.Step}
 		}
 		switch err.(type) {
 		case *sessionauth.CredentialFailure, accessTunnelCauseError, *filetransfer.LimitError, updateOpenConnectionsRefusal, destinationStorageFullError, destinationFileTooLargeError, destinationBusyError, destinationGoneError, *sshTargetNotReadyError, *hostinstall.SuppliedExecutableError, *accessMachineStepError, commandRejection, *envCommandFailure, *envHostRefreshFailure, *configComparisonFailure, *recordingReplayFailure, updateCompletionFailure, setupFailureError, machineReplacementError, commandPreparationFailure, *api.APIError, *localapi.RemoteError, *TunnelCreateExistingError, *TunnelCreateChangedError, *TunnelOperationOutcomeError, *TunnelOperationWaitTimeoutError, uninstallCleanupError, freshResetCleanupError, preferenceLoadFailure, usageError, unsupportedJSONOutputError, managedssh.NativeExitError, managedssh.NativeLaunchError, exitCodeError, jsonFailureExitCodeError, *sshDialError, *managedssh.RefusedError:

@@ -117,9 +117,7 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 			case "insufficient_disk_space":
 				return "", hostinstall.ErrInsufficientSpace
 			case "update_not_ready":
-				// The step that failed, as the Unix privileged step prints it above the rejection.
-				_, _ = io.WriteString(os.Stderr, "pb: cause: "+remote.Message+"\n")
-				return "", hostinstall.ErrUpdateNotReady
+				return "", hostinstall.NotReadyFromMessage(remote.Message)
 			}
 		}
 		if diskspace.IsFull(err) {

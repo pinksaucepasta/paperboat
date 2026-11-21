@@ -24,3 +24,16 @@ func TestNotReadyIfRolledBackNamesOnlyAFinishedRollbackOfAFailedCandidate(t *tes
 		t.Fatal("success became a failure")
 	}
 }
+
+// The Windows bridge wraps the message; the step still comes out clean and round-trips.
+func TestNotReadyFromMessageDropsTheBridgeWrapper(t *testing.T) {
+	step := "local_access_unavailable: deadline_exceeded"
+	wrapped := "elevated Windows operation failed (update_not_ready): " + (&UpdateNotReadyError{Step: step}).Error()
+	got := NotReadyFromMessage(wrapped)
+	if got.Step != step || !errors.Is(got, ErrUpdateNotReady) {
+		t.Fatalf("step = %q", got.Step)
+	}
+	if NotReadyFromMessage("elevated Windows operation failed (update_not_ready): x").Step != "" {
+		t.Fatal("a message without a step produced one")
+	}
+}

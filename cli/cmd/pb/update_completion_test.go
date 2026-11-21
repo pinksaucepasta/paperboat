@@ -197,6 +197,22 @@ func TestUpdateWhoseDaemonCannotStartIsReportedAsRolledBack(t *testing.T) {
 	}
 }
 
+// A rolled-back update names the step that failed in its message and its JSON error: with --json nothing is printed above it.
+func TestRolledBackUpdateCarriesItsFailedStep(t *testing.T) {
+	const step = "authentication: This session cannot read the operating system's credential store"
+	err := fmt.Errorf("install: %w", &hostinstall.UpdateNotReadyError{Step: step})
+	if message := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(message, "failed step: "+step) || strings.Contains(message, "printed above") {
+		t.Fatalf("message = %q", message)
+	}
+	result := classifyCLIJSONError(err)
+	if result.Code != "update_rolled_back" || result.FailedStep != step || !strings.Contains(result.Message, step) || !result.Retryable {
+		t.Fatalf("json = %+v", result)
+	}
+	if bare := classifyCLIJSONError(hostinstall.ErrUpdateNotReady); bare.Code != "update_rolled_back" || bare.FailedStep != "" {
+		t.Fatalf("a rollback without a step = %+v", bare)
+	}
+}
+
 // A bundle install keeps whatever automatic-update setting the machine had; the CLI cannot see it, so it does not claim one.
 func TestUpdateFromABundleDoesNotClaimAnAutomaticUpdateSetting(t *testing.T) {
 	var out bytes.Buffer

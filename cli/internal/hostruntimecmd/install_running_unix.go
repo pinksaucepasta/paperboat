@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	documentation "github.com/pinksaucepasta/paperboat/cli/docs"
@@ -156,7 +157,7 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 				case InsufficientSpaceExitCode:
 					return hostinstall.ErrInsufficientSpace
 				case UpdateNotReadyExitCode:
-					return hostinstall.ErrUpdateNotReady
+					return &hostinstall.UpdateNotReadyError{Step: notReadyStep(reason.String())}
 				case NoPendingInstallationExitCode:
 					return hostinstall.ErrNoPendingInstallation
 				}
@@ -345,6 +346,17 @@ func KeepInstallFailureOwner(installErr, inventoryErr error) error {
 }
 
 // stderrReason is what the privileged step printed last, as a cause (nil when it printed nothing).
+// notReadyStep is the failed step the privileged step printed last ("pb: cause: <step>"); empty when it printed none.
+func notReadyStep(stderr string) string {
+	step := ""
+	for _, line := range strings.Split(stderr, "\n") {
+		if cause, ok := strings.CutPrefix(strings.TrimSpace(line), "pb: cause: "); ok {
+			step = cause
+		}
+	}
+	return step
+}
+
 func stderrReason(reason *tailBuffer) error {
 	if text := reason.String(); text != "" {
 		return errors.New("privileged step: " + text)

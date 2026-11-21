@@ -32,6 +32,28 @@ var ErrNoPendingInstallation = errors.New("the installation already committed, s
 // committed; the previous version was restored.
 var ErrUpdateNotReady = errors.New("the new version did not become ready, so the previous version was restored")
 
+// UpdateNotReadyError is ErrUpdateNotReady with the step that failed, as the privileged step reported it
+// ("pb: cause: ..."), so the caller can show it where the step's own output is not visible (--json, an SSH log).
+type UpdateNotReadyError struct{ Step string }
+
+const failedStepMarker = "; failed step: "
+
+func (e *UpdateNotReadyError) Error() string {
+	if e.Step == "" {
+		return ErrUpdateNotReady.Error()
+	}
+	return ErrUpdateNotReady.Error() + failedStepMarker + e.Step
+}
+
+// NotReadyFromMessage reads the step back out of an Error() text that crossed a boundary which wrapped it
+// (the Windows elevation bridge prefixes "elevated Windows operation failed (update_not_ready): ").
+func NotReadyFromMessage(message string) *UpdateNotReadyError {
+	_, step, _ := strings.Cut(message, failedStepMarker)
+	return &UpdateNotReadyError{Step: strings.TrimSpace(step)}
+}
+
+func (e *UpdateNotReadyError) Is(target error) bool { return target == ErrUpdateNotReady }
+
 // UpdateNotReady is the rollback of a new version that failed validation; cause is the failed step.
 func UpdateNotReady(cause error) error {
 	return hostInstallFailure("the new version did not become ready; restoring the previous version", ErrUpdateNotReady, cause)
