@@ -56,6 +56,7 @@ type guardServer struct {
 	names           map[controlConn]map[string]string
 	aliases         map[controlConn]map[string]string
 	connections     map[controlConn]string
+	departed        map[controlConn]chan struct{} // closed once the connection's leases are withdrawn
 	wg              sync.WaitGroup
 	closing         bool
 	failures        chan error
@@ -254,6 +255,10 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		defer g.mu.Unlock()
 		g.withdraw(ctx, conn)
 		delete(g.connections, conn)
+		if departed, ok := g.departed[conn]; ok {
+			close(departed)
+			delete(g.departed, conn)
+		}
 	}()
 
 	g.mu.Lock()
@@ -268,6 +273,10 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		return
 	}
 	g.connections[conn] = uid
+	if g.departed == nil {
+		g.departed = map[controlConn]chan struct{}{}
+	}
+	g.departed[conn] = make(chan struct{})
 	g.mu.Unlock()
 	for {
 		in, err := conn.Receive()
@@ -303,6 +312,24 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			return
 		}
 
+	}
+}
+
+// awaitDeparture waits, with g.mu released, until owner's leases are withdrawn; false if ctx ended first or owner
+// is not a served connection. Prior art: tailscale ipn/ipnserver/server.go blocks a new client until the previous
+// one's teardown finished (actor waiting on the old one's done channel).
+func (g *guardServer) awaitDeparture(ctx context.Context, owner controlConn) bool {
+	departed, ok := g.departed[owner]
+	if !ok {
+		return false
+	}
+	g.mu.Unlock()
+	defer g.mu.Lock()
+	select {
+	case <-departed:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -449,6 +476,10 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			if _, exists := aliases[in.Hostname]; exists && g.sameNamespace(other, uid) {
 				return nil, errors.New("machine name conflicts with an active browser alias")
 			}
+		}
+		if lease, exists := g.leases[key]; exists && lease.owner != nil && lease.owner != conn && lease.uid == uid &&
+			g.awaitDeparture(ctx, lease.owner) {
+			return g.handle(ctx, conn, uid, in) // the same user's reconnect raced its old connection's withdrawal
 		}
 		if lease, exists := g.leases[key]; exists {
 			if lease.owner != nil || lease.uid != uid || lease.hostname != in.Hostname {
