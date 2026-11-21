@@ -79,13 +79,19 @@ type relayAccountSpeed struct {
 	Mbit    float64 `json:"mbit"`
 }
 
+// relayLeaseCapacityLimit is the connection limit those older relays enforced (their derpquic.MaxConnections).
+// shortcut: delete with CapacityLimit once no 2026.11.20.0 relay remains.
+const relayLeaseCapacityLimit = 16384
+
 type relayNodeLeaseDocument struct {
-	NodeID       string                `json:"node_id"`
-	Generation   int64                 `json:"node_generation"`
-	ProcessEpoch string                `json:"process_epoch"`
-	ExpiresAt    int64                 `json:"expires_at"`
-	Revocations  []relayRevocation     `json:"revocations"`
-	PeerRelay    *relayServiceIdentity `json:"peer_relay,omitempty"`
+	NodeID       string            `json:"node_id"`
+	Generation   int64             `json:"node_generation"`
+	ProcessEpoch string            `json:"process_epoch"`
+	ExpiresAt    int64             `json:"expires_at"`
+	Revocations  []relayRevocation `json:"revocations"`
+	// CapacityLimit keeps relays from release 2026.11.20.0 running during the server-first rollout: they fence a lease without it.
+	CapacityLimit int64                 `json:"capacity_limit"`
+	PeerRelay     *relayServiceIdentity `json:"peer_relay,omitempty"`
 	// MeshPeers are the other managed relay nodes this one may link to (pin = their serving certificate's SPKI pin); none for
 	// a customer-owned relay, which never meshes with Paperboat's.
 	MeshPeers []nodemesh.Peer `json:"mesh_peers,omitempty"`
@@ -211,7 +217,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 				return out, err
 			}
 		}
-		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), Revocations: []relayRevocation{}}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen, ProcessEpoch: epoch, ExpiresAt: min(expires.Unix(), s.clock().Add(relayNodeLease).Unix()), Revocations: []relayRevocation{}, CapacityLimit: relayLeaseCapacityLimit}
 	} else {
 		now := s.clock().UTC()
 		// A process whose remembered generation differs (its state file was lost or restored) adopts the
@@ -226,7 +232,7 @@ func (s *EdgeService) StartRelayNode(ctx context.Context, in relayNodeStart) (re
 		if err != nil {
 			return out, err
 		}
-		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
+		out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: gen + 1, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}, CapacityLimit: relayLeaseCapacityLimit}
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
@@ -434,7 +440,7 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if err != nil {
 		return out, set, required, err
 	}
-	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}}
+	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), Revocations: []relayRevocation{}, CapacityLimit: relayLeaseCapacityLimit}
 	set, required, err = relayObservedSubjects(ctx, tx, in)
 	if err != nil {
 		return relayNodeLeaseDocument{}, set, required, err
