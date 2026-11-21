@@ -194,3 +194,37 @@ func TestManagedIngressIsVerifiedAutomatically(t *testing.T) {
 		t.Fatalf("the node is not serving after an automatic verification: err=%v probes=%d", err, probes)
 	}
 }
+
+// A drain and a resume built on the same read race: exactly one wins, and the loser cannot undo it later.
+func TestOperatorNodeActionsCompareAndSet(t *testing.T) {
+	s, _, admin, node, _ := drainFixture(t)
+	ctx := context.Background()
+	errs := make(chan error, 2)
+	for _, action := range []string{"drain", "resume"} {
+		go func() {
+			_, err := s.MutateNode(ctx, admin, "race-"+action+"-"+node.ID, NodeMutation{Action: action, NodeID: node.ID, Revision: node.Revision, Reason: "case:test"})
+			errs <- err
+		}()
+	}
+	wins := 0
+	for range 2 {
+		if err := <-errs; err == nil {
+			wins++
+		} else if !errors.Is(err, ErrConflict) {
+			t.Fatal(err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d of two racing actions on one revision applied", wins)
+	}
+	drained, err := s.MutateNode(ctx, admin, "drain-after-race-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision + 1, Reason: "case:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.MutateNode(ctx, admin, "stale-resume-"+node.ID, NodeMutation{Action: "resume", NodeID: node.ID, Revision: node.Revision + 1, Reason: "case:test"}); !errors.Is(err, ErrConflict) {
+		t.Fatal("stale resume undid a newer drain", err)
+	}
+	if drained.Node.Revision != node.Revision+2 || drained.Node.State != "draining" {
+		t.Fatalf("drain result %+v", drained.Node)
+	}
+}

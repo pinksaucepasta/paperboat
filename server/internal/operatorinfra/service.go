@@ -163,7 +163,7 @@ func (s *Service) MutateRegion(ctx context.Context, actor, key string, in Region
 			return err
 		}
 		if in.Action == "disable" {
-			_, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes n SET state='draining',ready=false,drain_deadline=coalesce(drain_deadline,now()+interval '30 seconds'),version=version+1,updated_at=now() FROM managed_node_authority m WHERE m.node_id=n.id AND m.region_id=$1 AND m.retired_at IS NULL AND n.state<>'retired'`, in.ID)
+			_, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes n SET state='draining',ready=false,drain_deadline=coalesce(drain_deadline,now()+interval '30 seconds'),operator_revision=operator_revision+1,version=version+1,updated_at=now() FROM managed_node_authority m WHERE m.node_id=n.id AND m.region_id=$1 AND m.retired_at IS NULL AND n.state<>'retired'`, in.ID)
 			return err
 		}
 		return nil
@@ -212,6 +212,14 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return err
 			}
 			if in.Action == "resume" && !regionEnabled {
+				return ErrConflict
+			}
+			// Compare-and-set: a request built on an older read (a resume racing a newer drain) is refused.
+			tag, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes SET operator_revision=operator_revision+1 WHERE id=$1 AND operator_revision=$2`, in.NodeID, in.Revision)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
 				return ErrConflict
 			}
 			if in.Action != "resume" {

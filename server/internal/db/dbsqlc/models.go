@@ -1048,6 +1048,7 @@ type ControlTunnelNode struct {
 	TunnelSnapshotAt                 sql.NullTime
 	Site                             sql.NullString
 	PublicHttpsPort                  sql.NullInt32
+	OperatorRevision                 int64
 }
 
 type ControlUsageCounter struct {
