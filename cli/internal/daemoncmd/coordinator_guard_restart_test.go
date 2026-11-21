@@ -130,7 +130,7 @@ func reconnectsToARestartedGuard(t *testing.T, watch time.Duration, kill func(*r
 
 var errRefusal = errors.New("guard refused")
 
-// A guard that times out once (it is restarting) is dialed again inside the same reconcile, which then succeeds
+// A guard that times out once (it is restarting, or its policy apply is slow) is dialed again inside the same reconcile, which then succeeds
 // without a pending step; a refusal is not retried.
 func TestCoordinatorRetriesATransientGuardFailureInTheSameReconcile(t *testing.T) {
 	for _, tc := range []struct {
@@ -138,11 +138,13 @@ func TestCoordinatorRetriesATransientGuardFailureInTheSameReconcile(t *testing.T
 		first      error
 		wantDials  int
 		wantFailed bool
+		onApply    bool // the guard answers status but its policy apply times out (a slow pfctl)
 	}{
-		{"timeout", os.ErrDeadlineExceeded, 2, false},
-		{"closed", net.ErrClosed, 2, false},
-		{"refusal", errRefusal, 1, true},
-		{"cancelled", context.Canceled, 1, true},
+		{"timeout", os.ErrDeadlineExceeded, 2, false, false},
+		{"closed", net.ErrClosed, 2, false, false},
+		{"refusal", errRefusal, 1, true, false},
+		{"cancelled", context.Canceled, 1, true, false},
+		{"apply timeout", os.ErrDeadlineExceeded, 2, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
@@ -157,7 +159,11 @@ func TestCoordinatorRetriesATransientGuardFailureInTheSameReconcile(t *testing.T
 						if tc.first == context.Canceled {
 							cancel() // the reconcile itself ends: never retried
 						}
-						client.statusErr = tc.first
+						if tc.onApply {
+							client.failApply = tc.first
+						} else {
+							client.statusErr = tc.first
+						}
 					}
 					return client, nil
 				},

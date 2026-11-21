@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineloopback"
@@ -77,9 +76,6 @@ func (c *Coordinator) resolveLocalDomainLocked(ctx context.Context, nameClient g
 	return nil
 }
 
-// guardRetryTimeout bounds the one re-dial a reconcile makes after a transient guard failure.
-var guardRetryTimeout = 5 * time.Second
-
 func (c *Coordinator) connectGuardLocked(ctx context.Context) (guardedNameClient, error) {
 	if c.nameClient != nil {
 		return c.nameClient, nil
@@ -123,6 +119,20 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	if c.ctx == nil {
 		return errors.New("coordinator is not running")
 	}
+	err = c.replaceGuardedRoutesLocked(ctx, peers)
+	// A guard that restarted (an update or self-heal replaced it) or answered too slowly leaves this connection
+	// dead (the failed step dropped it): on a timeout or closed connection, dial once more within this reconcile.
+	var op coordinatorOperationError
+	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(ctx, err) && errors.As(err, &op) &&
+		(op.LocalAccessStep() == "guard_status" || op.LocalAccessStep() == "native_listener") {
+		diagnosticlog.TryWarn("machine guard did not answer; dialing it again", "error", err)
+		c.resetNameGenerationLocked(ctx)
+		err = c.replaceGuardedRoutesLocked(ctx, peers)
+	}
+	return err
+}
+
+func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate) error {
 	// Withdrawal first: forwards kept across a reset are cut as soon as a snapshot no longer authorizes their
 	// machine and port, whether or not the guard can be reached to rebuild the listeners below.
 	c.cutWithdrawnDrainingLocked(ctx, peers)
@@ -131,21 +141,8 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 		return err
 	}
 	if err := c.resolveLocalDomainLocked(ctx, nameClient); err != nil {
-		// A guard that restarted (an update or self-heal replaced it) leaves this connection dead:
-		// drop it, and on a timeout or closed connection dial once more within this reconcile.
 		c.resetNameGenerationLocked(ctx)
-		if !transientGuardFailure(ctx, err) {
-			return err
-		}
-		retryCtx, cancel := context.WithTimeout(ctx, guardRetryTimeout)
-		defer cancel()
-		if nameClient, err = c.connectGuardLocked(retryCtx); err != nil {
-			return err
-		}
-		if err := c.resolveLocalDomainLocked(retryCtx, nameClient); err != nil {
-			c.resetNameGenerationLocked(ctx)
-			return err
-		}
+		return err
 	}
 	wanted := make(map[string]*guardedRoute)
 	wantedWeb := make(map[string]guardedWebRoute)

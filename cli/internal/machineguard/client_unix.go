@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"golang.org/x/sys/unix"
 	"io"
 	"net"
@@ -83,7 +84,14 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 		return response{}, nil, net.ErrClosed
 	}
 	connection := c.conn
-	deadline := time.Now().Add(5 * time.Second)
+	// A status ping is quick; acquire and apply run pfctl/ifconfig/iptables, which take seconds on a busy host.
+	// Prior art: tailscale wgengine/router/osrouter/router_linux.go runs each ip/iptables command without a short RPC cap.
+	timeout := 10 * time.Second
+	if in.Operation == "status" {
+		timeout = 5 * time.Second
+	}
+	started := time.Now()
+	deadline := started.Add(timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
@@ -105,6 +113,9 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 		}
 		closeErr = errors.Join(closeErr, connection.Close())
 		c.conn = nil
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			err = fmt.Errorf("machine guard %s did not answer within %s: %w", in.Operation, time.Since(started).Round(time.Millisecond), err)
+		}
 		return response{}, nil, errors.Join(err, closeErr)
 	}
 	data, err := json.Marshal(in)
