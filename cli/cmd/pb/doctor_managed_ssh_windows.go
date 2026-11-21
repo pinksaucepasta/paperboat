@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -29,24 +30,25 @@ func managedSSHInstallWarnings() []string { return managedSSHInstallWarning(wind
 func windowsManagedSSHCheck() doctorpkg.Check {
 	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
-		return doctorManagedSSHCheck(true, err, "")
+		return doctorManagedSSHCheck(true, err, "", false)
 	}
 	instance, err := hostinstall.WindowsInstanceForSID(user.User.Sid.String())
 	if err != nil {
-		return doctorManagedSSHCheck(true, err, "")
+		return doctorManagedSSHCheck(true, err, "", false)
 	}
 	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, hostinstall.ErrNotInstalled) || err == nil && installed.EnrollmentPending {
-		return doctorManagedSSHCheck(false, nil, "")
+		return doctorManagedSSHCheck(false, nil, "", false)
 	}
 	if err != nil || len(installed.Source.SHA256) < 32 {
-		return doctorManagedSSHCheck(true, errors.Join(errors.New("read installed runtime"), err), "")
+		return doctorManagedSSHCheck(true, errors.Join(errors.New("read installed runtime"), err), "", false)
 	}
 	handle, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
-		return doctorManagedSSHCheck(true, nil, "unavailable")
+		return doctorManagedSSHCheck(true, nil, "unavailable", false)
 	}
 	manager := &mgr.Mgr{Handle: handle}
 	defer manager.Disconnect()
-	return doctorManagedSSHCheck(true, nil, windowsServiceState(manager, windowsopenssh.ServiceName+"-"+instance+"-"+installed.Source.SHA256[:32]))
+	retrying := time.Since(installed.InstalledAt) <= hostinstall.WindowsLateSSHWindow
+	return doctorManagedSSHCheck(true, nil, windowsServiceState(manager, windowsopenssh.ServiceName+"-"+instance+"-"+installed.Source.SHA256[:32]), retrying)
 }
