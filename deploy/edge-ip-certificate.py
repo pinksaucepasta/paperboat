@@ -5,8 +5,11 @@ import ipaddress
 import json
 import os
 import re
+import socket
 from pathlib import Path
 import subprocess
+
+import health_report
 
 
 def stop_owned_edge(state, log):
@@ -112,10 +115,24 @@ def main():
     try:
         renew(args)
     except Exception as error:
-        print(str(error) if isinstance(error, RuntimeError) else "certificate configuration failed; inspect the protected state and renewal log")
+        message = str(error) if isinstance(error, RuntimeError) else "certificate configuration failed; inspect the protected state and renewal log"
+        print(message)
+        report(args, False, message)
         return 1
     print("Public edge certificate is current; enrolled identity preserved.")
+    report(args, True, "")
     return 0
+
+
+def report(args, ok, error):
+    """The admin panel alerts while this edge's renewal fails, or when no check arrived for a day (four missed timer runs)."""
+    try:
+        host = json.loads((Path(args.state_dir) / "tunnel/deployment.json").read_text())["connector_advertise_host"]
+    except (OSError, ValueError, KeyError, TypeError):
+        host = ""
+    if not re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", str(host)):
+        host = socket.gethostname()
+    health_report.push("edge-certificate:" + host[:253], {"ok": ok, "error": error[:300], "stale_after_seconds": 86400})
 
 
 if __name__ == "__main__":
