@@ -174,7 +174,11 @@ func ProbePort(ctx context.Context, dir, transport string, port int, nonce strin
 	if err != nil {
 		return PortProbe{}, err
 	}
-	body, err := json.Marshal(map[string]any{"transport": transport, "port": port, "nonce": nonce})
+	request := map[string]any{"transport": transport, "port": port}
+	if nonce != "" { // the server refuses an empty nonce; node ports take none
+		request["nonce"] = nonce
+	}
+	body, err := json.Marshal(request)
 	if err != nil {
 		return PortProbe{}, err
 	}

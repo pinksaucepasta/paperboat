@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"log/slog"
 	"net/http"
 	"runtime"
@@ -805,7 +806,7 @@ func New(opts Options) (*App, error) {
 		IPRules:                  accessrules.New(store),
 		OperatorBilling:          billing.NewOperatorService(store, priceReader, opts.Config.Business),
 		OperatorAudit:            auditWriter,
-		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService, Floors: map[string]httpapi.NodeUpdatePolicy{"pbh": nodeFloors["pbh"], "edge": nodeFloors["edge"], "relay": nodeFloors["relay"]}},
+		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService, Floors: map[string]httpapi.NodeUpdatePolicy{"pbh": nodeFloors["pbh"], "edge": nodeFloors["edge"], "relay": nodeFloors["relay"]}, PortProbeLimit: ratelimit.New(opts.Config.RateLimits.SelfhostPortProbePerMinute, opts.Config.RateLimits.SelfhostPortProbeBurst, opts.Config.RateLimits.MaxClients)},
 		Config:                   opts.Config,
 		Logger:                   opts.Logger,
 		ReadinessChecker:         checker,

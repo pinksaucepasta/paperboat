@@ -35,7 +35,7 @@ type PortProbe struct {
 	Detail    string `json:"detail"`
 }
 
-// ProbePort connects from the control plane to the authenticated node's registered endpoint host. On
+// ProbePort connects from the control plane to the authenticated node's verified public ingress address. On
 // transport "tcp" with a port in the public range it expects the node's test listener to write nonce
 // back; on a node port (edgeports.NodeMin-NodeMax, held by the edge or relay, so pbh cannot listen
 // there) an accepted connection counts, with no nonce. On transport "udp" only the relay's STUN port
@@ -61,11 +61,15 @@ func (s *Service) ProbePort(ctx context.Context, credential, transport string, p
 	if len(credential) < 32 || len(credential) > 4096 {
 		return PortProbe{}, ErrUnauthorized
 	}
-	var host string
-	err := s.database.SQL().QueryRowContext(ctx, `SELECT n.endpoint_host
+	// Only the addresses ingress verification proved are dialed, never endpoint_host: the node chose
+	// that name, so resolving it would let a node point the control plane anywhere.
+	var v4, v6 string
+	var verified bool
+	err := s.database.SQL().QueryRowContext(ctx, `SELECT coalesce(host(n.public_ingress_ipv4),''),
+coalesce(host(n.public_ingress_ipv6),''),n.public_ingress_verified_at IS NOT NULL
 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
 WHERE i.runtime_hash=$1 AND i.state='active' AND i.claim_complete
-AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), s.now().UTC()).Scan(&host)
+AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), s.now().UTC()).Scan(&v4, &v6, &verified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PortProbe{}, ErrUnauthorized
 	}
@@ -76,21 +80,20 @@ AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), s.now().UTC()
 	if dial == nil {
 		dial = (&net.Dialer{Timeout: portProbeTimeout}).DialContext
 	}
-	return probeNodePort(ctx, host, transport, port, check, s.ingressIP, dial), nil
+	var addresses []netip.Addr
+	for _, v := range []string{v4, v6} {
+		if ip, err := netip.ParseAddr(v); verified && err == nil {
+			addresses = append(addresses, ip)
+		}
+	}
+	return probeNodePort(ctx, addresses, transport, port, check, s.ingressIP, dial), nil
 }
 
-// probeNodePort resolves host once, dials the first allowed address and runs check on the connection, all
+// probeNodePort dials the first allowed address and runs check on the connection, all
 // within portProbeBudget. Canceling ctx closes the connection, so blocked reads and writes return at once.
-func probeNodePort(ctx context.Context, host, transport string, port int, check func(context.Context, net.Conn) PortProbe, allowed func(netip.Addr) bool, dial func(context.Context, string, string) (net.Conn, error)) PortProbe {
+func probeNodePort(ctx context.Context, addresses []netip.Addr, transport string, port int, check func(context.Context, net.Conn) PortProbe, allowed func(netip.Addr) bool, dial func(context.Context, string, string) (net.Conn, error)) PortProbe {
 	ctx, cancel := context.WithTimeout(ctx, portProbeBudget)
 	defer cancel()
-	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
-		addresses, err = []netip.Addr{ip}, nil
-	}
-	if err != nil {
-		return PortProbe{Detail: "unresolved"}
-	}
 	for _, ip := range addresses {
 		if !allowed(ip) {
 			continue

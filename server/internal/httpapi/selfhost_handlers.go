@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"io"
 	"net/http"
 	"strconv"
@@ -20,6 +21,8 @@ type SelfhostHandlers struct {
 	Service *selfhost.Service
 	// Floors is the update policy of each node component ("edge", "relay"); nil marks nothing.
 	Floors map[string]NodeUpdatePolicy
+	// PortProbeLimit bounds port probes per node credential; nil allows all (tests).
+	PortProbeLimit *ratelimit.Limiter
 }
 
 // NodeUpdatePolicy is one node component's update floor and newest published release (clientupdate.NewNode).

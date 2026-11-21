@@ -39,7 +39,7 @@ func TestProbeNodePortReportsWhatTheConnectionSaw(t *testing.T) {
 		"other":           {fail(errors.New("boom")), PortProbe{Detail: "error"}},
 	} {
 		check := func(ctx context.Context, c net.Conn) PortProbe { return echoesNonce(ctx, c, nonce) }
-		if got := probeNodePort(t.Context(), "203.0.113.7", "tcp", 25000, check, anyAddress, test.dial); got != test.want {
+		if got := probeNodePort(t.Context(), addrs("203.0.113.7"), "tcp", 25000, check, anyAddress, test.dial); got != test.want {
 			t.Errorf("%s: got %+v, want %+v", name, got, test.want)
 		}
 	}
@@ -50,8 +50,8 @@ func TestProbeNodePortNeverDialsADisallowedAddress(t *testing.T) {
 		t.Fatal("dialed a disallowed address")
 		return nil, nil
 	}
-	for _, host := range []string{"127.0.0.1", "10.0.0.5", "169.254.169.254", "100.64.0.1"} {
-		got := probeNodePort(t.Context(), host, "udp", 7274, answersSTUN, publicIngressIP, dial)
+	for _, host := range []string{"127.0.0.1", "10.0.0.5", "169.254.169.254", "100.64.0.1", "::1", "fe80::1", "fd00::5"} {
+		got := probeNodePort(t.Context(), addrs(host), "udp", 7274, answersSTUN, publicIngressIP, dial)
 		if got != (PortProbe{Detail: "not_public"}) {
 			t.Errorf("%s: got %+v", host, got)
 		}
@@ -94,7 +94,7 @@ func TestProbeNodePortConnectsToANodePortWithoutANonce(t *testing.T) {
 		return client, nil
 	}
 	check := func(context.Context, net.Conn) PortProbe { return PortProbe{Reachable: true, Detail: "connected"} }
-	got := probeNodePort(t.Context(), "203.0.113.7", "tcp", 7272, check, anyAddress, dial)
+	got := probeNodePort(t.Context(), addrs("203.0.113.7"), "tcp", 7272, check, anyAddress, dial)
 	if got != (PortProbe{Reachable: true, Detail: "connected"}) || network != "tcp" || address != "203.0.113.7:7272" {
 		t.Fatalf("got %+v dialing %s %s", got, network, address)
 	}
@@ -216,7 +216,7 @@ func TestProbeNodePortReturnsPromptlyWhenCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	time.AfterFunc(100*time.Millisecond, cancel)
 	start := time.Now()
-	got := probeNodePort(ctx, "203.0.113.7", "udp", 7274, answersSTUN, anyAddress, func(context.Context, string, string) (net.Conn, error) { return silent, nil })
+	got := probeNodePort(ctx, addrs("203.0.113.7"), "udp", 7274, answersSTUN, anyAddress, func(context.Context, string, string) (net.Conn, error) { return silent, nil })
 	if got != (PortProbe{Detail: "timeout"}) || time.Since(start) > time.Second {
 		t.Fatalf("got %+v after %v", got, time.Since(start))
 	}
@@ -227,7 +227,7 @@ func TestProbeNodePortReturnsPromptlyWhenCanceled(t *testing.T) {
 	done, stop := context.WithCancel(t.Context())
 	stop()
 	dialed := false
-	got = probeNodePort(done, "203.0.113.7", "tcp", 7272, func(context.Context, net.Conn) PortProbe { return PortProbe{Reachable: true} }, anyAddress, func(ctx context.Context, _, _ string) (net.Conn, error) {
+	got = probeNodePort(done, addrs("203.0.113.7"), "tcp", 7272, func(context.Context, net.Conn) PortProbe { return PortProbe{Reachable: true} }, anyAddress, func(ctx context.Context, _, _ string) (net.Conn, error) {
 		dialed = true
 		return nil, ctx.Err()
 	})
@@ -266,4 +266,12 @@ func TestAnswersSTUNSendsNoRetryAfterCancel(t *testing.T) {
 	if got := <-result; got != (PortProbe{Detail: "timeout"}) || conn.writes.Load() != 1 {
 		t.Fatalf("got %+v after %d writes; a canceled probe must not retry", got, conn.writes.Load())
 	}
+}
+
+func addrs(ips ...string) []netip.Addr {
+	var out []netip.Addr
+	for _, ip := range ips {
+		out = append(out, netip.MustParseAddr(ip))
+	}
+	return out
 }

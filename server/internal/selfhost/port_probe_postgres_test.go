@@ -2,9 +2,11 @@ package selfhost
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -41,8 +43,18 @@ func TestProbePortSelectsTheNodeTransportAndDestinationOnPostgres(t *testing.T) 
 	key := "port-probe-test-encryption-key-0123456789"
 	service := New(store, key)
 	node := scopedInstallationFixture(t, store, key, owner, "tunnel")
-	setHost := func(host string) {
-		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET endpoint_host=$1 WHERE id=$2`, host, node.NodeID); err != nil {
+	// setIngress stores ip as the node's verified ingress address (unverified when ip is ""); the
+	// registered endpoint_host is pointed somewhere else to prove it is never dialed.
+	setHost := func(ip string) {
+		v4, v6 := sql.NullString{}, sql.NullString{}
+		if strings.Contains(ip, ":") {
+			v6 = sql.NullString{String: ip, Valid: true}
+		} else if ip != "" {
+			v4 = sql.NullString{String: ip, Valid: true}
+		}
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET endpoint_host='9.9.9.9',
+public_ingress_ipv4=$1::inet,public_ingress_ipv6=$2::inet,public_ingress_verified_at=CASE WHEN $3 THEN now() END
+WHERE id=$4`, v4, v6, ip != "", node.NodeID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,7 +84,7 @@ func TestProbePortSelectsTheNodeTransportAndDestinationOnPostgres(t *testing.T) 
 	if _, err := service.ProbePort(ctx, randomToken(32), "tcp", 7272, ""); !errors.Is(err, ErrUnauthorized) || len(dialed) != 0 {
 		t.Errorf("unknown credential: err %v dialed %v", err, dialed)
 	}
-	for _, host := range []string{"::1", "fd00::5", "fe80::1", "127.0.0.1"} {
+	for _, host := range []string{"", "::1", "fd00::5", "fe80::1", "127.0.0.1", "169.254.169.254"} {
 		setHost(host)
 		dialed = nil
 		got, err := service.ProbePort(ctx, node.RuntimeCredential, "tcp", 7272, "")

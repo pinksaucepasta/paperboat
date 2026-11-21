@@ -1,10 +1,15 @@
 package httpapi
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
@@ -18,15 +23,24 @@ func (h *SelfhostHandlers) PortProbe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 401, "runtime_unauthorized", "Supply this node's runtime credential.", nil)
 		return
 	}
+	sum := sha256.Sum256([]byte(credential))
+	if allowed, wait := h.PortProbeLimit.Allow(hex.EncodeToString(sum[:])); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait/time.Second)+1))
+		writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Port probes are sent too often. Retry after the delay.", nil)
+		return
+	}
 	var in struct {
 		Transport string          `json:"transport"`
 		Port      int             `json:"port"`
 		Nonce     json.RawMessage `json:"nonce"`
 	}
 	var nonce string
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
-	// One object only; nonce absent or a string, never null.
-	if decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF || in.Nonce != nil && (string(in.Nonce) == "null" || json.Unmarshal(in.Nonce, &nonce) != nil) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<10))
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	// One object only, no repeated key (a second "nonce" would override the first after it was
+	// checked); nonce absent or a non-empty string.
+	if err != nil || !uniqueTopLevelKeys(body) || decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		in.Nonce != nil && (json.Unmarshal(in.Nonce, &nonce) != nil || nonce == "") {
 		writeError(w, r, 400, "invalid_request", "Send {\"transport\": \"tcp\"|\"udp\", \"port\": <port>, \"nonce\": <16-64 URL-safe characters, public TCP ports only>}.", nil)
 		return
 	}
@@ -41,4 +55,26 @@ func (h *SelfhostHandlers) PortProbe(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
 	}
+}
+
+// uniqueTopLevelKeys reports whether body starts with a JSON object whose keys are all distinct.
+func uniqueTopLevelKeys(body []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return false
+	}
+	seen := map[string]bool{}
+	for decoder.More() {
+		key, err := decoder.Token()
+		name, ok := key.(string)
+		if err != nil || !ok || seen[name] {
+			return false
+		}
+		seen[name] = true
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return false
+		}
+	}
+	return true
 }
