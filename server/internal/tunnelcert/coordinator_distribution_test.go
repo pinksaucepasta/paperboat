@@ -86,7 +86,7 @@ func TestCoordinatorRetriesPartialActiveCertificateRedistribution(t *testing.T) 
 	coordinator.config.Distributor = distributor
 	domain := Domain{ID: "platform_cert_runtime_v1", AccountID: PlatformAccountID, TargetKind: TargetPlatformWildcard,
 		Hostname: "*.edge.example.test", Generation: 1, Strategy: StrategyPlatformDNS01,
-		 CAAState: "not_applicable",
+		CAAState:    "not_applicable",
 		EdgeTargets: []EdgeTarget{{NodeID: "edge_a", ProcessEpoch: "epoch-old-a", Generation: 1}, {NodeID: "edge_b", ProcessEpoch: "epoch-old-b", Generation: 1}}}
 	first, err := coordinator.Ensure(context.Background(), domain)
 	if err != nil {
