@@ -77,7 +77,10 @@ cd "$dest/previous-src/relay" && go build -trimpath -o "$dest/previous/paperboat
 cd "$dest/previous-src/relay" && go test -c -o "$dest/previous/selfhost-node.test" ./selfhost
 # pbh: the binary, and its server-facing client code as a test binary the e2e runs against the HEAD server.
 cd "$dest/previous-src/helper" && go build -trimpath -o "$dest/previous/pbh" ./cmd/pbh
-cd "$dest/previous-src/helper" && go test -c -o "$dest/previous/pbh-probe.test" ./internal/containers
+# A previous release without the probe test gets no binary; the e2e then skips the probe.
+if grep -q "func TestPbhServerProbe" "$dest"/previous-src/helper/internal/containers/*_test.go; then
+  cd "$dest/previous-src/helper" && go test -c -o "$dest/previous/pbh-probe.test" ./internal/containers
+fi
 # Host prep e2e.yml does on its runner: the server's test name and low ports for the edge.
 grep -q ' e2e-server.example.test$' /etc/hosts || echo "127.0.0.1 e2e-server.example.test" | sudo -n tee -a /etc/hosts >/dev/null
 sudo -n sysctl -q net.ipv4.ip_unprivileged_port_start=80
