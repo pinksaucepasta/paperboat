@@ -400,16 +400,6 @@ func (s *Store) CreateRoute(ctx context.Context, params dbsqlc.CreatePreviewTunn
 	return value, translate(err)
 }
 
-func (s *Store) CreateDomain(ctx context.Context, params dbsqlc.CreatePreviewTunnelDomainParams) (dbsqlc.TunnelDomain, error) {
-	canonical, err := canonicalSafeJSON(params.ObservedRecords)
-	if err != nil {
-		return dbsqlc.TunnelDomain{}, err
-	}
-	params.ObservedRecords = canonical
-	value, err := s.db.Queries().CreatePreviewTunnelDomain(ctx, params)
-	return value, translate(err)
-}
-
 func (s *Store) CreatePreviewLease(ctx context.Context, params dbsqlc.CreatePreviewLeaseParams) (dbsqlc.PreviewLease, error) {
 	if !ValidPreviewOwnerSessionKind(params.OwnerSessionKind) {
 		return dbsqlc.PreviewLease{}, ErrInvalidInput

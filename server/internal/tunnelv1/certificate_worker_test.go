@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -133,7 +135,11 @@ func TestCertificateWorkerRetriesPreviewPlacementWithoutExitingOnPostgres(t *tes
 	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline) VALUES('foreground',$1,$2,$3,$3,$4,'certificate-owner','http','127.0.0.1:3000','public',now()+interval '1 hour')`, preview, endpoint, account, host); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns:placement','verified','edge.example.test','managed','issuing','ready','clear')`, domain, account, preview, "placement-"+testutil.EndpointLabel(preview)+".example.test"); err != nil {
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:placement','verified','edge.example.test','managed','issuing','ready','clear',$5)`, domain, account, preview, "placement-"+testutil.EndpointLabel(preview)+".example.test", "wsd_"+ws); err != nil {
 		t.Fatal(err)
 	}
 	issuer := &placementPendingIssuer{}
