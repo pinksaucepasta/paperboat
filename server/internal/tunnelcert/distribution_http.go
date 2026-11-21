@@ -75,6 +75,9 @@ type DistributionHub struct {
 	keys            MasterKeySource
 	keyReference    string
 
+	flightsMu sync.Mutex
+	flights   map[string]*onDemandFlight
+
 	mu       sync.Mutex
 	closed   bool
 	closedCh chan struct{} // closed by Close, wakes waiters
@@ -875,11 +878,54 @@ func issuancePending(err error) bool {
 	return pureDistributionError(err, ErrIssuanceLocked) || pureDistributionError(err, ErrCertificateNotReady) || pureDistributionError(err, ErrDNSChallengePending)
 }
 
+// onDemandIssueTimeout bounds one on-demand issuance (ACME order plus DNS-01 propagation), which outlives the request.
+var onDemandIssueTimeout = 10 * time.Minute
+
+type onDemandFlight struct {
+	done chan struct{}
+	err  error
+}
+
+// startOnDemand runs the issuance for one exact name on its own context, once per name in this process: an
+// issuance takes longer than a request may wait, and a cancelled one would leave every retry starting over.
+// Other server instances are kept out by the issuance lock in the database.
+func (h *DistributionHub) startOnDemand(parent context.Context, identity DistributionNodeIdentity, hostname string) *onDemandFlight {
+	key := identity.NodeID + "\x00" + identity.ProcessEpoch + "\x00" + hostname
+	h.flightsMu.Lock()
+	defer h.flightsMu.Unlock()
+	if flight := h.flights[key]; flight != nil {
+		return flight
+	}
+	if h.flights == nil {
+		h.flights = map[string]*onDemandFlight{}
+	}
+	flight := &onDemandFlight{done: make(chan struct{})}
+	h.flights[key] = flight
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), onDemandIssueTimeout)
+		defer cancel()
+		go func() {
+			select {
+			case <-h.closedCh: // a closed hub stops its issuances
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		flight.err = h.onDemand(ctx, identity, hostname)
+		h.flightsMu.Lock()
+		delete(h.flights, key)
+		h.flightsMu.Unlock()
+		close(flight.done)
+	}()
+	return flight
+}
+
 // awaitOnDemand asks for the leaf; when another request (the other edge, or another server instance) is already
 // issuing it, it waits for that issuance and asks again, so every concurrent first handshake gets the one
-// certificate. The issuance lock is in the shared database, so the wait polls it with backoff rather than an
-// in-process channel. Prior art: certmagic's on-demand obtain waits on the in-flight issuance for the same name
-// (handshake.go obtainOnDemandCertificate, obtainCertWaitChans, bounded wait). Only a wait that runs out is returned.
+// certificate. The issuance lock is in the shared database, so the wait polls it with backoff. The wait ends
+// before the request's deadline with "not yet" while the issuance carries on for the edge's next request.
+// Prior art: certmagic's on-demand obtain waits on the in-flight issuance for the same name
+// (handshake.go obtainOnDemandCertificate, obtainCertWaitChans, bounded wait).
 func (h *DistributionHub) awaitOnDemand(parent context.Context, identity DistributionNodeIdentity, hostname string) error {
 	wait := onDemandWait
 	if deadline, ok := parent.Deadline(); ok {
@@ -890,12 +936,16 @@ func (h *DistributionHub) awaitOnDemand(parent context.Context, identity Distrib
 	defer cancel()
 	delay := 250 * time.Millisecond
 	for {
-		err := h.onDemand(ctx, identity, hostname)
-		if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		flight := h.startOnDemand(parent, identity, hostname)
+		var err error
+		select {
+		case <-flight.done:
+			err = flight.err
+		case <-ctx.Done():
 			if parent.Err() != nil {
 				return parent.Err() // the edge went away: the handler answers 499
 			}
-			return ErrCertificateNotReady // our own wait ran out inside the call: still "not yet"
+			return ErrCertificateNotReady // our wait ran out; the issuance continues
 		}
 		if err == nil || !issuancePending(err) {
 			return err

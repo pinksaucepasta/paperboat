@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,17 +78,40 @@ func TestDistributionQueueIsScopedToTheCallersOwnCredential(t *testing.T) {
 	}
 }
 
-// A request deadline shorter than the on-demand wait (the router's 15 s against 25 s) must still end in
-// "not yet", not the router's timeout: prod falkenstein-1 got 503 on every first request.
-func TestOnDemandWaitEndsBeforeTheRequestDeadline(t *testing.T) {
+// A request deadline shorter than the issuance (the router's 15 s against a DNS-01 order) must end in "not yet"
+// while the issuance carries on, so the edge's next request gets the leaf: prod falkenstein-1 got 503 every time.
+func TestOnDemandIssuanceOutlivesTheRequestThatStartedIt(t *testing.T) {
+	var calls atomic.Int32
+	issued := make(chan error, 1)
 	hub := &DistributionHub{onDemand: func(ctx context.Context, _ DistributionNodeIdentity, _ string) error {
-		<-ctx.Done()
-		return ctx.Err()
+		if calls.Add(1) > 1 {
+			return nil // the leaf is active now
+		}
+		select {
+		case <-time.After(600 * time.Millisecond):
+			issued <- nil
+			return nil
+		case <-ctx.Done():
+			issued <- ctx.Err()
+			return ctx.Err()
+		}
 	}}
-	parent, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	err := hub.awaitOnDemand(parent, DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, "leaf.example.test")
-	if !errors.Is(err, ErrCertificateNotReady) || parent.Err() != nil {
-		t.Fatalf("await = %v, parent = %v; want not-ready before the request deadline", err, parent.Err())
+	identity := DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}
+	await := func() error {
+		parent, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		return hub.awaitOnDemand(parent, identity, "leaf.example.test")
+	}
+	if err := await(); !errors.Is(err, ErrCertificateNotReady) {
+		t.Fatalf("first request = %v, want not-ready before its deadline", err)
+	}
+	if err := await(); !errors.Is(err, ErrCertificateNotReady) || calls.Load() != 1 {
+		t.Fatalf("second request = %v after %d issuances, want it to wait on the one in flight", err, calls.Load())
+	}
+	if err := <-issued; err != nil {
+		t.Fatalf("issuance was cancelled with its request: %v", err)
+	}
+	if err := await(); err != nil {
+		t.Fatalf("request after the issuance = %v, want the leaf", err)
 	}
 }
