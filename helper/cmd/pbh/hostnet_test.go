@@ -194,7 +194,7 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + spec: "", "iptables -D INPUT " + spec: ""}, []string{"iptables"},
 			[]string{"iptables -C INPUT " + spec, "iptables -I INPUT 1 " + spec}, []string{"iptables -D INPUT " + spec}},
 		"nft": {"nft", map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\"": "",
-			"nft -a list chain inet filter input": "\t\ttcp dport { 443, 10000-59999 } accept comment \"paperboat-edge\" # handle 7\n", "nft delete rule inet filter input handle 7": ""}, []string{"nft"},
+			"nft -a list chain inet filter input": "\t\ttcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\" # handle 7\n", "nft delete rule inet filter input handle 7": ""}, []string{"nft"},
 			[]string{"nft insert rule inet filter input"}, []string{"nft delete rule inet filter input handle 7"}},
 	} {
 		f := newFakeHost(t, "60000 65535")

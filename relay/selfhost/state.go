@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,8 +60,14 @@ func validateConfig(c Config) error {
 	if c.EndpointHost == "" || strings.ContainsAny(c.EndpointHost, "/@ ") || (net.ParseIP(c.EndpointHost) == nil && strings.Contains(c.EndpointHost, ":")) {
 		return errors.New("endpoint host must be a DNS name or IP without a port")
 	}
-	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
+	_, claimPort, err := net.SplitHostPort(c.Listen)
+	if err != nil {
 		return errors.New("claim listen address requires host:port")
+	}
+	// The claim listener and the edge's loopback listeners share the node's TCP ports with the components.
+	reserved := map[int]bool{edgeports.EdgeHealth: true, edgeports.EdgePrivateHTTPS: true}
+	if n, err := strconv.Atoi(claimPort); err == nil {
+		reserved[n] = true
 	}
 	if len(c.Components) < 1 || len(c.Components) > 2 {
 		return errors.New("choose relay, tunnel, or both")
@@ -76,8 +83,8 @@ func validateConfig(c Config) error {
 			return errors.New("invalid capacity, region, or failure domain")
 		}
 		for _, p := range []int{v.TCPPort, v.QUICPort} {
-			if p < 1 || p > 65535 || ports[p] || p == edgeports.Claim {
-				return errors.New("component ports must be distinct and must not use claim port 7277")
+			if p < 1 || p > 65535 || ports[p] || reserved[p] {
+				return errors.New("component ports must be distinct and must not use the claim port or the edge health and private HTTPS ports")
 			}
 			ports[p] = true
 		}
