@@ -401,3 +401,6 @@ Plan bandwidth limits stop big transfers, not floods of tiny requests; per-addre
 
 ## Windows without App Installer: install OpenSSH from Microsoft's MSI (user 2026-11-21)
 On machines without App Installer/winget for LocalSystem (plain Windows Server, Windows Sandbox), `pb install` now fails visibly instead of setting up managed SSH. Direction: install Microsoft's signed OpenSSH MSI (PowerShell/Win32-OpenSSH release, pinned version, Authenticode check; `msiexec /i OpenSSH-Win64.msi /qn ADDLOCAL=Server`), as Ansible and Chocolatey do. Same rule for `pb update`, which now rolls back there. Start when the user says.
+
+## Edge hostname published at enroll (user 2026-11-21)
+A self-hosted or managed edge enrolled with only an IP (address auto-detected) can't pass verify-ingress: the probe dials its endpoint over WebPKI HTTPS and an IP gets no certificate (selfhost/ingress.go:112-130). Europe (falkenstein-1) needed a hand-made DNS-only A record `edge-falkenstein-1.pprbt.dev` and a reinstall with `--endpoint-host`. Direction: at enroll, the server publishes the edge's own hostname (`edge-<node>.<domain>`, DNS-only, to the detected address) through its DNS publisher and hands it to pbh as the endpoint host, so the edge gets its Let's Encrypt cert and verifies with no manual DNS. Start when the user says.
