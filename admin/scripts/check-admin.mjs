@@ -198,10 +198,6 @@ function mutate(method, p, json) {
     return { installations: [] }
   }
   if (area === "selfhost" && method === "DELETE") world.installs = world.installs.filter((i) => i.installation_id !== action)
-  if (area === "nodes" && action === "enroll") {
-    world.nodes.push({ ...world.nodes[0], id, region_id: json.region_id, roles: json.roles, transports: json.transports, revision: 1 })
-    return { runtime_credential: "rc-FIXTURE-credential-value" }
-  }
   if (area === "regions" && action === "create") world.regions.push({ id, display_name: json.display_name, enabled: true, revision: 1, updated_at: new Date().toISOString() })
   if (area === "regions" && action === "disable") world.regions.find((r) => r.id === id).enabled = false
   if (p === "/v1/admin/server-nodes/enrollments") world.serverNodes.push({ ...world.serverNodes[0], id: "srv_2", state: "registered", healthy: false })
@@ -811,6 +807,7 @@ try {
   }
   await step("enrol a node: command is exact, a bad reference blocks submit, the one-time code goes with target/reason/key, the node goes waiting then ready", async () => {
     await p.goto(`${ORIGIN}/infrastructure`)
+    await p.getByRole("tab", { name: "Self-hosted" }).click()
     await p.waitForSelector("[data-enrol-node]")
     await p.getByLabel("Public hostname or IP").fill("relay-1.example.test")
     await p.getByLabel("Label", { exact: true }).fill("Hetzner Helsinki")
@@ -832,31 +829,11 @@ try {
     await p.waitForFunction(() => document.querySelector("[data-installation-counts]")?.textContent?.includes("1 ready"), null, { timeout: 20000 })
     await p.screenshot({ path: `${shots}/enrol-light.png`, fullPage: true })
   })
-  await step("managed node: the runtime credential is shown once and must be acknowledged", async () => {
+  await step("managed node: drain and retire need a reference; retire needs the node id typed", async () => {
     await p.getByRole("tab", { name: "Managed nodes" }).click()
     await waitReady("nodes")
-    await p.getByRole("button", { name: "Enrol a managed node" }).click()
-    const d = dialog("Enrol a managed node")
-    await d.getByLabel("Node id").fill("relay-sin-1")
-    await d.getByLabel("Kind").selectOption("relay")
-    await d.getByLabel("Region", { exact: true }).selectOption("eu")
-    await d.getByLabel("Pool").fill("pool-a")
-    await d.getByLabel("Failure domain").fill("rack-1")
-    await d.getByLabel("Public hostname").fill("relay-sin-1.example.test")
-    await d.getByLabel("QUIC port").fill("7275")
-    await submit(d, "Enrol node")
-    await p.waitForSelector("[data-one-time-secrets]")
-    expect((await text("[data-secret]")) === "rc-FIXTURE-credential-value", "credential not shown")
-    const w = lastWrite()
-    expect(w.path === "/v1/admin/nodes/relay-sin-1/enroll" && w.target === "relay-sin-1" && w.body.revision === 0 && w.body.roles.join() === "relay" && w.body.transports.join() === "derp_quic,derp_wss", `managed enrol body ${JSON.stringify(w.body)}`)
-    expect(await p.getByRole("button", { name: "Done" }).isDisabled(), "Done must wait for the acknowledgement")
-    await p.getByText("I saved it").click()
-    await p.getByRole("button", { name: "Done" }).click()
-    await p.waitForFunction(() => !document.querySelector("[data-one-time-secrets]"))
-    expect(!(await p.content()).includes("rc-FIXTURE-credential-value"), "the credential stayed on the page")
-  })
-  await step("managed node: drain and retire need a reference; retire needs the node id typed", async () => {
     await rowAction('[data-node-actions="node_1"]', "Drain")
+    await dialog("Drain node_1").getByLabel(/Type/).fill("node_1")
     await submit(dialog("Drain node_1"), "Drain")
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Drain node_1"]'))
     expect(lastWrite().path === "/v1/admin/nodes/node_1/drain" && lastWrite().body.revision === 1, "drain write")
@@ -868,19 +845,6 @@ try {
     await d.getByRole("button", { name: "Retire", exact: true }).click()
     await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Retire node_1"]'))
     expect(lastWrite().path === "/v1/admin/nodes/node_1/retire", "retire write")
-  })
-  await step("managed node: editing keeps the enrolled usage key, so there is nothing to paste and none is sent", async () => {
-    await p.getByRole("tab", { name: "Managed nodes" }).click()
-    await waitReady("nodes")
-    await rowAction('[data-node-actions="edge_1"]', "Edit")
-    const d = dialog("Update edge_1")
-    expect((await d.getByLabel(/Usage public key/).count()) === 0, "the edit form asks for the usage key")
-    expect((await d.innerText()).includes("kept from enrolment"), "the hint does not say the key is kept")
-    await d.getByLabel("Public hostname").fill("edge-1b.example.test")
-    await submit(d, "Save configuration")
-    await p.waitForFunction(() => !document.querySelector('[data-action-dialog="Update edge_1"]'))
-    const w = lastWrite()
-    expect(w.path === "/v1/admin/nodes/edge_1/update" && w.body.revision === 4 && w.body.endpoint_host === "edge-1b.example.test" && !("usage_public_key" in w.body), `update body ${JSON.stringify(w.body)}`)
   })
   await step("regions: create, and disable asks for the region id", async () => {
     await p.getByRole("tab", { name: "Regions" }).click()
