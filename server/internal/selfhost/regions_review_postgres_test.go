@@ -32,7 +32,7 @@ func TestDeleteRegionHeldByAPoolEntry(t *testing.T) {
 		_, _ = f.store.SQL().Exec(`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_id=$1`, f.member)
 	})
 	// The region's servers are gone, but a workspace pool still lists one of them.
-	f.exec(`UPDATE paperboat.selfhost_installations SET state='revoked' WHERE id=ANY($1)`, "{"+f.s1+","+f.s1b+"}")
+	f.exec(`UPDATE paperboat.selfhost_installations SET state='removed' WHERE id=ANY($1)`, "{"+f.s1+","+f.s1b+"}")
 	f.exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'relay','self-hosted-only',ARRAY[$2])`, f.member, f.s1)
 	err := f.service.DeleteRegion(f.ctx, f.owner, f.personal, f.own1)
 	if !errors.Is(err, ErrRegionInUse) || !strings.Contains(err.Error(), "Switch their regions") || strings.Contains(err.Error(), f.member) {
@@ -92,7 +92,7 @@ func TestEnrollRefusesARemovedExpectedRegion(t *testing.T) {
 	if err = f.service.DeleteRegion(f.t.Context(), f.owner, owner, r.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.enroll(newFakeClaimNode(t, "Relay", fakeRelay(r.ID)), r.ID, "relay"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "was removed") {
+	if _, err = f.enrollRaw(newFakeClaimNode(t, "Relay", fakeRelay(r.ID)), r.ID, "relay"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "was removed") {
 		t.Fatalf("claim for a removed region: %v", err)
 	}
 	// Claimed first, the region then cannot be removed; and a claim without an expectation still starts a region.
@@ -100,7 +100,7 @@ func TestEnrollRefusesARemovedExpectedRegion(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { f.exec(`DELETE FROM paperboat.selfhost_regions WHERE scope_id=$1`, f.owner) })
-	if _, err = f.enroll(newFakeClaimNode(t, "Relay 2", fakeRelay(r.ID)), r.ID, "relay"); err != nil {
+	if _, err = f.enrollRaw(newFakeClaimNode(t, "Relay 2", fakeRelay(r.ID)), r.ID, "relay"); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.service.DeleteRegion(f.t.Context(), f.owner, owner, r.ID); !errors.Is(err, ErrRegionInUse) {

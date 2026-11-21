@@ -418,8 +418,8 @@ func NewRouter(opts Options) http.Handler {
 			}
 			mux.Handle("POST /v1/selfhost/enrollments", write)
 			// Regions are console-only: a browser session, never an API token (a token's workspace binding is not checked here).
-			regionWrite := requireAuth(opts.Auth, requireCSRF(opts.Auth, account))
-			mux.Handle("GET /v1/selfhost/regions", requireAuth(opts.Auth, account))
+			regionWrite := requireBrowserSession(opts.Auth, requireCSRF(opts.Auth, account))
+			mux.Handle("GET /v1/selfhost/regions", requireBrowserSession(opts.Auth, account))
 			mux.Handle("POST /v1/selfhost/regions", regionWrite)
 			mux.Handle("PATCH /v1/selfhost/regions/{regionID}", regionWrite)
 			mux.Handle("DELETE /v1/selfhost/regions/{regionID}", regionWrite)

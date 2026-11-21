@@ -199,6 +199,18 @@ func requireAuth(service *auth.Service, next http.Handler) http.Handler {
 	})
 }
 
+// requireBrowserSession is requireAuth for console-only routes: an API token is refused, not passed through.
+func requireBrowserSession(service *auth.Service, next http.Handler) http.Handler {
+	session := requireAuth(service, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := apiTokenPrincipal(r); ok {
+			writeError(w, r, http.StatusForbidden, "browser_session_required", "Use the console for this; API tokens cannot manage regions.")
+			return
+		}
+		session.ServeHTTP(w, r)
+	})
+}
+
 func requireAnyAuth(service *auth.Service, machines *auth.DeviceService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := apiTokenPrincipal(r); ok {

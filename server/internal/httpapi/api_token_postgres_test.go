@@ -73,7 +73,7 @@ func TestAPITokenBearerRequests(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+ownerSecret)
 		rec := httptest.NewRecorder()
 		regionsOnly.ServeHTTP(rec, req)
-		if rec.Code != http.StatusUnauthorized {
+		if rec.Code != http.StatusForbidden {
 			t.Fatalf("%s %s with an API token = %d %s", route[0], route[1], rec.Code, rec.Body.String())
 		}
 	}

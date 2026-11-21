@@ -161,6 +161,15 @@ func newEnrollExpectFixture(t *testing.T) *enrollExpectFixture {
 // enroll claims node for the owner with the given expectations. The address override confines the real connection to
 // the fake node's listener.
 func (f *enrollExpectFixture) enroll(node *fakeClaimNode, region, capability string) ([]Installation, error) {
+	if region != "" {
+		// A claim for an expected region needs the region to exist, as the console's Add dialog on a region card does.
+		f.exec(`INSERT INTO paperboat.selfhost_regions(scope_kind,scope_id,slug,display_name) VALUES('account',$1,$2,$2) ON CONFLICT DO NOTHING`, f.owner, region)
+		f.t.Cleanup(func() { f.exec(`DELETE FROM paperboat.selfhost_regions WHERE scope_id=$1`, f.owner) })
+	}
+	return f.enrollRaw(node, region, capability)
+}
+
+func (f *enrollExpectFixture) enrollRaw(node *fakeClaimNode, region, capability string) ([]Installation, error) {
 	f.service.DialAddress = func(context.Context, string) (string, error) { return node.server.Listener.Addr().String(), nil }
 	installs, err := f.service.Enroll(f.t.Context(), f.owner, EnrollRequest{Address: node.server.Listener.Addr().String(), Code: node.code(), Scope: Scope{Kind: "account", ID: f.owner}, ExpectRegion: region, ExpectCapability: capability}, false)
 	for _, i := range installs {

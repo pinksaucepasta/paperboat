@@ -19,7 +19,7 @@ func TestRegionSlugBase(t *testing.T) {
 		"9 lives":                      "r-9-lives",
 		"!!!":                          "r",
 		"日本":                           "r",
-		"a日b":                          "ab",
+		"a日b":                          "a-b",
 		"-edge-":                       "edge",
 		"ＦＵＬＬ　ｗｉｄｔｈ":                   "full-width",
 		strings.Repeat("a", 60):        strings.Repeat("a", 40),
