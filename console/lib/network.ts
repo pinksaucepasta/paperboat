@@ -1,7 +1,7 @@
 "use client"
 
-import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query"
-import { api, ApiError, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
+import { infiniteQueryOptions, keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query"
+import { api, apiAction, ApiError, idempotencyKey, type Data, type Schemas, type Workspace } from "@/lib/api"
 import { cursorPage, cursorPageSize } from "@/lib/cursor-pages"
 import { pauseTunnelById, stopPreview } from "@/lib/tunnels"
 
@@ -18,6 +18,9 @@ export type Capability = "relay" | "tunnel"
 
 export type Installation = Schemas["SelfhostInstallation"]
 
+/** One of your own regions: a name you gave it and the slug machines carry (`id`, never changes). */
+export type Region = Schemas["SelfhostRegion"]
+
 /** selfhost.Policy: relay `mixed | self-hosted-only`, tunnel `managed-only | self-hosted-only`. */
 export type Pool = Schemas["SelfhostPolicy"]
 
@@ -33,6 +36,7 @@ const scopeQuery = (scope: ReturnType<typeof scopeOf>) =>
 
 export const networkKeys = {
   installations: (scope: string) => ["selfhost", "installations", scope] as const,
+  regions: (scope: string) => ["selfhost", "regions", scope] as const,
   pool: (capability: Capability, scope: string) => ["selfhost", "pool", capability, scope] as const,
 }
 
@@ -58,6 +62,14 @@ export const installationsQuery = (scope: ReturnType<typeof scopeOf>, q: string,
       ),
     placeholderData: keepPreviousData,
     // Readiness follows the node's own registration and health reports.
+    refetchInterval: 10_000,
+  })
+
+/** Your own regions (every region of the scope, empty ones too; Paperboat's regions never appear). */
+export const regionsQuery = (scope: ReturnType<typeof scopeOf>) =>
+  queryOptions({
+    queryKey: networkKeys.regions(`${scope.kind}:${scope.id ?? ""}`),
+    queryFn: ({ signal }) => api<Region[]>(`selfhost/regions?${scopeQuery(scope)}`, { signal }),
     refetchInterval: 10_000,
   })
 
@@ -95,16 +107,45 @@ const write = <T>(path: string, method: string, body?: unknown) =>
 
 /**
  * Pairs a node: the server checks the code against the node at `address` (the code pins its
- * certificate), then assigns it to the scope. Answers with the node's installations.
+ * certificate), then assigns it to the scope. `expectRegion` and `expectCapability` make the server refuse a
+ * machine installed for another region or role (400 `invalid_request`, naming what to fix). Answers with the
+ * node's installations.
  */
-export async function pairNode(input: { address: string; code: string; scope: ReturnType<typeof scopeOf> }) {
+export async function pairNode(input: {
+  address: string
+  code: string
+  scope: ReturnType<typeof scopeOf>
+  expectRegion?: string
+  expectCapability?: Capability
+}) {
   const result = await write<{ installations?: Installation[] } | Installation[]>("selfhost/enrollments", "POST", {
     address: input.address,
     code: input.code,
     scope: { kind: input.scope.kind, ...(input.scope.id && { id: input.scope.id }) },
+    ...(input.expectRegion && { expect_region: input.expectRegion }),
+    ...(input.expectCapability && { expect_capability: input.expectCapability }),
   })
   return Array.isArray(result) ? result : (result.installations ?? [])
 }
+
+/** Creates a region; the server derives its slug from the name (409 `region_exists` names the existing one). */
+export const createRegion = (scope: ReturnType<typeof scopeOf>, name: string) =>
+  write<Region>(`selfhost/regions?${scopeQuery(scope)}`, "POST", { name })
+
+/** Renames only the display name; the slug, machines, pairs and pools are untouched. */
+export const renameRegion = (scope: ReturnType<typeof scopeOf>, region: Region, name: string) =>
+  write<Region>(`selfhost/regions/${encodeURIComponent(region.id)}?${scopeQuery(scope)}`, "PATCH", { name })
+
+/** Removes an empty region (409 `region_in_use` says what to do first). */
+export const deleteRegion = (scope: ReturnType<typeof scopeOf>, region: Region) =>
+  apiAction(`selfhost/regions/${encodeURIComponent(region.id)}?${scopeQuery(scope)}`, { method: "DELETE" })
+
+/**
+ * After a machine is paired or removed, a region changes, or the relay pool changes: your regions, machines and pools,
+ * and the Relays and Edges tables (Paperboat's relay regions, the workspace's pair of regions) that follow from them.
+ */
+export const refreshNetwork = (queryClient: QueryClient) =>
+  Promise.all([["selfhost"], ["relays"], ["edges"]].map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 
 export const removeInstallation = (installation: Installation) =>
   write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}`, "DELETE")
@@ -118,8 +159,9 @@ export const updating = (installation: Installation) =>
   Boolean(installation.update && !["succeeded", "rolled_back", "failed"].includes(installation.update.state))
 
 /**
- * Drain: the server takes no new connections and the ones it holds finish; servers of the same region keep
- * serving. `move` also sends the machines attached to it elsewhere now. Resume takes it back into service.
+ * Drain: the machine takes no new work and running work finishes (up to 10 minutes); machines of the same
+ * region keep serving. `move` also moves running work off now, and the machine drains within about 90 seconds.
+ * Resume takes it back into service.
  */
 export const drainInstallation = (installation: Installation, move: boolean) =>
   write(`selfhost/installations/${encodeURIComponent(installation.installation_id)}/drain`, "POST", { move })
@@ -139,8 +181,17 @@ export const savePool = (capability: Capability, scope: ReturnType<typeof scopeO
   })
 }
 
-/** One server, with the installations it runs (relay, tunnel server, or both). */
-export type Node = { id: string; name: string; host: string; region: string; installations: Installation[] }
+/** One machine (a node), with the installations it runs (relay, edge, or both). */
+export type Node = {
+  id: string
+  name: string
+  host: string
+  /** The region's slug. */
+  region: string
+  /** Some installation of the machine is drained (explicit on the installation). */
+  draining: boolean
+  installations: Installation[]
+}
 
 export function groupNodes(installations: Installation[]): Node[] {
   const nodes = new Map<string, Node>()
@@ -150,17 +201,33 @@ export function groupNodes(installations: Installation[]): Node[] {
       name: installation.name,
       host: installation.endpoint_host,
       region: installation.region,
+      draining: false,
       installations: [],
     }
     node.installations.push(installation)
+    node.draining ||= installation.draining
     nodes.set(installation.node_id, node)
   }
   return [...nodes.values()].sort((a, b) => a.region.localeCompare(b.region) || a.name.localeCompare(b.name))
 }
 
-/** The installer for a node, run on the server. */
-export const installCommand = (installerBaseUrl: string, components: "relay" | "tunnel" | "both") =>
-  `curl -fsSL ${installerBaseUrl}/selfhost | sh -s -- --${components === "tunnel" ? "edge" : components}`
+/** The machine's roles as the console names them: a tunnel server is an Edge. */
+export const roleLabel = (capability: Capability) => (capability === "tunnel" ? "Edge" : "Relay")
+
+/** What a region needs, in order: its machines are all ready, some are, none are, it is being drained, or it has none. */
+export type RegionState = "ready" | "degraded" | "draining" | "not_ready" | "empty"
+
+export function regionState(region: Region, nodes: Node[]): RegionState {
+  if (region.machines === 0 && nodes.length === 0) return "empty"
+  if (nodes.length > 0 && nodes.every((node) => node.draining)) return "draining"
+  if (region.machines === 0) return "not_ready"
+  if (region.ready >= region.machines) return "ready"
+  return region.ready === 0 ? "not_ready" : "degraded"
+}
+
+/** The installer for a machine, run on a Linux server: it carries the role and the region the machine joins. */
+export const installCommand = (installerBaseUrl: string, role: "relay" | "edge", regionSlug: string) =>
+  `curl -fsSL ${installerBaseUrl}/selfhost | sh -s -- --${role} --region ${regionSlug}`
 
 /** One of a workspace's two regions: one of Paperboat's, or one of your own (the region you named when pairing servers). */
 export type PairRegion = Data<"/v1/edges/pair">["primary"]
