@@ -93,8 +93,8 @@ func collectWindowsDoctor(ctx context.Context) doctorReport {
 	sshConfig := windowsopenssh.DefaultConfig(nil)
 	sshConfig.OwnerSID = instance.config.OwnerSID
 	sshConfig = windowsOpenSSHBootstrapConfig(sshConfig, instance.name)
-	// Setup finishes without OpenSSH on a machine that cannot supply it (windowsopenssh.Unobtainable): there is
-	// then no SSH generation and no firewall state to own. An installation awaiting enrollment has neither yet.
+	// No SSH generation: managed SSH is not prepared (setup fails rather than skip it, so it was removed later).
+	// An installation awaiting enrollment has none yet.
 	if generations, err := windowsopenssh.ListGenerations(ctx, instance.config.OwnerSID); err == nil && len(generations) == 0 && !instance.config.EnrollmentPending {
 		add("managed_ssh", "warning", "Managed SSH is not ready: Paperboat could not install OpenSSH on this machine. Terminal, exec and files work.",
 			"Install \"App Installer\" (winget) from the Microsoft Store, or "+windowsopenssh.PackageID+" "+windowsopenssh.ApprovedVersion+" into "+sshConfig.InstallRoot+", then run pb doctor --repair.")

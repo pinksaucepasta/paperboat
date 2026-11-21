@@ -1635,7 +1635,7 @@ func installWindowsSSHAfterActivation(ctx context.Context, request Request, layo
 		return err
 	}
 	if carrier {
-		return prepareWindowsSSHGenerationIfObtainable(ctx, request)
+		return prepareWindowsSSHGenerationWithin(ctx, request)
 	}
 
 	config, err := windowsOpenSSHConfig(layout, request.OwnerSID)
@@ -1653,7 +1653,7 @@ func installWindowsSSHAfterActivation(ctx context.Context, request Request, layo
 	})
 }
 
-func prepareWindowsSSHGenerationIfObtainable(ctx context.Context, request Request) error {
+func prepareWindowsSSHGenerationWithin(ctx context.Context, request Request) error {
 	return prepareWindowsSSHWithin(ctx, func(bounded context.Context) error {
 		_, err := PrepareWindowsSSHGeneration(bounded, request)
 		return err

@@ -9,50 +9,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
 
-// skipUnobtainableWindowsSSH lets an installation, update or repair finish on a machine that cannot supply
-// OpenSSH (no App Installer on Windows Server, LTSC or Sandbox), as Linux and macOS do without sshd: the
-// worker reports managed SSH as not ready and the next install, update or repair prepares it again. Trust,
-// ownership and cancellation failures still abort.
-func skipUnobtainableWindowsSSH(ctx context.Context, err error) error {
-	if err != nil && ctx.Err() == nil && windowsopenssh.Unobtainable(err) {
-		reportWindowsSSHSkipped(ctx, err)
-		return nil
-	}
-	return err
-}
-
-// reportWindowsSSHSkipped records that an install continued without managed SSH. The step usually runs in the
-// elevated helper, whose stderr nobody sees, so the skip is also an observed fault (local diagnostics and the
-// error reporter), not only a notice; the worker then reports managed SSH as not ready.
-func reportWindowsSSHSkipped(ctx context.Context, err error) {
-	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "managed_ssh", "lifecycle", "managed_ssh_failed", err)
-}
-
-// windowsSSHPreparationBudget bounds the OpenSSH step of an install, pair or repair: obtaining the package may fall
-// back to the PowerShell Gallery (5 min) and Install-WinGetPackage (10 min), which exceed the 3 min the elevated
-// bridge allows the whole operation (a Windows test VM, 2026-11-10: three minutes of silence, then a rollback).
+// windowsSSHPreparationBudget bounds one attempt at the OpenSSH step of an install, pair or repair: obtaining the
+// package may fall back to the PowerShell Gallery (5 min) and Install-WinGetPackage (10 min), which exceed the 3 min the
+// elevated bridge allows the whole operation.
 var windowsSSHPreparationBudget = 75 * time.Second
 
-// windowsSSHTimeoutNotice tells the user, once per expiry, that managed SSH was skipped and how to get it later.
-var windowsSSHTimeoutNotice = func(err error) {
-	fmt.Fprintf(os.Stderr, "Managed SSH was not prepared within %s (%v); installation continues without it. Run `pb doctor --repair` to prepare it.\n", windowsSSHPreparationBudget, err)
-}
+// windowsSSHFailureAdvice is what the user can do when managed SSH could not be prepared.
+const windowsSSHFailureAdvice = "set up managed SSH (OpenSSH via App Installer/winget); make sure App Installer is " +
+	"installed for all users or the PowerShell Gallery is reachable, then run the command again"
 
-// prepareWindowsSSHWithin runs one OpenSSH preparation step under its own budget. When the budget expires the machine
-// could not supply OpenSSH in time: that is announced (windowsSSHTimeoutNotice) and the install continues without managed
-// SSH like any other unobtainable case. Only the expiry itself or an unobtainable package is skipped: a trust or ownership
-// refusal that arrives after the budget still aborts, as does an expiry of the caller's own context.
+// prepareWindowsSSHWithin runs one OpenSSH preparation step under its own budget.
 func prepareWindowsSSHWithin(ctx context.Context, step func(context.Context) error) error {
 	return prepareWindowsSSHWithinAttempts(ctx, 1, step)
 }
 
-// prepareWindowsSSHWithinAttempts is prepareWindowsSSHWithin with up to attempts budgets: an attempt whose budget
-// expires is tried again, and only the last expiry is skipped.
+// prepareWindowsSSHWithinAttempts runs step with up to attempts budgets: an attempt whose budget expires is tried
+// again. A failure is never skipped: the install stops and names the step, as a missing PaperboatSshd after an "ok"
+// install is invisible until someone runs pb doctor.
 func prepareWindowsSSHWithinAttempts(ctx context.Context, attempts int, step func(context.Context) error) error {
 	for attempt := 1; ; attempt++ {
 		bounded, cancel := context.WithTimeout(ctx, windowsSSHPreparationBudget)
@@ -62,12 +38,10 @@ func prepareWindowsSSHWithinAttempts(ctx context.Context, attempts int, step fun
 		if expired && attempt < attempts {
 			continue
 		}
-		if expired && (errors.Is(err, context.DeadlineExceeded) || windowsopenssh.Unobtainable(err)) {
-			windowsSSHTimeoutNotice(err)
-			reportWindowsSSHSkipped(ctx, err)
-			return nil
+		if expired {
+			err = fmt.Errorf("not ready within %s: %w", windowsSSHPreparationBudget, err)
 		}
-		return skipUnobtainableWindowsSSH(ctx, err)
+		return hostInstallFailure("could not "+windowsSSHFailureAdvice, err)
 	}
 }
 

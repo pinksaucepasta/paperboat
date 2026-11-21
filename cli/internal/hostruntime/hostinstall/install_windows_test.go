@@ -552,13 +552,11 @@ func TestWindowsActivationOrder(t *testing.T) {
 }
 
 // The one OpenSSH preparation of an activation runs while hostd serves; a budget it outlives there is retried
-// (review of 7f4cc1054: the old post-stop repeats used to cover a transient expiry), and only the last one skipped.
+// (review of 7f4cc1054: the old post-stop repeats used to cover a transient expiry), and the last one stops the install.
 func TestWindowsSSHPreparationRetriesAnExpiredBudget(t *testing.T) {
-	budget, notice := windowsSSHPreparationBudget, windowsSSHTimeoutNotice
-	t.Cleanup(func() { windowsSSHPreparationBudget, windowsSSHTimeoutNotice = budget, notice })
+	budget := windowsSSHPreparationBudget
+	t.Cleanup(func() { windowsSSHPreparationBudget = budget })
 	windowsSSHPreparationBudget = 20 * time.Millisecond
-	notices := 0
-	windowsSSHTimeoutNotice = func(error) { notices++ }
 	expire := func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
 	calls := 0
 	err := prepareWindowsSSHWithinAttempts(context.Background(), 2, func(ctx context.Context) error {
@@ -568,12 +566,12 @@ func TestWindowsSSHPreparationRetriesAnExpiredBudget(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || calls != 2 || notices != 0 {
-		t.Fatalf("expired then prepared: err %v calls %d notices %d", err, calls, notices)
+	if err != nil || calls != 2 {
+		t.Fatalf("expired then prepared: err %v calls %d", err, calls)
 	}
 	calls = 0
-	if err := prepareWindowsSSHWithinAttempts(context.Background(), 2, func(ctx context.Context) error { calls++; return expire(ctx) }); err != nil || calls != 2 || notices != 1 {
-		t.Fatalf("expired twice: err %v calls %d notices %d, want skipped once after 2 attempts", err, calls, notices)
+	if err := prepareWindowsSSHWithinAttempts(context.Background(), 2, func(ctx context.Context) error { calls++; return expire(ctx) }); !errors.Is(err, context.DeadlineExceeded) || calls != 2 {
+		t.Fatalf("expired twice: err %v calls %d, want the install stopped after 2 attempts", err, calls)
 	}
 	refused := errors.New("untrusted sshd")
 	calls = 0

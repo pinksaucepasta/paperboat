@@ -83,7 +83,7 @@ func TestWindowsSignatureScriptsImportSecurityModuleBySystemPath(t *testing.T) {
 		t.Fatalf("resolve calls = %d, want 1", len(runner.calls))
 	}
 	script := runner.calls[0].args[len(runner.calls[0].args)-1]
-	for _, required := range []string{"$env:WINDIR", "Microsoft.PowerShell.Security.psd1", "Import-Module -Name $m -ErrorAction Stop", "Get-AuthenticodeSignature"} {
+	for _, required := range []string{"Get-AppxPackage -AllUsers", "$env:WINDIR", "Microsoft.PowerShell.Security.psd1", "Import-Module -Name $m -ErrorAction Stop", "Get-AuthenticodeSignature"} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("resolve script missing %q: %s", required, script)
 		}
