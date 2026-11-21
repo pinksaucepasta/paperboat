@@ -490,7 +490,7 @@ func confirmRevocationAfter(t *testing.T, d time.Duration) {
 func TestRuntimeAttachmentSurvivesRefusalsDuringAServerSwap(t *testing.T) {
 	confirmRevocationAfter(t, 10*time.Second)
 	var refuse atomic.Bool
-	var refused atomic.Int32
+	var refused, answered atomic.Int32
 	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 	defer cancel()
 	// The short admission makes the host ask again within the test; a healthy long one is rechecked only every 30 s.
@@ -500,17 +500,32 @@ func TestRuntimeAttachmentSurvivesRefusalsDuringAServerSwap(t *testing.T) {
 			refused.Add(1)
 			return http.StatusUnauthorized
 		}
+		answered.Add(1)
 		return http.StatusOK
 	})
 	refuse.Store(true)
-	select {
-	case <-edge.Done():
-		t.Fatal("a short refusal ended the attachment")
-	case <-time.After(3 * time.Second):
+	// Wait for the refusals themselves, not a fixed window: the host asks at half the admission's life on a 1 s
+	// poll tick (~3 s here), which a loaded machine pushes past any window that tight.
+	for refused.Load() < 2 {
+		select {
+		case <-edge.Done():
+			t.Fatal("a short refusal ended the attachment")
+		case <-ctx.Done():
+			t.Fatalf("the host asked %d times while the server refused", refused.Load())
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
+	before := answered.Load()
 	refuse.Store(false)
-	if refused.Load() == 0 {
-		t.Fatal("the host never asked while the server refused")
+	// The host asks again once the server answers; a round after the refusals also means it handled them.
+	for answered.Load() == before {
+		select {
+		case <-edge.Done():
+			t.Fatal("the attachment ended after the refusals")
+		case <-ctx.Done():
+			t.Fatal("the host did not ask again after the server recovered")
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	if err := edge.Ping(ctx); err != nil {
 		t.Fatal("carrier unusable after the refusals", err)
