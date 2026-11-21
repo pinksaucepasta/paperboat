@@ -4,7 +4,7 @@ import doctorpkg "github.com/pinksaucepasta/paperboat/cli/internal/doctor"
 
 // doctorManagedSSHCheck reports whether an enrolled Windows machine has its Paperboat-managed sshd service.
 // Install continues without it when OpenSSH cannot be obtained in time; this is where the user learns of it.
-// retrying is true while the updater still retries a skipped setup (hostinstall.WindowsLateSSHWindow after install).
+// retrying is true when the updater reports an active or scheduled retry for this installation.
 func doctorManagedSSHCheck(enrolled bool, enrolledErr error, serviceState string, retrying bool) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "managed_ssh"}
 	switch {

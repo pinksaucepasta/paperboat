@@ -401,6 +401,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	}
 	switch request.Operation {
 	case "status":
+		response.ManagedSSHRetry = hostinstall.WindowsManagedSSHRetry(installed)
 		if journal, err := loadWindowsActivationJournalForController(c.config); err == nil {
 			response.Transaction = windowsTransactionState(journal)
 			response.Transaction.ActiveVersion = response.Version

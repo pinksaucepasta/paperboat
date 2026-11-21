@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,8 +19,15 @@ const (
 
 // windowsLateSSH is the updater's retry state: one owner, the reconcile goroutine.
 type windowsLateSSH struct {
-	next  time.Time
-	delay time.Duration
+	next         time.Time
+	delay        time.Duration
+	pendingUntil atomic.Pointer[time.Time]
+}
+
+// pending reports the live attempt or scheduled backoff to the updater status reader.
+func (r *windowsLateSSH) pending(now time.Time) bool {
+	until := r.pendingUntil.Load()
+	return until != nil && !now.After(*until)
 }
 
 // errWindowsLateSSHSuperseded is prepare's answer when an update replaced the installed generation meanwhile: the
@@ -30,16 +38,24 @@ var errWindowsLateSSHSuperseded = errors.New("installed generation replaced")
 // and the backoff allows; after a failed or skipped attempt the delay doubles up to windowsLateSSHMaxDelay. A failure
 // is returned (and so reported) only when no attempt is left in the window: retries inside it are expected.
 func (r *windowsLateSSH) complete(ctx context.Context, now, installedAt time.Time, present func(context.Context) bool, prepare func(context.Context) error) error {
-	if now.Sub(installedAt) > WindowsLateSSHWindow || now.Before(r.next) || present(ctx) {
+	deadline := installedAt.Add(WindowsLateSSHWindow)
+	if now.After(deadline) || present(ctx) {
+		r.pendingUntil.Store(nil)
 		return nil
 	}
+	if now.Before(r.next) {
+		return nil
+	}
+	r.pendingUntil.Store(&deadline)
 	err := prepare(ctx)
 	if errors.Is(err, errWindowsLateSSHSuperseded) {
-		*r = windowsLateSSH{}
+		r.delay, r.next = 0, time.Time{}
+		r.pendingUntil.Store(nil)
 		return nil
 	}
 	if err == nil && present(ctx) {
-		r.delay = 0
+		r.delay, r.next = 0, time.Time{}
+		r.pendingUntil.Store(nil)
 		return nil
 	}
 	r.delay = min(max(2*r.delay, windowsLateSSHFirstDelay), windowsLateSSHMaxDelay)
@@ -47,6 +63,7 @@ func (r *windowsLateSSH) complete(ctx context.Context, now, installedAt time.Tim
 	if r.next.Sub(installedAt) <= WindowsLateSSHWindow {
 		return nil
 	}
+	r.pendingUntil.Store(nil)
 	if err == nil {
 		err = errors.New("managed SSH is still not prepared: OpenSSH could not be obtained")
 	}

@@ -76,6 +76,7 @@ type ControlResponse struct {
 	Settings          *autoupdate.Preferences            `json:"settings,omitempty"`
 	NextMaintenanceAt time.Time                          `json:"next_maintenance_at,omitempty"`
 	OwnerMaintenance  *autoupdate.OwnerMaintenanceNotice `json:"owner_maintenance,omitempty"`
+	ManagedSSHRetry   string                             `json:"managed_ssh_retry,omitempty"`
 }
 
 // UpdateHealth is the availability value doctor reads: "recovery_required" when the updater errors or its journal

@@ -13,9 +13,17 @@ func TestWindowsLateSSHRetriesUntilObtained(t *testing.T) {
 	installed := time.Date(2026, 11, 21, 6, 40, 0, 0, time.UTC)
 	ctx := context.Background()
 	ready, calls, failures := false, 0, 2
+	var r windowsLateSSH
+	now := installed.Add(time.Minute)
+	if r.pending(now) {
+		t.Fatal("a recent install alone should not report a pending SSH retry")
+	}
 	present := func(context.Context) bool { return ready }
 	prepare := func(context.Context) error {
 		calls++
+		if !r.pending(now) {
+			t.Fatal("SSH preparation should report pending while it runs")
+		}
 		if failures > 0 {
 			failures--
 			return errors.New("winget download failed")
@@ -23,7 +31,6 @@ func TestWindowsLateSSHRetriesUntilObtained(t *testing.T) {
 		ready = true
 		return nil
 	}
-	var r windowsLateSSH
 	steps := []struct {
 		after   time.Duration
 		calls   int
@@ -37,9 +44,13 @@ func TestWindowsLateSSHRetriesUntilObtained(t *testing.T) {
 		{5 * time.Minute, 3, false},  // present: nothing to do
 	}
 	for _, step := range steps {
-		err := r.complete(ctx, installed.Add(step.after), installed, present, prepare)
+		now = installed.Add(step.after)
+		err := r.complete(ctx, now, installed, present, prepare)
 		if calls != step.calls || (err != nil) != step.wantErr {
 			t.Fatalf("at +%s: calls=%d err=%v, want calls=%d err=%t", step.after, calls, err, step.calls, step.wantErr)
+		}
+		if got, want := r.pending(now), !ready; got != want {
+			t.Fatalf("at +%s: pending=%t, want %t", step.after, got, want)
 		}
 	}
 	if !ready {
@@ -73,7 +84,22 @@ func TestWindowsLateSSHSupersededIsQuiet(t *testing.T) {
 	installed := time.Date(2026, 11, 21, 6, 40, 0, 0, time.UTC)
 	r := windowsLateSSH{delay: 2 * time.Minute, next: installed}
 	err := r.complete(context.Background(), installed.Add(time.Minute), installed, func(context.Context) bool { return false }, func(context.Context) error { return errWindowsLateSSHSuperseded })
-	if err != nil || r != (windowsLateSSH{}) {
-		t.Fatalf("superseded: err=%v state=%+v", err, r)
+	if err != nil || !r.next.IsZero() || r.delay != 0 || r.pending(installed.Add(time.Minute)) {
+		t.Fatalf("superseded: err=%v next=%v delay=%v", err, r.next, r.delay)
+	}
+}
+
+func TestWindowsLateSSHDoesNotReportPendingAfterWindow(t *testing.T) {
+	installed := time.Date(2026, 11, 21, 6, 40, 0, 0, time.UTC)
+	var r windowsLateSSH
+	now := installed.Add(WindowsLateSSHWindow - time.Minute)
+	err := r.complete(context.Background(), now, installed, func(context.Context) bool { return false }, func(context.Context) error {
+		if r.pending(installed.Add(WindowsLateSSHWindow + time.Second)) {
+			t.Fatal("an attempt still running past the retry window must not report pending")
+		}
+		return errors.New("OpenSSH download failed")
+	})
+	if err != nil || !r.pending(now) {
+		t.Fatalf("retry scheduled at the deadline: pending=%t err=%v", r.pending(now), err)
 	}
 }

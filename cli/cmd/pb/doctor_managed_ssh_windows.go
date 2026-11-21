@@ -18,16 +18,18 @@ import (
 
 // Windows has no managed SSH source addresses to check (it routes all of 127/8); it checks the sshd service.
 func doctorSSHSourceProbes() []doctorpkg.Probe {
-	return []doctorpkg.Probe{{Code: "managed_ssh", Run: func(context.Context) doctorpkg.Check { return windowsManagedSSHCheck() }}}
+	return []doctorpkg.Probe{{Code: "managed_ssh", Run: windowsManagedSSHCheck}}
 }
 
 // managedSSHInstallWarnings names a missing managed sshd after install or pair: the install skips OpenSSH it
 // cannot obtain in time (hostinstall.prepareWindowsSSHWithinAttempts) and reports success otherwise.
-func managedSSHInstallWarnings() []string { return managedSSHInstallWarning(windowsManagedSSHCheck()) }
+func managedSSHInstallWarnings() []string {
+	return managedSSHInstallWarning(windowsManagedSSHCheck(context.Background()))
+}
 
 // windowsManagedSSHCheck queries the installed runtime's own sshd generation, PaperboatSshd-<instance>-<sha[:32]>
 // (the one its worker serves, production_platform_windows.go), so a retained older generation cannot hide it.
-func windowsManagedSSHCheck() doctorpkg.Check {
+func windowsManagedSSHCheck(ctx context.Context) doctorpkg.Check {
 	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return doctorManagedSSHCheck(true, err, "", false)
@@ -49,6 +51,15 @@ func windowsManagedSSHCheck() doctorpkg.Check {
 	}
 	manager := &mgr.Mgr{Handle: handle}
 	defer manager.Disconnect()
-	retrying := time.Since(installed.InstalledAt) <= hostinstall.WindowsLateSSHWindow
-	return doctorManagedSSHCheck(true, nil, windowsServiceState(manager, windowsopenssh.ServiceName+"-"+instance+"-"+installed.Source.SHA256[:32]), retrying)
+	state := windowsServiceState(manager, windowsopenssh.ServiceName+"-"+instance+"-"+installed.Source.SHA256[:32])
+	retrying := false
+	if state == "not_installed" {
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if client, err := newUpdateControlClient(ctx, time.Second); err == nil {
+			status, err := client.Status(ctx)
+			retrying = err == nil && status.ManagedSSHRetry == installed.WindowsSSHInstallationID()
+		}
+	}
+	return doctorManagedSSHCheck(true, nil, state, retrying)
 }
