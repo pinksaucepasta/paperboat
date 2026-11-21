@@ -248,6 +248,9 @@ export function recordingRules(text: string): RecordingRule[] {
   )
 }
 
+/** Whether a saved policy has a rule that records sessions, so it needs the recording key. */
+export const recordsSessions = (text: string) => recordingRules(text).some((rule) => rule.action === "record")
+
 /**
  * The policy text with one recording rule added or one action removed. A file with comments would lose them on
  * rewrite, so it returns undefined and the person edits the file on Access instead.

@@ -15,6 +15,7 @@ import {
   recordingKeyQuery,
   recordingMessage,
   recordingRules,
+  recordsSessions,
   keyHeld,
   resetRecordingKey,
   rotateRecordingKey,
@@ -321,7 +322,7 @@ function RulesSection({ policy, admin }: { policy: Policy | undefined; admin: bo
           onDone={() => {
             setSaving(null)
             // A record rule records from now on, so it needs the key: the first one makes generation 1 (no-op after).
-            const recording = /"allow"\s*:\s*\[[^\]]*"record"/.test(saving.text)
+            const recording = recordsSessions(saving.text)
             void (recording ? ensureRecordingKey(policy.workspace) : Promise.resolve(false))
               .catch((error: unknown) => toast.error(recordingMessage(error)))
               // A replay rule adds or removes viewers, which the key section seals for.

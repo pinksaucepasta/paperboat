@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingRules, recordingScope, SegmentFramer, toBase64 } from "@/lib/recordings"
+import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingRules, recordingScope, recordsSessions, SegmentFramer, toBase64 } from "@/lib/recordings"
 
 const policy = `{
   "tags": { "tag:prod": [] },
@@ -95,4 +95,22 @@ test("byte fields convert between the server's base64 and the vault's base64url,
 test("the personal workspace's key is sealed under its owner's scope, a team's under its id", () => {
   expect(recordingScope("personal", [{ account_id: "user_1" }])).toBe("personal:user_1")
   expect(recordingScope("acme", [{ account_id: "user_1" }])).toBe("acme")
+})
+
+test("recordsSessions reads the parsed policy, not its text", () => {
+  // A comment holding "]" inside the allow array, a trailing comma and allow written first: a text match on
+  // \`"allow": [ ... "record"\` stops at that "]" and misses it.
+  const odd = `{
+    "rules": [{ "allow": [
+      "ssh", // see [docs]
+      "record"
+    ], "dst": ["machine:*"], "src": ["*"], },],
+  }`
+  expect(recordsSessions(odd)).toBe(true)
+  // A commented-out rule and a deny are not rules that record; the old text match took the comment for one.
+  expect(recordsSessions(`{
+    // "allow": ["record"]
+    "rules": [{"src": ["*"], "dst": ["machine:*"], "deny": ["record"]}]
+  }`)).toBe(false)
+  expect(recordsSessions(`{"rules": [{"src": ["*"], "dst": ["machine:*"], "allow": ["recording_view"]}]}`)).toBe(false)
 })
