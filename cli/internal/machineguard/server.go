@@ -125,7 +125,7 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 		return err
 	}
 	clearStartFailure(cfg.Socket)
-	trustCtx, trustCancel := context.WithTimeout(ctx, 2*time.Minute)
+	trustCtx, trustCancel := context.WithTimeout(ctx, guardTrustTimeout)
 	err = g.prepareLocalCA(trustCtx)
 	trustCancel()
 	// Pending trust leaves the guard serving; RuntimeStatus reports TrustReady=false.

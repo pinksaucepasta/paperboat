@@ -60,8 +60,11 @@ func lockedGuardImage(err error) bool {
 
 // macpool-6 at load 13-21: a 10 s wait with 500 ms probes timed out and rolled back a rev12->rev15 update that
 // passes idle; the Windows start attempt already allows a minute.
+// The guard opens its control socket only after its rules and its local CA (up to guardTrustTimeout), so an install
+// that gave up sooner stopped a guard that was still starting (macpool at load ~50: rolled back after 60 s).
 const (
-	guardInstallReadyTimeout = time.Minute
+	guardTrustTimeout        = 2 * time.Minute
+	guardInstallReadyTimeout = guardTrustTimeout + time.Minute
 	guardProbeTimeout        = 2 * time.Second
 	guardReadyStability      = 300 * time.Millisecond
 )

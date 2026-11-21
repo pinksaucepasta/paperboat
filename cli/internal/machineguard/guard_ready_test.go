@@ -121,3 +121,10 @@ func TestUnknownGuardRevisionSkipsTheCheck(t *testing.T) {
 		t.Fatalf("unknown expected revision refused a ready guard: %v", err)
 	}
 }
+
+// Install must not give up on a guard that is still inside its own bounded start-up (rules, then the local CA).
+func TestInstallWaitOutlastsTheGuardsOwnStartup(t *testing.T) {
+	if guardInstallReadyTimeout <= guardTrustTimeout {
+		t.Fatalf("install waits %v, the guard may take %v to prepare its CA before it listens", guardInstallReadyTimeout, guardTrustTimeout)
+	}
+}
