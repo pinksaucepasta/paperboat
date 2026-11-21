@@ -198,6 +198,7 @@ func authorized(r *http.Request, s state) bool {
 	expected, err := encoding.DecodeString(s.SecretHash)
 	return err == nil && subtle.ConstantTimeCompare(hash[:], expected) == 1
 }
+
 // maxInspectBodyBytes bounds InspectRequest, which carries only a 16-64 byte nonce.
 const maxInspectBodyBytes = 4 << 10
 

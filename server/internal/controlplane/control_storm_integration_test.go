@@ -303,8 +303,8 @@ func runTunnelClientStorm(t *testing.T, ctx context.Context, server *httptest.Se
 	t.Cleanup(func() { _ = os.Remove(reportPath) })
 	config, err := json.Marshal(map[string]any{
 		"base_url": server.URL,
-		"ca_pem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})),
-		"prefix": prefix, "nodes": nodes, "report_path": reportPath,
+		"ca_pem":   string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})),
+		"prefix":   prefix, "nodes": nodes, "report_path": reportPath,
 	})
 	if err != nil {
 		t.Fatal(err)

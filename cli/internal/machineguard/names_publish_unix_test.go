@@ -26,11 +26,11 @@ func TestTwoOSUsersPublishTheSameMachineNameAndAClashDegradesOnlyThatName(t *tes
 		names:       map[controlConn]map[string]string{},
 		connections: map[controlConn]string{a: "1000", b: "1001", a2: "1000"},
 		leases: map[string]*guardedLease{
-			"a-laptop":   {hostname: laptop, ip: "127.100.0.2", owner: a, uid: "1000"},
-			"a-dev":  {hostname: dev, ip: "127.100.0.5", owner: a, uid: "1000"},
-			"b-laptop":   {hostname: laptop, ip: "127.100.0.4", owner: b, uid: "1001"},
-			"a2-laptop":  {hostname: laptop, ip: "127.100.0.6", owner: a2, uid: "1000"},
-			"a2-lab": {hostname: lab, ip: "127.100.0.7", owner: a2, uid: "1000"},
+			"a-laptop":  {hostname: laptop, ip: "127.100.0.2", owner: a, uid: "1000"},
+			"a-dev":     {hostname: dev, ip: "127.100.0.5", owner: a, uid: "1000"},
+			"b-laptop":  {hostname: laptop, ip: "127.100.0.4", owner: b, uid: "1001"},
+			"a2-laptop": {hostname: laptop, ip: "127.100.0.6", owner: a2, uid: "1000"},
+			"a2-lab":    {hostname: lab, ip: "127.100.0.7", owner: a2, uid: "1000"},
 		},
 	}
 	if _, err := g.handle(t.Context(), a, "1000", request{Operation: "names", Names: map[string]string{laptop: "127.100.0.2", dev: "127.100.0.5"}}); err != nil {
