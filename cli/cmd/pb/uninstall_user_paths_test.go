@@ -1,8 +1,12 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 
 	"github.com/spf13/cobra"
 )
@@ -26,4 +30,54 @@ func TestUninstallRemovesTheDaemonLogFolder(t *testing.T) {
 		}
 	}
 	t.Fatalf("%s is not removed on uninstall: %v", want, paths)
+}
+
+// PB-U1 on dev-0a637d078: pb uninstall left $XDG_RUNTIME_DIR/paperboat (managed-SSH known_hosts) behind.
+func TestUninstallRemovesTheDaemonRuntimeRoot(t *testing.T) {
+	home, runtimeDir := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	command := &cobra.Command{}
+	command.Flags().String("config", "", "")
+	command.Flags().String("state-root", "", "")
+	paths, err := userPaperboatRemovalPaths(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := localapi.CurrentPaths(os.Geteuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, local.RuntimeRoot) {
+		t.Fatalf("%s is not removed on uninstall: %v", local.RuntimeRoot, paths)
+	}
+}
+
+// PB-U1 on dev-0a637d078: the sudo-run uninstall step left /root/.local/state/paperboat/diagnostics behind.
+func TestElevatedRuntimeServiceStepsKeepDiagnosticsInMemory(t *testing.T) {
+	runtimeService := &cobra.Command{Use: "__runtime-service"}
+	cases := []struct {
+		name    string
+		command *cobra.Command
+		args    []string
+		goos    string
+		uid     string
+		want    bool
+	}{
+		{"sudo uninstall-persisted", runtimeService, []string{"__runtime-service", "uninstall-persisted"}, "linux", "1000", true},
+		{"sudo install", runtimeService, []string{"__runtime-service", "install"}, "darwin", "501", true},
+		{"purge without sudo env", runtimeService, []string{"__runtime-service", "purge"}, "linux", "", true},
+		{"purge only as an argument", runtimeService, []string{"__runtime-service", "hostd", "purge"}, "linux", "", false},
+		{"service process", runtimeService, []string{"__runtime-service", "hostd"}, "linux", "", false},
+		{"uninstall", &cobra.Command{Use: "uninstall"}, nil, "linux", "", true},
+		{"complete-uninstall off Windows", &cobra.Command{Use: "__complete-uninstall"}, nil, "linux", "", false},
+		{"complete-uninstall on Windows", &cobra.Command{Use: "__complete-uninstall"}, nil, "windows", "", true},
+		{"status", &cobra.Command{Use: "status"}, nil, "linux", "1000", false},
+	}
+	for _, tc := range cases {
+		if got := diagnosticsStayInMemory(tc.command, tc.args, tc.goos, tc.uid); got != tc.want {
+			t.Errorf("%s: diagnosticsStayInMemory = %v, want %v", tc.name, got, tc.want)
+		}
+	}
 }

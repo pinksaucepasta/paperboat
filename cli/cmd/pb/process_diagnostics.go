@@ -26,15 +26,7 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	var storageErr error
 	var recorder *diagnostics.Recorder
 	command, _, findErr := newRootCommand().Find(args)
-	removesStorage := findErr == nil && command != nil && (command.Name() == "uninstall" || command.Name() == "reset" || runtime.GOOS == "windows" && command.Name() == "__complete-uninstall")
-	if !removesStorage && command != nil && command.Name() == "__runtime-service" {
-		for i, arg := range args {
-			if arg == "__runtime-service" && i+1 < len(args) && args[i+1] == "purge" {
-				removesStorage = true
-				break
-			}
-		}
-	}
+	removesStorage := findErr == nil && diagnosticsStayInMemory(command, args, runtime.GOOS, os.Getenv("PAPERBOAT_INVOKING_UID"))
 	if removesStorage {
 		// These commands remove the diagnostics directory itself. A disk segment
 		// would lock that directory on Windows or fail to save at exit. The
@@ -229,4 +221,23 @@ func processDiagnosticsDirectory(ctx context.Context, command *cobra.Command) (s
 		return "", err
 	}
 	return filepath.Join(paths.StateRoot, "diagnostics"), nil
+}
+
+// diagnosticsStayInMemory names the processes that must not write a disk segment: commands that remove the
+// diagnostics directory itself, and every `__runtime-service` step Paperboat re-runs through sudo, whose
+// segment would land in root's home where no uninstall removes it.
+func diagnosticsStayInMemory(command *cobra.Command, args []string, goos, invokingUID string) bool {
+	if command == nil {
+		return false
+	}
+	switch command.Name() {
+	case "uninstall", "reset":
+		return true
+	case "__complete-uninstall":
+		return goos == "windows"
+	case "__runtime-service":
+		i := slices.Index(args, "__runtime-service")
+		return invokingUID != "" || i >= 0 && i+1 < len(args) && args[i+1] == "purge"
+	}
+	return false
 }
