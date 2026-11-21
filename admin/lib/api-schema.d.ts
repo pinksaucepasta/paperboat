@@ -15670,6 +15670,12 @@ export interface components {
             total: number;
             total_capped?: boolean;
         };
+        NodeRotateRequest: {
+            /** Format: int64 */
+            revision: number;
+            /** @description Rotate even when this is the last serving edge of an enabled region; the region stops serving from about 15 seconds after the rotation until the edge is redeployed with the new credential. Without it that case answers 409 last_serving_edge. */
+            confirm_region_offline?: boolean;
+        };
     };
     responses: {
         /** @description Structured API error. */
@@ -30830,7 +30836,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RevisionRequest"];
+                "application/json": components["schemas"]["NodeRotateRequest"];
             };
         };
         responses: {

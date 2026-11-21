@@ -22413,6 +22413,24 @@
           "mails",
           "total"
         ]
+      },
+      "NodeRotateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "confirm_region_offline": {
+            "type": "boolean",
+            "description": "Rotate even when this is the last serving edge of an enabled region; the region stops serving from about 15 seconds after the rotation until the edge is redeployed with the new credential. Without it that case answers 409 last_serving_edge."
+          }
+        }
       }
     },
     "responses": {
@@ -51204,7 +51222,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RevisionRequest"
+                "$ref": "#/components/schemas/NodeRotateRequest"
               }
             }
           }

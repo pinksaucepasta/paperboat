@@ -148,6 +148,16 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 	if _, err := s.MutateNode(ctx, admin, "update-last-"+node.ID, NodeMutation{Action: "update", NodeID: node.ID, Revision: node.Revision, RegionID: node.RegionID, EdgePool: node.EdgePool, FailureDomain: "zone-c", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8}); !errors.Is(err, ErrLastServingEdge) {
 		t.Fatalf("update of the last serving edge: %v", err)
 	}
+	// A rotation may take the region offline when the operator confirms it: the credential must stay rotatable.
+	rotated, err := s.MutateNode(ctx, admin, "rotate-confirmed-"+node.ID, NodeMutation{Action: "rotate", NodeID: node.ID, Revision: node.Revision, Reason: "case:test", ConfirmRegionOffline: true})
+	if err != nil || rotated.RuntimeCredential == "" {
+		t.Fatalf("confirmed rotate of the last serving edge: %+v err=%v", rotated, err)
+	}
+	node = rotated.Node
+	var verified bool
+	if err = store.SQL().QueryRowContext(ctx, `SELECT public_ingress_verified_at IS NOT NULL FROM paperboat.control_tunnel_nodes WHERE id=$1`, node.ID).Scan(&verified); err != nil || !verified {
+		t.Fatalf("rotate dropped the verified ingress (verified=%v err=%v): the address did not change", verified, err)
+	}
 	second, err := s.MutateNode(ctx, admin, "enroll-second-"+node.ID, NodeMutation{Action: "enroll", NodeID: node.ID + "_b", RegionID: node.RegionID, EdgePool: "managed:" + node.RegionID, FailureDomain: "zone-b", EndpointHost: "edge-b.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)})
 	if err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ type operatorRegionInput struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 type operatorNodeInput struct {
+	ConfirmRegionOffline   bool     `json:"confirm_region_offline,omitempty"`
 	RegionID               string   `json:"region_id,omitempty"`
 	EdgePool               string   `json:"edge_pool,omitempty"`
 	FailureDomain          string   `json:"failure_domain,omitempty"`
@@ -95,6 +96,10 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 				return
 			}
 			other := in.RegionID != "" || in.EdgePool != "" || in.FailureDomain != "" || in.EndpointHost != "" || in.EndpointTCPPort != 0 || in.EndpointQUICPort != 0 || len(in.Roles) != 0 || len(in.Transports) != 0 || in.CapacityLimit != 0 || len(in.UsagePublicKey) != 0 || len(in.PeerWireGuardPublicKey) != 0 || len(in.PeerDiscoPublicKey) != 0 || in.PeerVirtualAddress != ""
+			if action != "rotate" && in.ConfirmRegionOffline {
+				writeError(w, r, 400, "invalid_request", "Only rotate accepts confirm_region_offline.")
+				return
+			}
 			if action == "site" && (other || in.Revision != 0) {
 				writeError(w, r, 400, "invalid_request", "Only site is accepted for this node action.")
 				return
@@ -104,7 +109,7 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 				return
 			}
 			p, _ := principalFromContext(r.Context())
-			out, err := service.MutateNode(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), operatorinfra.NodeMutation{Action: action, NodeID: r.PathValue("node_id"), RegionID: in.RegionID, EdgePool: in.EdgePool, FailureDomain: in.FailureDomain, EndpointHost: in.EndpointHost, EndpointTCPPort: in.EndpointTCPPort, EndpointQUICPort: in.EndpointQUICPort, Roles: in.Roles, Transports: in.Transports, CapacityLimit: in.CapacityLimit, Revision: in.Revision, UsagePublicKey: in.UsagePublicKey, PeerWireGuardPublicKey: in.PeerWireGuardPublicKey, PeerDiscoPublicKey: in.PeerDiscoPublicKey, PeerVirtualAddress: in.PeerVirtualAddress, Site: in.Site, Reason: r.Header.Get("Operator-Reason")})
+			out, err := service.MutateNode(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), operatorinfra.NodeMutation{Action: action, NodeID: r.PathValue("node_id"), RegionID: in.RegionID, EdgePool: in.EdgePool, FailureDomain: in.FailureDomain, EndpointHost: in.EndpointHost, EndpointTCPPort: in.EndpointTCPPort, EndpointQUICPort: in.EndpointQUICPort, Roles: in.Roles, Transports: in.Transports, CapacityLimit: in.CapacityLimit, Revision: in.Revision, UsagePublicKey: in.UsagePublicKey, PeerWireGuardPublicKey: in.PeerWireGuardPublicKey, PeerDiscoPublicKey: in.PeerDiscoPublicKey, PeerVirtualAddress: in.PeerVirtualAddress, Site: in.Site, ConfirmRegionOffline: in.ConfirmRegionOffline, Reason: r.Header.Get("Operator-Reason")})
 			if err != nil {
 				operatorInfrastructureError(w, r, err)
 				return
@@ -122,7 +127,7 @@ func operatorInfrastructureError(w http.ResponseWriter, r *http.Request, err err
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrNotFound):
 		writeError(w, r, 404, "not_found", "The managed infrastructure target does not exist.")
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrLastServingEdge):
-		writeError(w, r, 409, "last_serving_edge", "This is the last serving edge of an enabled region. Bring another edge in the region up first, or disable the region.")
+		writeError(w, r, 409, "last_serving_edge", "This is the last serving edge of an enabled region. Bring another edge in the region up first, or disable the region. A credential rotation may go ahead with confirm_region_offline: the region stops serving from about 15 seconds after the rotation until the edge is redeployed with the new credential.")
 	case expectedHTTPErrorOnly(err, operatorinfra.ErrConflict):
 		writeError(w, r, 409, "infrastructure_conflict", "The target state, revision or retry key conflicts. Read current state before changing the request; retry interrupted requests with their original key.")
 	default:

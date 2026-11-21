@@ -39,7 +39,7 @@ var (
 	ErrForbidden = errors.New("infrastructure operation forbidden")
 	ErrNotFound  = errors.New("infrastructure resource not found")
 	ErrConflict  = errors.New("infrastructure operation conflict")
-	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, rotate, or an update that
+	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, an unconfirmed rotate, or an update that
 	// re-registers it): the region would leave the wildcard DNS names and every pair using it.
 	ErrLastServingEdge = errors.New("last serving edge of an enabled region")
 )
@@ -123,6 +123,8 @@ type NodeMutation struct {
 	PeerDiscoPublicKey     []byte   `json:"peer_disco_public_key,omitempty"`
 	PeerVirtualAddress     string   `json:"peer_virtual_address,omitempty"`
 	Site                   string   `json:"site,omitempty"` // city or site shown next to the region; only the site action takes it
+	// ConfirmRegionOffline lets rotate take a region's last serving edge out until the node is redeployed with the new credential; only rotate takes it.
+	ConfirmRegionOffline bool `json:"confirm_region_offline,omitempty"`
 }
 type NodeMutationResult struct {
 	Node              Node   `json:"node"`
@@ -275,9 +277,13 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if in.Revision < 1 {
 				return ErrInvalid
 			}
-			// Rotation clears the verified ingress below, which takes the node out of the serving set.
-			if err := refuseLastServingEdge(ctx, tx, in.NodeID); err != nil {
-				return err
+			// The old credential stops authenticating now (each node request looks it up), so the node stops
+			// heartbeating and leaves the serving set ~15 s later, until it is redeployed with the new credential. A
+			// possibly leaked credential must still be rotatable, so the operator may confirm taking the region offline.
+			if !in.ConfirmRegionOffline {
+				if err := refuseLastServingEdge(ctx, tx, in.NodeID); err != nil {
+					return err
+				}
 			}
 			credential := randomToken()
 			hash := sha256.Sum256([]byte(credential))
@@ -293,10 +299,8 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return ErrConflict
 			}
 			out.RuntimeCredential = credential
-			_, err = tx.Exec(ctx, `UPDATE control_tunnel_nodes SET public_ingress_ipv4=NULL,public_ingress_ipv6=NULL,public_ingress_verified_at=NULL WHERE id=$1`, in.NodeID)
-			if err != nil {
-				return err
-			}
+			// The verified ingress stays: a new credential does not change the node's public address (update, which
+			// can, clears it), so the redeployed node serves on its first heartbeat without a new probe.
 		case "update":
 			// The shape is checked before the stored state is read, so bad input is a 400 even on a stale revision;
 			// the usage key (kept from the stored configuration when left out) is checked once it is known.

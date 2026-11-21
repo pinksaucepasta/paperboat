@@ -9,7 +9,7 @@ import { SelectField, TextField } from "@/components/fields"
 import { Time } from "@/components/time"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { operatorAction, useOperator, type Data } from "@/lib/api"
+import { ApiError, operatorAction, useOperator, type Data } from "@/lib/api"
 import { useAllPages, useCursorList } from "@/lib/paging"
 import { generateUsageKeyPair } from "@/lib/use-key-pair"
 
@@ -129,6 +129,8 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
     ),
   })
   const [site, setSite] = useState("")
+  const [offlineWarning, setOfflineWarning] = useState(false)
+  const [offlineOk, setOfflineOk] = useState(false)
   const [c, setC] = useState<Config>({ region: node.region_id, pool: node.edge_pool, domain: node.failure_domain, host: node.endpoint_host, tcp: String(node.endpoint_tcp_port), quic: String(node.endpoint_quic_port), capacity: String(node.capacity_limit), kind: nodeKind(node), usageKey: "" })
   if (!admin) return null
   const actions: RowAction[] = [
@@ -182,10 +184,32 @@ function NodeActions({ node, regions, admin }: { node: Node; regions: string[]; 
           target={node.id}
           destructive
           confirmWord={node.id}
-          submitLabel="Rotate credential"
-          run={(h) => operatorAction<{ runtime_credential: string }>("POST", path("rotate"), h, { revision: node.revision })}
+          submitLabel={offlineOk ? "Rotate and take the region offline" : "Rotate credential"}
+          run={async (h) => {
+            try {
+              return await operatorAction<{ runtime_credential: string }>("POST", path("rotate"), h, offlineOk ? { revision: node.revision, confirm_region_offline: true } : { revision: node.revision })
+            } catch (e) {
+              if (e instanceof ApiError && e.code === "last_serving_edge") setOfflineWarning(true)
+              throw e
+            }
+          }}
           secrets={(r) => [{ label: "New runtime credential", value: r.runtime_credential }]}
-        />
+          onOpenChange={(open) => {
+            d.onOpenChange(open)
+            if (!open) {
+              setOfflineWarning(false)
+              setOfflineOk(false)
+            }
+          }}
+        >
+          {offlineWarning && (
+            <label className="flex items-start gap-2 text-sm" data-confirm-region-offline>
+              {/* A native input: its change event reaches the form, which gives the confirmed attempt its own key. */}
+              <input type="checkbox" className="mt-0.5" checked={offlineOk} onChange={(e) => setOfflineOk(e.target.checked)} />
+              This is the last serving edge of its region. Rotate anyway: the region stops serving about 15 seconds from now until you redeploy this node with the new credential.
+            </label>
+          )}
+        </ActionDialog>
       ),
     },
     simple("retire", "Retire", `Retire ${node.id}`, node.carriers > 0 ? `${node.carriers} machine${node.carriers === 1 ? " is" : "s are"} still attached to it and will lose it now. Drain it and wait for 0 carriers first. Removes the node from the fleet for good.` : "Removes the node from the fleet for good.", true),
