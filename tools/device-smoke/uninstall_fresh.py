@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""uninstall_fresh.py HOST BINARY  (check id: uninstall-fresh, CHECKLIST F1-09 / C021, PB-U1)
+"""uninstall_fresh.py HOST BINARY [--keep]  (check id: uninstall-fresh, CHECKLIST F1-09 / C021, PB-U1)
 
 A fresh throwaway systemd container on HOST (image test-systemd): BINARY is installed and paired as user pbt (a
 throwaway machine of the account HOST's pb is signed in to, or of $FRESH_MINT's), the privileged uninstall inventory
@@ -9,7 +9,8 @@ is recorded (it must see the install), then the command a user runs, `pb uninsta
   the whole container for anything named paperboat and for a `pb` binary, system and user systemd units, sockets and
   listeners, processes, accounts/groups the installer added, the Inbox (a sentinel file must survive), the server-side
   machine record (gone or revoked). Then a reinstall + re-pair in the same container must end with a healthy doctor.
-The container is removed and every machine revoked by exact id on every exit path. Nothing secret is printed or kept
+The container is removed and every machine revoked by exact id (pb machine revoke, then listed by id) on every exit path;
+--keep leaves both for triage. Every leftover path is stat'ed/ls'ed to stderr (owner, times, processes) before the reinstall. Nothing secret is printed or kept
 (the enrollment token only travels through 0600 files, fresh_pair_lib.sh pair_user).
 Prints one JSON line {"check":"uninstall-fresh","status":PASS|FAIL,"leftovers":[...],"machine_id":...}; exit 1 on FAIL.
 env: SMOKE_CT_DOCKER=docker when HOST's user needs no sudo for docker; FRESH_MINT as in fresh_pair_lib.sh.
@@ -81,15 +82,20 @@ def stage(binary, host, dest):
     return subprocess.run(['bash', '-c', '. "$0/stage_binary.sh"; stage_binary "$1" "$2" "$3"', str(HERE), binary, host, dest]).returncode == 0
 
 
-def revoke(machine_id):
-    done = subprocess.run([sys.executable, str(HERE / 'cleanup_test_account.py'), '--id', machine_id, '--stale', '0 seconds', '--apply'],
-                          capture_output=True, text=True)
-    return done.returncode == 0
+# What a leftover path tells about its owner: kept as plain stat/ls output on stderr (names, times, owners, never contents).
+TRIAGE = r'''
+for p in "$@"; do
+  echo "== $p"; stat -c 'owner=%U:%G mode=%a size=%s birth=%w mtime=%y ctime=%z' "$p" 2>&1
+  ls -laR --time-style=full-iso "$p" 2>&1 | head -40
+done
+echo "== processes"; ps -eo pid=,user=,lstart=,args= | grep -iE 'paperboat|(^| )pb( |$)' | grep -v grep | cut -c1-200
+echo "== sessions"; loginctl list-sessions --no-legend 2>&1 | head; systemctl is-active user@1000.service 2>&1
+'''
 
 
 class Check:
-    def __init__(self, host, binary):
-        self.host, self.binary = host, binary
+    def __init__(self, host, binary, keep=False):
+        self.host, self.binary, self.keep, self.window = host, binary, keep, '?'
         self.ct = 'test-pbu1-%d' % int(time.time())
         self.staged = '/tmp/%s.pb' % self.ct
         self.leftovers, self.machine_ids, self.before, self.reinstall, self.digest = [], [], {}, 'not run', ''
@@ -145,9 +151,10 @@ class Check:
         code, out = self.exec(ACCOUNTS, user=False)
         return set(out.split()) if code == 0 else None
 
+    mint = os.environ.get('FRESH_MINT') or '$HOME/.local/bin/pb'
+
     def machine_listed(self, machine_id):
-        mint = os.environ.get('FRESH_MINT') or '$HOME/.local/bin/pb'
-        code, out = self.ssh(f'{mint} machine list --all --json', timeout=120)
+        code, out = self.ssh(f'{self.mint} machine list --all --json', timeout=120)
         try:
             data = json.loads(out)
             data = data.get('data', data)
@@ -182,7 +189,9 @@ class Check:
             return None if receipt.get('status') == 'FAIL' and receipt.get('total', 0) >= 1 else 'inventory saw nothing of the install: ' + json.dumps(receipt)[:200]
         self.step('pre-uninstall-inventory', positive_control)
         uninstall = ("%s uninstall --confirmation 'UNINSTALL PAPERBOAT' --hostname \"$(hostname)\" --json" % PB)
+        began = self.exec('date +%T.%N', user=False)[1].strip()
         code, out = self.exec(uninstall, timeout=600)
+        self.window = '%s .. %s' % (began, self.exec('date +%T.%N', user=False)[1].strip())
         self.step('pb uninstall', lambda: self.check_uninstall_result(code, out))
         self.check_leftovers(inbox, machine_id, names)
         self.step('reinstall', lambda: self.phase_reinstall(alias + '-again'))
@@ -191,7 +200,8 @@ class Check:
     def check_uninstall_result(code, out):
         try:
             result = json.loads(out.strip().splitlines()[-1])
-        except (ValueError, IndexError):
+            result = result.get('data', result)  # pb --json wraps its result: {"ok":true,"data":{...}}
+        except (ValueError, IndexError, AttributeError):
             result = {}
         if code != 0 or result.get('uninstalled') is not True:
             return 'exit %s: %s' % (code, out[-300:])
@@ -210,7 +220,9 @@ class Check:
         code, out = self.exec(SCAN, user=False, env={'INBOX': inbox}, timeout=180)
         if code != 0 and 'LEFT\t' not in out:
             self.leftovers.append('scan: did not run: ' + out[-200:])
-        self.leftovers.extend('%s:%s' % tuple(line.split('\t')[1:3]) for line in out.splitlines() if line.startswith('LEFT\t') and line.count('\t') >= 2)
+        found = [tuple(line.split('\t')[1:3]) for line in out.splitlines() if line.startswith('LEFT\t') and line.count('\t') >= 2]
+        self.leftovers.extend('%s:%s' % kind_path for kind_path in found)
+        self.triage([path for kind, path in found if path.startswith('/')] + [p for p in receipt.get('file_paths', []) if p.startswith('/')])
         after = self.accounts()
         if names_before is not None and after is not None:
             self.leftovers.extend('account:' + name for name in sorted(after - names_before))
@@ -220,6 +232,14 @@ class Check:
         if code != 0 or out.split()[:1] != [self.digest]:
             self.leftovers.append('inbox: the sentinel file did not survive unchanged')
         self.step('server-record', lambda: self.record_problem(machine_id))
+
+    def triage(self, paths):
+        """Before the reinstall recreates anything: owner, times and the live processes of every leftover path, on stderr."""
+        if not paths:
+            return
+        quoted = ' '.join(shlex.quote(p) for p in sorted(set(paths)))
+        code, out = self.ssh('%s exec %s sh -c %s _ %s' % (DOCKER, self.ct, shlex.quote(TRIAGE), quoted), timeout=60)
+        print('leftover triage (uninstall window %s):\n%s' % (self.window, redact(out)), file=sys.stderr, flush=True)
 
     def record_problem(self, machine_id):
         entry = self.machine_listed(machine_id)
@@ -245,6 +265,16 @@ class Check:
                 return 'doctor was not healthy within 120 s after the reinstall'
             time.sleep(5)
 
+    def revoke(self, machine_id):
+        """Exact id, the way a user does (preview, then the printed confirmation); then the record must be gone or revoked."""
+        code, out = self.ssh(f'{self.mint} machine revoke {machine_id} --json', timeout=120)
+        token = re.search(r'"confirmation_token":\s*"([A-Z0-9]+)"', out)
+        if token:
+            code, out = self.ssh(f'{self.mint} machine revoke {machine_id} --json --confirm {token.group(1)}', timeout=120)
+        if code != 0:
+            return 'revoke of %s failed: %s' % (machine_id, out[-200:])
+        return self.record_problem(machine_id)
+
     def run(self):
         try:
             if not self.step('staging', lambda: None if stage(self.binary, self.host, self.staged) else 'could not copy the build to ' + self.host):
@@ -252,9 +282,12 @@ class Check:
             if self.step('container', self.start):
                 self.phase_uninstall(self.ct)
         finally:
+            if self.keep:
+                print('kept container %s on %s (machines %s); remove it and revoke them yourself' % (self.ct, self.host, ' '.join(self.machine_ids)), file=sys.stderr, flush=True)
+                return
             self.ssh(f'{DOCKER} rm -f {self.ct} >/dev/null 2>&1; rm -f {self.staged}')
             for machine_id in self.machine_ids:
-                self.step('teardown', lambda: None if revoke(machine_id) else 'revoke of %s failed' % machine_id)
+                self.step('teardown', lambda: self.revoke(machine_id))
 
     def line(self):
         status = 'FAIL' if self.leftovers else 'PASS'
@@ -264,10 +297,12 @@ class Check:
 
 
 def main(argv):
+    keep = '--keep' in argv
+    argv = [a for a in argv if a != '--keep']
     if len(argv) != 3:
-        print(__doc__.splitlines()[0], file=sys.stderr)
+        print(__doc__.splitlines()[0] + ' [--keep]', file=sys.stderr)
         return 2
-    check = Check(argv[1], argv[2])
+    check = Check(argv[1], argv[2], keep)
     check.run()
     line, status = check.line()
     print(redact(line), flush=True)

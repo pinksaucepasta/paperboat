@@ -2,7 +2,7 @@
 import io
 import json
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 import uninstall_fresh as uf
@@ -48,12 +48,23 @@ class Host:
             return 0, json.dumps({'status': 'PASS', 'total': 0, 'leftovers': {}})
         if 'uninstall --confirmation' in command:
             self.uninstalled = True
-            return 0, json.dumps({'uninstalled': True, 'inbox_preserved': True})
+            # the real `pb uninstall --json` shape (cli/cmd/pb/uninstall_command.go uninstallJSONResult, wrapped by writeCLIJSON)
+            data = {'hostname': 'h', 'inbox_preserved': True, 'uninstalled': not k.get('uninstall_refused')}
+            return 0, json.dumps({'schema_version': '1.0', 'ok': True, 'data': data} if not k.get('flat') else data)
         if 'INBOX=${INBOX:?}' in command:
             return 0, ''.join('LEFT\t%s\t%s\n' % kv for kv in k.get('scan', []))
+        if 'machine revoke' in command:
+            if '--confirm' not in command:
+                return 0, json.dumps({'ok': True, 'data': {'confirmation_token': 'AB12CD'}})
+            self.revoked.append(command.split('machine revoke ')[1].split()[0])
+            return 0, json.dumps({'ok': True, 'data': {'revoked': True}})
         if 'machine list --all' in command:
-            listed = [{'id': ID1, 'state': 'online'}] if k.get('still_listed') else []
+            listed = [{'id': ID1, 'state': 'online'}] if k.get('still_listed') and ID1 not in self.revoked else []
+            listed += [{'id': ID2, 'state': 'online'}] if k.get('revoke_ineffective') else []
             return 0, json.dumps({'machines': listed})
+        if 'owner=%U' in command:
+            self.triaged = command
+            return 0, '== /root/.local/state/paperboat\nowner=root:root'
         if 'doctor --json' in command:
             return 0, json.dumps({'overall': 'unhealthy' if k.get('unhealthy') else 'healthy'})
         return 0, ''
@@ -66,7 +77,6 @@ def run(**knobs):
     out = io.StringIO()
     clock = iter(range(0, 10 ** 6, 40))  # each monotonic() read jumps 40 s, so the doctor wait ends
     with patch.object(uf, 'run_ssh', host.ssh), patch.object(uf, 'stage', lambda *a: True), \
-            patch.object(uf, 'revoke', lambda i: host.revoked.append(i) or True), \
             patch.object(uf.time, 'sleep', lambda s: None), patch.object(uf.time, 'monotonic', lambda: next(clock)), \
             redirect_stdout(out):
         code = uf.main(['uninstall_fresh.py', 'host', '/bin/pb'])
@@ -109,12 +119,34 @@ class UninstallFresh(unittest.TestCase):
         self.assertEqual((code, result['status']), (1, 'FAIL'))
         self.assertTrue(any(' rm -f test-pbu1-' in c for c in host.commands))
 
-    def test_failed_revoke_is_reported_as_a_leftover(self):
+    def test_a_revoke_that_leaves_the_machine_listed_is_a_leftover(self):
+        code, result, host, _ = run(revoke_ineffective=True)
+        self.assertEqual((code, result['status']), (1, 'FAIL'))
+        self.assertIn('machine %s is still listed' % ID2, ' '.join(result['leftovers']))
+        self.assertEqual(host.revoked, [ID1, ID2])  # both were revoked by exact id, with the printed confirmation
+
+    def test_real_wrapped_uninstall_result_is_not_a_leftover_and_flat_is_accepted(self):
+        for knobs in ({}, {'flat': True}):
+            self.assertEqual(run(**knobs)[1]['leftovers'], [])
+        code, result, _, _ = run(uninstall_refused=True)
+        self.assertIn('pb uninstall: exit 0', ' '.join(result['leftovers']))
+
+    def test_leftover_files_are_triaged_on_stderr_before_teardown(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, result, host, _ = run(scan=[('file', '/root/.local/state/paperboat'), ('file', '/run/user/1000/paperboat')])
+        self.assertIn('owner=root:root', err.getvalue())
+        self.assertIn("/root/.local/state/paperboat /run/user/1000/paperboat", host.triaged)
+
+    def test_keep_leaves_container_and_machines(self):
         host = Host()
-        with patch.object(uf, 'run_ssh', host.ssh), patch.object(uf, 'stage', lambda *a: True), patch.object(uf, 'revoke', lambda i: False), \
-                patch.object(uf.time, 'sleep', lambda s: None), redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(uf.main(['x', 'h', 'b']), 1)
-        self.assertIn('revoke of ' + ID1 + ' failed', out.getvalue())
+        err = io.StringIO()
+        with patch.object(uf, 'run_ssh', host.ssh), patch.object(uf, 'stage', lambda *a: True), patch.object(uf.time, 'sleep', lambda s: None), \
+                redirect_stdout(io.StringIO()), redirect_stderr(err):
+            uf.main(['x', 'h', 'b', '--keep'])
+        self.assertIn('kept container test-pbu1-', err.getvalue())
+        self.assertEqual(host.revoked, [])
+        self.assertEqual(sum('docker rm -f test-pbu1-' in c for c in host.commands), 1)  # only the pre-run clean-up, no teardown
 
     def test_redact_removes_tokens(self):
         text = uf.redact("PB_TOKEN='%s' and %s" % (TOKEN, TOKEN))
