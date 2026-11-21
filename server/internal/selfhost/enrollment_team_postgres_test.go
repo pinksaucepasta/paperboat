@@ -204,9 +204,10 @@ func TestPackagedHelperTeamEnrollmentAndPlacementOnPostgres(t *testing.T) {
 		if installation.ScopeKind != "team" || installation.ScopeID != team {
 			t.Fatal("claim escaped team scope")
 		}
+		// Relays serve every team member at once; a team edge serves only once the team pairs its region.
 		for _, actor := range []string{owner, admin, member, outsider} {
 			var eligible bool
-			if err = store.SQL().QueryRowContext(ctx, `SELECT paperboat.node_pool_eligible($1,$2,$3)`, installation.NodeID, actor, installation.Capability).Scan(&eligible); err != nil || eligible != (actor != outsider) {
+			if err = store.SQL().QueryRowContext(ctx, `SELECT paperboat.node_pool_eligible($1,$2,$3)`, installation.NodeID, actor, installation.Capability).Scan(&eligible); err != nil || eligible != (actor != outsider && installation.Capability == "relay") {
 				t.Fatalf("team eligibility actor=%s eligible=%v: %v", actor, eligible, err)
 			}
 		}
