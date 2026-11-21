@@ -82,10 +82,13 @@ carrier certificate. These identities serve different connections; keep the
 carrier key and runtime credentials unchanged.
 
 Install `edge-ip-certificate.py` as
-`/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py` (mode 0755), and install
+`/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py` (mode 0755) with `health_report.py` beside it, and install
 `paperboat-edge-certificate.service` and `.timer` in `/etc/systemd/system/`.
 Create mode-0600 `/etc/paperboat-edge-certificate.env` with
-`PAPERBOAT_CERTIFICATE_EMAIL` set to the operator's certificate contact address.
+`PAPERBOAT_CERTIFICATE_EMAIL` set to the operator's certificate contact address, and
+`PAPERBOAT_HEALTH_REPORT_URL` (the server's origin) with `PAPERBOAT_HEALTH_REPORT_TOKEN_FILE` (a mode-0600 file
+holding the server's `PAPERBOAT_HOST_HEALTH_TOKEN`) so each check shows in the admin panel: a failing renewal, or
+no check for a day, is an alert in the admin bell.
 Run `systemctl daemon-reload`, start `paperboat-edge-certificate.service`, then
 `systemctl enable --now paperboat-edge-certificate.timer`.
 
@@ -281,6 +284,9 @@ server back to .917 after migrations 477-490 had run; .917 could not serve on 49
   commit, 12 chars>` on the new server's commit is `success`. Otherwise the new server keeps serving, edges still
   roll back, an alert goes to the canary's `alerts.log` and `CANARY_ALERT_THREAD`, and the gate exits 6:
   roll forward with a fix.
+- With `PAPERBOAT_HEALTH_REPORT_URL` and `PAPERBOAT_HEALTH_REPORT_TOKEN_FILE` set (the canary's report URL and token
+  file), every gated deploy reports its outcome; an automatic rollback, or a server kept on the migrated schema, is an
+  alert in the admin bell until the next deploy that stays.
 - `SKEW_CHECK_PUBLISH=1 tools/device-smoke/skew_check.sh <previous release>` publishes that status (its schema
   stage runs the previous release's own server and `TestE2ECore` on a database migrated to HEAD), and its
   overall `paperboat/skew-check`, which release.yml requires, fails when the schema stage fails.

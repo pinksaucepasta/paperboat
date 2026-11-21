@@ -67173,10 +67173,7 @@
                 "properties": {
                   "source": {
                     "type": "string",
-                    "enum": [
-                      "hosts",
-                      "canary"
-                    ]
+                    "pattern": "^(hosts|canary|deploy|edge-certificate:[A-Za-z0-9.:-]{1,253})$"
                   },
                   "payload": {
                     "type": "object",
@@ -67275,10 +67272,7 @@
                             "properties": {
                               "source": {
                                 "type": "string",
-                                "enum": [
-                                  "hosts",
-                                  "canary"
-                                ]
+                                "pattern": "^(hosts|canary|deploy|edge-certificate:[A-Za-z0-9.:-]{1,253})$"
                               },
                               "payload": {
                                 "type": "object",

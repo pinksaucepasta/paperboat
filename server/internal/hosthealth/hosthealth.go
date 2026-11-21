@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -19,7 +20,11 @@ var ErrInvalid = errors.New("invalid host health report")
 // maxPayload bounds one report: a few hosts with a handful of resources each, or one canary run.
 const maxPayload = 32 << 10
 
-// Report is one source's whole latest state. Sources are "hosts" (per host resource percentages and levels) and "canary".
+// knownSource matches the table's CHECK: one row per source, and one per edge host for certificate renewal.
+var knownSource = regexp.MustCompile(`^(hosts|canary|deploy|edge-certificate:[A-Za-z0-9.:-]{1,253})$`)
+
+// Report is one source's whole latest state. Sources are "hosts" (per host resource percentages and levels), "canary",
+// "deploy" (the gated deploy's last outcome) and "edge-certificate:<edge host>" (that edge's last certificate renewal check).
 type Report struct {
 	Source  string          `json:"source"`
 	Payload json.RawMessage `json:"payload"`
@@ -49,7 +54,7 @@ func (s *Service) Authenticate(token string) bool {
 
 func (s *Service) Ingest(ctx context.Context, r Report) error {
 	var object map[string]json.RawMessage
-	if (r.Source != "hosts" && r.Source != "canary") || len(r.Payload) == 0 || len(r.Payload) > maxPayload || json.Unmarshal(r.Payload, &object) != nil || object == nil {
+	if !knownSource.MatchString(r.Source) || len(r.Payload) == 0 || len(r.Payload) > maxPayload || json.Unmarshal(r.Payload, &object) != nil || object == nil {
 		return ErrInvalid
 	}
 	_, err := s.store.Pool().Exec(ctx, `INSERT INTO host_health_reports(source,payload,reported_at) VALUES($1,$2,now())

@@ -68,6 +68,7 @@ const fixtureSession = (c) => ({ id: c.repeat(64), created_at: new Date(Date.now
 // What the panel changed, and the state the fixture serves back (so a write is visible on the next read).
 const writes = []
 const world = {
+  hostHealth: [],
   regionsFail: true,
   regions: [{ id: "eu", display_name: "Europe", enabled: true, revision: 2, updated_at: "2026-11-17T09:00:00Z" }],
   nodes: [{ id: "node_1", protocol_version: "1.0", region_id: "eu", edge_pool: "a", failure_domain: "x", state: "ready", endpoint_host: "edge.example.test", endpoint_tcp_port: 443, endpoint_quic_port: 443, roles: ["relay"], transports: ["tcp"], capacity_limit: 10, revision: 1, node_generation: 1, registry_expires_at: "2026-11-18T00:00:00Z", ready: true, observed_at: "2026-11-17T09:00:00Z" },
@@ -355,6 +356,7 @@ function route(req, url) {
   if (p === "/v1/admin/config/billing") return world.policy
   if (p === "/v1/admin/client-update-policy") return world.floor
   if (p === "/v1/admin/node-notices") return { notices: [] }
+  if (p === "/v1/admin/host-health") return { reports: world.hostHealth }
   if (p.startsWith("/v1/admin/release-authority/") && process.env.__FIXTURE_RELEASE === "off") return { __status: 503, code: "release_authority_not_configured", message: "Release authority has not been configured on this server." }
   if (p === "/v1/admin/release-authority/requests") return { requests: world.requests, pagination: { limit: 50, offset: 0, total: world.requests.length, next_offset: null } }
   if (p === "/v1/admin/release-authority/bundles") return { bundles: [], pagination: { limit: 50, offset: 0, total: 0, next_offset: null } }
@@ -773,6 +775,27 @@ try {
     await p.getByRole("tab", { name: "Relay health" }).click()
     await waitReady("relay health")
     world.regionsFail = false
+  })
+  await step("admin bell: an automatic rollback and a failing edge certificate renewal are alerts with what to do", async () => {
+    const at = new Date().toISOString()
+    world.hostHealth = [
+      { source: "deploy", payload: { rolled_back: true, kept_migrated: false, what: "server 2", reason: "no green canary run within 300 s of the switch", green_after: true, rollback_ok: true, at }, reported_at: at },
+      { source: "edge-certificate:203.0.113.7", payload: { ok: false, error: "issue public IP certificate failed; inspect the protected certificate renewal log", stale_after_seconds: 86400 }, reported_at: at },
+      { source: "edge-certificate:203.0.113.8", payload: { ok: true, error: "", stale_after_seconds: 86400 }, reported_at: at },
+    ]
+    try {
+      await p.goto(`${ORIGIN}/audit`)
+      await p.waitForSelector('[data-admin-notices="2"]')
+      await p.locator("[data-admin-notices]").click()
+      const rollback = await text('[data-alert="deploy:rolled-back"]')
+      expect(rollback.includes("A deploy was rolled back automatically") && rollback.includes("Fix the cause and deploy again"), `rollback alert was: ${rollback}`)
+      const cert = await text('[data-alert="edge-certificate:203.0.113.7"]')
+      expect(cert.includes("Certificate renewal is failing on 203.0.113.7") && cert.includes("renew.log"), `certificate alert was: ${cert}`)
+      expect((await p.locator('[data-alert="edge-certificate:203.0.113.8"]').count()) === 0, "a healthy edge is not an alert")
+      await p.keyboard.press("Escape")
+    } finally {
+      world.hostHealth = []
+    }
   })
   // ---- writes -----------------------------------------------------------------------------------
   const dialog = (title) => p.locator(`[data-action-dialog="${title}"]`)
