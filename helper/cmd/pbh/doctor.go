@@ -110,11 +110,11 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	}
 	for _, component := range c.Components {
 		for _, p := range nodePorts(component) {
-			if p.transport == "" {
-				fmt.Fprintf(out, "note UDP %d (%s QUIC) is not checked from the control plane; allow inbound UDP %d in the cloud firewall\n", p.port, component.Capability, p.port)
+			name := fmt.Sprintf("%s %d (%s)", strings.ToUpper(p.transport), p.port, p.service)
+			if p.skip != "" {
+				fmt.Fprintf(out, "skip %s: %s; make sure inbound %s %d is allowed\n", name, p.skip, strings.ToUpper(p.transport), p.port)
 				continue
 			}
-			name := fmt.Sprintf("%s %d (%s)", strings.ToUpper(p.transport), p.port, component.Capability)
 			result, err := d.probe(ctx, p.transport, p.port, "")
 			if err != nil {
 				report(false, "", "the control plane could not check "+name+" ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
@@ -142,37 +142,48 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 }
 
 type nodePort struct {
-	transport string // "" when the control plane cannot check it
+	transport string
 	port      int
+	service   string // what listens there, for the report
+	skip      string // why the control plane cannot probe it; "" when it can
 }
 
-// nodePorts lists the listeners of component the control plane may probe: its TCP port, the relay's STUN
-// (UDP on its TCP port) and its QUIC port, which is only noted. Ports outside the node range (a relay-only
-// install on 443) are left out; the probe accepts only edgeports.NodeMin-NodeMax.
+// nodePorts lists every listener of component: its TCP port (probed in edgeports.NodeMin-NodeMax), the
+// relay's STUN on UDP at its TCP port (probed only at edgeports.RelayWSS) and its QUIC port (never probed:
+// the control plane sends no QUIC). What the probe does not accept comes back with a skip reason.
 func nodePorts(component selfhost.Component) []nodePort {
 	var ports []nodePort
-	if component.TCPPort >= edgeports.NodeMin && component.TCPPort <= edgeports.NodeMax {
-		ports = append(ports, nodePort{"tcp", component.TCPPort})
-		if component.Capability == "relay" && component.TCPPort == edgeports.RelayWSS {
-			ports = append(ports, nodePort{"udp", component.TCPPort})
+	if component.TCPPort > 0 {
+		p := nodePort{"tcp", component.TCPPort, component.Capability, ""}
+		if p.port < edgeports.NodeMin || p.port > edgeports.NodeMax {
+			p.skip = fmt.Sprintf("the control plane probes only TCP %d-%d", edgeports.NodeMin, edgeports.NodeMax)
+		}
+		ports = append(ports, p)
+		if component.Capability == "relay" {
+			stun := nodePort{"udp", component.TCPPort, "relay STUN", ""}
+			if stun.port != edgeports.RelayWSS {
+				stun.skip = fmt.Sprintf("the control plane probes STUN only on UDP %d", edgeports.RelayWSS)
+			}
+			ports = append(ports, stun)
 		}
 	}
 	if component.QUICPort > 0 {
-		ports = append(ports, nodePort{"", component.QUICPort})
+		ports = append(ports, nodePort{"udp", component.QUICPort, component.Capability + " QUIC", "the control plane does not send QUIC"})
 	}
 	return ports
 }
 
-// nodePortAdvice turns what the control plane saw on an edge or relay port into the fix.
+// nodePortAdvice describes what the control plane saw on an edge or relay port and the usual fix.
 func nodePortAdvice(name, transport string, port int, capability, detail string) string {
 	prefix := name + " is not reachable from the control plane: "
+	rule := strings.ToUpper(transport) + " " + strconv.Itoa(port)
 	switch detail {
 	case "timeout":
-		return prefix + fmt.Sprintf("it timed out, so a cloud firewall drops it; allow inbound %s %d from anywhere (security group, security list or VPC firewall)", strings.ToUpper(transport), port)
+		return prefix + "timed out, usually a cloud firewall drop; allow inbound " + rule + " from anywhere (security group, security list or VPC firewall)"
 	case "refused":
-		return prefix + "nothing listens on it; run pbh status and check the " + capability + " service"
+		return prefix + "connection refused, so the host answered but nothing listens there; run pbh status and check the " + capability + " service"
 	case "unreachable":
-		return prefix + "this host's firewall rejects it; run pbh install as root to open " + strings.ToUpper(transport) + " " + strconv.Itoa(port) + " (or add the rule by hand)"
+		return prefix + "rejected by the network (unreachable), usually the host firewall or routing; see the host firewall check above, or allow inbound " + rule + " by hand"
 	case "not_public":
 		return prefix + "the registered endpoint host does not resolve to a public address; fix --endpoint-host"
 	default:

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -147,10 +148,11 @@ func TestDoctorChecksEveryNodePort(t *testing.T) {
 		results map[string]string // "tcp 7272" -> detail; missing means connected
 		want    []string
 	}{
-		{nil, []string{"ok   TCP 7272 (tunnel) is reachable", "ok   TCP 7274 (relay) is reachable", "ok   UDP 7274 (relay) is reachable", "UDP 7273 (tunnel QUIC) is not checked", "UDP 7275 (relay QUIC) is not checked"}},
+		{nil, []string{"ok   TCP 7272 (tunnel) is reachable", "ok   TCP 7274 (relay) is reachable", "ok   UDP 7274 (relay STUN) is reachable", "skip UDP 7273 (tunnel QUIC): the control plane does not send QUIC; make sure inbound UDP 7273 is allowed", "skip UDP 7275 (relay QUIC)"}},
 		{map[string]string{"tcp 7272": "timeout"}, []string{"FIX  TCP 7272 (tunnel) is not reachable", "allow inbound TCP 7272 from anywhere"}},
 		{map[string]string{"udp 7274": "timeout"}, []string{"allow inbound UDP 7274 from anywhere"}},
-		{map[string]string{"tcp 7274": "refused"}, []string{"FIX  TCP 7274 (relay) is not reachable", "run pbh status and check the relay service"}},
+		{map[string]string{"tcp 7274": "refused"}, []string{"FIX  TCP 7274 (relay) is not reachable", "connection refused", "run pbh status and check the relay service"}},
+		{map[string]string{"tcp 7272": "unreachable"}, []string{"rejected by the network (unreachable)", "host firewall check above"}},
 	} {
 		deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{}, nil)
 		var probed []string
@@ -177,5 +179,15 @@ func TestDoctorChecksEveryNodePort(t *testing.T) {
 		if got := strings.Join(probed, ","); got != "tcp 25000,tcp 7272,tcp 7274,udp 7274" {
 			t.Errorf("probed %s", got)
 		}
+	}
+}
+
+func TestNodePortsSkipsWhatTheProbeDoesNotAccept(t *testing.T) {
+	var got []string
+	for _, p := range nodePorts(selfhost.Component{Capability: "relay", TCPPort: 443, QUICPort: 7275}) {
+		got = append(got, fmt.Sprintf("%s %d %s skip=%v", p.transport, p.port, p.service, p.skip != ""))
+	}
+	if want := "tcp 443 relay skip=true,udp 443 relay STUN skip=true,udp 7275 relay QUIC skip=true"; strings.Join(got, ",") != want {
+		t.Fatalf("got %s\nwant %s", strings.Join(got, ","), want)
 	}
 }

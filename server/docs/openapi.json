@@ -55871,33 +55871,88 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "transport",
-                  "port",
-                  "nonce"
-                ],
-                "properties": {
-                  "transport": {
-                    "type": "string",
-                    "enum": [
-                      "tcp",
-                      "udp"
-                    ]
+                "description": "One of three shapes; unknown fields are ignored.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "description": "A public TCP tunnel port; the node's test listener must echo the nonce.",
+                    "required": [
+                      "transport",
+                      "port",
+                      "nonce"
+                    ],
+                    "properties": {
+                      "transport": {
+                        "type": "string",
+                        "enum": [
+                          "tcp"
+                        ]
+                      },
+                      "port": {
+                        "type": "integer",
+                        "minimum": 10000,
+                        "maximum": 59999
+                      },
+                      "nonce": {
+                        "type": "string",
+                        "minLength": 16,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_-]+$"
+                      }
+                    }
                   },
-                  "port": {
-                    "type": "integer",
-                    "minimum": 7272,
-                    "maximum": 59999
+                  {
+                    "type": "object",
+                    "description": "An edge or relay node TCP port; an accepted connection counts. No nonce (absent or empty).",
+                    "required": [
+                      "transport",
+                      "port"
+                    ],
+                    "properties": {
+                      "transport": {
+                        "type": "string",
+                        "enum": [
+                          "tcp"
+                        ]
+                      },
+                      "port": {
+                        "type": "integer",
+                        "minimum": 7272,
+                        "maximum": 7275
+                      },
+                      "nonce": {
+                        "type": "string",
+                        "maxLength": 0
+                      }
+                    }
                   },
-                  "nonce": {
-                    "type": "string",
-                    "description": "16-64 characters for a public TCP tunnel port; empty for a node port.",
-                    "maxLength": 64,
-                    "pattern": "^[A-Za-z0-9_-]*$"
+                  {
+                    "type": "object",
+                    "description": "The relay's STUN port on UDP; a STUN binding success counts. No nonce (absent or empty).",
+                    "required": [
+                      "transport",
+                      "port"
+                    ],
+                    "properties": {
+                      "transport": {
+                        "type": "string",
+                        "enum": [
+                          "udp"
+                        ]
+                      },
+                      "port": {
+                        "type": "integer",
+                        "enum": [
+                          7274
+                        ]
+                      },
+                      "nonce": {
+                        "type": "string",
+                        "maxLength": 0
+                      }
+                    }
                   }
-                }
+                ]
               }
             }
           }
