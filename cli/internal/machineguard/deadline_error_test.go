@@ -19,3 +19,11 @@ func TestGuardDeadlineReachesTheClientAsATimeout(t *testing.T) {
 	}
 }
 
+// Every platform's client waits longer than the guard's own per-operation deadline, so the guard's answer arrives.
+func TestClientOutwaitsTheGuardOperationDeadline(t *testing.T) {
+	for _, op := range []string{"acquire", "apply", "names", "certificate"} {
+		if exchangeTimeout(op) <= operationTimeout {
+			t.Fatalf("%s: client waits %s, guard allows %s", op, exchangeTimeout(op), operationTimeout)
+		}
+	}
+}
