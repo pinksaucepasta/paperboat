@@ -424,7 +424,7 @@ func TestPreviewResourceProjectsReleasedDomainSummaryWithoutTunnelFields(t *test
 	service, err := NewService(fake, Config{
 		EndpointDomain: "preview.example.test", CursorKey: []byte(strings.Repeat("k", 32)), PreviewDomains: previewDomainProjectionFake{rows: []dbsqlc.PreviewDomain{{
 			ID: "pdom_1", AccountID: "acct_1", PreviewID: "prv_1", PreviewGeneration: 2, Hostname: "*.apps.example.test",
-			MatchType: "one_label_wildcard", OwnershipState: "expired", DnsTarget: "a.preview.example.test",
+			MatchType: "one_label_wildcard", DnsTarget: "a.preview.example.test",
 			ObservedRecords: []byte(`[]`), DnsProvider: "generic", ExpectedRecords: []byte(`[]`), DnsNextCheckAt: now,
 			CertificateStrategy: "managed", CertificateState: "revoked", CaaState: "ready", ConflictState: "quarantined",
 			Generation: 5, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
@@ -1281,4 +1281,12 @@ func TestBackgroundRenewStillNeedsTheOwnerOnline(t *testing.T) {
 	if _, err = service.Renew(context.Background(), machineRequest("machine_1"), created.Preview.ID, MutationRequest{ExpectedGeneration: 1, OwnerSessionID: "session_1", IdempotencyKey: "renew_bg"}); !errors.Is(err, previewtunnelstore.ErrOwnerNotFound) {
 		t.Fatalf("background renew with an offline owner = %v, want ErrOwnerNotFound", err)
 	}
+}
+
+func (f previewDomainProjectionFake) VerifiedWorkspaceDomains(_ context.Context, ids []string) (map[string]bool, error) {
+	verified := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		verified[id] = true
+	}
+	return verified, nil
 }

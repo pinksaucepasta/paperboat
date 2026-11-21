@@ -416,6 +416,30 @@ func (q *Queries) ListDueWorkspaceDomainDNS(ctx context.Context, arg ListDueWork
 	return items, nil
 }
 
+const listVerifiedWorkspaceDomainIDs = `-- name: ListVerifiedWorkspaceDomainIDs :many
+SELECT id FROM workspace_domains WHERE id = ANY($1::text[]) AND ownership_state = 'verified'
+`
+
+func (q *Queries) ListVerifiedWorkspaceDomainIDs(ctx context.Context, ids []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listVerifiedWorkspaceDomainIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceDomainUses = `-- name: ListWorkspaceDomainUses :many
 SELECT 'tunnel'::text AS kind, d.workspace_domain_id::text AS workspace_domain_id, d.id AS domain_id, d.hostname,
        t.id AS resource_id, t.name AS resource_name, d.certificate_state

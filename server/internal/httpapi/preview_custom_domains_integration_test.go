@@ -536,7 +536,7 @@ func (f *previewCustomDomainsRepository) CreatePreviewLeaseV1(_ context.Context,
 			ID: "pdom_" + strconv.Itoa(index+1), AccountID: input.AccountID, PreviewID: input.LeaseID,
 			PreviewGeneration: 1, Hostname: hostname, MatchType: matchType,
 			OwnershipChallengeReference: "dns-challenge://super-secret-" + strconv.Itoa(index+1),
-			OwnershipState:              "pending", DnsTarget: stableTarget, ObservedRecords: []byte(`[]`), DnsProvider: provider,
+			DnsTarget:                   stableTarget, ObservedRecords: []byte(`[]`), DnsProvider: provider,
 			ExpectedRecords: expected, DnsNextCheckAt: input.Now, CertificateStrategy: strategy,
 			CertificateState: certificateState, CaaState: caaState, ConflictState: "clear", Generation: 1,
 			CreatedAt: input.Now, UpdatedAt: input.Now,
@@ -635,7 +635,7 @@ func (f *previewCustomDomainsRepository) StopPreviewLeaseV1(_ context.Context, i
 		if row.AccountID != input.AccountID || row.PreviewID != input.PreviewID || row.PreviewGeneration > terminalGeneration || row.DeletedAt.Valid {
 			continue
 		}
-		row.OwnershipState, row.CertificateState, row.ConflictState = "expired", "revoked", "quarantined"
+		row.CertificateState, row.ConflictState = "revoked", "quarantined"
 		row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewtunnelstore.DomainQuarantine), Valid: true}
 		row.DeletedAt = sql.NullTime{Time: input.Now, Valid: true}
 		row.Generation++
@@ -741,7 +741,7 @@ func (f *previewCustomDomainsRepository) Create(_ context.Context, input preview
 	if err := f.previewDomainConflictLocked(input.AccountID, input.Hostname, input.Now); err != nil {
 		return previewdomain.RepositoryMutation{}, err
 	}
-	row := dbsqlc.PreviewDomain{ID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, PreviewGeneration: input.PreviewGeneration, Hostname: input.Hostname, MatchType: input.MatchType, OwnershipChallengeReference: input.ChallengeReference, OwnershipState: "pending", DnsTarget: input.DNSTarget, DnsProvider: input.DNSProvider, ExpectedRecords: append([]byte(nil), input.ExpectedRecords...), DnsNextCheckAt: input.Now, CertificateStrategy: input.CertificateStrategy, CertificateState: "pending", CaaState: "unknown", ConflictState: "clear", Generation: 1, CreatedAt: input.Now, UpdatedAt: input.Now}
+	row := dbsqlc.PreviewDomain{ID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, PreviewGeneration: input.PreviewGeneration, Hostname: input.Hostname, MatchType: input.MatchType, OwnershipChallengeReference: input.ChallengeReference, DnsTarget: input.DNSTarget, DnsProvider: input.DNSProvider, ExpectedRecords: append([]byte(nil), input.ExpectedRecords...), DnsNextCheckAt: input.Now, CertificateStrategy: input.CertificateStrategy, CertificateState: "pending", CaaState: "unknown", ConflictState: "clear", Generation: 1, CreatedAt: input.Now, UpdatedAt: input.Now}
 	f.domains[previewCustomDomainScope(input.AccountID, input.PreviewID, input.DomainID)] = row
 	op := previewCustomDomainOperation(input.OperationID, input.AccountID, input.IdempotencyKey, "preview.domain.create", input.DomainID, "waiting_for_dns", "running", 35, input.Now)
 	result := previewdomain.RepositoryMutation{Domain: row, Operation: op, Changed: true}
@@ -778,7 +778,7 @@ func (f *previewCustomDomainsRepository) ReadyAliases(_ context.Context, account
 	rows := f.domainRowsLocked(accountID, previewID, false)
 	result := make([]previewdomain.ReadyAliasRecord, 0, len(rows))
 	for _, row := range rows {
-		if row.OwnershipState == "verified" && row.CertificateState == "ready" && row.ConflictState == "clear" {
+		if row.CertificateState == "ready" && row.ConflictState == "clear" {
 			result = append(result, previewdomain.ReadyAliasRecord{Domain: row, CertificateReference: "cert-ref", CertificateGeneration: row.Generation})
 		}
 	}
@@ -812,7 +812,7 @@ func (f *previewCustomDomainsRepository) mutateDomain(input previewdomain.Mutati
 	}
 	row.Generation++
 	row.UpdatedAt = input.Now
-	row.OwnershipState, row.CertificateState, row.ConflictState = "revoked", "revoked", "quarantined"
+	row.CertificateState, row.ConflictState = "revoked", "quarantined"
 	row.DeletedAt = sql.NullTime{Time: input.Now, Valid: true}
 	row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewtunnelstore.DomainQuarantine), Valid: true}
 	phase, state, progress := "ready", "succeeded", int16(100)
@@ -987,4 +987,12 @@ func (f *previewCustomDomainsRepository) ResolvePreviewLeaseMachineAccountV1(_ c
 		}
 	}
 	return "", previewtunnelstore.ErrOwnerNotFound
+}
+
+func (f *previewCustomDomainsRepository) VerifiedWorkspaceDomains(_ context.Context, ids []string) (map[string]bool, error) {
+	verified := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		verified[id] = true
+	}
+	return verified, nil
 }

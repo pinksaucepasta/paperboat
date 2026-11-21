@@ -99,7 +99,7 @@ WHERE id = $7
   AND generation = $10
   AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
-RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 `
 
 type ApplyPreviewDomainCertificateObservationV1Params struct {
@@ -137,7 +137,6 @@ func (q *Queries) ApplyPreviewDomainCertificateObservationV1(ctx context.Context
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.DnsProvider,
@@ -154,7 +153,6 @@ func (q *Queries) ApplyPreviewDomainCertificateObservationV1(ctx context.Context
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -181,7 +179,7 @@ INSERT INTO preview_domains (
   CASE WHEN $12 = 'none' THEN 'not_applicable' ELSE 'unknown' END,
   'clear', 1, $11, $11, $13
 )
-RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 `
 
 type CreatePreviewDomainV1Params struct {
@@ -225,7 +223,6 @@ func (q *Queries) CreatePreviewDomainV1(ctx context.Context, arg CreatePreviewDo
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.DnsProvider,
@@ -242,7 +239,6 @@ func (q *Queries) CreatePreviewDomainV1(ctx context.Context, arg CreatePreviewDo
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -266,7 +262,7 @@ WHERE id = $3
   AND preview_id = $5
   AND generation = $6
   AND deleted_at IS NULL
-RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 `
 
 type DeletePreviewDomainV1Params struct {
@@ -296,7 +292,6 @@ func (q *Queries) DeletePreviewDomainV1(ctx context.Context, arg DeletePreviewDo
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.DnsProvider,
@@ -313,7 +308,6 @@ func (q *Queries) DeletePreviewDomainV1(ctx context.Context, arg DeletePreviewDo
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -386,7 +380,7 @@ func (q *Queries) ExpirePreviewLeaseAndWithdrawDomainsV1(ctx context.Context, ar
 }
 
 const getPreviewDomainAnyV1 = `-- name: GetPreviewDomainAnyV1 :one
-SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 FROM preview_domains
 WHERE id = $1
   AND account_id = $2
@@ -410,7 +404,6 @@ func (q *Queries) GetPreviewDomainAnyV1(ctx context.Context, arg GetPreviewDomai
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.DnsProvider,
@@ -427,7 +420,6 @@ func (q *Queries) GetPreviewDomainAnyV1(ctx context.Context, arg GetPreviewDomai
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -439,7 +431,7 @@ func (q *Queries) GetPreviewDomainAnyV1(ctx context.Context, arg GetPreviewDomai
 }
 
 const getPreviewDomainForReconciliationV1 = `-- name: GetPreviewDomainForReconciliationV1 :one
-SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
+SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
 FROM preview_domains AS d
 JOIN preview_leases AS p
   ON p.id = d.preview_id AND p.account_id = d.account_id
@@ -461,7 +453,6 @@ func (q *Queries) GetPreviewDomainForReconciliationV1(ctx context.Context, domai
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.DnsProvider,
@@ -478,7 +469,6 @@ func (q *Queries) GetPreviewDomainForReconciliationV1(ctx context.Context, domai
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -539,7 +529,7 @@ func (q *Queries) GetPreviewDomainLeaseViewV1(ctx context.Context, arg GetPrevie
 }
 
 const getPreviewDomainV1 = `-- name: GetPreviewDomainV1 :one
-SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 FROM preview_domains
 WHERE id = $1
   AND account_id = $2
@@ -564,7 +554,6 @@ func (q *Queries) GetPreviewDomainV1(ctx context.Context, arg GetPreviewDomainV1
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.DnsProvider,
@@ -581,7 +570,6 @@ func (q *Queries) GetPreviewDomainV1(ctx context.Context, arg GetPreviewDomainV1
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -686,7 +674,7 @@ func (q *Queries) GetPreviewLeaseOwnerContextV1(ctx context.Context, arg GetPrev
 }
 
 const listPreviewDomainProjectionsV1 = `-- name: ListPreviewDomainProjectionsV1 :many
-SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 FROM preview_domains
 WHERE preview_id = ANY($1::text[])
 ORDER BY preview_id, created_at, id
@@ -710,7 +698,6 @@ func (q *Queries) ListPreviewDomainProjectionsV1(ctx context.Context, previewIds
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -727,7 +714,6 @@ func (q *Queries) ListPreviewDomainProjectionsV1(ctx context.Context, previewIds
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -746,7 +732,7 @@ func (q *Queries) ListPreviewDomainProjectionsV1(ctx context.Context, previewIds
 }
 
 const listPreviewDomainsV1 = `-- name: ListPreviewDomainsV1 :many
-SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+SELECT id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 FROM preview_domains
 WHERE account_id = $1
   AND preview_id = $2
@@ -793,7 +779,6 @@ func (q *Queries) ListPreviewDomainsV1(ctx context.Context, arg ListPreviewDomai
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -810,7 +795,6 @@ func (q *Queries) ListPreviewDomainsV1(ctx context.Context, arg ListPreviewDomai
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -829,7 +813,7 @@ func (q *Queries) ListPreviewDomainsV1(ctx context.Context, arg ListPreviewDomai
 }
 
 const listReadyPreviewDomainAliasesV1 = `-- name: ListReadyPreviewDomainAliasesV1 :many
-SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id, cert.certificate_reference AS active_certificate_reference,
+SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id, cert.certificate_reference AS active_certificate_reference,
        cert.certificate_generation AS active_certificate_generation
 FROM preview_domains AS d
 JOIN preview_leases AS p
@@ -847,7 +831,7 @@ JOIN tunnel_certificate_records AS cert
 WHERE d.account_id = $2
   AND d.preview_id = $3
   AND d.deleted_at IS NULL
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -872,7 +856,6 @@ type ListReadyPreviewDomainAliasesV1Row struct {
 	Hostname                      string
 	MatchType                     string
 	OwnershipChallengeReference   string
-	OwnershipState                string
 	DnsTarget                     string
 	ObservedRecords               []byte
 	DnsProvider                   string
@@ -889,7 +872,6 @@ type ListReadyPreviewDomainAliasesV1Row struct {
 	CertificateFailureCode        sql.NullString
 	CaaState                      string
 	ConflictState                 string
-	LastVerifiedAt                sql.NullTime
 	Generation                    int64
 	CreatedAt                     time.Time
 	UpdatedAt                     time.Time
@@ -917,7 +899,6 @@ func (q *Queries) ListReadyPreviewDomainAliasesV1(ctx context.Context, arg ListR
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -934,7 +915,6 @@ func (q *Queries) ListReadyPreviewDomainAliasesV1(ctx context.Context, arg ListR
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -955,14 +935,14 @@ func (q *Queries) ListReadyPreviewDomainAliasesV1(ctx context.Context, arg ListR
 }
 
 const listReadyPreviewDomainsV1 = `-- name: ListReadyPreviewDomainsV1 :many
-SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
+SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
 FROM preview_domains AS d
 JOIN preview_leases AS p
   ON p.id = d.preview_id AND p.account_id = d.account_id
 WHERE d.account_id = $1
   AND d.preview_id = $2
   AND d.deleted_at IS NULL
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -996,7 +976,6 @@ func (q *Queries) ListReadyPreviewDomainsV1(ctx context.Context, arg ListReadyPr
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -1013,7 +992,6 @@ func (q *Queries) ListReadyPreviewDomainsV1(ctx context.Context, arg ListReadyPr
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1233,7 +1211,7 @@ WHERE preview_id = $3
   AND account_id = $4
   AND preview_generation <= $5
   AND deleted_at IS NULL
-RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
+RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 `
 
 type WithdrawPreviewDomainsV1Params struct {
@@ -1267,7 +1245,6 @@ func (q *Queries) WithdrawPreviewDomainsV1(ctx context.Context, arg WithdrawPrev
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -1284,7 +1261,6 @@ func (q *Queries) WithdrawPreviewDomainsV1(ctx context.Context, arg WithdrawPrev
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,

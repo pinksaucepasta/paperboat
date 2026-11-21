@@ -133,6 +133,28 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 	}
 	assertPreviewDomainRows(t, database, ctx, created.Lease.ID, accountID, 2, 2, 2)
 
+	// A retried create (same idempotency key; the service mints new ids per request) replays the first binding.
+	domainRepo, err := previewdomain.NewSQLRepository(database, previewdomain.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := previewdomain.CreateRecord{OperationID: "op_preview_domain_add_" + suffix, AuditEventID: "aud_preview_domain_add_" + suffix,
+		AccountID: accountID, PreviewID: created.Lease.ID, DomainID: "dom_preview_domain_add_" + suffix, PreviewGeneration: 2,
+		Hostname: "extra.s-" + suffix + ".example.test", MatchType: "exact", ChallengeReference: "dns:test", DNSTarget: "domain-" + suffix + ".preview.example.test",
+		DNSProvider: "generic", ExpectedRecords: []byte("[]"), CertificateStrategy: "managed", IdempotencyKey: "preview-domain-add:" + suffix,
+		RequestHash: sha256.Sum256([]byte("preview-domain-add:" + suffix)), ActorID: accountID, ActorType: "user", CorrelationID: "cor_preview_domain_add_" + suffix, Now: now.Add(90 * time.Second)}
+	first, err := domainRepo.Create(ctx, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry := record
+	retry.OperationID, retry.AuditEventID, retry.DomainID = record.OperationID+"_retry", record.AuditEventID+"_retry", record.DomainID+"_retry"
+	replayed, err := domainRepo.Create(ctx, retry)
+	if err != nil || !replayed.Replayed || replayed.Domain.ID != first.Domain.ID {
+		t.Fatalf("retried create = %+v, %v; want a replay of %s", replayed.Domain.ID, err, first.Domain.ID)
+	}
+	assertPreviewDomainRows(t, database, ctx, created.Lease.ID, accountID, 3, 2, 3)
+
 	stopped, err := store.StopPreviewLeaseV1(ctx, previewtunnelstore.StopPreviewLeaseV1Input{
 		OperationID: "op_preview_domain_stop_" + suffix, AuditEventID: "aud_preview_domain_stop_" + suffix,
 		AccountID: accountID, ActorID: accountID, ActorType: "user", PreviewID: created.Lease.ID,
@@ -241,7 +263,7 @@ func assertWithdrawnPreviewDomains(t *testing.T, database *db.DB, ctx context.Co
 FROM paperboat.preview_domains WHERE preview_id=$1 AND account_id=$2`, previewID, accountID, now).Scan(&count, &withdrawn, &revoked, &quarantined, &quarantineFuture); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 || withdrawn != 2 || revoked != 2 || quarantined != 2 || !quarantineFuture {
+	if count != 3 || withdrawn != 3 || revoked != 3 || quarantined != 3 || !quarantineFuture {
 		t.Fatalf("withdrawn preview domains count=%d deleted=%d revoked_certificates=%d quarantined=%d future=%v", count, withdrawn, revoked, quarantined, quarantineFuture)
 	}
 }

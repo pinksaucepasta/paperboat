@@ -25,11 +25,11 @@ func TestCertificateDomainUsesConfiguredIssuerAndRenewalWindow(t *testing.T) {
 		TunnelID:                    "tun_01",
 		Hostname:                    "*.example.test",
 		OwnershipChallengeReference: "dns-challenge://dom_01",
-		OwnershipState:              "verified",
-		CertificateStrategy:         "managed",
-		CertificateState:            "ready",
-		CertificateExpiresAt:        sql.NullTime{Time: now.Add(20 * 24 * time.Hour), Valid: true},
-		Generation:                  3,
+
+		CertificateStrategy:  "managed",
+		CertificateState:     "ready",
+		CertificateExpiresAt: sql.NullTime{Time: now.Add(20 * 24 * time.Hour), Valid: true},
+		Generation:           3,
 	}
 	for _, test := range []struct {
 		name        string
@@ -76,7 +76,7 @@ func TestCertificateWorkerDeferralRequiresPurePolicyOutcome(t *testing.T) {
 func TestCertificateDomainDistributionFailureDoesNotRequestRenewal(t *testing.T) {
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	row := dbsqlc.TunnelDomain{ID: "dom_01", AccountID: "acct_01", TunnelID: "tun_01", RouteID: "route_01",
-		Hostname: "app.example.test", OwnershipChallengeReference: "dns-challenge://dom_01", OwnershipState: "verified",
+		Hostname: "app.example.test", OwnershipChallengeReference: "dns-challenge://dom_01",
 		CertificateStrategy: "managed", CertificateReference: sql.NullString{String: "tcert_existing", Valid: true},
 		CertificateExpiresAt: sql.NullTime{Time: now.Add(89 * 24 * time.Hour), Valid: true}, Generation: 76}
 	for _, state := range []string{"ready", "renewing", "failed"} {

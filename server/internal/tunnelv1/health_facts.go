@@ -86,7 +86,7 @@ func (r *SQLRepository) HealthFacts(ctx context.Context, accountID, tunnelID str
 	if err := insecure.Err(); err != nil {
 		return HealthFacts{}, translate(err)
 	}
-	rows, err := r.db.Pool().Query(ctx, `SELECT hostname, CASE WHEN paperboat.workspace_domain_verified(workspace_domain_id) THEN 'verified' ELSE 'failed' END, certificate_state, certificate_strategy FROM tunnel_domains
+	rows, err := r.db.Pool().Query(ctx, `SELECT hostname, CASE WHEN EXISTS(SELECT 1 FROM paperboat.workspace_domains wd WHERE wd.id=workspace_domain_id AND wd.ownership_state='verified') THEN 'verified' ELSE 'failed' END, certificate_state, certificate_strategy FROM tunnel_domains
  WHERE account_id=$1 AND tunnel_id=$2 AND deleted_at IS NULL ORDER BY hostname LIMIT 64`, accountID, tunnelID)
 	if err != nil {
 		return HealthFacts{}, translate(err)

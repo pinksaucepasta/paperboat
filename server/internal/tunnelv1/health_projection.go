@@ -28,7 +28,7 @@ func RefreshHealth(ctx context.Context, executor healthExecutor, accountID strin
  WHEN t.expires_at IS NOT NULL AND t.expires_at<=$3 THEN 'expired'
  WHEN t.desired_state='paused' THEN 'paused'
  WHEN paperboat.workspace_edge_mode(t.account_id,paperboat.publication_workspace_team('tunnel',t.id))='self-hosted-only'
- AND EXISTS(SELECT 1 FROM tunnel_routes needed WHERE needed.tunnel_id=t.id AND needed.protocol IN('http','tls') AND needed.desired_state='active' AND needed.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM tunnel_domains d WHERE d.route_id=needed.id AND d.account_id=t.account_id AND d.deleted_at IS NULL AND paperboat.workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear')) THEN 'custom_domain_required'
+ AND EXISTS(SELECT 1 FROM tunnel_routes needed WHERE needed.tunnel_id=t.id AND needed.protocol IN('http','tls') AND needed.desired_state='active' AND needed.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM tunnel_domains d WHERE d.route_id=needed.id AND d.account_id=t.account_id AND d.deleted_at IS NULL AND EXISTS(SELECT 1 FROM paperboat.workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified') AND d.conflict_state='clear')) THEN 'custom_domain_required'
  WHEN count(r.id)>0 AND bool_and(coalesce(probe.ready,false)) AND EXISTS(SELECT 1 FROM tunnel_route_origin_health oh JOIN tunnel_routes orr ON orr.id=oh.route_id
  WHERE oh.tunnel_id=t.id AND oh.state='unreachable' AND oh.observed_at>$3::timestamptz-($7::double precision*interval '1 second')
  AND orr.desired_state='active' AND orr.deleted_at IS NULL) THEN 'origin_unreachable'

@@ -55,10 +55,11 @@ generate:
 	@mkdir -p .build
 	@# sqlc's parser input: the Goose Up sections without the schema qualifier
 	@for f in $$(LC_ALL=C ls internal/db/migrations/*.sql); do sed -e '/^-- +goose Down/,$$d' -e 's/paperboat\.//g' $$f; echo; done > .build/sqlc-schema.sql
+	@sed -e 's/paperboat\.//g' internal/db/sqlc_ignored_columns.sql >> .build/sqlc-schema.sql
 	$(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
 generate-check:
-	@before="$$(git diff -- internal/db/dbsqlc)"; $(MAKE) generate >/dev/null; test "$$(git diff -- internal/db/dbsqlc)" = "$$before" || { echo "generated sqlc output is stale; run make generate" >&2; git diff -- internal/db/dbsqlc; exit 1; }
+	@before="$$(git diff -- internal/db/dbsqlc)"; $(MAKE) generate >/dev/null || exit 1; test "$$(git diff -- internal/db/dbsqlc)" = "$$before" || { echo "generated sqlc output is stale; run make generate" >&2; git diff -- internal/db/dbsqlc; exit 1; }
 
 ## policy-checks: the non-test checks of `make check`; tools/ci-test.sh runs them too, so a green CI run means main's checks pass
 policy-checks: standalone-build verify-toolchain dependencies source-policy metrics-check scenario-matrix-check fmt-check generate-check

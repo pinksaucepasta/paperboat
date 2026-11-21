@@ -141,12 +141,12 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Reposit
 		if !allowed {
 			return fmt.Errorf("%w: self-hosted publications require a customer domain outside Paperboat-managed namespaces", ErrInvalidInput)
 		}
-		op, replayed, err := beginOperation(ctx, q, operationRecord{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: "preview.domain.create", ResourceID: input.DomainID, CorrelationID: input.CorrelationID})
+		op, replayed, err := beginOperation(ctx, q, operationRecord{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: "preview.domain.create", ResourceID: input.DomainID, CorrelationID: input.CorrelationID}, false)
 		if err != nil {
 			return err
 		}
 		if replayed {
-			domain, getErr := getAnyDomain(ctx, tx, input.AccountID, input.PreviewID, input.DomainID)
+			domain, getErr := getAnyDomain(ctx, tx, input.AccountID, input.PreviewID, op.ResourceID.String)
 			if isSolePreviewDomainError(getErr, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -208,7 +208,7 @@ func (r *SQLRepository) Delete(ctx context.Context, input MutationRecord) (Repos
 		if err := requireActiveLease(lease, input.Now); err != nil {
 			return err
 		}
-		op, replayed, err := beginOperation(ctx, q, operationRecord{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: "preview.domain.delete", ResourceID: input.DomainID, CorrelationID: input.CorrelationID})
+		op, replayed, err := beginOperation(ctx, q, operationRecord{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: "preview.domain.delete", ResourceID: input.DomainID, CorrelationID: input.CorrelationID}, true)
 		if err != nil {
 			return err
 		}
@@ -243,7 +243,7 @@ func (r *SQLRepository) Delete(ctx context.Context, input MutationRecord) (Repos
 		if err != nil {
 			return err
 		}
-		if err := recordAudit(ctx, q, input.AuditEventID, input.AccountID, input.ActorID, input.ActorType, "preview.domain.deleted", current.ID, input.IdempotencyKey, input.RequestID, input.CorrelationID, input.SourceMachineID, input.Now, map[string]any{"hostname": current.Hostname, "state": wireState(current)}); err != nil {
+		if err := recordAudit(ctx, q, input.AuditEventID, input.AccountID, input.ActorID, input.ActorType, "preview.domain.deleted", current.ID, input.IdempotencyKey, input.RequestID, input.CorrelationID, input.SourceMachineID, input.Now, map[string]any{"hostname": current.Hostname, "state": wireState(current, true)}); err != nil {
 			return err
 		}
 		result = RepositoryMutation{Domain: current, Operation: op, Changed: true}
@@ -426,8 +426,9 @@ type operationRecord struct {
 	OperationType, ResourceID, CorrelationID string
 }
 
-func beginOperation(ctx context.Context, q *dbsqlc.Queries, input operationRecord) (dbsqlc.Operation, bool, error) {
-	op, replayed, err := previewtunnelstore.BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash[:], OperationType: input.OperationType, ResourceKind: Kind, ResourceID: sql.NullString{String: input.ResourceID, Valid: true}, Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID}, true)
+// matchResource: a replay must name the same resource; a create's resource id is new on every request.
+func beginOperation(ctx context.Context, q *dbsqlc.Queries, input operationRecord, matchResource bool) (dbsqlc.Operation, bool, error) {
+	op, replayed, err := previewtunnelstore.BeginOperation(ctx, q, dbsqlc.CreatePreviewTunnelOperationParams{ID: input.ID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash[:], OperationType: input.OperationType, ResourceKind: Kind, ResourceID: sql.NullString{String: input.ResourceID, Valid: true}, Phase: "persisting", State: "running", Progress: 20, Outcome: "unchanged", CorrelationID: input.CorrelationID}, matchResource)
 	if err != nil && !errors.Is(err, ErrIdempotencyConflict) {
 		err = mapDatabaseError(err)
 	}
@@ -589,4 +590,17 @@ func defaultID(prefix string) (string, error) {
 		return "", err
 	}
 	return prefix + "_" + value.String(), nil
+}
+
+// VerifiedWorkspaceDomains reports which of ids are verified workspace domains.
+func (r *SQLRepository) VerifiedWorkspaceDomains(ctx context.Context, ids []string) (map[string]bool, error) {
+	rows, err := r.db.Queries().ListVerifiedWorkspaceDomainIDs(ctx, ids)
+	if err != nil {
+		return nil, translate(err)
+	}
+	verified := make(map[string]bool, len(rows))
+	for _, id := range rows {
+		verified[id] = true
+	}
+	return verified, nil
 }

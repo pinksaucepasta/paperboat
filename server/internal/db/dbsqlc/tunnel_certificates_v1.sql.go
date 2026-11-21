@@ -70,7 +70,7 @@ WHERE tunnel_certificate_records.id = $2
           AND domain.tunnel_id = tunnel_certificate_records.tunnel_id
           AND domain.generation = $3
           AND domain.deleted_at IS NULL
-          AND workspace_domain_verified(domain.workspace_domain_id)
+          AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
           AND domain.conflict_state = 'clear'
       )
     ) OR (
@@ -86,7 +86,7 @@ WHERE tunnel_certificate_records.id = $2
         AND domain.generation = $3
         AND domain.preview_generation = tunnel_certificate_records.preview_generation
         AND domain.deleted_at IS NULL
-        AND workspace_domain_verified(domain.workspace_domain_id)
+        AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
         AND domain.conflict_state = 'clear'
         AND lease.generation = domain.preview_generation
         AND lease.terminal_state = 'active'
@@ -217,7 +217,7 @@ WHERE d.id = $4
   AND d.preview_id = $6
   AND d.preview_generation = $7
   AND d.generation = $8
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.deleted_at IS NULL
   AND lease.id = d.preview_id
@@ -360,7 +360,7 @@ WHERE EXISTS (
     AND domain.preview_id = $4
     AND domain.preview_generation = $5
     AND domain.generation = $9
-    AND workspace_domain_verified(domain.workspace_domain_id)
+    AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
     AND domain.conflict_state = 'clear'
     AND domain.deleted_at IS NULL
     AND lease.generation = $5
@@ -493,7 +493,7 @@ WHERE EXISTS (
     AND domain.account_id = $3
     AND domain.tunnel_id = $4
     AND domain.generation = $8
-    AND workspace_domain_verified(domain.workspace_domain_id)
+    AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
     AND domain.conflict_state = 'clear'
     AND domain.deleted_at IS NULL
 )
@@ -728,7 +728,7 @@ WHERE cert.domain_id = $1
   AND cert.state = 'active'
   AND cert.expires_at > $5
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -806,7 +806,7 @@ WHERE cert.domain_id = $1
   AND cert.leaf_hostname = $2
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -875,7 +875,7 @@ WHERE cert.domain_id = $1
   AND cert.leaf_hostname IS NULL
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -946,7 +946,7 @@ WHERE cert.domain_id = $1
   AND cert.leaf_hostname = $4
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -1025,7 +1025,7 @@ WHERE cert.domain_id = $1
   AND cert.state = 'active'
   AND cert.expires_at > $4
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -1107,7 +1107,7 @@ WHERE cert.domain_id = $1
   AND cert.leaf_hostname IS NULL
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -1418,7 +1418,7 @@ SELECT EXISTS (
     AND d.preview_generation = $4
     AND d.generation = $5
     AND d.hostname = $6
-    AND workspace_domain_verified(d.workspace_domain_id)
+    AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
     AND d.conflict_state = 'clear'
     AND d.certificate_state = 'ready'
     AND d.certificate_reference IS NOT NULL
@@ -2332,7 +2332,7 @@ WHERE cert.id = $4
   AND domain.preview_id = $8
   AND domain.preview_generation = $1
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -2421,7 +2421,7 @@ WHERE cert.domain_id = domain.id
   AND domain.preview_id = $6
   AND domain.preview_generation = $1
   AND domain.deleted_at IS NULL
-  AND workspace_domain_verified(domain.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=domain.workspace_domain_id AND wd.ownership_state='verified')
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -2465,7 +2465,7 @@ SET certificate_state = 'ready', certificate_failure_code = NULL,
 FROM tunnel_certificate_records AS cert, tunnels AS t, tunnel_routes AS r
 WHERE d.id = $2 AND d.account_id = $3
   AND d.generation = $4
-  AND workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state = 'clear'
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified') AND d.conflict_state = 'clear'
   AND d.deleted_at IS NULL AND d.certificate_state IN ('failed','renewing')
   AND t.id = d.tunnel_id AND t.account_id = d.account_id
   AND t.desired_state = 'active' AND t.deleted_at IS NULL

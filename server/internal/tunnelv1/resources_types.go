@@ -170,6 +170,7 @@ type ResourceRepository interface {
 	DeleteResourceRoute(context.Context, RouteRecord) (ResourceMutationRecord, error)
 	ListResourceDomains(context.Context, string, string, *ListPosition, int) ([]dbsqlc.TunnelDomain, error)
 	GetResourceDomain(context.Context, string, string, string) (dbsqlc.TunnelDomain, error)
+	VerifiedWorkspaceDomains(context.Context, []string) (map[string]bool, error)
 	CreateResourceDomain(context.Context, DomainRecord) (ResourceMutationRecord, error)
 	DeleteResourceDomain(context.Context, DomainRecord) (ResourceMutationRecord, error)
 	ListResourceTunnelLogs(context.Context, string, string, int64, int) ([]dbsqlc.ListTunnelLogsV1Row, error)

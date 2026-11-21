@@ -279,7 +279,7 @@ JOIN preview_leases AS p
 WHERE d.account_id = sqlc.arg(account_id)
   AND d.preview_id = sqlc.arg(preview_id)
   AND d.deleted_at IS NULL
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -308,7 +308,7 @@ JOIN tunnel_certificate_records AS cert
 WHERE d.account_id = sqlc.arg(account_id)
   AND d.preview_id = sqlc.arg(preview_id)
   AND d.deleted_at IS NULL
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL

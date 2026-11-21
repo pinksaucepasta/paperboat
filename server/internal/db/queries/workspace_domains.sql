@@ -97,3 +97,6 @@ SELECT 'preview', d.workspace_domain_id::text, d.id, d.hostname, p.id, p.endpoin
 FROM preview_domains d JOIN preview_leases p ON p.id = d.preview_id
 WHERE d.workspace_domain_id = ANY(sqlc.arg(ids)::text[]) AND d.deleted_at IS NULL AND p.terminal_state = 'active'
 ORDER BY 2, 4, 3;
+
+-- name: ListVerifiedWorkspaceDomainIDs :many
+SELECT id FROM workspace_domains WHERE id = ANY(sqlc.arg(ids)::text[]) AND ownership_state = 'verified';

@@ -117,6 +117,7 @@ type Service struct {
 
 type PreviewDomainReader interface {
 	List(context.Context, string, string, *previewdomain.ListPosition, int) ([]dbsqlc.PreviewDomain, error)
+	VerifiedWorkspaceDomains(context.Context, []string) (map[string]bool, error)
 }
 
 type previewDomainProjectionReader interface {
@@ -980,8 +981,12 @@ func (s *Service) previewViews(ctx context.Context, rows []previewtunnelstore.Pr
 		}
 		if len(found) > 0 {
 			view.Domains = make([]PreviewDomainSummary, 0, len(found))
+			verified, err := s.previewDomains.VerifiedWorkspaceDomains(ctx, previewdomain.WorkspaceDomainIDs(found))
+			if err != nil {
+				return nil, err
+			}
 			for _, row := range found {
-				domain := previewdomain.DomainViewFromRow(row)
+				domain := previewdomain.DomainViewFromRow(row, verified[row.WorkspaceDomainID.String])
 				view.Domains = append(view.Domains, PreviewDomainSummary{
 					ID: domain.ID, TargetKind: domain.TargetKind, PreviewID: domain.PreviewID,
 					Hostname: domain.Hostname, MatchType: domain.MatchType, WildcardLabels: domain.WildcardLabels,

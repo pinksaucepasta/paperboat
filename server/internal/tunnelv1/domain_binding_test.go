@@ -13,11 +13,15 @@ import (
 
 func TestDomainLifecycleReportsIssuingTLSAfterDNSVerification(t *testing.T) {
 	row := dbsqlc.TunnelDomain{ConflictState: "clear", CertificateState: "issuing"}
-	if got := wireDomainLifecycleState(row); got != "issuing_tls" {
+	if got := wireDomainLifecycleState(row, true); got != "issuing_tls" {
 		t.Fatalf("state = %q", got)
 	}
+	row.CertificateState = "ready"
+	if got := wireDomainLifecycleState(row, false); got != "dns_error" {
+		t.Fatalf("lapsed workspace domain state = %q, want dns_error (never ready)", got)
+	}
 	row.ConflictState = "quarantined"
-	if got := wireDomainLifecycleState(row); got != "quarantined" {
+	if got := wireDomainLifecycleState(row, true); got != "quarantined" {
 		t.Fatalf("quarantined state = %q", got)
 	}
 }
@@ -68,7 +72,7 @@ func TestDomainClaimQuarantineIsBoundedAndLiveClaimsStayExclusive(t *testing.T) 
 }
 
 func TestDomainViewIncludesEmptyObservedRecordsArray(t *testing.T) {
-	view := DomainViewFromRow(resourceDomain("dom_empty", "app.example.test", "pending", "clear"))
+	view := DomainViewFromRow(resourceDomain("dom_empty", "app.example.test", "pending", "clear"), true)
 	encoded, err := json.Marshal(view)
 	if err != nil {
 		t.Fatal(err)

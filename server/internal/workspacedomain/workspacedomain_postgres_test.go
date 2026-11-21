@@ -149,9 +149,38 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	if _, err := worker.WorkspaceCertificate(ctx, owner, view.ID); !errors.Is(err, tunnelcert.ErrWorkspaceCertificatePending) {
 		t.Fatalf("certificate before issuance = %v", err)
 	}
-	// Issuance: one order for the domain and its wildcard, sealed, then served to hostnames under it.
 	issuer := &fakeIssuer{}
 	worker.wc.Issuer, worker.wc.Keys, worker.wc.MasterKeyReference, worker.wc.OwnerID = issuer, tunnelcert.ReferenceKeySource{Keys: map[string][]byte{"master/test": make([]byte, 32)}}, "master/test", "wsd-test"
+	setState := func(state string) {
+		t.Helper()
+		if _, err := database.Pool().Exec(ctx, `UPDATE paperboat.workspace_domains SET ownership_state=$2 WHERE id=$1`, view.ID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := dbsqlc.WorkspaceDomain{ID: view.ID, AccountID: owner, Hostname: hostname, OwnershipState: "verified"} // as the due list read it
+	// Lapsed before the order starts: no order at all.
+	setState("pending")
+	if err := worker.issue(ctx, stale); !errors.Is(err, ErrNotVerified) || len(issuer.names) != 0 {
+		t.Fatalf("order on a lapsed domain = %v (%d names)", err, len(issuer.names))
+	}
+	// Lapsed while the order runs: the certificate is not stored.
+	setState("verified")
+	issuer.onOrder = func() { setState("failed") }
+	if err := worker.issue(ctx, stale); !errors.Is(err, ErrNotVerified) {
+		t.Fatalf("finalize on a lapsed domain = %v", err)
+	}
+	// Through Run too: lost authority is not an issuer failure, so no backoff delays the next order.
+	setState("verified")
+	if err := worker.Run(ctx, 500); err != nil {
+		t.Fatal(err)
+	}
+	var stored, backoff bool
+	if err := database.Pool().QueryRow(ctx, `SELECT certificate_ciphertext IS NOT NULL OR certificate_state='ready', certificate_retry_at IS NOT NULL OR certificate_failure_code IS NOT NULL FROM paperboat.workspace_domains WHERE id=$1`, view.ID).Scan(&stored, &backoff); err != nil || stored || backoff {
+		t.Fatalf("after a mid-order lapse: stored %v backoff %v %v", stored, backoff, err)
+	}
+	issuer.onOrder, issuer.names = nil, nil
+	setState("verified")
+	// Issuance: one order for the domain and its wildcard, sealed, then served to hostnames under it.
 	if err := worker.Run(ctx, 500); err != nil {
 		t.Fatal(err)
 	}
@@ -284,12 +313,16 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 }
 
 type fakeIssuer struct {
-	domain tunnelcert.Domain
-	names  []string
+	domain  tunnelcert.Domain
+	names   []string
+	onOrder func() // runs while the order is in flight
 }
 
 func (f *fakeIssuer) IssueDNS01Names(_ context.Context, domain tunnelcert.Domain, names []string) (tunnelcert.CertificateBundle, error) {
 	f.domain, f.names = domain, append(f.names, names...)
+	if f.onOrder != nil {
+		f.onOrder()
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tunnelcert.CertificateBundle{}, err

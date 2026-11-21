@@ -161,13 +161,17 @@ func TestServiceProjectsListGetRenewStopAndReadyAliases(t *testing.T) {
 
 	// Stop/expiry makes the lease unreadable for this live resource and the
 	// withdrawn row itself projects as quarantined, never ready.
+	lapsed := exact
+	lapsed.CertificateState = "ready"
+	if view := DomainViewFromRow(lapsed, false); view.State != "dns_error" {
+		t.Fatalf("lapsed workspace domain state = %q, want dns_error (never ready)", view.State)
+	}
 	withdrawn := exact
 	withdrawn.DeletedAt = sql.NullTime{Time: now, Valid: true}
-	withdrawn.OwnershipState = "revoked"
 	withdrawn.CertificateState = "revoked"
 	withdrawn.ConflictState = "quarantined"
 	withdrawn.QuarantineUntil = sql.NullTime{Time: now.Add(previewtunnelstore.DomainQuarantine), Valid: true}
-	if view := DomainViewFromRow(withdrawn); view.State != "quarantined" {
+	if view := DomainViewFromRow(withdrawn, true); view.State != "quarantined" {
 		t.Fatalf("withdrawn domain state = %q, want quarantined", view.State)
 	}
 	repository.lease.TerminalState = "stopped"
@@ -199,7 +203,7 @@ func deterministicIDs() func(prefix string) (string, error) {
 }
 
 func previewDomainRow(id, accountID, previewID, hostname, matchType string, previewGeneration int64, now time.Time) dbsqlc.PreviewDomain {
-	return dbsqlc.PreviewDomain{ID: id, AccountID: accountID, PreviewID: previewID, PreviewGeneration: previewGeneration, Hostname: hostname, MatchType: matchType, OwnershipState: "verified", DnsTarget: "preview.example", ObservedRecords: []byte(`[]`), DnsProvider: "generic", ExpectedRecords: []byte(`[]`), DnsNextCheckAt: now, CertificateStrategy: "managed", CertificateReference: sql.NullString{String: "cert-ref", Valid: true}, CertificateState: "ready", CertificateExpiresAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true}, CaaState: "ready", ConflictState: "clear", Generation: 2, CreatedAt: now, UpdatedAt: now}
+	return dbsqlc.PreviewDomain{ID: id, AccountID: accountID, PreviewID: previewID, PreviewGeneration: previewGeneration, Hostname: hostname, MatchType: matchType, DnsTarget: "preview.example", ObservedRecords: []byte(`[]`), DnsProvider: "generic", ExpectedRecords: []byte(`[]`), DnsNextCheckAt: now, CertificateStrategy: "managed", CertificateReference: sql.NullString{String: "cert-ref", Valid: true}, CertificateState: "ready", CertificateExpiresAt: sql.NullTime{Time: now.Add(time.Hour), Valid: true}, CaaState: "ready", ConflictState: "clear", Generation: 2, CreatedAt: now, UpdatedAt: now}
 }
 
 type serviceRepositoryFake struct {
@@ -235,4 +239,12 @@ func (f *serviceRepositoryFake) ApplyCertificateObservation(context.Context, Cer
 }
 func (f *serviceRepositoryFake) ReadyAliases(context.Context, string, string, time.Time) ([]ReadyAliasRecord, error) {
 	return append([]ReadyAliasRecord(nil), f.ready...), nil
+}
+
+func (f *serviceRepositoryFake) VerifiedWorkspaceDomains(_ context.Context, ids []string) (map[string]bool, error) {
+	verified := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		verified[id] = true
+	}
+	return verified, nil
 }

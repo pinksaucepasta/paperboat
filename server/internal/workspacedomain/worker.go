@@ -102,7 +102,9 @@ func (w *Worker) Run(ctx context.Context, limit int) error {
 		return err
 	}
 	for _, row := range due {
-		if err := w.issue(ctx, row); err != nil {
+		if err := w.issue(ctx, row); errors.Is(err, ErrNotVerified) {
+			continue // lost authority, not an issuer failure: no backoff once it is verified again
+		} else if err != nil {
 			code := certificateFailureCode(err)
 			retry := now.Add(certificateRetry(row.CertificateAttempts + 1))
 			if markErr := w.db.Queries().MarkWorkspaceDomainCertificateFailure(ctx, dbsqlc.MarkWorkspaceDomainCertificateFailureParams{
@@ -206,6 +208,13 @@ func (w *Worker) issue(ctx context.Context, row dbsqlc.WorkspaceDomain) error {
 	wildcard := "*." + row.Hostname
 	domain := tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetWorkspaceDomain, Hostname: wildcard,
 		ChallengeReference: row.ChallengeReference, Generation: 1, Strategy: tunnelcert.StrategyDelegatedDNS01, Issuer: w.wc.IssuerName}
+	// The due list may be stale: the domain must still be verified right before the order starts (after CAA).
+	// A lapse after this read can still cost a CA order, but the conditional store below keeps nothing.
+	if verified, err := w.db.Queries().ListVerifiedWorkspaceDomainIDs(ctx, []string{row.ID}); err != nil {
+		return err
+	} else if len(verified) == 0 {
+		return ErrNotVerified
+	}
 	bundle, err := w.wc.Issuer.IssueDNS01Names(ctx, domain, []string{wildcard, row.Hostname})
 	if err != nil {
 		return err
@@ -223,9 +232,12 @@ func (w *Worker) issue(ctx context.Context, row dbsqlc.WorkspaceDomain) error {
 	if err != nil {
 		return err
 	}
-	_, err = w.db.Queries().StoreWorkspaceDomainCertificate(ctx, dbsqlc.StoreWorkspaceDomainCertificateParams{ID: row.ID,
+	stored, err := w.db.Queries().StoreWorkspaceDomainCertificate(ctx, dbsqlc.StoreWorkspaceDomainCertificateParams{ID: row.ID,
 		MasterKeyReference: sql.NullString{String: w.wc.MasterKeyReference, Valid: true}, CertificateCiphertext: certificate, PrivateKeyCiphertext: key,
 		CertificateFingerprint: identity.Fingerprint[:], CertificateExpiresAt: sql.NullTime{Time: identity.NotAfter, Valid: true}, Now: w.now()})
+	if err == nil && stored == 0 {
+		return ErrNotVerified // lapsed (or removed) while the order ran: the certificate is discarded
+	}
 	return err
 }
 

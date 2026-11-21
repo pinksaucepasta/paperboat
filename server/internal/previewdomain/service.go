@@ -85,11 +85,15 @@ func (s *Service) List(ctx context.Context, request previewtunnelapi.RequestCont
 	if hasMore {
 		rows = rows[:limit]
 	}
+	verified, err := s.repository.VerifiedWorkspaceDomains(ctx, WorkspaceDomainIDs(rows))
+	if err != nil {
+		return Page{}, err
+	}
 	for _, row := range rows {
 		if row.PreviewGeneration != lease.Generation {
 			continue
 		}
-		page.Items = append(page.Items, DomainViewFromRow(row))
+		page.Items = append(page.Items, DomainViewFromRow(row, verified[row.WorkspaceDomainID.String]))
 	}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
@@ -123,7 +127,11 @@ func (s *Service) Get(ctx context.Context, request previewtunnelapi.RequestConte
 	if domain.PreviewGeneration != lease.Generation {
 		return DomainView{}, ErrGenerationConflict
 	}
-	return DomainViewFromRow(domain), nil
+	verified, err := s.repository.VerifiedWorkspaceDomains(ctx, WorkspaceDomainIDs([]dbsqlc.PreviewDomain{domain}))
+	if err != nil {
+		return DomainView{}, err
+	}
+	return DomainViewFromRow(domain, verified[domain.WorkspaceDomainID.String]), nil
 }
 
 func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestContext, previewID string, input Request) (MutationResult, error) {
@@ -189,7 +197,12 @@ func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestCo
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return mutationResult(result, request.RequestID), nil
+	// A replay returns the stored binding: its workspace domain may have lapsed since.
+	verified, err := s.repository.VerifiedWorkspaceDomains(ctx, WorkspaceDomainIDs([]dbsqlc.PreviewDomain{result.Domain}))
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return mutationResult(result, request.RequestID, verified[result.Domain.WorkspaceDomainID.String]), nil
 }
 
 func (s *Service) Delete(ctx context.Context, request previewtunnelapi.RequestContext, previewID, domainID string, input MutationInput) (MutationResult, error) {
@@ -227,7 +240,7 @@ func (s *Service) Delete(ctx context.Context, request previewtunnelapi.RequestCo
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return mutationResult(result, request.RequestID), nil
+	return mutationResult(result, request.RequestID, true), nil // deleted: its terminal state wins
 }
 
 func (s *Service) ReadyAliases(ctx context.Context, request previewtunnelapi.RequestContext, previewID string) ([]ReadyAlias, error) {
@@ -282,7 +295,7 @@ func (s *Service) CreateForPreviewTx(ctx context.Context, tx *db.Tx, input Batch
 	}
 	views := make([]DomainView, 0, len(rows))
 	for _, row := range rows {
-		views = append(views, DomainViewFromRow(row))
+		views = append(views, DomainViewFromRow(row, true)) // created under a verified workspace domain
 	}
 	return views, nil
 }
@@ -308,8 +321,8 @@ func validateMutation(input MutationInput, generation bool) error {
 	return nil
 }
 
-func mutationResult(result RepositoryMutation, requestID string) MutationResult {
-	return MutationResult{Domain: DomainViewFromRow(result.Domain), Operation: operationView(result.Operation, requestID), Replayed: result.Replayed, Changed: result.Changed}
+func mutationResult(result RepositoryMutation, requestID string, verified bool) MutationResult {
+	return MutationResult{Domain: DomainViewFromRow(result.Domain, verified), Operation: operationView(result.Operation, requestID), Replayed: result.Replayed, Changed: result.Changed}
 }
 
 func operationView(row dbsqlc.Operation, requestID string) previewtunnelapi.Operation {

@@ -14,11 +14,11 @@ import (
 )
 
 const getExactTunnelCertificateDomainForEdgeV1 = `-- name: GetExactTunnelCertificateDomainForEdgeV1 :one
-SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
 FROM tunnel_domains AS d
 WHERE d.match_type = 'exact'
   AND d.hostname = $1
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -53,7 +53,6 @@ func (q *Queries) GetExactTunnelCertificateDomainForEdgeV1(ctx context.Context, 
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -64,7 +63,6 @@ func (q *Queries) GetExactTunnelCertificateDomainForEdgeV1(ctx context.Context, 
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -84,12 +82,12 @@ func (q *Queries) GetExactTunnelCertificateDomainForEdgeV1(ctx context.Context, 
 }
 
 const listDuePreviewCertificateDomainsV1 = `-- name: ListDuePreviewCertificateDomainsV1 :many
-SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
+SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
 FROM preview_domains AS d
 JOIN preview_leases AS lease
   ON lease.id = d.preview_id AND lease.account_id = d.account_id
 WHERE d.deleted_at IS NULL
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND (d.certificate_failure_code IS NULL OR d.certificate_renewal_attempted_at IS NULL OR d.certificate_renewal_attempted_at <= $1::timestamptz - interval '1 minute')
   AND lease.terminal_state = 'active'
@@ -170,7 +168,6 @@ func (q *Queries) ListDuePreviewCertificateDomainsV1(ctx context.Context, arg Li
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -187,7 +184,6 @@ func (q *Queries) ListDuePreviewCertificateDomainsV1(ctx context.Context, arg Li
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -206,10 +202,10 @@ func (q *Queries) ListDuePreviewCertificateDomainsV1(ctx context.Context, arg Li
 }
 
 const listDueTunnelCertificateDomainsV1 = `-- name: ListDueTunnelCertificateDomainsV1 :many
-SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
 FROM tunnel_domains AS d
 WHERE d.deleted_at IS NULL
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > $1::timestamptz)
   AND (
@@ -272,7 +268,6 @@ func (q *Queries) ListDueTunnelCertificateDomainsV1(ctx context.Context, arg Lis
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.CertificateStrategy,
@@ -283,7 +278,6 @@ func (q *Queries) ListDueTunnelCertificateDomainsV1(ctx context.Context, arg Lis
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -310,7 +304,7 @@ func (q *Queries) ListDueTunnelCertificateDomainsV1(ctx context.Context, arg Lis
 }
 
 const listOnDemandPreviewDomainsForEdgeV1 = `-- name: ListOnDemandPreviewDomainsForEdgeV1 :many
-SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
+SELECT d.id, d.account_id, d.preview_id, d.preview_generation, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.quarantine_until, d.workspace_domain_id
 FROM preview_domains AS d
 JOIN preview_leases AS lease
   ON lease.id = d.preview_id AND lease.account_id = d.account_id
@@ -320,7 +314,7 @@ JOIN preview_routes AS a
  AND a.owner_session_id=lease.owner_session_id AND a.host_id=lease.owner_machine_id
 WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.match_type = 'one_label_wildcard'
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -385,7 +379,6 @@ func (q *Queries) ListOnDemandPreviewDomainsForEdgeV1(ctx context.Context, arg L
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.DnsProvider,
@@ -402,7 +395,6 @@ func (q *Queries) ListOnDemandPreviewDomainsForEdgeV1(ctx context.Context, arg L
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -421,11 +413,11 @@ func (q *Queries) ListOnDemandPreviewDomainsForEdgeV1(ctx context.Context, arg L
 }
 
 const listOnDemandWildcardDomainsForEdgeV1 = `-- name: ListOnDemandWildcardDomainsForEdgeV1 :many
-SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
 FROM tunnel_domains AS d
 WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.match_type = 'one_label_wildcard'
-  AND workspace_domain_verified(d.workspace_domain_id)
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified')
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -473,7 +465,6 @@ func (q *Queries) ListOnDemandWildcardDomainsForEdgeV1(ctx context.Context, arg 
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.CertificateStrategy,
@@ -484,7 +475,6 @@ func (q *Queries) ListOnDemandWildcardDomainsForEdgeV1(ctx context.Context, arg 
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -531,7 +521,7 @@ WHERE d.id = $1
   AND n.registry_expires_at>$2
   AND n.roles @> ARRAY['edge']::text[]
   AND paperboat.node_preview_eligible(n.id,lease.account_id,lease.id)
-  AND workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear' AND d.deleted_at IS NULL
+  AND EXISTS(SELECT 1 FROM workspace_domains wd WHERE wd.id=d.workspace_domain_id AND wd.ownership_state='verified') AND d.conflict_state='clear' AND d.deleted_at IS NULL
   AND (paperboat.workspace_edge_mode(lease.account_id,lease.owner_team_id)='managed-only' OR paperboat.selfhost_publication_hostname_allowed(d.hostname))
   AND a.expires_at > $2
   AND lease.terminal_state = 'active'
@@ -626,7 +616,7 @@ WHERE id = $4
   AND generation = $5
   AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
 `
 
 type MarkTunnelDomainCertificateFailureV1Params struct {
@@ -654,7 +644,6 @@ func (q *Queries) MarkTunnelDomainCertificateFailureV1(ctx context.Context, arg 
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -665,7 +654,6 @@ func (q *Queries) MarkTunnelDomainCertificateFailureV1(ctx context.Context, arg 
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -701,7 +689,7 @@ WHERE id = $4
   AND workspace_domain_verified(workspace_domain_id)
   AND conflict_state = 'clear'
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
 `
 
 type MarkTunnelDomainCertificateReadyV1Params struct {
@@ -729,7 +717,6 @@ func (q *Queries) MarkTunnelDomainCertificateReadyV1(ctx context.Context, arg Ma
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -740,7 +727,6 @@ func (q *Queries) MarkTunnelDomainCertificateReadyV1(ctx context.Context, arg Ma
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,

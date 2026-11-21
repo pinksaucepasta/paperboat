@@ -252,8 +252,12 @@ func (s *ResourceService) ListDomains(ctx context.Context, request previewtunnel
 		rows = rows[:limit]
 	}
 	page := DomainPage{Items: make([]DomainView, 0, len(rows))}
+	verified, err := s.repository.VerifiedWorkspaceDomains(ctx, workspaceDomainIDs(rows))
+	if err != nil {
+		return DomainPage{}, err
+	}
 	for _, row := range rows {
-		page.Items = append(page.Items, DomainViewFromRow(row))
+		page.Items = append(page.Items, DomainViewFromRow(row, verified[row.WorkspaceDomainID.String]))
 	}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
@@ -277,7 +281,11 @@ func (s *ResourceService) GetDomain(ctx context.Context, request previewtunnelap
 	if err != nil {
 		return DomainView{}, err
 	}
-	return DomainViewFromRow(row), nil
+	verified, err := s.repository.VerifiedWorkspaceDomains(ctx, workspaceDomainIDs([]dbsqlc.TunnelDomain{row}))
+	if err != nil {
+		return DomainView{}, err
+	}
+	return DomainViewFromRow(row, verified[row.WorkspaceDomainID.String]), nil
 }
 
 func (s *ResourceService) CreateDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input DomainCreateRequest) (DomainMutationResult, error) {
@@ -340,7 +348,12 @@ func (s *ResourceService) CreateDomain(ctx context.Context, request previewtunne
 	if err != nil {
 		return DomainMutationResult{}, err
 	}
-	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
+	// A replay returns the stored binding: its workspace domain may have lapsed since.
+	verified, err := s.repository.VerifiedWorkspaceDomains(ctx, workspaceDomainIDs([]dbsqlc.TunnelDomain{result.Domain}))
+	if err != nil {
+		return DomainMutationResult{}, err
+	}
+	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain, verified[result.Domain.WorkspaceDomainID.String]), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
 }
 
 func (s *ResourceService) DeleteDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string, input ResourceMutationInput) (DomainMutationResult, error) {
@@ -369,7 +382,7 @@ func (s *ResourceService) DeleteDomain(ctx context.Context, request previewtunne
 	if err != nil {
 		return DomainMutationResult{}, err
 	}
-	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
+	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain, true), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
 }
 
 func validateDNSProvider(value string) (string, error) {
@@ -540,7 +553,8 @@ func routeRewriteRules(raw []byte) *tunnelrouterules.Rules {
 }
 
 // DomainViewFromRow is the wire view of a tunnel domain binding.
-func DomainViewFromRow(row dbsqlc.TunnelDomain) DomainView {
+// verified is the binding's workspace domain verification (the only owner of that fact).
+func DomainViewFromRow(row dbsqlc.TunnelDomain, verified bool) DomainView {
 	observed := make([]string, 0)
 	var raw []any
 	if json.Unmarshal(row.ObservedRecords, &raw) == nil {
@@ -572,16 +586,17 @@ func DomainViewFromRow(row dbsqlc.TunnelDomain) DomainView {
 		labels = &value
 	}
 	return DomainView{Schema: Schema, Kind: "domain_binding", ID: row.ID, AccountID: row.AccountID, TunnelID: row.TunnelID, RouteID: row.RouteID, Hostname: row.Hostname, MatchType: row.MatchType,
-		WildcardLabels: labels, CertificateStrategy: row.CertificateStrategy, State: wireDomainLifecycleState(row), DNS: dns, Certificate: certificate, Generation: row.Generation, ETag: previewtunnelapi.ETag("domain_binding", row.ID, row.Generation)}
+		WildcardLabels: labels, CertificateStrategy: row.CertificateStrategy, State: wireDomainLifecycleState(row, verified), DNS: dns, Certificate: certificate, Generation: row.Generation, ETag: previewtunnelapi.ETag("domain_binding", row.ID, row.Generation)}
 }
 
-func wireDomainLifecycleState(row dbsqlc.TunnelDomain) string {
-	// Ownership lives on the workspace domain (its own list shows lapses); a binding reports deletion, conflict and TLS.
+func wireDomainLifecycleState(row dbsqlc.TunnelDomain, verified bool) string {
 	switch {
 	case row.DeletedAt.Valid || row.ConflictState == "quarantined":
 		return "quarantined"
 	case row.ConflictState == "conflicted":
 		return "conflict"
+	case !verified: // the workspace domain lapsed: not served, whatever the certificate says
+		return "dns_error"
 	}
 	switch row.CertificateState {
 	case "pending", "issuing", "renewing":
@@ -1125,7 +1140,6 @@ func wireMatchType(value string) string {
 	return value
 }
 
-
 func wireCertificateState(value string) string {
 	if value == "pending" {
 		return "not_requested"
@@ -1234,4 +1248,12 @@ func (c *resourceCursorCodec) DecodeLog(raw, kind, accountID, scopeID string) (i
 		return 0, previewtunnelapi.ErrInvalidCursor
 	}
 	return value.Sequence, nil
+}
+
+func workspaceDomainIDs(rows []dbsqlc.TunnelDomain) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.WorkspaceDomainID.String)
+	}
+	return ids
 }

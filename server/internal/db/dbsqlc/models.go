@@ -2306,7 +2306,6 @@ type PreviewDomain struct {
 	Hostname                      string
 	MatchType                     string
 	OwnershipChallengeReference   string
-	OwnershipState                string
 	DnsTarget                     string
 	ObservedRecords               []byte
 	DnsProvider                   string
@@ -2323,7 +2322,6 @@ type PreviewDomain struct {
 	CertificateFailureCode        sql.NullString
 	CaaState                      string
 	ConflictState                 string
-	LastVerifiedAt                sql.NullTime
 	Generation                    int64
 	CreatedAt                     time.Time
 	UpdatedAt                     time.Time
@@ -3286,7 +3284,6 @@ type TunnelDomain struct {
 	Hostname                      string
 	MatchType                     string
 	OwnershipChallengeReference   string
-	OwnershipState                string
 	DnsTarget                     string
 	ObservedRecords               []byte
 	CertificateStrategy           string
@@ -3297,7 +3294,6 @@ type TunnelDomain struct {
 	CertificateFailureCode        sql.NullString
 	CaaState                      string
 	ConflictState                 string
-	LastVerifiedAt                sql.NullTime
 	Generation                    int64
 	CreatedAt                     time.Time
 	UpdatedAt                     time.Time

@@ -188,6 +188,7 @@ type PreviewDomainRepository interface {
 	Delete(context.Context, MutationRecord) (RepositoryMutation, error)
 	ApplyCertificateObservation(context.Context, CertificateObservationRecord) (RepositoryMutation, error)
 	ReadyAliases(context.Context, string, string, time.Time) ([]ReadyAliasRecord, error)
+	VerifiedWorkspaceDomains(context.Context, []string) (map[string]bool, error)
 }
 
 type ListPosition struct {
@@ -358,9 +359,10 @@ func StableTargetHostname(endpoint string) (string, error) {
 	return host, nil
 }
 
-func DomainViewFromRow(row dbsqlc.PreviewDomain) DomainView {
+// verified is the binding's workspace domain verification (the only owner of that fact).
+func DomainViewFromRow(row dbsqlc.PreviewDomain, verified bool) DomainView {
 	view := DomainView{Schema: Schema, Kind: Kind, ID: row.ID, AccountID: row.AccountID, TargetKind: TargetKind, PreviewID: row.PreviewID,
-		Hostname: row.Hostname, MatchType: row.MatchType, State: wireState(row), Generation: row.Generation,
+		Hostname: row.Hostname, MatchType: row.MatchType, State: wireState(row, verified), Generation: row.Generation,
 		ETag: previewtunnelapi.ETag(Kind, row.ID, row.Generation), Certificate: CertificateState{State: wireCertificateState(row.CertificateState), Failure: nil}, DNS: DNSState{Target: row.DnsTarget}}
 	if row.MatchType == "one_label_wildcard" {
 		labels := 1
@@ -396,7 +398,7 @@ func wireCertificateState(value string) string {
 	return value
 }
 
-func wireState(row dbsqlc.PreviewDomain) string {
+func wireState(row dbsqlc.PreviewDomain, verified bool) string {
 	if row.DeletedAt.Valid {
 		if row.ConflictState == "quarantined" {
 			return "quarantined"
@@ -409,7 +411,9 @@ func wireState(row dbsqlc.PreviewDomain) string {
 	case "conflicted":
 		return "conflict"
 	}
-	// Ownership lives on the workspace domain (its own list shows lapses); a binding reports conflict and TLS.
+	if !verified { // the workspace domain lapsed: not served, whatever the certificate says
+		return "dns_error"
+	}
 	switch row.CertificateState {
 	case "pending", "issuing", "renewing":
 		return "issuing_tls"
@@ -433,4 +437,13 @@ func jsonUnmarshalStrings(raw []byte, out *[]string) error {
 	}
 	*out = append((*out)[:0], values...)
 	return nil
+}
+
+// WorkspaceDomainIDs lists the workspace domains rows are bound through, for VerifiedWorkspaceDomains.
+func WorkspaceDomainIDs(rows []dbsqlc.PreviewDomain) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.WorkspaceDomainID.String)
+	}
+	return ids
 }

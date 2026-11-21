@@ -71,7 +71,7 @@ VALUES
    CASE WHEN $10 = 'none' THEN 'not_applicable' ELSE 'unknown' END, 'clear',
    1, $11, $11, $12,
    $13::jsonb, $11, $14)
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
 `
 
 type CreateTunnelDomainV1Params struct {
@@ -117,7 +117,6 @@ func (q *Queries) CreateTunnelDomainV1(ctx context.Context, arg CreateTunnelDoma
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -128,7 +127,6 @@ func (q *Queries) CreateTunnelDomainV1(ctx context.Context, arg CreateTunnelDoma
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -387,7 +385,7 @@ WHERE id = $3
   AND tunnel_id = $5
   AND generation = $6
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
 `
 
 type DeleteTunnelDomainV1Params struct {
@@ -417,7 +415,6 @@ func (q *Queries) DeleteTunnelDomainV1(ctx context.Context, arg DeleteTunnelDoma
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -428,7 +425,6 @@ func (q *Queries) DeleteTunnelDomainV1(ctx context.Context, arg DeleteTunnelDoma
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -555,7 +551,7 @@ func (q *Queries) GetTunnelConfigGenerationV1(ctx context.Context, arg GetTunnel
 }
 
 const getTunnelDomainByHostnameV1 = `-- name: GetTunnelDomainByHostnameV1 :one
-SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.ownership_state, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.last_verified_at, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until, tunnel_domains.certificate_retry_at, tunnel_domains.certificate_failure_attempts, tunnel_domains.workspace_domain_id
+SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until, tunnel_domains.certificate_retry_at, tunnel_domains.certificate_failure_attempts, tunnel_domains.workspace_domain_id
 FROM tunnel_domains
 WHERE hostname = $1
 ORDER BY created_at DESC, id DESC
@@ -573,7 +569,6 @@ func (q *Queries) GetTunnelDomainByHostnameV1(ctx context.Context, hostname stri
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -584,7 +579,6 @@ func (q *Queries) GetTunnelDomainByHostnameV1(ctx context.Context, hostname stri
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -604,7 +598,7 @@ func (q *Queries) GetTunnelDomainByHostnameV1(ctx context.Context, hostname stri
 }
 
 const getTunnelDomainV1 = `-- name: GetTunnelDomainV1 :one
-SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.ownership_state, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.last_verified_at, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
+SELECT d.id, d.account_id, d.tunnel_id, d.route_id, d.hostname, d.match_type, d.ownership_challenge_reference, d.dns_target, d.observed_records, d.certificate_strategy, d.certificate_reference, d.certificate_state, d.certificate_expires_at, d.certificate_renewal_attempted_at, d.certificate_failure_code, d.caa_state, d.conflict_state, d.generation, d.created_at, d.updated_at, d.deleted_at, d.dns_provider, d.expected_records, d.dns_last_checked_at, d.dns_next_check_at, d.dns_ttl_seconds, d.verification_attempts, d.quarantine_until, d.certificate_retry_at, d.certificate_failure_attempts, d.workspace_domain_id
 FROM tunnel_domains AS d
 WHERE d.id = $1
   AND d.account_id = $2
@@ -628,7 +622,6 @@ func (q *Queries) GetTunnelDomainV1(ctx context.Context, arg GetTunnelDomainV1Pa
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -639,7 +632,6 @@ func (q *Queries) GetTunnelDomainV1(ctx context.Context, arg GetTunnelDomainV1Pa
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -938,7 +930,7 @@ func (q *Queries) ListPreviewLogsV1(ctx context.Context, arg ListPreviewLogsV1Pa
 }
 
 const listTunnelDomainsV1 = `-- name: ListTunnelDomainsV1 :many
-SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.ownership_state, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.last_verified_at, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until, tunnel_domains.certificate_retry_at, tunnel_domains.certificate_failure_attempts, tunnel_domains.workspace_domain_id
+SELECT tunnel_domains.id, tunnel_domains.account_id, tunnel_domains.tunnel_id, tunnel_domains.route_id, tunnel_domains.hostname, tunnel_domains.match_type, tunnel_domains.ownership_challenge_reference, tunnel_domains.dns_target, tunnel_domains.observed_records, tunnel_domains.certificate_strategy, tunnel_domains.certificate_reference, tunnel_domains.certificate_state, tunnel_domains.certificate_expires_at, tunnel_domains.certificate_renewal_attempted_at, tunnel_domains.certificate_failure_code, tunnel_domains.caa_state, tunnel_domains.conflict_state, tunnel_domains.generation, tunnel_domains.created_at, tunnel_domains.updated_at, tunnel_domains.deleted_at, tunnel_domains.dns_provider, tunnel_domains.expected_records, tunnel_domains.dns_last_checked_at, tunnel_domains.dns_next_check_at, tunnel_domains.dns_ttl_seconds, tunnel_domains.verification_attempts, tunnel_domains.quarantine_until, tunnel_domains.certificate_retry_at, tunnel_domains.certificate_failure_attempts, tunnel_domains.workspace_domain_id
 FROM tunnel_domains
 WHERE account_id = $1
   AND tunnel_id = $2
@@ -985,7 +977,6 @@ func (q *Queries) ListTunnelDomainsV1(ctx context.Context, arg ListTunnelDomains
 			&i.Hostname,
 			&i.MatchType,
 			&i.OwnershipChallengeReference,
-			&i.OwnershipState,
 			&i.DnsTarget,
 			&i.ObservedRecords,
 			&i.CertificateStrategy,
@@ -996,7 +987,6 @@ func (q *Queries) ListTunnelDomainsV1(ctx context.Context, arg ListTunnelDomains
 			&i.CertificateFailureCode,
 			&i.CaaState,
 			&i.ConflictState,
-			&i.LastVerifiedAt,
 			&i.Generation,
 			&i.CreatedAt,
 			&i.UpdatedAt,

@@ -157,7 +157,7 @@ func resourceRoute(id, protocol, matchType string) dbsqlc.TunnelRoute {
 }
 
 func resourceDomain(id, hostname, ownership, conflict string) dbsqlc.TunnelDomain {
-	return dbsqlc.TunnelDomain{ID: id, AccountID: "acct_1", TunnelID: "tun_1", RouteID: "rte_1", Hostname: hostname, MatchType: "exact", OwnershipChallengeReference: "dns-challenge://dns_1", OwnershipState: ownership, DnsTarget: "target.example.net", ObservedRecords: []byte(`[]`), CertificateStrategy: "managed", CertificateState: "pending", ConflictState: conflict, Generation: 2, CreatedAt: testNow.Add(-time.Minute), UpdatedAt: testNow}
+	return dbsqlc.TunnelDomain{ID: id, AccountID: "acct_1", TunnelID: "tun_1", RouteID: "rte_1", Hostname: hostname, MatchType: "exact", OwnershipChallengeReference: "dns-challenge://dns_1", DnsTarget: "target.example.net", ObservedRecords: []byte(`[]`), CertificateStrategy: "managed", CertificateState: "pending", ConflictState: conflict, Generation: 2, CreatedAt: testNow.Add(-time.Minute), UpdatedAt: testNow}
 }
 
 func resourceOperation(id, resourceID, phase, state, outcome string) dbsqlc.Operation {
@@ -537,3 +537,11 @@ AgNIADBFAiEAvTVH1jZGj+VY1uTmZHvXen/x/gXT3CtGjWVraatH4H4CIGpr/0YE
 cmzbAqwChtlkH/qpOVhGLFYWJMHz90AjSyGz
 -----END CERTIFICATE-----
 `
+
+func (f *fakeResourceRepository) VerifiedWorkspaceDomains(_ context.Context, ids []string) (map[string]bool, error) {
+	verified := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		verified[id] = true
+	}
+	return verified, nil
+}

@@ -24,7 +24,7 @@ WHERE id = $7
   AND generation = $8
   AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
-RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
+RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
 `
 
 type ApplyTunnelDomainCertificateObservationV1Params struct {
@@ -58,7 +58,6 @@ func (q *Queries) ApplyTunnelDomainCertificateObservationV1(ctx context.Context,
 		&i.Hostname,
 		&i.MatchType,
 		&i.OwnershipChallengeReference,
-		&i.OwnershipState,
 		&i.DnsTarget,
 		&i.ObservedRecords,
 		&i.CertificateStrategy,
@@ -69,7 +68,6 @@ func (q *Queries) ApplyTunnelDomainCertificateObservationV1(ctx context.Context,
 		&i.CertificateFailureCode,
 		&i.CaaState,
 		&i.ConflictState,
-		&i.LastVerifiedAt,
 		&i.Generation,
 		&i.CreatedAt,
 		&i.UpdatedAt,

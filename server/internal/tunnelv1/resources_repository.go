@@ -1058,3 +1058,16 @@ func (r *SQLRepository) ListResourcePreviewLogs(ctx context.Context, accountID, 
 	rows, err := r.db.Queries().ListPreviewLogsV1(ctx, dbsqlc.ListPreviewLogsV1Params{AccountID: accountID, PreviewID: nullableString(previewID), AfterSequence: sql.NullInt64{Int64: after, Valid: true}, RowLimit: int32(limit)})
 	return rows, translate(err)
 }
+
+// VerifiedWorkspaceDomains reports which of ids are verified workspace domains.
+func (r *SQLRepository) VerifiedWorkspaceDomains(ctx context.Context, ids []string) (map[string]bool, error) {
+	rows, err := r.db.Queries().ListVerifiedWorkspaceDomainIDs(ctx, ids)
+	if err != nil {
+		return nil, translate(err)
+	}
+	verified := make(map[string]bool, len(rows))
+	for _, id := range rows {
+		verified[id] = true
+	}
+	return verified, nil
+}
