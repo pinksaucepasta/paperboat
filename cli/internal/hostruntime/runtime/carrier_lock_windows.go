@@ -30,7 +30,9 @@ func lockCarrierFile(path string) (func() error, error) {
 		return nil, err
 	}
 	descriptor := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + user.User.Sid.String() + ")"
-	handle, err := createCarrierRoleLock(path, descriptor)
+	// The owner is named: an elevated token would otherwise make Administrators the owner and refuse its own file.
+	owned := "O:" + user.User.Sid.String() + descriptor
+	handle, err := createCarrierRoleLock(path, owned)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +43,7 @@ func lockCarrierFile(path string) (func() error, error) {
 		if removeErr := os.Remove(path); removeErr != nil {
 			return nil, errors.Join(err, removeErr)
 		}
-		if handle, err = createCarrierRoleLock(path, descriptor); err != nil {
+		if handle, err = createCarrierRoleLock(path, owned); err != nil {
 			return nil, err
 		}
 		if err := checkCarrierRoleLock(handle, user.User.Sid, descriptor); err != nil {
