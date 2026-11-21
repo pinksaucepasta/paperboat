@@ -55,7 +55,7 @@ export function openAlerts(reports: Reports | undefined, now: number): Alert[] {
     alerts.push({ id: "deploy:kept-migrated", level: "critical", title: "A failed deploy could not be rolled back", body: `${deploy.what} failed its canary check, but its database migrations have no passing compatibility check with the previous server, so the new server keeps serving. Deploy a fix forward.`, since: deploy.at })
   for (const report of reports ?? []) {
     if (!report.source.startsWith("edge-certificate:") || typeof report.payload !== "object") continue
-    const edge = report.source.slice("edge-certificate:".length)
+    const edge = report.source.slice("edge-certificate:".length).toLowerCase()
     const cert = { payload: report.payload as EdgeCertificatePayload, reported_at: report.reported_at }
     const stale = isStale(cert, now)
     // Only an explicit success is healthy: a malformed report reads as a failure, and a failure stays critical until a success arrives.

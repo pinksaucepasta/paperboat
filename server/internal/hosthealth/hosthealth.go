@@ -60,6 +60,9 @@ func (s *Service) Authenticate(token string) bool {
 
 func (s *Service) Ingest(ctx context.Context, r Report) error {
 	var object map[string]json.RawMessage
+	if strings.HasPrefix(r.Source, edgeCertificatePrefix) {
+		r.Source = strings.ToLower(r.Source) // hostnames are case-insensitive: one row per edge
+	}
 	if !knownSource.MatchString(r.Source) || len(r.Payload) == 0 || len(r.Payload) > maxPayload || json.Unmarshal(r.Payload, &object) != nil || object == nil {
 		return ErrInvalid
 	}

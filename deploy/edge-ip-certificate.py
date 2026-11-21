@@ -128,17 +128,34 @@ def main():
 
 def report(args, ok, error):
     """The admin panel alerts while this edge's renewal fails, or when no check arrived for a day (four missed timer runs)."""
-    # Only a host renewal itself accepts names the alert; anything else sends nothing (silent while
-    # misconfigured: the staleness alert and the local renew.log still show it).
+    # The alert is named by the host renewal accepts; a bad or unreadable host still alerts, named by the
+    # edge's node id (never by a hostname, which could collide). Neither usable: nothing is sent and the
+    # staleness alert plus the local renew.log show it.
+    error = str(error)[:300]
     try:
         host = json.loads((Path(args.state_dir) / "tunnel/deployment.json").read_text())["connector_advertise_host"]
         if not isinstance(host, str):
-            return
-        host = subject_flags(host)[1].lower()  # one alert record per edge whatever the case
+            raise TypeError
+        source = "edge-certificate:" + subject_flags(host)[1].lower()  # one alert record per edge whatever the case
     except (OSError, ValueError, KeyError, TypeError, IndexError, RecursionError):
-        return
-    health_report.push("edge-certificate:" + host, {"ok": ok, "error": str(error)[:300], "stale_after_seconds": 86400})
+        source = node_source(args)
+        if source is None:
+            return
+        ok, error = False, "the advertised connector host is missing or invalid; fix tunnel/deployment.json. " + error
+        error = error[:300]
+    health_report.push(source, {"ok": ok, "error": error, "stale_after_seconds": 86400})
 
+
+def node_source(args):
+    try:
+        runtime = json.loads((Path(args.state_dir) / "tunnel/runtime.args").read_text())
+        node = runtime[runtime.index("-node-id") + 1] if isinstance(runtime, list) else None
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError, RecursionError):
+        return None
+    # Within the edge identity pattern and the server's alert source pattern (no "_" there).
+    if not isinstance(node, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,127}", node):
+        return None
+    return "edge-certificate:node-" + node
 
 if __name__ == "__main__":
     raise SystemExit(main())

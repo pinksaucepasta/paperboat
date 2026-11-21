@@ -1,4 +1,4 @@
-"""report() names the alert only with a host renewal accepts; anything else pushes nothing and never raises."""
+"""report() names the alert with a host renewal accepts, else with the edge's node id; neither: pushes nothing, never raises."""
 import importlib.util
 import json
 import sys
@@ -17,12 +17,14 @@ MISSING = object()
 
 
 class EdgeIpCertificateReportTest(unittest.TestCase):
-    def report(self, doc=MISSING, raw=None, error='boom'):
+    def report(self, doc=MISSING, raw=None, error='boom', runtime=MISSING):
         with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'tunnel').mkdir()
             if raw is not None or doc is not MISSING:
-                (Path(d) / 'tunnel').mkdir()
                 text = raw if raw is not None else json.dumps(doc)
                 (Path(d) / 'tunnel/deployment.json').write_text(text)
+            if runtime is not MISSING:
+                (Path(d) / 'tunnel/runtime.args').write_text(runtime if isinstance(runtime, str) else json.dumps(runtime))
             with mock.patch.object(edge.health_report, 'push') as push:
                 edge.report(SimpleNamespace(state_dir=d), False, error)
             return push
@@ -54,6 +56,32 @@ class EdgeIpCertificateReportTest(unittest.TestCase):
         self.report(['8.8.8.8']).assert_not_called()
         self.report('8.8.8.8').assert_not_called()
         self.report(raw='[' * 100000).assert_not_called()
+
+    def test_bad_host_alerts_by_node_id(self):
+        args = ['-node-id', 'edge-01', '-edge-pool', 'p']
+        for doc in [{'connector_advertise_host': 'a;rm'}, {'connector_advertise_host': None}, {}, MISSING]:
+            with self.subTest(doc=doc):
+                push = self.report(doc, runtime=args, error='x' * 1000)
+                push.assert_called_once()
+                source, payload = push.call_args.args
+                self.assertEqual(source, 'edge-certificate:node-edge-01')
+                self.assertFalse(payload['ok'])
+                self.assertIn('advertised connector host', payload['error'])
+                self.assertNotIn('a;rm', payload['error'])
+                self.assertLessEqual(len(payload['error']), 300)
+        push = self.report(raw='{', runtime=args)
+        self.assertEqual(push.call_args.args[0], 'edge-certificate:node-edge-01')
+
+    def test_bad_host_without_usable_node_id_pushes_nothing(self):
+        for runtime in [MISSING, '{', ['-node-id'], ['-edge-pool', 'p'], ['-node-id', 'Edge'], ['-node-id', 'a_b'],
+                        ['-node-id', 'a' * 129], ['-node-id', 'a\n'], ['-node-id', '../x'], ['-node-id', 5],
+                        {'-node-id': 'x'}, 'x-node-id abc', '[' * 100000]:
+            with self.subTest(runtime=repr(runtime)[:40]):
+                self.report({'connector_advertise_host': 'a;rm'}, runtime=runtime).assert_not_called()
+
+    def test_valid_host_ignores_node_id(self):
+        push = self.report({'connector_advertise_host': 'Example.COM'}, runtime=['-node-id', 'edge-01'])
+        push.assert_called_once_with('edge-certificate:example.com', {'ok': False, 'error': 'boom', 'stale_after_seconds': 86400})
 
     def test_error_capped(self):
         push = self.report({'connector_advertise_host': '8.8.8.8'}, error='x' * 1000)
