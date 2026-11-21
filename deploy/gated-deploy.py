@@ -16,7 +16,10 @@ Runs on build host, next to the production canary (tools/probe/canary.py, user u
      tools/device-smoke/skew_check.sh); otherwise it keeps serving and an alert asks for a roll-forward fix.
 Exit: 0 kept, 1 rolled back and green again, 2 rolled back and still red (or rollback failed),
 3 refused (canary red before), 4 deploy lock held by someone else, 5 refused (staging failed),
-6 red but the server was kept on the migrated schema: roll forward.
+6 red but the server was kept on the migrated schema: roll forward,
+7 kept and green, but the deployed/<version> branch could not be recorded (tools/check_migrations.py reads it).
+After a kept deploy the serving server's commit is pushed to origin as a new branch deployed/<version> (the image tag), never
+forced: skipped when it already points at that commit, a failure when it points anywhere else.
 """
 import argparse, json, os, re, shlex, subprocess, sys, time
 from datetime import datetime, timezone
@@ -32,6 +35,7 @@ SERVER_IMAGE = ("docker inspect --format '{{{{.Config.Image}}}}' \"$(python3 -c 
                 "print(json.load(open('{d}/server-rollout.json'))['active'])\")\"")
 REVISION = "docker image inspect --format '{{{{index .Config.Labels \"org.opencontainers.image.revision\"}}}}' {}"
 SCHEMA_REFUSED = 3  # rollout-server.py: rollback across migrations without a schema-skew pass
+REPO = Path(__file__).resolve().parent.parent
 EDGE_IMAGES = "sudo -n docker ps --filter name=paperboat-pbh- --format '{{.Names}} {{.Image}}'"
 
 
@@ -52,11 +56,26 @@ def parse_edge(text):
 
 class Gate:
     def __init__(self, args, sh, deploy, canary, wall=time.time, mono=time.monotonic, say=print, stage=None,
-                 skew_status=None, alert=None, report=None):
+                 skew_status=None, alert=None, report=None, publish=None):
         self.a, self.sh, self.deploy, self.canary, self.stage = args, sh, deploy, canary, stage
         self.wall, self.mono, self.say = wall, mono, say
         self.skew_status, self.alert = skew_status or github_skew_status, alert or send_alert
         self.report = report or health_report.push
+        self.publish = publish or publish_deployed
+
+    def record_deployed(self):
+        """Push the serving server's commit as origin's deployed/<version>; (ok, message). Never raises."""
+        try:
+            rc, out = self.sh(self.a.server_host, SERVER_IMAGE.format(d=self.a.directory))
+            image = out.strip()
+            version = image.rsplit(":", 1)[-1] if ":" in image else ""
+            rc2, rev = self.sh(self.a.server_host, REVISION.format(shlex.quote(image))) if rc == 0 and image else (1, "")
+            commit = rev.strip()
+            if not re.fullmatch(r"\d[\w.-]*", version) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+                return False, f"cannot name the deployed commit and version from image {image!r} (commit {commit!r})"
+            return self.publish(commit, version)
+        except Exception as error:  # the deploy is already healthy; only the record failed
+            return False, f"deployed branch not recorded: {error}"
 
     def schema_skew_passed(self, previous, current):
         """True when skew_check.sh's schema stage passed for the previous server image on the current one's schema."""
@@ -149,10 +168,14 @@ class Gate:
             else:
                 green, run = self.wait_green(switched)
                 if green:
-                    self.say(f"kept: canary green after the switch (run {run['started']})")
                     self.report("deploy", {"rolled_back": False, "kept_migrated": False, "what": self.a.what[:200],
                                            "at": iso(self.wall())})
-                    return 0
+                    ok, message = self.record_deployed()
+                    self.say(message)
+                    self.say(f"kept: canary green after the switch (run {run['started']})")
+                    if not ok:
+                        self.alert(f"deploy kept and green, but deployed/<version> was not recorded: {message}")
+                    return 0 if ok else 7
                 failed = [s["step"] for s in (run or {}).get("steps", []) if not s.get("ok")]
                 reason = f"no green canary run within {self.a.wait} s of the switch (failing: {', '.join(failed) or 'no result'})"
             self.say(f"rolling back: {reason}")
@@ -173,6 +196,29 @@ class Gate:
             return 6 if kept else 1 if ok and green else 2
         finally:
             self.sh(self.a.server_host, f"rm -f {self.a.directory}/deploy.lock")
+
+
+def publish_deployed(commit, version):
+    """Create origin's refs/heads/deployed/<version> at `commit` as a new branch only (no force); (ok, message).
+    Run from this repository's checkout, which must have the commit."""
+    ref = f"refs/heads/deployed/{version}"
+    try:
+        listed = subprocess.run(["git", "ls-remote", "origin", ref], cwd=REPO, capture_output=True, text=True, timeout=120)
+        if listed.returncode != 0:
+            return False, f"deployed branch not recorded: git ls-remote failed: {listed.stderr.strip()[:200]}"
+        existing = listed.stdout.split()[0] if listed.stdout.strip() else ""
+        if existing == commit:
+            return True, f"deployed/{version} already at {commit[:12]}"
+        if existing:
+            return False, (f"deployed/{version} already exists at {existing[:12]}, not the deployed commit {commit[:12]}; "
+                           "left unchanged")
+        pushed = subprocess.run(["git", "push", "origin", f"{commit}:{ref}"], cwd=REPO, capture_output=True, text=True,
+                                timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return False, f"deployed branch not recorded: {error}"
+    if pushed.returncode != 0:
+        return False, f"deployed branch not recorded: git push failed: {pushed.stderr.strip()[:200]}"
+    return True, f"recorded deployed/{version} at {commit[:12]}"
 
 
 def github_skew_status(commit, context):

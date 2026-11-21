@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +35,7 @@ class Fake:
         self.migrated = False  # the deploy applied migrations: rollout-server.py refuses a rollback without --schema-skew-ok
         self.skew = {}  # (commit, context) -> GitHub status state
         self.alerts = []
+        self.published = []  # (commit, version) pushed as origin's deployed/<version>
         self.reports = []  # (source, payload) pushed to the admin panel
 
     def sh(self, target, script):
@@ -81,13 +83,14 @@ class Fake:
         return status(self.after.pop(0) if self.after else False, self.clock)
 
 
-def gate(fake, status_file, force='', wait=300, stage=None):
+def gate(fake, status_file, force='', wait=300, stage=None, publish=None):
     args = SimpleNamespace(what='W4 server 2', server_host='root@control', directory='/opt/paperboat',
                            edge=['local'], wait=wait, force=force, canary_status=status_file)
     out = []
     g = gated.Gate(args, fake.sh, fake.deploy, fake.canary, wall=lambda: fake.clock, mono=lambda: fake.clock,
                    say=out.append, stage=stage, skew_status=lambda c, ctx: fake.skew.get((c, ctx), ''),
-                   alert=fake.alerts.append, report=lambda *r: fake.reports.append(r))
+                   alert=fake.alerts.append, report=lambda *r: fake.reports.append(r),
+                   publish=publish or (lambda commit, version: fake.published.append((commit, version)) or (True, 'recorded')))
     return g.run(), out
 
 
@@ -112,6 +115,43 @@ class GatedDeployTest(unittest.TestCase):
         self.assertIsNone(fake.lock)
         self.assertTrue(out[-1].startswith('kept'))
         self.assertEqual([(s, p['rolled_back']) for s, p in fake.reports], [('deploy', False)])  # clears the panel alert
+
+    def test_kept_deploy_records_the_deployed_commit_under_its_version(self):
+        fake = Fake([True])
+        fake.images['server'] = 'paperboat-server:2026.11.20.1'
+        orig = fake.deploy
+        fake.deploy = lambda: (orig(), fake.images.update(server='paperboat-server:2026.11.20.2'))[0]
+        self.assertEqual(gate(fake, self.status)[0], 0)
+        self.assertEqual(fake.published, [('2' * 40, '2026.11.20.2')])
+
+    def test_rolled_back_or_refused_deploys_record_nothing(self):
+        fake = Fake([False] * 5 + [True])
+        gate(fake, self.status)
+        self.assertEqual(fake.published, [])
+        self.write(status(False, T0 - 30))
+        fake = Fake([True])
+        self.assertEqual(gate(fake, self.status)[0], 3)
+        self.assertEqual(fake.published, [])
+
+    def test_failed_record_is_loud_exit_7_without_a_rollback(self):
+        fake = Fake([True])
+        code, out = gate(fake, self.status, publish=lambda c, v: (False, 'deployed/2 already exists at abc, not the deployed commit'))
+        self.assertEqual(code, 7)
+        self.assertEqual(fake.images['server'], 'paperboat-server:2')  # kept
+        self.assertFalse(any('--image' in s for _, s in fake.calls))
+        self.assertEqual(len(fake.alerts), 1)
+        self.assertIn('already exists', out[-2])
+        self.assertIsNone(fake.lock)
+
+    def test_unnameable_version_or_commit_fails_visibly(self):
+        fake = Fake([True])
+        fake.sh_orig = fake.sh
+        def sh(target, script):
+            return (0, 'paperboat-server@sha256:abc\n') if 'server-rollout.json' in script and fake.deployed else fake.sh_orig(target, script)
+        fake.sh = sh
+        code, out = gate(fake, self.status)
+        self.assertEqual((code, fake.published), (7, []))
+        self.assertIn('cannot name', out[-2])
 
     def test_access_pass_does_not_override_a_failed_account_probe(self):
         fake = Fake([True] * 5)
@@ -253,6 +293,43 @@ class GatedDeployTest(unittest.TestCase):
     def test_parse_edge(self):
         self.assertEqual(gated.parse_edge('paperboat-pbh-1-relay r:1\npaperboat-pbh-1-edge t:2\nother x\n'),
                          {'relay': 'r:1', 'edge': 't:2'})
+
+class PublishDeployed(unittest.TestCase):
+    """publish_deployed with git mocked: new branch only, same commit skips, a different commit fails, never forced."""
+    C, OTHER = 'a' * 40, 'b' * 40
+
+    def run_git(self, remote_output, push_rc=0):
+        calls = []
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if cmd[1] == 'ls-remote':
+                return SimpleNamespace(returncode=0, stdout=remote_output, stderr='')
+            return SimpleNamespace(returncode=push_rc, stdout='', stderr='rejected' if push_rc else '')
+        with mock.patch.object(gated.subprocess, 'run', fake_run):
+            return gated.publish_deployed(self.C, '2026.11.20.1'), calls
+
+    def test_new_branch_is_pushed_without_force(self):
+        (ok, _), calls = self.run_git('')
+        self.assertTrue(ok)
+        self.assertEqual(calls[-1], ['git', 'push', 'origin', f'{self.C}:refs/heads/deployed/2026.11.20.1'])
+        self.assertFalse(any('force' in a or a.startswith('+') or a.startswith('-f') for c in calls for a in c))
+
+    def test_same_commit_is_skipped(self):
+        (ok, message), calls = self.run_git(f'{self.C}\trefs/heads/deployed/2026.11.20.1\n')
+        self.assertTrue(ok)
+        self.assertIn('already at', message)
+        self.assertEqual([c[1] for c in calls], ['ls-remote'])
+
+    def test_different_commit_fails_and_is_not_pushed(self):
+        (ok, message), calls = self.run_git(f'{self.OTHER}\trefs/heads/deployed/2026.11.20.1\n')
+        self.assertFalse(ok)
+        self.assertIn('already exists', message)
+        self.assertEqual([c[1] for c in calls], ['ls-remote'])
+
+    def test_rejected_push_fails(self):
+        (ok, message), _ = self.run_git('', push_rc=1)
+        self.assertFalse(ok)
+        self.assertIn('git push failed', message)
 
 
 if __name__ == '__main__':
