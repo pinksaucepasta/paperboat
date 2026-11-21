@@ -401,7 +401,11 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 			_ = socket.Close()
 			continue
 		}
-		o.workers.Add(1)
+		if !o.startWorker() {
+			// Close already waited for workers: a worker started now would outlive it.
+			_ = socket.Close()
+			return classifyPeerOperationFailure(ctx, "listener_accept", "native_private_failed", net.ErrClosed)
+		}
 		go func() {
 			defer o.workers.Done()
 			listenerConfig := peerquic.DevelopmentSessionConfig(peerquic.ClassInteractive)
@@ -509,6 +513,18 @@ func (o *Owner) add(session *Session) error {
 	}
 	o.sessions[session] = struct{}{}
 	return nil
+}
+
+// startWorker counts a worker unless Close has begun; Close sets closed under
+// the same lock before it waits, so every counted worker is awaited.
+func (o *Owner) startWorker() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return false
+	}
+	o.workers.Add(1)
+	return true
 }
 func (o *Owner) remove(session *Session) { o.mu.Lock(); delete(o.sessions, session); o.mu.Unlock() }
 

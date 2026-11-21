@@ -68,7 +68,7 @@ type productionNativePeerService struct {
 	lastErr         error
 	cleanupErr      error
 	startGeneration func(context.Context) (*productionNativePeerGeneration, error)
-	inbound         inboundWatchdog
+	inbound         native.InboundWatchdog
 }
 
 type productionNativePeerGeneration struct {
@@ -88,6 +88,10 @@ type productionNativePeerGeneration struct {
 	done   sync.WaitGroup
 	once   sync.Once
 }
+
+// errInboundWedged ends a generation whose inbound handshakes keep timing out
+// while none completes; supervise rebuilds the listener, socket and endpoints.
+var errInboundWedged = errors.New("inbound peer handshakes keep timing out; rebuilding the native listener")
 
 const productionNativePeerRestartDelay = time.Second
 
@@ -274,7 +278,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	s.inbound.reset()
+	s.inbound.Reset()
 	generationErrors := make(chan error, 3)
 	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
@@ -282,7 +286,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 			return bandwidth.Path{Mode: mode, NodeID: node}
 		})
 	}, Observe: func(event native.Event) {
-		if trip, next := s.inbound.observe(event.Kind, event.Err); trip {
+		if trip, next := s.inbound.Observe(event); trip {
 			diagnosticlog.TryInfo("native inbound watchdog", "stage", "rebuild", "next_window", next.String())
 			select {
 			case generationErrors <- errInboundWedged:
@@ -462,6 +466,9 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 		case err := <-generation.errors:
 			if ctx.Err() != nil {
 				return
+			}
+			if errors.Is(err, errInboundWedged) && !s.inbound.CommitRebuild() {
+				continue // an accept landed after the trip: keep its session
 			}
 			if err == nil {
 				err = errors.New("native peer worker stopped unexpectedly")

@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/auth"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/cli/internal/nativeprivate"
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
@@ -361,5 +362,51 @@ func TestNativePeerRestartDelayBacksOffToAMinute(t *testing.T) {
 	}
 	if got := nativePeerRestartDelay(100); got != time.Minute {
 		t.Fatalf("many failures: %v", got)
+	}
+}
+
+func TestProductionNativePeerSupervisorRebuildsOnlyAStillWedgedListener(t *testing.T) {
+	var firstStopped atomic.Bool
+	first := &productionNativePeerGeneration{cancel: func() { firstStopped.Store(true) }, errors: make(chan error, 1)}
+	second := &productionNativePeerGeneration{cancel: func() {}, errors: make(chan error, 1)}
+	var starts atomic.Int32
+	service := &productionNativePeerService{}
+	service.startGeneration = func(context.Context) (*productionNativePeerGeneration, error) {
+		if starts.Add(1) == 1 {
+			return first, nil
+		}
+		return second, nil
+	}
+	if err := service.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Shutdown(context.Background())
+	now := time.Unix(1_000, 0)
+	service.inbound.Now = func() time.Time { now = now.Add(15 * time.Second); return now }
+	timeout := native.Event{Kind: "accept_failed", Err: context.DeadlineExceeded}
+	trip := func() {
+		for tripped := false; !tripped; {
+			tripped, _ = service.inbound.Observe(timeout)
+		}
+	}
+	trip()
+	service.inbound.Observe(native.Event{Kind: "accepted"}) // lands before supervise reads the trip
+	first.errors <- errInboundWedged
+	for len(first.errors) != 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Past the 1 s restart delay: a wrong teardown would have stopped the first and started a second.
+	time.Sleep(productionNativePeerRestartDelay + 500*time.Millisecond)
+	if firstStopped.Load() || starts.Load() != 1 {
+		t.Fatal("a rebuild queued before an accept closed the accepted listener")
+	}
+	trip()
+	first.errors <- errInboundWedged
+	deadline := time.Now().Add(3 * time.Second)
+	for starts.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if starts.Load() != 2 {
+		t.Fatal("a still-wedged listener was not rebuilt")
 	}
 }
