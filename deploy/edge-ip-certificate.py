@@ -5,7 +5,6 @@ import ipaddress
 import json
 import os
 import re
-import socket
 from pathlib import Path
 import subprocess
 
@@ -37,10 +36,10 @@ def subject_flags(host):
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*", host) or len(host) > 253:
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*", host) or len(host) > 253:
             raise ValueError("the enrolled edge advertises an invalid host name")
         return ["--domain", host]
-    if not address.is_global:
+    if not address.is_global or "%" in host:
         raise ValueError("the enrolled edge must advertise a public IP address or a DNS name")
     return ["--ip-address", str(address)]
 
@@ -129,13 +128,16 @@ def main():
 
 def report(args, ok, error):
     """The admin panel alerts while this edge's renewal fails, or when no check arrived for a day (four missed timer runs)."""
+    # Only a host renewal itself accepts names the alert; anything else sends nothing (silent while
+    # misconfigured: the staleness alert and the local renew.log still show it).
     try:
         host = json.loads((Path(args.state_dir) / "tunnel/deployment.json").read_text())["connector_advertise_host"]
-    except (OSError, ValueError, KeyError, TypeError):
-        host = ""
-    if not re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", str(host)):
-        host = re.sub(r"[^A-Za-z0-9.:-]", "-", socket.gethostname()) or "unknown"
-    health_report.push("edge-certificate:" + host[:253], {"ok": ok, "error": error[:300], "stale_after_seconds": 86400})
+        if not isinstance(host, str):
+            return
+        host = subject_flags(host)[1].lower()  # one alert record per edge whatever the case
+    except (OSError, ValueError, KeyError, TypeError, IndexError, RecursionError):
+        return
+    health_report.push("edge-certificate:" + host, {"ok": ok, "error": str(error)[:300], "stale_after_seconds": 86400})
 
 
 if __name__ == "__main__":
