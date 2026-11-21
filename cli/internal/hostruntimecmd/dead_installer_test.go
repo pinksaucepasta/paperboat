@@ -54,7 +54,7 @@ type killedInstall struct {
 
 func newKilledInstall(t *testing.T) *killedInstall {
 	t.Helper()
-	root := shorttemp.Dir(t) // the lifecycle journal refuses a symlinked ancestor; macOS's TempDir is under /var -> /private/var
+	root := shorttemp.MachineDir(t) // the lifecycle journal refuses a symlinked ancestor; macOS's TempDir is under /var -> /private/var
 	k := &killedInstall{version: filepath.Join(root, "version"), roles: []*lifecycleRole{{"hostd", true}, {"daemon", true}, {"updater", true}}}
 	record := filepath.Join(root, "install-candidate.json")
 	if err := os.WriteFile(k.version, []byte("previous"), 0o600); err != nil {
@@ -259,7 +259,7 @@ func (k *carrierCreatingInstall) othersRunning() bool {
 
 func newCarrierCreatingInstall(t *testing.T, self string) *carrierCreatingInstall {
 	t.Helper()
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	k := &carrierCreatingInstall{process: &carrierProcess{}}
 	role := func(id string, installed bool) *processRole {
 		return &processRole{lifecycleRole: lifecycleRole{id: id, running: installed}, process: k.process, installed: installed, self: id == service.CarrierKind}

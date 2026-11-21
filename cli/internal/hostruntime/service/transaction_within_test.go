@@ -16,7 +16,7 @@ import (
 // runs the replaced executable, and the updater runs it: stopping itself would end the recovery half done. The
 // caller's own role is left running and reported, so it can exit and be started on the restored executable.
 func TestRecoverWithinNeverStopsTheCallersOwnService(t *testing.T) {
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	image := filepath.Join(root, "image")
 	if err := writeFile(image, "prior exact image and configuration"); err != nil {
 		t.Fatal(err)

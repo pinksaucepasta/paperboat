@@ -170,7 +170,7 @@ func skipLinuxServiceFixtureOnWindows(t *testing.T) {
 
 func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t *testing.T) {
 	skipLinuxServiceFixtureOnWindows(t)
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	layout := Layout{
 		Platform:        "linux",
 		InstallRoot:     filepath.Join(root, "install"),
@@ -244,7 +244,7 @@ func TestHostLifecycleManagerRollsBackExactBothComponentStateAfterProbeFailure(t
 
 func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T) {
 	skipLinuxServiceFixtureOnWindows(t)
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	layout := Layout{
 		Platform:        "linux",
 		InstallRoot:     filepath.Join(root, "install"),
@@ -288,7 +288,7 @@ func TestHostLifecycleManagerIncludesPrivilegedHostBeforeSupervisor(t *testing.T
 
 func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *testing.T) {
 	skipLinuxServiceFixtureOnWindows(t)
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	layout := Layout{
 		Platform:        "linux",
 		InstallRoot:     filepath.Join(root, "install"),
@@ -356,7 +356,7 @@ func TestHostLifecycleManagerRollsBackPrivilegedHostWithSupervisorAndUpdater(t *
 
 func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
 	skipLinuxServiceFixtureOnWindows(t)
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	binary := filepath.Join(root, "pb")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
@@ -408,7 +408,7 @@ func TestLifecycleManagerRepairsMissingThirdComponentAtomically(t *testing.T) {
 
 func TestLifecycleManagerRollsBackFirstTwoAfterThirdComponentFailure(t *testing.T) {
 	skipLinuxServiceFixtureOnWindows(t)
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	binary := filepath.Join(root, "pb")
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
@@ -465,7 +465,7 @@ func bytesEqual(left, right []byte) bool {
 
 func TestHostLifecycleCanceledDefinitionPublicationRestoresRunningCarrier(t *testing.T) {
 	ctx := context.Background()
-	root := shorttemp.Dir(t)
+	root := shorttemp.MachineDir(t)
 	controllers := make([]*fakeNativeController, 0, 3)
 	installers := make([]*Installer, 0, 3)
 	originals := make([][]byte, 0, 3)
