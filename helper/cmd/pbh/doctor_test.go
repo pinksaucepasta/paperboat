@@ -197,3 +197,22 @@ func TestDoctorReportsRelayOnlyListenersAsSkipped(t *testing.T) {
 		}
 	}
 }
+
+// Doctor reports one line per filtering layer, and says so when nothing filters.
+func TestDoctorReportsEveryFilteringLayer(t *testing.T) {
+	const ruleset = "table inet mine {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"
+	run := func(answers map[string]string) string {
+		deps, out := doctorFixture(t, "60000 65535", answers, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
+		_ = runDoctor(t.Context(), tunnelConfig(), deps, out)
+		return out.String()
+	}
+	out := run(map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": ruleset})
+	for _, want := range []string{"FIX  the iptables host firewall does not allow", "FIX  the nft host firewall does not allow"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if out := run(map[string]string{}); !strings.Contains(out, "ok   host firewall (none active) lets") {
+		t.Errorf("no-firewall line missing:\n%s", out)
+	}
+}

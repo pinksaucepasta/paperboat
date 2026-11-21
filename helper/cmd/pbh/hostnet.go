@@ -190,10 +190,11 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 		_ = writeHostnetRecord(paths.record, record)
 		return err
 	}
-	record.Firewalls = mergeStrings(record.Firewalls, detectFirewalls(ctx, run))
-	if len(record.Firewalls) > 0 {
+	detected := detectFirewalls(ctx, run)
+	record.Firewalls = mergeStrings(record.Firewalls, detected) // an earlier kind stays listed so uninstall removes what it added
+	if len(detected) > 0 {
 		record.Rules = hostFirewallRules(c)
-		for _, kind := range record.Firewalls {
+		for _, kind := range detected {
 			added, err := firewallAdd(ctx, run, kind, record.Rules)
 			record.Added = mergeStrings(record.Added, added)
 			if err != nil {
@@ -310,26 +311,34 @@ func currentOutgoing(path string) (string, error) {
 }
 
 // detectFirewalls names the host firewalls that are filtering inbound traffic: ufw or firewalld (front ends that own
-// their rules), else iptables and/or nft, which can both drop on one host: an accept in one does not open the
-// other's drop, so a rule is needed in each. Empty when nothing filters.
+// their rules), iptables, and nft; a host can drop in several layers, and an accept in one does not open another's
+// drop, so a rule is needed in each. iptables is not listed beside a front end (its policy is the front end's).
 func detectFirewalls(ctx context.Context, run commander) []string {
-	if out, err := run(ctx, "ufw", "status"); err == nil && strings.Contains(out, "Status: active") {
-		return []string{"ufw"}
-	}
-	if out, err := run(ctx, "firewall-cmd", "--state"); err == nil && strings.TrimSpace(out) == "running" {
-		return []string{"firewalld"}
-	}
 	var kinds []string
-	for _, tool := range []string{"iptables", "ip6tables"} { // a host can filter only IPv6
-		if out, err := run(ctx, tool, "-S", "INPUT"); err == nil && inputFiltered(out) {
-			kinds = append(kinds, "iptables")
-			break
-		}
+	front := false
+	if out, err := run(ctx, "ufw", "status"); err == nil && strings.Contains(out, "Status: active") {
+		kinds, front = []string{"ufw"}, true
+	} else if out, err := run(ctx, "firewall-cmd", "--state"); err == nil && strings.TrimSpace(out) == "running" {
+		kinds, front = []string{"firewalld"}, true
 	}
-	if out, err := run(ctx, "nft", "list", "ruleset"); err == nil && len(nftInputChains(out)) > 0 {
+	ipt := iptablesFilters(ctx, run)
+	if ipt && !front {
+		kinds = append(kinds, "iptables")
+	}
+	if out, err := run(ctx, "nft", "list", "ruleset"); err == nil && len(nftInputChains(out, ipt)) > 0 {
 		kinds = append(kinds, "nft")
 	}
 	return kinds
+}
+
+// iptablesFilters reports whether iptables or ip6tables drops what it does not allow (a host can filter only IPv6).
+func iptablesFilters(ctx context.Context, run commander) bool {
+	for _, tool := range []string{"iptables", "ip6tables"} {
+		if out, err := run(ctx, tool, "-S", "INPUT"); err == nil && inputFiltered(out) {
+			return true
+		}
+	}
+	return false
 }
 
 // inputFiltered reports whether an `iptables -S INPUT` listing drops what it does not allow.
@@ -351,10 +360,16 @@ func xtablesChain(family, table, chain string) bool {
 	return (family == "ip" || family == "ip6") && table == "filter" && chain == "INPUT"
 }
 
+// nftTargetChains are the nft chains to put rules in: the iptables-nft chain is skipped only when iptables itself
+// reports filtering (otherwise a native nft chain with that name is the host's only drop).
+func nftTargetChains(ctx context.Context, run commander, ruleset string) []nftChainRef {
+	return nftInputChains(ruleset, iptablesFilters(ctx, run))
+}
+
 // nftInputChains finds every filter base chain that hooks input with policy drop in the ip, ip6 and inet families
 // (arp and bridge chains do not take tcp/udp rules): a host can filter IPv4 and IPv6 in separate tables, and a
 // rule in only one of them leaves the other family closed.
-func nftInputChains(ruleset string) []nftChainRef {
+func nftInputChains(ruleset string, skipXtables bool) []nftChainRef {
 	var chains []nftChainRef
 	var family, table, chain string
 	for _, line := range strings.Split(ruleset, "\n") {
@@ -364,7 +379,7 @@ func nftInputChains(ruleset string) []nftChainRef {
 			family, table, chain = fields[1], fields[2], ""
 		case len(fields) >= 2 && fields[0] == "chain":
 			chain = fields[1]
-		case chain != "" && slices.Contains([]string{"ip", "ip6", "inet"}, family) && !xtablesChain(family, table, chain) && strings.HasPrefix(strings.TrimSpace(line), "type filter hook input ") && strings.Contains(line, "policy drop"):
+		case chain != "" && slices.Contains([]string{"ip", "ip6", "inet"}, family) && !(skipXtables && xtablesChain(family, table, chain)) && table != "firewalld" && strings.HasPrefix(strings.TrimSpace(line), "type filter hook input ") && strings.Contains(line, "policy drop"):
 			chains = append(chains, nftChainRef{family, table, chain})
 		}
 	}
@@ -423,13 +438,13 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 			if err != nil {
 				return added, err
 			}
-			if ufwUpdated(out) {
-				// The preflight keeps ufw from replacing a rule; if it did anyway, say so instead of recording or
-				// ignoring a change pbh cannot undo.
-				return added, fmt.Errorf("ufw updated an existing rule for %s instead of adding one (%q); check ufw status numbered and restore it", spec, strings.TrimSpace(out))
-			}
-			if entry := ufwOwned(spec, out); entry != "" {
+			if entry := ufwOwned(spec, out); entry != "" { // a row ufw did create is ours even if another was updated
 				added = append(added, entry)
+			}
+			if ufwUpdated(out) {
+				// The preflight keeps ufw from replacing a rule; if it did anyway, say so instead of ignoring a change
+				// pbh cannot undo.
+				return added, fmt.Errorf("ufw updated an existing rule for %s instead of adding one (%q); check ufw status numbered and restore it", spec, strings.TrimSpace(out))
 			}
 		}
 	case "firewalld":
@@ -478,7 +493,7 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 		if err != nil {
 			return added, err
 		}
-		chains := nftInputChains(out)
+		chains := nftTargetChains(ctx, run, out)
 		if len(chains) == 0 {
 			return added, errors.New("no nftables input chain with policy drop")
 		}
@@ -950,7 +965,7 @@ func firewallRulePresent(ctx context.Context, run commander, kind string, rules 
 		return true
 	case "nft":
 		out, err := run(ctx, "nft", "list", "ruleset")
-		chains := nftInputChains(out)
+		chains := nftTargetChains(ctx, run, out)
 		if err != nil || len(chains) == 0 {
 			return false
 		}

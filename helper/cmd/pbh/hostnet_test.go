@@ -174,6 +174,12 @@ func TestDetectFirewalls(t *testing.T) {
 		"nothing":               {map[string]string{}, ""},
 		// iptables-nft keeps its INPUT chain in `table ip filter`: that is iptables', not a native nft chain.
 		"iptables-nft only": {map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "iptables"},
+		// The same name is the host's only drop when iptables itself does not filter.
+		"native INPUT chain, iptables open": {map[string]string{"iptables -S INPUT": "-P INPUT ACCEPT\n", "nft list ruleset": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "nft"},
+		// A front end does not open a native nft drop beside it, and its own iptables-nft chain or firewalld's table is not one.
+		"ufw and native nft":    {map[string]string{"ufw status": "Status: active\n", "iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": "table inet mine {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "ufw+nft"},
+		"ufw over iptables-nft": {map[string]string{"ufw status": "Status: active\n", "iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "ufw"},
+		"firewalld own table":   {map[string]string{"firewall-cmd --state": "running\n", "nft list ruleset": "table inet firewalld {\n\tchain filter_INPUT {\n\t\ttype filter hook input priority filter + 10; policy drop;\n\t}\n}\n"}, "firewalld"},
 		// A native nft chain beside a dropping iptables: an accept in one does not open the other.
 		"iptables and native nft": {map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "nft list ruleset": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\ntable inet mine {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "iptables+nft"},
 	} {
@@ -729,7 +735,7 @@ func TestUfwRuleRowsMustBePlainInboundAllowFromAnywhere(t *testing.T) {
 func TestNftInputChainsIgnoreArpAndComments(t *testing.T) {
 	ruleset := "table arp filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n" +
 		"table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n\tchain extra {\n\t\ttcp dport 1 accept comment \"type filter hook input policy drop\"\n\t}\n}\n"
-	chains := nftInputChains(ruleset)
+	chains := nftInputChains(ruleset, true)
 	if len(chains) != 1 || chains[0] != (nftChainRef{"inet", "filter", "input"}) {
 		t.Fatalf("chains %v", chains)
 	}
@@ -889,5 +895,35 @@ func TestFirewalldSplitIPv4AndIPv6ZonesAreBothOpened(t *testing.T) {
 	}
 	if err := firewallRemove(t.Context(), f.run, "firewalld", added); err != nil || f.called("firewall-cmd --permanent --zone=dmz --remove-port=443/tcp") != 1 || f.called("firewall-cmd --permanent --zone=external --remove-port=443/tcp") != 1 {
 		t.Fatalf("err %v calls %v", err, f.calls)
+	}
+}
+
+// ufw answering "Rule updated (v4) and Rule added (v6)": the new v6 row is ours and is recorded even though the
+// install stops with an error for the updated one.
+func TestUfwMixedUpdatedAndAddedKeepsTheAddedRow(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"ufw status": "Status: active\n", "ufw allow 7277/tcp": "Rule updated\nRule added (v6)\n"}
+	added, err := firewallAdd(t.Context(), f.run, "ufw", testRules)
+	if err == nil || strings.Join(added, ",") != "7277/tcp v6" {
+		t.Fatalf("added %v err %v", added, err)
+	}
+}
+
+// Rerunning install after the firewall changed only opens ports in what filters now, but keeps the earlier kind in
+// the record so uninstall still removes what was added there.
+func TestReinstallOpensOnlyWhatFiltersNowAndKeepsTheOldKind(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewalls: []string{"ufw"}, Added: []string{"7277/tcp"}, Rules: testRules}); err != nil {
+		t.Fatal(err)
+	}
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
+	f.answers = map[string]string{"ufw status": "Status: inactive\n", "iptables -S INPUT": "-P INPUT DROP\n", "iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: ""}
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}, testConfig); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := readHostnetRecord(f.paths.record)
+	if strings.Join(record.Firewalls, "+") != "ufw+iptables" || f.called("ufw allow") != 0 || f.called("iptables -I INPUT 1") != 2 {
+		t.Fatalf("record %+v calls %v", record, f.calls)
 	}
 }

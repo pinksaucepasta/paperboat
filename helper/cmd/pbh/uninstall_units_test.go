@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,6 +245,15 @@ func TestUninstallCommandLineWiring(t *testing.T) {
 		if (test.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), test.wantErr)) || removed != test.wantRemoved || !strings.Contains(out.String(), test.wantOutput) {
 			t.Errorf("%s: err %v removed %d output %q", name, err, removed, out.String())
 		}
+	}
+	// Without root the command re-runs itself under sudo with its arguments and removes nothing itself.
+	var elevatedArgs []string
+	defer func(e func(context.Context, []string, io.Writer) error) { elevate = e }(elevate)
+	elevate = func(_ context.Context, args []string, _ io.Writer) error { elevatedArgs = args; return nil }
+	isRoot = func() bool { return false }
+	uninstallEnvFor = func() uninstallEnv { t.Fatal("a non-root run touched the host"); return uninstallEnv{} }
+	if err := uninstall(t.Context(), []string{"--remove-data", "--confirm-remove-data"}, io.Discard); err != nil || strings.Join(elevatedArgs, " ") != "uninstall --remove-data --confirm-remove-data" {
+		t.Fatalf("err %v re-exec args %q", err, elevatedArgs)
 	}
 	// The default wiring points at the real host paths and the real elevation, with nothing missing.
 	env := defaultUninstallEnv()

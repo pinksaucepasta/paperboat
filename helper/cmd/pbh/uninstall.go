@@ -34,7 +34,7 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 		return commandError("data deletion requires both --remove-data and --confirm-remove-data; omit both to retain state")
 	}
 	if !isRoot() {
-		return elevated(ctx, append([]string{"uninstall"}, args...), out)
+		return elevate(ctx, append([]string{"uninstall"}, args...), out)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
@@ -44,6 +44,7 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 // isRoot and uninstallEnvFor are what the command line wires to the real host; tests replace them.
 var (
 	isRoot          = func() bool { return os.Geteuid() == 0 }
+	elevate         = elevated
 	uninstallEnvFor = defaultUninstallEnv
 )
 
