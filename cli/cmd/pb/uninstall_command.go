@@ -279,9 +279,11 @@ func userPaperboatRemovalPaths(command *cobra.Command) ([]string, error) {
 		paths = append(paths, root)
 	}
 	// Linux keeps the daemon's sockets and managed-SSH known_hosts under $XDG_RUNTIME_DIR/paperboat.
-	// An unsafe runtime directory is refused here and left alone rather than failing the whole uninstall.
-	if local, err := localapi.CurrentPaths(os.Geteuid()); err == nil {
-		paths = append(paths, local.StateRoot, local.RuntimeRoot)
+	// Only roots that exist: resolving what to delete must not create anything.
+	for _, path := range localapi.RemovalCandidates(os.Geteuid()) {
+		if _, err := os.Lstat(path); err == nil {
+			paths = append(paths, path)
+		}
 	}
 	if root, err := command.Flags().GetString("state-root"); err == nil && root != "" {
 		paths = append(paths, filepath.Clean(root))

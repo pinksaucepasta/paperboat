@@ -131,15 +131,21 @@ func TestElevatedStepsWriteNoDiagnosticsUnderRootsHome(t *testing.T) {
 		d.euid = func() int { return 0 }
 		d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{StateRoot: rootState}, nil }
 	})
-	for _, variable := range []string{"PAPERBOAT_INVOKING_UID", "SUDO_UID"} {
-		t.Run(variable, func(t *testing.T) {
-			t.Setenv(variable, "1000")
-			var stderr bytes.Buffer
-			_, closeDiagnostics := openProcessDiagnostics(ctx, []string{"--no-customization", "__man-pages", "--directory", t.TempDir()}, &errorreport.Reporter{}, &stderr)
-			closeDiagnostics()
-			if entries, _ := os.ReadDir(rootState); len(entries) != 0 {
-				t.Fatalf("elevated step wrote under root's state: %v (%s)", entries, stderr.String())
-			}
-		})
+	run := func(t *testing.T) []os.DirEntry {
+		var stderr bytes.Buffer
+		_, closeDiagnostics := openProcessDiagnostics(ctx, []string{"--no-customization", "__man-pages", "--directory", t.TempDir()}, &errorreport.Reporter{}, &stderr)
+		closeDiagnostics()
+		entries, _ := os.ReadDir(rootState)
+		return entries
+	}
+	t.Setenv("PAPERBOAT_INVOKING_UID", "1000")
+	if entries := run(t); len(entries) != 0 {
+		t.Fatalf("elevated step wrote under root's state: %v", entries)
+	}
+	// An admin's own `sudo pb ...` is not a Paperboat re-run: it keeps its diagnostics on disk.
+	os.Unsetenv("PAPERBOAT_INVOKING_UID")
+	t.Setenv("SUDO_UID", "1000")
+	if entries := run(t); len(entries) == 0 {
+		t.Fatal("an admin's own sudo run lost its disk diagnostics")
 	}
 }

@@ -68,3 +68,12 @@ func WindowsPaths(stateRoot, ownerSID string) (Paths, error) {
 		LockPath:    filepath.Join(stateRoot, "daemon.lock"),
 	}, nil
 }
+
+// RemovalCandidates lists the state and runtime roots CurrentPaths resolves, which it never creates.
+func RemovalCandidates(uid int) []string {
+	paths, err := CurrentPaths(uid)
+	if err != nil {
+		return nil
+	}
+	return []string{paths.StateRoot, paths.RuntimeRoot}
+}

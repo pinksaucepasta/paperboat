@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
@@ -26,9 +27,10 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	var storageErr error
 	var recorder *diagnostics.Recorder
 	command, _, findErr := newRootCommand().Find(args)
-	// Every step Paperboat re-runs as root through sudo (install, update, man pages, purge, ...) acts for the
-	// invoking user; a disk segment would land in root's home, where no uninstall removes it.
-	elevated := runtime.GOOS != "windows" && hostDependenciesOf(ctx).euid() == 0 && (os.Getenv("PAPERBOAT_INVOKING_UID") != "" || os.Getenv("SUDO_UID") != "")
+	// Every step Paperboat itself re-runs as root through sudo (install, update, man pages, purge, ...) acts for
+	// the invoking user; a disk segment would land in root's home, where no uninstall removes it. An admin's own
+	// `sudo pb ...` has no PAPERBOAT_INVOKING_UID and keeps disk diagnostics.
+	elevated := runtime.GOOS != "windows" && hostDependenciesOf(ctx).euid() == 0 && os.Getenv("PAPERBOAT_INVOKING_UID") != ""
 	removesStorage := elevated || findErr == nil && diagnosticsStayInMemory(command, args, runtime.GOOS)
 	if removesStorage {
 		// These commands remove the diagnostics directory itself. A disk segment
@@ -226,7 +228,8 @@ func processDiagnosticsDirectory(ctx context.Context, command *cobra.Command) (s
 	return filepath.Join(paths.StateRoot, "diagnostics"), nil
 }
 
-// diagnosticsStayInMemory names the commands that remove the diagnostics directory itself.
+// diagnosticsStayInMemory names the commands that remove the diagnostics directory itself, and the Windows
+// elevated helper (the UAC bridge), whose profile may be another admin's that the user's uninstall never sees.
 func diagnosticsStayInMemory(command *cobra.Command, args []string, goos string) bool {
 	if command == nil {
 		return false
@@ -238,7 +241,7 @@ func diagnosticsStayInMemory(command *cobra.Command, args []string, goos string)
 		return goos == "windows"
 	case "__runtime-service":
 		i := slices.Index(args, "__runtime-service")
-		return i >= 0 && i+1 < len(args) && args[i+1] == "purge"
+		return i >= 0 && i+1 < len(args) && (args[i+1] == "purge" || args[i+1] == elevation.BridgeCommand)
 	}
 	return false
 }

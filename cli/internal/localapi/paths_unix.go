@@ -130,3 +130,23 @@ func safeOwnerDirectory(path string, uid int) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 && fileOwner(info) == uid && info.Mode().Perm()&0o022 == 0
 }
+
+// RemovalCandidates lists every state and runtime root CurrentPaths may resolve for uid, without creating
+// any of them, so uninstall can find what to delete.
+func RemovalCandidates(uid int) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	if stateRoot, err := userStateRoot(os.Getenv, home); err == nil {
+		paths = append(paths, stateRoot)
+	}
+	if runtime.GOOS == "linux" && uid != 0 {
+		if base := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(base) {
+			paths = append(paths, filepath.Join(filepath.Clean(base), "paperboat"))
+		}
+		paths = append(paths, filepath.Join("/run/user", strconv.Itoa(uid), "paperboat"))
+	}
+	return paths
+}
