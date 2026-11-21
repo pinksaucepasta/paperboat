@@ -16,7 +16,7 @@ case \$1 in
   machine) echo '{"data":{"items":[{"name":"b"},{"name":"a"}]}}' ;;
   send) cp "\$2" "\$HOME/inbox/"; echo "\$(basename \$2): delivered to \$HOME/inbox on peer" ;;
   inbox) echo '{"data":{"path":"'"\$HOME"'/inbox"}}' ;;
-  preview) [ "\$2" = stop ] || echo '{"data":{"id":"p1","endpoint":"http://'"\${FAKE_PREVIEW_HOST:-127.0.0.1}"':'"\$2"'"}}' ;;
+  preview) [ -z "\${FAKE_PREVIEW_FAIL:-}" ] || exit 1; [ "\$2" = stop ] || echo '{"data":{"id":"p1","endpoint":"http://'"\${FAKE_PREVIEW_HOST:-127.0.0.1}"':'"\$2"'"}}' ;;
 esac
 FAKE
 chmod +x "$d/bin/pb"
@@ -57,4 +57,7 @@ out=$(PROBE_STEPS="exec_a_to_b exec_b_to_a" CANARY_TUNNEL_URL= "$here/probe.sh")
 # Steps driven from B run only when named, and pass with the same fake machines.
 out=$(PROBE_STEPS="exec_b_to_a ssh_b_to_a send_b_to_a api_auth_b" CANARY_TUNNEL_URL= "$here/probe.sh") || { echo "B-driven run failed: $out"; exit 1; }
 [ "$(grep -c '"ok":true' <<<"$out")" = 4 ] || { echo "B-driven steps: $out"; exit 1; }
+# A step that fails without writing to stderr (here the preview command exits 1 silently) still records why.
+out=$(FAKE_PREVIEW_FAIL=1 PROBE_STEPS=preview CANARY_TUNNEL_URL= "$here/probe.sh") && { echo "silent failure passed: $out"; exit 1; }
+grep -q '"step":"preview","ok":false,"seconds":[0-9]*,"error":"exit 1 with no output' <<<"$out" || { echo "silent failure has no error: $out"; exit 1; }
 echo "probe self-check ok"

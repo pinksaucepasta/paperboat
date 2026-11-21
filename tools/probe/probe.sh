@@ -33,12 +33,15 @@ on() { local run=$RUN_A; [ "$1" = B ] && run=$RUN_B; printf 'cd; %s\n' "$2" | ti
 step() { # name function: the function's stdout/stderr land in $tmp/out, $tmp/err
   local name=$1 start=$SECONDS; shift
   [ -z "${PROBE_STEPS:-}" ] || [[ " $PROBE_STEPS " == *" $name "* ]] || return 0
-  if "$@" >"$tmp/out" 2>"$tmp/err"; then
+  local rc=0
+  "$@" >"$tmp/out" 2>"$tmp/err" || rc=$?
+  if [ $rc = 0 ]; then
     printf '{"step":"%s","ok":true,"seconds":%d}\n' "$name" $((SECONDS - start))
   else
     failed=1
+    local why; why=$(tail -c 300 "$tmp/err"); [ -n "$why" ] || why="exit $rc with no output (a killed command, or a silent failure)"
     printf '{"step":"%s","ok":false,"seconds":%d,"error":%s}\n' "$name" $((SECONDS - start)) \
-      "$(tail -c 300 "$tmp/err" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().strip()))')"
+      "$(printf '%s' "$why" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read().strip()))')"
   fi
 }
 want() { grep -qxF "$marker" "$tmp/got" || { echo "expected the run marker, got: $(head -c 120 "$tmp/got")" >&2; return 1; }; }
