@@ -225,12 +225,12 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 			[]string{"7277/tcp", "443/tcp", "443/udp", "7272/tcp", "7273/udp"},
 			[]string{"ufw allow 7277/tcp", "ufw allow 443/udp", "ufw allow 7273/udp", "ufw allow 10000:59999/tcp"},
 			[]string{"ufw delete allow 7277/tcp", "ufw delete allow 443/udp", "ufw delete allow 7273/udp"}},
-		"firewalld": {"firewalld", map[string]string{"firewall-cmd --permanent --query-port=443/tcp": "yes", "firewall-cmd --reload": "success",
-			"firewall-cmd --permanent --add-port=7277/tcp": "success", "firewall-cmd --permanent --add-port=443/udp": "success", "firewall-cmd --permanent --add-port=7272/tcp": "success", "firewall-cmd --permanent --add-port=7273/udp": "success", "firewall-cmd --permanent --add-port=10000-59999/tcp": "success",
-			"firewall-cmd --permanent --remove-port=7277/tcp": "success", "firewall-cmd --permanent --remove-port=443/udp": "success", "firewall-cmd --permanent --remove-port=7272/tcp": "success", "firewall-cmd --permanent --remove-port=7273/udp": "success", "firewall-cmd --permanent --remove-port=10000-59999/tcp": "success"},
-			[]string{"7277/tcp", "443/udp", "7272/tcp", "7273/udp", "10000-59999/tcp"},
-			[]string{"firewall-cmd --permanent --add-port=7277/tcp", "firewall-cmd --permanent --add-port=443/udp", "firewall-cmd --permanent --add-port=7273/udp", "firewall-cmd --reload"},
-			[]string{"firewall-cmd --permanent --remove-port=7277/tcp", "firewall-cmd --permanent --remove-port=443/udp", "firewall-cmd --permanent --remove-port=7273/udp"}},
+		"firewalld": {"firewalld", map[string]string{"firewall-cmd --get-default-zone": "public\n", "firewall-cmd --permanent --zone=public --query-port=443/tcp": "yes", "firewall-cmd --reload": "success",
+			"firewall-cmd --permanent --zone=public --add-port=7277/tcp": "success", "firewall-cmd --permanent --zone=public --add-port=443/udp": "success", "firewall-cmd --permanent --zone=public --add-port=7272/tcp": "success", "firewall-cmd --permanent --zone=public --add-port=7273/udp": "success", "firewall-cmd --permanent --zone=public --add-port=10000-59999/tcp": "success",
+			"firewall-cmd --permanent --zone=public --remove-port=7277/tcp": "success", "firewall-cmd --permanent --zone=public --remove-port=443/udp": "success", "firewall-cmd --permanent --zone=public --remove-port=7272/tcp": "success", "firewall-cmd --permanent --zone=public --remove-port=7273/udp": "success", "firewall-cmd --permanent --zone=public --remove-port=10000-59999/tcp": "success"},
+			[]string{"public 7277/tcp", "public 443/udp", "public 7272/tcp", "public 7273/udp", "public 10000-59999/tcp"},
+			[]string{"firewall-cmd --permanent --zone=public --add-port=7277/tcp", "firewall-cmd --permanent --zone=public --add-port=443/udp", "firewall-cmd --permanent --zone=public --add-port=7273/udp", "firewall-cmd --reload"},
+			[]string{"firewall-cmd --permanent --zone=public --remove-port=7277/tcp", "firewall-cmd --permanent --zone=public --remove-port=443/udp", "firewall-cmd --permanent --zone=public --remove-port=7273/udp"}},
 		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "", "iptables -D INPUT " + tcp: "", "iptables -D INPUT " + udp: "",
 			"iptables -S INPUT": "-P INPUT DROP\n-A INPUT " + tcp + "\n-A INPUT " + udp + "\n"},
 			[]string{"iptables " + tcp, "iptables " + udp},
@@ -620,8 +620,8 @@ func TestUfwIPv6RulesAreTrackedAndChecked(t *testing.T) {
 		"ufw allow 443/udp": "Rule added\nRule added (v6)\n", "ufw allow 7272/tcp": "Rule added\n", "ufw allow 7273/udp": "Rule added\n", "ufw allow 10000:59999/tcp": "Rule added\nRule added (v6)\n",
 	}
 	added, err := firewallAdd(t.Context(), f.run, "ufw", testRules)
-	if want := "7277/tcp,443/udp,7272/tcp,7273/udp,10000:59999/tcp"; err != nil || strings.Join(added, ",") != want {
-		t.Fatalf("added %v err %v, want %s (a rule with only the v6 half new is ours, an existing one is not)", added, err, want)
+	if want := "7277/tcp v6,443/udp,7272/tcp,7273/udp,10000:59999/tcp"; err != nil || strings.Join(added, ",") != want {
+		t.Fatalf("added %v err %v, want %s (only the new v6 row of 7277/tcp is ours; an existing one is not)", added, err, want)
 	}
 	rules := []firewallRule{{"tcp", "443"}, {"udp", "7273"}}
 	status := func(lines ...string) map[string]string {
@@ -642,6 +642,104 @@ func TestUfwIPv6RulesAreTrackedAndChecked(t *testing.T) {
 		f.answers = test.status
 		if got := firewallRulePresent(t.Context(), f.run, "ufw", rules); got != test.want {
 			t.Errorf("%s: present %v, want %v", name, got, test.want)
+		}
+	}
+}
+
+// Uninstall deletes exactly the ufw rows pbh added: a rule whose IPv4 row the administrator already had loses only
+// its IPv6 row (by number), a rule pbh added for both families goes with one delete.
+func TestUfwUninstallKeepsTheAdministratorsRow(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	listing := func(lines ...string) string {
+		var b strings.Builder
+		for i, l := range lines {
+			fmt.Fprintf(&b, "[ %d] %s\n", i+1, l)
+		}
+		return b.String()
+	}
+	f.answers = map[string]string{
+		"ufw status numbered":  listing("22/tcp ALLOW IN Anywhere", "7277/tcp ALLOW IN Anywhere", "7277/tcp (v6) ALLOW IN Anywhere (v6)", "443/tcp on eth0 ALLOW IN Anywhere"),
+		"ufw --force delete 3": "", "ufw delete allow 443/udp": "",
+	}
+	run := func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := f.run(ctx, name, args...)
+		if strings.Join(args, " ") == "--force delete 3" { // the row is gone on the next listing
+			f.answers["ufw status numbered"] = listing("22/tcp ALLOW IN Anywhere", "7277/tcp ALLOW IN Anywhere", "443/tcp on eth0 ALLOW IN Anywhere")
+		}
+		return out, err
+	}
+	if err := firewallRemove(t.Context(), run, "ufw", []string{"7277/tcp v6", "443/udp"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.called("ufw --force delete 3") != 1 || f.called("ufw --force delete") != 1 || f.called("ufw delete allow 443/udp") != 1 || f.called("ufw delete allow 7277/tcp") != 0 {
+		t.Fatalf("calls %v", f.calls)
+	}
+}
+
+// A firewalld rule goes into the zone the public uplink is bound to, not only the default zone, is recorded with
+// it for uninstall, and doctor checks what is live in that zone.
+func TestFirewalldUsesTheUplinksZone(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{
+		"firewall-cmd --get-default-zone": "public\n", "ip -4 -o route show default": "default via 10.0.0.1 dev ens3 proto dhcp\n", "firewall-cmd --get-zone-of-interface=ens3": "dmz\n",
+		"firewall-cmd --reload": "success", "firewall-cmd --permanent --zone=dmz --add-port=443/tcp": "success", "firewall-cmd --permanent --zone=dmz --add-port=7273/udp": "success",
+		"firewall-cmd --permanent --zone=dmz --remove-port=443/tcp": "success", "firewall-cmd --permanent --zone=dmz --remove-port=7273/udp": "success",
+	}
+	rules := []firewallRule{{"tcp", "443"}, {"udp", "7273"}}
+	added, err := firewallAdd(t.Context(), f.run, "firewalld", rules)
+	if err != nil || strings.Join(added, ",") != "dmz 443/tcp,dmz 7273/udp" || f.called("firewall-cmd --permanent --zone=public") != 0 {
+		t.Fatalf("added %v err %v calls %v", added, err, f.calls)
+	}
+	if firewallRulePresent(t.Context(), f.run, "firewalld", rules) {
+		t.Fatal("rules not live in the uplink's zone counted as open")
+	}
+	f.answers["firewall-cmd --zone=dmz --query-port=443/tcp"], f.answers["firewall-cmd --zone=dmz --query-port=7273/udp"] = "yes\n", "yes\n"
+	if !firewallRulePresent(t.Context(), f.run, "firewalld", rules) {
+		t.Fatal("rules live in the uplink's zone did not count as open")
+	}
+	if err := firewallRemove(t.Context(), f.run, "firewalld", added); err != nil || f.called("firewall-cmd --permanent --zone=dmz --remove-port=443/tcp") != 1 {
+		t.Fatalf("err %v calls %v", err, f.calls)
+	}
+}
+
+// Rows doctor must not accept as the open port: outbound, routed, source-limited, denied, interface-bound.
+func TestUfwRuleRowsMustBePlainInboundAllowFromAnywhere(t *testing.T) {
+	for row, want := range map[string]bool{
+		"443/tcp ALLOW Anywhere": true, "443/tcp ALLOW IN Anywhere": true, "443/tcp (v6) ALLOW IN Anywhere (v6)": false, /* checked as v4 below */
+		"443/tcp ALLOW FWD Anywhere": false, "443/tcp ALLOW OUT Anywhere": false, "443/tcp ALLOW 10.0.0.0/8": false,
+		"443/tcp ALLOW IN 10.0.0.0/8 # Anywhere": false, "443/tcp DENY Anywhere": false, "443/tcp on eth0 ALLOW IN Anywhere": false,
+		"443/tcp ALLOW IN Anywhere # web": true, "443/tcp LIMIT Anywhere": false,
+	} {
+		if got := ufwAllows(row, "443/tcp", false); got != want {
+			t.Errorf("%q: v4 allow %v, want %v", row, got, want)
+		}
+	}
+	if !ufwAllows("443/tcp (v6) ALLOW IN Anywhere (v6)", "443/tcp", true) || ufwAllows("443/tcp (v6) ALLOW IN Anywhere", "443/tcp", true) {
+		t.Error("v6 row parsing")
+	}
+}
+
+// Only filter chains in the ip, ip6 and inet families take tcp/udp rules; an arp input chain with policy drop must
+// not be picked, and the words in a rule comment must not make a chain.
+func TestNftInputChainsIgnoreArpAndComments(t *testing.T) {
+	ruleset := "table arp filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n" +
+		"table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n\tchain extra {\n\t\ttcp dport 1 accept comment \"type filter hook input policy drop\"\n\t}\n}\n"
+	chains := nftInputChains(ruleset)
+	if len(chains) != 1 || chains[0] != (nftChainRef{"inet", "filter", "input"}) {
+		t.Fatalf("chains %v", chains)
+	}
+}
+
+// A rule with the same ports but another condition is not Paperboat's open rule.
+func TestNftRulePresentNeedsTheExactRule(t *testing.T) {
+	exact := `tcp dport { 443, 7272, 7277, 10000-59999 } accept comment "paperboat-edge"`
+	rules := testRules
+	for listing, want := range map[string]bool{
+		"\t\t" + exact + "\n": true, "\t\t" + exact + " # handle 7\n": true,
+		"\t\tip saddr 10.0.0.0/8 " + exact + "\n": false, "\t\tiifname \"lo\" " + exact + "\n": false,
+	} {
+		if got := nftRulePresent(listing, rules, "tcp"); got != want {
+			t.Errorf("%q: present %v, want %v", listing, got, want)
 		}
 	}
 }

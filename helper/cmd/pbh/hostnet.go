@@ -334,8 +334,9 @@ func inputFiltered(listing string) bool {
 
 type nftChainRef struct{ family, table, chain string }
 
-// nftInputChains finds every base chain that hooks input with policy drop, in every table and family: a host can
-// filter IPv4 and IPv6 in separate tables, and a rule in only one of them leaves the other family closed.
+// nftInputChains finds every filter base chain that hooks input with policy drop in the ip, ip6 and inet families
+// (arp and bridge chains do not take tcp/udp rules): a host can filter IPv4 and IPv6 in separate tables, and a
+// rule in only one of them leaves the other family closed.
 func nftInputChains(ruleset string) []nftChainRef {
 	var chains []nftChainRef
 	var family, table, chain string
@@ -346,7 +347,7 @@ func nftInputChains(ruleset string) []nftChainRef {
 			family, table, chain = fields[1], fields[2], ""
 		case len(fields) >= 2 && fields[0] == "chain":
 			chain = fields[1]
-		case chain != "" && strings.Contains(line, "hook input") && strings.Contains(line, "policy drop"):
+		case chain != "" && slices.Contains([]string{"ip", "ip6", "inet"}, family) && strings.HasPrefix(strings.TrimSpace(line), "type filter hook input ") && strings.Contains(line, "policy drop"):
 			chains = append(chains, nftChainRef{family, table, chain})
 		}
 	}
@@ -394,22 +395,26 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 			if err != nil {
 				return added, err
 			}
-			// ufw answers once per address family ("Rule added", "Rule added (v6)", "Skipping adding existing
-			// rule"): the rule is ours if either family was added. Its delete removes both families.
-			if ufwAddedARule(out) {
-				added = append(added, spec)
+			if entry := ufwOwned(spec, out); entry != "" {
+				added = append(added, entry)
 			}
 		}
 	case "firewalld":
-		for _, r := range rules {
-			spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
-			if out, err := run(ctx, "firewall-cmd", "--permanent", "--query-port="+spec); err == nil && strings.TrimSpace(out) == "yes" {
-				continue
+		zones, err := firewalldZones(ctx, run)
+		if err != nil {
+			return added, err
+		}
+		for _, zone := range zones {
+			for _, r := range rules {
+				spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
+				if out, err := run(ctx, "firewall-cmd", "--permanent", "--zone="+zone, "--query-port="+spec); err == nil && strings.TrimSpace(out) == "yes" {
+					continue
+				}
+				if _, err := run(ctx, "firewall-cmd", "--permanent", "--zone="+zone, "--add-port="+spec); err != nil {
+					return added, err
+				}
+				added = append(added, zone+" "+spec)
 			}
-			if _, err := run(ctx, "firewall-cmd", "--permanent", "--add-port="+spec); err != nil {
-				return added, err
-			}
-			added = append(added, spec)
 		}
 		if len(added) > 0 {
 			if _, err := run(ctx, "firewall-cmd", "--reload"); err != nil {
@@ -464,7 +469,8 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 func nftRulePresent(listed string, rules []firewallRule, proto string) bool {
 	want := strings.Join(nftSpec(proto, portsOf(rules, proto)), " ")
 	for _, line := range strings.Split(listed, "\n") {
-		if strings.Contains(line, want) {
+		line, _, _ = strings.Cut(line, " # handle ") // a rule with more conditions is not ours
+		if strings.TrimSpace(line) == want {
 			return true
 		}
 	}
@@ -506,34 +512,123 @@ func splitIptablesLine(line string) ([]string, bool) {
 	return args, !inQuote
 }
 
-// ufwAddedARule reports whether an `ufw allow` answer added a rule for any address family.
-func ufwAddedARule(output string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "Rule added") {
+// firewalldZones names the zones public traffic enters: the zone of each interface with a default route, or the
+// default zone for an interface bound to none. A rule added to another zone would leave the uplink closed.
+func firewalldZones(ctx context.Context, run commander) ([]string, error) {
+	out, err := run(ctx, "firewall-cmd", "--get-default-zone")
+	if err != nil {
+		return nil, err
+	}
+	def := strings.TrimSpace(out)
+	var zones []string
+	add := func(zone string) {
+		if zone != "" && !slices.Contains(zones, zone) {
+			zones = append(zones, zone)
+		}
+	}
+	for _, iface := range publicInterfaces(ctx, run) {
+		zone, err := run(ctx, "firewall-cmd", "--get-zone-of-interface="+iface)
+		if zone = strings.TrimSpace(zone); err != nil || zone == "" || zone == "no zone" {
+			zone = def
+		}
+		add(zone)
+	}
+	if len(zones) == 0 { // no uplink found: the default zone is where an unbound interface lands
+		add(def)
+	}
+	return zones, nil
+}
+
+// ufwRule reads one row of `ufw status` (or `ufw status numbered` after its [N] prefix): the port/protocol spec, whether
+// it is the IPv6 row, and whether it is a plain inbound ALLOW from anywhere (not DENY, OUT, FWD or limited to a source).
+func ufwRule(line string) (spec string, v6, allowAnywhere bool) {
+	line, _, _ = strings.Cut(line, "#")
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return "", false, false
+	}
+	spec, rest := fields[0], fields[1:]
+	if rest[0] == "(v6)" {
+		v6, rest = true, rest[1:]
+	}
+	if len(rest) < 2 || rest[0] != "ALLOW" {
+		return spec, v6, false
+	}
+	rest = rest[1:]
+	if rest[0] == "IN" {
+		rest = rest[1:]
+	}
+	source := strings.Join(rest, " ")
+	return spec, v6, (!v6 && source == "Anywhere") || (v6 && source == "Anywhere (v6)")
+}
+
+// ufwAllows reports whether `ufw status` lists an inbound ALLOW from anywhere for spec, for IPv4 or IPv6.
+func ufwAllows(status, spec string, v6 bool) bool {
+	for _, line := range strings.Split(status, "\n") {
+		if s, isV6, ok := ufwRule(line); ok && s == spec && isV6 == v6 {
 			return true
 		}
 	}
 	return false
 }
 
-// ufwAllows reports whether `ufw status` lists an ALLOW rule for spec from anywhere, for IPv4 or (v6) IPv6.
-func ufwAllows(status, spec string, v6 bool) bool {
-	for _, line := range strings.Split(status, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 || fields[0] != spec {
-			continue
-		}
-		rest := fields[1:]
-		if isV6 := rest[0] == "(v6)"; isV6 != v6 {
-			continue
-		} else if isV6 {
-			rest = rest[1:]
-		}
-		if len(rest) >= 2 && rest[0] == "ALLOW" && slices.Contains(rest, "Anywhere") {
-			return true
+// ufwOwned says what pbh added for `ufw allow spec`: ufw answers per address family ("Rule added", "Rule added
+// (v6)", "Skipping adding existing rule [(v6)]"). Both families new (or IPv6 off) is the plain spec; only one new
+// family is "spec v4" or "spec v6", so uninstall removes just that row and not the administrator's other one.
+func ufwOwned(spec, output string) string {
+	var v4, v6 bool
+	for _, line := range strings.Split(output, "\n") {
+		switch strings.TrimSpace(line) {
+		case "Rule added":
+			v4 = true
+		case "Rule added (v6)":
+			v6 = true
 		}
 	}
-	return false
+	switch {
+	case v4 && (v6 || !strings.Contains(output, "(v6)")):
+		return spec
+	case v4:
+		return spec + " v4"
+	case v6:
+		return spec + " v6"
+	}
+	return ""
+}
+
+// ufwRemove undoes one ufwOwned entry. `ufw delete allow` removes both families, so a one-family entry deletes its
+// row by number, looked up again after every delete because the numbers shift.
+func ufwRemove(ctx context.Context, run commander, entry string) error {
+	spec, family, single := strings.Cut(entry, " ")
+	if !single {
+		_, err := run(ctx, "ufw", "delete", "allow", spec)
+		return err
+	}
+	for range 4 { // a spec has at most a few rows; the bound stops a listing that never changes
+		out, err := run(ctx, "ufw", "status", "numbered")
+		if err != nil {
+			return err
+		}
+		number := ""
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "[") {
+				continue
+			}
+			n, row, ok := strings.Cut(strings.TrimPrefix(line, "["), "]")
+			if s, isV6, allow := ufwRule(row); ok && allow && s == spec && isV6 == (family == "v6") {
+				number = strings.TrimSpace(n)
+				break
+			}
+		}
+		if number == "" {
+			return nil
+		}
+		if _, err := run(ctx, "ufw", "--force", "delete", number); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ownedIptablesRule reports whether an `iptables -S` rule is one pbh added: its --comment argument is exactly ours.
@@ -583,14 +678,15 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 	var errs []error
 	switch kind {
 	case "ufw":
-		for _, spec := range added {
-			if _, err := run(ctx, "ufw", "delete", "allow", spec); err != nil {
+		for _, entry := range added {
+			if err := ufwRemove(ctx, run, entry); err != nil {
 				errs = append(errs, err)
 			}
 		}
 	case "firewalld":
-		for _, spec := range added {
-			if _, err := run(ctx, "firewall-cmd", "--permanent", "--remove-port="+spec); err != nil {
+		for _, entry := range added { // "<zone> <port/proto>", as firewallAdd recorded it
+			zone, spec, _ := strings.Cut(entry, " ")
+			if _, err := run(ctx, "firewall-cmd", "--permanent", "--zone="+zone, "--remove-port="+spec); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -755,10 +851,16 @@ func firewallRulePresent(ctx context.Context, run commander, kind string, rules 
 		}
 		return true
 	case "firewalld":
-		for _, r := range rules {
-			spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
-			if out, err := run(ctx, "firewall-cmd", "--permanent", "--query-port="+spec); err != nil || strings.TrimSpace(out) != "yes" {
-				return false
+		zones, err := firewalldZones(ctx, run)
+		if err != nil {
+			return false
+		}
+		for _, zone := range zones { // what is live, not only what is configured
+			for _, r := range rules {
+				spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
+				if out, err := run(ctx, "firewall-cmd", "--zone="+zone, "--query-port="+spec); err != nil || strings.TrimSpace(out) != "yes" {
+					return false
+				}
 			}
 		}
 		return true
