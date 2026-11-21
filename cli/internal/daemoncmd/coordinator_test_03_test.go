@@ -351,9 +351,7 @@ func TestCoordinatorReconnectsAfterTheGuardRestarts(t *testing.T) {
 	}
 	c.ctx = t.Context()
 	machines := []api.UserMachine{{ID: "PRIVATE", Alias: "studio", AssignedIP: "127.100.0.22", State: "online", Online: true, NetworkApproved: true}}
-	if err := c.ApplyMachines(t.Context(), machines, nil); !errors.Is(err, syscall.EPIPE) {
-		t.Fatalf("dead guard connection was not reported: %v", err)
-	}
+	// The dead connection is dropped and the guard dialed again within the same reconcile.
 	if err := c.ApplyMachines(t.Context(), machines, nil); err != nil || connects != 2 {
 		t.Fatalf("reconcile kept the dead guard connection: err=%v connects=%d", err, connects)
 	}
