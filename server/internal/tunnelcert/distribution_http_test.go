@@ -786,13 +786,15 @@ func TestDistributionOnDemandWaitsForTheLeafAlreadyBeingIssued(t *testing.T) {
 	if code := send(stalled, "edge_01", short); code != http.StatusConflict {
 		t.Fatalf("a wait that ran out answered %d, want 409", code)
 	}
-	// Cancellation that lands inside the callback: the edge leaving is a 499, our own wait running out a 409; neither is reported.
+	// Cancellation while an issuance runs: the edge leaving is a 499, our own wait running out (joined to the same
+	// issuance, which carries on) a 409; neither is reported. Closing the hub ends the issuance.
 	inCallback := make(chan struct{}, 2)
 	blocked := newHub(func(ctx context.Context, _ DistributionNodeIdentity, _ string) error {
 		inCallback <- struct{}{}
 		<-ctx.Done()
 		return ctx.Err()
 	})
+	defer blocked.Close()
 	gone, leave := context.WithCancel(reporter.Context(runCtx, supportreport.NewReference()))
 	go func() { <-inCallback; leave() }() // the edge leaves while the callback is running
 	if code := send(blocked, "edge_01", gone); code != statusClientClosedRequest {

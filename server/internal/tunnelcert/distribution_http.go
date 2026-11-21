@@ -922,6 +922,9 @@ func (h *DistributionHub) startOnDemand(parent context.Context, identity Distrib
 			}
 		}()
 		flight.err = h.onDemand(ctx, identity, hostname)
+		if flight.err != nil && ctx.Err() != nil && errors.Is(flight.err, ctx.Err()) {
+			flight.err = ErrCertificateNotReady // timed out or the hub closed: the edge asks again, not an outage
+		}
 		h.flightsMu.Lock()
 		delete(h.flights, key)
 		h.flightsMu.Unlock()
