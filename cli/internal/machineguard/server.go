@@ -298,20 +298,28 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			out.IP = in.IP
 		}
 		if err != nil {
-			out.Error = err.Error()
-			if errors.Is(err, ErrPortInUse) {
-				out.ErrorCode = "port_in_use"
-			} else if errors.Is(err, ErrListenerRefused) {
-				out.ErrorCode = "listener_refused"
-			} else if errors.Is(err, ErrNamesRefused) {
-				out.ErrorCode = "names_refused"
-			}
+			out.Error, out.ErrorCode = err.Error(), errorCode(err)
 		}
 		if err := conn.Send(out, file); err != nil {
 			return
 		}
 
 	}
+}
+
+// errorCode types err for the client's responseError.
+func errorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrPortInUse):
+		return "port_in_use"
+	case errors.Is(err, ErrListenerRefused):
+		return "listener_refused"
+	case errors.Is(err, ErrNamesRefused):
+		return "names_refused"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	}
+	return ""
 }
 
 func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {

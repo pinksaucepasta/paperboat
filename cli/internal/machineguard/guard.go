@@ -53,6 +53,12 @@ type listenerRefusal struct{ reason string }
 func (e listenerRefusal) Error() string      { return e.reason }
 func (listenerRefusal) Is(target error) bool { return target == ErrListenerRefused }
 
+// guardDeadline is the guard running out of time on an operation: callers retry it as a timeout.
+type guardDeadline struct{ reason string }
+
+func (e guardDeadline) Error() string      { return e.reason }
+func (guardDeadline) Is(target error) bool { return target == context.DeadlineExceeded }
+
 func responseError(out response) error {
 	if out.ErrorCode == "port_in_use" {
 		return ErrPortInUse
@@ -62,6 +68,9 @@ func responseError(out response) error {
 	}
 	if out.ErrorCode == "names_refused" {
 		return namesRefusal{reason: out.Error}
+	}
+	if out.ErrorCode == "deadline_exceeded" {
+		return guardDeadline{reason: out.Error}
 	}
 	if out.Error != "" {
 		return errors.New(out.Error)
