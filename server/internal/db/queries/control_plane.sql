@@ -959,6 +959,10 @@ WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=contro
    OR EXISTS (SELECT 1 FROM selfhost_installations i
        WHERE i.node_id=control_tunnel_nodes.id AND i.state='active' AND i.capability='tunnel'
          AND i.claim_complete AND octet_length(control_tunnel_nodes.tls_spki_sha256)=32
+         AND control_tunnel_nodes.state <> 'retired'
+         -- Paperboat's own (global) edge: an operator drain or a disabled region holds it out, as for any managed node.
+         AND (i.scope_kind <> 'global' OR ((control_tunnel_nodes.state <> 'draining' OR control_tunnel_nodes.drain_deadline IS NULL)
+           AND EXISTS (SELECT 1 FROM operator_regions r WHERE r.id=control_tunnel_nodes.region AND r.enabled)))
          AND coalesce(EXCLUDED.carrier_server_spki_sha256, control_tunnel_nodes.carrier_server_spki_sha256)='sha256:'||encode(control_tunnel_nodes.tls_spki_sha256,'hex')
          AND (i.expires_at IS NULL OR i.expires_at>EXCLUDED.last_heartbeat_at)
          AND EXCLUDED.edge_pool=i.id

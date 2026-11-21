@@ -125,7 +125,7 @@ func (s *Service) RuntimeNode(ctx context.Context, credential string) (string, e
 		return "", nodeauth.ErrNotFound
 	}
 	var id string
-	e := s.database.SQL().QueryRowContext(ctx, `SELECT node_id FROM paperboat.selfhost_installations WHERE runtime_hash=$1 AND state='active' AND claim_complete AND (expires_at IS NULL OR expires_at>now())`, digest(credential)).Scan(&id)
+	e := s.database.SQL().QueryRowContext(ctx, `SELECT i.node_id FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.runtime_hash=$1 AND i.state='active' AND i.claim_complete AND (i.expires_at IS NULL OR i.expires_at>now()) AND n.state<>'retired'`, digest(credential)).Scan(&id)
 	if e == sql.ErrNoRows {
 		e = nodeauth.ErrNotFound
 	}
@@ -136,7 +136,7 @@ func (s *Service) RuntimeCredential(ctx context.Context, nodeID string) (string,
 		return "", ErrUnauthorized
 	}
 	var encrypted []byte
-	e := s.database.SQL().QueryRowContext(ctx, `SELECT runtime_ciphertext FROM paperboat.selfhost_installations WHERE node_id=$1 AND state='active' AND claim_complete AND (expires_at IS NULL OR expires_at>now())`, nodeID).Scan(&encrypted)
+	e := s.database.SQL().QueryRowContext(ctx, `SELECT i.runtime_ciphertext FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.node_id=$1 AND i.state='active' AND i.claim_complete AND (i.expires_at IS NULL OR i.expires_at>now()) AND n.state<>'retired'`, nodeID).Scan(&encrypted)
 	if e == sql.ErrNoRows {
 		return "", nodeauth.ErrNotFound
 	}
