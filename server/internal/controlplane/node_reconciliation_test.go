@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -175,4 +176,53 @@ func seedConnectorTestMachine(t *testing.T, store interface{ SQL() *sql.DB }, en
 		t.Fatal(err)
 	}
 	return machineID
+}
+
+func TestReconcileExpiredDrainsFinalizesOnlyExpiredWithinBatch(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='offline',ready=false WHERE state='draining'`); err != nil {
+		t.Fatal(err)
+	}
+	suffix := "drain_" + time.Now().Format("150405.000000000")
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	ids := []string{"a_" + suffix, "b_" + suffix, "c_" + suffix, "future_" + suffix}
+	for i, id := range ids {
+		deadline := now.Add(-time.Minute)
+		if id == ids[3] {
+			deadline = now.Add(10 * time.Minute)
+		}
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,drain_deadline) VALUES ($1,'default','1.0',$2,'draining',false,$3)`, id, fmt.Sprint("epoch_", suffix, i), deadline); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, id)
+		})
+	}
+	service := NewEdgeService(store, "test")
+	service.SetClock(func() time.Time { return now })
+	state := func(id string) string {
+		var s string
+		if err := store.SQL().QueryRowContext(ctx, `SELECT state FROM paperboat.control_tunnel_nodes WHERE id=$1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if count, err := service.ReconcileExpiredDrains(ctx, now, 2); err != nil || count != 2 {
+		t.Fatalf("first batch count=%d err=%v, want 2", count, err)
+	}
+	if count, err := service.ReconcileExpiredDrains(ctx, now, 2); err != nil || count != 1 {
+		t.Fatalf("second batch count=%d err=%v, want 1", count, err)
+	}
+	for _, id := range ids[:3] {
+		if got := state(id); got != "offline" {
+			t.Errorf("expired drain %s state = %s, want offline", id, got)
+		}
+	}
+	if got := state(ids[3]); got != "draining" {
+		t.Errorf("unexpired drain state = %s, want draining", got)
+	}
+	if count, err := service.ReconcileExpiredDrains(ctx, now, 2); err != nil || count != 0 {
+		t.Fatalf("repeat count=%d err=%v, want 0", count, err)
+	}
 }

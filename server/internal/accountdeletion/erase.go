@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
-	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
+	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 )
 
 // Outbox job kinds. The target is the WorkOS subject, the Stripe subscription, or the mail's fixed name.
@@ -311,33 +311,28 @@ func (s *Service) leaveTeamsTx(ctx context.Context, tx *db.Tx, userID string, de
 	return nil
 }
 
-// eraseMachinesTx deletes every personal machine through the same revocation as the delete action.
+// eraseMachinesTx deletes every personal machine with the same revocation as the delete action, set-based:
+// the rows are locked in one query and removed a chunk at a time, not machine by machine.
 func (s *Service) eraseMachinesTx(ctx context.Context, tx *db.Tx, userID string) error {
-	rows, err := tx.Query(ctx, `SELECT id FROM user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND deleted_at IS NULL ORDER BY id`, userID)
+	rows, err := tx.Query(ctx, `SELECT id, environment_id, alias FROM user_machines WHERE user_id=$1 AND owner_team_id IS NULL AND deleted_at IS NULL AND machine_management_allowed($1,id) ORDER BY id FOR UPDATE`, userID)
 	if err != nil {
-		return fmt.Errorf("account deletion: list machines: %w", err)
+		return fmt.Errorf("account deletion: lock machines: %w", err)
 	}
-	var ids []string
+	var machines []usermachines.MachineRef
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var m usermachines.MachineRef
+		if err := rows.Scan(&m.ID, &m.EnvironmentID, &m.Alias); err != nil {
 			rows.Close()
 			return fmt.Errorf("account deletion: read machine: %w", err)
 		}
-		ids = append(ids, id)
+		machines = append(machines, m)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("account deletion: list machines: %w", err)
+		return fmt.Errorf("account deletion: lock machines: %w", err)
 	}
-	for _, id := range ids {
-		machine, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: id, UserID: userID})
-		if err != nil {
-			return fmt.Errorf("account deletion: lock machine: %w", err)
-		}
-		if err := s.machines.DeleteMachineTx(ctx, tx, userID, machine); err != nil {
-			return fmt.Errorf("account deletion: delete machine: %w", err)
-		}
+	if err := s.machines.DeleteMachinesTx(ctx, tx, userID, machines); err != nil {
+		return fmt.Errorf("account deletion: delete machines: %w", err)
 	}
 	return nil
 }

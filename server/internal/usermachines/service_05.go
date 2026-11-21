@@ -886,6 +886,32 @@ func (s *Service) DeleteMachineTx(ctx context.Context, tx *db.Tx, userID string,
 	return s.revokeUserMachineControlTx(ctx, tx, userID, machine, true)
 }
 
+// MachineRef is what DeleteMachinesTx needs of a locked machine row.
+type MachineRef struct{ ID, EnvironmentID, Alias string }
+
+// DeleteMachinesTx is DeleteMachineTx for many machines of one account: one statement per table for each chunk of
+// 1000 (db.DeleteUserMachinesBatchTx) and one audit event per machine. The caller has locked every row FOR UPDATE.
+func (s *Service) DeleteMachinesTx(ctx context.Context, tx *db.Tx, userID string, machines []MachineRef) error {
+	now := s.now().UTC()
+	for chunk := range slices.Chunk(machines, 1000) {
+		ids, envs := make([]string, len(chunk)), make([]string, len(chunk))
+		for i, m := range chunk {
+			ids[i], envs[i] = m.ID, m.EnvironmentID
+		}
+		if err := db.DeleteUserMachinesBatchTx(ctx, tx, userID, ids, envs, now); err != nil {
+			return err
+		}
+		for _, m := range chunk {
+			if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: userID, ActorType: audit.ActorUser,
+				EventType: "user_machine.deleted", ResourceType: "user_machine", ResourceID: m.ID,
+				IdempotencyKey: "user_machine.deleted:" + m.ID, Metadata: map[string]any{"alias": m.Alias}}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // machineRemovalLockSeed keys the account lock a user's revoke or delete and each final-delete batch take
 // (hashtextextended(account, seed)): background final deletes of the account's other machines ran back to back,
 // and a revoke that overlapped them lost every serializable retry (40001, read/write dependencies).
