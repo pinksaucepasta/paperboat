@@ -414,20 +414,25 @@ delivers domains to machines (see "Machine domains").
 
 ## Network (self-hosted relays and tunnel servers)
 
-`components/network/network-page.tsx`, `lib/network.ts`, on the existing `/v1/selfhost/...` API:
-servers paired to the workspace (installations grouped by node: relay, tunnel server or both),
-Add server (the installer command for relay/tunnel/both, then the claim address and one-time
-code it prints, `POST /v1/selfhost/enrollments` with the workspace scope), Check public access
-(`verify-ingress`), Remove (deletes each installation of the node), and the two pools: relays
-`mixed | self-hosted-only` (account scope always), tunnel servers `managed-only | self-hosted-only`
-(workspace scope). **Users see regions, never Paperboat's nodes.** `GET /v1/edges` and `/v1/relays` list
-Paperboat's regions (`id`, `name`, `status`); the workspace's pair (`GET/PUT /v1/edges/pair`) is two regions,
-both Paperboat's or both your own (`kind`). Your own servers keep their names and addresses, grouped under the
-region you named when pairing them (`region` on the installation; servers of one region back each other up),
-and their menu has Drain, Drain and move and Resume. Only the admin panel lists nodes. Gaps:
+`components/network/` (`network-page.tsx` composes `relays-section`, `edges-section`, `regions-section`),
+`lib/network.ts`, on the `/v1/selfhost/...` API. **Your regions** replaces the old flat server table: the
+regions list (`GET /v1/selfhost/regions`, `POST`, `PATCH/DELETE /v1/selfhost/regions/{id}`; the slug is the id
+and never changes, the name is console-only) gives one card per region, empty ones too; the machines inside it
+come from the paged, searchable installations list, grouped by node (relay, edge or both) and by region slug.
+Add relay / Add edge (per region, role fixed): the installer command carries `--relay|--edge --region <slug>`,
+then the address and one-time code it prints are paired with `POST /v1/selfhost/enrollments` plus
+`expect_region` / `expect_capability` (400 `invalid_request` names the mismatch), then a live wait polls the
+installation until it is ready. Check public access (`verify-ingress`), Drain, Drain and move, Resume, Update and
+Remove machine stay per installation. The two pools: relays `mixed | self-hosted-only` (account scope always),
+edges `managed-only | self-hosted-only` (workspace scope). **Users see regions, never Paperboat's nodes.**
+`GET /v1/edges` and `/v1/relays` list Paperboat's regions (`id`, `name`, `status`); the workspace's pair
+(`GET/PUT /v1/edges/pair`) is two regions, both Paperboat's or both your own (`kind`); own regions show their
+display name from the regions list with the slug muted. Only the admin panel lists nodes. Gaps:
 
-- The installation list has no draining flag: a server whose installations are all not ready is treated as
-  draining and offers Resume. Add the flag to the list if that proves wrong.
+- Phase 2 (a one-command install carrying an enrollment secret, no pasted address and code) is not built: see
+  `paperboat-private/dashboard-regions-plan.md`. The dialog's steps are command, pair, wait.
+- The installations list has no region filter: a region card shows the machines on the list's current page
+  (50 per page, search narrows them); its count comes from the regions list.
 
 - Team scope sends the workspace ID (the team slug) as `scope_id`; confirm the server's team scope
   takes the slug, not an internal ID.

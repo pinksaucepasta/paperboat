@@ -1,5 +1,6 @@
 // Browser check for Network > Edges > Change: switching between Paperboat's regions and your own regions while
-// previews and tunnels run, plus the Drain / Drain and move / Resume menu of your own servers. The server API is stubbed (no account or server needed), so the
+// previews and tunnels run, plus the Drain / Drain and move / Resume menu of your own machines (each row sits under its
+// region card, and draining is the installation's explicit `draining` flag). The server API is stubbed (no account or server needed), so the
 // check shows what the dialog does with the 409 `previews_running` answer and the three follow-ups: the refusal
 // lists what runs by name, "Stop these and switch" stays disabled until "switch regions" is typed, confirming
 // stops each (preview ended, tunnel paused) before asking again, and the dialog then shows the
@@ -20,8 +21,14 @@ const now = "2026-11-18T12:00:00Z"
 const region = (id, name) => ({ id, name, status: "ready" })
 const own = (id, name, region) => ({
   installation_id: id, node_id: `node_${id}`, endpoint_host: `${id}.example.test`, name, region, capability: "tunnel",
-  ready: !state.draining, scope_kind: "account", scope_id: "user", trust_notice: "", enrollment_state: "enrolled",
+  ready: !state.draining, draining: state.draining, version: "1.4.0", last_heartbeat_at: now,
+  scope_kind: "account", scope_id: "user", trust_notice: "", enrollment_state: "enrolled",
 })
+// Own regions: display names differ from the slugs the pair and the machines carry.
+const regions = () => [
+  { id: "home", name: "Main site", machines: 1, ready: state.draining ? 0 : 1 },
+  { id: "lab", name: "Backup site", machines: 1, ready: 1 },
+]
 const state = {
   kind: "managed",
   live: [
@@ -73,6 +80,7 @@ await context.route("**/api/v1/**", async (route) => {
     state.draining = path.endsWith("/drain") || (state.draining && !path.endsWith("/resume"))
     return ok(route, own("s1", "Server A", "home"))
   }
+  if (path === "selfhost/regions" && method === "GET") return ok(route, regions())
   if (path === "selfhost/installations") {
     const tunnels = [own("s1", "Server A", "home"), own("s2", "Server B", "lab")]
     const items = url.searchParams.get("capability") === "relay" ? [] : tunnels
@@ -138,23 +146,30 @@ try {
   await dialog.waitFor({ state: "detached" })
   log(true, "Done closes the dialog")
 
-  // Your own servers keep names and addresses, grouped under their region, with Drain / Drain and move / Resume.
-  const ownRow = page.getByRole("row", { name: /Server A/ })
-  await ownRow.getByRole("cell", { name: "home" }).waitFor()
-  log(true, "own server row shows its region")
+  // Your own machines keep their names, grouped under their region's card, with Drain / Drain and move / Resume.
+  const card = page.locator('[data-region="home"]')
+  await card.getByRole("heading", { name: "Main site" }).waitFor()
+  await card.getByRole("row", { name: /Server A/ }).waitFor()
+  log((await page.locator('[data-region="home"]').getByText("home", { exact: true }).count()) > 0, "region card shows the slug beside the name")
+  log((await page.locator('[data-region="lab"]').getByRole("row", { name: /Server A/ }).count()) === 0, "machine row sits only under its own region")
+  log((await card.getByRole("row", { name: /Server A/ }).getByText("Edge", { exact: true }).count()) === 1, "a tunnel installation shows as the Edge role")
   const open = () => page.getByRole("button", { name: "Actions for Server A" }).click()
   await open()
-  log((await page.getByRole("menuitem", { name: "Resume" }).count()) === 0, "no Resume while the server serves")
+  log((await page.getByRole("menuitem", { name: "Resume" }).count()) === 0, "no Resume while the machine serves")
   await page.getByRole("menuitem", { name: "Drain", exact: true }).click()
   const alert = page.getByRole("alertdialog")
-  await alert.getByText("New connections stop; existing ones finish. Servers in the same region keep serving.").waitFor()
+  await alert.getByText("New work stops going to this machine. Running work finishes (up to 10 minutes).").waitFor()
   await alert.getByRole("button", { name: "Drain", exact: true }).click()
   await alert.waitFor({ state: "detached" })
   log(state.posts.at(-1) === 'drain {"move":false}', "Drain asks the server without move", state.posts.join())
   await open()
-  log(await page.getByRole("menuitem", { name: "Resume" }).isVisible(), "a draining server offers Resume")
+  log(await page.getByRole("menuitem", { name: "Resume" }).isVisible(), "a draining machine offers Resume")
+  await page.keyboard.press("Escape")
+  await card.getByRole("row", { name: /Server A/ }).getByText("Draining", { exact: true }).waitFor()
+  log(true, "the explicit draining flag shows Draining in the row")
+  await open()
   await page.getByRole("menuitem", { name: "Drain and move", exact: true }).click()
-  await alert.getByText(/Existing connections move to your other servers in this region now/).waitFor()
+  await alert.getByText("Running work is moved off this machine now. It drains within about 90 seconds.").waitFor()
   await alert.getByRole("button", { name: "Drain and move", exact: true }).click()
   await alert.waitFor({ state: "detached" })
   log(state.posts.at(-1) === 'drain {"move":true}', "Drain and move asks the server with move", state.posts.join())
