@@ -173,3 +173,64 @@ func TestNativeRepairWindowsTreeRefusesUnprotectedLockDirectory(t *testing.T) {
 		t.Fatalf("repair of a tree with an unprotected lock directory = %v, want ErrInvalidRequest", err)
 	}
 }
+
+// An entry checked by the repair is swapped for a hard link to a file outside the tree before the change pass, and
+// a new hard link is planted next to it: the held handle refuses the swap, and nothing outside the tree changes.
+func TestNativeRepairWindowsTreeSwapBetweenCheckAndChangeLeavesOutsideAlone(t *testing.T) {
+	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := windows.GetNamedSecurityInfo(outside, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	checked := filepath.Join(root, "sub", "state.json")
+	if err := os.MkdirAll(filepath.Dir(checked), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(checked, []byte("state"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var removeErr, renameErr, plantErr error
+	windowsTreeRepairValidated = func() {
+		removeErr = os.Remove(checked)
+		renameErr = os.Rename(filepath.Dir(checked), filepath.Join(root, "moved"))
+		plantErr = os.Link(outside, filepath.Join(root, "sub", "planted"))
+	}
+	defer func() { windowsTreeRepairValidated = func() {} }()
+	if err := repairWindowsTreeACL(root, tokenUser.User.Sid.String()); err != nil {
+		t.Fatalf("repair: %v (swap: remove=%v rename=%v plant=%v)", err, removeErr, renameErr, plantErr)
+	}
+	if removeErr == nil || renameErr == nil {
+		t.Fatalf("a checked entry was swapped while held: remove=%v rename=%v", removeErr, renameErr)
+	}
+	sd, err := windows.GetNamedSecurityInfo(checked, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner, _, err := sd.Owner(); err != nil || !owner.Equals(tokenUser.User.Sid) {
+		t.Fatal("the checked entry did not get the enrolled owner")
+	}
+	if control, _, err := sd.Control(); err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+		t.Fatal("the checked entry's DACL is not protected")
+	}
+	if plantErr != nil {
+		t.Skipf("hard links unavailable: %v", plantErr)
+	}
+	after, err := windows.GetNamedSecurityInfo(outside, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.String() != after.String() {
+		t.Fatalf("the outside file's descriptor changed: %s -> %s", before, after)
+	}
+	if err := repairWindowsTreeACL(root, tokenUser.User.Sid.String()); err == nil {
+		t.Fatal("the next repair accepted the planted hard link")
+	}
+}
