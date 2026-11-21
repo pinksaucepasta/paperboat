@@ -166,7 +166,7 @@ func distributionBudgetTestDatabase(t *testing.T) (context.Context, *db.DB) {
 	t.Cleanup(func() { _ = database.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
-	if err := db.Migrate(ctx, database); err != nil {
+	if err := db.Migrate(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, database
