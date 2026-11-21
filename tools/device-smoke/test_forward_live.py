@@ -227,9 +227,20 @@ class Terminal(unittest.TestCase):
 
 
 class Cli(unittest.TestCase):
-    def test_edge_flag_needs_two_nodes(self):
-        with self.assertRaises(SystemExit):
-            forward_live.main(['--api', 'https://api.example.test', '--cred', 'cred', '--edge', 'a=192.0.2.1'])
+    def test_one_edge_skips_with_a_reason_and_exits_zero(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = forward_live.main(['--api', 'https://api.example.test', '--cred', 'cred', '--edge', 'a=192.0.2.1'])
+        self.assertEqual(code, 0)
+        self.assertRegex(out.getvalue(), r'^SKIP  forward-live  the region has 1 edge node')
+
+    def test_skip_reason_names_edges_the_operator_does_not_list(self):
+        edges = [('a', '192.0.2.1'), ('b', '192.0.2.2')]
+        self.assertEqual(forward_live.skip_reason(edges, {'a': None, 'b': None}), '')
+        self.assertIn('b are not in the operator list', forward_live.skip_reason(edges, {'a': None}))
+        self.assertIn('0 edge', forward_live.skip_reason([], None))
 
     def test_tcp_name_and_port_go_together(self):
         with self.assertRaises(SystemExit):

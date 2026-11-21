@@ -4,13 +4,47 @@
 //   in DNS), checking (nothing looked up yet). The optional root-domain record is `not_checked` in all of them: it must never show.
 // usage: node scripts/check-dns-status.mjs          PW_MODULE=<playwright-core index.js> PW_CHROMIUM=<chrome path> when not installed
 // It starts `next dev` on a free port with PAPERBOAT_SERVER_URL pointing at the stub. Exits 1 when a step fails.
+// LIVE MODE (read-only, set ORIGIN, or LIVE=1): no stub and no `next dev`; ORIGIN=<real console> DOMAIN=<real test domain>
+// STATE=<storage state of the signed-in test account> (or EMAIL + PASSWORD_FILE, the stored WorkOS password) [EXPECT_HEALTH=healthy]
+// node scripts/check-dns-status.mjs. It opens the domain's panel on the Network page and checks the real badges; see scripts/dns-live.mjs.
 import { createServer } from "node:http"
 import { spawn } from "node:child_process"
 import { createServer as net } from "node:net"
+import * as live from "./dns-live.mjs"
 
 const playwright = await import(process.env.PW_MODULE ?? "playwright-core")
 const chromium = playwright.chromium ?? playwright.default.chromium
 const freePort = () => new Promise((resolve) => { const s = net().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)) }) })
+
+if (live.liveMode()) {
+  const cfg = live.liveConfig()
+  let bad = 0
+  const verdict = (step, ok, detail = "") => { if (!ok) bad++; console.log(`${ok ? "PASS" : "FAIL"}  ${step}${detail ? `  (${detail})` : ""}`) }
+  const lbrowser = await live.launch(playwright)
+  try {
+    for (const [name, width] of [["desktop", 1440], ["phone", 390]]) {
+      const context = await live.signedInContext(lbrowser, cfg, { width, height: 900 })
+      const { page, panel, why } = await live.openDomainPanel(context, cfg)
+      verdict(`live/${name}: the panel of ${cfg.domain} opens`, Boolean(panel), why)
+      if (!panel) { await context.close(); continue }
+      const r = await live.readPanel(panel)
+      verdict(`live/${name}: the header pill is a known DNS health`, live.HEALTHS.includes(r.health) && r.healthText === live.LABELS[r.health], `${r.health} ${r.healthText}`)
+      if (cfg.expect) verdict(`live/${name}: the header pill is ${cfg.expect}`, r.health === cfg.expect, String(r.health))
+      verdict(`live/${name}: every record pill is a known status`, r.pills.length > 0 && live.knownPills(r.pills), r.pills.join())
+      verdict(`live/${name}: the header pill agrees with the record pills`, live.healthAgreesWithPills(r.health, r.pills), `${r.health} vs ${r.pills.join()}`)
+      verdict(`live/${name}: the root-domain record is neither shown nor counted`, r.apexRows === 0 && !/Serves the domain itself/.test(r.text))
+      if (r.health === "healthy") verdict(`live/${name}: a healthy domain has no problem notes`, r.notes.length === 0, r.notes.join(" | "))
+      if (r.health === "wrong_address" || r.health === "missing") verdict(`live/${name}: a ${r.health} domain explains the problem`, r.notes.length > 0, r.notes.join(" | "))
+      verdict(`live/${name}: every name and value has a copy button`, r.copies === 2 * r.pills.length, `${r.copies} buttons, ${r.pills.length} records`)
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      verdict(`live/${name}: no horizontal overflow`, overflow <= 0, `${overflow}px`)
+      if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/dns-live-${name}.png` })
+      await context.close()
+    }
+  } finally { await lbrowser.close() }
+  console.log(bad ? `${bad} failed` : "all passed")
+  process.exit(bad ? 1 : 0)
+}
 
 const HOST = "shop.example.test"
 const A = "203.0.113.10"

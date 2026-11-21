@@ -8,6 +8,8 @@ Before running (operator steps, done once):
     answers a known marker; pass its URL as --preview-url and the marker as --marker;
   * --node NODE_ID=PUBLIC_IP twice (the operator API's node id and that node's public ingress address);
   * --cred: the operator credential file (line 1 email, line 2 password, line 3 base32 key of the authenticator), never printed.
+SKIP (exit 0, receipt {"ok": true, "skipped": true, "reason": ...}): a region with fewer than 2 edges cannot be drained without taking
+the preview down, so fewer than two --node arguments, or a node the operator does not list or does not report ready, skips with the reason.
 Steps (each asserted; a failing step stops the run, and the node is resumed on the way out):
   serve-all  every node serves the preview when the request is pinned to its address (curl --resolve): the machine holds a
              carrier to every node of the region
@@ -16,7 +18,8 @@ Steps (each asserted; a failing step stops the run, and the node is resumed on t
              other node keeps serving; with --check-dns A's address leaves DNS; unpinned requests never fail
   resume     Resume A: it is ready again and serves the preview again (the machine re-holds its carrier)
   move       Drain and move node A: the connection opened to A before ends within --move-seconds (it moved), the other node
-             keeps serving, unpinned requests never fail, and the operator's `carriers` count for A drops to 0
+             keeps serving, unpinned requests never fail, the operator's `carriers` count for A drops to 0 and node B's is >= 1
+             (the machines were re-placed on the remaining edge and hold a carrier there)
   resume     Resume A again, as above
 """
 import argparse
@@ -231,6 +234,9 @@ def run(env):
         empty = wait_until(lambda: env.operator.node(a).get('carriers', -1) == 0, env.move_seconds, sleep=env.sleep, now=env.now)
         need(empty is not None, 'move', 'node %s still lists carriers after %ss' % (a, env.move_seconds))
         step('move-carriers-zero', empty)
+        moved = wait_until(lambda: env.operator.node(b).get('carriers', 0) >= 1, env.move_seconds, sleep=env.sleep, now=env.now)
+        need(moved is not None, 'move', 'node %s holds no carrier %ss after Drain and move: the machines were not moved to the remaining edge' % (b, env.move_seconds))
+        step('move-carriers-on-remaining', moved)
         resume_and_serve('resume-after-move')
     finally:
         env.probe.stop.set()
@@ -277,6 +283,20 @@ class Env:
         return {info[4][0] for info in socket.getaddrinfo(self.host, 443, proto=socket.IPPROTO_TCP)}
 
 
+def skip_reason(operator, nodes):
+    """Why the check cannot run yet ('' when it can): the region needs two enrolled, ready edge nodes."""
+    if len(nodes) < 2:
+        return 'the region has %d edge node(s); draining needs 2 so the other can keep serving' % len(nodes)
+    for node in nodes:
+        try:
+            record = operator.node(node)
+        except Fail:
+            return 'node %s is not enrolled in the operator list yet; the region has fewer than 2 edges' % node
+        if not record.get('ready'):
+            return 'node %s is not ready (state %s); the region has fewer than 2 serving edges' % (node, record.get('state', '?'))
+    return ''
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--api', required=True, help='the server API base URL')
@@ -284,7 +304,7 @@ def main():
     parser.add_argument('--cafile')
     parser.add_argument('--preview-url', required=True)
     parser.add_argument('--marker', required=True)
-    parser.add_argument('--node', action='append', required=True, metavar='NODE_ID=PUBLIC_IP', help='twice, both in one region')
+    parser.add_argument('--node', action='append', default=[], metavar='NODE_ID=PUBLIC_IP', help='twice, both in one region; fewer skips the check')
     parser.add_argument('--check-dns', action='store_true')
     parser.add_argument('--serve-seconds', type=int, default=120)
     parser.add_argument('--up-seconds', type=int, default=240)
@@ -293,10 +313,14 @@ def main():
     parser.add_argument('--settle-seconds', type=int, default=20)
     parser.add_argument('--max-probe-failures', type=int, default=0)
     args = parser.parse_args()
-    if len(args.node) != 2 or any('=' not in n for n in args.node):
-        parser.error('--node NODE_ID=PUBLIC_IP is required exactly twice')
+    if len(args.node) > 2 or any('=' not in n for n in args.node):
+        parser.error('--node NODE_ID=PUBLIC_IP is at most twice (both nodes of one region)')
     operator = Operator(args.api, args.cred, args.cafile)
     operator.login()
+    reason = skip_reason(operator, [n.split('=')[0] for n in args.node])
+    if reason:
+        print(json.dumps({'ok': True, 'skipped': True, 'reason': reason}))
+        return 0
     try:
         receipt = run(Env(args, operator))
     except Fail as error:

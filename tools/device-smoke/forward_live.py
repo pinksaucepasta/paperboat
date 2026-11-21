@@ -352,6 +352,18 @@ def read_tickets(path):
     return [line.strip() for line in Path(path).read_text().splitlines()]
 
 
+def skip_reason(edges, stats):
+    """Why the check cannot run yet ('' when it can): forwarding needs two enrolled edge nodes. edges: --edge values (NODE_ID=IP
+    strings or pairs); stats: the operator's node list, or None when it was not read (then only the count is judged)."""
+    if len(edges) < 2:
+        return 'the region has %d edge node(s); forwarding needs 2 (--edge at least twice)' % len(edges)
+    ids = [e[0] if isinstance(e, tuple) else e.partition('=')[0] for e in edges]
+    missing = [n for n in ids if stats is not None and n not in stats]
+    if missing:
+        return 'edge node(s) %s are not in the operator list yet (not enrolled); forwarding needs 2' % ', '.join(missing)
+    return ''
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--api', default=os.environ.get('PB_API'))
@@ -368,8 +380,11 @@ def main(argv=None):
     parser.add_argument('--terminal-subprotocols-file', default=os.environ.get('PB_FORWARD_TERMINAL_SUBPROTOCOLS_FILE'))
     parser.add_argument('--terminal-origin')
     args = parser.parse_args(argv)
-    if not args.api or not args.cred or len(args.edge) < 2:
-        parser.error('--api, --cred and --edge (at least twice) are required, as arguments or environment')
+    if not args.api or not args.cred:
+        parser.error('--api and --cred are required, as arguments or environment')
+    if len(args.edge) < 2:
+        print('SKIP  forward-live  %s' % skip_reason(args.edge, None))
+        return 0
     if bool(args.tcp_name) != bool(args.tcp_port) or (args.tcp_port and not 0 < args.tcp_port < 65536):
         parser.error('--tcp-name and --tcp-port go together (the port is 1-65535)')
     terminal = (args.terminal_host, args.terminal_subprotocols_file, args.terminal_origin)
@@ -379,6 +394,10 @@ def main(argv=None):
     operator = Operator(args.api, args.cred)
     try:
         operator.login()
+        reason = skip_reason(args.edge, operator.forward_stats())
+        if reason:
+            print('SKIP  forward-live  %s' % reason)
+            return 0
         args.tickets = read_tickets(args.terminal_subprotocols_file) if args.terminal_subprotocols_file else []
         rows = run(Env(args, operator))
     except Fail as error:

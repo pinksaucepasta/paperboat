@@ -842,6 +842,58 @@ test_local_access_settings() {
   done
 }
 
+# Operator-side edge checks (run from this host against the live admin API; no device). The operator credential is a file
+# (SMOKE_OPERATOR_CRED: line 1 email, line 2 password, line 3 base32 authenticator key) that is never printed; SMOKE_OPERATOR_API is
+# the server API base URL. One row per region, so each region with two edges is judged on its own (Mumbai, Europe):
+#   region-drain:REGION   SMOKE_REGION_DRAIN_FILE, one line per region, tab separated: REGION, NODE_ID=IP,NODE_ID=IP (the region's two
+#                         edges), PREVIEW_URL (a preview served by a paired machine), MARKER (text its server answers).
+#                         Drain moves the workspaces' machines to the other edge, previews keep serving, resume restores
+#                         (region_drain.py).
+#   forward-live:REGION   SMOKE_FORWARD_LIVE_FILE, one line per region, tab separated: REGION, NODE_ID=IP,NODE_ID=IP, then optional
+#                         NAME=NODE_ID,NAME=NODE_ID (publication names and the edge holding each one's carrier). A request that hits
+#                         the edge not holding the route is forwarded to the holder and served (forward_live.py).
+# A region with fewer than two edges (not enrolled or not ready yet) or unset configuration records SKIP with the reason.
+operator_edge_check() { # operator_edge_check GROUP SCRIPT-NAME FILE-VARIABLE
+  local group=$1 script=$2 file=${!3:-} region rest id t0 out status line reason
+  skipped "$group" && return
+  if [ -z "${SMOKE_OPERATOR_API:-}" ] || [ -z "${SMOKE_OPERATOR_CRED:-}" ] || [ -z "$file" ] || [ ! -r "$file" ]; then
+    record "$group" SKIP 0 "set SMOKE_OPERATOR_API, SMOKE_OPERATOR_CRED and $3 (a readable file, one region per line) to run it"
+    return
+  fi
+  while IFS=$'\t' read -r region nodes a b || [ -n "$region" ]; do
+    case "$region" in ''|'#'*) continue ;; esac
+    id="$group:$region"
+    skipped "$id" && continue
+    t0=$(now)
+    local args=(--api "$SMOKE_OPERATOR_API" --cred "$SMOKE_OPERATOR_CRED") node
+    IFS=, read -ra list <<<"$nodes"
+    if [ "$group" = region-drain ]; then
+      for node in "${list[@]}"; do args+=(--node "$node"); done
+      args+=(--preview-url "$a" --marker "$b")
+    else
+      for node in "${list[@]}"; do args+=(--edge "$node"); done
+      IFS=, read -ra pubs <<<"$a"
+      for node in "${pubs[@]}"; do [ -z "$node" ] || args+=(--publication "$node"); done
+    fi
+    out=$(python3 "$HERE/$script" "${args[@]}" 2>&1); status=$?
+    line=$(tail -n 1 <<<"$out")
+    if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["ok"] and r.get("skipped")' "$line" 2>/dev/null; then
+      reason=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["reason"])' "$line")
+      record "$id" SKIP $(( $(now)-t0 )) "$reason"
+    elif [ "$status" = 0 ] && grep -q '^SKIP  forward-live  ' <<<"$out"; then
+      record "$id" SKIP $(( $(now)-t0 )) "$(grep -m1 '^SKIP  forward-live  ' <<<"$out" | cut -c21-)"
+    elif [ "$status" = 0 ] && [ "$group" = region-drain ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["ok"]' "$line" 2>/dev/null; then
+      record "$id" PASS $(( $(now)-t0 )) "drain: machines move to the other edge, previews keep serving, resume restores"
+    elif [ "$status" = 0 ] && [ "$group" = forward-live ]; then
+      record "$id" PASS $(( $(now)-t0 )) "a request to the edge without the route is forwarded and served"
+    else
+      record_command_failure "$id" $(( $(now)-t0 )) "$out"
+    fi
+  done < "$file"
+}
+test_region_drain() { operator_edge_check region-drain region_drain.py SMOKE_REGION_DRAIN_FILE; }
+test_forward_live() { operator_edge_check forward-live forward_live.py SMOKE_FORWARD_LIVE_FILE; }
+
 # carrier-throughput:DEVICE: the carrier's PR-06 budget on real hardware. The connector's own test (one QUIC stream at 50 ms
 # RTT, sender + delay line + receiver on the device) is cross-built, copied over and run with GITHUB_ACTIONS unset, so it
 # asserts the full 150 Mbit/s that shared CI runners only floor. Not a container device: it shares its host's cores.
@@ -1265,6 +1317,9 @@ done
 # Restart/update checks interrupt live connections by design, so they run after the long holds finish.
 test_device_application config-survival config_survival.py
 test_device_application preview-survival preview_survival.py
+# Drain moves machines between edges and cuts their live connections by design: after the long holds and the survival checks.
+test_region_drain
+test_forward_live
 
 if [ -n "$UPDATE_DIR" ]; then
   for t in "${TLIST[@]}"; do update_target "$t"; done

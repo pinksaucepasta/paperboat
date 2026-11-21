@@ -4,14 +4,56 @@
 // healthy, wrong address (a stray IP in DNS), missing (a region machine absent from DNS) and not added (no list entry).
 // usage: node scripts/check-dns-binding-badges.mjs     PW_MODULE=<playwright-core index.js> PW_CHROMIUM=<chrome path> when not installed
 // Exits 1 when a step fails.
+// LIVE MODE (read-only, set ORIGIN, or LIVE=1): no stub and no `next dev`; ORIGIN=<real console> DOMAIN=<real test domain, with at least
+// one tunnel or preview bound to a name under it> STATE=<storage state of the signed-in test account> (or EMAIL + PASSWORD_FILE, the stored
+// WorkOS password) [EXPECT_HEALTH=healthy] node scripts/check-dns-binding-badges.mjs. It reads the domain's badge in the Domains list, then
+// the badge on every tunnel page (and the Previews page) that the domain's "Used by" list names, and requires them to agree.
 import { createServer } from "node:http"
 import { readFileSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { createServer as net } from "node:net"
+import * as live from "./dns-live.mjs"
 
 const playwright = await import(process.env.PW_MODULE ?? "playwright-core")
 const chromium = playwright.chromium ?? playwright.default.chromium
 const freePort = () => new Promise((resolve) => { const s = net().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)) }) })
+
+if (live.liveMode()) {
+  const cfg = live.liveConfig()
+  let bad = 0
+  const verdict = (step, ok, detail = "") => { if (!ok) bad++; console.log(`${ok ? "PASS" : "FAIL"}  ${step}${detail ? `  (${detail})` : ""}`) }
+  const lbrowser = await live.launch(playwright)
+  try {
+    const context = await live.signedInContext(lbrowser, cfg, { width: 1280, height: 900 })
+    const { panel, why } = await live.openDomainPanel(context, cfg)
+    verdict(`live/domains list: the entry of ${cfg.domain} opens`, Boolean(panel), why)
+    if (panel) {
+      const r = await live.readPanel(panel)
+      verdict(`live/domains list: the entry shows a known DNS health`, live.HEALTHS.includes(r.health), String(r.health))
+      if (cfg.expect) verdict(`live/domains list: the entry says ${cfg.expect}`, r.health === cfg.expect, String(r.health))
+      verdict(`live/domains list: a tunnel or a preview is bound under the domain`, r.tunnelLinks.length > 0 || r.usesPreview, "the test domain's Used by list is empty: bind a tunnel or preview name under it")
+      const pages = [...r.tunnelLinks.map((href) => ["tunnel", href]), ...(r.usesPreview ? [["preview", "/previews"]] : [])]
+      for (const [kind, path] of pages) {
+        const page = await context.newPage()
+        await page.goto(`${cfg.origin}${path}`, { timeout: 120_000 })
+        const first = await page.waitForSelector("[data-dns-health]", { timeout: 60_000 }).catch(() => null)
+        verdict(`live/${kind} ${path}: the domain row shows a DNS badge`, Boolean(first), first ? "" : live.squash((await page.locator("main").innerText().catch(() => "")).slice(0, 300)))
+        if (first) {
+          const badges = await page.$$eval("[data-dns-health]", (e) => e.map((b) => [b.getAttribute("data-dns-health"), b.innerText.replace(/\s+/g, " ")]))
+          verdict(`live/${kind} ${path}: every badge is a known DNS health with its label`, badges.every(([h, t]) => live.HEALTHS.includes(h) && t === live.LABELS[h]), badges.map((b) => b.join(":")).join(","))
+          verdict(`live/${kind} ${path}: a badge says ${r.health}, like the Domains list`, badges.some(([h]) => h === r.health), badges.map((b) => b[0]).join(","))
+          const href = await page.locator("a:has([data-dns-health], [data-dns-not-added])").first().getAttribute("href")
+          verdict(`live/${kind} ${path}: the badge opens the Domains list`, href === "/network#domains", String(href))
+        }
+        if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/binding-live-${kind}.png` })
+        await page.close()
+      }
+    }
+    await context.close()
+  } finally { await lbrowser.close() }
+  console.log(bad ? `${bad} failed` : "all passed")
+  process.exit(bad ? 1 : 0)
+}
 
 // A valid object for a schema of the API description: required fields only, the first enum value, empty lists.
 const doc = JSON.parse(readFileSync(new URL("../../server/docs/openapi.json", import.meta.url), "utf8"))

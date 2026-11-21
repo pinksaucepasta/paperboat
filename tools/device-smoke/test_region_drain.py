@@ -2,7 +2,7 @@ import threading
 import unittest
 
 import region_drain
-from region_drain import Fail, run, totp, wait_until
+from region_drain import Fail, run, skip_reason, totp, wait_until
 
 
 class Clock:
@@ -131,6 +131,34 @@ class RegionDrain(unittest.TestCase):
         with self.assertRaises(Fail):
             run(Env(operator, self.clock))
         self.assertEqual(operator.nodes['a']['state'], 'ready')
+
+    def test_fails_when_move_leaves_no_carrier_on_the_remaining_edge(self):
+        original = self.operator.act
+
+        def emptying(node_id, action):
+            original(node_id, action)
+            if action == 'drain-move':
+                self.operator.nodes['b']['carriers'] = 0
+        self.operator.act = emptying
+        with self.assertRaisesRegex(Fail, 'move: .*remaining edge'):
+            run(Env(self.operator, self.clock))
+
+    def test_skips_with_a_reason_below_two_ready_edges(self):
+        self.assertIn('1 edge', skip_reason(self.operator, ['a']))
+        self.assertIn('0 edge', skip_reason(self.operator, []))
+        self.assertIn('not enrolled', skip_reason(self.operator, ['a', 'europe']) if self._missing() else '')
+        self.operator.nodes['b']['ready'] = False
+        self.assertIn('not ready', skip_reason(self.operator, ['a', 'b']))
+        self.operator.nodes['b']['ready'] = True
+        self.assertEqual(skip_reason(self.operator, ['a', 'b']), '')
+
+    def _missing(self):
+        def node(node_id, region=''):
+            if node_id not in self.operator.nodes:
+                raise Fail('node %s is not in the operator list' % node_id)
+            return self.operator.nodes[node_id]
+        self.operator.node = node
+        return True
 
 
 if __name__ == '__main__':
