@@ -40,6 +40,14 @@ func writeAuthRequest(w io.Writer, parts []string, namespace [32]byte, disco key
 	return nil
 }
 
+// grantAdmissionError identifies the certificate-bound subject of a refused grant.
+type grantAdmissionError struct {
+	error
+	accountID, endpointID string
+}
+
+func (e *grantAdmissionError) Unwrap() error { return e.error }
+
 func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time.Time) error {
 	p.stream.SetReadDeadline(now.Add(5 * time.Second))
 	defer p.stream.SetReadDeadline(time.Time{})
@@ -106,7 +114,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 		copy(merged.signedHash[:], digest.Sum(nil))
 	}
 	if err := s.admit(p, merged, now); err != nil {
-		return fmt.Errorf("admit: %w", err)
+		return &grantAdmissionError{fmt.Errorf("admit: %w", err), merged.AccountID, merged.EndpointID}
 	}
 	s.rememberTokens(p, merged, tokens)
 	return nil

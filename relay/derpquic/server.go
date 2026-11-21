@@ -418,7 +418,12 @@ func (s *Server) reject(p *peerConn, err error) {
 	}
 	// A refusal is never silent: one bounded line per second names its typed code.
 	if now := time.Now().UnixNano(); now-s.lastRefusalLog.Load() >= int64(time.Second) && s.lastRefusalLog.CompareAndSwap(s.lastRefusalLog.Load(), now) {
-		slog.Info("relay admission refused", "code", e.Code, "reason", err.Error(), "refused_total", s.denied.Load())
+		attrs := []slog.Attr{slog.Uint64("code", e.Code), slog.String("reason", err.Error()), slog.Uint64("refused_total", s.denied.Load())}
+		var subject *grantAdmissionError
+		if errors.As(err, &subject) {
+			attrs = append(attrs, slog.String("account_id", subject.accountID), slog.String("endpoint_id", subject.endpointID))
+		}
+		slog.LogAttrs(context.Background(), slog.LevelInfo, "relay admission refused", attrs...)
 	}
 	p.close(e.Code, e.Message)
 }
