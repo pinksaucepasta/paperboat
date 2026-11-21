@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -40,7 +41,7 @@ func TestENVDecodedIntegrityKeepsHelpfulPresentationAndOneFaultOwner(t *testing.
 	defer server.Close()
 	ctx := supportref.WithContext(t.Context(), reference)
 	client := api.New(server.URL, config.Credential{AccessToken: "fixture-token"}, server.Client())
-	vault := environmentmanager.PasswordVault{WorkspaceID: "personal", Client: client, Issuer: state.Issuer, AccountID: state.AccountID, Store: config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: envIntegrityEmptyStore{}}}
+	vault := environmentmanager.PasswordVault{WorkspaceID: "personal", Client: client, Issuer: state.Issuer, AccountID: state.AccountID, Store: config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: envIntegrityEmptyStore{}}}
 	err := vault.Initialize(ctx, []byte("unused-password"))
 	var corrupt base64.CorruptInputError
 	if !errors.As(err, &corrupt) || !errors.Is(err, environmentmanager.ErrIntegrity) || !onlyEnvironmentIntegrityFailure(err) {

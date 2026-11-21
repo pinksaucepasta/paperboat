@@ -22,7 +22,7 @@ func Dir(t testing.TB) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	ownByUser(t, dir)
+	OwnByUser(t, dir)
 	real, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)

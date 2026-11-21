@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/spf13/cobra"
 )
 
@@ -217,7 +218,7 @@ type commandVaultFixture struct {
 
 func newCommandVaultFixture(t *testing.T) commandVaultFixture {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	secrets := &commandVaultSecureStore{values: make(map[string]string)}
 	store := config.ProfileStore{Path: filepath.Join(root, "profiles.json"), Secrets: secrets}
 	control := &commandVaultControl{store: store, scopes: make(map[string]api.VaultScopeState)}
@@ -298,7 +299,7 @@ func assertCommandVaultNoSecret(t *testing.T, secrets *commandVaultSecureStore, 
 
 func TestPasswordVaultCommandSavesRecoveryBeforePublicationAndHidesCode(t *testing.T) {
 	fixture := newCommandVaultFixture(t)
-	path := filepath.Join(t.TempDir(), "recovery-code.txt")
+	path := filepath.Join(shorttemp.Dir(t), "recovery-code.txt")
 	password := []byte("command master password")
 	defer clear(password)
 	var code []byte
@@ -337,7 +338,7 @@ func TestPasswordVaultCommandSavesRecoveryBeforePublicationAndHidesCode(t *testi
 
 func TestPasswordVaultCommandCommitErrorRetainsCodeAndResumeRetriesExactBytes(t *testing.T) {
 	fixture := newCommandVaultFixture(t)
-	path := filepath.Join(t.TempDir(), "recovery-code.txt")
+	path := filepath.Join(shorttemp.Dir(t), "recovery-code.txt")
 	password := []byte("command master password")
 	defer clear(password)
 	fixture.control.failAfterCommit = true
@@ -427,7 +428,7 @@ func TestPasswordVaultCommandBadRecoveryLeavesVaultCustodyUnchanged(t *testing.T
 		return wrong
 	}()} {
 		badCode := badCode
-		path := filepath.Join(t.TempDir(), "replacement-code.txt")
+		path := filepath.Join(shorttemp.Dir(t), "replacement-code.txt")
 		newPassword := []byte("replacement master password")
 		defer clear(newPassword)
 		ctx := installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{

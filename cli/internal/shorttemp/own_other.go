@@ -4,4 +4,5 @@ package shorttemp
 
 import "testing"
 
-func ownByUser(testing.TB, string) {}
+// OwnByUser is a no-op off Windows: the creating user always owns what it creates.
+func OwnByUser(testing.TB, string) {}

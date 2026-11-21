@@ -13,12 +13,13 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmentmanager"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/spf13/cobra"
 )
 
 func writeVaultInputFile(t *testing.T, value []byte, mode os.FileMode) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "secret-input")
+	path := filepath.Join(shorttemp.Dir(t), "secret-input")
 	if mode.Perm() == 0o600 { // the private shape; other modes build the files the command must refuse
 		atomicfiletest.WriteOwnerOnly(t, path, value)
 		return path
@@ -131,7 +132,7 @@ func TestVaultPasswordInputRejectsUnsafeFilesAndConflictingSources(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "owner-only") || called {
 		t.Fatalf("unsafe password file err=%v manager_called=%t", err, called)
 	}
-	missing := filepath.Join(t.TempDir(), "missing-password")
+	missing := filepath.Join(shorttemp.Dir(t), "missing-password")
 	_, _, err = executePasswordVaultCommand(t, ctx, "init", "--json", "--password-file", missing)
 	if err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) || called {
 		t.Fatalf("missing password file lost its private cause or exposed its path: err=%v manager_called=%t", err, called)
@@ -150,8 +151,8 @@ func TestVaultPasswordInputRejectsUnsafeFilesAndConflictingSources(t *testing.T)
 }
 
 func TestVaultRecoveryInputReadFailureRetainsCauseWithoutPath(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing-recovery-code")
-	replacement := filepath.Join(t.TempDir(), "replacement-code")
+	missing := filepath.Join(shorttemp.Dir(t), "missing-recovery-code")
+	replacement := filepath.Join(shorttemp.Dir(t), "replacement-code")
 	_, _, err := executePasswordVaultCommand(t, t.Context(), "recover", "--json", "--recovery-input-file", missing, "--password-stdin", "--recovery-file", replacement)
 	if err == nil || !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), missing) {
 		t.Fatalf("missing recovery input lost its private cause or exposed its path: %v", err)
@@ -182,7 +183,7 @@ func TestVaultJSONRecoverReadsSeparateRecoveryInputFile(t *testing.T) {
 	recoveryInput := writeVaultInputFile(t, append(append([]byte(nil), oldCode...), '\n'), 0o600)
 	newPassword := []byte("replacement password")
 	defer clear(newPassword)
-	replacementFile := filepath.Join(t.TempDir(), "replacement-code")
+	replacementFile := filepath.Join(shorttemp.Dir(t), "replacement-code")
 	root := environmentVariablesCobraCommand()
 	root.SetArgs([]string{"recover", "--json", "--recovery-input-file", recoveryInput, "--password-stdin", "--recovery-file", replacementFile})
 	root.SetIn(bytes.NewReader(newPassword))
