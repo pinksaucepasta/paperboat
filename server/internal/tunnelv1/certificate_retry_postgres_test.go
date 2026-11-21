@@ -45,8 +45,8 @@ VALUES ($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000',$4,$4,$5,$5)`, rou
 	}
 	if _, err := f.database.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.tunnel_domains
- (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
-VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear',$6)`, domain, account, tunnel, route, hostname, "wsd_"+ws); err != nil {
+ (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+VALUES ($1,$2,$3,$4,$5,'exact',$1,$5,'managed','issuing','ready','clear',$6)`, domain, account, tunnel, route, hostname, "wsd_"+ws); err != nil {
 		t.Fatal(err)
 	}
 	due := func(at time.Time) bool {
@@ -173,8 +173,8 @@ VALUES($1,'default','v1',$2,'ready',true,$3,1,ARRAY['edge']::text[],'test','doma
 		ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 		workspaceDomains[domain.id] = "wsd_" + ws
 		exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test")
-		exec(`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
-VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear',$6)`, domain.id, account, tunnel, route, domain.hostname, "wsd_"+ws)
+		exec(`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+VALUES ($1,$2,$3,$4,$5,'exact',$1,$5,'managed','issuing','ready','clear',$6)`, domain.id, account, tunnel, route, domain.hostname, "wsd_"+ws)
 	}
 
 	issuer := &fanoutIssuer{}

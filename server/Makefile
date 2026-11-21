@@ -55,7 +55,6 @@ generate:
 	@mkdir -p .build
 	@# sqlc's parser input: the Goose Up sections without the schema qualifier
 	@for f in $$(LC_ALL=C ls internal/db/migrations/*.sql); do sed -e '/^-- +goose Down/,$$d' -e 's/paperboat\.//g' $$f; echo; done > .build/sqlc-schema.sql
-	@sed -e 's/paperboat\.//g' internal/db/sqlc_ignored_columns.sql >> .build/sqlc-schema.sql
 	$(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
 generate-check:

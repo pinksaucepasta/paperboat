@@ -55,13 +55,15 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	domain := "domain_" + f.suffix
 	hostname := "custom-" + f.suffix + ".example.test"
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
-	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.accountID, ws+".example.test")
-	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
- VALUES($1,$2,$3,$4,$5,'exact','dns:test','pending','target.example.test','managed','pending','unknown','clear',$6)`, domain, f.accountID, f.tunnelID, f.routeID, hostname, "wsd_"+ws)
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','pending',$2)`, "wsd_"+ws, f.accountID, ws+".example.test")
+	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+ VALUES($1,$2,$3,$4,$5,'exact','dns:test','target.example.test','managed','pending','unknown','clear',$6)`, domain, f.accountID, f.tunnelID, f.routeID, hostname, "wsd_"+ws)
+	// The DNS record names this edge already, so only the workspace domain's ownership differs below.
+	exec(`UPDATE paperboat.tunnel_domains SET expected_records='[{"type":"A","value":"93.184.216.35"}]'::jsonb WHERE id=$1`, domain)
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("unverified custom domain admitted: %+v", rows)
 	}
-	exec(`UPDATE paperboat.tunnel_domains SET ownership_state='verified',expected_records='[{"type":"A","value":"93.184.216.35"}]'::jsonb WHERE id=$1`, domain)
+	exec(`UPDATE paperboat.workspace_domains SET ownership_state='verified' WHERE id=$1`, "wsd_"+ws)
 	rows := read()
 	if len(rows) != 1 || rows[0].ScopedDomainHostname != hostname || rows[0].ScopedDomainMatchType != "exact" || rows[0].DomainBindings != "[]" {
 		t.Fatalf("pre-TLS bootstrap = %+v", rows)
