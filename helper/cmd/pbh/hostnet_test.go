@@ -230,7 +230,8 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 			[]string{"7277/tcp", "443/udp", "7272/tcp", "7273/udp", "10000-59999/tcp"},
 			[]string{"firewall-cmd --permanent --add-port=7277/tcp", "firewall-cmd --permanent --add-port=443/udp", "firewall-cmd --permanent --add-port=7273/udp", "firewall-cmd --reload"},
 			[]string{"firewall-cmd --permanent --remove-port=7277/tcp", "firewall-cmd --permanent --remove-port=443/udp", "firewall-cmd --permanent --remove-port=7273/udp"}},
-		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "", "iptables -D INPUT " + tcp: "", "iptables -D INPUT " + udp: ""},
+		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "", "iptables -D INPUT " + tcp: "", "iptables -D INPUT " + udp: "",
+			"iptables -S INPUT": "-P INPUT DROP\n-A INPUT " + tcp + "\n-A INPUT " + udp + "\n"},
 			[]string{"iptables " + tcp, "iptables " + udp},
 			[]string{"iptables -C INPUT " + tcp, "iptables -I INPUT 1 -p tcp -m multiport --dports 7277,443,7272,10000:59999 ", "iptables -I INPUT 1 -p udp -m multiport --dports 443,7273 "},
 			[]string{"iptables -D INPUT -p tcp -m multiport --dports 7277,443,7272,10000:59999 ", "iptables -D INPUT -p udp -m multiport --dports 443,7273 "}},
@@ -442,5 +443,43 @@ func TestSetupWithoutATunnelOpensOnlyTheRelayAndClaimPorts(t *testing.T) {
 	record, _ := readHostnetRecord(f.paths.record)
 	if len(record.Rules) != 4 || record.Guard {
 		t.Fatalf("record %+v", record)
+	}
+}
+
+// Uninstall finds the rules by their comment: with the record gone, with a rule the service re-added, and
+// beside rules of other owners, which stay.
+func TestUninstallRemovesEveryCommentedRuleWithoutARecord(t *testing.T) {
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
+	foreign := "-p tcp -m tcp --dport 22 -m comment --comment other-owner -j ACCEPT"
+	f := newFakeHost(t, "60000 65535") // no hostnet.json: nothing recorded
+	f.answers = map[string]string{
+		"iptables -S INPUT":        "-P INPUT DROP\n-A INPUT " + tcp + "\n-A INPUT " + foreign + "\n-A INPUT " + udp + "\n",
+		"ip6tables -S INPUT":       "-P INPUT DROP\n-A INPUT " + tcp + "\n",
+		"iptables -D INPUT " + tcp: "", "iptables -D INPUT " + udp: "", "ip6tables -D INPUT " + tcp: "",
+		"nft list ruleset":                           "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n",
+		"nft -a list chain inet filter input":        "\t\ttcp dport { 443 } accept comment \"paperboat-edge\" # handle 4\n\t\ttcp dport { 22 } accept comment \"other-owner\" # handle 5\n",
+		"nft delete rule inet filter input handle 4": "",
+	}
+	for _, path := range []string{f.paths.sysctl, f.paths.udp} {
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := removeHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"iptables -D INPUT " + tcp, "iptables -D INPUT " + udp, "ip6tables -D INPUT " + tcp, "nft delete rule inet filter input handle 4"} {
+		if f.called(want) != 1 {
+			t.Errorf("%q ran %d times; calls %v", want, f.called(want), f.calls)
+		}
+	}
+	if f.called("iptables -D INPUT -p tcp -m tcp --dport 22") != 0 || f.called("nft delete rule inet filter input handle 5") != 0 {
+		t.Errorf("a rule of another owner was deleted: %v", f.calls)
+	}
+	for _, gone := range []string{f.paths.sysctl, f.paths.udp} {
+		if _, err := os.Stat(gone); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s survived uninstall without a record: %v", gone, err)
+		}
 	}
 }

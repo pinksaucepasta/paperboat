@@ -492,23 +492,29 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 			}
 		}
 	case "iptables":
-		for _, entry := range added { // "<tool> <rule args>", as firewallAdd recorded it
-			fields := strings.Fields(entry)
-			if len(fields) < 2 {
-				continue
+		// Found by comment, not by the record, so a rule the service re-added or a lost record cannot leave one behind.
+		for _, tool := range []string{"iptables", "ip6tables"} {
+			listed, err := run(ctx, tool, "-S", "INPUT")
+			if err != nil {
+				continue // no such tool, or no rules to list: nothing of ours in it
 			}
-			if _, err := run(ctx, fields[0], append([]string{"-D", "INPUT"}, fields[1:]...)...); err != nil {
-				errs = append(errs, err)
+			for _, line := range strings.Split(listed, "\n") {
+				fields := strings.Fields(line)
+				if len(fields) < 3 || fields[0] != "-A" || fields[1] != "INPUT" || !slices.Contains(fields, firewallComment) {
+					continue
+				}
+				if _, err := run(ctx, tool, append([]string{"-D", "INPUT"}, fields[2:]...)...); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 	case "nft":
-		if len(added) == 0 {
-			break
-		}
 		out, err := run(ctx, "nft", "list", "ruleset")
 		family, table, chain, ok := nftInputChain(out)
 		if err != nil || !ok {
-			errs = append(errs, errors.New("nftables input chain not found"))
+			if len(added) > 0 { // rules were recorded, so the chain they went into must be there
+				errs = append(errs, errors.New("nftables input chain not found"))
+			}
 			break
 		}
 		listed, err := run(ctx, "nft", "-a", "list", "chain", family, table, chain)
@@ -564,11 +570,20 @@ func removeHostNetwork(ctx context.Context, run commander, paths hostPaths, out 
 		return fmt.Errorf("%w: %w", commandError("read pbh host network record failed; nothing removed"), err)
 	}
 	var errs []error
-	if record.Firewall != "" && len(record.Added) > 0 {
-		if err := firewallRemove(ctx, run, record.Firewall, record.Added); err != nil {
-			errs = append(errs, fmt.Errorf("remove %s rules: %w", record.Firewall, err))
-		} else {
-			fmt.Fprintf(out, "Removed the %s host firewall rules pbh added.\n", record.Firewall)
+	// iptables and nft rules are found by their comment whether or not the record lists them; ufw and
+	// firewalld rules carry no comment, so those are removed from the record.
+	kinds := []string{record.Firewall}
+	if record.Firewall == "" {
+		kinds = []string{"iptables", "nft"}
+	}
+	for _, kind := range kinds {
+		if (kind == "ufw" || kind == "firewalld") && len(record.Added) == 0 {
+			continue
+		}
+		if err := firewallRemove(ctx, run, kind, record.Added); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s rules: %w", kind, err))
+		} else if record.Firewall != "" {
+			fmt.Fprintf(out, "Removed the %s host firewall rules pbh added.\n", kind)
 		}
 	}
 	if record.Guard {
@@ -598,6 +613,11 @@ func removeHostNetwork(ctx context.Context, run commander, paths hostPaths, out 
 			if _, err := run(ctx, "sysctl", "-w", key+"="+previous); err != nil {
 				errs = append(errs, fmt.Errorf("restore %s=%s: %w", key, previous, err))
 			}
+		}
+	}
+	for _, path := range []string{paths.sysctl, paths.udp} { // pbh's own files, even when the record is gone
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {

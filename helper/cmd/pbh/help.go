@@ -78,7 +78,8 @@ pbh doctor and, as root, in pbh status, and the current certificate serves until
 Examples:
   pbh configure-tls --acme
   pbh configure-tls --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
-	"uninstall": `Stop the service and remove its containers and the pbh executables. Protected identity,
+	"uninstall": `Stop the service and remove its containers, host firewall rules, the edge certificate timer and
+service, and the pbh executables. Protected identity,
 credentials and configuration are kept for a reinstall unless both --remove-data and
 --confirm-remove-data are given, which deletes them permanently. Remove the node from
 Dashboard → Network to revoke its registration. Needs root (it re-runs itself with sudo).`,
