@@ -75,6 +75,11 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// A global (Paperboat-hosted) edge serves only managed-only workspaces, so the
 	// pool switches to managed-only for this check and back afterwards.
 	exec(`UPDATE paperboat.selfhost_installations SET scope_kind='global' WHERE id=$1`, installation)
+	// A global node serves in its operator region (the claim creates it).
+	region := "boot_" + f.suffix
+	exec(`INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1)`, region)
+	t.Cleanup(func() { database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.operator_regions WHERE id=$1`, region) })
+	exec(`UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, f.nodeID, region)
 	exec(`UPDATE paperboat.selfhost_pool_policies SET mode='managed-only',installation_ids='{}' WHERE scope_kind='account' AND scope_id=$1`, f.accountID)
 	f.setCarrierHost(t, database, false)
 	if rows := read(); len(rows) != 1 || rows[0].ScopedDomainHostname != "" {

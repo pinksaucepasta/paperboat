@@ -30,17 +30,15 @@ func TestManagedNodeRestartAfterGracefulDrain(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,'Restart test')`, region); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready) VALUES($1,'managed:test','1.0','old_epoch','edge.example.test',27443,27444,'edge.example.test',27443,27444,'draining',false)`, node); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, node, region); err != nil {
+	// A global pbh edge as the claim leaves it: its installation id is its pool, its TLS key is pinned.
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$1,'1.0','old_epoch','edge.example.test',27443,27444,'edge.example.test',27443,27444,'draining',false,$2,'test',ARRAY['edge'],ARRAY['http3','http2'],10,0,now(),now(),decode(lpad('1',64,'0'),'hex'))`, node, region); err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256([]byte(node))
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),$2,$3,'managed fixture','tunnel','global','global',$1,true)`, node, hash[:], []byte("test")); err != nil {
 		t.Fatal(err)
 	}
-	registration := dbsqlc.RegisterControlTunnelNodeParams{ID: node, EdgePool: "managed:test", ProtocolVersion: "1.0", ProcessEpoch: "new_epoch", EndpointHost: sql.NullString{String: "edge.example.test", Valid: true}, EndpointTcpPort: sql.NullInt32{Int32: 27443, Valid: true}, EndpointQuicPort: sql.NullInt32{Int32: 27444, Valid: true}, CarrierEndpointHost: sql.NullString{String: "edge.example.test", Valid: true}, CarrierEndpointTcpPort: sql.NullInt32{Int32: 27443, Valid: true}, CarrierEndpointQuicPort: sql.NullInt32{Int32: 27444, Valid: true}, CarrierServerSpkiSha256: sql.NullString{String: "sha256:" + fmt.Sprintf("%064x", 1), Valid: true}, CarrierServerCertificateChainPem: sql.NullString{String: "certificate", Valid: true}, Capacity: []byte(`{"connectors":8}`), Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}}
+	registration := dbsqlc.RegisterControlTunnelNodeParams{ID: node, EdgePool: node, ProtocolVersion: "1.0", ProcessEpoch: "new_epoch", EndpointHost: sql.NullString{String: "edge.example.test", Valid: true}, EndpointTcpPort: sql.NullInt32{Int32: 27443, Valid: true}, EndpointQuicPort: sql.NullInt32{Int32: 27444, Valid: true}, CarrierEndpointHost: sql.NullString{String: "edge.example.test", Valid: true}, CarrierEndpointTcpPort: sql.NullInt32{Int32: 27443, Valid: true}, CarrierEndpointQuicPort: sql.NullInt32{Int32: 27444, Valid: true}, CarrierServerSpkiSha256: sql.NullString{String: "sha256:" + fmt.Sprintf("%064x", 1), Valid: true}, CarrierServerCertificateChainPem: sql.NullString{String: "certificate", Valid: true}, Capacity: []byte(`{"connectors":8}`), Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}}
 	if _, err := store.Queries().RegisterControlTunnelNode(ctx, registration); err != nil {
 		t.Fatalf("graceful restart failed: %v", err)
 	}
