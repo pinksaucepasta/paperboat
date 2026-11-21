@@ -15,7 +15,6 @@ import (
 
 type stormProcessConfig struct {
 	BaseURL    string `json:"base_url"`
-	Credential string `json:"credential"`
 	CAPEM      string `json:"ca_pem"`
 	Prefix     string `json:"prefix"`
 	Nodes      int    `json:"nodes"`
@@ -40,13 +39,6 @@ func TestControlStormParticipant(t *testing.T) {
 	if !roots.AppendCertsFromPEM([]byte(config.CAPEM)) {
 		t.Fatal("invalid control-storm CA certificate")
 	}
-	client, err := NewHTTPClient(HTTPConfig{
-		BaseURL: config.BaseURL, Credential: config.Credential, Timeout: 45 * time.Second,
-		TLS: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -57,6 +49,15 @@ func TestControlStormParticipant(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 			nodeID := config.Prefix + strconv.Itoa(index)
+			// Each node sends its own credential (the harness binds "storm-node:<id>"); node routes refuse a shared one.
+			client, err := NewHTTPClient(HTTPConfig{
+				BaseURL: config.BaseURL, Credential: "storm-node:" + nodeID, Timeout: 45 * time.Second,
+				TLS: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13},
+			})
+			if err != nil {
+				errors <- err
+				return
+			}
 			trust, trustErr := NewProcessCarrierServerTrust(nodeID, "tunnel_client_epoch", "edge.example.test", time.Now().UTC(), time.Hour)
 			if trustErr != nil {
 				errors <- trustErr
@@ -70,7 +71,7 @@ func TestControlStormParticipant(t *testing.T) {
 				CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM,
 			}
 			started := time.Now()
-			err := client.RegisterNode(ctx, registration)
+			err = client.RegisterNode(ctx, registration)
 			durations <- time.Since(started)
 			if err != nil {
 				errors <- fmt.Errorf("register node %d: %w", index, err)

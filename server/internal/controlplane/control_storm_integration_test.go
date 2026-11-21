@@ -201,7 +201,7 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 	seedStormAssignments(t, ctx, store.SQL(), prefix, machines)
 	report.Phases = append(report.Phases,
 		runStormPhase(t, ctx, "route_snapshot", machines, func(index int) (int64, int64, error) {
-			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/edge/routes/desired-state", controlStormCredential, map[string]string{"edge_node_id": prefix + strconv.Itoa(index)})
+			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/edge/routes/desired-state", stormNodeCredential(prefix, index), map[string]string{"edge_node_id": prefix + strconv.Itoa(index)})
 		}),
 	)
 	stale := (machines + 1) / 2
@@ -219,15 +219,15 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 			return 0, 0, err
 		}),
 		runStormPhase(t, ctx, "post_fence_snapshot", machines, func(index int) (int64, int64, error) {
-			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/edge/routes/desired-state", controlStormCredential, map[string]string{"edge_node_id": prefix + strconv.Itoa(index)})
+			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/edge/routes/desired-state", stormNodeCredential(prefix, index), map[string]string{"edge_node_id": prefix + strconv.Itoa(index)})
 		}),
 	)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_signing_key_revocations (key_id,reason,revoked_at)
 		SELECT $1 || value::text, 'storm', now() FROM generate_series(0,$2::integer-1) value`, prefix, machines); err != nil {
 		t.Fatal(err)
 	}
-	report.Phases = append(report.Phases, runStormPhase(t, ctx, "revocation_snapshot", machines, func(int) (int64, int64, error) {
-		return stormRequest(ctx, client, http.MethodGet, server.URL+"/v1/trust/revocations", controlStormCredential, nil)
+	report.Phases = append(report.Phases, runStormPhase(t, ctx, "revocation_snapshot", machines, func(index int) (int64, int64, error) {
+		return stormRequest(ctx, client, http.MethodGet, server.URL+"/v1/trust/revocations", stormNodeCredential(prefix, index), nil)
 	}))
 
 	var persisted, ready int
@@ -302,7 +302,7 @@ func runTunnelClientStorm(t *testing.T, ctx context.Context, server *httptest.Se
 	}
 	t.Cleanup(func() { _ = os.Remove(reportPath) })
 	config, err := json.Marshal(map[string]any{
-		"base_url": server.URL, "credential": controlStormCredential,
+		"base_url": server.URL,
 		"ca_pem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})),
 		"prefix": prefix, "nodes": nodes, "report_path": reportPath,
 	})
@@ -659,7 +659,7 @@ func stormResources() (heap uint64, goroutines int, cpuSeconds float64) {
 	return memory.HeapAlloc, runtime.NumGoroutine(), cpuSeconds
 }
 
-// stormNodes binds each storm node's own credential to that node: register and heartbeat refuse the shared one.
+// stormNodes binds each storm node's own credential to that node: node routes refuse the shared one.
 type stormNodes string
 
 func stormNodeCredential(prefix string, index int) string {

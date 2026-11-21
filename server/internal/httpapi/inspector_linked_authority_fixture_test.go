@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/inspectaccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
@@ -171,7 +172,10 @@ func newInspectorLinkedAuthority(t *testing.T, database *db.DB, now time.Time, s
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.machine_control_sessions WHERE machine_id=$1`, machine)
 		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.machine_control_renewals WHERE machine_id=$1`, machine)
 	})
-	return &inspectorLinkedAuthority{Signer: signer, Enrollment: enrollment, MachineVerifier: verifier, EdgeService: controlplane.NewEdgeService(database, edgeCredential), TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{tlsPair}}, Descriptor: map[string]any{"FixtureExpiresAt": now.Add(time.Hour), "OwnerAccountID": owner, "MachineID": machine, "EnvironmentID": environment, "MachineGeneration": 1, "MachineToken": token, "MachinePrivateKey": base64.RawURLEncoding.EncodeToString(private), "MachinePublicKey": base64.RawURLEncoding.EncodeToString(public), "MachineThumbprint": base64.RawURLEncoding.EncodeToString(thumb[:]), "EdgeNodeID": node, "EdgeProcessEpoch": epoch, "EdgeCredential": edgeCredential, "TLSCertificatePEM": string(certPEM), "TLSPrivateKeyPEM": string(keyPEM), "OriginAddress": origin, "PreviewAccess": previewAccess, "TunnelAccess": tunnelAccess, "PreviewCarrier": previewAccess.Carrier, "TunnelCarrier": tunnelAccess.Carrier, "PreviewEndpoint": previewEndpoint, "TunnelEndpoint": tunnelEndpoint}}
+	// The fixture's edge credential is bound to its node: node routes refuse the shared one.
+	edgeService := controlplane.NewEdgeService(database, "inspector-fixture-shared-credential-0123456789")
+	edgeService.SetNodeCredentials(fixtureNodeCredential{credential: edgeCredential, node: node})
+	return &inspectorLinkedAuthority{Signer: signer, Enrollment: enrollment, MachineVerifier: verifier, EdgeService: edgeService, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{tlsPair}}, Descriptor: map[string]any{"FixtureExpiresAt": now.Add(time.Hour), "OwnerAccountID": owner, "MachineID": machine, "EnvironmentID": environment, "MachineGeneration": 1, "MachineToken": token, "MachinePrivateKey": base64.RawURLEncoding.EncodeToString(private), "MachinePublicKey": base64.RawURLEncoding.EncodeToString(public), "MachineThumbprint": base64.RawURLEncoding.EncodeToString(thumb[:]), "EdgeNodeID": node, "EdgeProcessEpoch": epoch, "EdgeCredential": edgeCredential, "TLSCertificatePEM": string(certPEM), "TLSPrivateKeyPEM": string(keyPEM), "OriginAddress": origin, "PreviewAccess": previewAccess, "TunnelAccess": tunnelAccess, "PreviewCarrier": previewAccess.Carrier, "TunnelCarrier": tunnelAccess.Carrier, "PreviewEndpoint": previewEndpoint, "TunnelEndpoint": tunnelEndpoint}}
 }
 
 func TestInspectorLinkedAuthorityProductionPostgres(t *testing.T) {
@@ -249,3 +253,16 @@ func TestInspectorLinkedAuthorityProductionPostgres(t *testing.T) {
 		}
 	}
 }
+
+type fixtureNodeCredential struct{ credential, node string }
+
+func (f fixtureNodeCredential) RuntimeNode(_ context.Context, credential string) (string, error) {
+	if credential == f.credential {
+		return f.node, nil
+	}
+	return "", nodeauth.ErrNotFound
+}
+func (fixtureNodeCredential) RuntimeCredential(context.Context, string) (string, error) {
+	return "", nodeauth.ErrNotFound
+}
+func (fixtureNodeCredential) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
