@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 import re
+import stat
 from pathlib import Path
 import subprocess
 
@@ -57,7 +58,7 @@ def http01_address(state):
 def renew(args):
     os.umask(0o077)
     state = Path(args.state_dir).resolve()
-    deployment = json.loads((state / "tunnel/deployment.json").read_text())
+    deployment = json.loads(read_state(args.state_dir, "tunnel/deployment.json"))
     subject = subject_flags(deployment["connector_advertise_host"])
     acme = state / "public-acme"
     acme.mkdir(mode=0o700, exist_ok=True)
@@ -126,14 +127,42 @@ def main():
     return 0
 
 
+MAX_STATE_FILE = 64 << 10
+# The edge's flags (edge/internal/config/config.go Parse); an unknown one makes the edge refuse its argv.
+EDGE_FLAGS = {"node-id", "edge-pool", "relay-id", "relay-region", "relay-name", "health-address", "state-path",
+              "deployment-config", "shutdown-timeout"}
+NODE_ID = re.compile(r"node_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+
+
+def read_state(state_dir, name):
+    """One small regular file under the state dir: no symlink anywhere below it, no FIFO, at most MAX_STATE_FILE bytes."""
+    fd = os.open(os.path.normpath(state_dir), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in name.split("/"):
+            last = part == name.split("/")[-1]
+            flags = (os.O_RDONLY | os.O_NONBLOCK) if last else (os.O_RDONLY | os.O_DIRECTORY)
+            child = os.open(part, flags | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STATE_FILE:
+            raise ValueError(name + " is not a small regular file")
+        data = os.read(fd, MAX_STATE_FILE + 1)
+        if len(data) > MAX_STATE_FILE:
+            raise ValueError(name + " is too large")
+        return data.decode()
+    finally:
+        os.close(fd)
+
+
 def report(args, ok, error):
     """The admin panel alerts while this edge's renewal fails, or when no check arrived for a day (four missed timer runs)."""
     # The alert is named by the host renewal accepts; a bad or unreadable host still alerts, named by the
-    # edge's node id (never by a hostname, which could collide). Neither usable: nothing is sent and the
-    # staleness alert plus the local renew.log show it.
+    # edge's node id (node:<uuid>, which no hostname or IP can equal), with a fixed message that never echoes
+    # the host. Neither usable: nothing is sent and the staleness alert plus the local renew.log show it.
     error = str(error)[:300]
     try:
-        host = json.loads((Path(args.state_dir) / "tunnel/deployment.json").read_text())["connector_advertise_host"]
+        host = json.loads(read_state(args.state_dir, "tunnel/deployment.json"))["connector_advertise_host"]
         if not isinstance(host, str):
             raise TypeError
         source = "edge-certificate:" + subject_flags(host)[1].lower()  # one alert record per edge whatever the case
@@ -141,21 +170,35 @@ def report(args, ok, error):
         source = node_source(args)
         if source is None:
             return
-        ok, error = False, "the advertised connector host is missing or invalid; fix tunnel/deployment.json. " + error
-        error = error[:300]
+        ok, error = False, "the advertised connector host is missing or invalid; fix tunnel/deployment.json"
     health_report.push(source, {"ok": ok, "error": error, "stale_after_seconds": 86400})
 
 
 def node_source(args):
     try:
-        runtime = json.loads((Path(args.state_dir) / "tunnel/runtime.args").read_text())
-        node = runtime[runtime.index("-node-id") + 1] if isinstance(runtime, list) else None
-    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError, RecursionError):
+        runtime = json.loads(read_state(args.state_dir, "tunnel/runtime.args"))
+    except (OSError, ValueError, RecursionError):
         return None
-    # Within the edge identity pattern and the server's alert source pattern (no "_" there).
-    if not isinstance(node, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,127}", node):
+    if not isinstance(runtime, list) or not all(isinstance(a, str) for a in runtime):
         return None
-    return "edge-certificate:node-" + node
+    # Walk argv as the edge's Go flag parser does (every edge flag takes a value; "-x=v" or "-x v"; stops at the first
+    # non-flag or "--"). It keeps the last of repeated flags; refuse any repeat instead of guessing.
+    values, i = [], 0
+    while i < len(runtime) and runtime[i] != "--" and len(runtime[i]) > 1 and runtime[i][0] == "-":
+        name, eq, value = runtime[i][2 if runtime[i].startswith("--") else 1:].partition("=")
+        if name not in EDGE_FLAGS:
+            return None
+        if not eq:
+            if i + 1 >= len(runtime):
+                return None
+            i, value = i + 1, runtime[i + 1]
+        if name == "node-id":
+            values.append(value)
+        i += 1
+    if len(values) != 1:
+        return None
+    match = NODE_ID.fullmatch(values[0])
+    return "edge-certificate:node:" + match.group(1) if match else None
 
 if __name__ == "__main__":
     raise SystemExit(main())
