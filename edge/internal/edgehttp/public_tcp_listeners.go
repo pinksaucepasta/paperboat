@@ -504,8 +504,6 @@ func (p *PublicTCPListeners) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// WrapTLSListener transfers dispatch ownership to the HTTPS server's listener.
-// PublicTCPListeners only checks readiness; it never binds or closes TCP443.
 // ServesHTTPS reports whether this node answers host over HTTPS itself, by the shared TLS listener's own decision (false
 // until the listener exists): the gate that keeps HTTP/3, which is never forwarded, to names held here.
 func (p *PublicTCPListeners) ServesHTTPS(host string) bool {
@@ -515,6 +513,8 @@ func (p *PublicTCPListeners) ServesHTTPS(host string) bool {
 	return shared != nil && shared.ServesHTTPS(host)
 }
 
+// WrapTLSListener transfers dispatch ownership to the HTTPS server's listener.
+// PublicTCPListeners only checks readiness; it never binds or closes TCP443.
 func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostname func(string) bool, admittedHTTPSHostname func(string) bool) (net.Listener, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

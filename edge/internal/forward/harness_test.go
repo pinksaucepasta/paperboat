@@ -186,23 +186,22 @@ func (s *fakeSource) Holders(_ context.Context, page string, limit int) (nodemes
 
 // node is one edge: a public TLS listener with the production dispatch, an HTTP server behind it, and a mesh.
 type node struct {
-	t       *testing.T
-	id      string
-	region  string
-	link    tls.Certificate
-	pin     string
-	port    uint16
-	ln      net.Listener
-	public  *edgehttp.PublicTCPListeners
-	held    *fakeHeld
-	src     *fakeSource
-	mesh    *forward.Mesh
-	hits    atomic.Int64
-	drained atomic.Bool
-	cfg     func(*forward.Config)
-	dialed  []net.Conn
-	dialMu  sync.Mutex
-	vip     net.IP // the address this node's listener shows for its accepted connections
+	t      *testing.T
+	id     string
+	region string
+	link   tls.Certificate
+	pin    string
+	port   uint16
+	ln     net.Listener
+	public *edgehttp.PublicTCPListeners
+	held   *fakeHeld
+	src    *fakeSource
+	mesh   *forward.Mesh
+	hits   atomic.Int64
+	cfg    func(*forward.Config)
+	dialed []net.Conn
+	dialMu sync.Mutex
+	vip    net.IP // the address this node's listener shows for its accepted connections
 }
 
 // echo handler: GET answers who served it; an Upgrade request becomes a raw echo stream.
