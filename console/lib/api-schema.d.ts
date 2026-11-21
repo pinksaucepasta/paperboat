@@ -39094,7 +39094,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    source: "hosts" | "canary";
+                    source: string;
                     payload: {
                         [key: string]: unknown;
                     };
@@ -39141,7 +39141,7 @@ export interface operations {
                         data: {
                             reports: {
                                 /** @enum {string} */
-                                source: "hosts" | "canary";
+                                source: string;
                                 payload: {
                                     [key: string]: unknown;
                                 };
