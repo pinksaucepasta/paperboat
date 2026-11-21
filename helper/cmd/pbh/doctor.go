@@ -88,7 +88,7 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	current, err := currentOutgoing(d.paths.proc)
 	report(err == nil && current == outgoingRange, "outgoing port range is "+outgoingRange+", clear of the public range", fmt.Sprintf("outgoing port range is %q; run pbh install to move it to %s (public TCP ports %d-%d would collide with outgoing connections)", current, outgoingRange, edgeports.PublicTCPMin, edgeports.PublicTCPMax))
 	kind := detectFirewall(ctx, d.run)
-	rules := hostFirewallRules(true, claimPortOf(c.Listen))
+	rules := hostFirewallRules(c)
 	report(kind == "" || firewallRulePresent(ctx, d.run, kind, rules), "host firewall ("+firewallLabel(kind)+") lets "+rulesText(rules)+" in", "the "+kind+" host firewall does not allow "+rulesText(rules)+"; run pbh install as root to add the rule")
 	report(edgeGuardPresent(ctx, d.run), "per-address connection limits are on (nftables table "+edgeGuardTable+")", "per-address connection limits are off; install nftables and run pbh install as root")
 	nonceBytes := make([]byte, 24)

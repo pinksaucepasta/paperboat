@@ -31,3 +31,14 @@ func TestComponentPortsRefuseTheClaimAndLoopbackPorts(t *testing.T) {
 		}
 	}
 }
+
+// The claim listen port must be a real number: 0 would bind a random port and a service name would be
+// read differently by the firewall rules than by the listener.
+func TestClaimListenPortMustBeANumber(t *testing.T) {
+	for _, listen := range []string{"[::]:0", "[::]:http", "[::]:65536", "[::]:"} {
+		c := Config{Name: "native-test", EndpointHost: "127.0.0.1", Listen: listen, Components: []Component{{Capability: "tunnel", TCPPort: 7272, QUICPort: 7273, Region: "test", FailureDomain: "test-host", CapacityLimit: 256}}}
+		if err := validateConfig(c); err == nil {
+			t.Fatalf("claim listen %q accepted", listen)
+		}
+	}
+}

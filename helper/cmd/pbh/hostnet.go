@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/relay/selfhost"
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
@@ -89,7 +91,6 @@ func writeHostnetRecord(path string, r hostnetRecord) error {
 
 var (
 	publicRange   = fmt.Sprintf("%d:%d", edgeports.PublicTCPMin, edgeports.PublicTCPMax)
-	nodeRange     = fmt.Sprintf("%d:%d", edgeports.NodeMin, edgeports.NodeMax)
 	outgoingRange = fmt.Sprintf("%d %d", edgeports.OutgoingMin, edgeports.OutgoingMax)
 )
 
@@ -99,12 +100,30 @@ type firewallRule struct {
 	Ports string `json:"ports"`
 }
 
-// hostFirewallRules is what a node's host firewall must let in: 443, the carrier and relay ports and the
-// claim port on TCP and UDP where they use it, plus the public tunnel range when the node serves tunnels.
-func hostFirewallRules(tunnel bool, claimPort int) []firewallRule {
-	rules := []firewallRule{{"tcp", "443"}, {"tcp", nodeRange}, {"tcp", strconv.Itoa(claimPort)}, {"udp", "443"}, {"udp", nodeRange}}
-	if tunnel {
-		rules = append(rules, firewallRule{"tcp", publicRange})
+// hostFirewallRules is what a node's host firewall must let in, from the ports its components really
+// listen on: the claim port; a relay's WSS (TCP), STUN (UDP, same port) and QUIC; a tunnel edge's 443
+// (TCP, and UDP for HTTP/3), carrier TCP and QUIC, and the public tunnel range.
+func hostFirewallRules(c selfhost.Config) []firewallRule {
+	var rules []firewallRule
+	add := func(proto, ports string) {
+		if r := (firewallRule{proto, ports}); !slices.Contains(rules, r) {
+			rules = append(rules, r)
+		}
+	}
+	add("tcp", strconv.Itoa(claimPortOf(c.Listen)))
+	for _, v := range c.Components {
+		switch v.Capability {
+		case "relay":
+			add("tcp", strconv.Itoa(v.TCPPort))
+			add("udp", strconv.Itoa(v.TCPPort))
+			add("udp", strconv.Itoa(v.QUICPort))
+		case "tunnel":
+			add("tcp", "443")
+			add("udp", "443")
+			add("tcp", strconv.Itoa(v.TCPPort))
+			add("udp", strconv.Itoa(v.QUICPort))
+			add("tcp", publicRange)
+		}
 	}
 	return rules
 }
@@ -143,10 +162,11 @@ func claimPortOf(listen string) int {
 // setupHostNetwork moves the outgoing port range clear of the public range and opens the host
 // firewall, recording each change. It never touches the cloud firewall. A node without a tunnel keeps
 // the outgoing range and skips the edge guard, which only serve public tunnel ports.
-func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out io.Writer, tunnel bool, claimListen string) error {
+func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out io.Writer, c selfhost.Config) error {
 	if err := edgeports.Check(); err != nil {
 		return commandError("the public TCP port range overlaps the host's outgoing port range; this pbh build is misconfigured")
 	}
+	tunnel := slices.ContainsFunc(c.Components, func(v selfhost.Component) bool { return v.Capability == "tunnel" })
 	record, err := readHostnetRecord(paths.record)
 	if err != nil {
 		return fmt.Errorf("%w: %w", commandError("read pbh host network record failed"), err)
@@ -165,7 +185,7 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 		record.Firewall = detectFirewall(ctx, run)
 	}
 	if record.Firewall != "" {
-		record.Rules = hostFirewallRules(tunnel, claimPortOf(claimListen))
+		record.Rules = hostFirewallRules(c)
 		added, err := firewallAdd(ctx, run, record.Firewall, record.Rules)
 		record.Added = mergeStrings(record.Added, added)
 		if err != nil {
@@ -182,7 +202,7 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 			return err
 		}
 	}
-	fmt.Fprintf(out, "If this host sits behind a cloud firewall (security group, security list, VPC firewall), %s. pbh cannot change it from the host; run pbh doctor to check.\n", cloudRule(hostFirewallRules(tunnel, claimPortOf(claimListen))))
+	fmt.Fprintf(out, "If this host sits behind a cloud firewall (security group, security list, VPC firewall), %s. pbh cannot change it from the host; run pbh doctor to check.\n", cloudRule(hostFirewallRules(c)))
 	return writeHostnetRecord(paths.record, record)
 }
 
@@ -345,7 +365,15 @@ func iptablesSpec(proto string, ports []string) []string {
 
 // nftSpec is the rule that allows the ports of one protocol, after the nft insert/ chain/ table words.
 func nftSpec(proto string, ports []string) []string {
-	return []string{proto, "dport", "{", strings.Replace(strings.Join(ports, ", "), ":", "-", -1), "}", "accept", "comment", `"` + firewallComment + `"`}
+	sorted := slices.Clone(ports) // nft lists a set in ascending order; the same order lets the rule be recognized again
+	slices.SortFunc(sorted, func(a, b string) int { return portStart(a) - portStart(b) })
+	return []string{proto, "dport", "{", strings.Replace(strings.Join(sorted, ", "), ":", "-", -1), "}", "accept", "comment", `"` + firewallComment + `"`}
+}
+
+func portStart(ports string) int {
+	n, _, _ := strings.Cut(ports, ":")
+	v, _ := strconv.Atoi(n)
+	return v
 }
 
 // firewallAdd opens the rules and returns what it added (rules that were already
@@ -367,7 +395,7 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 	case "firewalld":
 		for _, r := range rules {
 			spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
-			if out, err := run(ctx, "firewall-cmd", "--query-port="+spec); err == nil && strings.TrimSpace(out) == "yes" {
+			if out, err := run(ctx, "firewall-cmd", "--permanent", "--query-port="+spec); err == nil && strings.TrimSpace(out) == "yes" {
 				continue
 			}
 			if _, err := run(ctx, "firewall-cmd", "--permanent", "--add-port="+spec); err != nil {
@@ -402,9 +430,12 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 		if !ok {
 			return added, errors.New("no nftables input chain with policy drop")
 		}
-		listed, _ := run(ctx, "nft", "list", "chain", family, table, chain)
+		listed, err := run(ctx, "nft", "list", "chain", family, table, chain)
+		if err != nil {
+			return added, err
+		}
 		for _, proto := range []string{"tcp", "udp"} {
-			if nftRulePresent(listed, proto) {
+			if nftRulePresent(listed, rules, proto) {
 				continue
 			}
 			args := append([]string{"insert", "rule", family, table, chain}, nftSpec(proto, portsOf(rules, proto))...)
@@ -420,9 +451,10 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 }
 
 // nftRulePresent reports whether the chain listing holds the paperboat rule for proto.
-func nftRulePresent(listed, proto string) bool {
+func nftRulePresent(listed string, rules []firewallRule, proto string) bool {
+	want := strings.Join(nftSpec(proto, portsOf(rules, proto)), " ")
 	for _, line := range strings.Split(listed, "\n") {
-		if strings.Contains(line, firewallComment) && strings.Contains(line, proto+" dport") {
+		if strings.Contains(line, want) {
 			return true
 		}
 	}
@@ -503,8 +535,18 @@ func reapplyHostFirewall(ctx context.Context, run commander, paths hostPaths, ou
 		return
 	}
 	if record.Firewall == "iptables" || record.Firewall == "nft" {
-		if _, err := firewallAdd(ctx, run, record.Firewall, record.Rules); err != nil {
-			fmt.Fprintf(out, "pbh: could not re-open the %s host firewall for %s: %v\n", record.Firewall, rulesText(record.Rules), err)
+		if len(record.Rules) == 0 {
+			fmt.Fprintf(out, "pbh: the host network record lists no firewall rules to re-open; run pbh install again\n")
+		} else {
+			// Rules the service recreates are pbh's, so uninstall must remove them too.
+			added, err := firewallAdd(ctx, run, record.Firewall, record.Rules)
+			if len(added) > 0 {
+				record.Added = mergeStrings(record.Added, added)
+				_ = writeHostnetRecord(paths.record, record)
+			}
+			if err != nil {
+				fmt.Fprintf(out, "pbh: could not re-open the %s host firewall for %s: %v\n", record.Firewall, rulesText(record.Rules), err)
+			}
 		}
 	}
 	if record.Guard {
@@ -581,7 +623,7 @@ func firewallRulePresent(ctx context.Context, run commander, kind string, rules 
 	case "firewalld":
 		for _, r := range rules {
 			spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
-			if out, err := run(ctx, "firewall-cmd", "--query-port="+spec); err != nil || strings.TrimSpace(out) != "yes" {
+			if out, err := run(ctx, "firewall-cmd", "--permanent", "--query-port="+spec); err != nil || strings.TrimSpace(out) != "yes" {
 				return false
 			}
 		}
@@ -602,7 +644,7 @@ func firewallRulePresent(ctx context.Context, run commander, kind string, rules 
 			return false
 		}
 		listed, err := run(ctx, "nft", "list", "chain", family, table, chain)
-		return err == nil && nftRulePresent(listed, "tcp") && nftRulePresent(listed, "udp")
+		return err == nil && nftRulePresent(listed, rules, "tcp") && nftRulePresent(listed, rules, "udp")
 	}
 	return false
 }

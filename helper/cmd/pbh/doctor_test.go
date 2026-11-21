@@ -15,7 +15,7 @@ import (
 )
 
 func tunnelConfig() selfhost.Config {
-	return selfhost.Config{Components: []selfhost.Component{{Capability: "tunnel"}}}
+	return selfhost.Config{Listen: "[::]:7277", Components: []selfhost.Component{{Capability: "tunnel", TCPPort: 7272, QUICPort: 7273}}}
 }
 
 func doctorFixture(t *testing.T, outgoing string, answers map[string]string, probe containers.PortProbe, probeErr error) (doctorDeps, *strings.Builder) {
@@ -67,7 +67,7 @@ func TestDoctorReportsAWrongOutgoingRangeAndAClosedHostFirewall(t *testing.T) {
 	if err := runDoctor(t.Context(), tunnelConfig(), deps, out); err == nil {
 		t.Fatalf("doctor passed:\n%s", out)
 	}
-	for _, want := range []string{"outgoing port range is \"32768 60999\"", "iptables host firewall does not allow TCP 443"} {
+	for _, want := range []string{"outgoing port range is \"32768 60999\"", "iptables host firewall does not allow TCP 7277, 443, 7272, 10000-59999 and UDP 443, 7273"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
