@@ -93,13 +93,20 @@ def wait_for(predicate, seconds, what):
     raise RuntimeError(f'timed out waiting for {what}')
 
 
+def enrollment_token(windows_command):
+    """The token of `pb machine add --json` windows_command: $env:PB_TOKEN='<token>'; $env:PB_NAME='...'; irm ... | iex."""
+    found = re.search(r"PB_TOKEN='([^']+)'", windows_command)
+    if not found:
+        raise RuntimeError('pb machine add --json windows_command has no PB_TOKEN; the enrollment command format changed')
+    return found.group(1)
+
+
 def mint_token(host, alias):
     """Mint an enrollment token on a paired Linux machine, stage it on the Windows device owner-only; return nothing printed."""
     code, out = linux(f'{PB_LINUX} machine add --json --name {alias}') if host == 'linux' else (1, '')
     if code:
         raise RuntimeError('could not mint an enrollment token on ' + host)
-    command = json.loads(out)['data']['windows_command']
-    token = re.search(r"p=([^'\"&]+)", command).group(1)[-26:]
+    token = enrollment_token(json.loads(out)['data']['windows_command'])
     code, _ = powershell_on_device(
         f"Set-Content -NoNewline -Path '{TOKEN_FILE}' -Value '{token}'; "
         f"icacls '{TOKEN_FILE}' /setowner $env:USERNAME | Out-Null; "
