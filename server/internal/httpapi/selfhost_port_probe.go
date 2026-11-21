@@ -23,7 +23,6 @@ func (h *SelfhostHandlers) PortProbe(w http.ResponseWriter, r *http.Request) {
 		Nonce     string `json:"nonce"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
-	decoder.DisallowUnknownFields()
 	if decoder.Decode(&in) != nil {
 		writeError(w, r, 400, "invalid_request", "Send {\"transport\": \"tcp\"|\"udp\", \"port\": <port>, \"nonce\": <16-64 URL-safe characters, public TCP ports only>}.", nil)
 		return
