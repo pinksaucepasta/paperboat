@@ -102,6 +102,10 @@ func TestHeartbeatCertificateRenewalRaisesAndClearsOnlyThatNodesAlertPostgres(t 
 	if code := beat("cred-b", a, healthy); code/100 == 2 {
 		t.Fatalf("B's credential heartbeating as A = %d, want refused", code)
 	}
+	// The server-wide managed credential names no node: it cannot clear (or write) A's either.
+	if code := beat(strings.Repeat("m", 40), a, healthy); code != http.StatusUnauthorized {
+		t.Fatalf("managed credential heartbeating as A = %d, want 401", code)
+	}
 	if code := beat("cred-b", b, healthy); code/100 != 2 {
 		t.Fatalf("B heartbeat = %d", code)
 	}

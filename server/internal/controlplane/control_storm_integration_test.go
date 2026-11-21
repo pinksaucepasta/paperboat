@@ -31,6 +31,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 )
 
 const controlStormCredential = "paperboat-control-storm-credential-0123456789"
@@ -147,6 +148,7 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 	})
 
 	service := NewEdgeService(store, controlStormCredential)
+	service.SetNodeCredentials(stormNodes(prefix))
 	mintKey := ed25519.NewKeyFromSeed(sha256Sum("paperboat-control-storm-mint"))
 	signer, err := mint.New([]mint.Key{{ID: "control-storm", PrivateKey: mintKey}}, "control-storm", time.Minute)
 	if err != nil {
@@ -171,13 +173,13 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 	report := controlStormReport{Machines: machines}
 	report.Phases = append(report.Phases,
 		runStormPhase(t, ctx, "register", machines, func(index int) (int64, int64, error) {
-			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/register", controlStormCredential, stormRegistration(prefix, index, "epoch_1"))
+			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/register", stormNodeCredential(prefix, index), stormRegistration(prefix, index, "epoch_1"))
 		}),
 		runStormPhase(t, ctx, "reconnect", machines, func(index int) (int64, int64, error) {
-			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/register", controlStormCredential, stormRegistration(prefix, index, "epoch_2"))
+			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/register", stormNodeCredential(prefix, index), stormRegistration(prefix, index, "epoch_2"))
 		}),
 		runStormPhase(t, ctx, "heartbeat", machines, func(index int) (int64, int64, error) {
-			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/heartbeat", controlStormCredential, map[string]any{
+			return stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/heartbeat", stormNodeCredential(prefix, index), map[string]any{
 				"edge_node_id": prefix + strconv.Itoa(index), "process_epoch": "epoch_2", "ready": true,
 				"draining": false, "active_streams": index % 17, "at": time.Now().UTC(),
 			})
@@ -186,10 +188,10 @@ func runControlStorm(t *testing.T, machines int) controlStormReport {
 	standbyNodes := 0
 	if machines == 1 {
 		standbyNodes = 1
-		if _, _, err := stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/register", controlStormCredential, stormRegistration(prefix, 1, "epoch_2")); err != nil {
+		if _, _, err := stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/register", stormNodeCredential(prefix, 1), stormRegistration(prefix, 1, "epoch_2")); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/heartbeat", controlStormCredential, map[string]any{
+		if _, _, err := stormRequest(ctx, client, http.MethodPost, server.URL+"/v1/nodes/heartbeat", stormNodeCredential(prefix, 1), map[string]any{
 			"edge_node_id": prefix + "1", "process_epoch": "epoch_2", "ready": true,
 			"draining": false, "active_streams": 0, "at": time.Now().UTC(),
 		}); err != nil {
@@ -656,3 +658,21 @@ func stormResources() (heap uint64, goroutines int, cpuSeconds float64) {
 	}
 	return memory.HeapAlloc, runtime.NumGoroutine(), cpuSeconds
 }
+
+// stormNodes binds each storm node's own credential to that node: register and heartbeat refuse the shared one.
+type stormNodes string
+
+func stormNodeCredential(prefix string, index int) string {
+	return "storm-node:" + prefix + strconv.Itoa(index)
+}
+
+func (p stormNodes) RuntimeNode(_ context.Context, credential string) (string, error) {
+	if node, ok := strings.CutPrefix(credential, "storm-node:"); ok && strings.HasPrefix(node, string(p)) {
+		return node, nil
+	}
+	return "", nodeauth.ErrNotFound
+}
+func (stormNodes) RuntimeCredential(context.Context, string) (string, error) {
+	return "", nodeauth.ErrNotFound
+}
+func (stormNodes) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
