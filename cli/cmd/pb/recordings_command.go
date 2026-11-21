@@ -100,15 +100,13 @@ func recordingsKeyReset(c *command.Context) error {
 	}
 	var request wire.KeyCreate
 	err = vault.WithUnlockedKeys(c.Context, func(keys *environmente2ee.VaultKeys) (makeErr error) {
-		request, makeErr = recording.ResetKey(keys.WriterSeed, team, state)
+		request, makeErr = recordingKeyRequest(true, team, state, keys)
 		return makeErr
 	})
-	switch {
-	case errors.Is(err, environmentmanager.ErrVaultLocked):
+	if errors.Is(err, environmentmanager.ErrVaultLocked) {
 		return localArgumentError("your ENV vault is locked on this computer; run `pb env unlock`, then retry")
-	case errors.Is(err, recording.ErrNotResetAuthority):
-		return localArgumentError("only the team owner's ENV key can reset this team's recording key")
-	case err != nil:
+	}
+	if err != nil {
 		return err
 	}
 	key, err := client.ReplaceRecordingKey(c.Context, team, request)
@@ -153,15 +151,13 @@ func recordingsKeyReplace(c *command.Context) error {
 	}
 	var request wire.KeyCreate
 	err = vault.WithUnlockedKeys(c.Context, func(keys *environmente2ee.VaultKeys) (makeErr error) {
-		request, makeErr = recording.ReplaceKey(keys.SharingPrivate, team, state)
+		request, makeErr = recordingKeyRequest(false, team, state, keys)
 		return makeErr
 	})
-	switch {
-	case errors.Is(err, environmentmanager.ErrVaultLocked):
+	if errors.Is(err, environmentmanager.ErrVaultLocked) {
 		return localArgumentError("your ENV vault is locked on this computer; run `pb env unlock`, then retry")
-	case errors.Is(err, recording.ErrNoCopy):
-		return localArgumentError("you hold no copy of this team's current recording key: ask a member who can replay to open Recordings in the console, or to replace the key")
-	case err != nil:
+	}
+	if err != nil {
 		return err
 	}
 	key, err := client.ReplaceRecordingKey(c.Context, team, request)
@@ -173,6 +169,26 @@ func recordingsKeyReplace(c *command.Context) error {
 	}
 	_, err = fmt.Fprintf(c.Writer, "Replaced the recording key of %s: generation %d, %d members got a copy. Machines follow it through the signed chain; older recordings stay readable.\n", team, key.Generation, len(request.Grants))
 	return err
+}
+
+// recordingKeyRequest makes the body of POST recording-key: a reset signed by the owner's writer key, or a replacement
+// signed with this account's copy. Generation 1 is made by the console when the first recording starts, never here.
+func recordingKeyRequest(reset bool, team string, state wire.KeyState, keys *environmente2ee.VaultKeys) (wire.KeyCreate, error) {
+	switch {
+	case state.Key == nil:
+		return wire.KeyCreate{}, localArgumentError("this team has no recording key yet: the recording key is created when the first recording starts in the console; there is nothing to replace or reset")
+	case reset:
+		request, err := recording.ResetKey(keys.WriterSeed, team, state)
+		if errors.Is(err, recording.ErrNotResetAuthority) {
+			return request, localArgumentError("only the team owner can reset this team's recording key, with the ENV vault the key was set up with; if you hold a copy, use `pb recordings key replace` instead")
+		}
+		return request, err
+	}
+	request, err := recording.ReplaceKey(keys.SharingPrivate, team, state)
+	if errors.Is(err, recording.ErrNoCopy) {
+		return request, localArgumentError("you hold no copy of this team's current recording key: ask a member who can replay to open Recordings in the console, or to replace the key; if nobody holds it, the team owner resets it with `pb recordings key reset`")
+	}
+	return request, err
 }
 
 func recordingsList(c *command.Context) error {
