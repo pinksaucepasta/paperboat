@@ -272,7 +272,8 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		if err != nil {
 			return
 		}
-		opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Below the client's 10 s acquire/apply deadline, so a slow pfctl/ifconfig/nft run still answers in time.
+		opCtx, cancel := context.WithTimeout(ctx, 9*time.Second)
 		var file net.Listener
 		var status *RuntimeStatus
 		var certificate *CertificateBundle
