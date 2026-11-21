@@ -522,9 +522,11 @@ except (OSError,subprocess.CalledProcessError,KeyError):
         "ON CONFLICT(id) DO UPDATE SET capacity_limit=excluded.capacity_limit,"
         "failure_domain=excluded.failure_domain,carrier_endpoint_host=excluded.carrier_endpoint_host,carrier_endpoint_tcp_port=excluded.carrier_endpoint_tcp_port,"
         "carrier_endpoint_quic_port=excluded.carrier_endpoint_quic_port")
-    sql(f"INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) "
-        f"VALUES('{node}','{REGION}',decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),'{{}}') "
-        "ON CONFLICT(node_id) DO UPDATE SET runtime_hash=excluded.runtime_hash,runtime_ciphertext=excluded.runtime_ciphertext")
+    # Paperboat's own edge = a global installation (what an admin-panel claim of pbh install records).
+    sql(f"INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
+        f"VALUES('{install}','{node}',decode('{hashlib.sha256(node.encode()).hexdigest()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),"
+        f"'{EDGE_NAME}','tunnel','global','global','{install}',true) "
+        "ON CONFLICT(id) DO UPDATE SET runtime_hash=excluded.runtime_hash,runtime_ciphertext=excluded.runtime_ciphertext,state='active'")
     sql("INSERT INTO selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) "
         "VALUES('account','usr_staging','tunnel','managed-only','{}') "
         "ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids")

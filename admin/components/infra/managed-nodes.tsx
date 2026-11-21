@@ -10,10 +10,11 @@ import { Time } from "@/components/time"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { operatorAction, useOperator, type Data } from "@/lib/api"
-import { useCursorList } from "@/lib/paging"
+import { useAllPages, useCursorList } from "@/lib/paging"
 
 type Nodes = Data<"/v1/admin/nodes">
 type Node = Nodes["items"][number]
+type Regions = Data<"/v1/admin/regions">
 
 function NodeActions({ node, admin }: { node: Node; admin: boolean }) {
   const path = (action: string) => `/v1/admin/nodes/${encodeURIComponent(node.id)}/${action}`
@@ -80,6 +81,7 @@ export function ManagedNodes() {
   const admin = useOperator()?.role === "admin"
   const filters = useMemo(() => ({}), [])
   const list = useCursorList<Nodes>("/v1/admin/nodes", filters)
+  const regionList = useAllPages<Regions["items"][number]>("/v1/admin/regions", (page) => (page as unknown as Regions).items)
   // The display name users see for a region; the id when the list is not loaded.
   const regionName = new Map((regionList.data?.items ?? []).map((r) => [r.id, r.display_name]))
   return (

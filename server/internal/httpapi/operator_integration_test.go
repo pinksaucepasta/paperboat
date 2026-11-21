@@ -383,15 +383,16 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 		t.Fatalf("region creation %d %s", response.Code, response.Body.String())
 	}
 	// A managed node is a global pbh installation in the region; there is no operator enrolment.
-	if _, err = store.Pool().Exec(ctx, `INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit) VALUES($1,$2,'1.0','epoch','relay.example.test',443,444,'relay.example.test',443,444,'registered',false,$2,'rack-a',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],32)`, nodeID, regionID); err != nil {
+	if _, err = store.Pool().Exec(ctx, `INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_observed_at,registry_expires_at) VALUES($1,$2,'1.0','epoch','relay.example.test',443,444,'relay.example.test',443,444,'registered',false,$2,'rack-a',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],32,now(),now())`, nodeID, regionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.Pool().Exec(ctx, `INSERT INTO selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),decode(md5($1)||md5($1),'hex'),'\x00','managed fixture','relay','global','global',$1,true)`, nodeID); err != nil {
 		t.Fatal(err)
 	}
-	if listed := request("GET", "/v1/admin/nodes", "", false); listed.Code != 200 {
-		t.Fatal("node list", listed.Code)
+	if listed := request("GET", "/v1/admin/nodes", "", false); listed.Code != 200 || !strings.Contains(listed.Body.String(), nodeID) || strings.Contains(listed.Body.String(), "credential") {
+		t.Fatal("node list", listed.Code, listed.Body.String())
 	}
+	infraHeaders["Operator-Target"] = nodeID
 	infraHeaders["Idempotency-Key"] = "node-site-" + user.ID
 	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai","region_id":"x"}`, true, infraHeaders); response.Code != 400 {
 		t.Fatalf("site action with region: %d %s", response.Code, response.Body.String())

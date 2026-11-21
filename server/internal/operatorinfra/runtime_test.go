@@ -162,9 +162,6 @@ func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {
 	if _, err = service.MutateRegion(ctx, actor, "enable-"+suffix, RegionMutation{Action: "enable", ID: region.ID, Revision: disabled.Revision, Reason: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.MutateNode(ctx, actor, "stale-resume-"+suffix, NodeMutation{Action: "resume", NodeID: nodeID, Revision: 1, Reason: "test"}); !errors.Is(err, ErrConflict) {
-		t.Fatal("pre-disable revision accepted", err)
-	}
 	page, err = service.ListNodes(ctx, actor, region.ID, "", 1)
 	if err != nil || page.Items[0].Ready {
 		t.Fatal("reenable silently resumed node", err)

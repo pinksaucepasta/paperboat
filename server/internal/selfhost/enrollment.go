@@ -530,8 +530,12 @@ func checkReserveRegions(ctx context.Context, tx *sql.Tx, scope Scope, i Inspect
 		// Paperboat's own node: its install region is an operator region (created enabled on first use), which puts it
 		// in that region's serving set, wildcard DNS and drains.
 		for _, c := range i.Components {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1) ON CONFLICT (id) DO NOTHING`, c.Region); err != nil {
+			var enabled bool
+			if err := tx.QueryRowContext(ctx, `INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1) ON CONFLICT (id) DO UPDATE SET id=EXCLUDED.id RETURNING enabled`, c.Region).Scan(&enabled); err != nil {
 				return err
+			}
+			if !enabled {
+				return invalidRegion("Region %s is disabled: enable it in the admin panel, or run pbh install --region with another region.", c.Region)
 			}
 		}
 		return nil
