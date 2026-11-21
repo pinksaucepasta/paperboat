@@ -12,13 +12,13 @@ import (
 )
 
 func TestDomainLifecycleReportsIssuingTLSAfterDNSVerification(t *testing.T) {
-	row := dbsqlc.TunnelDomain{OwnershipState: "verified", ConflictState: "clear", CertificateState: "issuing"}
+	row := dbsqlc.TunnelDomain{ConflictState: "clear", CertificateState: "issuing"}
 	if got := wireDomainLifecycleState(row); got != "issuing_tls" {
 		t.Fatalf("state = %q", got)
 	}
-	row.OwnershipState = "failed"
-	if got := wireDomainLifecycleState(row); got != "dns_error" {
-		t.Fatalf("drifted state = %q", got)
+	row.ConflictState = "quarantined"
+	if got := wireDomainLifecycleState(row); got != "quarantined" {
+		t.Fatalf("quarantined state = %q", got)
 	}
 }
 

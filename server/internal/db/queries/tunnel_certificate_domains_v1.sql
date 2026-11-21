@@ -2,7 +2,7 @@
 SELECT d.*
 FROM tunnel_domains AS d
 WHERE d.deleted_at IS NULL
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND NOT (d.certificate_state IN ('renewing','failed') AND d.certificate_retry_at > sqlc.arg(now)::timestamptz)
   AND (
@@ -56,7 +56,7 @@ SELECT d.*
 FROM tunnel_domains AS d
 WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.match_type = 'one_label_wildcard'
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -87,7 +87,7 @@ SELECT d.*
 FROM tunnel_domains AS d
 WHERE d.match_type = 'exact'
   AND d.hostname = sqlc.arg(hostname)
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -112,7 +112,7 @@ FROM preview_domains AS d
 JOIN preview_leases AS lease
   ON lease.id = d.preview_id AND lease.account_id = d.account_id
 WHERE d.deleted_at IS NULL
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND (d.certificate_failure_code IS NULL OR d.certificate_renewal_attempted_at IS NULL OR d.certificate_renewal_attempted_at <= sqlc.arg(now)::timestamptz - interval '1 minute')
   AND lease.terminal_state = 'active'
@@ -189,7 +189,7 @@ WHERE d.id = sqlc.arg(domain_id)
   AND n.registry_expires_at>sqlc.arg(now)
   AND n.roles @> ARRAY['edge']::text[]
   AND paperboat.node_preview_eligible(n.id,lease.account_id,lease.id)
-  AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.deleted_at IS NULL
+  AND workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear' AND d.deleted_at IS NULL
   AND (paperboat.workspace_edge_mode(lease.account_id,lease.owner_team_id)='managed-only' OR paperboat.selfhost_publication_hostname_allowed(d.hostname))
   AND a.expires_at > sqlc.arg(now)
   AND lease.terminal_state = 'active'
@@ -214,7 +214,7 @@ JOIN preview_routes AS a
  AND a.owner_session_id=lease.owner_session_id AND a.host_id=lease.owner_machine_id
 WHERE d.certificate_strategy = 'on_demand_leaf'
   AND d.match_type = 'one_label_wildcard'
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -259,7 +259,7 @@ SET certificate_state = 'ready',
     updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(domain_id)
   AND generation = sqlc.arg(expected_generation)
-  AND ownership_state = 'verified'
+  AND workspace_domain_verified(workspace_domain_id)
   AND conflict_state = 'clear'
   AND deleted_at IS NULL
 RETURNING *;
@@ -275,6 +275,6 @@ SET certificate_state = CASE WHEN certificate_state = 'ready' THEN 'renewing' EL
     updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(domain_id)
   AND generation = sqlc.arg(expected_generation)
-  AND ownership_state = 'verified'
+  AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
 RETURNING *;

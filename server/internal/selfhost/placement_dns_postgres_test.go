@@ -113,7 +113,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 			t.Helper()
 			var actualTarget, actualState, actualType string
 			var actualGeneration int64
-			if err := store.SQL().QueryRowContext(ctx, `SELECT dns_target,ownership_state,expected_records->0->>'type',generation FROM `+table+` WHERE id=$1`, domainID).Scan(&actualTarget, &actualState, &actualType, &actualGeneration); err != nil || actualTarget != target || actualState != state || actualType != typ || actualGeneration != generation {
+			if err := store.SQL().QueryRowContext(ctx, `SELECT dns_target,CASE WHEN paperboat.workspace_domain_verified(workspace_domain_id) THEN 'verified' ELSE 'failed' END,expected_records->0->>'type',generation FROM `+table+` WHERE id=$1`, domainID).Scan(&actualTarget, &actualState, &actualType, &actualGeneration); err != nil || actualTarget != target || actualState != state || actualType != typ || actualGeneration != generation {
 				t.Fatalf("%s target=%q state=%q type=%q generation=%d: %v", kind, actualTarget, actualState, actualType, actualGeneration, err)
 			}
 		}

@@ -58,19 +58,19 @@ func (q *Queries) BumpTunnelGenerationForResourceV1(ctx context.Context, arg Bum
 const createTunnelDomainV1 = `-- name: CreateTunnelDomainV1 :one
 INSERT INTO tunnel_domains
   (id, account_id, tunnel_id, route_id, hostname, match_type,
-   ownership_challenge_reference, ownership_state, dns_target,
+   ownership_challenge_reference, dns_target,
    observed_records, certificate_strategy, certificate_state, caa_state,
    conflict_state, generation, created_at, updated_at,
-   dns_provider, expected_records, dns_next_check_at, workspace_domain_id, last_verified_at)
+   dns_provider, expected_records, dns_next_check_at, workspace_domain_id)
 VALUES
   ($1, $2, $3, $4,
    $5, $6,
-   $7, 'verified', $8,
+   $7, $8,
    $9::jsonb, $10,
    CASE WHEN $10 = 'none' THEN 'not_applicable' ELSE 'issuing' END, -- verified at creation: the certificate is next
    CASE WHEN $10 = 'none' THEN 'not_applicable' ELSE 'unknown' END, 'clear',
    1, $11, $11, $12,
-   $13::jsonb, $11, $14, $11)
+   $13::jsonb, $11, $14)
 RETURNING id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, quarantine_until, certificate_retry_at, certificate_failure_attempts, workspace_domain_id
 `
 
@@ -379,7 +379,7 @@ func (q *Queries) DeleteAllTunnelRoutesV1(ctx context.Context, arg DeleteAllTunn
 
 const deleteTunnelDomainV1 = `-- name: DeleteTunnelDomainV1 :one
 UPDATE tunnel_domains
-SET ownership_state = 'revoked', conflict_state = 'quarantined',
+SET conflict_state = 'quarantined',
     quarantine_until = $1, generation = generation + 1,
     deleted_at = $2, updated_at = $2
 WHERE id = $3

@@ -240,24 +240,24 @@ LIMIT 1;
 -- name: CreateTunnelDomainV1 :one
 INSERT INTO tunnel_domains
   (id, account_id, tunnel_id, route_id, hostname, match_type,
-   ownership_challenge_reference, ownership_state, dns_target,
+   ownership_challenge_reference, dns_target,
    observed_records, certificate_strategy, certificate_state, caa_state,
    conflict_state, generation, created_at, updated_at,
-   dns_provider, expected_records, dns_next_check_at, workspace_domain_id, last_verified_at)
+   dns_provider, expected_records, dns_next_check_at, workspace_domain_id)
 VALUES
   (sqlc.arg(id), sqlc.arg(account_id), sqlc.arg(tunnel_id), sqlc.arg(route_id),
    sqlc.arg(hostname), sqlc.arg(match_type),
-   sqlc.arg(ownership_challenge_reference), 'verified', sqlc.arg(dns_target),
+   sqlc.arg(ownership_challenge_reference), sqlc.arg(dns_target),
    sqlc.arg(observed_records)::jsonb, sqlc.arg(certificate_strategy),
    CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'issuing' END, -- verified at creation: the certificate is next
    CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'unknown' END, 'clear',
    1, sqlc.arg(now), sqlc.arg(now), sqlc.arg(dns_provider),
-   sqlc.arg(expected_records)::jsonb, sqlc.arg(now), sqlc.arg(workspace_domain_id), sqlc.arg(now))
+   sqlc.arg(expected_records)::jsonb, sqlc.arg(now), sqlc.arg(workspace_domain_id))
 RETURNING *;
 
 -- name: DeleteTunnelDomainV1 :one
 UPDATE tunnel_domains
-SET ownership_state = 'revoked', conflict_state = 'quarantined',
+SET conflict_state = 'quarantined',
     quarantine_until = sqlc.arg(quarantine_until), generation = generation + 1,
     deleted_at = sqlc.arg(now), updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(domain_id)

@@ -110,12 +110,12 @@ CROSS JOIN LATERAL (SELECT v.effective_access_mode,v.viewer_policy_generation FR
 LEFT JOIN LATERAL (
  SELECT COALESCE(r.match_hostname,substring(t.stable_endpoint from 9)) AS hostname,r.id AS publication_id,r.generation AS publication_generation
  WHERE paperboat.workspace_edge_mode(t.account_id,t.owner_team_id)='managed-only' OR r.protocol='tcp'
- OR (r.match_type='exact' AND EXISTS(SELECT 1 FROM tunnel_domains exact_domain WHERE exact_domain.account_id=t.account_id AND exact_domain.tunnel_id=t.id AND exact_domain.route_id=r.id AND exact_domain.hostname=r.match_hostname AND exact_domain.deleted_at IS NULL AND exact_domain.ownership_state='verified' AND exact_domain.conflict_state='clear' AND exact_domain.match_type='exact' AND (r.protocol='http' OR(exact_domain.certificate_strategy='none' AND exact_domain.certificate_state='not_applicable'))))
+ OR (r.match_type='exact' AND EXISTS(SELECT 1 FROM tunnel_domains exact_domain WHERE exact_domain.account_id=t.account_id AND exact_domain.tunnel_id=t.id AND exact_domain.route_id=r.id AND exact_domain.hostname=r.match_hostname AND exact_domain.deleted_at IS NULL AND paperboat.workspace_domain_verified(exact_domain.workspace_domain_id) AND exact_domain.conflict_state='clear' AND exact_domain.match_type='exact' AND (r.protocol='http' OR(exact_domain.certificate_strategy='none' AND exact_domain.certificate_state='not_applicable'))))
  UNION ALL
  SELECT d.hostname,d.id,d.generation FROM tunnel_domains d
  WHERE r.protocol IN ('http','tls') AND d.account_id=t.account_id
    AND d.route_id=r.id AND d.tunnel_id=r.tunnel_id AND d.deleted_at IS NULL
-   AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.match_type='exact'
+   AND paperboat.workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear' AND d.match_type='exact'
    AND d.hostname<>COALESCE(r.match_hostname,substring(t.stable_endpoint from 9))
    AND (r.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))
  UNION ALL

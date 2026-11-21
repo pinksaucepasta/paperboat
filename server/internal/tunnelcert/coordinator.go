@@ -339,7 +339,7 @@ func (c *Coordinator) RefreshPreviewIssuanceTarget(ctx context.Context, captured
 }
 
 func samePreviewIssuanceBinding(captured, current Domain) bool {
-	return captured.TargetKind == TargetPreviewLease && current.TargetKind == TargetPreviewLease && captured.ID == current.ID && captured.AccountID == current.AccountID && captured.PreviewID == current.PreviewID && captured.PreviewOwnerMachineID != "" && captured.PreviewOwnerMachineID == current.PreviewOwnerMachineID && captured.PreviewOwnerSessionID != "" && captured.PreviewOwnerSessionID == current.PreviewOwnerSessionID && captured.Hostname == current.Hostname && captured.LeafHostname == current.LeafHostname && captured.Generation == current.Generation && captured.Strategy == current.Strategy && captured.ChallengeReference == current.ChallengeReference && current.OwnershipState == "verified"
+	return captured.TargetKind == TargetPreviewLease && current.TargetKind == TargetPreviewLease && captured.ID == current.ID && captured.AccountID == current.AccountID && captured.PreviewID == current.PreviewID && captured.PreviewOwnerMachineID != "" && captured.PreviewOwnerMachineID == current.PreviewOwnerMachineID && captured.PreviewOwnerSessionID != "" && captured.PreviewOwnerSessionID == current.PreviewOwnerSessionID && captured.Hostname == current.Hostname && captured.LeafHostname == current.LeafHostname && captured.Generation == current.Generation && captured.Strategy == current.Strategy && captured.ChallengeReference == current.ChallengeReference
 }
 
 type Config struct {

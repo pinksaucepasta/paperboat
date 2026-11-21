@@ -90,7 +90,7 @@ func setPlacementTx(ctx context.Context, tx *db.Tx, actor, kind, table, id strin
 			domainTable, resourceColumn = "paperboat.tunnel_domains", "tunnel_id"
 		}
 		var verified bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+domainTable+` WHERE `+resourceColumn+`=$1 AND deleted_at IS NULL AND ownership_state='verified' AND conflict_state='clear')`, id).Scan(&verified); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+domainTable+` WHERE `+resourceColumn+`=$1 AND deleted_at IS NULL AND paperboat.workspace_domain_verified(workspace_domain_id) AND conflict_state='clear')`, id).Scan(&verified); err != nil {
 			return Placement{}, err
 		}
 		if !verified {

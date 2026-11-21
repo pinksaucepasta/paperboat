@@ -409,28 +409,16 @@ func wireState(row dbsqlc.PreviewDomain) string {
 	case "conflicted":
 		return "conflict"
 	}
-	switch row.OwnershipState {
-	case "pending":
-		return "waiting_dns"
-	case "verified":
-		switch row.CertificateState {
-		case "pending", "issuing", "renewing":
-			return "issuing_tls"
-		case "ready":
-			return "ready"
-		case "failed", "expired", "revoked":
-			return "tls_error"
-		}
-		return "verified"
-	case "failed":
-		return "dns_error"
-	case "expired":
-		return "expired"
-	case "revoked":
-		return "quarantined"
-	default:
-		return "requested"
+	// Ownership lives on the workspace domain (its own list shows lapses); a binding reports conflict and TLS.
+	switch row.CertificateState {
+	case "pending", "issuing", "renewing":
+		return "issuing_tls"
+	case "ready":
+		return "ready"
+	case "failed", "expired", "revoked":
+		return "tls_error"
 	}
+	return "verified"
 }
 
 // jsonUnmarshalStrings is kept local so malformed persisted observations are

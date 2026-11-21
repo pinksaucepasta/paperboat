@@ -57,14 +57,14 @@ SELECT names.key COLLATE "C", x.edge_node_id` + endpointCols + `
   -- a wildcard domain's hostname is already its "*.suffix" key; a TLS-passthrough route serves exact domains only
   -- (control_plane.sql's domain_bindings), so a wildcard domain on one is not a name this node holds
   SELECT d.hostname FROM tunnel_domains d WHERE tr.protocol IN ('http','tls') AND d.route_id=tr.id AND d.tunnel_id=tr.tunnel_id
-   AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND (d.match_type='exact' OR tr.protocol='http' AND d.match_type='one_label_wildcard')
+   AND d.deleted_at IS NULL AND paperboat.workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear' AND (d.match_type='exact' OR tr.protocol='http' AND d.match_type='one_label_wildcard')
    AND (tr.protocol='http' OR (d.certificate_strategy='none' AND d.certificate_state='not_applicable'))
   UNION ALL
   -- the preview's ready custom-domain aliases (previewdomain ReadyAliases): served on the preview's carrier like its own
   -- hostname; a wildcard alias's hostname is already its "*.suffix" key
   SELECT pd.hostname FROM preview_domains pd JOIN preview_leases pl ON pl.id=pd.preview_id AND pl.account_id=pd.account_id
    AND pl.generation=pd.preview_generation WHERE e.kind='preview' AND pd.preview_id=e.preview_lease_id AND pd.deleted_at IS NULL
-   AND pd.ownership_state='verified' AND pd.conflict_state='clear' AND pd.certificate_state='ready' AND pd.certificate_reference IS NOT NULL
+   AND paperboat.workspace_domain_verified(pd.workspace_domain_id) AND pd.conflict_state='clear' AND pd.certificate_state='ready' AND pd.certificate_reference IS NOT NULL
    AND (pl.user_deadline IS NULL OR pl.user_deadline>now())) names
  WHERE x.desired='active' AND r.protocol<>'private_tcp' AND (r.protocol<>'tcp' OR tr.public_tcp_port IS NOT NULL)` + endpointLive
 }

@@ -252,7 +252,7 @@ func (s *Service) ReadyAliases(ctx context.Context, request previewtunnelapi.Req
 	aliases := make([]ReadyAlias, 0, len(rows))
 	for _, record := range rows {
 		row := record.Domain
-		if row.AccountID != request.Actor.AccountID || row.PreviewID != previewID || row.PreviewGeneration != lease.Generation || row.DeletedAt.Valid || row.OwnershipState != "verified" || row.ConflictState != "clear" || row.CertificateState != "ready" || record.CertificateReference == "" || record.CertificateGeneration < 1 {
+		if row.AccountID != request.Actor.AccountID || row.PreviewID != previewID || row.PreviewGeneration != lease.Generation || row.DeletedAt.Valid || row.ConflictState != "clear" || row.CertificateState != "ready" || record.CertificateReference == "" || record.CertificateGeneration < 1 {
 			continue
 		}
 		var wildcardLabels *int

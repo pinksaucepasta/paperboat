@@ -692,7 +692,7 @@ func assertPlatformDefinitions(t *testing.T, definitions []tunnelcert.PlatformCe
 
 func assertPlatformDNSIdentity(t *testing.T, definition tunnelcert.PlatformCertificateTargetDefinition) {
 	t.Helper()
-	domain := tunnelcert.Domain{ID: definition.ID, AccountID: definition.AccountID, TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: definition.Hostname, Generation: definition.Generation, Strategy: tunnelcert.StrategyPlatformDNS01, OwnershipState: "verified"}
+	domain := tunnelcert.Domain{ID: definition.ID, AccountID: definition.AccountID, TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: definition.Hostname, Generation: definition.Generation, Strategy: tunnelcert.StrategyPlatformDNS01}
 	name, err := tunnelcert.PlatformDNSChallengeTargetForDomain(domain)
 	if err != nil {
 		t.Fatal(err)

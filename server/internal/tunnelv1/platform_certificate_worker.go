@@ -77,7 +77,7 @@ func (r *SQLPlatformEdgeTargetResolver) Resolve(ctx context.Context) ([]tunnelce
 		if _, exists := seen[key]; exists {
 			continue
 		}
-		if err := (tunnelcert.Domain{ID: "platform_edge_probe_v1", AccountID: "platform_edge_probe_v1", TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: "*.edge.example.test", Generation: 1, Strategy: tunnelcert.StrategyPlatformDNS01, OwnershipState: "verified", EdgeTargets: []tunnelcert.EdgeTarget{edge}}).Validate(); err != nil {
+		if err := (tunnelcert.Domain{ID: "platform_edge_probe_v1", AccountID: "platform_edge_probe_v1", TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: "*.edge.example.test", Generation: 1, Strategy: tunnelcert.StrategyPlatformDNS01, EdgeTargets: []tunnelcert.EdgeTarget{edge}}).Validate(); err != nil {
 			return nil, fmt.Errorf("%w: edge node %s returned invalid identity: %w", ErrPlatformCertificateUnavailable, nodeID, err)
 		}
 		seen[key] = struct{}{}
@@ -249,7 +249,7 @@ func (w *PlatformCertificateWorker) Reconcile(ctx context.Context, limit int) (i
 		return 0, ErrPlatformCertificateNoEdges
 	}
 	for _, edge := range edges {
-		if err := (tunnelcert.Domain{ID: "platform_edge_probe_v1", AccountID: "platform_edge_probe_v1", TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: "*.edge.example.test", Generation: 1, Strategy: tunnelcert.StrategyPlatformDNS01, OwnershipState: "verified", EdgeTargets: []tunnelcert.EdgeTarget{edge}}).Validate(); err != nil {
+		if err := (tunnelcert.Domain{ID: "platform_edge_probe_v1", AccountID: "platform_edge_probe_v1", TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: "*.edge.example.test", Generation: 1, Strategy: tunnelcert.StrategyPlatformDNS01, EdgeTargets: []tunnelcert.EdgeTarget{edge}}).Validate(); err != nil {
 			return 0, fmt.Errorf("%w: edge resolver returned invalid target: %w", ErrPlatformCertificateUnavailable, err)
 		}
 	}
@@ -355,8 +355,7 @@ func platformDomain(target tunnelcert.PlatformCertificateTarget, edges []tunnelc
 	return tunnelcert.Domain{
 		ID: target.ID, AccountID: target.AccountID, TargetKind: tunnelcert.TargetPlatformWildcard,
 		Hostname: target.Hostname, ChallengeReference: target.ChallengeReference,
-		Generation: target.Generation, Strategy: tunnelcert.StrategyPlatformDNS01,
-		OwnershipState: "verified", CAAState: "unknown", CertificateReference: target.CertificateReference,
+		Generation: target.Generation, Strategy: tunnelcert.StrategyPlatformDNS01, CAAState: "unknown", CertificateReference: target.CertificateReference,
 		RenewalDue: target.CertificateExpiresAt.IsZero() || !target.CertificateExpiresAt.After(now.Add(renewBefore)),
 		Issuer:     issuerName, EdgeTargets: append([]tunnelcert.EdgeTarget(nil), edges...),
 	}

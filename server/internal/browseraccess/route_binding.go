@@ -80,7 +80,7 @@ SELECT t.id,t.account_id,t.access_mode,t.generation,t.access_generation,r.id,r.g
 FROM tunnels t
 JOIN tunnel_routes r ON r.tunnel_id=t.id
 LEFT JOIN tunnel_domains d ON d.route_id=r.id AND d.tunnel_id=t.id
- AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear'
+ AND d.deleted_at IS NULL AND paperboat.workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear'
  AND ((r.protocol='tls' AND d.certificate_strategy='none' AND d.certificate_state='not_applicable' AND d.match_type='exact')
    OR (r.protocol<>'tls' AND d.certificate_state='ready'))
 WHERE t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$2)

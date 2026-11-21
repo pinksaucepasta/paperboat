@@ -97,7 +97,7 @@ WHERE id = $7
   AND account_id = $8
   AND preview_id = $9
   AND generation = $10
-  AND ownership_state = 'verified'
+  AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
 RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 `
@@ -168,18 +168,18 @@ func (q *Queries) ApplyPreviewDomainCertificateObservationV1(ctx context.Context
 const createPreviewDomainV1 = `-- name: CreatePreviewDomainV1 :one
 INSERT INTO preview_domains (
   id, account_id, preview_id, preview_generation, hostname, match_type,
-  ownership_challenge_reference, ownership_state, dns_target,
+  ownership_challenge_reference, dns_target,
   observed_records, dns_provider, expected_records, dns_next_check_at,
   certificate_strategy, certificate_state, caa_state, conflict_state,
-  generation, created_at, updated_at, workspace_domain_id, last_verified_at
+  generation, created_at, updated_at, workspace_domain_id
 ) VALUES (
   $1, $2, $3, $4,
   $5, $6, $7,
-  'verified', $8, '[]'::jsonb, $9,
+  $8, '[]'::jsonb, $9,
   $10, $11, $12,
   CASE WHEN $12 = 'none' THEN 'not_applicable' ELSE 'issuing' END, -- verified at creation: the certificate is next
   CASE WHEN $12 = 'none' THEN 'not_applicable' ELSE 'unknown' END,
-  'clear', 1, $11, $11, $13, $11
+  'clear', 1, $11, $11, $13
 )
 RETURNING id, account_id, preview_id, preview_generation, hostname, match_type, ownership_challenge_reference, ownership_state, dns_target, observed_records, dns_provider, expected_records, dns_last_checked_at, dns_next_check_at, dns_ttl_seconds, verification_attempts, certificate_strategy, certificate_reference, certificate_state, certificate_expires_at, certificate_renewal_attempted_at, certificate_failure_code, caa_state, conflict_state, last_verified_at, generation, created_at, updated_at, deleted_at, quarantine_until, workspace_domain_id
 `
@@ -255,8 +255,7 @@ func (q *Queries) CreatePreviewDomainV1(ctx context.Context, arg CreatePreviewDo
 
 const deletePreviewDomainV1 = `-- name: DeletePreviewDomainV1 :one
 UPDATE preview_domains
-SET ownership_state = 'revoked',
-    certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+SET certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
     conflict_state = 'quarantined',
     quarantine_until = $1,
     deleted_at = $2,
@@ -343,8 +342,7 @@ WITH candidates AS (
   RETURNING p.id, p.account_id, p.generation
 ), withdrawn AS (
   UPDATE preview_domains AS d
-  SET ownership_state = 'expired',
-      certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+  SET certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
       conflict_state = 'quarantined', quarantine_until = $3,
       deleted_at = $1, generation = d.generation + 1, updated_at = $1
   FROM expired
@@ -849,7 +847,7 @@ JOIN tunnel_certificate_records AS cert
 WHERE d.account_id = $2
   AND d.preview_id = $3
   AND d.deleted_at IS NULL
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -964,7 +962,7 @@ JOIN preview_leases AS p
 WHERE d.account_id = $1
   AND d.preview_id = $2
   AND d.deleted_at IS NULL
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -1052,8 +1050,7 @@ WITH candidates AS (
   RETURNING p.id, p.account_id, p.generation
 ), withdrawn AS (
   UPDATE preview_domains AS d
-  SET ownership_state = 'expired',
-      certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+  SET certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
       conflict_state = 'quarantined', quarantine_until = $4,
       deleted_at = $1, generation = d.generation + 1, updated_at = $1
   FROM lost
@@ -1178,8 +1175,7 @@ WITH stopped AS (
   RETURNING id, account_id, generation
 ), withdrawn AS (
   UPDATE preview_domains AS d
-  SET ownership_state = CASE WHEN $1 = 'owner_lost' THEN 'expired' ELSE 'revoked' END,
-      certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+  SET certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
       conflict_state = 'quarantined',
       quarantine_until = $6,
       deleted_at = $2,
@@ -1227,8 +1223,7 @@ func (q *Queries) StopPreviewLeaseAndWithdrawDomainsV1(ctx context.Context, arg 
 
 const withdrawPreviewDomainsV1 = `-- name: WithdrawPreviewDomainsV1 :many
 UPDATE preview_domains
-SET ownership_state = 'expired',
-    certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+SET certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
     conflict_state = 'quarantined',
     quarantine_until = $1,
     deleted_at = $2,

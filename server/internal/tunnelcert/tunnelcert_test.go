@@ -175,7 +175,7 @@ func bytesOf(size int) []byte {
 }
 
 func testDomain(hostname string, strategy Strategy) Domain {
-	return Domain{ID: "dom_001", AccountID: "acct_001", TunnelID: "tun_001", Hostname: hostname, Generation: 4, Strategy: strategy, OwnershipState: "verified", CAAState: "ready", EdgeTargets: []EdgeTarget{{NodeID: "edge_b", ProcessEpoch: "epoch-0002", Generation: 9}, {NodeID: "edge_a", ProcessEpoch: "epoch-0001", Generation: 7}}}
+	return Domain{ID: "dom_001", AccountID: "acct_001", TunnelID: "tun_001", Hostname: hostname, Generation: 4, Strategy: strategy, CAAState: "ready", EdgeTargets: []EdgeTarget{{NodeID: "edge_b", ProcessEpoch: "epoch-0002", Generation: 9}, {NodeID: "edge_a", ProcessEpoch: "epoch-0001", Generation: 7}}}
 }
 
 func TestSealOpenNeverStoresPlaintextAndRejectsTampering(t *testing.T) {

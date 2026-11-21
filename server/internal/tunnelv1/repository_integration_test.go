@@ -394,15 +394,15 @@ func TestSQLRepositoryDeletionWithdrawsCertificatesOnPostgres(t *testing.T) {
 			for i, domain := range domains {
 				withdrawn := wholeTunnel || i == 0
 				var deleted bool
-				var ownership, conflict, certificate string
+				var conflict, certificate string
 				var quarantine sql.NullTime
-				if err := f.database.SQL().QueryRowContext(ctx, `SELECT deleted_at IS NOT NULL,ownership_state,conflict_state,certificate_state,quarantine_until FROM paperboat.tunnel_domains WHERE id=$1`, domain.DomainID).Scan(&deleted, &ownership, &conflict, &certificate, &quarantine); err != nil {
+				if err := f.database.SQL().QueryRowContext(ctx, `SELECT deleted_at IS NOT NULL,conflict_state,certificate_state,quarantine_until FROM paperboat.tunnel_domains WHERE id=$1`, domain.DomainID).Scan(&deleted, &conflict, &certificate, &quarantine); err != nil {
 					t.Fatal(err)
 				}
-				if withdrawn && (!deleted || ownership != "revoked" || conflict != "quarantined" || certificate != "revoked" || !quarantine.Valid) {
-					t.Fatalf("domain not terminal: %t %s %s %s %+v", deleted, ownership, conflict, certificate, quarantine)
+				if withdrawn && (!deleted || conflict != "quarantined" || certificate != "revoked" || !quarantine.Valid) {
+					t.Fatalf("domain not terminal: %t %s %s %+v", deleted, conflict, certificate, quarantine)
 				}
-				if !withdrawn && (deleted || ownership == "revoked" || quarantine.Valid) {
+				if !withdrawn && (deleted || quarantine.Valid) {
 					t.Fatal("sibling domain changed")
 				}
 				var terminal, pending, intact int
@@ -717,7 +717,7 @@ ORDER BY generation`, tunnelID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if domainResult.Domain.OwnershipState != "verified" || domainResult.Domain.WorkspaceDomainID.String != workspaceDomainID ||
+	if domainResult.Domain.WorkspaceDomainID.String != workspaceDomainID ||
 		domainResult.Operation.Phase != "issuing_certificate" || domainResult.Operation.State != "running" {
 		t.Fatalf("domain create readiness = %#v", domainResult)
 	}
@@ -824,7 +824,7 @@ ORDER BY generation`, tunnelID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if deletedDomain.Domain.OwnershipState != "revoked" || deletedDomain.Domain.ConflictState != "quarantined" || !deletedDomain.Domain.DeletedAt.Valid || !deletedDomain.Changed {
+	if deletedDomain.Domain.ConflictState != "quarantined" || !deletedDomain.Domain.DeletedAt.Valid || !deletedDomain.Changed {
 		t.Fatalf("domain delete = %#v", deletedDomain)
 	}
 	deleteReplay := deleteDomain

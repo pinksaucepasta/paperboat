@@ -149,7 +149,7 @@ func TestPreviewCertificateIssuanceRenewalFencesOnPostgres(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			captured := tunnelcert.Domain{ID: f.previewDomainID, AccountID: f.previewAccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: f.previewLeaseID, PreviewGeneration: 1, PreviewOwnerMachineID: "machine-" + f.suffix, PreviewOwnerSessionID: "session-" + f.suffix, PreviewState: "active", PreviewExpiresAt: now.Add(12 * time.Hour), Hostname: f.previewHostname, ChallengeReference: "dns-preview-platform", Generation: 1, Strategy: tunnelcert.StrategyDelegatedDNS01, OwnershipState: "verified", CAAState: "ready", RenewalDue: true, EdgeTargets: []tunnelcert.EdgeTarget{{NodeID: "edge-renewal", ProcessEpoch: "epoch-renewal", Generation: 1}}}
+			captured := tunnelcert.Domain{ID: f.previewDomainID, AccountID: f.previewAccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: f.previewLeaseID, PreviewGeneration: 1, PreviewOwnerMachineID: "machine-" + f.suffix, PreviewOwnerSessionID: "session-" + f.suffix, PreviewState: "active", PreviewExpiresAt: now.Add(12 * time.Hour), Hostname: f.previewHostname, ChallengeReference: "dns-preview-platform", Generation: 1, Strategy: tunnelcert.StrategyDelegatedDNS01, CAAState: "ready", RenewalDue: true, EdgeTargets: []tunnelcert.EdgeTarget{{NodeID: "edge-renewal", ProcessEpoch: "epoch-renewal", Generation: 1}}}
 			if kind == "owner_mismatch" {
 				captured.PreviewOwnerSessionID = "different-captured-session"
 			}

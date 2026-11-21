@@ -302,13 +302,13 @@ func (r *SQLRepository) ReadyAliases(ctx context.Context, accountID, previewID s
 func previewDomainFromAliasRow(row dbsqlc.ListReadyPreviewDomainAliasesV1Row) dbsqlc.PreviewDomain {
 	return dbsqlc.PreviewDomain{ID: row.ID, AccountID: row.AccountID, PreviewID: row.PreviewID, PreviewGeneration: row.PreviewGeneration,
 		Hostname: row.Hostname, MatchType: row.MatchType, OwnershipChallengeReference: row.OwnershipChallengeReference,
-		OwnershipState: row.OwnershipState, DnsTarget: row.DnsTarget, ObservedRecords: row.ObservedRecords,
+		DnsTarget: row.DnsTarget, ObservedRecords: row.ObservedRecords,
 		DnsProvider: row.DnsProvider, ExpectedRecords: row.ExpectedRecords, DnsLastCheckedAt: row.DnsLastCheckedAt,
 		DnsNextCheckAt: row.DnsNextCheckAt, DnsTtlSeconds: row.DnsTtlSeconds, VerificationAttempts: row.VerificationAttempts,
 		CertificateStrategy: row.CertificateStrategy, CertificateReference: row.CertificateReference, CertificateState: row.CertificateState,
 		CertificateExpiresAt: row.CertificateExpiresAt, CertificateRenewalAttemptedAt: row.CertificateRenewalAttemptedAt,
 		CertificateFailureCode: row.CertificateFailureCode, CaaState: row.CaaState, ConflictState: row.ConflictState,
-		LastVerifiedAt: row.LastVerifiedAt, Generation: row.Generation, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		Generation: row.Generation, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		DeletedAt: row.DeletedAt, QuarantineUntil: row.QuarantineUntil}
 }
 

@@ -30,12 +30,12 @@ func TestHealthFactsReadDomainAndOriginStateOnPostgres(t *testing.T) {
 	}
 	insertDomain := func(id, hostname, ownership, certificate string) {
 		ws := strings.ReplaceAll(uuid.NewString(), "-", "")
-		if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test"); err != nil {
+		if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x',$4,$2)`, "wsd_"+ws, account, ws+".example.test", ownership); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.database.SQL().ExecContext(ctx, `
-INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,dns_provider,expected_records,dns_next_check_at,created_at,updated_at,ownership_state,certificate_state,workspace_domain_id)
-VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','generic','[]'::jsonb,$6,$6,$6,$7,$8,$9)`, id, account, tunnel, route, hostname, now, ownership, certificate, "wsd_"+ws); err != nil {
+INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,dns_provider,expected_records,dns_next_check_at,created_at,updated_at,certificate_state,workspace_domain_id)
+VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','generic','[]'::jsonb,$6,$6,$6,$7,$8)`, id, account, tunnel, route, hostname, now, certificate, "wsd_"+ws); err != nil {
 			t.Fatal(err)
 		}
 	}

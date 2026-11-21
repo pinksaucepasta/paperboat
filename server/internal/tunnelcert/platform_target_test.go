@@ -162,7 +162,7 @@ func TestPlatformWildcardDomainRejectsRouteAndLeaseIdentity(t *testing.T) {
 	base := Domain{
 		ID: PlatformRuntimeTargetID, AccountID: PlatformAccountID,
 		TargetKind: TargetPlatformWildcard, Hostname: "*.tunnels.example.test",
-		Generation: 1, Strategy: StrategyPlatformDNS01, OwnershipState: "verified",
+		Generation: 1, Strategy: StrategyPlatformDNS01,
 		CAAState: "not_applicable",
 	}
 	if err := base.Validate(); err != nil {

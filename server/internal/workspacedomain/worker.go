@@ -205,7 +205,7 @@ func (w *Worker) issue(ctx context.Context, row dbsqlc.WorkspaceDomain) error {
 	}
 	wildcard := "*." + row.Hostname
 	domain := tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetWorkspaceDomain, Hostname: wildcard,
-		ChallengeReference: row.ChallengeReference, Generation: 1, Strategy: tunnelcert.StrategyDelegatedDNS01, OwnershipState: "verified", Issuer: w.wc.IssuerName}
+		ChallengeReference: row.ChallengeReference, Generation: 1, Strategy: tunnelcert.StrategyDelegatedDNS01, Issuer: w.wc.IssuerName}
 	bundle, err := w.wc.Issuer.IssueDNS01Names(ctx, domain, []string{wildcard, row.Hostname})
 	if err != nil {
 		return err

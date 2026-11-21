@@ -35,7 +35,7 @@ JOIN LATERAL (
  SELECT substring(p.endpoint from 9) hostname WHERE paperboat.workspace_edge_mode(p.account_id,p.owner_team_id)='managed-only'
  UNION ALL
  SELECT d.hostname FROM preview_domains d WHERE d.preview_id=p.id AND d.account_id=p.account_id
- AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear'
+ AND d.deleted_at IS NULL AND paperboat.workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear'
  AND d.certificate_state='ready' AND d.certificate_reference IS NOT NULL AND d.preview_generation=p.generation
 ) publication ON true
 WHERE a.edge_node_id=$1 AND a.edge_process_epoch=$2

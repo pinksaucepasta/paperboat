@@ -36,7 +36,7 @@ func (s *SQLStore) RefreshPreviewIssuanceTarget(ctx context.Context, captured Do
 	err := s.db.Pool().QueryRow(ctx, `SELECT p.generation,least(p.lease_deadline,coalesce(p.user_deadline,p.lease_deadline))
  FROM paperboat.preview_domains d JOIN paperboat.preview_leases p ON p.id=d.preview_id AND p.account_id=d.account_id
  WHERE d.id=$1 AND d.account_id=$2 AND d.preview_id=$3 AND d.generation=$4 AND d.hostname=$5 AND d.ownership_challenge_reference=$6 AND (CASE WHEN d.certificate_strategy='managed' THEN 'delegated_dns01' ELSE d.certificate_strategy END)=$7
- AND d.deleted_at IS NULL AND d.ownership_state='verified' AND d.conflict_state='clear' AND d.preview_generation=p.generation
+ AND d.deleted_at IS NULL AND paperboat.workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state='clear' AND d.preview_generation=p.generation
  AND p.owner_machine_id=$8 AND p.owner_session_id=$9 AND p.terminal_state='active' AND p.generation >= $10
  AND p.lease_deadline>$11 AND (p.user_deadline IS NULL OR p.user_deadline>$11)`, captured.ID, captured.AccountID, captured.PreviewID, int64(captured.Generation), captured.Hostname, captured.ChallengeReference, string(captured.Strategy), captured.PreviewOwnerMachineID, captured.PreviewOwnerSessionID, int64(captured.PreviewGeneration), now.UTC()).Scan(&generation, &current.PreviewExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {

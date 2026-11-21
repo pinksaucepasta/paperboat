@@ -64,18 +64,18 @@ WHERE id = sqlc.arg(domain_id)
 -- name: CreatePreviewDomainV1 :one
 INSERT INTO preview_domains (
   id, account_id, preview_id, preview_generation, hostname, match_type,
-  ownership_challenge_reference, ownership_state, dns_target,
+  ownership_challenge_reference, dns_target,
   observed_records, dns_provider, expected_records, dns_next_check_at,
   certificate_strategy, certificate_state, caa_state, conflict_state,
-  generation, created_at, updated_at, workspace_domain_id, last_verified_at
+  generation, created_at, updated_at, workspace_domain_id
 ) VALUES (
   sqlc.arg(id), sqlc.arg(account_id), sqlc.arg(preview_id), sqlc.arg(preview_generation),
   sqlc.arg(hostname), sqlc.arg(match_type), sqlc.arg(ownership_challenge_reference),
-  'verified', sqlc.arg(dns_target), '[]'::jsonb, sqlc.arg(dns_provider),
+  sqlc.arg(dns_target), '[]'::jsonb, sqlc.arg(dns_provider),
   sqlc.arg(expected_records), sqlc.arg(now), sqlc.arg(certificate_strategy),
   CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'issuing' END, -- verified at creation: the certificate is next
   CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'unknown' END,
-  'clear', 1, sqlc.arg(now), sqlc.arg(now), sqlc.arg(workspace_domain_id), sqlc.arg(now)
+  'clear', 1, sqlc.arg(now), sqlc.arg(now), sqlc.arg(workspace_domain_id)
 )
 RETURNING *;
 
@@ -93,14 +93,13 @@ WHERE id = sqlc.arg(domain_id)
   AND account_id = sqlc.arg(account_id)
   AND preview_id = sqlc.arg(preview_id)
   AND generation = sqlc.arg(expected_generation)
-  AND ownership_state = 'verified'
+  AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
 RETURNING *;
 
 -- name: DeletePreviewDomainV1 :one
 UPDATE preview_domains
-SET ownership_state = 'revoked',
-    certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+SET certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
     conflict_state = 'quarantined',
     quarantine_until = sqlc.arg(quarantine_until),
     deleted_at = sqlc.arg(now),
@@ -185,8 +184,7 @@ WITH stopped AS (
   RETURNING id, account_id, generation
 ), withdrawn AS (
   UPDATE preview_domains AS d
-  SET ownership_state = CASE WHEN sqlc.arg(terminal_state) = 'owner_lost' THEN 'expired' ELSE 'revoked' END,
-      certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+  SET certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
       conflict_state = 'quarantined',
       quarantine_until = sqlc.arg(quarantine_until),
       deleted_at = sqlc.arg(now),
@@ -220,8 +218,7 @@ WITH candidates AS (
   RETURNING p.id, p.account_id, p.generation
 ), withdrawn AS (
   UPDATE preview_domains AS d
-  SET ownership_state = 'expired',
-      certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+  SET certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
       conflict_state = 'quarantined', quarantine_until = sqlc.arg(quarantine_until),
       deleted_at = sqlc.arg(now), generation = d.generation + 1, updated_at = sqlc.arg(now)
   FROM expired
@@ -250,8 +247,7 @@ WITH candidates AS (
   RETURNING p.id, p.account_id, p.generation
 ), withdrawn AS (
   UPDATE preview_domains AS d
-  SET ownership_state = 'expired',
-      certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+  SET certificate_state = CASE WHEN d.certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
       conflict_state = 'quarantined', quarantine_until = sqlc.arg(quarantine_until),
       deleted_at = sqlc.arg(now), generation = d.generation + 1, updated_at = sqlc.arg(now)
   FROM lost
@@ -263,8 +259,7 @@ SELECT id, account_id, generation FROM lost;
 
 -- name: WithdrawPreviewDomainsV1 :many
 UPDATE preview_domains
-SET ownership_state = 'expired',
-    certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
+SET certificate_state = CASE WHEN certificate_state = 'not_applicable' THEN 'not_applicable' ELSE 'revoked' END,
     conflict_state = 'quarantined',
     quarantine_until = sqlc.arg(quarantine_until),
     deleted_at = sqlc.arg(now),
@@ -284,7 +279,7 @@ JOIN preview_leases AS p
 WHERE d.account_id = sqlc.arg(account_id)
   AND d.preview_id = sqlc.arg(preview_id)
   AND d.deleted_at IS NULL
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL
@@ -313,7 +308,7 @@ JOIN tunnel_certificate_records AS cert
 WHERE d.account_id = sqlc.arg(account_id)
   AND d.preview_id = sqlc.arg(preview_id)
   AND d.deleted_at IS NULL
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.certificate_state = 'ready'
   AND d.certificate_reference IS NOT NULL

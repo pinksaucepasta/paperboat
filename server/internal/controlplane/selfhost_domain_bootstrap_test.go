@@ -102,7 +102,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	// A TLS route is never rewritten to the customer's name (the edge requires its managed name for passthrough):
 	// the verified domain reaches the edge only as a domain binding.
 	exec(`UPDATE paperboat.tunnel_routes SET protocol='tls',origin_scheme='tcp',public_tcp_listener_id='listener_tls_443',public_tcp_port=443,tls_verification='not_applicable',preserve_host=false,match_hostname=$2,wildcard_suffix=NULL,path_prefix=NULL,host_override=NULL WHERE id=$1`, f.routeID, "managed-"+f.suffix+".example.test")
-	exec(`UPDATE paperboat.tunnel_domains SET hostname=$2,match_type='exact',ownership_state='verified',certificate_strategy='none',certificate_state='not_applicable' WHERE id=$1`, domain, hostname)
+	exec(`UPDATE paperboat.tunnel_domains SET hostname=$2,match_type='exact',certificate_strategy='none',certificate_state='not_applicable' WHERE id=$1`, domain, hostname)
 	rows = read()
 	if len(rows) != 1 || rows[0].ScopedDomainHostname != "" || rows[0].MatchType != "managed" {
 		t.Fatalf("TLS route was rewritten to the customer name: %+v", rows)
@@ -110,7 +110,7 @@ func TestScopedTunnelDomainBootstrapOnPostgres(t *testing.T) {
 	if err := json.Unmarshal([]byte(rows[0].DomainBindings), &aliases); err != nil || len(aliases) != 1 || aliases[0]["hostname"] != hostname {
 		t.Fatalf("TLS domain binding = %s, %v", rows[0].DomainBindings, err)
 	}
-	exec(`UPDATE paperboat.tunnel_domains SET ownership_state='revoked' WHERE id=$1`, domain)
+	exec(`UPDATE paperboat.workspace_domains SET ownership_state='failed' WHERE id=(SELECT workspace_domain_id FROM paperboat.tunnel_domains WHERE id=$1)`, domain)
 	if rows := read(); len(rows) != 0 {
 		t.Fatalf("revoked custom domain retained admission: %+v", rows)
 	}

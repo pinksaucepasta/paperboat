@@ -576,9 +576,12 @@ func DomainViewFromRow(row dbsqlc.TunnelDomain) DomainView {
 }
 
 func wireDomainLifecycleState(row dbsqlc.TunnelDomain) string {
-	dnsState := wireDomainState(row.OwnershipState, row.ConflictState)
-	if dnsState != "verified" {
-		return dnsState
+	// Ownership lives on the workspace domain (its own list shows lapses); a binding reports deletion, conflict and TLS.
+	switch {
+	case row.DeletedAt.Valid || row.ConflictState == "quarantined":
+		return "quarantined"
+	case row.ConflictState == "conflicted":
+		return "conflict"
 	}
 	switch row.CertificateState {
 	case "pending", "issuing", "renewing":
@@ -1122,28 +1125,6 @@ func wireMatchType(value string) string {
 	return value
 }
 
-func wireDomainState(ownership, conflict string) string {
-	if conflict == "quarantined" {
-		return "quarantined"
-	}
-	if conflict == "conflicted" {
-		return "conflict"
-	}
-	switch ownership {
-	case "pending":
-		return "waiting_dns"
-	case "verified":
-		return "verified"
-	case "failed":
-		return "dns_error"
-	case "expired":
-		return "expired"
-	case "revoked":
-		return "quarantined"
-	default:
-		return "requested"
-	}
-}
 
 func wireCertificateState(value string) string {
 	if value == "pending" {

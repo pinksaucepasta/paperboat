@@ -121,7 +121,6 @@ type Domain struct {
 	ChallengeReference    string
 	Generation            uint64
 	Strategy              Strategy
-	OwnershipState        string
 	CAAState              string
 	CertificateReference  string
 	CertificateGeneration uint64
@@ -306,9 +305,6 @@ func (d Domain) Validate() error {
 	}
 	if d.Target().KindValue() == TargetPlatformWildcard && d.Strategy != StrategyPlatformDNS01 {
 		return fmt.Errorf("%w: platform wildcard target requires platform DNS-01 strategy", ErrInvalid)
-	}
-	if d.OwnershipState != "verified" {
-		return fmt.Errorf("%w: domain ownership is not verified", ErrInvalid)
 	}
 	if d.CAAState != "" && d.CAAState != "unknown" && d.CAAState != "ready" && d.CAAState != "not_applicable" {
 		return fmt.Errorf("%w: CAA state is not ready", ErrCAABlocked)

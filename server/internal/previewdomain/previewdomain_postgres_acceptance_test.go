@@ -231,19 +231,18 @@ FROM paperboat.preview_domains WHERE preview_id=$1 AND account_id=$2`, previewID
 
 func assertWithdrawnPreviewDomains(t *testing.T, database *db.DB, ctx context.Context, previewID, accountID string, now time.Time) {
 	t.Helper()
-	var count, withdrawn, expired, revoked, quarantined int
+	var count, withdrawn, revoked, quarantined int
 	var quarantineFuture bool
 	if err := database.SQL().QueryRowContext(ctx, `
 	SELECT count(*), count(*) FILTER (WHERE deleted_at IS NOT NULL),
-	       count(*) FILTER (WHERE ownership_state='expired'),
 	       count(*) FILTER (WHERE certificate_state='revoked'),
 	       count(*) FILTER (WHERE conflict_state='quarantined'),
 	       COALESCE(bool_and(quarantine_until > $3), false)
-FROM paperboat.preview_domains WHERE preview_id=$1 AND account_id=$2`, previewID, accountID, now).Scan(&count, &withdrawn, &expired, &revoked, &quarantined, &quarantineFuture); err != nil {
+FROM paperboat.preview_domains WHERE preview_id=$1 AND account_id=$2`, previewID, accountID, now).Scan(&count, &withdrawn, &revoked, &quarantined, &quarantineFuture); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 || withdrawn != 2 || expired != 2 || revoked != 2 || quarantined != 2 || !quarantineFuture {
-		t.Fatalf("withdrawn preview domains count=%d deleted=%d expired=%d revoked_certificates=%d quarantined=%d future=%v", count, withdrawn, expired, revoked, quarantined, quarantineFuture)
+	if count != 2 || withdrawn != 2 || revoked != 2 || quarantined != 2 || !quarantineFuture {
+		t.Fatalf("withdrawn preview domains count=%d deleted=%d revoked_certificates=%d quarantined=%d future=%v", count, withdrawn, revoked, quarantined, quarantineFuture)
 	}
 }
 

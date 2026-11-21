@@ -69,7 +69,7 @@ func EnsureCertificate(ctx context.Context, d *db.DB, key, domain string, issuer
 	}
 	bundle, err := issuer.IssueDNS01(ctx, tunnelcert.Domain{ID: "regional_wildcard_v1", AccountID: tunnelcert.PlatformAccountID,
 		TargetKind: tunnelcert.TargetPlatformWildcard, Hostname: wildcardName(domain), Generation: 1,
-		Strategy: tunnelcert.StrategyPlatformDNS01, OwnershipState: "verified"})
+		Strategy: tunnelcert.StrategyPlatformDNS01})
 	if err != nil {
 		return fmt.Errorf("issue %s: %w", wildcardName(domain), err)
 	}

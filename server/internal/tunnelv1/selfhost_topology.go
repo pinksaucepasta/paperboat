@@ -23,7 +23,7 @@ func rejectManagedHTTPForSelfhostOnly(ctx context.Context, tx *db.Tx, account, p
 	}
 	if routeID != "" {
 		var verified bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.tunnel_domains WHERE account_id=$1 AND route_id=$2 AND deleted_at IS NULL AND ownership_state='verified' AND conflict_state='clear')`, account, routeID).Scan(&verified); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.tunnel_domains WHERE account_id=$1 AND route_id=$2 AND deleted_at IS NULL AND paperboat.workspace_domain_verified(workspace_domain_id) AND conflict_state='clear')`, account, routeID).Scan(&verified); err != nil {
 			return err
 		}
 		if verified {

@@ -88,7 +88,7 @@ func TestACMEIssuerPebbleWildcard(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancelCNAME()
-	bundle, err := issuer.IssueDNS01(context.Background(), Domain{ID: "domain_pebble_1", AccountID: "account_pebble_1", TunnelID: "tunnel_pebble_1", Hostname: "*.example.test", ChallengeReference: "dns-challenge://domain_pebble_1", Generation: 1, Strategy: StrategyWildcard, OwnershipState: "verified", CAAState: "not_applicable"})
+	bundle, err := issuer.IssueDNS01(context.Background(), Domain{ID: "domain_pebble_1", AccountID: "account_pebble_1", TunnelID: "tunnel_pebble_1", Hostname: "*.example.test", ChallengeReference: "dns-challenge://domain_pebble_1", Generation: 1, Strategy: StrategyWildcard, CAAState: "not_applicable"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestACMEIssuerPebbleWildcard(t *testing.T) {
 
 	// A second order for the same identity exercises the renewal path and
 	// proves that a replacement certificate gets a distinct key/fingerprint.
-	renewed, err := issuer.IssueDNS01(context.Background(), Domain{ID: "domain_pebble_1", AccountID: "account_pebble_1", TunnelID: "tunnel_pebble_1", Hostname: "*.example.test", ChallengeReference: "dns-challenge://domain_pebble_1", Generation: 2, Strategy: StrategyWildcard, OwnershipState: "verified", CAAState: "not_applicable"})
+	renewed, err := issuer.IssueDNS01(context.Background(), Domain{ID: "domain_pebble_1", AccountID: "account_pebble_1", TunnelID: "tunnel_pebble_1", Hostname: "*.example.test", ChallengeReference: "dns-challenge://domain_pebble_1", Generation: 2, Strategy: StrategyWildcard, CAAState: "not_applicable"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestACMEIssuerPebbleWildcard(t *testing.T) {
 		ID: PlatformPublicTargetID, AccountID: PlatformAccountID,
 		TargetKind: TargetPlatformWildcard, Hostname: "*.platform.example.test",
 		ChallengeReference: PlatformPublicChallengeReference, Generation: 1,
-		Strategy: StrategyPlatformDNS01, OwnershipState: "verified", CAAState: "not_applicable",
+		Strategy: StrategyPlatformDNS01, CAAState: "not_applicable",
 	}
 	platformBundle, err := issuer.IssueDNS01(context.Background(), platformDomain)
 	if err != nil {

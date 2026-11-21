@@ -134,7 +134,7 @@ WHERE EXISTS (
     AND domain.account_id = sqlc.arg(account_id)
     AND domain.tunnel_id = sqlc.arg(tunnel_id)
     AND domain.generation = sqlc.arg(domain_generation)
-    AND domain.ownership_state = 'verified'
+    AND workspace_domain_verified(domain.workspace_domain_id)
     AND domain.conflict_state = 'clear'
     AND domain.deleted_at IS NULL
 )
@@ -180,7 +180,7 @@ WHERE EXISTS (
     AND domain.preview_id = sqlc.arg(preview_id)
     AND domain.preview_generation = sqlc.arg(preview_generation)
     AND domain.generation = sqlc.arg(domain_generation)
-    AND domain.ownership_state = 'verified'
+    AND workspace_domain_verified(domain.workspace_domain_id)
     AND domain.conflict_state = 'clear'
     AND domain.deleted_at IS NULL
     AND lease.generation = sqlc.arg(preview_generation)
@@ -220,7 +220,7 @@ WHERE cert.domain_id = sqlc.arg(domain_id)
   AND cert.leaf_hostname IS NULL
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -244,7 +244,7 @@ WHERE cert.domain_id = sqlc.arg(domain_id)
   AND cert.leaf_hostname IS NULL
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -275,7 +275,7 @@ WHERE cert.domain_id = sqlc.arg(domain_id)
   AND cert.state = 'active'
   AND cert.expires_at > sqlc.arg(now)
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -300,7 +300,7 @@ WHERE cert.domain_id = sqlc.arg(domain_id)
   AND cert.leaf_hostname = sqlc.arg(hostname)
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -327,7 +327,7 @@ WHERE cert.domain_id = sqlc.arg(domain_id)
   AND cert.state = 'active'
   AND cert.expires_at > sqlc.arg(now)
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -354,7 +354,7 @@ WHERE cert.domain_id = sqlc.arg(domain_id)
   AND cert.leaf_hostname = sqlc.arg(hostname)
   AND cert.state = 'active'
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -380,6 +380,8 @@ WHERE tunnel_certificate_records.id = sqlc.arg(id)
           AND domain.tunnel_id = tunnel_certificate_records.tunnel_id
           AND domain.generation = sqlc.arg(domain_generation)
           AND domain.deleted_at IS NULL
+          AND workspace_domain_verified(domain.workspace_domain_id)
+          AND domain.conflict_state = 'clear'
       )
     ) OR (
       tunnel_certificate_records.target_kind = 'preview_lease'
@@ -394,7 +396,7 @@ WHERE tunnel_certificate_records.id = sqlc.arg(id)
         AND domain.generation = sqlc.arg(domain_generation)
         AND domain.preview_generation = tunnel_certificate_records.preview_generation
         AND domain.deleted_at IS NULL
-        AND domain.ownership_state = 'verified'
+        AND workspace_domain_verified(domain.workspace_domain_id)
         AND domain.conflict_state = 'clear'
         AND lease.generation = domain.preview_generation
         AND lease.terminal_state = 'active'
@@ -501,7 +503,7 @@ WHERE cert.id = sqlc.arg(certificate_id)
   AND domain.preview_id = sqlc.arg(preview_id)
   AND domain.preview_generation = sqlc.arg(preview_generation)
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -531,7 +533,7 @@ WHERE cert.domain_id = domain.id
   AND domain.preview_id = sqlc.arg(preview_id)
   AND domain.preview_generation = sqlc.arg(preview_generation)
   AND domain.deleted_at IS NULL
-  AND domain.ownership_state = 'verified'
+  AND workspace_domain_verified(domain.workspace_domain_id)
   AND domain.conflict_state = 'clear'
   AND lease.generation = domain.preview_generation
   AND lease.terminal_state = 'active'
@@ -669,7 +671,7 @@ SET certificate_state = 'ready',
 WHERE id = sqlc.arg(domain_id)
   AND account_id = sqlc.arg(account_id)
   AND generation = sqlc.arg(expected_generation)
-  AND ownership_state = 'verified'
+  AND workspace_domain_verified(workspace_domain_id)
   AND conflict_state = 'clear'
   AND deleted_at IS NULL;
 
@@ -894,7 +896,7 @@ WHERE d.id = sqlc.arg(domain_id)
   AND d.preview_id = sqlc.arg(preview_id)
   AND d.preview_generation = sqlc.arg(preview_generation)
   AND d.generation = sqlc.arg(expected_domain_generation)
-  AND d.ownership_state = 'verified'
+  AND workspace_domain_verified(d.workspace_domain_id)
   AND d.conflict_state = 'clear'
   AND d.deleted_at IS NULL
   AND lease.id = d.preview_id
@@ -937,7 +939,7 @@ SELECT EXISTS (
     AND d.preview_generation = sqlc.arg(preview_generation)
     AND d.generation = sqlc.arg(domain_generation)
     AND d.hostname = sqlc.arg(hostname)
-    AND d.ownership_state = 'verified'
+    AND workspace_domain_verified(d.workspace_domain_id)
     AND d.conflict_state = 'clear'
     AND d.certificate_state = 'ready'
     AND d.certificate_reference IS NOT NULL
@@ -978,7 +980,7 @@ SET certificate_state = 'ready', certificate_failure_code = NULL,
 FROM tunnel_certificate_records AS cert, tunnels AS t, tunnel_routes AS r
 WHERE d.id = sqlc.arg(domain_id) AND d.account_id = sqlc.arg(account_id)
   AND d.generation = sqlc.arg(expected_generation)
-  AND d.ownership_state = 'verified' AND d.conflict_state = 'clear'
+  AND workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state = 'clear'
   AND d.deleted_at IS NULL AND d.certificate_state IN ('failed','renewing')
   AND t.id = d.tunnel_id AND t.account_id = d.account_id
   AND t.desired_state = 'active' AND t.deleted_at IS NULL

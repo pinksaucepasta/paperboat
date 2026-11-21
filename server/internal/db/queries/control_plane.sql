@@ -1149,7 +1149,7 @@ SELECT ('epa_' || x.route_id)::text AS assignment_id,
          FROM (
            SELECT d.id, d.hostname, d.match_type, d.generation
            FROM tunnel_domains AS d
-           WHERE d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.deleted_at IS NULL AND d.ownership_state = 'verified'
+           WHERE d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.deleted_at IS NULL AND workspace_domain_verified(d.workspace_domain_id)
              AND ((tr.protocol = 'tls' AND d.certificate_strategy = 'none' AND d.certificate_state = 'not_applicable' AND d.match_type = 'exact')
                OR (tr.protocol <> 'tls' AND d.certificate_state = 'ready'))
              AND d.conflict_state = 'clear'
@@ -1182,7 +1182,7 @@ LEFT JOIN LATERAL (
   WHERE tr.match_type = 'managed' AND tr.protocol = 'http'
     AND EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id = node.id AND i.scope_kind <> 'global')
     AND d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.account_id = t.account_id
-    AND d.deleted_at IS NULL AND d.ownership_state = 'verified' AND d.conflict_state = 'clear'
+    AND d.deleted_at IS NULL AND workspace_domain_verified(d.workspace_domain_id) AND d.conflict_state = 'clear'
   ORDER BY d.hostname, d.id
   LIMIT 1
 ) engine_scoped_domain ON true

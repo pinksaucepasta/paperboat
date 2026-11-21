@@ -672,7 +672,7 @@ func transitionTx(ctx context.Context, tx *db.Tx, input StateRecord, now time.Ti
 		}
 		current = updated
 		if input.DesiredState == DesiredDeleted {
-			if _, err := tx.Exec(ctx, `UPDATE paperboat.tunnel_domains SET ownership_state='revoked', conflict_state='quarantined',
+			if _, err := tx.Exec(ctx, `UPDATE paperboat.tunnel_domains SET conflict_state='quarantined',
  quarantine_until=$3, generation=generation+1, deleted_at=$4, updated_at=$4
  WHERE account_id=$1 AND tunnel_id=$2 AND deleted_at IS NULL`, input.AccountID, input.TunnelID, now.Add(previewtunnelstore.DomainQuarantine), now); err != nil {
 				return result, err

@@ -10,6 +10,6 @@ SET certificate_state = sqlc.arg(certificate_state),
     updated_at = sqlc.arg(now)
 WHERE id = sqlc.arg(domain_id)
   AND generation = sqlc.arg(expected_generation)
-  AND ownership_state = 'verified'
+  AND workspace_domain_verified(workspace_domain_id)
   AND deleted_at IS NULL
 RETURNING *;

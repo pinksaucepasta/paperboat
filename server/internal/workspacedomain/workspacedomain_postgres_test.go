@@ -220,7 +220,18 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	if !served() {
 		t.Fatal("binding under a verified domain is not served")
 	}
+	generation := func() (g int64) {
+		t.Helper()
+		if err := database.Pool().QueryRow(ctx, `SELECT generation FROM paperboat.tunnel_domains WHERE id=$1`, binding).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	before := generation()
 	exec(`UPDATE paperboat.workspace_domains SET ownership_state='pending' WHERE id=$1`, view.ID)
+	if generation() <= before { // certificate staging/activation fence on it
+		t.Fatal("binding generation did not move when its workspace domain lapsed")
+	}
 	if served() {
 		t.Fatal("binding still served after its workspace domain lapsed")
 	}
@@ -234,13 +245,12 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	if taken, err := service.Add(personal, stranger, stranger, hostname); err != nil || taken.ID == view.ID {
 		t.Fatalf("takeover of a lapsed domain = %+v %v", taken, err)
 	}
-	var state string
 	var deleted bool
-	if err := database.Pool().QueryRow(ctx, `SELECT ownership_state, deleted_at IS NOT NULL FROM paperboat.tunnel_domains WHERE id=$1`, binding).Scan(&state, &deleted); err != nil {
+	if err := database.Pool().QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM paperboat.tunnel_domains WHERE id=$1`, binding).Scan(&deleted); err != nil {
 		t.Fatal(err)
 	}
-	if state != "revoked" || !deleted || served() {
-		t.Fatalf("old binding after takeover: state %q deleted %v served %v", state, deleted, served())
+	if !deleted || served() {
+		t.Fatalf("old binding after takeover: deleted %v served %v", deleted, served())
 	}
 	if _, err := service.Get(personal, owner, view.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("taken-over domain = %v", err)
