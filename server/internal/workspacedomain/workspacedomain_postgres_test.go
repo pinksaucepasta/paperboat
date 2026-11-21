@@ -12,9 +12,12 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/miekg/dns"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -80,7 +83,8 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	}
 	challenge, _ := tunnelcert.WorkspaceChallengeTarget("account:"+owner, hostname, cfg.ChallengeZone)
 	if view.Hostname != hostname || view.State != "pending_dns" || len(view.Records) != 3 ||
-		view.Records[0] != (Record{Name: "_acme-challenge." + hostname, Type: "CNAME", Value: challenge, Purpose: "verification", Required: true}) ||
+		!reflect.DeepEqual(view.Records[0], Record{Name: "_acme-challenge." + hostname, Type: "CNAME", Value: challenge, Purpose: "verification", Required: true,
+			Status: RecordPending, ObservedValues: []string{}}) || view.DNSHealth != HealthChecking || view.Records[2].Status != RecordNotChecked ||
 		view.Records[1].Name != "*."+hostname || view.Records[1].Value != RoutingName(view.ID, cfg.RoutingBase) || view.Records[1].Type != "CNAME" {
 		t.Fatalf("added view = %+v", view)
 	}
@@ -98,7 +102,15 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 
 	// DNS: missing, wrong, then the exact CNAME verifies.
 	answers := map[string]string{}
-	worker, err := NewWorker(database, cfg, WorkerConfig{Lookup: func(_ context.Context, name string) (string, error) { return answers[name], nil }})
+	worker, err := NewWorker(database, cfg, WorkerConfig{Lookup: func(_ context.Context, name string, qtype uint16) ([]string, error) {
+		if qtype != dns.TypeCNAME || strings.HasPrefix(name, "_pb-probe-") {
+			return []string{"192.0.2.99"}, errors.New("routing lookups never decide ownership")
+		}
+		if a := answers[name]; a != "" && qtype == dns.TypeCNAME {
+			return []string{a}, nil
+		}
+		return nil, nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +138,8 @@ func TestWorkspaceDomainLifecycleOnPostgres(t *testing.T) {
 	answers["_acme-challenge."+hostname] = challenge
 	if got := check("verified"); got.DNSFailure != nil || got.VerifiedAt == nil {
 		t.Fatalf("verified view = %+v", got)
+	} else if got.Records[0].Status != RecordVerified {
+		t.Fatalf("verification record status = %q", got.Records[0].Status)
 	}
 	if _, err := service.Add(personal, stranger, stranger, hostname); !errors.Is(err, ErrConflict) {
 		t.Fatalf("claiming a verified domain = %v, want ErrConflict", err)

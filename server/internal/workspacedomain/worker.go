@@ -29,8 +29,9 @@ const (
 	renewLead = 5 * 24 * time.Hour
 )
 
-// CNAMELookup returns the CNAME target of name (lowercase, no trailing dot), or "" when name has none.
-type CNAMELookup func(ctx context.Context, name string) (string, error)
+// DNSLookup returns name's answers of type qtype: the CNAME target (not followed) for dns.TypeCNAME, the
+// addresses (CNAMEs followed by the resolver) for A and AAAA; lowercase, no trailing dot, none when absent.
+type DNSLookup func(ctx context.Context, name string, qtype uint16) ([]string, error)
 
 // NamesIssuer orders one certificate for several names (tunnelcert.ACMEIssuer).
 type NamesIssuer interface {
@@ -38,7 +39,7 @@ type NamesIssuer interface {
 }
 
 type WorkerConfig struct {
-	Lookup             CNAMELookup // nil: the system resolvers
+	Lookup             DNSLookup   // nil: the system resolvers
 	Issuer             NamesIssuer // nil: certificates are not issued (http-01 deployments cannot issue wildcards)
 	CAA                tunnelcert.CAAInspector
 	Keys               tunnelcert.MasterKeySource
@@ -66,7 +67,7 @@ func NewWorker(database *db.DB, cfg Config, wc WorkerConfig) (*Worker, error) {
 		return nil, err
 	}
 	if wc.Lookup == nil {
-		wc.Lookup = SystemCNAME
+		wc.Lookup = SystemDNS
 	}
 	if wc.RenewBefore <= 0 {
 		wc.RenewBefore = 30 * 24 * time.Hour
@@ -120,9 +121,13 @@ func (w *Worker) checkDNS(ctx context.Context, row dbsqlc.WorkspaceDomain, now t
 		return err
 	}
 	name := "_acme-challenge." + row.Hostname
-	lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	got, lookupErr := w.wc.Lookup(lookupCtx, name)
+	lookupCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	answers, lookupErr := w.wc.Lookup(lookupCtx, name, dns.TypeCNAME)
 	cancel()
+	got := ""
+	if len(answers) > 0 {
+		got = answers[0]
+	}
 	state, code, observed := "pending", "", []string{}
 	switch {
 	case lookupErr != nil:
@@ -142,6 +147,15 @@ func (w *Worker) checkDNS(ctx context.Context, row dbsqlc.WorkspaceDomain, now t
 	next := now.Add(dnsVerifiedEvery)
 	if state != "verified" {
 		next = now.Add(dnsBackoff(row.VerificationAttempts))
+	}
+	// Routing records are observed for the view only; they never change ownership state.
+	// A failure here leaves the routing records pending in the view and the ownership result still applies.
+	if uses, err := listUses(ctx, w.db.Queries(), []string{row.ID}); err != nil {
+		workers.IterationFailure(ctx, "workspace_domain_routing", "routing_records", err)
+	} else if records, err := (&Service{db: w.db, cfg: w.cfg}).Records(ctx, row, apexInUse(uses[row.ID], row.Hostname)); err != nil {
+		workers.IterationFailure(ctx, "workspace_domain_routing", "routing_records", err)
+	} else {
+		observed = append(observed, observeRouting(ctx, w.wc.Lookup, records)...)
 	}
 	raw, err := json.Marshal(observed)
 	if err != nil {
@@ -273,18 +287,21 @@ func (w *Worker) Worker(interval time.Duration, limit int) workers.Worker {
 	}
 }
 
-// SystemCNAME asks the resolvers in /etc/resolv.conf for name's CNAME record, without following it.
-func SystemCNAME(ctx context.Context, name string) (string, error) {
+// SystemDNS asks the resolvers in /etc/resolv.conf for name's qtype answers (see DNSLookup).
+func SystemDNS(ctx context.Context, name string, qtype uint16) ([]string, error) {
 	config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 	if err != nil || len(config.Servers) == 0 {
-		return "", errors.New("DNS resolver configuration is unavailable")
+		return nil, errors.New("DNS resolver configuration is unavailable")
 	}
 	message := new(dns.Msg)
-	message.SetQuestion(dns.Fqdn(name), dns.TypeCNAME)
+	message.SetQuestion(dns.Fqdn(name), qtype)
 	client := &dns.Client{Timeout: 5 * time.Second}
 	var lastErr error
 	for _, server := range config.Servers {
 		reply, _, err := client.ExchangeContext(ctx, message, net.JoinHostPort(server, config.Port))
+		if err == nil && reply.Truncated { // the full answer is only over TCP
+			reply, _, err = (&dns.Client{Net: "tcp", Timeout: 5 * time.Second}).ExchangeContext(ctx, message, net.JoinHostPort(server, config.Port))
+		}
 		if err != nil {
 			lastErr = err
 			continue
@@ -293,14 +310,29 @@ func SystemCNAME(ctx context.Context, name string) (string, error) {
 			lastErr = fmt.Errorf("DNS answered %s", dns.RcodeToString[reply.Rcode])
 			continue
 		}
+		var out []string
 		for _, answer := range reply.Answer {
-			if cname, ok := answer.(*dns.CNAME); ok && strings.EqualFold(strings.TrimSuffix(cname.Hdr.Name, "."), name) {
-				return strings.ToLower(strings.TrimSuffix(cname.Target, ".")), nil
+			switch rr := answer.(type) {
+			case *dns.CNAME:
+				if qtype == dns.TypeCNAME && strings.EqualFold(strings.TrimSuffix(rr.Hdr.Name, "."), name) {
+					return []string{strings.ToLower(strings.TrimSuffix(rr.Target, "."))}, nil
+				}
+			case *dns.A:
+				if qtype == dns.TypeA {
+					out = append(out, rr.A.String())
+				}
+			case *dns.AAAA:
+				if qtype == dns.TypeAAAA {
+					out = append(out, rr.AAAA.String())
+				}
+			}
+			if len(out) == maxObservedValues {
+				break
 			}
 		}
-		return "", nil
+		return out, nil
 	}
-	return "", lastErr
+	return nil, lastErr
 }
 
 var _ tunnelcert.WorkspaceCertificateSource = (*Worker)(nil)

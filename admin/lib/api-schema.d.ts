@@ -14316,8 +14316,20 @@ export interface components {
                 /** @enum {string} */
                 purpose: "verification" | "routing" | "apex_routing";
                 required: boolean;
+                /**
+                 * @description What DNS answers compared with this record. pending: not checked yet or the resolver failed. not_checked: an optional record nothing uses (the root-domain record without a tunnel or preview on the root domain).
+                 * @enum {string}
+                 */
+                record_status: "verified" | "wrong_address" | "missing" | "pending" | "not_checked";
+                /** @description What DNS answers for this record's name (the wildcard is probed with _pb-probe.<domain>). */
+                observed_values: string[];
             }[];
             observed_records: string[];
+            /**
+             * @description Over the required records: wrong_address outranks missing outranks checking.
+             * @enum {string}
+             */
+            dns_health: "healthy" | "wrong_address" | "missing" | "checking";
             /** Format: date-time */
             last_checked_at?: string;
             /** Format: date-time */

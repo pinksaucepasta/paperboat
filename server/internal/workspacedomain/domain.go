@@ -62,6 +62,9 @@ type Record struct {
 	Value    string `json:"value"`
 	Purpose  string `json:"purpose"` // verification, routing or apex_routing
 	Required bool   `json:"required"`
+	// Status is RecordVerified, RecordWrongAddress, RecordMissing, RecordPending or RecordNotChecked.
+	Status         string   `json:"record_status"`
+	ObservedValues []string `json:"observed_values"` // what DNS answers for the record's name (at most 16)
 }
 
 // Use is a tunnel or preview hostname under the domain.
@@ -86,6 +89,7 @@ type View struct {
 	State       string   `json:"state"` // pending_dns, verified, failed
 	Records     []Record `json:"records"`
 	Observed    []string `json:"observed_records"`
+	DNSHealth   string   `json:"dns_health"` // HealthHealthy, HealthWrongAddress, HealthMissing or HealthChecking
 	CheckedAt   *string  `json:"last_checked_at,omitempty"`
 	NextCheckAt string   `json:"next_check_at"`
 	VerifiedAt  *string  `json:"verified_at,omitempty"`
@@ -358,7 +362,7 @@ func (s *Service) views(ctx context.Context, rows []dbsqlc.WorkspaceDomain) ([]V
 	}
 	out := make([]View, 0, len(rows))
 	for _, r := range rows {
-		records, err := s.Records(ctx, r)
+		records, err := s.Records(ctx, r, apexInUse(uses[r.ID], r.Hostname))
 		if err != nil {
 			return nil, err
 		}
@@ -372,8 +376,9 @@ func (s *Service) views(ctx context.Context, rows []dbsqlc.WorkspaceDomain) ([]V
 }
 
 // Records are the DNS records to add: the verification CNAME (required) and the routing records to the
-// workspace's edges, for every name under the domain and, optionally, for the domain itself.
-func (s *Service) Records(ctx context.Context, row dbsqlc.WorkspaceDomain) ([]Record, error) {
+// workspace's edges, for every name under the domain and for the domain itself, required only when a tunnel
+// or preview uses the domain itself (apexUsed).
+func (s *Service) Records(ctx context.Context, row dbsqlc.WorkspaceDomain, apexUsed bool) ([]Record, error) {
 	challenge, err := tunnelcert.WorkspaceChallengeTarget(row.ChallengeReference, row.Hostname, s.cfg.ChallengeZone)
 	if err != nil {
 		return nil, err
@@ -387,7 +392,7 @@ func (s *Service) Records(ctx context.Context, row dbsqlc.WorkspaceDomain) ([]Re
 		records = append(records, Record{Name: "*." + row.Hostname, Type: publicationdns.DomainRecordType(target, "*."+row.Hostname, "generic"), Value: target, Purpose: "routing", Required: true})
 	}
 	for _, target := range targets {
-		records = append(records, Record{Name: row.Hostname, Type: publicationdns.DomainRecordType(target, row.Hostname, "generic"), Value: target, Purpose: "apex_routing"})
+		records = append(records, Record{Name: row.Hostname, Type: publicationdns.DomainRecordType(target, row.Hostname, "generic"), Value: target, Purpose: "apex_routing", Required: apexUsed})
 	}
 	return records, nil
 }
@@ -429,6 +434,7 @@ func viewOf(r dbsqlc.WorkspaceDomain, records []Record) View {
 	if json.Unmarshal(r.ObservedRecords, &v.Observed) != nil || v.Observed == nil {
 		v.Observed = []string{}
 	}
+	v.DNSHealth = applyStatus(r, v.Records, v.Observed)
 	stamp := func(t sql.NullTime) *string {
 		if !t.Valid {
 			return nil
