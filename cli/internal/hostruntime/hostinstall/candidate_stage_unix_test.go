@@ -66,7 +66,7 @@ func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 	mark := func(b []byte) []byte {
 		return append(append([]byte(nil), b...), "# only the candidate renders this\n"...)
 	}
-	candidate := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Carrier: mark(own.Carrier), Guard: map[string]string{}}
+	candidate := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Carrier: mark(own.Carrier), Guard: map[string]string{}, GuardRevision: own.GuardRevision + 1}
 	for name, unit := range own.Guard {
 		candidate.Guard[name] = unit + "# only the candidate renders this\n"
 	}
@@ -98,7 +98,8 @@ func TestEveryUnitTheUpdateWritesIsTheCandidatesOwnRender(t *testing.T) {
 				t.Fatalf("pending=%v: the %s unit written is not the candidate's render: %v", pending, name, err)
 			}
 		}
-		if len(guard) != len(candidate.Guard) {
+		// A candidate of another guard revision: readiness must wait for its revision, not the installer's.
+		if rendered.GuardRevision != candidate.GuardRevision || len(guard) != len(candidate.Guard) {
 			t.Fatalf("guard units %v", guard)
 		}
 		for name, unit := range candidate.Guard {
@@ -130,7 +131,7 @@ func TestInstallRunsTheCandidateExecutableAndInstallsItsReport(t *testing.T) {
 	mark := func(b []byte) []byte {
 		return append(append([]byte(nil), b...), "# rendered by the candidate executable\n"...)
 	}
-	report := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Carrier: mark(own.Carrier), Guard: map[string]string{}}
+	report := CandidateRender{HostdPending: mark(own.HostdPending), Hostd: mark(own.Hostd), Updater: mark(own.Updater), Host: mark(own.Host), Carrier: mark(own.Carrier), Guard: map[string]string{}, GuardRevision: own.GuardRevision + 1}
 	for name, unit := range own.Guard {
 		report.Guard[name] = unit + "# rendered by the candidate executable\n"
 	}
@@ -161,6 +162,9 @@ func TestInstallRunsTheCandidateExecutableAndInstallsItsReport(t *testing.T) {
 		}
 	}
 	guard := rendered.Guard
+	if rendered.GuardRevision != report.GuardRevision {
+		t.Fatalf("guard revision %d is not the candidate executable's %d", rendered.GuardRevision, report.GuardRevision)
+	}
 	for name, unit := range report.Guard {
 		if guard[name] != unit {
 			t.Fatalf("guard unit %s is not the candidate executable's render", name)

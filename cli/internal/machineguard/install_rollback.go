@@ -187,8 +187,19 @@ func (u *Undo) Discard() {
 // Install installs and starts the guard from executable. On success (trust may still be pending) it
 // returns the Undo that restores the prior installation; the caller restores or discards it.
 // units are the installed build's own guard unit files (nil: this build's, Units).
-func Install(ctx context.Context, executable, browserDomain string, units map[string]string) (*Undo, error) {
+func Install(ctx context.Context, executable, browserDomain string, units *UnitSet) (*Undo, error) {
 	var undo *Undo
-	err := installGuard(ctx, executable, browserDomain, units, &undo)
+	if units == nil {
+		units = &UnitSet{Revision: Revision}
+	}
+	err := installGuard(ctx, executable, browserDomain, units.Files, units.Revision, &undo)
 	return undo, err
+}
+
+// UnitSet is a build's own guard unit files and the guard Revision that build runs. The installing process may be
+// another build, so readiness waits for this Revision, not the installer's. Nil Files renders the installer's own
+// units; Revision 0 (unknown, e.g. an older build) skips the revision check. A nil UnitSet is the installer's own build.
+type UnitSet struct {
+	Files    map[string]string `json:"files"`
+	Revision int               `json:"revision"`
 }

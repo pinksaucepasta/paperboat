@@ -20,7 +20,7 @@ import (
 const darwinHelperPath = "/Library/PrivilegedHelperTools/io.paperboat.machineguard"
 const darwinLaunchPath = "/Library/LaunchDaemons/io.paperboat.machineguard.plist"
 
-func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, undo **Undo) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, revision int, undo **Undo) (resultErr error) {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -63,6 +63,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 		}
 		cfg.Unit = units[filepath.Base(darwinLaunchPath)]
 	}
+	cfg.Revision = revision
 	return installDarwin(ctx, executable, cfg)
 }
 
@@ -85,7 +86,9 @@ func Units() map[string]string {
 
 type darwinInstallConfig struct {
 	// Unit is the launchd declaration as the installed build rendered it; empty renders this build's.
-	Unit                                           string
+	Unit string
+	// Revision is the guard revision the installed build runs; readiness waits for it.
+	Revision                                       int
 	HelperPath, LaunchPath, Label, Socket, Account string
 	NewsyslogPath                                  string // set for the real install; tests leave it empty
 	StateDir                                       string
@@ -204,7 +207,7 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 		return err
 	}
 	if err := waitGuardReady(ctx, guardInstallReadyTimeout, func(probeCtx context.Context) error {
-		return probeGuardStatus(probeCtx, cfg.Socket)
+		return probeGuardStatus(probeCtx, cfg.Socket, cfg.Revision)
 	}); err != nil {
 		return fmt.Errorf("machine guard installed but not ready; inspect launchctl print %s and retry installation: %w", domain, err)
 	}

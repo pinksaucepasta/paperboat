@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"os"
 	"testing"
 
@@ -60,7 +61,7 @@ func TestGuardInstallRecordsTheServersLocalAccessDomain(t *testing.T) {
 			existingMachineGuardReady = func(context.Context, string) error { return errors.New("machine guard requires upgrade") }
 			prepareMachineGuardForInstall = func() error { return nil }
 			var installedDomain string
-			installMissingMachineGuard = func(_ context.Context, _, domain string, _ map[string]string) (guardUndo, error) {
+			installMissingMachineGuard = func(_ context.Context, _, domain string, _ *machineguard.UnitSet) (guardUndo, error) {
 				installedDomain = domain
 				return nil, nil
 			}
@@ -85,7 +86,7 @@ func TestGuardInstallFailsClearlyWhenTheServerDomainIsUnavailable(t *testing.T) 
 	})
 	existingMachineGuardReady = func(context.Context, string) error { return errors.New("guard absent") }
 	prepareMachineGuardForInstall = func() error { return nil }
-	installMissingMachineGuard = func(context.Context, string, string, map[string]string) (guardUndo, error) {
+	installMissingMachineGuard = func(context.Context, string, string, *machineguard.UnitSet) (guardUndo, error) {
 		t.Fatal("the guard was installed without a local access domain")
 		return nil, nil
 	}

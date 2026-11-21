@@ -66,14 +66,24 @@ const (
 	guardReadyStability      = 300 * time.Millisecond
 )
 
-func probeGuardStatus(ctx context.Context, socket string) error {
+func probeGuardStatus(ctx context.Context, socket string, revision int) error {
 	client, err := Connect(ctx, socket)
 	if err != nil {
 		return fmt.Errorf("connect to the machine guard: %w", err)
 	}
 	defer client.Close()
-	if _, err := client.Status(ctx); err != nil {
+	status, err := client.Status(ctx)
+	if err != nil {
 		return fmt.Errorf("read machine guard status: %w", err)
+	}
+	return guardRunsRevision(status, revision)
+}
+
+// guardRunsRevision refuses a reply from another guard revision: the replaced guard can still be answering
+// on the socket while the service manager swaps it, and must not pass the new guard's readiness.
+func guardRunsRevision(status RuntimeStatus, want int) error {
+	if want != 0 && status.Revision != want {
+		return fmt.Errorf("machine guard revision %d is still answering; waiting for revision %d", status.Revision, want)
 	}
 	return nil
 }

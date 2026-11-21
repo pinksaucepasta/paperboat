@@ -18,7 +18,7 @@ import (
 // Install copies the invoked executable into root-only installation storage and
 // restores only address isolation before user sessions. DNS startup does not gate
 // normal logins. No user-writable binary runs as root.
-func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, undo **Undo) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, units map[string]string, revision int, undo **Undo) (resultErr error) {
 	defer diagnostics.UpdateStep("guard_install")()
 	if err := requirePrivilege(); err != nil {
 		return err
@@ -152,7 +152,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, units m
 		}
 	}
 	if err := waitGuardReady(ctx, guardInstallReadyTimeout, func(probeCtx context.Context) error {
-		return probeGuardStatus(probeCtx, DefaultSocket)
+		return probeGuardStatus(probeCtx, DefaultSocket, revision)
 	}); err != nil {
 		return fmt.Errorf("machine guard installed but not ready; inspect systemctl status paperboat-machineguard.service and retry installation: %w", err)
 	}

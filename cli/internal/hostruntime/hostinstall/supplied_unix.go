@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -167,7 +168,7 @@ func SuppliedBinary(ctx context.Context, input Request, operation string, hooks 
 		if err != nil {
 			return err
 		}
-		if err = installMachineGuard(ctx, request, rendered.Guard); err != nil {
+		if err = installMachineGuard(ctx, request, &machineguard.UnitSet{Files: rendered.Guard, Revision: rendered.GuardRevision}); err != nil {
 			return err
 		}
 		if err = ensureUserLinger(ctx, request, paths); err != nil {

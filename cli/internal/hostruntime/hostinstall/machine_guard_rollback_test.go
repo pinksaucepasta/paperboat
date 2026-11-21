@@ -3,6 +3,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"os"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestAReadyGuardOnAnotherVersionIsReplaced(t *testing.T) {
 	}
 	prepareMachineGuardForInstall = func() error { return nil }
 	installed := 0
-	installMissingMachineGuard = func(context.Context, string, string, map[string]string) (guardUndo, error) {
+	installMissingMachineGuard = func(context.Context, string, string, *machineguard.UnitSet) (guardUndo, error) {
 		installed++
 		running = "dev-294d86df"
 		return &recordingGuardUndo{}, nil

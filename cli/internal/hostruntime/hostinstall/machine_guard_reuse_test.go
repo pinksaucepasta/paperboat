@@ -60,7 +60,7 @@ func TestMachineInstallPreservesReadyMachineGuardAndValidatesSuppliedBytes(t *te
 		return nil
 	}
 	prepareMachineGuardForInstall = func() error { prepared++; return nil }
-	installMissingMachineGuard = func(context.Context, string, string, map[string]string) (guardUndo, error) {
+	installMissingMachineGuard = func(context.Context, string, string, *machineguard.UnitSet) (guardUndo, error) {
 		installed++
 		return nil, nil
 	}

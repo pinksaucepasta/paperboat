@@ -104,3 +104,20 @@ func TestWaitGuardReadyAcceptsSlowReplies(t *testing.T) {
 		t.Fatalf("slow but ready guard was refused: %v", err)
 	}
 }
+
+// During an update the old guard can still answer Status; only the new revision counts as ready.
+func TestOldGuardRevisionIsNotReady(t *testing.T) {
+	if err := guardRunsRevision(RuntimeStatus{Ready: true, Revision: Revision - 1}, Revision); err == nil {
+		t.Fatal("an older guard revision passed readiness")
+	}
+	if err := guardRunsRevision(RuntimeStatus{Ready: true, Revision: Revision}, Revision); err != nil {
+		t.Fatalf("the expected guard revision was refused: %v", err)
+	}
+}
+
+// An older candidate reports no guard revision (0): readiness cannot tell revisions apart and accepts any.
+func TestUnknownGuardRevisionSkipsTheCheck(t *testing.T) {
+	if err := guardRunsRevision(RuntimeStatus{Ready: true, Revision: 12}, 0); err != nil {
+		t.Fatalf("unknown expected revision refused a ready guard: %v", err)
+	}
+}

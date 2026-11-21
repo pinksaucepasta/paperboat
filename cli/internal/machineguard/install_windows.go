@@ -23,7 +23,7 @@ import (
 
 const windowsGuardTask = `\Paperboat\MachineGuard`
 
-func installGuard(ctx context.Context, executable, browserDomain string, _ map[string]string, undo **Undo) (resultErr error) {
+func installGuard(ctx context.Context, executable, browserDomain string, _ map[string]string, revision int, undo **Undo) (resultErr error) {
 	if !elevation.IsCurrentProcessElevated() {
 		return errors.New("installing the machine guard requires an elevated administrator")
 	}
@@ -160,7 +160,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, _ map[s
 		}
 	}
 	if err := startGuardWithRetry(ctx, func(probeCtx context.Context) error {
-		return probeGuardStatus(probeCtx, DefaultSocket)
+		return probeGuardStatus(probeCtx, DefaultSocket, revision)
 	}, func(restartCtx context.Context) error {
 		// Not running (it already exited) is fine for /End; wait until the task has left Running so /Run starts a
 		// new process instead of being ignored (IgnoreNew), then /Run must work.

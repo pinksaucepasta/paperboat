@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"io"
 	"net"
 	"os"
@@ -1100,7 +1101,7 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) (resultEr
 	if err := request.Source.Verify(request.Executable); err != nil {
 		return hostInstallFailure("source bytes", ErrInvalidRequest, err)
 	}
-	if err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() error { return installMachineGuard(ctx, request, nil) }); err != nil {
+	if err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() error { return installMachineGuard(ctx, request, &machineguard.UnitSet{}) }); err != nil {
 		return err
 	}
 	instance, err := WindowsInstanceForSID(request.OwnerSID)

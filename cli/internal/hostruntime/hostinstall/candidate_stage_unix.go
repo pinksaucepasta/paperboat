@@ -103,6 +103,8 @@ type CandidateRender struct {
 	Host         []byte            `json:"host,omitempty"`
 	Carrier      []byte            `json:"carrier,omitempty"`
 	Guard        map[string]string `json:"guard"`
+	// GuardRevision is the guard revision this build runs; 0 (a build without it) skips that readiness check.
+	GuardRevision int `json:"guard_revision,omitempty"`
 }
 
 // renderOutputLimit bounds a candidate's render report (several units, base64).
@@ -111,7 +113,7 @@ const renderOutputLimit = 1 << 20
 // RenderCandidate runs in the build being installed and renders its own units. A
 // first install that is not enrolled yet writes only the machine guard.
 func RenderCandidate(request Request) (CandidateRender, error) {
-	render := CandidateRender{Guard: machineguard.Units()}
+	render := CandidateRender{Guard: machineguard.Units(), GuardRevision: machineguard.Revision}
 	if request.EnrollmentPending {
 		return render, nil
 	}

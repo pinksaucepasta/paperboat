@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"golang.org/x/sys/windows"
 	"io"
 	"os"
@@ -427,7 +428,7 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 	installGuard := func(ctx context.Context) (guardUndo, error) {
 		var undo guardUndo
 		err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() (err error) {
-			undo, err = installMachineGuardReversible(ctx, request, nil)
+			undo, err = installMachineGuardReversible(ctx, request, &machineguard.UnitSet{}) // revision of request.Executable unknown here
 			return err
 		})
 		if err != nil {

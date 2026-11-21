@@ -6,8 +6,8 @@ package machineguard
 // one per machine and shared by every OS user's install, so an install replaces it only with a higher
 // revision (FIX-MULTIINST 2a602424f fixed the guard without adding a feature and never reached machines).
 // Bump it with any change to this package's code; TestGuardRevisionMatchesItsSource fails until you do.
-const Revision = 16
+const Revision = 17
 
 // RevisionSourceSHA256 is the hash of this package's code (non-test .go files except this one) that
 // Revision describes. Update it together with Revision.
-const RevisionSourceSHA256 = "26262f367397ecd989bfb470749d593710b78cae93ea55fee5ae4bbe78abfcb1"
+const RevisionSourceSHA256 = "8ef97e03c53b12857356b0491be1ac50334630beea27cbdbb271aa53b893859f"

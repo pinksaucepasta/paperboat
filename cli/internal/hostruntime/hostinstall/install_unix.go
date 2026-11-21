@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/machineguard"
 	"os"
 	"runtime"
 	"time"
@@ -125,7 +126,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 		}
 		// Every installation and update, signed updates included, brings the guard to this build's
 		// version; the undo puts the prior guard back if the update does not commit.
-		undo, err := installMachineGuardReversible(ctx, request, candidateUnits.Guard)
+		undo, err := installMachineGuardReversible(ctx, request, &machineguard.UnitSet{Files: candidateUnits.Guard, Revision: candidateUnits.GuardRevision})
 		if err != nil {
 			return err
 		}
