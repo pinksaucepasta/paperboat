@@ -23,7 +23,7 @@ func TestDoctorManagedSSHCheck(t *testing.T) {
 		{true, nil, "unavailable", doctorpkg.StatusUnavailable},
 		{true, nil, "invalid", doctorpkg.StatusUnavailable},
 	} {
-		check := doctorManagedSSHCheck(test.enrolled, test.err, test.state)
+		check := doctorManagedSSHCheck(test.enrolled, test.err, test.state, false)
 		if check.Status != test.want {
 			t.Errorf("%v/%v/%s: status %s, want %s", test.enrolled, test.err, test.state, check.Status, test.want)
 		}
@@ -34,12 +34,25 @@ func TestDoctorManagedSSHCheck(t *testing.T) {
 }
 
 func TestManagedSSHInstallWarningOnlyWhenMissing(t *testing.T) {
-	if got := managedSSHInstallWarning(doctorManagedSSHCheck(true, nil, "not_installed")); len(got) != 1 || !strings.Contains(got[0], "pb doctor --repair") {
+	if got := managedSSHInstallWarning(doctorManagedSSHCheck(true, nil, "not_installed", false)); len(got) != 1 || !strings.Contains(got[0], "pb doctor --repair") {
 		t.Fatalf("missing sshd warning = %q", got)
 	}
 	for _, state := range []string{"active", "installed_inactive", "unavailable"} {
-		if got := managedSSHInstallWarning(doctorManagedSSHCheck(true, nil, state)); got != nil {
+		if got := managedSSHInstallWarning(doctorManagedSSHCheck(true, nil, state, false)); got != nil {
 			t.Fatalf("%s: unexpected warning %q", state, got)
 		}
+	}
+}
+
+func TestDoctorManagedSSHPendingWhileRetrying(t *testing.T) {
+	check := doctorManagedSSHCheck(true, nil, "not_installed", true)
+	if check.Status != doctorpkg.StatusPending || !strings.Contains(check.Summary, "still being installed") {
+		t.Fatalf("retrying check = %+v", check)
+	}
+	if got := managedSSHInstallWarning(check); len(got) != 1 || !strings.Contains(got[0], "background") {
+		t.Fatalf("install warning while retrying = %q", got)
+	}
+	if check := doctorManagedSSHCheck(true, nil, "active", true); check.Status != doctorpkg.StatusPass {
+		t.Fatalf("running service while in window = %s", check.Status)
 	}
 }
