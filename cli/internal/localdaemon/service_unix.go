@@ -5,6 +5,7 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
 	"github.com/pinksaucepasta/paperboat/cli/internal/endpointbinary"
 	"os"
@@ -137,6 +138,14 @@ func currentUserServiceConfig(executable string) (serviceConfig, error) {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" && filepath.IsAbs(value) {
 			environment[key] = filepath.Clean(value)
 		}
+	}
+	// The daemon must open the config the installing command used, byte for byte (a relative one made absolute).
+	if value := os.Getenv(config.EnvConfigPath); value != "" {
+		absolute, err := filepath.Abs(value)
+		if err != nil {
+			return serviceConfig{}, err
+		}
+		environment[config.EnvConfigPath] = absolute
 	}
 	return serviceConfig{
 		Platform: runtime.GOOS, Home: home, Executable: resolvedExecutable,

@@ -1,14 +1,17 @@
 package daemoncmd
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
@@ -158,6 +161,16 @@ func serviceInstallCommand() *cobra.Command {
 		}
 		executable, err := executableForService()
 		if err != nil {
+			return err
+		}
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			return err
+		}
+		if err = config.CheckDaemonSignIn(cfg, cmp.Or(strings.TrimSpace(serverURL), cfg.ServerURL)); err != nil {
+			if errors.Is(err, config.ErrCredentialStoreUnavailable) {
+				return fmt.Errorf("%s: %w", config.DaemonSignInHelp, err)
+			}
 			return err
 		}
 		ctx, cancel := serviceRegistrationContext(cmd)
