@@ -102,12 +102,22 @@ def enrollment_token(windows_command):
     return found.group(1)
 
 
+def enrollment_token_from_add(output):
+    """The token of `pb machine add --json` output ({"ok":true,"data":{"windows_command":...}}); garbage fails without echoing it."""
+    try:
+        envelope = json.loads(output)
+        command = envelope['data']['windows_command']
+    except (ValueError, KeyError, TypeError):
+        raise RuntimeError('pb machine add --json printed no windows_command; the enrollment output format changed') from None
+    return enrollment_token(command)
+
+
 def mint_token(host, alias):
     """Mint an enrollment token on a paired Linux machine, stage it on the Windows device owner-only; return nothing printed."""
     code, out = linux(f'{PB_LINUX} machine add --json --name {alias}') if host == 'linux' else (1, '')
     if code:
         raise RuntimeError('could not mint an enrollment token on ' + host)
-    token = enrollment_token(json.loads(out)['data']['windows_command'])
+    token = enrollment_token_from_add(out)
     code, _ = powershell_on_device(
         f"Set-Content -NoNewline -Path '{TOKEN_FILE}' -Value '{token}'; "
         f"icacls '{TOKEN_FILE}' /setowner $env:USERNAME | Out-Null; "
