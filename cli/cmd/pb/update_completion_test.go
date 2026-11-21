@@ -232,3 +232,16 @@ func TestUpdateFromABundleDoesNotClaimAnAutomaticUpdateSetting(t *testing.T) {
 		t.Fatalf("a custom install must still report its setting: %v %s", err, out.String())
 	}
 }
+
+type steppedInstallFailure struct{}
+
+func (steppedInstallFailure) Error() string      { return "installing failed at step: install Paperboat machine guard" }
+func (steppedInstallFailure) FailedStep() string { return "install Paperboat machine guard" }
+
+// An install step failure carries its step into the JSON error and never points at output --json does not print.
+func TestInstallStepFailureJSONCarriesItsFailedStep(t *testing.T) {
+	result := classifyCLIJSONError(fmt.Errorf("install: %w", steppedInstallFailure{}))
+	if result.FailedStep != "install Paperboat machine guard" || strings.Contains(result.Message, "printed above") {
+		t.Fatalf("json = %+v", result)
+	}
+}

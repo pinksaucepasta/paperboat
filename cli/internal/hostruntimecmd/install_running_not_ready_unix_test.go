@@ -23,3 +23,14 @@ func TestNotReadyStepIsTheLastCauseLine(t *testing.T) {
 		t.Fatal("a rollback with a step must still be ErrUpdateNotReady")
 	}
 }
+
+// A failed privileged install step (the machine guard on a loaded Mac) is named for --json, which shows no stderr.
+func TestInstallGuardStepFailureNamesItsStep(t *testing.T) {
+	stderr := "pb: Paperboat installation failed: install Paperboat machine guard. Run pb doctor, then retry.\n"
+	if got := privilegedFailedStep(stderr); got != "install Paperboat machine guard" {
+		t.Fatalf("step = %q", got)
+	}
+	if got := privilegedFailedStep("sudo: a password is required\n"); got != "" {
+		t.Fatalf("step without a pb line = %q", got)
+	}
+}

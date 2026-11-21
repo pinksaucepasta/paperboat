@@ -18,6 +18,16 @@ import (
 type CommandFailure struct {
 	message string
 	causes  []error
+	// step is the failed step a privileged child reported on its stderr, for callers that do not show that stderr (--json).
+	step string
+}
+
+// FailedStep is the step that failed, when a privileged child named it.
+func (e *CommandFailure) FailedStep() string {
+	if e == nil {
+		return ""
+	}
+	return e.step
 }
 
 func (e *CommandFailure) Error() string {

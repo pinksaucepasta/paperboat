@@ -166,6 +166,12 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 				return refused
 			}
 			// The privileged step prints its own reason first; administrator approval is only one cause.
+			// --json shows nothing printed above, so a named step is carried in the error itself.
+			if step := privilegedFailedStep(reason.String()); step != "" {
+				failure := runtimeFailure("installing the supplied Paperboat executable failed at step: "+step+"; if administrator access was declined, approve it and rerun `pb install`", err, stderrReason(reason), runtimeContextFailure(callCtx)).(*CommandFailure)
+				failure.step = step
+				return failure
+			}
 			return runtimeFailure("installing the supplied Paperboat executable failed (its reason is printed above); if administrator access was declined, approve it and rerun `pb install`", err, stderrReason(reason), runtimeContextFailure(callCtx))
 		}
 		return nil
@@ -352,6 +358,22 @@ func notReadyStep(stderr string) string {
 	for _, line := range strings.Split(stderr, "\n") {
 		if cause, ok := strings.CutPrefix(strings.TrimSpace(line), "pb: cause: "); ok {
 			step = cause
+		}
+	}
+	return step
+}
+
+// privilegedFailedStep is the step the privileged child named: its last "pb: cause:" line, else its last "pb: " line
+// ("pb: Paperboat installation failed: <step>. Run pb doctor, then retry."), without the framing.
+func privilegedFailedStep(stderr string) string {
+	if step := notReadyStep(stderr); step != "" {
+		return step
+	}
+	step := ""
+	for _, line := range strings.Split(stderr, "\n") {
+		if text, ok := strings.CutPrefix(strings.TrimSpace(line), "pb: "); ok {
+			text = strings.TrimPrefix(text, "Paperboat installation failed: ")
+			step = strings.TrimSuffix(strings.TrimSuffix(text, " Run pb doctor, then retry."), ".")
 		}
 	}
 	return step
