@@ -29,6 +29,9 @@ class Fake:
         self.after = list(canary_after_deploy)  # canary results (ok bools) for runs after the switch
         self.deploy_rc = deploy_rc
         self.rollout_error = ''  # when set, the server rollback command fails with this output
+        self.migrated = False  # the deploy applied migrations: rollout-server.py refuses a rollback without --schema-skew-ok
+        self.skew = {}  # (commit, context) -> GitHub status state
+        self.alerts = []
 
     def sh(self, target, script):
         self.calls.append((target, script))
@@ -47,7 +50,11 @@ class Fake:
         if 'docker ps' in script:
             relay, tunnel = self.images[target]
             return 0, f'paperboat-pbh-x-relay {relay}\npaperboat-pbh-x-edge {tunnel}\n'
+        if 'image inspect' in script:
+            return 0, ('1' if 'server:1' in script else '2') * 40 + '\n'
         if '--image' in script:
+            if self.migrated and '--schema-skew-ok' not in script:
+                return 3, 'Draining servers retained: 0\nRefused to roll back: the serving server\'s deploy migrated the schema'
             if self.rollout_error:
                 return 1, 'Draining servers retained: 1\n' + self.rollout_error
             self.images['server'] = script.rsplit('--image ', 1)[1].strip()
@@ -76,7 +83,8 @@ def gate(fake, status_file, force='', wait=300, stage=None):
                            edge=['local'], wait=wait, force=force, canary_status=status_file)
     out = []
     g = gated.Gate(args, fake.sh, fake.deploy, fake.canary, wall=lambda: fake.clock, mono=lambda: fake.clock,
-                   say=out.append, stage=stage)
+                   say=out.append, stage=stage, skew_status=lambda c, ctx: fake.skew.get((c, ctx), ''),
+                   alert=fake.alerts.append)
     return g.run(), out
 
 
@@ -142,6 +150,28 @@ class GatedDeployTest(unittest.TestCase):
         self.assertTrue(any('a rollback step failed' in line for line in out))
         rollout = [s for _, s in fake.calls if '--image' in s or '--reap' in s]
         self.assertIn('--reap', rollout[0])  # the draining servers are reaped first; a retained one is reported, never forced
+
+    def test_red_after_migrations_without_schema_skew_pass_keeps_the_server_and_alerts(self):
+        # 2026-11-21 07:54 IST: the rollback put .917 on the migrated schema (503s, edge 401s).
+        fake = Fake([False] * 20)
+        fake.migrated = True
+        code, out = gate(fake, self.status)
+        self.assertEqual(code, 6)
+        self.assertEqual(fake.images['server'], 'paperboat-server:2')
+        self.assertEqual(len(fake.alerts), 1)
+        self.assertIn('SERVER KEPT', fake.alerts[0])
+        self.assertIn('Roll forward', fake.alerts[0])
+        self.assertTrue(any('roll forward' in line for line in out))
+        self.assertIsNone(fake.lock)
+
+    def test_red_after_migrations_with_schema_skew_pass_rolls_back(self):
+        fake = Fake([False] * 5 + [True])
+        fake.migrated = True
+        fake.skew[('2' * 40, 'paperboat/schema-skew/' + '1' * 12)] = 'success'
+        code, _ = gate(fake, self.status)
+        self.assertEqual(code, 1)
+        self.assertEqual(fake.images['server'], 'paperboat-server:1')
+        self.assertEqual(fake.alerts, [])
 
     def test_rollback_that_stays_red_exits_2(self):
         fake = Fake([False] * 20)

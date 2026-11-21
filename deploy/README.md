@@ -266,6 +266,33 @@ green run rolls back every image that changed, server first (after `--reap`), th
 rollback step failed; 0 kept). Previous images stay on the hosts; never prune the last two tags. Tests:
 `python3 deploy/test_gated_deploy.py`.
 
+### Migrations and rollback
+
+Migration downs are not rollbacks and never run in production. A rollback after migrations works only when the
+previous server works on the new schema: expand/contract ([GitLab post-deployment
+migrations](https://docs.gitlab.com/development/database/post_deployment_migrations/),
+[strong_migrations](https://github.com/ankane/strong_migrations)). 2026-11-21 07:54 IST: the gate rolled the
+server back to .917 after migrations 477-490 had run; .917 could not serve on 490 (503s, edge 401s).
+
+- `rollout-server.py` records the applied goose version before and after `migrate` in `server-rollout.json`
+  (`schema`, and `migrated_from` when the deploy changed it). `--rollback` of a server whose deploy migrated
+  refuses (exit 3, nothing changed) unless `--schema-skew-ok` is given.
+- `gated-deploy.py` passes `--schema-skew-ok` only when the commit status `paperboat/schema-skew/<previous
+  commit, 12 chars>` on the new server's commit is `success`. Otherwise the new server keeps serving, edges still
+  roll back, an alert goes to the canary's `alerts.log` and `CANARY_ALERT_THREAD`, and the gate exits 6:
+  roll forward with a fix.
+- `SKEW_CHECK_PUBLISH=1 tools/device-smoke/skew_check.sh <previous release>` publishes that status (its schema
+  stage runs the previous release's own server and `TestE2ECore` on a database migrated to HEAD), and its
+  overall `paperboat/skew-check`, which release.yml requires, fails when the schema stage fails.
+  `SKEW_CHECK_ONLY=schema` runs only the schema stage.
+
+To pass the schema stage: **expand now, contract one deploy later.** Add columns nullable or with a default,
+add tables and indexes, add constraints `NOT VALID`; keep writing every column the previous server reads.
+Renames are add-new + dual-write + backfill, then drop the old one a deploy later. Drop a column, table or
+function, tighten `NOT NULL`, or change a type only in a later deploy, after the server that read it is gone
+(the previous release no longer reads it). Seeded rows the previous server inserts must satisfy every new
+constraint.
+
 **Edge control access log.** The API site logs every `/v1/edge/*` request at the proxy (`deploy/Caddyfile`, `log edge_control`):
 JSON in the proxy's data volume, `/data/access/edge-control.log` inside `paperboat-proxy-1`
 (`/var/lib/docker/volumes/paperboat_proxy_data/_data/access/` on the host), rotated at 20 MiB, 5 files, 7 days; request and response headers and

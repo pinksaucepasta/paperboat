@@ -10,11 +10,15 @@ Runs on build host, next to the production canary (tools/probe/canary.py, user u
   4. runs the deploy command (normally deploy/check-edges.sh --deploy '...', which keeps the 5xx check);
   5. waits up to --wait seconds for one full canary pass that started after the switch;
   6. if the deploy command failed or no pass came, rolls back everything that changed (server first,
-     then each edge) to the noted images and runs the canary again to report the result.
+     then each edge) to the noted images and runs the canary again to report the result. A server whose deploy
+     applied migrations (rollout-server.py records the schema) is rolled back only when the schema-skew check
+     passed for that pair (commit status paperboat/schema-skew/<previous> on the new commit, from
+     tools/device-smoke/skew_check.sh); otherwise it keeps serving and an alert asks for a roll-forward fix.
 Exit: 0 kept, 1 rolled back and green again, 2 rolled back and still red (or rollback failed),
-3 refused (canary red before), 4 deploy lock held by someone else, 5 refused (staging failed).
+3 refused (canary red before), 4 deploy lock held by someone else, 5 refused (staging failed),
+6 red but the server was kept on the migrated schema: roll forward.
 """
-import argparse, json, shlex, subprocess, sys, time
+import argparse, json, os, re, shlex, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +28,8 @@ FRESH = 300  # seconds a canary status counts as current; one run a minute, a br
 PBH = "/usr/local/lib/paperboat-selfhost/pbh"
 SERVER_IMAGE = ("docker inspect --format '{{{{.Config.Image}}}}' \"$(python3 -c \"import json;"
                 "print(json.load(open('{d}/server-rollout.json'))['active'])\")\"")
+REVISION = "docker image inspect --format '{{{{index .Config.Labels \"org.opencontainers.image.revision\"}}}}' {}"
+SCHEMA_REFUSED = 3  # rollout-server.py: rollback across migrations without a schema-skew pass
 EDGE_IMAGES = "sudo -n docker ps --filter name=paperboat-pbh- --format '{{.Names}} {{.Image}}'"
 
 
@@ -43,9 +49,21 @@ def parse_edge(text):
 
 
 class Gate:
-    def __init__(self, args, sh, deploy, canary, wall=time.time, mono=time.monotonic, say=print, stage=None):
+    def __init__(self, args, sh, deploy, canary, wall=time.time, mono=time.monotonic, say=print, stage=None,
+                 skew_status=None, alert=None):
         self.a, self.sh, self.deploy, self.canary, self.stage = args, sh, deploy, canary, stage
         self.wall, self.mono, self.say = wall, mono, say
+        self.skew_status, self.alert = skew_status or github_skew_status, alert or send_alert
+
+    def schema_skew_passed(self, previous, current):
+        """True when skew_check.sh's schema stage passed for the previous server image on the current one's schema."""
+        revisions = []
+        for image in (previous, current):
+            rc, out = self.sh(self.a.server_host, REVISION.format(shlex.quote(image)))
+            if rc != 0 or not re.fullmatch(r"[0-9a-f]{40}", out.strip()):
+                return False
+            revisions.append(out.strip())
+        return self.skew_status(revisions[1], "paperboat/schema-skew/" + revisions[0][:12]) == "success"
 
     def images(self):
         rc, out = self.sh(self.a.server_host, SERVER_IMAGE.format(d=self.a.directory))
@@ -71,13 +89,23 @@ class Gate:
         return False, (last or {}).get("last")
 
     def rollback(self, before):
-        now, ok = self.images(), True
+        """(every rollback step worked, the server was kept because its deploy migrated without a schema-skew pass)"""
+        now, ok, kept = self.images(), True, False
         if now["server"] != before["server"]:
             d = shlex.quote(self.a.directory)
+            skew = " --schema-skew-ok" if self.schema_skew_passed(before["server"], now["server"]) else ""
             self.say(f"rollback: server {now['server']} -> {before['server']}")
             rc, out = self.sh(self.a.server_host, f"python3 {d}/rollout-server.py --directory {d} --reap; "
-                              f"python3 {d}/rollout-server.py --directory {d} --rollback --image {shlex.quote(before['server'])}")
-            ok &= rc == 0 or bool(self.say(f"rollback: server rollout failed (exit {rc}): {out[-300:]}"))
+                              f"python3 {d}/rollout-server.py --directory {d} --rollback{skew} --image {shlex.quote(before['server'])}")
+            if rc == SCHEMA_REFUSED:
+                kept = True
+                message = (f"DEPLOY RED, SERVER KEPT: {self.a.what}: server {now['server']} stays on the migrated schema "
+                           f"(rollback to {before['server']} has no passing schema-skew check). Roll forward with a fix. "
+                           f"{out.strip()[-300:]}")
+                self.say(message)
+                self.alert(message)
+            else:
+                ok &= rc == 0 or bool(self.say(f"rollback: server rollout failed (exit {rc}): {out[-300:]}"))
         for edge in self.a.edge:
             if now[edge] != before[edge]:
                 b = before[edge]
@@ -85,7 +113,7 @@ class Gate:
                 rc, out = self.sh(edge, f"sudo -n {PBH} install --relay-image {shlex.quote(b['relay'])} "
                                   f"--edge-image {shlex.quote(b['edge'])}")
                 ok &= rc == 0 or bool(self.say(f"rollback: edge {edge} failed (exit {rc}): {out[-300:]}"))
-        return ok
+        return ok, kept
 
     def run(self):
         if self.stage is not None and (code := self.stage()) != 0:
@@ -123,13 +151,39 @@ class Gate:
                 failed = [s["step"] for s in (run or {}).get("steps", []) if not s.get("ok")]
                 reason = f"no green canary run within {self.a.wait} s of the switch (failing: {', '.join(failed) or 'no result'})"
             self.say(f"rolling back: {reason}")
-            ok = self.rollback(before)
+            ok, kept = self.rollback(before)
             green, run = self.wait_green(self.wall())
             self.say(f"after rollback: canary {'green' if green else 'still red'}"
-                     + ("" if ok else "; a rollback step failed, see above"))
-            return 1 if ok and green else 2
+                     + ("" if ok else "; a rollback step failed, see above")
+                     + ("; the server was kept on the migrated schema: roll forward" if kept else ""))
+            return 6 if kept else 1 if ok and green else 2
         finally:
             self.sh(self.a.server_host, f"rm -f {self.a.directory}/deploy.lock")
+
+
+def github_skew_status(commit, context):
+    """State of a commit status from GitHub ('' when unknown); run from a checkout of the repository."""
+    jq = f'[.statuses[] | select(.context == "{context}")][0].state // ""'
+    try:
+        done = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{commit}/status", "--jq", jq],
+                              capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def send_alert(message):
+    """The canary's alert path: its alerts.log (admin panel bell via the canary) and the coordinator thread."""
+    try:
+        with open(STATUS.parent / "alerts.log", "a") as log:
+            log.write(f"{iso(time.time())} {message}\n")
+    except OSError:
+        pass
+    if thread := os.environ.get("CANARY_ALERT_THREAD"):
+        try:
+            subprocess.run(["t3", "thread", "send", thread, message], timeout=30, capture_output=True)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 def read_status(path):

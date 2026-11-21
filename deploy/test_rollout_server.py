@@ -70,9 +70,14 @@ class ServerRolloutTest(unittest.TestCase):
         self.fail_reload = False
         self.routes = []
         self.taken = set()  # container names that already exist
+        self.schema_version, self.migrate_to = 477, 477
 
     def docker(self, args, image=None, timeout=120):
         self.operations.append(args)
+        if 'psql' in args:
+            return f'{self.schema_version}\n'.encode()
+        if args[-1] == 'migrate':
+            self.schema_version = self.migrate_to
         if args[:4] == ['docker', 'compose', 'ps', '-q']:
             return b'old-id'
         if args[:3] == ['docker', 'image', 'inspect']:
@@ -120,6 +125,58 @@ class ServerRolloutTest(unittest.TestCase):
             self.rollout.reap(state)
         self.assertEqual(state['retired'], [])
         self.assertIn(['docker', 'stop', '--time', '30', 'paperboat-server-1'], self.operations)
+
+    def test_rollback_across_applied_migrations_needs_a_passing_schema_skew_check(self):
+        # 2026-11-21 07:54 IST: the gate rolled the server back to .917 after migrations 477-490 ran; .917 could not
+        # serve on 490 (503s, edge 401s).
+        self.live = True
+        self.migrate_to = 490
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('new-image', commit=self.commit)
+        state = json.loads(self.rollout.state_path.read_text())
+        self.assertEqual((state['schema'], state['migrated_from']), (490, 477))
+        caddy, ops = (self.root / 'Caddyfile').read_text(), len(self.operations)
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            with self.assertRaisesRegex(module.SchemaSkewRefused, 'from 477 to 490.*keeps serving'):
+                self.rollout.deploy('old-image', rollback=True)
+        self.assertEqual(json.loads(self.rollout.state_path.read_text())['active'], self.candidate)
+        self.assertEqual((self.root / 'Caddyfile').read_text(), caddy)
+        self.assertFalse([a for a in self.operations[ops:] if 'migrate' in a or 'reload' in a or a[:2] == ['docker', 'stop']])
+        # A schema-skew pass for the pair allows it; the rolled-back state no longer marks a migration.
+        self.image = 'sha256:' + 'b' * 64
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('old-image', rollback=True, schema_skew_ok=True)
+        state = json.loads(self.rollout.state_path.read_text())
+        self.assertEqual(state['active'], 'paperboat-server-' + 'b' * 16)
+        self.assertNotIn('migrated_from', state)
+
+    def test_retry_after_a_failed_migrated_rollout_keeps_the_migration_boundary(self):
+        self.rollout.save(self.rollout.state_path, {'active': 'paperboat-server-1', 'retired': [], 'schema': 477})
+        self.migrate_to = 490
+        with patch.object(self.rollout, 'run', side_effect=self.docker), patch.object(self.rollout, 'ready', return_value=False), patch.object(module.time, 'sleep'):
+            with self.assertRaises(module.RolloutError):
+                self.rollout.deploy('new-image', commit=self.commit)
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('new-image', commit=self.commit)
+        self.assertEqual(json.loads(self.rollout.state_path.read_text())['migrated_from'], 477)
+
+    def test_interrupted_switch_after_migrations_does_not_restore_the_old_route(self):
+        self.rollout.save(self.rollout.journal, {'before': {'active': 'paperboat-server-1', 'retired': []}, 'candidate': self.candidate,
+                                                 'migrated': True, 'caddy': 'old', 'env': 'old'})
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            with self.assertRaisesRegex(module.SchemaSkewRefused, 'Interrupted rollout after migrations'):
+                self.rollout.recover()
+        self.assertEqual((self.root / 'Caddyfile').read_text(), self.original)
+        self.assertFalse(any('reload' in a for a in self.operations))
+
+    def test_rollback_without_migrations_needs_no_schema_skew_check(self):
+        self.live = True
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('new-image', commit=self.commit)
+            self.assertNotIn('migrated_from', json.loads(self.rollout.state_path.read_text()))
+            self.image = 'sha256:' + 'b' * 64
+            self.rollout.deploy('old-image', rollback=True)
+        self.assertEqual(json.loads(self.rollout.state_path.read_text())['active'], 'paperboat-server-' + 'b' * 16)
 
     def test_rollback_to_the_image_of_a_draining_server_takes_the_next_free_name(self):
         # 2026-11-12: the rollback of .12.1 to .11.9 failed 'Replacement container name already exists': the .11.9 server was

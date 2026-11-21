@@ -8,6 +8,9 @@
 #   tools/device-smoke/skew_check.sh [previous-ref] [host]
 #   tools/device-smoke/skew_check.sh --preflight <host>  # only check the specified host
 # previous-ref is any git ref (a release tag, or origin/main before the first release exists).
+# Then the schema stage: the previous release's server and e2e on a database migrated to HEAD (expand/contract:
+# a rollback after migrations must work; see deploy/README.md "Migrations and rollback"). SKEW_CHECK_ONLY=schema
+# runs only that stage.
 # SKEW_CHECK_PUBLISH=1 records the result as the commit status paperboat/skew-check on HEAD, which release.yml
 # requires before it publishes a release of that commit: run it on the exact release commit (the tag).
 # pb, edge, relay, pbh and the self-host harness are all built from previous-ref's source on the host.
@@ -61,7 +64,7 @@ rsync -az --delete -e 'ssh -o BatchMode=yes' "$stage"/ "$host:$dest/"
 sha=$(git rev-parse HEAD)
 set +e
 ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
-  "GITHUB_SHA=$sha PREV_SHA=$prev_sha flock -w 7200 \$HOME/pb-remote-test/host.lock bash -s -- $dest" <<'REMOTE'
+  "GITHUB_SHA=$sha PREV_SHA=$prev_sha SKEW_CHECK_ONLY=${SKEW_CHECK_ONLY:-} flock -w 7200 \$HOME/pb-remote-test/host.lock bash -s -- $dest" <<'REMOTE'
 set -euo pipefail
 umask 022
 # A cache of this run only: no other job on the host can clean it away mid-build.
@@ -87,14 +90,44 @@ sudo -n sysctl -q net.ipv4.ip_unprivileged_port_start=80
 # A fresh database for this run, like tools/remote-test.sh.
 base=$(cat "$HOME/.pb-test-pg-dsn") db="lane_skew_$(tr -c 'A-Za-z0-9' _ <<<"$worktree")test"
 psql "${base%%lane_test*}postgres?sslmode=disable" -qc "drop database if exists \"$db\" with (force)" -c "create database \"$db\""
+admin="${base%%lane_test*}postgres?sslmode=disable"
+# Both stages always run (checks never fail fast). Exit 4 = only client skew failed, 8 = only schema skew failed,
+# 12 = both; any other non-zero (a setup step under set -e, ssh) proves nothing.
+rc=0
+if [ "${SKEW_CHECK_ONLY:-}" != schema ]; then
+  cd "$dest/head/server"
+  PAPERBOAT_E2E_CORE=1 PAPERBOAT_E2E_PREVIOUS="$dest/previous" PAPERBOAT_TEST_DATABASE_DSN="${base/lane_test\?/$db?}" \
+    nice go test -count=1 -timeout 60m -v -run '^TestE2ECore$' ./internal/app | tee "$dest/skew.log" \
+    && grep -q -- '^--- PASS: TestE2ECore ' "$dest/skew.log" || rc=$((rc | 4))
+fi
+# Schema skew: the previous release's own server (and pb, edge, relay) on a database migrated by this commit, as
+# after a deploy that ran migrations and then rolled the server back. Its TestE2ECore covers readyz, machine
+# auth, peer config and the edge snapshot. Its migrate step is a no-op on the newer schema.
+sdb="${db%test}schema_test" sdsn="${base/lane_test\?/${db%test}schema_test?}"  # test DSNs must end in _test
+psql "$admin" -qc "drop database if exists \"$sdb\" with (force)" -c "create database \"$sdb\""
 cd "$dest/head/server"
-PAPERBOAT_E2E_CORE=1 PAPERBOAT_E2E_PREVIOUS="$dest/previous" PAPERBOAT_TEST_DATABASE_DSN="${base/lane_test\?/$db?}" \
-  nice go test -count=1 -timeout 60m -v -run '^TestE2ECore$' ./internal/app | tee "$dest/skew.log"
-grep -q -- '^--- PASS: TestE2ECore ' "$dest/skew.log"
+if PAPERBOAT_DATABASE_DSN="$sdsn" go run ./cmd/paperboat-server migrate; then
+  cd "$dest/previous-src/server"
+  PAPERBOAT_E2E_CORE=1 PAPERBOAT_TEST_DATABASE_DSN="$sdsn" \
+    nice go test -count=1 -timeout 60m -v -run '^TestE2ECore$' ./internal/app | tee "$dest/schema-skew.log" \
+    && grep -q -- '^--- PASS: TestE2ECore ' "$dest/schema-skew.log" || rc=$((rc | 8))
+else
+  echo "schema-skew: migrating to this commit's schema failed" >&2
+  rc=$((rc | 8))
+fi
+[ $((rc & 4)) = 0 ] || echo "skew-check: FAIL client skew (previous pb/edge/relay vs this server), see $dest/skew.log" >&2
+[ $((rc & 8)) = 0 ] || echo "skew-check: FAIL schema skew (previous server on this commit's schema), see $dest/schema-skew.log" >&2
+exit "$rc"
 REMOTE
 rc=$?
 set -e
 if [ "${SKEW_CHECK_PUBLISH:-}" = 1 ]; then
+  # Per pair: deploy/gated-deploy.py rolls a migrated server back to previous-ref only when this is success.
+  state=failure
+  { [ "$rc" = 0 ] || [ "$rc" = 4 ]; } && state=success
+  gh api "repos/{owner}/{repo}/statuses/$sha" -f state="$state" -f context="paperboat/schema-skew/${prev_sha:0:12}" \
+    -f description="previous server $prev on this commit's migrated schema" >/dev/null
+  [ "${SKEW_CHECK_ONLY:-}" != schema ] || exit "$rc"
   state=failure
   [ "$rc" = 0 ] && state=success
   gh api "repos/{owner}/{repo}/statuses/$sha" -f state="$state" -f context=paperboat/skew-check \

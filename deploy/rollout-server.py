@@ -23,6 +23,15 @@ class RolloutError(Exception):
     pass
 
 
+class SchemaSkewRefused(RolloutError):
+    """A rollback across applied migrations without a passing schema-skew check (exit 3)."""
+
+
+# Applied goose version; the schema a deploy migrated from is kept in the state so a rollback can see it.
+SCHEMA = ['docker', 'compose', 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'paperboat', '-tAc',
+          'select max(version_id) from paperboat.goose_db_version']
+
+
 def connection_count(contents):
     """Count accepted live TCP sockets on this process namespace's listen ports."""
     rows = [line.split() for content in contents for line in content.splitlines()[1:]]
@@ -143,6 +152,11 @@ class Rollout:
             return
         record = json.loads(self.journal.read_text())
         old = record['before']
+        # Restoring the old route is a rollback: across migrations it needs the same proof (nothing changed here).
+        if record.get('migrated'):
+            raise SchemaSkewRefused('Interrupted rollout after migrations: the route was not restored to the previous '
+                                    'server, which has no proof it works on the new schema. Finish the switch to '
+                                    f"{record['candidate']} by hand (Caddyfile, .env, server-rollout.json) or roll forward.")
         if not self.ready(old['active']):
             raise RolloutError('Interrupted rollout: previous server is not ready;'
                                ' retain both containers and inspect the protected journal.')
@@ -155,7 +169,10 @@ class Rollout:
         self.save(self.state_path, old)
         self.journal.unlink()
 
-    def deploy(self, image, rollback=False, commit=''):
+    def schema(self):
+        return int(self.run(SCHEMA).strip() or 0)
+
+    def deploy(self, image, rollback=False, commit='', schema_skew_ok=False):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}", image):
             raise RolloutError("Use one valid Docker image reference.")
         self.recover()
@@ -163,6 +180,13 @@ class Rollout:
         # The limit keeps forward deploys from piling up processes; a rollback restores service, so it never waits
         # (2026-11-12 19:59Z: the gate's rollback of .13.4 was refused here and prod stayed on the failed build).
         # Two retained + active + a rollback is db.RolloutInstances (4): change both together, the database pools are sized from it.
+        # Migration downs are not rollbacks: after migrations the previous server runs on the new schema, which only
+        # tools/device-smoke/skew_check.sh's schema stage proves (2026-11-21: .917 rolled back onto 490, 503s).
+        if rollback and 'migrated_from' in before and not schema_skew_ok:
+            raise SchemaSkewRefused(
+                f"Refused to roll back: the serving server's deploy migrated the schema from {before['migrated_from']} "
+                f"to {before.get('schema')} and no passing schema-skew check proves the previous server works on it. "
+                'The current server keeps serving; fix forward with a new build. Nothing was changed.')
         if self.reap(before) >= 2 and not rollback:
             raise RolloutError('Two previous servers still hold live connections. '
                                'Run --reap after those sessions finish; none were stopped.')
@@ -178,8 +202,12 @@ class Rollout:
         if active['Image'] == info['Id']:
             return 'Current server already runs this image.'
         # Migrations run while the current version is still serving (additive: the previous server keeps working on them).
+        # The active server's recorded schema, so a retry after a failed rollout (migrations done, candidate never
+        # ready) still sees the boundary; the database is read only before the first recorded deploy.
+        schema_before = before['schema'] if 'schema' in before else self.schema()
         self.run(['docker', 'compose', 'run', '--rm', '--no-deps', 'migrate'],
                  image=image, timeout=300)
+        schema = self.schema()
         # The name follows the image id, so rolling back to the image of a server that is still draining (it holds live
         # connections and cannot be removed) meets its name: take the next free one (2026-11-12, the rollback of .12.1 failed on this).
         base = 'paperboat-server-' + info['Id'].split(':')[-1][:16]
@@ -211,14 +239,16 @@ class Rollout:
                                      'PAPERBOAT_SERVER_IMAGE=' + image, env, flags=re.M)
             if count != 1:
                 raise RolloutError('Expected one managed server image setting; routing was not changed.')
-            self.save(self.journal, {'before': before, 'candidate': candidate,
+            self.save(self.journal, {'before': before, 'candidate': candidate, 'migrated': schema != schema_before,
                                      'caddy': caddy, 'env': env})
             # Preserve the bind-mounted inode. Replacing the host file would leave
             # the proxy reading its previous inode during reload.
             (self.root / 'Caddyfile').write_text(updated)
             self.reload()
             (self.root / '.env').write_text(next_env)
-            state = {'active': candidate, 'retired': before['retired'] + [before['active']]}
+            state = {'active': candidate, 'retired': before['retired'] + [before['active']], 'schema': schema}
+            if schema != schema_before:
+                state['migrated_from'] = schema_before
             self.save(self.state_path, state)
             self.journal.unlink()
         except BaseException:
@@ -247,6 +277,8 @@ def main():
     parser.add_argument('--commit', default='', help='the commit the image must have been built from (its revision label)')
     parser.add_argument('--reap', action='store_true')
     parser.add_argument('--rollback', action='store_true', help='with --image: deploy even while two servers drain')
+    parser.add_argument('--schema-skew-ok', action='store_true',
+                        help='with --rollback: the schema-skew check passed for this pair, so roll back across migrations')
     args = parser.parse_args()
     if bool(args.image) == args.reap:
         parser.error('choose --image or --reap')
@@ -262,7 +294,7 @@ def main():
                 rollout.recover()
                 print('Draining servers retained:', rollout.reap(rollout.current()))
             else:
-                print(rollout.deploy(args.image, args.rollback, args.commit))
+                print(rollout.deploy(args.image, args.rollback, args.commit, args.schema_skew_ok))
         finally:
             rollout.log.close()
 
@@ -270,6 +302,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except SchemaSkewRefused as error:
+        print(str(error))
+        raise SystemExit(3)
     except (RolloutError, subprocess.TimeoutExpired, BlockingIOError) as error:
         print(str(error))
         raise SystemExit(1)

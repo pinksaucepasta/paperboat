@@ -585,7 +585,8 @@ jobs:
         run: |
           set -euo pipefail
           # SKEW_CHECK_PUBLISH=1 tools/device-smoke/skew_check.sh <previous release> runs the previous release's pb, edge
-          # and relay against this commit's server on our own host, then records paperboat/skew-check on this commit.
+          # and relay against this commit's server, then the previous release's server on this commit's migrated schema
+          # (deploy/README.md "Migrations and rollback"), on our own host; records paperboat/skew-check on this commit.
           # The combined status holds the latest state per context.
           state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SOURCE_SHA/status" --jq '[.statuses[] | select(.context == "paperboat/skew-check")][0].state // "missing"')
           if test "$state" != success; then
