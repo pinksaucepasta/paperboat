@@ -24,7 +24,7 @@ func doctorFixture(t *testing.T, outgoing string, answers map[string]string, pro
 	deps := doctorDeps{
 		run:    f.run,
 		paths:  f.paths,
-		probe:  func(context.Context, int, string) (containers.PortProbe, error) { return probe, probeErr },
+		probe:  func(context.Context, string, int, string) (containers.PortProbe, error) { return probe, probeErr },
 		listen: func(string) (int, func(), error) { return 25000, func() {}, nil },
 		ingress: func(context.Context, string) (containers.IngressState, error) {
 			return containers.IngressState{Verified: true}, nil
@@ -83,7 +83,7 @@ func TestDoctorReportsAFailedProbeCall(t *testing.T) {
 
 func TestDoctorSkipsRelayOnlyInstallations(t *testing.T) {
 	deps, out := doctorFixture(t, "32768 60999", nil, containers.PortProbe{}, nil)
-	deps.probe = func(context.Context, int, string) (containers.PortProbe, error) {
+	deps.probe = func(context.Context, string, int, string) (containers.PortProbe, error) {
 		t.Fatal("probed a relay-only node")
 		return containers.PortProbe{}, nil
 	}
@@ -135,5 +135,47 @@ func TestDoctorReportsEndpointHostVerificationWithTheFix(t *testing.T) {
 	deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
 	if err := runDoctor(t.Context(), config, deps, out); err != nil || !strings.Contains(out.String(), "ok   the control plane verified edge.example.test reaches this node") {
 		t.Fatalf("verified endpoint host not reported: %v\n%s", err, out)
+	}
+}
+
+func TestDoctorChecksEveryNodePort(t *testing.T) {
+	c := selfhost.Config{Components: []selfhost.Component{
+		{Capability: "tunnel", TCPPort: edgeports.CarrierTCP, QUICPort: edgeports.CarrierQUIC},
+		{Capability: "relay", TCPPort: edgeports.RelayWSS, QUICPort: edgeports.RelayQUIC},
+	}}
+	for _, test := range []struct {
+		results map[string]string // "tcp 7272" -> detail; missing means connected
+		want    []string
+	}{
+		{nil, []string{"ok   TCP 7272 (tunnel) is reachable", "ok   TCP 7274 (relay) is reachable", "ok   UDP 7274 (relay) is reachable", "UDP 7273 (tunnel QUIC) is not checked", "UDP 7275 (relay QUIC) is not checked"}},
+		{map[string]string{"tcp 7272": "timeout"}, []string{"FIX  TCP 7272 (tunnel) is not reachable", "allow inbound TCP 7272 from anywhere"}},
+		{map[string]string{"udp 7274": "timeout"}, []string{"allow inbound UDP 7274 from anywhere"}},
+		{map[string]string{"tcp 7274": "refused"}, []string{"FIX  TCP 7274 (relay) is not reachable", "run pbh status and check the relay service"}},
+	} {
+		deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{}, nil)
+		var probed []string
+		deps.probe = func(_ context.Context, transport string, port int, nonce string) (containers.PortProbe, error) {
+			key := transport + " " + strconv.Itoa(port)
+			probed = append(probed, key)
+			if (port == 25000) != (nonce != "") {
+				t.Errorf("%s: nonce %q", key, nonce)
+			}
+			if detail, ok := test.results[key]; ok {
+				return containers.PortProbe{Detail: detail}, nil
+			}
+			return containers.PortProbe{Reachable: true, Detail: "connected"}, nil
+		}
+		err := runDoctor(t.Context(), c, deps, out)
+		if (err == nil) != (test.results == nil) {
+			t.Errorf("%v: err %v\n%s", test.results, err, out)
+		}
+		for _, want := range test.want {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("missing %q in:\n%s", want, out)
+			}
+		}
+		if got := strings.Join(probed, ","); got != "tcp 25000,tcp 7272,tcp 7274,udp 7274" {
+			t.Errorf("probed %s", got)
+		}
 	}
 }

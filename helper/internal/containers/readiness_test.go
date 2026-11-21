@@ -80,10 +80,13 @@ func TestNodeReadinessRejectsRedirectOtherIdentityAndOversizedResponse(t *testin
 func TestProbePortReadsTheTunnelComponentDirectoryAndDecodesTheResult(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Port  int    `json:"port"`
-			Nonce string `json:"nonce"`
+			Transport string `json:"transport"`
+			Port      int    `json:"port"`
+			Nonce     string `json:"nonce"`
 		}
-		if r.Method != "POST" || r.URL.Path != "/v1/selfhost/port-probe" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("c", 48) || json.NewDecoder(r.Body).Decode(&in) != nil || in.Port != 25000 || in.Nonce != "nonce" {
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if r.Method != "POST" || r.URL.Path != "/v1/selfhost/port-probe" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("c", 48) || decoder.Decode(&in) != nil || in.Transport != "udp" || in.Port != 7274 || in.Nonce != "" {
 			t.Errorf("probe request lost its exact shape: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(400)
 			return
@@ -107,7 +110,7 @@ func TestProbePortReadsTheTunnelComponentDirectoryAndDecodesTheResult(t *testing
 			t.Fatal(err)
 		}
 	}
-	got, err := ProbePort(context.Background(), stateDir, 25000, "nonce")
+	got, err := ProbePort(context.Background(), stateDir, "udp", 7274, "")
 	if err != nil || got.Reachable || got.Detail != "timeout" {
 		t.Fatalf("got %+v err %v", got, err)
 	}
