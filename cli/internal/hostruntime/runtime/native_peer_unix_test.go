@@ -390,7 +390,7 @@ func TestProductionNativePeerSupervisorRebuildsOnlyAStillWedgedListener(t *testi
 		}
 	}
 	trip()
-	service.inbound.Observe(native.Event{Kind: "accepted"}) // lands before supervise reads the trip
+	service.inbound.Admit() // an accept lands before supervise reads the trip
 	first.errors <- errInboundWedged
 	for len(first.errors) != 0 {
 		time.Sleep(10 * time.Millisecond)

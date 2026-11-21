@@ -66,7 +66,7 @@ func TestWedgedInboundListenerRecoversAfterWatchdogRebuild(t *testing.T) {
 		issued := time.Now().Unix()
 		applyTestConfiguration(t, authority, signer, testConfiguration(issued, 1, bound, client, "accept"))
 		applyTestConfiguration(t, clientAuthority, signer, testConfiguration(issued, ordinal, client, bound, "dial"))
-		owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, Observe: observe})
+		owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, Observe: observe, Inbound: watchdog})
 		if err != nil {
 			t.Fatal(err)
 		}

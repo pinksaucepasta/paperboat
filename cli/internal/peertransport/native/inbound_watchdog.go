@@ -24,7 +24,7 @@ type InboundWatchdog struct {
 	Now      func() time.Time // nil: time.Now
 	trips    int              // consecutive trips with no accept since; survives Reset
 	wedged   bool             // tripped and no accept since
-	rebuild  bool             // a rebuild was committed: its accepts keep the backoff
+	rebuild  bool             // a rebuild was committed: Admit refuses until Reset
 	failures int
 	first    time.Time
 	last     time.Time
@@ -39,12 +39,6 @@ func (w *InboundWatchdog) Observe(event Event) (bool, time.Duration) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	switch {
-	case event.Kind == "accepted":
-		if !w.rebuild { // an accept racing a committed teardown proves nothing
-			w.trips = 0
-		}
-		w.failures, w.wedged = 0, false
-		return false, 0
 	case event.Kind != "accept_failed" || !errors.Is(event.Err, context.DeadlineExceeded):
 		return false, 0
 	}
@@ -63,6 +57,20 @@ func (w *InboundWatchdog) Observe(event Event) (bool, time.Duration) {
 	w.trips++
 	w.failures, w.wedged = 0, true
 	return true, w.windowLocked()
+}
+
+// Admit decides, under the same lock as CommitRebuild, whether a completed
+// inbound handshake may become a session: either the accept wins and cancels
+// the trip, or the committed rebuild wins and the accept is refused before it
+// carries any traffic (the peer redials the rebuilt listener). Never both.
+func (w *InboundWatchdog) Admit() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.rebuild {
+		return false
+	}
+	w.trips, w.failures, w.wedged = 0, 0, false
+	return true
 }
 
 // CommitRebuild reports whether a queued rebuild is still needed (a trip with
