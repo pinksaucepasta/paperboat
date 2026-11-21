@@ -163,7 +163,7 @@ try {
   await alert.waitFor({ state: "detached" })
   log(state.posts.at(-1) === 'drain {"move":false}', "Drain asks the server without move", state.posts.join())
   await open()
-  log(await page.getByRole("menuitem", { name: "Resume" }).isVisible(), "a draining machine offers Resume")
+  log(await page.getByRole("menuitem", { name: "Resume" }).waitFor({ timeout: 15_000 }).then(() => true, () => false), "a draining machine offers Resume")
   await page.keyboard.press("Escape")
   await card.getByRole("row", { name: /Server A/ }).getByText("Draining", { exact: true }).waitFor()
   log(true, "the explicit draining flag shows Draining in the row")
