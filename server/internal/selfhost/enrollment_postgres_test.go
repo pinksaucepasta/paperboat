@@ -19,6 +19,9 @@ import (
 // an isolated PostgreSQL database. No claim endpoint or authorization is mocked.
 func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 	dsn, binary := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"), os.Getenv("PBH_TEST_BINARY")
+	if dsn != "" && binary == "" && os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatal("CI must build pbh and set PBH_TEST_BINARY (.github/workflows/test.yml)")
+	}
 	if dsn == "" || binary == "" {
 		t.Skip("requires isolated PostgreSQL and packaged pbh")
 	}

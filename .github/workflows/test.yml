@@ -129,6 +129,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends ripgrep
           ../tools/verify-source-policy.sh ${{ matrix.module }}
           ../tools/verify-static-analysis.sh ${{ matrix.module }}
+      # The packaged-helper enrollment tests run a real pbh: build it so they run here instead of skipping.
+      - name: build pbh for the packaged-helper tests
+        if: matrix.module == 'server'
+        run: |
+          (cd ../helper && CGO_ENABLED=0 go build -o "$RUNNER_TEMP/pbh" ./cmd/pbh)
+          echo "PBH_TEST_BINARY=$RUNNER_TEMP/pbh" >> "$GITHUB_ENV"
       - name: go test -race
         run: |
           set -o pipefail
