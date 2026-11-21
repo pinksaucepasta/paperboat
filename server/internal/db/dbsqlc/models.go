@@ -3791,6 +3791,12 @@ type WorkspaceEdgeSet struct {
 	Regions    []string
 }
 
+type WorkspaceEdgeWake struct {
+	ScopeKind string
+	ScopeID   string
+	QueuedAt  time.Time
+}
+
 type WorkspacePolicy struct {
 	ID                  int64
 	TeamID              sql.NullString
