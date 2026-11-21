@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
@@ -23,7 +24,7 @@ import (
 type doctorDeps struct {
 	run    commander
 	paths  hostPaths
-	probe  func(ctx context.Context, port int, nonce string) (containers.PortProbe, error)
+	probe  func(ctx context.Context, transport string, port int, nonce string) (containers.PortProbe, error)
 	listen func(nonce string) (port int, stop func(), err error)
 	// ingress is the control plane's verdict on the endpoint host, with a reason when it is not verified.
 	ingress func(ctx context.Context, host string) (containers.IngressState, error)
@@ -55,8 +56,8 @@ func doctor(ctx context.Context, args []string, out io.Writer) error {
 	return runDoctor(ctx, c, doctorDeps{
 		run:   execCommander,
 		paths: defaultHostPaths(*dir),
-		probe: func(ctx context.Context, port int, nonce string) (containers.PortProbe, error) {
-			return containers.ProbePort(ctx, *dir, port, nonce)
+		probe: func(ctx context.Context, transport string, port int, nonce string) (containers.PortProbe, error) {
+			return containers.ProbePort(ctx, *dir, transport, port, nonce)
 		},
 		listen: listenTestPort,
 		ingress: func(ctx context.Context, host string) (containers.IngressState, error) {
@@ -101,11 +102,26 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		return fmt.Errorf("%w: %w", commandError("could not open a test port in "+publicRange+" on this host"), err)
 	}
 	defer stop()
-	result, err := d.probe(ctx, port, nonce)
+	result, err := d.probe(ctx, "tcp", port, nonce)
 	if err != nil {
 		report(false, "", "the control plane could not run the reachability check ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
 	} else {
 		report(result.Reachable, fmt.Sprintf("test port %d is reachable from the control plane", port), reachabilityAdvice(port, result.Detail, rules))
+	}
+	for _, component := range c.Components {
+		for _, p := range nodePorts(component) {
+			if p.transport == "" {
+				fmt.Fprintf(out, "note UDP %d (%s QUIC) is not checked from the control plane; allow inbound UDP %d in the cloud firewall\n", p.port, component.Capability, p.port)
+				continue
+			}
+			name := fmt.Sprintf("%s %d (%s)", strings.ToUpper(p.transport), p.port, component.Capability)
+			result, err := d.probe(ctx, p.transport, p.port, "")
+			if err != nil {
+				report(false, "", "the control plane could not check "+name+" ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
+				continue
+			}
+			report(result.Reachable, name+" is reachable from the control plane", nodePortAdvice(name, p.transport, p.port, component.Capability, result.Detail))
+		}
 	}
 	state, err := d.ingress(ctx, c.EndpointHost)
 	if err != nil {
@@ -123,6 +139,45 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		return commandError(fmt.Sprintf("%d problem(s) found; fix them and rerun pbh doctor", problems))
 	}
 	return nil
+}
+
+type nodePort struct {
+	transport string // "" when the control plane cannot check it
+	port      int
+}
+
+// nodePorts lists the listeners of component the control plane may probe: its TCP port, the relay's STUN
+// (UDP on its TCP port) and its QUIC port, which is only noted. Ports outside the node range (a relay-only
+// install on 443) are left out; the probe accepts only edgeports.NodeMin-NodeMax.
+func nodePorts(component selfhost.Component) []nodePort {
+	var ports []nodePort
+	if component.TCPPort >= edgeports.NodeMin && component.TCPPort <= edgeports.NodeMax {
+		ports = append(ports, nodePort{"tcp", component.TCPPort})
+		if component.Capability == "relay" && component.TCPPort == edgeports.RelayWSS {
+			ports = append(ports, nodePort{"udp", component.TCPPort})
+		}
+	}
+	if component.QUICPort > 0 {
+		ports = append(ports, nodePort{"", component.QUICPort})
+	}
+	return ports
+}
+
+// nodePortAdvice turns what the control plane saw on an edge or relay port into the fix.
+func nodePortAdvice(name, transport string, port int, capability, detail string) string {
+	prefix := name + " is not reachable from the control plane: "
+	switch detail {
+	case "timeout":
+		return prefix + fmt.Sprintf("it timed out, so a cloud firewall drops it; allow inbound %s %d from anywhere (security group, security list or VPC firewall)", strings.ToUpper(transport), port)
+	case "refused":
+		return prefix + "nothing listens on it; run pbh status and check the " + capability + " service"
+	case "unreachable":
+		return prefix + "this host's firewall rejects it; run pbh install as root to open " + nodeRange + " (or add the rule by hand)"
+	case "not_public":
+		return prefix + "the registered endpoint host does not resolve to a public address; fix --endpoint-host"
+	default:
+		return prefix + "check result '" + detail + "'; verify the endpoint host and firewalls"
+	}
 }
 
 func firewallLabel(kind string) string {

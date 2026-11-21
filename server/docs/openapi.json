@@ -55859,8 +55859,8 @@
     "/v1/selfhost/port-probe": {
       "post": {
         "operationId": "selfhost_port_probe",
-        "summary": "Check from the control plane that a node's public TCP range is reachable",
-        "description": "The runtime credential selects the exact node. The control plane connects to that node's registered public endpoint host (a public address only) on the given public TCP tunnel port and reports whether the node's temporary test listener echoed the nonce. Detail names what was seen: connected, refused, unreachable (a host firewall rejects), timeout (a cloud firewall drops), nonce_mismatch, not_public, unresolved. Responses are not cached.",
+        "summary": "Check from the control plane that a node's public TCP range and its edge and relay ports are reachable",
+        "description": "The runtime credential selects the exact node. The control plane connects to that node's registered public endpoint host (a public address only). On a public TCP tunnel port (10000-59999) it reports whether the node's temporary test listener echoed the nonce; on a TCP edge or relay node port (7272-7275, no nonce) whether the connection was accepted; on UDP 7274 (the relay's STUN, no nonce) whether a STUN binding request was answered. Detail names what was seen: connected, refused, unreachable (a host firewall rejects), timeout (a cloud firewall drops), nonce_mismatch, not_public, unresolved. Responses are not cached.",
         "security": [
           {
             "bearerSelfhostRuntime": []
@@ -55874,20 +55874,28 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
+                  "transport",
                   "port",
                   "nonce"
                 ],
                 "properties": {
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "tcp",
+                      "udp"
+                    ]
+                  },
                   "port": {
                     "type": "integer",
-                    "minimum": 10000,
+                    "minimum": 7272,
                     "maximum": 59999
                   },
                   "nonce": {
                     "type": "string",
-                    "minLength": 16,
+                    "description": "16-64 characters for a public TCP tunnel port; empty for a node port.",
                     "maxLength": 64,
-                    "pattern": "^[A-Za-z0-9_-]+$"
+                    "pattern": "^[A-Za-z0-9_-]*$"
                   }
                 }
               }
