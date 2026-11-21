@@ -180,7 +180,7 @@ func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, pr
 		return EdgePair{}, err
 	}
 	// The pair is stored; a failed wake-up only leaves machines to see it when their attachment next refreshes.
-	if err = s.publishPairChange(ctx, ws); err != nil {
+	if err = s.PublishPairChange(ctx, ws); err != nil {
 		slog.ErrorContext(ctx, "edge_pair_publish_failed", "scope_kind", ws.Kind, "scope_id", ws.ID, "error", err)
 	}
 	return s.readPair(ctx, actor, ws, nodes)
@@ -259,10 +259,10 @@ ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,ins
 // pairPublishBatch bounds how many machines one wake-up read and one topic write cover.
 var pairPublishBatch = 1000
 
-// publishPairChange wakes the workspace's machines on the topics their runtime watches for edge changes, so each
+// PublishPairChange wakes the workspace's machines on the topics their runtime watches for edge changes, so each
 // looks at its attachment again instead of waiting for it to expire. It pages through the machines by id, after the
 // pair is committed, so a workspace with many machines never holds the write transaction open.
-func (s *Service) publishPairChange(ctx context.Context, ws edgeset.Scope) error {
+func (s *Service) PublishPairChange(ctx context.Context, ws edgeset.Scope) error {
 	pool := s.database.Pool()
 	after := ""
 	for {

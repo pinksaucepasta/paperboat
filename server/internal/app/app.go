@@ -1049,7 +1049,12 @@ func New(opts Options) (*App, error) {
 		reconcileContext, cancel := context.WithTimeout(ctx, opts.Config.HTTP.RequestTimeout)
 		defer cancel()
 		sweeps++
-		_, err := edgeset.Sweep(reconcileContext, store, time.Now().UTC(), (sweeps-1)%edgeset.FullSweepEvery == 0)
+		_, err := edgeset.Sweep(reconcileContext, store, time.Now().UTC(), (sweeps-1)%edgeset.FullSweepEvery == 0, func(ctx context.Context, ws edgeset.Scope) {
+			// The set is committed; a failed wake-up only leaves machines to see it when their attachment next refreshes.
+			if err := selfhostService.PublishPairChange(ctx, ws); err != nil {
+				slog.ErrorContext(ctx, "edge_set_publish_failed", "scope_kind", ws.Kind, "scope_id", ws.ID, "error", err)
+			}
+		})
 		workers.IterationFailure(ctx, "edge_set_reconcile", "edge_set_reconcile_failed", err)
 		outcome := "success"
 		if err != nil {

@@ -117,6 +117,18 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	if err != nil || disabled.Enabled {
 		t.Fatalf("disable=%#v err=%v", disabled, err)
 	}
+	// A replayed disable returns the receipt and writes nothing, so no node, set or machine sees a second change.
+	var version int64
+	if err = store.SQL().QueryRowContext(ctx, `SELECT version FROM paperboat.control_tunnel_nodes WHERE id=$1`, nodeInput.NodeID).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := s.MutateRegion(ctx, admin, "region-disable-"+x, RegionMutation{Action: "disable", ID: region.ID, Reason: "case:test", Revision: region.Revision}); err != nil || replay.Revision != disabled.Revision || replay.Enabled {
+		t.Fatalf("disable replay=%#v err=%v", replay, err)
+	}
+	var replayed int64
+	if err = store.SQL().QueryRowContext(ctx, `SELECT version FROM paperboat.control_tunnel_nodes WHERE id=$1`, nodeInput.NodeID).Scan(&replayed); err != nil || replayed != version {
+		t.Fatalf("disable replay rewrote the node: version %d -> %d err=%v", version, replayed, err)
+	}
 	if _, err = s.RuntimeNode(ctx, rotated.RuntimeCredential); !errors.Is(err, nodeauth.ErrNotFound) {
 		t.Fatalf("disabled credential=%v", err)
 	}

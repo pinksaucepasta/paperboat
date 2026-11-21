@@ -41,8 +41,12 @@ WHERE ` + usableEdge("$1") + `
 AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)
 ORDER BY n.id`
 
+// undrained keeps a draining edge (an operator drained it or disabled its region) out of a set at once, as a silent one
+// is after ReplaceAfter: the sweep then moves its workspaces and wakes their machines.
+const undrained = ` AND n.state<>'draining' AND n.drain_deadline IS NULL`
+
 const retainedEdgesSQL = `SELECT n.id FROM control_tunnel_nodes n
-WHERE n.roles @> ARRAY['edge']::text[] AND n.last_heartbeat_at>$1::timestamptz-$4::interval
+WHERE n.roles @> ARRAY['edge']::text[] AND n.last_heartbeat_at>$1::timestamptz-$4::interval` + undrained + `
 AND paperboat.node_workspace_edge_eligible(n.id,$2,$3)`
 
 // ReconcileScope makes the workspace's stored edge set current: a set keeps its members while they
@@ -230,7 +234,7 @@ WHERE (s.kind,s.id)>($1,$2) AND (
  OR cardinality(e.node_ids)>$4
  OR EXISTS (SELECT 1 FROM unnest(e.node_ids) AS member(id) WHERE NOT EXISTS (
   SELECT 1 FROM control_tunnel_nodes n WHERE n.id=member.id AND n.roles @> ARRAY['edge']::text[]
-   AND n.last_heartbeat_at>$5::timestamptz-$6::interval` + eligible("n.id") + `))
+   AND n.last_heartbeat_at>$5::timestamptz-$6::interval` + undrained + eligible("n.id") + `))
  OR (cardinality(e.node_ids)<$4` + managedOnly + ` AND EXISTS (SELECT 1 FROM control_tunnel_nodes n WHERE ` + usableEdge("$5") + `
    AND n.id<>ALL(e.node_ids)` + eligible("n.id") + `)))
 ORDER BY s.kind,s.id LIMIT $3`
@@ -249,12 +253,14 @@ const FullSweepEvery = 20
 // ReconcileAll walks every workspace once with the full test, a page per transaction, and returns how many sets
 // changed.
 func ReconcileAll(ctx context.Context, database *db.DB, now time.Time) (int, error) {
-	return Sweep(ctx, database, now, true)
+	return Sweep(ctx, database, now, true, nil)
 }
 
 // Sweep reconciles the workspaces whose set would change: with full false only by the quick test (SweepEvery), with
-// full true by every test (the worker's every FullSweepEvery-th run, and ReconcileAll).
-func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool) (int, error) {
+// full true by every test (the worker's every FullSweepEvery-th run, and ReconcileAll). moved, when set, is called
+// after each committed change (the worker wakes the workspace's machines); an unchanged set is never reported, so
+// replaying what caused a move (a drain, a region disable) wakes nobody again.
+func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool, moved func(context.Context, Scope)) (int, error) {
 	const page = 100
 	query := quickScopesSQL
 	if full {
@@ -298,6 +304,9 @@ func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool) (int,
 			}
 			if did {
 				changed++
+				if moved != nil {
+					moved(ctx, scope)
+				}
 			}
 		}
 		if len(scopes) < page {

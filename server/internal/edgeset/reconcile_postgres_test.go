@@ -188,9 +188,39 @@ VALUES($1,$2,$3,'linux','amd64','/home/t','online','occupied',true,now(),now(),'
 	if !reconcile(time.Now()) {
 		t.Fatal("switching back to managed stored no new set")
 	}
-	mode, ids, _ = stored()
+	mode, ids, generation = stored()
 	if mode != "managed-only" || len(ids) != 2 || allows(own) {
 		t.Fatalf("managed set after switching back = %s %v", mode, ids)
+	}
+	// A drained member (an operator drain or a disabled region) leaves the set on the worker's next sweep, which
+	// reports the move once so its machines are woken; a second sweep (or a replayed drain) reports nothing.
+	exec(`UPDATE paperboat.control_tunnel_nodes SET state='draining',ready=false,drain_deadline=now()+interval '30 seconds' WHERE id=$1`, ids[0])
+	for name, query := range map[string]string{"quick": quickScopesSQL, "full": fullScopesSQL} {
+		if !listedBy(query) {
+			t.Fatalf("the %s sweep skips a workspace whose member is draining", name)
+		}
+	}
+	sweep := func() int {
+		t.Helper()
+		moved := 0
+		if _, err := Sweep(ctx, database, time.Now(), false, func(_ context.Context, s Scope) {
+			if s == scope {
+				moved++
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return moved
+	}
+	if n := sweep(); n != 1 {
+		t.Fatalf("sweep reported the drained workspace %d times, want 1", n)
+	}
+	_, moved, movedGeneration := stored()
+	if movedGeneration != generation+1 || len(moved) != 2 || moved[0] == ids[0] || moved[1] == ids[0] || moved[0] != ids[1] {
+		t.Fatalf("after draining %s: %v generation %d (was %v)", ids[0], moved, movedGeneration, ids)
+	}
+	if n := sweep(); n != 0 {
+		t.Fatalf("a settled workspace was reported moved again %d times", n)
 	}
 }
 

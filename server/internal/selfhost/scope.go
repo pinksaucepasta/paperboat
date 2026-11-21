@@ -232,7 +232,7 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 	}
 	// The pool is stored; a failed wake-up leaves machines to see the new edges when their attachment next refreshes.
 	if flipped {
-		if err = s.publishPairChange(ctx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}); err != nil {
+		if err = s.PublishPairChange(ctx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}); err != nil {
 			slog.ErrorContext(ctx, "pool_publish_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
 		}
 	}
