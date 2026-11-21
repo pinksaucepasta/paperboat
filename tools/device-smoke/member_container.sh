@@ -6,35 +6,36 @@
 # into the container's `pb login --api-token -`; the enrollment token is piped the same way. Nothing secret is printed.
 # env: ORIGIN, STATE, PW_CHROMIUM, PW_MODULE (as mint_api_token.mjs). Prints one JSON line {"name","machine_id"}.
 # Teardown: ssh HOST sudo docker rm -f NAME, then cleanup_test_account.py --prefix <name prefix> --id <machine_id> --apply.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 host=$1 name=$2 bin=$3
 here=$(cd "$(dirname "$0")" && pwd)
-ct() { ssh -n "$host" "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt $name $*"; }
-ssh -n "$host" "sudo -n docker rm -f $name >/dev/null 2>&1 || true
-sudo -n docker run -d --name $name --hostname $name --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock gap5-systemd >/dev/null
+ct() { ssh -n "$host" "$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR -w $CT_HOME $name $*"; }
+ssh -n "$host" "$CT_DOCKER rm -f $name >/dev/null 2>&1 || true
+$CT_DOCKER run -d --name $name --hostname $name --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null
 sleep 8
-sudo -n docker exec $name loginctl enable-linger pbt
-sudo -n docker exec $name systemctl start user@1000.service"
+$CT_DOCKER exec $name loginctl enable-linger $CT_USER
+$CT_DOCKER exec $name systemctl start user@$CT_UID.service"
 stage_binary "$bin" "$host" "/tmp/$name.pb"
-ssh -n "$host" "sudo -n docker cp /tmp/$name.pb $name:/home/pbt/pb && rm -f /tmp/$name.pb && sudo -n docker exec $name sh -c 'chown pbt:pbt /home/pbt/pb && chmod 755 /home/pbt/pb'"
+ssh -n "$host" "$CT_DOCKER cp /tmp/$name.pb $name:$CT_HOME/pb && rm -f /tmp/$name.pb && $CT_DOCKER exec $name sh -c 'chown $CT_USER:$CT_USER $CT_HOME/pb && chmod 755 $CT_HOME/pb'"
 ct ./pb install --json >/dev/null
-pbx=/home/pbt/.local/bin/pb
+pbx=$CT_HOME/.local/bin/pb
 # a systemd container has no keyring: the member's session credentials go to a file (teammate_login.py copies this setting)
 shown=$(ct "$pbx config show --json")
 echo "$shown" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(json.dumps({"server_url": d["server_url"], "auth": {"allow_file_fallback": True}}))' |
-  ssh "$host" "sudo -n docker exec -i -u pbt $name sh -c 'mkdir -p /home/pbt/.config/paperboat && cat > /home/pbt/.config/paperboat/config.json'"
+  ssh "$host" "$CT_DOCKER exec -i -u $CT_USER $name sh -c 'mkdir -p $CT_HOME/.config/paperboat && cat > $CT_HOME/.config/paperboat/config.json'"
 # the member's CLI session is the controlled teammate profile (teammate_signin.py), apart from the device's own identity;
 # /home/pbt/pbm runs pb as that profile (team_two_account.py --member-pb)
-python3 "$here/teammate_signin.py" "$host sudo -n" "$name" pbt >/dev/null
-root=/home/pbt/.local/state/paperboat/device-smoke/teammate
-printf '#!/bin/sh\nexport HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%s/data XDG_STATE_HOME=%s/state XDG_CACHE_HOME=%s/cache XDG_RUNTIME_DIR=/run/user/1000\nexec %s --config %s/config.json "$@"\n' \
+python3 "$here/teammate_signin.py" "$host ${CT_DOCKER%%docker}" "$name" $CT_USER >/dev/null
+root=$CT_HOME/.local/state/paperboat/device-smoke/teammate
+printf '#!/bin/sh\nexport HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%s/data XDG_STATE_HOME=%s/state XDG_CACHE_HOME=%s/cache XDG_RUNTIME_DIR=$CT_RUNDIR\nexec %s --config %s/config.json "$@"\n' \
   "$root" "$root" "$root" "$root" "$root" "$pbx" "$root" |
-  ssh "$host" "sudo -n docker exec -i -u pbt $name sh -c 'cat > /home/pbt/pbm; chmod 755 /home/pbt/pbm'"
-ct "/home/pbt/pbm machine add --json" | python3 -c '
+  ssh "$host" "$CT_DOCKER exec -i -u $CT_USER $name sh -c 'cat > $CT_HOME/pbm; chmod 755 $CT_HOME/pbm'"
+ct "$CT_HOME/pbm machine add --json" | python3 -c '
 import json, re, sys, urllib.request
 command = json.load(sys.stdin)["data"]["linux_macos_command"]
 sys.stdout.write(re.search(r"PB_TOKEN=\x27([A-Za-z0-9]+)\x27", command).group(1))
-' | ssh "$host" "sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $name sh -c 'cat > /home/pbt/tok; chmod 600 /home/pbt/tok'"
-ct "$pbx pair --name $name --enrollment-token-file /home/pbt/tok --json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(json.dumps({"name":"'"$name"'","machine_id":d["machine_id"]}))'
-ct rm -f /home/pbt/tok
+' | ssh "$host" "$CT_DOCKER exec -i -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $name sh -c 'cat > $CT_HOME/tok; chmod 600 $CT_HOME/tok'"
+ct "$pbx pair --name $name --enrollment-token-file $CT_HOME/tok --json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(json.dumps({"name":"'"$name"'","machine_id":d["machine_id"]}))'
+ct rm -f $CT_HOME/tok

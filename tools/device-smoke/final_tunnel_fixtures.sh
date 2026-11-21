@@ -8,13 +8,14 @@
 #                    console (ORIGIN, STATE, PW_CHROMIUM from the caller).
 #   domain-binding   F8-02: as console-tunnels, then check-domain-binding-driver.mjs adds a fresh hostname under
 #                    SMOKE_DNS_ZONE and creates/deletes its DNS records through the fixtures endpoint (FINAL_FIXTURES_URL, token in FINAL_FIXTURES_TOKEN_FILE, never printed).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 MODE=${1:?private-tcp|console-tunnels|domain-binding} HOST=${2:?host} CT_A=${3:?container a} CT_B=${4:?container b}
 HERE=$(cd "$(dirname "$0")" && pwd) ROOT=$(cd "$HERE/../.." && pwd)
 STAMP=$(date +%s) ECHO_PORT=45991 HTTP_PORT=45992
 TUNNEL_CT= TUNNEL_ID=
 
-in_ct() { local ct=$1; shift; ssh -o BatchMode=yes "$HOST" "sudo -n docker exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $ct bash -lc $(printf %q "$*")"; }
+in_ct() { local ct=$1; shift; ssh -o BatchMode=yes "$HOST" "$CT_DOCKER exec -i -u $CT_USER -w $CT_HOME -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $ct bash -lc $(printf %q "$*")"; }
 json_field() { python3 -c 'import json,sys;d=json.load(sys.stdin);d=d.get("data",d);print(eval(sys.argv[1],{},{"d":d}))' "$1"; }
 
 cleanup() {
@@ -52,7 +53,7 @@ private-tcp)
   start_http "$CT_B"; start_echo "$CT_B"; sleep 1
   create_tunnel "$CT_B" "final-ptcp-$STAMP" --private || { echo "FAIL private tunnel create"; exit 1; }
   route=$(in_ct "$CT_B" ".local/bin/pb tunnel route add $TUNNEL_ID --name echo --protocol tcp_private --to tcp://127.0.0.1:$ECHO_PORT --wait --timeout 90s --json" | json_field 'd["route"]["id"]') || { echo "FAIL tcp_private route add"; exit 1; }
-  tar czf - -C "$HERE" tunnel_private_access.py pairing_lifecycle.py winhost.py pairing_fault.py terminal_command.py failure_triage.py | ssh "$HOST" "sudo -n docker exec -i -u pbt $CT_A bash -c 'mkdir -p ~/ds && tar xzf - -C ~/ds'"
+  tar czf - -C "$HERE" tunnel_private_access.py pairing_lifecycle.py winhost.py pairing_fault.py terminal_command.py failure_triage.py | ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $CT_A bash -c 'mkdir -p ~/ds && tar xzf - -C ~/ds'"
   in_ct "$CT_A" "cd ~/ds && python3 tunnel_private_access.py --tunnel $TUNNEL_ID --route $route --nonce final-$STAMP"
   ;;
 console-tunnels)

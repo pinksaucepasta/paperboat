@@ -16,6 +16,7 @@
 # B's managed OpenSSH config has T's block and B's ssh_known_hosts has T's lines.
 # Prints one JSON line {"check":"ssh-live-revoke",...}; machines revoked by exact id, containers removed on exit,
 # team share/membership undone.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary} MODE=${3:-cli}
@@ -29,23 +30,23 @@ T=test-slr-t-$STAMP C=test-slr-c-$STAMP ALIAS=test-slr-$STAMP
 IDS=
 TID= BID=
 OWNER='PB=~/.local/bin/pb; gen() { $PB team get "$TEAM" --json | python3 -c "import json,sys;print(json.load(sys.stdin)[\"generation\"])"; };'
-dx() { echo "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $1"; }
+dx() { echo "$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $1"; }
 owner() { ssh "$HOST" "TEAM=$TEAM; $OWNER $*"; }
 finish() {
   local status=$1 detail=$2 id
   if [ "$MODE" != cli ] && [ -n "$TID" ]; then
     owner "\$PB team machine unshare \$TEAM $TID --generation \$(gen) --json >/dev/null 2>&1; [ -z '$BID' ] || \$PB team remove \$TEAM $BID --generation \$(gen) --json >/dev/null 2>&1" >/dev/null 2>&1 || true
   fi
-  ssh "$HOST" "sudo -n docker rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
   for id in $IDS; do python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"; done
   python3 -c 'import json,sys;print(json.dumps({"check":"ssh-live-revoke","mode":sys.argv[1],"status":sys.argv[2],"machine_ids":sys.argv[3].split(),"detail":sys.argv[4]}))' "$MODE" "$status" "$IDS" "$detail"
   [ "$status" = PASS ]
   exit $?
 }
 diag() { # the member's and the target's own account of a failed dial, then exec and ssh once more (diagnostic codes only, no secrets)
-  local pbc="$(dx $C) /home/pbt/.local/bin/pb --workspace $TEAM"
+  local pbc="$(dx $C) $CT_HOME/.local/bin/pb --workspace $TEAM"
   {
-    ssh "$HOST" "for ct in $C $T; do echo \"[\$ct]\"; sudo -n docker exec \$ct bash -c 'grep -h -E \"peer_authority|admission|peer_stream\" /home/pbt/.local/state/paperboat/diagnostics/*.ndjson 2>/dev/null | tail -2 | cut -c1-420'; done" 2>&1
+    ssh "$HOST" "for ct in $C $T; do echo \"[\$ct]\"; $CT_DOCKER exec \$ct bash -c 'grep -h -E \"peer_authority|admission|peer_stream\" $CT_HOME/.local/state/paperboat/diagnostics/*.ndjson 2>/dev/null | tail -2 | cut -c1-420'; done" 2>&1
     echo -n 'EXEC: '; ssh "$HOST" "timeout 60 $pbc exec $ALIAS -- echo exec-ok" 2>&1 | tail -1 | cut -c1-120
     echo -n 'SSH-AFTER-EXEC: '; ssh "$HOST" "timeout 60 $pbc ssh $ALIAS -- echo ok" 2>&1 | tail -1 | cut -c1-160
   } | tr '\n' ' ' | cut -c1-1800
@@ -55,13 +56,13 @@ mk() { # mk CONTAINER PACKAGES: a fresh systemd container with the build install
   ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 ct=$1; X='$(dx "$1")'
-sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
+$CT_DOCKER run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null
 sleep 8
-sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y $2 >/dev/null 2>&1; true"
-sudo -n docker exec \$ct loginctl enable-linger pbt
-sudo -n docker exec \$ct systemctl start user@1000.service
-sudo -n docker cp /tmp/$T-pb \$ct:/home/pbt/pb
-sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
+$CT_DOCKER exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y $2 >/dev/null 2>&1; true"
+$CT_DOCKER exec \$ct loginctl enable-linger $CT_USER
+$CT_DOCKER exec \$ct systemctl start user@$CT_UID.service
+$CT_DOCKER cp /tmp/$T-pb \$ct:$CT_HOME/pb
+$CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/pb; chmod 755 $CT_HOME/pb'
 \$X bash -c 'cd ~ && ./pb install >/dev/null'
 EOF
 }
@@ -76,14 +77,14 @@ token = re.search(r"PB_TOKEN='([A-Za-z0-9]+)'", added["data"]["linux_macos_comma
 with open(os.open(os.environ["TOKEN"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     f.write(token)
 PY
-sudo -n docker cp /tmp/\$ct-token \$ct:/home/pbt/token; rm -f /tmp/\$ct-token
-sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/token; chmod 600 /home/pbt/token'
-\$X /home/pbt/.local/bin/pb pair --enrollment-token-file /home/pbt/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
-\$X rm -f /home/pbt/token
+$CT_DOCKER cp /tmp/\$ct-token \$ct:$CT_HOME/token; rm -f /tmp/\$ct-token
+$CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/token; chmod 600 $CT_HOME/token'
+\$X $CT_HOME/.local/bin/pb pair --enrollment-token-file $CT_HOME/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
+\$X rm -f $CT_HOME/token
 EOF
 }
 # the target: OpenSSH (paired AFTER sshd runs, so the setup user pbt is registered with port 22)
-out=$(mk $T openssh-server; ssh "$HOST" "sudo -n docker exec $T bash -c 'systemctl enable --now ssh >/dev/null 2>&1'"; enroll $T $ALIAS)
+out=$(mk $T openssh-server; ssh "$HOST" "$CT_DOCKER exec $T bash -c 'systemctl enable --now ssh >/dev/null 2>&1'"; enroll $T $ALIAS)
 TID=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | head -1)
 [ -n "$TID" ] || finish FAIL "target pairing failed: $(tail -c 300 <<<"$out" | tr '\n' ' ')"
 IDS="$TID "
@@ -99,21 +100,21 @@ else
   ssh "$HOST" "$(dx $C) bash -c 'nohup ~/.local/bin/pb login --no-browser --json > ~/login.out 2>&1 < /dev/null &'"
   url=
   for i in $(seq 1 30); do
-    url=$(ssh "$HOST" "$(dx $C) cat /home/pbt/login.out" 2>/dev/null | grep -o 'https://[^"]*authorize?code=[A-Z0-9-]*' | head -1)
+    url=$(ssh "$HOST" "$(dx $C) cat $CT_HOME/login.out" 2>/dev/null | grep -o 'https://[^"]*authorize?code=[A-Z0-9-]*' | head -1)
     [ -n "$url" ] && break; sleep 2
   done
   [ -n "$url" ] || finish FAIL "the member client printed no approval link"
   env STATE="$MEMBER_STATE" PW_CHROMIUM="$PW_CHROMIUM" PW_MODULE="${PW_MODULE:-playwright-core}" node "$HERE/approve_cli_login.mjs" "$url" >/dev/null 2>&1 || finish FAIL "the member's login approval failed"
   who=
   for i in $(seq 1 30); do
-    who=$(ssh "$HOST" "$(dx $C) /home/pbt/.local/bin/pb auth status --json" 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["account"]["id"],d["account"]["email"])' 2>/dev/null)
+    who=$(ssh "$HOST" "$(dx $C) $CT_HOME/.local/bin/pb auth status --json" 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["account"]["id"],d["account"]["email"])' 2>/dev/null)
     [ -n "$who" ] && break; sleep 2
   done
   [ -n "$who" ] || finish FAIL "the member client did not sign in"
   BID=${who% *} EMAIL=${who#* }
   inv=$(owner "\$PB team invite \$TEAM '$EMAIL' --generation \$(gen) --json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["invitation_id"])' 2>/dev/null)
   [ -n "$inv" ] || finish FAIL "the owner could not invite the member"
-  ssh "$HOST" "$(dx $C) /home/pbt/.local/bin/pb team accept $inv --json >/dev/null" || finish FAIL "the member could not accept the invitation"
+  ssh "$HOST" "$(dx $C) $CT_HOME/.local/bin/pb team accept $inv --json >/dev/null" || finish FAIL "the member could not accept the invitation"
   owner "\$PB team machine share \$TEAM $TID --generation \$(gen) --json >/dev/null" || finish FAIL "could not share the target into $TEAM"
   owner "\$PB team machine grant \$TEAM $TID --generation \$(gen) --member $BID --capability managed_ssh --capability exec --json >/dev/null" || finish FAIL "could not grant the member managed_ssh"
 fi
@@ -160,8 +161,8 @@ pend=$(date +%s.%N)
 palive=$(kill -0 $ppid 2>/dev/null && echo yes || echo no); alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no); kill $pid $ppid 2>/dev/null
 echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$alive plain_seconds=$(python3 -c "print(round($pend-$start,1))") plain_alive=$palive stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)] plain_stderr=[$(tr '\n' ' ' < ~/slrp.err | cut -c1-200)]"
 RUN
-ssh "$HOST" "sudo -n docker exec -i -u pbt $C sh -c 'cat > /home/pbt/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
-RUNX="$(dx $C) timeout 900 bash /home/pbt/run.sh $ALIAS '$PBW'"
+ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $C sh -c 'cat > $CT_HOME/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
+RUNX="$(dx $C) timeout 900 bash $CT_HOME/run.sh $ALIAS '$PBW'"
 detail=
 if [ "$MODE" = cli ]; then
   # the client waits for its own machine record to be listed before anything else
@@ -186,7 +187,7 @@ PY
   else
     owner "\$PB team remove \$TEAM $BID --generation \$(gen) --json >/dev/null" && BID= || finish FAIL "could not remove the member"
   fi
-  ssh "$HOST" "sudo -n docker exec $C touch /home/pbt/go"
+  ssh "$HOST" "$CT_DOCKER exec $C touch $CT_HOME/go"
   for i in $(seq 1 60); do ssh "$HOST" "grep -q 'RESULT seconds' /tmp/$T-hold.out" 2>/dev/null && break; sleep 2; done
   res=$(ssh "$HOST" "cat /tmp/$T-hold.out; rm -f /tmp/$T-hold.out")
 fi

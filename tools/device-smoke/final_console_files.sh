@@ -7,8 +7,8 @@
 set -uo pipefail
 HOST=${1:?docker host} A=${2:?container A} B=${3:?container B}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-DOCKER=${SMOKE_CT_DOCKER:-docker}
-X() { local ct=$1; shift; ssh -o BatchMode=yes "$HOST" "$DOCKER exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $ct bash -lc $(printf '%q' "$*")"; }
+SMOKE_CT_DOCKER=${SMOKE_CT_DOCKER:-docker}; . "$(cd "$(dirname "$0")" && pwd)/ct_env.sh"; DOCKER=$CT_DOCKER
+X() { local ct=$1; shift; ssh -o BatchMode=yes "$HOST" "$DOCKER exec -i -u $CT_USER -w $CT_HOME -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $ct bash -lc $(printf '%q' "$*")"; }
 STAMP=$(date +%s) NAME=final-files-$STAMP.txt CONTENT=FINAL_FILES_$STAMP
 LIST=$(X "$A" '.local/bin/pb machine list --json') || { echo "FAIL files: could not list machines"; exit 1; }
 SELF_B=$(X "$B" "python3 -c 'import json;print(json.load(open(\".local/state/paperboat/runtime/machine-registration.json\"))[\"machine_id\"])'") || { echo "FAIL files: no machine id in $B"; exit 1; }

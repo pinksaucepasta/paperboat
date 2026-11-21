@@ -20,7 +20,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 usage() { echo "usage: $0 up HOST NAME BINARY | down HOST NAME [MACHINE_ID]" >&2; exit 2; }
 ACTION=${1:-} HOST=${2:-} NAME=${3:-}
 [ -n "$HOST" ] && [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || usage
-image=${SMOKE_CT_IMAGE:-test-systemd} cu=${SMOKE_CT_USER:-pbt} uid=${SMOKE_CT_UID:-1000} docker=${SMOKE_CT_DOCKER:-sudo -n docker}  # the harness's own container settings
+. "$HERE/ct_env.sh"
+image=$CT_IMAGE cu=$CT_USER uid=$CT_UID docker=$CT_DOCKER
 CLEANUP=${REVOKE_CLIENT_CLEANUP:-"python3 $HERE/cleanup_test_account.py"}
 redact() { sed -E "s/[A-Za-z0-9_+\/=-]{24,}/<redacted>/g"; }
 

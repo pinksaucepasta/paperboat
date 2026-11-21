@@ -20,6 +20,7 @@
 # session id, outcome closed, bytes_in/out > 0).
 # Prints one JSON line {"check":"ssh-offline-audit","status":"PASS"|"FAIL",...}. Machines are revoked by exact id,
 # containers removed and blackhole routes removed on every exit path; the enrollment token stays in files.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
@@ -37,11 +38,11 @@ finish() {
   if [ -n "$ADDRS" ]; then
     for ct in $TARGET $CLIENT; do
       for a in $ADDRS; do
-        ssh "$HOST" "sudo -n docker exec $ct ip route del blackhole $a >/dev/null 2>&1 || sudo -n docker exec $ct ip -6 route del blackhole $a >/dev/null 2>&1" || true
+        ssh "$HOST" "$CT_DOCKER exec $ct ip route del blackhole $a >/dev/null 2>&1 || $CT_DOCKER exec $ct ip -6 route del blackhole $a >/dev/null 2>&1" || true
       done
     done
   fi
-  ssh "$HOST" "sudo -n docker rm -f $TARGET $CLIENT >/dev/null 2>&1; rm -f /tmp/$TARGET-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $TARGET $CLIENT >/dev/null 2>&1; rm -f /tmp/$TARGET-pb" || true
   for id in $MACHINE_IDS; do
     python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"
   done
@@ -51,15 +52,15 @@ finish() {
 }
 
 stage_binary "$BIN" "$HOST" "/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
-out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 start_ct $TARGET
-sudo -n docker exec $TARGET bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-server >/dev/null 2>&1; true"
+$CT_DOCKER exec $TARGET bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-server >/dev/null 2>&1; true"
 # the image may carry sshd host keys another container already published (cloned image): make this target's own
-sudo -n docker exec $TARGET bash -c "rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh"
-pair_user $TARGET pbt 1000 $ALIAS
+$CT_DOCKER exec $TARGET bash -c "rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh"
+pair_user $TARGET $CT_USER $CT_UID $ALIAS
 fresh $CLIENT $ALIAS-c
-C="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CLIENT"
+C="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CLIENT"
 for i in \$(seq 1 60); do \$C bash -c '~/.local/bin/pb machine list 2>/dev/null' | grep -q "$ALIAS " && break; sleep 2; done
 for i in \$(seq 1 30); do
   got=\$(\$C bash -c '~/.local/bin/pb ssh $ALIAS -- echo ssh-offline-baseline-$STAMP' </dev/null 2>&1 || true)
@@ -81,9 +82,9 @@ grep -qx SSH_OK <<<"$out" || finish FAIL "pb ssh did not run before the outage: 
 # never blocked, so the direct peer path stays open). Each hostname resolves to A+AAAA on the TARGET, unioned
 # with the client's view, so a DNS view that differs between the two cannot leave the host answering (its
 # signed network stays current until EVERY refresh fails: tailnet/authority.go OutOfSync, past the 2 min hint).
-api=$(ssh "$HOST" "sudo -n docker exec -u pbt $TARGET sed -n 's/.*\"server_url\": *\"https:\\/\\/\\([^\"]*\\)\".*/\\1/p' /home/pbt/.config/paperboat/config.json" 2>/dev/null)
+api=$(ssh "$HOST" "$CT_DOCKER exec -u $CT_USER $TARGET sed -n 's/.*\"server_url\": *\"https:\\/\\/\\([^\"]*\\)\".*/\\1/p' $CT_HOME/.config/paperboat/config.json" 2>/dev/null)
 [ -n "$api" ] || finish FAIL "could not read server_url from the target container"
-disc=$(ssh "$HOST" "sudo -n docker exec $TARGET curl -fsS -m 10 https://$api/v1/client-configuration" 2>/dev/null)
+disc=$(ssh "$HOST" "$CT_DOCKER exec $TARGET curl -fsS -m 10 https://$api/v1/client-configuration" 2>/dev/null)
 [ -n "$disc" ] || finish FAIL "could not read discovery from the target container"
 hosts=$(python3 - "$api" "$disc" <<'PY'
 import json, sys
@@ -119,8 +120,8 @@ print(' '.join(sorted(found)))
 PY
 )
 [ -n "$hosts" ] || finish FAIL "no Paperboat hostname in discovery"
-taddrs=$(ssh "$HOST" "sudo -n docker exec $TARGET bash -c 'for h in $hosts; do getent ahosts \$h 2>/dev/null | awk -v H=\$h \"{print H\\\"|\\\"\\\$1}\"; done' " 2>/dev/null)
-caddrs=$(ssh "$HOST" "sudo -n docker exec $CLIENT bash -c 'for h in $hosts; do getent ahosts \$h 2>/dev/null | awk \"{print \$1}\"; done' " 2>/dev/null)
+taddrs=$(ssh "$HOST" "$CT_DOCKER exec $TARGET bash -c 'for h in $hosts; do getent ahosts \$h 2>/dev/null | awk -v H=\$h \"{print H\\\"|\\\"\\\$1}\"; done' " 2>/dev/null)
+caddrs=$(ssh "$HOST" "$CT_DOCKER exec $CLIENT bash -c 'for h in $hosts; do getent ahosts \$h 2>/dev/null | awk \"{print \$1}\"; done' " 2>/dev/null)
 resolved=$(python3 - "$taddrs" "$caddrs" <<'PY'
 import ipaddress, sys
 pairs, seen = [], set()
@@ -152,8 +153,8 @@ naddrs=$(echo "$ADDRS" | wc -w | tr -d ' ')
 for ct in $TARGET $CLIENT; do
   for a in $ADDRS; do
     case "$a" in
-      *:*) ssh "$HOST" "sudo -n docker exec $ct ip -6 route add blackhole $a" 2>/dev/null ;;
-      *) ssh "$HOST" "sudo -n docker exec $ct ip route add blackhole $a" 2>/dev/null ;;
+      *:*) ssh "$HOST" "$CT_DOCKER exec $ct ip -6 route add blackhole $a" 2>/dev/null ;;
+      *) ssh "$HOST" "$CT_DOCKER exec $ct ip route add blackhole $a" 2>/dev/null ;;
     esac || finish FAIL "could not block all Paperboat addresses ($naddrs)"
   done
 done
@@ -166,7 +167,7 @@ done
 # each pair is double-quoted for the remote for-list: the | separator is a shell operator unquoted
 qpairs=
 for p in $tpairs; do qpairs="$qpairs \"$p\""; done
-verify=$(ssh "$HOST" "sudo -n docker exec -i $TARGET bash -s" <<EOF 2>/dev/null
+verify=$(ssh "$HOST" "$CT_DOCKER exec -i $TARGET bash -s" <<EOF 2>/dev/null
 bad=0; total=0
 for p in $qpairs; do
   h=\${p%%|*}; a=\${p##*|}; total=\$((total+1))
@@ -185,12 +186,12 @@ blackholed_at=$(date +%s)
 sleep "$OUTAGE_SECS"
 # while still blackholed, one real ssh: the client always sends the offline header, the host records
 # origin offline only past the hint
-off_out=$(ssh "$HOST" "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CLIENT timeout 60 bash -c '~/.local/bin/pb ssh $ALIAS -- echo ssh-offline-$STAMP' </dev/null 2>&1" || true)
+off_out=$(ssh "$HOST" "$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CLIENT timeout 60 bash -c '~/.local/bin/pb ssh $ALIAS -- echo ssh-offline-$STAMP' </dev/null 2>&1" || true)
 grep -q "ssh-offline-$STAMP" <<<"$off_out" || { detail="pb ssh did not run during the outage after $OUTAGE_SECS s: $(tail -c 300 <<<"$off_out" | tr '\n' ' ')"; finish FAIL "$detail"; }
 # routes removed again before the audit read (finish repeats this on every exit path)
 for ct in $TARGET $CLIENT; do
   for a in $ADDRS; do
-    ssh "$HOST" "sudo -n docker exec $ct ip route del blackhole $a >/dev/null 2>&1 || sudo -n docker exec $ct ip -6 route del blackhole $a >/dev/null 2>&1" || true
+    ssh "$HOST" "$CT_DOCKER exec $ct ip route del blackhole $a >/dev/null 2>&1 || $CT_DOCKER exec $ct ip -6 route del blackhole $a >/dev/null 2>&1" || true
   done
 done
 ADDRS=

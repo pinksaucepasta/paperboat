@@ -11,6 +11,7 @@
 # naming the start's session id with outcome closed and bytes_in/bytes_out > 0, both with origin online.
 # Prints one JSON line {"check":"ssh-session-audit","status":"PASS"|"FAIL",...}. Machines are revoked by exact id and
 # containers removed on every exit path; the enrollment token stays in files.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
@@ -23,7 +24,7 @@ MACHINE_IDS= TARGET_ID=
 
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $TARGET $CLIENT >/dev/null 2>&1; rm -f /tmp/$TARGET-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $TARGET $CLIENT >/dev/null 2>&1; rm -f /tmp/$TARGET-pb" || true
   for id in $MACHINE_IDS; do
     python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"
   done
@@ -33,15 +34,15 @@ finish() {
 }
 
 stage_binary "$BIN" "$HOST" "/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
-out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 start_ct $TARGET
-sudo -n docker exec $TARGET bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-server >/dev/null 2>&1; true"
+$CT_DOCKER exec $TARGET bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y openssh-server >/dev/null 2>&1; true"
 # the image may carry sshd host keys another container already published (cloned image): make this target's own
-sudo -n docker exec $TARGET bash -c "rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh"
-pair_user $TARGET pbt 1000 $ALIAS
+$CT_DOCKER exec $TARGET bash -c "rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh"
+pair_user $TARGET $CT_USER $CT_UID $ALIAS
 fresh $CLIENT $ALIAS-c
-C="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CLIENT"
+C="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CLIENT"
 for i in \$(seq 1 60); do \$C bash -c '~/.local/bin/pb machine list 2>/dev/null' | grep -q "$ALIAS " && break; sleep 2; done
 for i in \$(seq 1 30); do
   got=\$(\$C bash -c '~/.local/bin/pb ssh $ALIAS -- echo ssh-audit-$STAMP' </dev/null 2>&1 || true)

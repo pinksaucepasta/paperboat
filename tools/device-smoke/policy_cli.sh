@@ -6,15 +6,16 @@
 #    or, on a paired machine itself (macOS): LOCAL=1 EMAIL=... TARGET=... policy_cli.sh
 # Prints PASS/FAIL per step and exits non-zero on any FAIL; never prints secrets. The personal
 # policy is restored to the version it had before the run.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -u
 EMAIL=${EMAIL:?account email} TARGET=${TARGET:?machine name}
 if [ -n "${LOCAL:-}" ]; then
   P="$HOME/.local/bin/pb" D=$HOME
   put() { cp "$1" "$D/$(basename "$1")"; }
 else
-  CT=${CT:?container} D=/home/pbt
-  P="sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CT timeout 90 /home/pbt/.local/bin/pb"
-  put() { sudo docker cp "$1" "$CT:$D/$(basename "$1")" >/dev/null; sudo docker exec "$CT" chown pbt:pbt "$D/$(basename "$1")"; }
+  CT=${CT:?container} D=$CT_HOME
+  P="$CT_DOCKER exec -i -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CT timeout 90 $CT_HOME/.local/bin/pb"
+  put() { $CT_DOCKER cp "$1" "$CT:$D/$(basename "$1")" >/dev/null; $CT_DOCKER exec "$CT" chown $CT_USER:$CT_USER "$D/$(basename "$1")"; }
 fi
 fails=0
 ok(){ echo "PASS $1"; } ; bad(){ echo "FAIL $1: $2"; fails=$((fails+1)); }

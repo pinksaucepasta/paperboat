@@ -39,6 +39,7 @@ fi
 set -uo pipefail
 
 HERE=$PAPERBOAT_SMOKE_SOURCE_DIR
+. "$HERE/ct_env.sh"
 # Team creation needs a paid Checkout: team checks reuse this retained paid team.
 SMOKE_TEAM=${PAPERBOAT_SMOKE_TEAM:-paperboat-smoke-paid}
 RESULTS_DIR=${SMOKE_RESULTS_DIR:-"$HERE/results"}
@@ -137,8 +138,7 @@ same_ct_host() { # same_ct_host A B: both devices are containers on one Docker h
 }
 container_on() { # container_on HOST:CONTAINER CMD... : run as the enrolled user inside the container
   local host=${1%%:*} ct=${1#*:}; shift
-  local user=${SMOKE_CT_USER:-pbt} uid=${SMOKE_CT_UID:-1000} docker=${SMOKE_CT_DOCKER:-sudo docker}
-  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "$docker exec -i -u $user -e HOME=/home/$user -e XDG_RUNTIME_DIR=/run/user/$uid $ct bash -lc $(printf '%q' "$*")"
+  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "$CT_DOCKER exec -i -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $ct bash -lc $(printf '%q' "$*")"
 }
 
 # on DEVICE CMD... : run a POSIX shell or PowerShell command and print its output.

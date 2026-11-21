@@ -10,6 +10,7 @@
 # TB's, and pbu2 asking for pbt's name gets no A marker. Prints one JSON line {"check":"multi-account-host",...};
 # machines are revoked by exact id (A here; B ids are printed for the second account's cleanup) and containers
 # removed on every exit path.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary} MINT_B=${3:?second-account pb command on host}
@@ -20,7 +21,7 @@ IDS_A= IDS_B=
 
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $TA $TB $H >/dev/null 2>&1; rm -f /tmp/$H-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $TA $TB $H >/dev/null 2>&1; rm -f /tmp/$H-pb" || true
   for id in $IDS_A; do
     python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"
   done
@@ -30,40 +31,40 @@ finish() {
 }
 
 stage_binary "$BIN" "$HOST" "/tmp/$H-pb" || finish FAIL "could not copy the build to $HOST"
-out=$( { echo "FRESH_BINARY=/tmp/$H-pb"; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_BINARY=/tmp/$H-pb"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
-as() { local ct=\$1 user=\$2 uid=\$3; shift 3; sudo -n docker exec -u \$user -e HOME=/home/\$user -e XDG_RUNTIME_DIR=/run/user/\$uid \$ct "\$@"; }
+as() { local ct=\$1 user=\$2 uid=\$3; shift 3; $CT_DOCKER exec -u \$user -e HOME=/home/\$user -e XDG_RUNTIME_DIR=/run/user/\$uid \$ct "\$@"; }
 origin() { # origin CONTAINER MARKER
-  as \$1 pbt 1000 bash -c "mkdir -p ~/origin && echo \$2 > ~/origin/marker && cd ~/origin && nohup python3 -m http.server $PORT --bind 127.0.0.1 >/dev/null 2>&1 &"
+  as \$1 $CT_USER $CT_UID bash -c "mkdir -p ~/origin && echo \$2 > ~/origin/marker && cd ~/origin && nohup python3 -m http.server $PORT --bind 127.0.0.1 >/dev/null 2>&1 &"
 }
 fresh $TA $N | sed 's/^MACHINE_ID=/A_MACHINE_ID=/'
 FRESH_MINT="$MINT_B" fresh $TB $N | sed 's/^MACHINE_ID=/B_MACHINE_ID=/'
 origin $TA MARKER_A_$STAMP
 origin $TB MARKER_B_$STAMP
 start_ct $H
-pair_user $H pbt 1000 $N-ha | sed 's/^MACHINE_ID=/A_MACHINE_ID=/'
-add_user $H pbu2 1001
-FRESH_MINT="$MINT_B" pair_user $H pbu2 1001 $N-hb | sed 's/^MACHINE_ID=/B_MACHINE_ID=/'
-as $H pbt 1000 /home/pbt/.local/bin/pb daemon machine-guard install >/dev/null 2>&1 || as $H pbt 1000 sudo -n /home/pbt/.local/bin/pb daemon machine-guard install
+pair_user $H $CT_USER $CT_UID $N-ha | sed 's/^MACHINE_ID=/A_MACHINE_ID=/'
+add_user $H pbu2 $((CT_UID+1))
+FRESH_MINT="$MINT_B" pair_user $H pbu2 $((CT_UID+1)) $N-hb | sed 's/^MACHINE_ID=/B_MACHINE_ID=/'
+as $H $CT_USER $CT_UID $CT_HOME/.local/bin/pb daemon machine-guard install >/dev/null 2>&1 || as $H $CT_USER $CT_UID sudo -n $CT_HOME/.local/bin/pb daemon machine-guard install
 domain() { as $H \$1 \$2 /home/\$1/.local/bin/pb config local-access show --json | python3 -c 'import json,sys;d=json.load(sys.stdin)["data"];print(d.get("domain") or d["local_access"]["domain"])'; }
-DA=\$(domain pbt 1000); DB=\$(domain pbu2 1001)
+DA=\$(domain $CT_USER $CT_UID); DB=\$(domain pbu2 $((CT_UID+1)))
 fetch() { # fetch USER UID HOSTNAME: body of the marker through the gateway, empty on failure
   as $H \$1 \$2 curl -sk --noproxy '*' --connect-timeout 10 --max-time 20 https://\$3/marker 2>/dev/null || true
 }
 for i in \$(seq 1 60); do
-  a=\$(fetch pbt 1000 $PORT.$N.\$DA); b=\$(fetch pbu2 1001 $PORT.$N.\$DB)
+  a=\$(fetch $CT_USER $CT_UID $PORT.$N.\$DA); b=\$(fetch pbu2 $((CT_UID+1)) $PORT.$N.\$DB)
   [ "\$a" = MARKER_A_$STAMP ] && [ "\$b" = MARKER_B_$STAMP ] && break
   sleep 3
 done
 echo "A_GOT=\$a"; echo "B_GOT=\$b"
 [ "\$a" = MARKER_A_$STAMP ] && echo USER_A_OK
 [ "\$b" = MARKER_B_$STAMP ] && echo USER_B_OK
-cross=\$(fetch pbu2 1001 $PORT.$N.\$DA)
+cross=\$(fetch pbu2 $((CT_UID+1)) $PORT.$N.\$DA)
 [ "\$cross" != MARKER_A_$STAMP ] && echo ISOLATED
 # Both users publish the same short name $N (keyed by uid): neither daemon may be degraded by the other's name
 # (the gateway alone passed while the second user's machine names were refused, F23-01 on mac-vm).
 health() { as $H \$1 \$2 /home/\$1/.local/bin/pb status --json 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d.get("data",d);print(d.get("daemon_state"),*[h.get("code") for h in d.get("health",[])])'; }
-ha=\$(health pbt 1000); hb=\$(health pbu2 1001)
+ha=\$(health $CT_USER $CT_UID); hb=\$(health pbu2 $((CT_UID+1)))
 echo "A_HEALTH=\$ha"; echo "B_HEALTH=\$hb"
 [ "\$ha" = ready ] && [ "\$hb" = ready ] && echo BOTH_READY
 EOF

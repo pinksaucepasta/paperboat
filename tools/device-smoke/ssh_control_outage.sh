@@ -7,6 +7,7 @@
 # touched) and new plain ssh and `pb ssh` sessions from C must still log in with the managed key while R is still
 # refused. The routes are removed again before the containers go.
 # Prints one JSON line {"check":"ssh-control-outage",...}; machines revoked by exact id, containers removed on exit.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
@@ -16,7 +17,7 @@ T=test-sco-t-$STAMP C=test-sco-c-$STAMP R=test-sco-r-$STAMP ALIAS=test-sco-$STAM
 IDS=
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $T $C $R >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $T $C $R >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
   for id in $IDS; do python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"; done
   python3 -c 'import json,sys;print(json.dumps({"check":"ssh-control-outage","status":sys.argv[1],"machine_ids":sys.argv[2].split(),"detail":sys.argv[3]}))' "$status" "$IDS" "$detail"
   [ "$status" = PASS ]
@@ -27,14 +28,14 @@ out=$(ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES
   local ct=\$1 name=\$2 packages=\$3
-  local X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 \$ct"
-  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
+  local X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR \$ct"
+  $CT_DOCKER run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null
   sleep 8
-  sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
-  sudo -n docker exec \$ct loginctl enable-linger pbt
-  sudo -n docker exec \$ct systemctl start user@1000.service
-  sudo -n docker cp /tmp/$T-pb \$ct:/home/pbt/pb
-  sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
+  $CT_DOCKER exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
+  $CT_DOCKER exec \$ct loginctl enable-linger $CT_USER
+  $CT_DOCKER exec \$ct systemctl start user@$CT_UID.service
+  $CT_DOCKER cp /tmp/$T-pb \$ct:$CT_HOME/pb
+  $CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/pb; chmod 755 $CT_HOME/pb'
   \$X bash -c 'cd ~ && ./pb install >/dev/null'
   NAME=\$name TOKEN=/tmp/\$ct-token python3 - <<'PY'
 import json, os, re, subprocess
@@ -43,14 +44,14 @@ token = re.search(r"PB_TOKEN='([A-Za-z0-9]+)'", added["data"]["linux_macos_comma
 with open(os.open(os.environ["TOKEN"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     f.write(token)
 PY
-  sudo -n docker cp /tmp/\$ct-token \$ct:/home/pbt/token; rm -f /tmp/\$ct-token
-  sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/token; chmod 600 /home/pbt/token'
-  \$X /home/pbt/.local/bin/pb pair --enrollment-token-file /home/pbt/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
-  \$X rm -f /home/pbt/token
+  $CT_DOCKER cp /tmp/\$ct-token \$ct:$CT_HOME/token; rm -f /tmp/\$ct-token
+  $CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/token; chmod 600 $CT_HOME/token'
+  \$X $CT_HOME/.local/bin/pb pair --enrollment-token-file $CT_HOME/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
+  \$X rm -f $CT_HOME/token
 }
 # the target: OpenSSH (paired AFTER sshd runs, so the setup user pbt is registered with port 22) 
 fresh $T $ALIAS "openssh-server"
-sudo -n docker exec $T bash -c "systemctl enable --now ssh >/dev/null 2>&1"
+$CT_DOCKER exec $T bash -c "systemctl enable --now ssh >/dev/null 2>&1"
 fresh $C $ALIAS-c "openssh-client"
 fresh $R $ALIAS-r "openssh-client"
 EOF
@@ -82,8 +83,8 @@ pbout=$(timeout 40 "$PB" ssh "$ALIAS" -- echo outage-pb-ok </dev/null 2>&1 | tr 
 api=$(curl -s -m 5 -o /dev/null -w '%{http_code}' "https://$(sed -n 's/.*"server_url": *"https:\/\/\([^"/]*\).*/\1/p' ~/.config/paperboat/config.json)/v1/client-configuration" || true)
 echo "RESULT api=$api plain=[$plain] pb=[$pbout]"
 RUN
-for ct in $C $R; do ssh "$HOST" "sudo -n docker exec -i -u pbt $ct sh -c 'cat > /home/pbt/run.sh'" < /tmp/$T-run.sh; done; rm -f /tmp/$T-run.sh
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 300 bash /home/pbt/run.sh $ALIAS"
+for ct in $C $R; do ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $ct sh -c 'cat > $CT_HOME/run.sh'" < /tmp/$T-run.sh; done; rm -f /tmp/$T-run.sh
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $C timeout 300 bash $CT_HOME/run.sh $ALIAS"
 warm=$(ssh "$HOST" "$X warm" 2>&1)
 grep -q warm-ok <<<"$warm" || finish FAIL "no session before the outage: $(tail -c 200 <<<"$warm" | tr '\n' ' ')"
 # The host's managed keys: each client publishes its own key. The exact keys are read BEFORE R signs out (a sign-out
@@ -91,12 +92,12 @@ grep -q warm-ok <<<"$warm" || finish FAIL "no session before the outage: $(tail 
 # (the host has the withdrawal) and stay out before, during and after the outage; C's must stay in. A live login with
 # R's key is not possible: the private key never leaves the daemon's credential store. sshd must really consult
 # authorized_keys (sshd -T), or its content proves nothing.
-RX="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $R timeout 300 bash /home/pbt/run.sh $ALIAS"
-pubkey() { ssh "$HOST" "sudo -n docker exec -u pbt $1 awk '{print \$2}' /home/pbt/.ssh/paperboat-managed-ssh.pub"; }
+RX="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $R timeout 300 bash $CT_HOME/run.sh $ALIAS"
+pubkey() { ssh "$HOST" "$CT_DOCKER exec -u $CT_USER $1 awk '{print \$2}' $CT_HOME/.ssh/paperboat-managed-ssh.pub"; }
 RK=$(pubkey $R); CK=$(pubkey $C)
 [ -n "$RK" ] && [ -n "$CK" ] && [ "$RK" != "$CK" ] || finish FAIL "could not read two distinct managed public keys (R=${#RK} C=${#CK} chars)"
-listed() { ssh "$HOST" "sudo -n docker exec $T grep -qF \"$1\" /home/pbt/.ssh/authorized_keys"; }
-sshd=$(ssh "$HOST" "sudo -n docker exec $T sshd -T -C user=pbt,host=localhost,addr=127.0.0.1" 2>&1)
+listed() { ssh "$HOST" "$CT_DOCKER exec $T grep -qF \"$1\" $CT_HOME/.ssh/authorized_keys"; }
+sshd=$(ssh "$HOST" "$CT_DOCKER exec $T sshd -T -C user=$CT_USER,host=localhost,addr=127.0.0.1" 2>&1)
 grep -qiE '^authorizedkeysfile .*\.ssh/authorized_keys' <<<"$sshd" && grep -qiE '^authorizedkeyscommand none' <<<"$sshd" || finish FAIL "sshd does not read only ~/.ssh/authorized_keys: $(grep -iE '^authorizedkeys' <<<"$sshd" | tr '\n' ' ')"
 for i in $(seq 1 30); do listed "$RK" && listed "$CK" && break; sleep 2; done
 listed "$CK" || finish FAIL "the unrevoked client's managed key is not in the target's authorized_keys"
@@ -108,14 +109,14 @@ for i in $(seq 1 45); do listed "$RK" || { withdrawn=$(( $(date +%s)-start )); b
 [ -n "$withdrawn" ] || finish FAIL "R signed out but the target still lists its key after 90 s"
 # the control plane's addresses, blackholed in all containers (iproute2 in the image), removed on every exit
 res=$(ssh "$HOST" "bash -s" <<EOF 2>&1
-api=\$(sudo -n docker exec -u pbt $C sed -n 's/.*"server_url": *"https:\\/\\/\\([^"/]*\\).*/\\1/p' /home/pbt/.config/paperboat/config.json)
-addrs=\$(sudo -n docker exec $C getent ahosts "\$api" | awk '{print \$1}' | sort -u)
-for ct in $T $C $R; do for a in \$addrs; do sudo -n docker exec \$ct ip route add blackhole "\$a" 2>/dev/null || sudo -n docker exec \$ct ip -6 route add blackhole "\$a" 2>/dev/null; done; done
+api=\$($CT_DOCKER exec -u $CT_USER $C sed -n 's/.*"server_url": *"https:\\/\\/\\([^"/]*\\).*/\\1/p' $CT_HOME/.config/paperboat/config.json)
+addrs=\$($CT_DOCKER exec $C getent ahosts "\$api" | awk '{print \$1}' | sort -u)
+for ct in $T $C $R; do for a in \$addrs; do $CT_DOCKER exec \$ct ip route add blackhole "\$a" 2>/dev/null || $CT_DOCKER exec \$ct ip -6 route add blackhole "\$a" 2>/dev/null; done; done
 sleep 45
-for who in R C; do k=\$([ \$who = R ] && echo "$RK" || echo "$CK"); sudo -n docker exec $T grep -qF "\$k" /home/pbt/.ssh/authorized_keys && echo "KEYS-DURING \$who=listed" || echo "KEYS-DURING \$who=absent"; done
+for who in R C; do k=\$([ \$who = R ] && echo "$RK" || echo "$CK"); $CT_DOCKER exec $T grep -qF "\$k" $CT_HOME/.ssh/authorized_keys && echo "KEYS-DURING \$who=listed" || echo "KEYS-DURING \$who=absent"; done
 $X outage
 echo "R-\$($RX outage | grep ^RESULT)"
-for ct in $T $C $R; do for a in \$addrs; do sudo -n docker exec \$ct ip route del blackhole "\$a" 2>/dev/null || sudo -n docker exec \$ct ip -6 route del blackhole "\$a" 2>/dev/null; done; done
+for ct in $T $C $R; do for a in \$addrs; do $CT_DOCKER exec \$ct ip route del blackhole "\$a" 2>/dev/null || $CT_DOCKER exec \$ct ip -6 route del blackhole "\$a" 2>/dev/null; done; done
 EOF
 )
 detail=$(grep -E "^(RESULT|R-RESULT|KEYS-DURING)" <<<"$res" | tr '\n' ' ')

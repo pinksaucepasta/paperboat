@@ -6,8 +6,8 @@
 set -uo pipefail
 HOST=${1:?docker host} CT=${2:?container}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-DOCKER=${SMOKE_CT_DOCKER:-docker}
-X() { ssh -o BatchMode=yes "$HOST" "$DOCKER exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CT bash -lc $(printf '%q' "$*")"; }
+SMOKE_CT_DOCKER=${SMOKE_CT_DOCKER:-docker}; . "$(cd "$(dirname "$0")" && pwd)/ct_env.sh"; DOCKER=$CT_DOCKER
+X() { ssh -o BatchMode=yes "$HOST" "$DOCKER exec -i -u $CT_USER -w $CT_HOME -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CT bash -lc $(printf '%q' "$*")"; }
 FAILED=0
 ID= PHOST=
 started() { # started NAME: a fresh preview for step NAME, or a FAIL line for it (never a silent skip)
@@ -36,7 +36,7 @@ started inspector-hold && step inspector-hold env HOLD=${HOLD:-300} node "$ROOT/
 stop_preview
 started inspector-restart && step inspector-restart env \
   RESTART_CMD="ssh $HOST '$DOCKER exec $CT systemctl restart \"paperboat-carrier-u1000-*.service\"'" \
-  STOP_CMD="ssh $HOST \"$DOCKER exec -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CT .local/bin/pb preview stop <id> --json\" >/dev/null" \
+  STOP_CMD="ssh $HOST \"$DOCKER exec -u $CT_USER -w $CT_HOME -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CT .local/bin/pb preview stop <id> --json\" >/dev/null" \
   node "$ROOT/console/scripts/check-preview-inspector-restart.mjs" "$ID" "$PHOST"
 stop_preview
 exit $FAILED

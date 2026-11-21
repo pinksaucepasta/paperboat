@@ -29,6 +29,7 @@
 #
 # Prints one JSON line {"check":"final-extras-MODE","status":"PASS"|"FAIL",...}. The containers are removed on every exit path; their
 # machines belong to the run's throwaway account, which the caller deletes. Enrollment tokens stay in files.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 MODE=${1:?exec|revoke|history|reinstall|continuity|failures|scheduled} HOST=${2:?host} PREVIOUS=${3:-} WRONG=${4:-}
@@ -42,7 +43,7 @@ MACHINE_IDS=
 
 finish() {
   local status=$1 detail=$2
-  ssh "$HOST" "${SMOKE_CT_DOCKER:-sudo -n docker} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-ds.tgz /tmp/$T-dev" || true
+  ssh "$HOST" "${SMOKE_CT_DOCKER:-$CT_DOCKER} rm -f $T $P >/dev/null 2>&1; rm -f /tmp/$T-ds.tgz /tmp/$T-dev" || true
   python3 -c 'import json,sys;print(json.dumps({"check":"final-extras-"+sys.argv[1],"status":sys.argv[2],"machine_ids":sys.argv[3].split(),"detail":sys.argv[4]}))' "$MODE" "$status" "$MACHINE_IDS" "$detail"
   [ "$status" = PASS ]
   exit $?
@@ -51,13 +52,13 @@ finish() {
 tar czf /tmp/$T-ds.tgz -C "$HERE" $(cd "$HERE" && ls *.py *.sh) && scp -q /tmp/$T-ds.tgz "$HOST:/tmp/$T-ds.tgz"; [ "$HOST" = local ] || rm -f /tmp/$T-ds.tgz  # on the VM itself the copy is the file
 
 if [ "$MODE" = exec ]; then
-  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; echo "$SHIM"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 fresh_official $T $ALIAS
 fresh_official $P $ALIAS-p
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
 $X $P bash -c "echo FRESH_EXEC_$STAMP > ~/marker"
-if $X $T timeout 60 /home/pbt/.local/bin/pb exec $ALIAS-p -- cat /home/pbt/marker | grep -qx FRESH_EXEC_$STAMP; then echo EXEC_OK; else echo EXEC_FAILED; fi
+if $X $T timeout 60 $CT_HOME/.local/bin/pb exec $ALIAS-p -- cat $CT_HOME/marker | grep -qx FRESH_EXEC_$STAMP; then echo EXEC_OK; else echo EXEC_FAILED; fi
 EOF
 )
   MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')
@@ -66,11 +67,11 @@ EOF
 fi
 
 if [ "$MODE" = scheduled ]; then
-  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T ALIAS=$ALIAS REL=${SCHEDULED_FROM_RELEASE:-}"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T ALIAS=$ALIAS REL=${SCHEDULED_FROM_RELEASE:-}"; echo "$SHIM"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
 if [ -n "$REL" ]; then fresh_release $T $ALIAS $REL; else fresh_official $T $ALIAS; fi
-sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz
+$CT_DOCKER cp /tmp/$T-ds.tgz $T:$CT_HOME/ds.tgz
 $X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
 if res=$($X $T bash -c "cd ~/ds && python3 update_scheduled.py" 2>&1); then echo SCHEDULED_OK; else echo SCHEDULED_FAILED; fi
 echo "$res" | tail -n 3
@@ -82,14 +83,14 @@ EOF
 fi
 
 if [ "$MODE" = revoke ]; then
-  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS STAMP=$STAMP"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 fresh_official $T $ALIAS
 fresh_official $P $ALIAS-p
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
-for ct in $T $P; do sudo -n docker cp /tmp/$T-ds.tgz $ct:/home/pbt/ds.tgz; $X $ct bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'; done
-target=$($X $T python3 -c 'import json;print(json.load(open("/home/pbt/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])')
-for i in $(seq 1 24); do $X $P timeout 40 /home/pbt/.local/bin/pb exec $ALIAS -- true >/dev/null 2>&1 && break; sleep 5; done
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
+for ct in $T $P; do $CT_DOCKER cp /tmp/$T-ds.tgz $ct:$CT_HOME/ds.tgz; $X $ct bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'; done
+target=$($X $T python3 -c 'import json;print(json.load(open("$CT_HOME/.local/state/paperboat/runtime/machine-registration.json"))["machine_id"])')
+for i in $(seq 1 24); do $X $P timeout 40 $CT_HOME/.local/bin/pb exec $ALIAS -- true >/dev/null 2>&1 && break; sleep 5; done
 if $X $P bash -c "cd ~/ds && python3 revoked_machine.py revoke $target" && $X $T bash -c "cd ~/ds && python3 revoked_machine.py verify $ALIAS-p --window 60"; then echo REVOKE_OK; else echo REVOKE_FAILED; fi
 EOF
 )
@@ -101,20 +102,20 @@ fi
 if [ "$MODE" = reinstall ]; then
   [ -f "$PREVIOUS" ] || finish FAIL "the build $PREVIOUS is not a file"
   stage_binary "$PREVIOUS" "$HOST" "/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
-  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS"; echo "$SHIM"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -uo pipefail
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
 fresh_official $T $ALIAS || { echo REINSTALL_0_ERROR: fresh install and pair failed; exit 0; }
 fresh_official $P $ALIAS-p || { echo REINSTALL_0_ERROR: the peer failed to install and pair; exit 0; }
-sudo -n docker cp /tmp/$T-dev $T:/home/pbt/final-pb && sudo -n docker exec $T sh -c "chown pbt:pbt /home/pbt/final-pb && chmod 755 /home/pbt/final-pb"  # pb install refuses a binary owned by another user
-for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
-want=$($X $T /home/pbt/final-pb --version | sed -n 's/.*Version //p' | head -1)
+$CT_DOCKER cp /tmp/$T-dev $T:$CT_HOME/final-pb && $CT_DOCKER exec $T sh -c "chown $CT_USER:$CT_USER $CT_HOME/final-pb && chmod 755 $CT_HOME/final-pb"  # pb install refuses a binary owned by another user
+for i in $(seq 1 24); do $X $T timeout 40 $CT_HOME/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
+want=$($X $T $CT_HOME/final-pb --version | sed -n 's/.*Version //p' | head -1)
 ok=1
 for n in 1 2; do  # each reinstall runs over a running installation; the second over the first's result
-  if ! res=$($X $T timeout 240 /home/pbt/final-pb install 2>&1); then echo "REINSTALL_${n}_ERROR: $res"; ok=0; break; fi
-  got=$($X $T /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)
+  if ! res=$($X $T timeout 240 $CT_HOME/final-pb install 2>&1); then echo "REINSTALL_${n}_ERROR: $res"; ok=0; break; fi
+  got=$($X $T $CT_HOME/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)
   [ "$got" = "$want" ] || { echo "REINSTALL_${n}_ERROR: installed '$got', wanted '$want'"; ok=0; break; }
-  $X $T timeout 60 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 || { echo "REINSTALL_${n}_ERROR: pb exec to the peer fails after reinstall $n"; ok=0; break; }
+  $X $T timeout 60 $CT_HOME/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 || { echo "REINSTALL_${n}_ERROR: pb exec to the peer fails after reinstall $n"; ok=0; break; }
 done
 [ $ok = 1 ] && echo "REINSTALL_OK $want"
 EOF
@@ -130,19 +131,19 @@ if [ "$MODE" = continuity ] || [ "$MODE" = failures ]; then
   [ -f "$CAND" ] || finish FAIL "the candidate build $CAND is not a file"
   stage_binary "$CAND" "$HOST" "/tmp/$T-cand"
   if [ "$MODE" = failures ]; then [ -f "$WRONG" ] || finish FAIL "the wrong-platform binary $WRONG is not a file"; stage_binary "$WRONG" "$HOST" "/tmp/$T-wrong"; fi
-  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T ALIAS=$ALIAS MODE=$MODE"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+  out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T ALIAS=$ALIAS MODE=$MODE"; echo "$SHIM"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
 fresh_official $T $ALIAS
-sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz
-sudo -n docker cp /tmp/$T-cand $T:/home/pbt/cand
-[ "$MODE" = failures ] && sudo -n docker cp /tmp/$T-wrong $T:/home/pbt/wrong
-sudo -n docker exec $T chown pbt:pbt /home/pbt/ds.tgz /home/pbt/cand
-[ "$MODE" = failures ] && sudo -n docker exec $T chown pbt:pbt /home/pbt/wrong
-sudo -n docker exec $T chmod 755 /home/pbt/cand
+$CT_DOCKER cp /tmp/$T-ds.tgz $T:$CT_HOME/ds.tgz
+$CT_DOCKER cp /tmp/$T-cand $T:$CT_HOME/cand
+[ "$MODE" = failures ] && $CT_DOCKER cp /tmp/$T-wrong $T:$CT_HOME/wrong
+$CT_DOCKER exec $T chown $CT_USER:$CT_USER $CT_HOME/ds.tgz $CT_HOME/cand
+[ "$MODE" = failures ] && $CT_DOCKER exec $T chown $CT_USER:$CT_USER $CT_HOME/wrong
+$CT_DOCKER exec $T chmod 755 $CT_HOME/cand
 $X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
-for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS -- true >/dev/null 2>&1 && break; sleep 5; done
-if [ "$MODE" = continuity ]; then run="python3 update_continuity.py $ALIAS /home/pbt/cand"; else run="python3 update_failures.py $ALIAS /home/pbt/cand /home/pbt/wrong"; fi
+for i in $(seq 1 24); do $X $T timeout 40 $CT_HOME/.local/bin/pb exec $ALIAS -- true >/dev/null 2>&1 && break; sleep 5; done
+if [ "$MODE" = continuity ]; then run="python3 update_continuity.py $ALIAS $CT_HOME/cand"; else run="python3 update_failures.py $ALIAS $CT_HOME/cand $CT_HOME/wrong"; fi
 if res=$(echo x | $X $T bash -c "cd ~/ds && $run" 2>&1); then echo UPDATE_OK; else echo UPDATE_FAILED; fi
 echo "$res" | tail -n 3
 EOF
@@ -156,24 +157,24 @@ fi
 # history: the target starts on the previous official release, the peer on the official Latest.
 DEV=$WRONG  # history: the optional build to update to
 [ -z "$DEV" ] || stage_binary "$DEV" "$HOST" "/tmp/$T-dev" || finish FAIL "could not copy the build to $HOST"
-out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS PREVIOUS=$PREVIOUS DEVFILE=${DEV:+/tmp/$T-dev}"; echo "$SHIM"; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_MINT=$FRESH_MINT T=$T P=$P ALIAS=$ALIAS PREVIOUS=$PREVIOUS DEVFILE=${DEV:+/tmp/$T-dev}"; echo "$SHIM"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<'EOF'; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000"
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR"
 if [ -n "$PREVIOUS" ]; then fresh_release $T $ALIAS $PREVIOUS; else fresh_official $T $ALIAS; fi
 fresh_official $P $ALIAS-p
-sudo -n docker cp /tmp/$T-ds.tgz $T:/home/pbt/ds.tgz
+$CT_DOCKER cp /tmp/$T-ds.tgz $T:$CT_HOME/ds.tgz
 $X $T bash -c 'mkdir -p ~/ds && tar xzf ~/ds.tgz -C ~/ds'
 # the update is what is judged here (first exec after a pair is the exec mode's job): wait until the pair is usable
-for i in $(seq 1 24); do $X $T timeout 40 /home/pbt/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
+for i in $(seq 1 24); do $X $T timeout 40 $CT_HOME/.local/bin/pb exec $ALIAS-p -- true >/dev/null 2>&1 && break; sleep 5; done
 if [ -n "$DEVFILE" ]; then
-  sudo -n docker cp $DEVFILE $T:/home/pbt/final-pb && $X $T chmod 755 /home/pbt/final-pb
-  UPDATE="--from /home/pbt/final-pb"
+  $CT_DOCKER cp $DEVFILE $T:$CT_HOME/final-pb && $X $T chmod 755 $CT_HOME/final-pb
+  UPDATE="--from $CT_HOME/final-pb"
 else
-  $X $T bash -c "/home/pbt/.local/bin/pb update check --json >/dev/null && /home/pbt/.local/bin/pb update download --json >/dev/null" || true
+  $X $T bash -c "$CT_HOME/.local/bin/pb update check --json >/dev/null && $CT_HOME/.local/bin/pb update download --json >/dev/null" || true
   UPDATE="--approve"
 fi
 if echo x | $X $T bash -c "cd ~/ds && python3 update_survival.py $ALIAS $ALIAS-p --terminal --mib 400 $UPDATE"; then echo HISTORY_OK; else echo HISTORY_FAILED; fi
-echo "FINAL_$T=$($X $T /home/pbt/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
+echo "FINAL_$T=$($X $T $CT_HOME/.local/bin/pb --version | sed -n 's/.*Version //p' | head -1)"
 EOF
 )
 MACHINE_IDS=$(sed -n 's/^MACHINE_ID=\(machine_[0-9a-f-]*\)$/\1/p' <<<"$out" | tr '\n' ' ')

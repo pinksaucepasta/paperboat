@@ -8,6 +8,7 @@
 # regression never show a missing local-address lease (the private-access P0 of 2026-10-26); only a fresh pair
 # does. Prints one JSON line {"check":"fresh-pair-access","status":"PASS"|"FAIL",...}; the machine is revoked by
 # exact id and the container removed on every exit path. The enrollment token stays in files.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
@@ -18,7 +19,7 @@ MACHINE_IDS=
 
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $TARGET $CLIENT >/dev/null 2>&1; rm -f /tmp/$TARGET-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $TARGET $CLIENT >/dev/null 2>&1; rm -f /tmp/$TARGET-pb" || true
   for id in $MACHINE_IDS; do
     python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"
   done
@@ -28,12 +29,12 @@ finish() {
 }
 
 stage_binary "$BIN" "$HOST" "/tmp/$TARGET-pb" || finish FAIL "could not copy the build to $HOST"
-out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
+out=$( { echo "FRESH_BINARY=/tmp/$TARGET-pb"; ct_env_remote; cat "$HERE/fresh_pair_lib.sh"; cat <<EOF; } | ssh "$HOST" "bash -s" 2>&1
 set -euo pipefail
 fresh $TARGET $ALIAS
 fresh $CLIENT $ALIAS-c
-sudo -n docker exec -u pbt -e HOME=/home/pbt $TARGET bash -c 'mkdir -p ~/origin && echo FRESH_ACCESS_$STAMP > ~/origin/marker && cd ~/origin && nohup python3 -m http.server $PORT --bind 127.0.0.1 >/dev/null 2>&1 &'
-C="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $CLIENT"
+$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME $TARGET bash -c 'mkdir -p ~/origin && echo FRESH_ACCESS_$STAMP > ~/origin/marker && cd ~/origin && nohup python3 -m http.server $PORT --bind 127.0.0.1 >/dev/null 2>&1 &'
+C="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $CLIENT"
 \$C bash -c 'timeout 150 ~/.local/bin/pb access machine $ALIAS --port $PORT --listen $LISTEN > /tmp/access.log 2>&1 &'
 for i in \$(seq 1 120); do
   if \$C curl -fsS --max-time 5 http://$LISTEN/marker 2>/dev/null | grep -qx FRESH_ACCESS_$STAMP; then echo ACCESS_OK; break; fi

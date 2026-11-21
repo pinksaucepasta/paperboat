@@ -5,6 +5,7 @@
 : "${CT_SSH_HOST:?the Docker host of the containers}"
 while [ "$1" = -o ]; do shift 2; done
 ct=$1; shift
-command="${SMOKE_CT_DOCKER:-docker} exec -i -u pbt -w /home/pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $ct bash -c $(printf '%q' "$*")"
+SMOKE_CT_DOCKER=${SMOKE_CT_DOCKER:-docker}; . "$(dirname "$(readlink -f "$0")")/../ct_env.sh"
+command="$CT_DOCKER exec -i -u $CT_USER -w $CT_HOME -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $ct bash -c $(printf '%q' "$*")"
 [ "$CT_SSH_HOST" = local ] && exec bash -c "$command"  # on the CI VM the Docker host is the machine itself
 exec /usr/bin/ssh -o BatchMode=yes "$CT_SSH_HOST" "$command"

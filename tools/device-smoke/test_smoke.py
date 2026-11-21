@@ -738,6 +738,7 @@ TLIST=($DEVICES)
             ssh.chmod(0o700)
             script = root / 'smoke.sh'
             self.write_script(script, prefix + '\non box-a "echo \'hi there\'"\nct_of box-b || echo unmapped\n')
+            shutil.copy(HERE / 'ct_env.sh', root / 'ct_env.sh')
             last = root / 'last'
             result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], SSH_LAST=str(last),
@@ -745,7 +746,7 @@ TLIST=($DEVICES)
                                     capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             command = last.read_text()
-            self.assertIn('sudo docker exec -i -u pbt', command)
+            self.assertIn('sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000', command)
             self.assertIn(' ct-a bash -lc ', command)
             self.assertIn('hi\\ there', command)
             self.assertIn('unmapped', result.stdout)
@@ -1102,6 +1103,7 @@ test_terminal windows
         with tempfile.TemporaryDirectory() as directory:
             script = pathlib.Path(directory) / 'smoke.sh'
             script.write_text(prologue + fixture)
+            shutil.copy(HERE / 'ct_env.sh', pathlib.Path(directory) / 'ct_env.sh')
             result = subprocess.run(['bash', str(script), '--expect-version', 'test', '--targets', 'linux'],
                                     env=dict(os.environ, PAPERBOAT_SMOKE_SNAPSHOT='1', PAPERBOAT_SMOKE_SOURCE_DIR=directory),
                                     capture_output=True, text=True, timeout=10)

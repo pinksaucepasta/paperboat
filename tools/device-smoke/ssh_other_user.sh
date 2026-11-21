@@ -12,6 +12,7 @@
 #                through `pb ssh`; a wrong password fails with sshd's own "Permission denied" text
 # Prints one JSON line {"check":"ssh-other-user","status":"PASS"|"FAIL",...}. Machines are revoked by exact id
 # and containers removed on every exit path; credentials stay in files, never printed.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
@@ -21,7 +22,7 @@ T=test-sou-t-$STAMP C=test-sou-c-$STAMP ALIAS=test-sou-$STAMP
 IDS=
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
   for id in $IDS; do python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"; done
   python3 -c 'import json,sys;print(json.dumps({"check":"ssh-other-user","status":sys.argv[1],"machine_ids":sys.argv[2].split(),"detail":sys.argv[3]}))' "$status" "$IDS" "$detail"
   [ "$status" = PASS ]
@@ -32,14 +33,14 @@ out=$(ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES
   local ct=\$1 name=\$2 packages=\$3
-  local X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 \$ct"
-  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
+  local X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR \$ct"
+  $CT_DOCKER run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null
   sleep 8
-  sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
-  sudo -n docker exec \$ct loginctl enable-linger pbt
-  sudo -n docker exec \$ct systemctl start user@1000.service
-  sudo -n docker cp /tmp/$T-pb \$ct:/home/pbt/pb
-  sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
+  $CT_DOCKER exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
+  $CT_DOCKER exec \$ct loginctl enable-linger $CT_USER
+  $CT_DOCKER exec \$ct systemctl start user@$CT_UID.service
+  $CT_DOCKER cp /tmp/$T-pb \$ct:$CT_HOME/pb
+  $CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/pb; chmod 755 $CT_HOME/pb'
   \$X bash -c 'cd ~ && ./pb install >/dev/null'
   NAME=\$name TOKEN=/tmp/\$ct-token python3 - <<'PY'
 import json, os, re, subprocess
@@ -48,14 +49,14 @@ token = re.search(r"PB_TOKEN='([A-Za-z0-9]+)'", added["data"]["linux_macos_comma
 with open(os.open(os.environ["TOKEN"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     f.write(token)
 PY
-  sudo -n docker cp /tmp/\$ct-token \$ct:/home/pbt/token; rm -f /tmp/\$ct-token
-  sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/token; chmod 600 /home/pbt/token'
-  \$X /home/pbt/.local/bin/pb pair --enrollment-token-file /home/pbt/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
-  \$X rm -f /home/pbt/token
+  $CT_DOCKER cp /tmp/\$ct-token \$ct:$CT_HOME/token; rm -f /tmp/\$ct-token
+  $CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/token; chmod 600 $CT_HOME/token'
+  \$X $CT_HOME/.local/bin/pb pair --enrollment-token-file $CT_HOME/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
+  \$X rm -f $CT_HOME/token
 }
 # the target: OpenSSH (paired AFTER sshd runs, so the setup user pbt is registered with port 22) + user bob
 fresh $T $ALIAS "openssh-server"
-sudo -n docker exec $T bash -c 'systemctl enable --now ssh >/dev/null 2>&1; useradd -m -s /bin/bash bob; echo "bob:\$(cat /proc/sys/kernel/random/uuid)" | chpasswd; printf "PasswordAuthentication yes\nKbdInteractiveAuthentication no\n" > /etc/ssh/sshd_config.d/99-bob.conf; systemctl reload ssh'
+$CT_DOCKER exec $T bash -c 'systemctl enable --now ssh >/dev/null 2>&1; useradd -m -s /bin/bash bob; echo "bob:\$(cat /proc/sys/kernel/random/uuid)" | chpasswd; printf "PasswordAuthentication yes\nKbdInteractiveAuthentication no\n" > /etc/ssh/sshd_config.d/99-bob.conf; systemctl reload ssh'
 fresh $C $ALIAS-c "openssh-client sshpass"
 EOF
 )
@@ -79,7 +80,7 @@ for i in $(seq 1 60); do [ -n "$DOMAIN" ] && break; sleep 2; DOMAIN=$(grep -o 'H
 HOST=$ALIAS.$DOMAIN
 echo "domain=$DOMAIN"
 check setup-user-pb "ok-managed" "$PB" ssh "$ALIAS" -- echo ok-managed
-check setup-user-plain "ok-managed" ssh "pbt@$HOST" echo ok-managed
+check setup-user-plain "ok-managed" ssh "$CT_USER@$HOST" echo ok-managed
 # bob's own key (made by the caller on this client, trusted by the target)
 check bob-key-plain "ok-bob-key" ssh -i ~/bob_key -o IdentitiesOnly=yes -o BatchMode=yes "bob@$HOST" echo ok-bob-key
 eval "$(ssh-agent -s)" >/dev/null
@@ -96,16 +97,16 @@ SSHPASS=wrong-password-1
 check bob-wrong-password-is-sshd "Permission denied" sshpass -e ssh -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 "bob@$HOST" echo no
 echo "RESULT ok:[$ok ] fail:[$fail ]"
 RUN
-ssh "$HOST" "sudo -n docker exec -i -u pbt $C sh -c 'cat > /home/pbt/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
+ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $C sh -c 'cat > $CT_HOME/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
 # install bob's public key and a known password on the target, put the password where only the client's pbt reads it
 res=$(ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 PW=\$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)
-sudo -n docker exec $T bash -c "echo bob:\$PW | chpasswd"
-printf %s "\$PW" | sudo -n docker exec -i -u pbt $C bash -c 'umask 077; cat > ~/bob_pw'
-sudo -n docker exec -u pbt $C bash -c 'umask 077; ssh-keygen -q -t ed25519 -N "" -f /home/pbt/bob_key; cat /home/pbt/bob_key.pub' | sudo -n docker exec -i $T bash -c 'install -d -m 700 -o bob -g bob /home/bob/.ssh; cat > /home/bob/.ssh/authorized_keys; chown bob:bob /home/bob/.ssh/authorized_keys; chmod 600 /home/bob/.ssh/authorized_keys'
-sudo -n docker exec -u pbt $C rm -f /home/pbt/bob_key.pub
-sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 600 bash /home/pbt/run.sh $ALIAS $T
+$CT_DOCKER exec $T bash -c "echo bob:\$PW | chpasswd"
+printf %s "\$PW" | $CT_DOCKER exec -i -u $CT_USER $C bash -c 'umask 077; cat > ~/bob_pw'
+$CT_DOCKER exec -u $CT_USER $C bash -c 'umask 077; ssh-keygen -q -t ed25519 -N "" -f $CT_HOME/bob_key; cat $CT_HOME/bob_key.pub' | $CT_DOCKER exec -i $T bash -c 'install -d -m 700 -o bob -g bob /home/bob/.ssh; cat > /home/bob/.ssh/authorized_keys; chown bob:bob /home/bob/.ssh/authorized_keys; chmod 600 /home/bob/.ssh/authorized_keys'
+$CT_DOCKER exec -u $CT_USER $C rm -f $CT_HOME/bob_key.pub
+$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $C timeout 600 bash $CT_HOME/run.sh $ALIAS $T
 EOF
 )
 detail=$(grep -E "^(domain=|RESULT)" <<<"$res" | tr '\n' ' ')

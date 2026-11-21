@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """uninstall_fresh.py HOST BINARY [--keep]  (check id: uninstall-fresh, CHECKLIST F1-09 / C021, PB-U1)
 
-A fresh throwaway systemd container on HOST (image test-systemd): BINARY is installed and paired as user pbt (a
+A fresh throwaway systemd container on HOST (image SMOKE_CT_IMAGE): BINARY is installed and paired as the container user (SMOKE_CT_USER; a
 throwaway machine of the account HOST's pb is signed in to, or of $FRESH_MINT's), the privileged uninstall inventory
 is recorded (it must see the install), then the command a user runs, `pb uninstall --confirmation 'UNINSTALL PAPERBOAT'
 --hostname <h> --json`, removes it. Every leftover is listed, none stops the check:
@@ -13,7 +13,7 @@ The container is removed and every machine revoked by exact id (pb machine revok
 --keep leaves both for triage. Every leftover path is stat'ed/ls'ed to stderr (owner, times, processes) before the reinstall. Nothing secret is printed or kept
 (the enrollment token only travels through 0600 files, fresh_pair_lib.sh pair_user).
 Prints one JSON line {"check":"uninstall-fresh","status":PASS|FAIL,"leftovers":[...],"machine_id":...}; exit 1 on FAIL.
-env: SMOKE_CT_DOCKER=docker when HOST's user needs no sudo for docker; FRESH_MINT as in fresh_pair_lib.sh.
+env: SMOKE_CT_IMAGE/USER/UID/DOCKER (ct_env.py); SMOKE_CT_DOCKER=docker when HOST's user needs no sudo for docker; FRESH_MINT as in fresh_pair_lib.sh.
 Not for a paired device: it only ever touches its own container and the machines it paired.
 """
 import json
@@ -26,10 +26,10 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
-DOCKER = os.environ.get('SMOKE_CT_DOCKER', 'sudo -n docker')
-USER_EXEC = '-u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000'
-PB = '/home/pbt/.local/bin/pb'
-REGISTRATION = '/home/pbt/.local/state/paperboat/runtime/machine-registration.json'
+sys.path.insert(0, str(HERE))
+from ct_env import CT_DOCKER as DOCKER, CT_EXEC as USER_EXEC, CT_HOME, CT_IMAGE, CT_RUNDIR, CT_UID, CT_USER
+PB = f'{CT_HOME}/.local/bin/pb'
+REGISTRATION = f'{CT_HOME}/.local/state/paperboat/runtime/machine-registration.json'
 SENTINEL = '.pb-uninstall-proof'
 
 # Runs as root in the container, prints `LEFT<TAB>kind<TAB>detail` per leftover. The Inbox, and the directories that hold
@@ -39,7 +39,7 @@ INBOX=${INBOX:?}
 left() { printf 'LEFT\t%s\t%s\n' "$1" "$2"; }
 kept() { case "$1" in "$INBOX"|"$INBOX"/*) return 0 ;; esac; case "$INBOX/" in "$1"/*) return 0 ;; esac; return 1; }
 find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
-  \( -iname '*paperboat*' -o \( -name pb \( -type f -o -type l \) ! -path /home/pbt/pb \) \) -print 2>/dev/null |
+  \( -iname '*paperboat*' -o \( -name pb \( -type f -o -type l \) ! -path @HOME@/pb \) \) -print 2>/dev/null |
 while IFS= read -r p; do
   kept "$p" && continue
   if [ -S "$p" ]; then k=socket
@@ -53,13 +53,13 @@ while IFS= read -r p; do
 done
 systemctl list-unit-files --plain --no-legend --no-pager 'paperboat*' 2>/dev/null | while read -r u _; do left unit "system:$u"; done
 systemctl list-units --all --plain --no-legend --no-pager 'paperboat*' 2>/dev/null | while read -r u _; do left unit "system-loaded:$u"; done
-U="runuser -u pbt -- env XDG_RUNTIME_DIR=/run/user/1000"
+U="runuser -u @USER@ -- env XDG_RUNTIME_DIR=@RUNDIR@"
 $U systemctl --user list-unit-files --plain --no-legend --no-pager 'paperboat*' 2>/dev/null | while read -r u _; do left unit "user:$u"; done
 $U systemctl --user list-units --all --plain --no-legend --no-pager 'paperboat*' 2>/dev/null | while read -r u _; do left unit "user-loaded:$u"; done
 ss -xanH 2>/dev/null | grep -i paperboat | cut -c1-160 | while IFS= read -r l; do left socket "$l"; done
 ss -tulnpH 2>/dev/null | grep -E 'users:\(\("(pb|paperboat[^"]*)"' | cut -c1-160 | while IFS= read -r l; do left listener "$l"; done
 ps -eo pid=,comm= | awk '$2=="pb" || tolower($2) ~ /paperboat/ {print $1" "$2}' | while IFS= read -r l; do left process "$l"; done
-'''
+'''.replace('@HOME@', CT_HOME).replace('@USER@', CT_USER).replace('@RUNDIR@', CT_RUNDIR)
 ACCOUNTS = "getent passwd | cut -d: -f1; echo --; getent group | cut -d: -f1"
 
 
@@ -123,17 +123,17 @@ class Check:
         d, ct = DOCKER, self.ct
         code, out = self.ssh(
             f"{d} rm -f {ct} >/dev/null 2>&1; {d} run -d --name {ct} --hostname {ct} --privileged --dns-option single-request "
-            f"--cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null && "
+            f"--cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock {CT_IMAGE} >/dev/null && "
             f"for i in $(seq 30); do {d} exec {ct} systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break; sleep 1; done; "
-            f"{d} exec {ct} loginctl enable-linger pbt && {d} exec {ct} systemctl start user@1000.service")
+            f"{d} exec {ct} loginctl enable-linger {CT_USER} && {d} exec {ct} systemctl start user@{CT_UID}.service")
         return None if code == 0 else 'container did not start: ' + out[-200:]
 
     def pair(self, alias):
-        """fresh_pair_lib.sh pair_user: install BINARY as pbt and pair it as ALIAS; one MACHINE_ID= line out."""
+        """fresh_pair_lib.sh pair_user: install BINARY as the container user and pair it as ALIAS; one MACHINE_ID= line out."""
         shim = 'sudo() { shift; "$@"; }\n' if DOCKER == 'docker' else ''
         mint = 'FRESH_MINT=%s\n' % shlex.quote(os.environ['FRESH_MINT']) if os.environ.get('FRESH_MINT') else ''
-        script = 'set -euo pipefail\nFRESH_BINARY=%s\n%s%s%s\npair_user %s pbt 1000 %s\n' % (
-            shlex.quote(self.staged), mint, shim, (HERE / 'fresh_pair_lib.sh').read_text(), self.ct, alias)
+        script = 'set -euo pipefail\nFRESH_BINARY=%s\n%s%s%s\npair_user %s %s %s %s\n' % (
+            shlex.quote(self.staged), mint, shim, (HERE / 'fresh_pair_lib.sh').read_text(), self.ct, CT_USER, CT_UID, alias)
         code, out = self.ssh('bash -s', stdin=script, timeout=600)
         found = re.findall(r'^MACHINE_ID=(machine_[0-9a-f-]+)$', out, re.M)
         if found:
@@ -141,7 +141,7 @@ class Check:
         return None if code == 0 and found else 'install/pair failed: ' + out[-300:]
 
     def inventory(self, inbox):
-        code, out = self.exec('python3 -I /root/uninstall_inventory.py --user pbt --inbox "$INBOX"', user=False, env={'INBOX': inbox}, timeout=120)
+        code, out = self.exec(f'python3 -I /root/uninstall_inventory.py --user {CT_USER} --inbox "$INBOX"', user=False, env={'INBOX': inbox}, timeout=120)
         try:
             return json.loads(out.strip().splitlines()[-1])
         except (ValueError, IndexError):

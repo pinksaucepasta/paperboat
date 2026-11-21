@@ -16,8 +16,8 @@ set -uo pipefail
 usage() { echo "usage: $0 up HOST NAME TEAM | down HOST NAME TEAM [MACHINE_ID]" >&2; exit 2; }
 ACTION=${1:-} HOST=${2:-} NAME=${3:-} TEAM=${4:-}
 [ -n "$HOST" ] && [ -n "$TEAM" ] && [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] && [[ $TEAM =~ ^[A-Za-z0-9_-]+$ ]] || usage
-IMAGE=${SMOKE_CT_IMAGE:-test-systemd} CT_USER=${SMOKE_CT_USER:-pbt} CT_UID=${SMOKE_CT_UID:-1000} DOCKER=${SMOKE_CT_DOCKER:-sudo -n docker}
-[[ $IMAGE =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ && $CT_USER =~ ^[a-z_][a-z0-9_-]*$ && $CT_UID =~ ^[0-9]+$ && $DOCKER =~ ^[a-z\ -]+$ ]] || usage
+. "$(cd "$(dirname "$0")" && pwd)/ct_env.sh"
+IMAGE=$CT_IMAGE DOCKER=$CT_DOCKER
 redact() { sed -E "s/[A-Za-z0-9_+\/=-]{24,}/<redacted>/g"; }
 # On HOST: run pb as the owner and print data fields of its --json answer.
 PBH='$HOME/.local/bin/pb'

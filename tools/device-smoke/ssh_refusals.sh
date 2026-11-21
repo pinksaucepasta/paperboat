@@ -6,6 +6,7 @@
 # (offline), this computer's Paperboat service stopped. Each case is undone before the next. (No access is the
 # workspace test TestOfflineSessionsStartFromTheHostsSignedScopes.)
 # Prints one JSON line {"check":"ssh-refusals",...}; machines revoked by exact id, containers removed on exit.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ct_env.sh"
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/stage_binary.sh"
 HOST=${1:?host} BIN=${2:?binary}
@@ -15,7 +16,7 @@ T=test-srf-t-$STAMP C=test-srf-c-$STAMP ALIAS=test-srf-$STAMP
 IDS=
 finish() {
   local status=$1 detail=$2 id
-  ssh "$HOST" "sudo -n docker rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
+  ssh "$HOST" "$CT_DOCKER rm -f $T $C >/dev/null 2>&1; rm -f /tmp/$T-pb" || true
   for id in $IDS; do python3 "$HERE/cleanup_test_account.py" --id "$id" --stale '0 seconds' --apply >/dev/null 2>&1 || detail="$detail; revoke of $id failed"; done
   python3 -c 'import json,sys;print(json.dumps({"check":"ssh-refusals","status":sys.argv[1],"machine_ids":sys.argv[2].split(),"detail":sys.argv[3]}))' "$status" "$IDS" "$detail"
   [ "$status" = PASS ]
@@ -26,14 +27,14 @@ out=$(ssh "$HOST" "bash -s" <<EOF 2>&1
 set -euo pipefail
 fresh() { # fresh CONTAINER NAME PACKAGES
   local ct=\$1 name=\$2 packages=\$3
-  local X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 \$ct"
-  sudo -n docker run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock test-systemd >/dev/null
+  local X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR \$ct"
+  $CT_DOCKER run -d --name \$ct --privileged --dns-option single-request --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock $CT_IMAGE >/dev/null
   sleep 8
-  sudo -n docker exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
-  sudo -n docker exec \$ct loginctl enable-linger pbt
-  sudo -n docker exec \$ct systemctl start user@1000.service
-  sudo -n docker cp /tmp/$T-pb \$ct:/home/pbt/pb
-  sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
+  $CT_DOCKER exec \$ct bash -c "DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get -qq install -y \$packages >/dev/null 2>&1; true"
+  $CT_DOCKER exec \$ct loginctl enable-linger $CT_USER
+  $CT_DOCKER exec \$ct systemctl start user@$CT_UID.service
+  $CT_DOCKER cp /tmp/$T-pb \$ct:$CT_HOME/pb
+  $CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/pb; chmod 755 $CT_HOME/pb'
   \$X bash -c 'cd ~ && ./pb install >/dev/null'
   NAME=\$name TOKEN=/tmp/\$ct-token python3 - <<'PY'
 import json, os, re, subprocess
@@ -42,14 +43,14 @@ token = re.search(r"PB_TOKEN='([A-Za-z0-9]+)'", added["data"]["linux_macos_comma
 with open(os.open(os.environ["TOKEN"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     f.write(token)
 PY
-  sudo -n docker cp /tmp/\$ct-token \$ct:/home/pbt/token; rm -f /tmp/\$ct-token
-  sudo -n docker exec \$ct bash -c 'chown pbt:pbt /home/pbt/token; chmod 600 /home/pbt/token'
-  \$X /home/pbt/.local/bin/pb pair --enrollment-token-file /home/pbt/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
-  \$X rm -f /home/pbt/token
+  $CT_DOCKER cp /tmp/\$ct-token \$ct:$CT_HOME/token; rm -f /tmp/\$ct-token
+  $CT_DOCKER exec \$ct bash -c 'chown $CT_USER:$CT_USER $CT_HOME/token; chmod 600 $CT_HOME/token'
+  \$X $CT_HOME/.local/bin/pb pair --enrollment-token-file $CT_HOME/token --name \$name --json | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["ok"],d;print("MACHINE_ID="+d["data"]["machine_id"])'
+  \$X rm -f $CT_HOME/token
 }
 # the target: OpenSSH (paired AFTER sshd runs, so the setup user pbt is registered with port 22) 
 fresh $T $ALIAS "openssh-server"
-sudo -n docker exec $T bash -c "systemctl enable --now ssh >/dev/null 2>&1"
+$CT_DOCKER exec $T bash -c "systemctl enable --now ssh >/dev/null 2>&1"
 fresh $C $ALIAS-c "openssh-client"
 EOF
 )
@@ -70,21 +71,21 @@ if [ "$PHASE" = warm ]; then
 fi
 echo "CASE $PHASE [$(timeout 90 ssh "$HOST" true </dev/null 2>&1 | tr '\n' ' ' | cut -c1-300)]"
 RUN
-ssh "$HOST" "sudo -n docker exec -i -u pbt $C sh -c 'cat > /home/pbt/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
-X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 300 bash /home/pbt/run.sh $ALIAS"
+ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $C sh -c 'cat > $CT_HOME/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
+X="$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $C timeout 300 bash $CT_HOME/run.sh $ALIAS"
 warm=$(ssh "$HOST" "$X warm" 2>&1)
 grep -q warm-ok <<<"$warm" || finish FAIL "no session before the refusals: $(tail -c 200 <<<"$warm" | tr '\n' ' ')"
 res=$(ssh "$HOST" "bash -s" <<EOF 2>&1
-sudo -n docker exec $T bash -c 'systemctl stop ssh.socket ssh 2>/dev/null; true'
+$CT_DOCKER exec $T bash -c 'systemctl stop ssh.socket ssh 2>/dev/null; true'
 $X sshd_stopped
-sudo -n docker exec $T bash -c 'systemctl start ssh 2>/dev/null; true'
+$CT_DOCKER exec $T bash -c 'systemctl start ssh 2>/dev/null; true'
 sleep 5
-sudo -n docker pause $T >/dev/null
+$CT_DOCKER pause $T >/dev/null
 $X machine_offline
-sudo -n docker unpause $T >/dev/null
-sudo -n docker exec -u pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C systemctl --user stop paperboatd
+$CT_DOCKER unpause $T >/dev/null
+$CT_DOCKER exec -u $CT_USER -e XDG_RUNTIME_DIR=$CT_RUNDIR $C systemctl --user stop paperboatd
 $X service_stopped
-sudo -n docker exec -u pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C systemctl --user start paperboatd
+$CT_DOCKER exec -u $CT_USER -e XDG_RUNTIME_DIR=$CT_RUNDIR $C systemctl --user start paperboatd
 EOF
 )
 detail=$(grep -E "^CASE " <<<"$res" | tr '\n' ' ')
