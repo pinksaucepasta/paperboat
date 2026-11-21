@@ -20,8 +20,9 @@ import (
 // So the task runs at Normal priority, the image is read once before it is registered (warmGuardImage), and one
 // attempt gets a minute; a second attempt follows only when the first still shows no pipe.
 var (
-	// One attempt outlasts the guard's own bounded start-up (rules, then the local CA), as the Unix install wait does.
-	guardAttemptTimeout = guardInstallReadyTimeout
+	// shortcut: two attempts must fit the 4 min elevated activation (elevation.RuntimeActivationDuration), so an
+	// attempt cannot outlast the guard's own CA start-up (guardTrustTimeout) as the Unix wait does; revisit with that budget.
+	guardAttemptTimeout = time.Minute
 	guardStartAttempts  = 2
 )
 
