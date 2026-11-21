@@ -239,7 +239,8 @@ func (w *RuntimeCarrierWorker) routes() []edgehttp.DataCarrierPreviewRoute {
 	return out
 }
 
-func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute) {
+func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute, reason string) {
+	slog.Info("runtime_route_detached", "route_id", r.RouteID, "endpoint_id", r.PreviewID, "reason", reason)
 	if r.EndpointRoute {
 		_ = w.Endpoints.Detach(r.RouteID, r.Identity, r.Revision)
 		return
@@ -250,7 +251,8 @@ func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute) {
 	}
 }
 
-func (w *RuntimeCarrierWorker) detachAdmission(a datacarrier.ExpectedAdmission) {
+func (w *RuntimeCarrierWorker) detachAdmission(a datacarrier.ExpectedAdmission, reason string) {
+	slog.Info("runtime_route_detached", "route_id", a.RouteID, "endpoint_id", a.PreviewID, "reason", reason)
 	_ = w.registry(a).DetachAdmission(a)
 	if w.BrowserTerminalHub != nil && !a.EndpointRoute() {
 		w.BrowserTerminalHub.DeactivateRoute(a.RouteID, browserTerminalFence(a))
@@ -393,6 +395,7 @@ func (w *RuntimeCarrierWorker) applyEndpointPull(parent context.Context, pull en
 // assignment change this worker had not seen.
 func (w *RuntimeCarrierWorker) applyEndpoints(parent context.Context, update control.EndpointUpdate) (news bool, failure error) {
 	next, expiry := mergeEndpointUpdate(w.endpointSet, update)
+	logEndpointRemovals(w.endpointSet, next, update)
 	if update.Complete {
 		w.endpointFullAt = time.Now()
 	}
@@ -452,6 +455,32 @@ func mergeEndpointUpdate(current []runtimewire.Admission, update control.Endpoin
 	return next, expiry
 }
 
+// detachReason names why a held route is detached: no longer expected, or expected with another admission.
+func detachReason(expected bool) string {
+	if expected {
+		return "admission_changed"
+	}
+	return "not_expected"
+}
+
+// logEndpointRemovals logs each endpoint route of current that next drops: one the server answered
+// as removed (a delta) or one missing from a full set.
+func logEndpointRemovals(current, next []runtimewire.Admission, update control.EndpointUpdate) {
+	kept := make(map[string]bool, len(next))
+	for _, a := range next {
+		kept[a.Binding.RouteID] = true
+	}
+	reason := "server_removed"
+	if update.Complete {
+		reason = "absent_from_full_set"
+	}
+	for _, a := range current {
+		if !kept[a.Binding.RouteID] {
+			slog.Info("endpoint_route_removed", "route_id", a.Binding.RouteID, "endpoint_id", a.EndpointID, "reason", reason)
+		}
+	}
+}
+
 func endpointSetEqual(a, b []runtimewire.Admission) bool {
 	if len(a) != len(b) {
 		return false
@@ -497,7 +526,7 @@ func (w *RuntimeCarrierWorker) withdraw() {
 			if w.Expected.Superseded(r.Identity, r.RouteID, time.Now().UTC()) {
 				continue
 			}
-			w.detachRoute(r)
+			w.detachRoute(r, detachReason(ok))
 		}
 	}
 }
@@ -532,7 +561,7 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 	var drainEnd <-chan time.Time
 	defer func() {
 		for _, a := range attached {
-			w.detachAdmission(a)
+			w.detachAdmission(a, "carrier_closed")
 		}
 		w.changed()
 	}()
@@ -564,7 +593,7 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 				}
 			}
 			if !ok || !runtimeAdmissionEqual(a, next) {
-				w.detachAdmission(a)
+				w.detachAdmission(a, detachReason(ok))
 				delete(attached, key)
 				changed = true
 			}

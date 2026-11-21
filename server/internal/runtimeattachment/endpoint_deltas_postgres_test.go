@@ -82,6 +82,16 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 		len(changed.RemovedRouteIDs) != 1 || changed.RemovedRouteIDs[0] != first {
 		t.Fatalf("delta after a change = %+v, %v", changed, err)
 	}
+	// A removed row names the condition that failed; a live one says so.
+	reasons, err := endpoints.RemovalReasons(ctx, f.database.Pool(), f.node, f.edge.ProcessEpoch, []string{first, second})
+	if err != nil || reasons[first] != "endpoint_not_live" || reasons[second] != "live_now" {
+		t.Fatalf("removal reasons = %v, %v", reasons, err)
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now()-interval '1 minute' WHERE id=$1`, f.node)
+	if reasons, err = endpoints.RemovalReasons(ctx, f.database.Pool(), f.node, f.edge.ProcessEpoch, []string{second}); err != nil || reasons[second] != "edge_heartbeat_stale" {
+		t.Fatalf("removal reason with a stale edge = %v, %v", reasons, err)
+	}
+	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now() WHERE id=$1`, f.node)
 	// An access change arrives as the updated admission.
 	f.exec(t, `UPDATE endpoint_edge_assignments SET changed_at=now()-interval '1 minute' WHERE edge_node_id IN ($1,$2)`, f.node, f.backupNode)
 	f.exec(t, `UPDATE endpoints SET access_mode='private' WHERE id=$1`, second)

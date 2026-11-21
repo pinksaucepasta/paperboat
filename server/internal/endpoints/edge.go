@@ -216,3 +216,46 @@ WHERE x.edge_node_id=$1 AND x.edge_process_epoch=$2 AND x.changed_at>$3 AND e.ki
 	}
 	return *changed, nil
 }
+
+// RemovalReasons names, for each route a pull answered as removed (EdgeAdmissionsChanged), the first
+// condition that failed: the assignment and endpoint checks, then runtime_carrier_valid's (migration
+// 486) in its order. Run only for removed rows, so a hot pull pays nothing while every row is live.
+func RemovalReasons(ctx context.Context, q Querier, nodeID, epoch string, routeIDs []string) (map[string]string, error) {
+	rows, err := q.Query(ctx, `SELECT x.route_id, CASE
+ WHEN x.desired<>'active' THEN 'assignment_removed'
+ WHEN NOT (`+liveEndpoint+`) THEN 'endpoint_not_live'
+ WHEN a.route_id IS NULL THEN 'carrier_session_gone'
+ WHEN NOT (a.ready OR a.expires_at>now()) THEN 'carrier_not_ready_expired'
+ WHEN m.id IS NULL OR m.user_id<>a.account_id OR m.revoked_at IS NOT NULL OR m.deleted_at IS NOT NULL OR m.seat_state<>'occupied' THEN 'machine_not_active'
+ WHEN m.installation_generation<>a.installation_generation OR m.worker_generation<a.worker_generation OR m.public_identity_key<>a.public_identity_key THEN 'machine_identity_changed'
+ WHEN u.id IS NULL OR u.status<>'active' THEN 'account_not_active'
+ WHEN r.id IS NULL OR r.environment_id<>m.environment_id OR r.desired_revision<>a.route_revision OR r.kind<>'runtime_https_wss'
+  OR r.desired_state NOT IN ('attached','replacing') OR r.public_host<>r.managed_public_host THEN 'carrier_route_changed'
+ WHEN env.id IS NULL OR env.desired_state<>'active' THEN 'environment_not_active'
+ WHEN n.id IS NULL OR n.process_epoch<>a.edge_process_epoch OR NOT ((n.ready AND n.state='ready') OR (n.state='draining' AND n.drain_deadline>now()))
+  OR (n.drain_deadline IS NOT NULL AND n.drain_deadline<=now()) THEN 'edge_not_ready'
+ WHEN n.last_heartbeat_at<=now()-interval '30 seconds' OR n.registry_expires_at<=now() THEN 'edge_heartbeat_stale'
+ WHEN NOT (n.roles @> ARRAY['edge']::text[] AND n.transports @> ARRAY['http2','http3']::text[]) THEN 'edge_capabilities'
+ WHEN NOT (paperboat.node_edge_eligible_core(n.id,a.account_id,m.owner_team_id) OR paperboat.node_managed_edge_eligible(n.id,a.account_id,m.owner_team_id)) THEN 'edge_not_eligible'
+ ELSE 'live_now' END
+FROM endpoint_edge_assignments x JOIN endpoints e ON e.id=x.endpoint_id
+LEFT JOIN runtime_carrier_attachments a ON a.machine_id=e.agent_machine_id AND a.edge_node_id=x.edge_node_id
+ AND a.edge_process_epoch=x.edge_process_epoch AND a.session_id=x.carrier_session_id AND a.agent_capabilities @> ARRAY['endpoints']::text[]
+LEFT JOIN user_machines m ON m.id=a.machine_id LEFT JOIN users u ON u.id=a.account_id
+LEFT JOIN control_routes r ON r.id=a.route_id LEFT JOIN control_environments env ON env.id=r.environment_id
+LEFT JOIN control_tunnel_nodes n ON n.id=a.edge_node_id
+WHERE x.edge_node_id=$1 AND x.edge_process_epoch=$2 AND x.route_id=ANY($3)`, nodeID, epoch, routeIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string, len(routeIDs))
+	for rows.Next() {
+		var route, reason string
+		if err := rows.Scan(&route, &reason); err != nil {
+			return nil, err
+		}
+		out[route] = reason
+	}
+	return out, rows.Err()
+}

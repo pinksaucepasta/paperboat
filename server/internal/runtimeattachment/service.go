@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
+	"log/slog"
 	"net"
 	"slices"
 	"strings"
@@ -609,6 +610,9 @@ func (s *Service) endpointDelta(ctx context.Context, edge previewattachment.Prev
 	} else {
 		routes, removed, last, err = endpoints.EdgeAdmissionsChanged(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-overlap), after, expires, endpointPageRows-1)
 		out.RemovedRouteIDs, out.ExpiresAt = removed, &expires
+		if err == nil && len(removed) != 0 {
+			logRemovals(ctx, s.DB.Pool(), edge, removed)
+		}
 		if err == nil && page == "" {
 			var changed time.Time
 			if changed, err = endpoints.TunnelsChangedAt(ctx, s.DB.Pool(), edge.NodeID, edge.ProcessEpoch, cursor.Add(-overlap)); !changed.IsZero() {
@@ -895,4 +899,17 @@ FROM user_machines m WHERE m.id=$1 AND m.user_id=$2`, proof.MachineID, proof.Use
 	return s.DB.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		return edgeset.EnsureTx(ctx, tx, scope, time.Now().UTC())
 	})
+}
+
+// logRemovals logs why each route a delta answers as removed is not live (diagnosis of a preview
+// that went 404 right after it was ready, 2026-11-21). A failed lookup is logged, never returned.
+func logRemovals(ctx context.Context, q endpoints.Querier, edge previewattachment.PreviewEdgeIdentity, removed []string) {
+	reasons, err := endpoints.RemovalReasons(ctx, q, edge.NodeID, edge.ProcessEpoch, removed)
+	if err != nil {
+		slog.Warn("endpoint_removal_reason_failed", "edge_node_id", edge.NodeID, "error", err.Error())
+		return
+	}
+	for _, route := range removed {
+		slog.Info("endpoint_route_removed", "edge_node_id", edge.NodeID, "route_id", route, "reason", reasons[route])
+	}
 }
