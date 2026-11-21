@@ -29,6 +29,12 @@ func CheckDaemonSignIn(cfg *Config, issuer string) error {
 }
 
 func checkSignInUnlocking(store ProfileStore, issuer string) error {
+	// Known locked at a terminal: unlock first, since a read would wait on a dialog nobody may see (SSH).
+	if stdinIsTerminal() && keychainLocked() {
+		if unlockErr := unlockKeychain(); unlockErr != nil {
+			return errors.Join(credentialStoreFailure("the macOS login keychain is locked", errKeychainLocked), unlockErr)
+		}
+	}
 	err := checkSignIn(store, issuer)
 	if err == nil || !stdinIsTerminal() {
 		return err

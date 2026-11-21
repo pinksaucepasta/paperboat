@@ -216,7 +216,7 @@ func (c *Config) TelemetryPath() string {
 // config dir (~/.config/paperboat/config.json on Unix).
 func DefaultPath() (string, error) {
 	if p := os.Getenv(EnvConfigPath); p != "" {
-		return p, nil
+		return filepath.Abs(p) // the user service is registered with this path and refuses a relative one
 	}
 	path, err := userpaths.Config("paperboat/config.json")
 	if err != nil {

@@ -82,6 +82,16 @@ func TestCheckSignInUnlocksAtTerminalOtherwiseNamesCommand(t *testing.T) {
 	if err := checkSignInUnlocking(store, issuer); err != nil || unlocks != 1 {
 		t.Fatalf("terminal: %v, unlocks %d", err, unlocks)
 	}
+	// Known locked in process: unlock before any read, so no read waits on a dialog.
+	defer func(previous func() bool) { keychainLocked = previous }(keychainLocked)
+	keychainLocked = func() bool { return locked }
+	locked, unlocks = true, 0
+	unlockKeychain = func() error { unlocks++; locked = false; return nil }
+	reads := 0
+	store.Secrets = countingKeychain{store.Secrets.(switchableKeychain), &reads, &locked}
+	if err := checkSignInUnlocking(store, issuer); err != nil || unlocks != 1 || reads == 0 {
+		t.Fatalf("known locked: %v, unlocks %d, reads %d", err, unlocks, reads)
+	}
 	locked = true
 	unlockKeychain = func() error { unlocks++; return errors.New("exit status 51") } // wrong password
 	if err := checkSignInUnlocking(store, issuer); !errors.Is(err, ErrCredentialStoreUnavailable) {
@@ -95,5 +105,29 @@ func TestBoundedKeychainKeepsPromptAtTerminal(t *testing.T) {
 	keychainLocked, stdinIsTerminal = func() bool { return true }, func() bool { return true }
 	if value, err := boundedKeychain(func() (string, error) { return "ok", nil }); err != nil || value != "ok" {
 		t.Fatalf("terminal: %q, %v", value, err)
+	}
+}
+
+// countingKeychain fails the test's expectations if a read happens while locked.
+type countingKeychain struct {
+	switchableKeychain
+	reads  *int
+	locked *bool
+}
+
+func (k countingKeychain) Get(ref string) (string, error) {
+	if *k.locked {
+		panic("keychain read while known locked")
+	}
+	*k.reads++
+	return k.switchableKeychain.Get(ref)
+}
+
+func TestDefaultPathMakesConfigOverrideAbsolute(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv(EnvConfigPath, "pb.json")
+	want, _ := filepath.Abs("pb.json")
+	if got, err := DefaultPath(); err != nil || got != want {
+		t.Fatalf("DefaultPath = %q, %v; want %q", got, err, want)
 	}
 }
