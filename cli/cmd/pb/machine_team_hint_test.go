@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -93,5 +95,21 @@ func TestResolvingAMachineAsksOnlyForItsName(t *testing.T) {
 	machine, err := resolveUserMachine(context.Background(), client, "build-host")
 	if err != nil || machine.ID != "machine_1" || len(queries) != 1 || queries[0] != "build-host" {
 		t.Fatalf("machine=%+v err=%v queries=%v", machine, err, queries)
+	}
+}
+
+// Piped stderr carries the remote command's stderr (pb exec), so the routing notice stays off it.
+func TestNoticeWriterDiscardsWhenNotTerminal(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	saved := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = saved }()
+	if got := defaultWorkspaceDependencies().resolutionNotice; got != io.Discard {
+		t.Fatalf("default resolution notice with piped stderr = %T, want io.Discard", got)
 	}
 }
