@@ -15,7 +15,7 @@ import (
 // unixPair returns both ends of a connected Unix stream pair.
 func unixPair(t *testing.T) (*net.UnixConn, *net.UnixConn) {
 	t.Helper()
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
