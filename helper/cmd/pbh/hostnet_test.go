@@ -502,7 +502,7 @@ func TestSplitIptablesLineDecodesQuotedArguments(t *testing.T) {
 		t.Fatalf("args %q owned=%v", args, ownedIptablesRule(args))
 	}
 	own := splitIptablesLine("-A INPUT -p udp -m multiport --dports 443,7273 -m comment --comment paperboat-edge -j ACCEPT")
-	if !ownedIptablesRule(own) || len(own) != 13 {
+	if !ownedIptablesRule(own) || len(own) != 14 {
 		t.Fatalf("own rule args %q", own)
 	}
 	if got := splitIptablesLine(`-A INPUT --comment "a \"b\" c" -j ACCEPT`); got[3] != `a "b" c` {
