@@ -154,7 +154,7 @@ func TestPeerSetRefusesDuplicatesAndBounds(t *testing.T) {
 }
 
 // handshake connects client to server over loopback TCP and reports both sides' handshake errors.
-func handshake(t *testing.T, server, client *tls.Config) (srvErr, cliErr error, state tls.ConnectionState) {
+func handshake(t *testing.T, server, client *tls.Config) (state tls.ConnectionState, srvErr, cliErr error) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -192,7 +192,7 @@ func handshake(t *testing.T, server, client *tls.Config) (srvErr, cliErr error, 
 	}
 	_ = cl.Close()
 	srvErr = <-done
-	return srvErr, cliErr, state
+	return state, srvErr, cliErr
 }
 
 func TestMutualPinHandshake(t *testing.T) {
@@ -206,7 +206,7 @@ func TestMutualPinHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srvErr, cliErr, state := handshake(t, ServerTLS(serverCert, EdgeForwardALPN, func() PeerSet { return set }), clientConfig)
+	state, srvErr, cliErr := handshake(t, ServerTLS(serverCert, EdgeForwardALPN, func() PeerSet { return set }), clientConfig)
 	if srvErr != nil || cliErr != nil {
 		t.Fatalf("pinned handshake failed: server %v client %v", srvErr, cliErr)
 	}
@@ -229,13 +229,13 @@ func TestPeerPinMismatchRefused(t *testing.T) {
 	}
 	t.Run("server presents a certificate other than the pin", func(t *testing.T) {
 		cfg, _ := ClientTLS(clientCert, EdgeForwardALPN, peerFor("server", strangerLeaf))
-		if _, cliErr, _ := handshake(t, serverConfig(known), cfg); !errors.Is(cliErr, ErrPinMismatch) {
+		if _, _, cliErr := handshake(t, serverConfig(known), cfg); !errors.Is(cliErr, ErrPinMismatch) {
 			t.Fatalf("client accepted a wrong server: %v", cliErr)
 		}
 	})
 	t.Run("client certificate not in the directory", func(t *testing.T) {
 		cfg, _ := ClientTLS(clientCert, EdgeForwardALPN, peerFor("server", serverLeaf))
-		srvErr, _, _ := handshake(t, serverConfig(empty), cfg)
+		_, srvErr, _ := handshake(t, serverConfig(empty), cfg)
 		if !errors.Is(srvErr, ErrPeerUnknown) {
 			t.Fatalf("server accepted an unknown node: %v", srvErr)
 		}
@@ -244,19 +244,19 @@ func TestPeerPinMismatchRefused(t *testing.T) {
 		oldCert, oldLeaf := testCert(t, time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour))
 		set, _ := NewPeerSet([]Peer{peerFor("old", oldLeaf)})
 		cfg, _ := ClientTLS(oldCert, EdgeForwardALPN, peerFor("server", serverLeaf))
-		if srvErr, _, _ := handshake(t, serverConfig(set), cfg); !errors.Is(srvErr, ErrPeerUnknown) {
+		if _, srvErr, _ := handshake(t, serverConfig(set), cfg); !errors.Is(srvErr, ErrPeerUnknown) {
 			t.Fatalf("server accepted an expired certificate: %v", srvErr)
 		}
 	})
 	t.Run("other ALPN", func(t *testing.T) {
 		cfg, _ := ClientTLS(clientCert, RelayMeshALPN, peerFor("server", serverLeaf))
-		if srvErr, cliErr, _ := handshake(t, serverConfig(known), cfg); srvErr == nil && cliErr == nil {
+		if _, srvErr, cliErr := handshake(t, serverConfig(known), cfg); srvErr == nil && cliErr == nil {
 			t.Fatal("ALPN mismatch accepted")
 		}
 	})
 	t.Run("no client certificate", func(t *testing.T) {
 		cfg := &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13, NextProtos: []string{EdgeForwardALPN}}
-		if srvErr, _, _ := handshake(t, serverConfig(known), cfg); srvErr == nil {
+		if _, srvErr, _ := handshake(t, serverConfig(known), cfg); srvErr == nil {
 			t.Fatal("server accepted a client without a certificate")
 		}
 	})
