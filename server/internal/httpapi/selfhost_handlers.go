@@ -197,7 +197,7 @@ func (h *SelfhostHandlers) handle(w http.ResponseWriter, r *http.Request, operat
 		b, e = selfhostRead(w, r)
 		var in selfhost.EnrollRequest
 		if e == nil {
-			e = selfhostDecode(b, &in)
+			e = decodeEnrollRequest(b, &in)
 		}
 		if operator {
 			in.Scope = scope
@@ -355,4 +355,18 @@ func selfhostInventoryOptions(r *http.Request) (selfhost.InventoryOptions, error
 		return options, selfhost.ErrInvalid
 	}
 	return options, nil
+}
+
+// decodeEnrollRequest refuses unknown fields, and an expect_* field that is present but null or empty (omit it instead).
+func decodeEnrollRequest(body []byte, in *selfhost.EnrollRequest) error {
+	var raw map[string]json.RawMessage
+	if err := selfhostDecodeStrict(body, in); err != nil || json.Unmarshal(body, &raw) != nil {
+		return selfhost.ErrInvalid
+	}
+	for _, k := range []string{"expect_region", "expect_capability"} {
+		if v, ok := raw[k]; ok && (string(v) == "null" || string(v) == `""`) {
+			return selfhost.ErrInvalid
+		}
+	}
+	return nil
 }

@@ -13,6 +13,7 @@ func TestRegionSlugBase(t *testing.T) {
 		"Home lab":                     "home-lab",
 		"  Home   lab  ":               "home-lab",
 		"Ünïcode":                      "unicode",
+		"Lab—West":                     "lab-west",
 		"Eu_West 1!":                   "eu-west-1",
 		"123":                          "r-123",
 		"9 lives":                      "r-9-lives",

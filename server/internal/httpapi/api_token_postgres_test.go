@@ -64,6 +64,19 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	handler := NewRouter(Options{Config: config.Default(), Auth: auth.NewService(store, writer, nil, []string{"test-api-token-key"}, false),
 		DeviceAuth: auth.NewDeviceService(store, writer, config.Default().CLIAuth, []string{"test-api-token-session-key"}),
 		Workspaces: workspace.New(store), APITokens: tokens, Favorites: favorites.NewService(store), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	// Regions are console-only: a valid API token is refused before the handler runs, on every region route.
+	regionsOnly := NewRouter(Options{Config: config.Default(), Auth: auth.NewService(store, writer, nil, []string{"test-api-token-key"}, false),
+		DeviceAuth: auth.NewDeviceService(store, writer, config.Default().CLIAuth, []string{"test-api-token-session-key"}),
+		Workspaces: workspace.New(store), APITokens: tokens, Selfhost: &SelfhostHandlers{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	for _, route := range [][2]string{{"GET", "/v1/selfhost/regions"}, {"POST", "/v1/selfhost/regions"}, {"PATCH", "/v1/selfhost/regions/lab"}, {"DELETE", "/v1/selfhost/regions/lab"}} {
+		req := httptest.NewRequest(route[0], route[1], strings.NewReader(`{"name":"x"}`))
+		req.Header.Set("Authorization", "Bearer "+ownerSecret)
+		rec := httptest.NewRecorder()
+		regionsOnly.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s with an API token = %d %s", route[0], route[1], rec.Code, rec.Body.String())
+		}
+	}
 	lastRetryAfter := ""
 	do := func(method, path, bearer, body string) (int, map[string]any) {
 		t.Helper()

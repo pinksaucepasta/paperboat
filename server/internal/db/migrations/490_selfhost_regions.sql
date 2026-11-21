@@ -1,4 +1,5 @@
 -- +goose Up
+-- small-table: created empty here; at most 64 regions per scope.
 SET LOCAL lock_timeout = '5s';
 -- The owner's own regions: a display name ("Home lab") for the slug that nodes, pairs and pbh carry. The slug never
 -- changes; only the name is renamed. A region that exists only as a node's region string (the default "selfhost", or one

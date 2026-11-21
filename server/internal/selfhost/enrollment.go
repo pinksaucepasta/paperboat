@@ -304,7 +304,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	if e = checkEnrollExpectation(in, inspection); e != nil {
 		return nil, e
 	}
-	components, claimID, e := s.reserve(ctx, actor, scope, inspection, pin)
+	components, claimID, e := s.reserve(ctx, actor, scope, inspection, pin, in.ExpectRegion)
 	if e != nil {
 		return nil, e
 	}
@@ -340,7 +340,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	}
 	return s.ListScoped(ctx, actor, scope, operator)
 }
-func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Inspection, pin []byte) (registered []RegisteredComponent, resultClaimID string, returnErr error) {
+func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Inspection, pin []byte, expectRegion string) (registered []RegisteredComponent, resultClaimID string, returnErr error) {
 	tx, e := s.database.SQL().BeginTx(ctx, nil)
 	if e != nil {
 		return nil, "", e
@@ -354,6 +354,9 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 		return nil, "", e
 	}
 	if e = lockScope(ctx, tx, scope); e != nil {
+		return nil, "", e
+	}
+	if e = checkReserveRegions(ctx, tx, scope, i, expectRegion); e != nil {
 		return nil, "", e
 	}
 	var existing int
@@ -413,6 +416,10 @@ func (s *Service) reserve(ctx context.Context, actor string, scope Scope, i Insp
 		}
 		if e != sql.ErrNoRows {
 			return nil, "", e
+		}
+		if existing != 0 {
+			// The key is already registered with other components (or in another scope): never add one beside them.
+			return nil, "", ErrUsed
 		}
 		if !time.Unix(i.ExpiresAt, 0).After(s.now()) {
 			return nil, "", ErrExpired
@@ -511,6 +518,36 @@ func checkEnrollExpectation(in EnrollRequest, i Inspection) error {
 			region = in.ExpectRegion
 		}
 		return invalidRegion("This machine was installed as %s, not %s: run pbh install --%s --region %s on it again.", withArticle(enrollRole(c.Capability)), withArticle(enrollRole(in.ExpectCapability)), enrollRole(in.ExpectCapability), region)
+	}
+	return nil
+}
+
+// checkReserveRegions runs under the scope lock. A claim for an expected region refuses when that region is gone (it
+// was removed after the dialog opened). A component that would start a new implicit region refuses when its slug is
+// another region's display name, so two regions never share a name.
+func checkReserveRegions(ctx context.Context, tx *sql.Tx, scope Scope, i Inspection, expectRegion string) error {
+	if expectRegion != "" {
+		known, _, err := regionKnown(ctx, tx, scope, expectRegion)
+		if err != nil {
+			return err
+		}
+		if !known {
+			return invalidRegion("Region %s was removed: create it again, then add this machine.", expectRegion)
+		}
+		return nil
+	}
+	for _, c := range i.Components {
+		known, _, err := regionKnown(ctx, tx, scope, c.Region)
+		if err != nil || known {
+			return err
+		}
+		taken, err := readRegionTaken(ctx, tx, scope)
+		if err != nil {
+			return err
+		}
+		if owner, found := taken.nameOwner(c.Region, c.Region); found {
+			return invalidRegion("Region %s is already the name of another region: rename that region, or run pbh install --region with another name on this machine.", owner)
+		}
 	}
 	return nil
 }

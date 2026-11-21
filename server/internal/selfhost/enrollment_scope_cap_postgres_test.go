@@ -60,10 +60,10 @@ SELECT $1||n,$1||n,sha256(convert_to($1||n,'UTF8')),sha256(convert_to('r'||$1||n
 	inspection := Inspection{InstallationKey: newKey(), Name: "n", EndpointHost: "e.example.test", ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		Components: []Component{{Capability: "relay", TCPPort: 443, QUICPort: 444, Region: "t", FailureDomain: "t", CapacityLimit: 1}}}
 	withKey := func(i Inspection, key string) Inspection { i.InstallationKey = key; return i }
-	if _, _, err := service.reserve(ctx, "actor", Scope{Kind: "account", ID: prefix + "other"}, inspection, make([]byte, 32)); err != nil {
+	if _, _, err := service.reserve(ctx, "actor", Scope{Kind: "account", ID: prefix + "other"}, inspection, make([]byte, 32), ""); err != nil {
 		t.Fatalf("another scope's enrollment: %v", err)
 	}
-	if _, _, err := service.reserve(ctx, "actor", Scope{Kind: "account", ID: prefix + "crowded"}, withKey(inspection, newKey()), make([]byte, 32)); err == nil || !errors.Is(err, ErrLimit) {
+	if _, _, err := service.reserve(ctx, "actor", Scope{Kind: "account", ID: prefix + "crowded"}, withKey(inspection, newKey()), make([]byte, 32), ""); err == nil || !errors.Is(err, ErrLimit) {
 		t.Fatalf("the crowded scope's own enrollment = %v, want ErrLimit", err)
 	}
 }

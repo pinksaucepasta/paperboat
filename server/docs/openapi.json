@@ -13995,7 +13995,7 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 48,
+            "maxLength": 63,
             "description": "The display name the owner gave the region (console only, renameable); the slug while an implicit region has not been named."
           },
           "machines": {

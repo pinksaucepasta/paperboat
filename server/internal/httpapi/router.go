@@ -417,10 +417,12 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("PUT /v1/edges/pair", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, requireWorkspaceSelection(opts.Workspaces, edgePairPut(opts.Selfhost.Service))))))
 			}
 			mux.Handle("POST /v1/selfhost/enrollments", write)
-			mux.Handle("GET /v1/selfhost/regions", read)
-			mux.Handle("POST /v1/selfhost/regions", write)
-			mux.Handle("PATCH /v1/selfhost/regions/{regionID}", write)
-			mux.Handle("DELETE /v1/selfhost/regions/{regionID}", write)
+			// Regions are console-only: a browser session, never an API token (a token's workspace binding is not checked here).
+			regionWrite := requireAuth(opts.Auth, requireCSRF(opts.Auth, account))
+			mux.Handle("GET /v1/selfhost/regions", requireAuth(opts.Auth, account))
+			mux.Handle("POST /v1/selfhost/regions", regionWrite)
+			mux.Handle("PATCH /v1/selfhost/regions/{regionID}", regionWrite)
+			mux.Handle("DELETE /v1/selfhost/regions/{regionID}", regionWrite)
 			mux.Handle("GET /v1/selfhost/installations", read)
 			mux.Handle("GET /v1/selfhost/installations/{installationID}", read)
 			mux.Handle("DELETE /v1/selfhost/installations/{installationID}", write)

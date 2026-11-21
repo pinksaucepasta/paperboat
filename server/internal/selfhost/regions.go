@@ -146,7 +146,7 @@ func validRegionName(name string) (string, error) {
 	return name, nil
 }
 
-// regionSlugBase derives a slug from a display name: NFKD, non-ASCII dropped, lowercase, runs of anything but
+// regionSlugBase derives a slug from a display name: NFKD, combining marks dropped, lowercase, runs of anything but
 // [a-z0-9] become one '-', trimmed of '-'; a result that is empty or does not start with a letter gets the prefix "r-"
 // (so "123" is "r-123"); cut to 40 characters. The result always satisfies validRegion (for an empty result, "r").
 func regionSlugBase(name string) string {
@@ -160,8 +160,8 @@ func regionSlugBase(name string) string {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			b.WriteRune(r)
 			dash = false
-		case r >= utf8.RuneSelf:
-			// Dropped, and not a separator: "Ünïcode" is "unicode".
+		case unicode.Is(unicode.Mn, r):
+			// Combining marks are dropped, not separators: "Ünïcode" is "unicode"; "Lab—West" is "lab-west".
 		default:
 			if !dash && b.Len() > 0 {
 				b.WriteByte('-')
@@ -266,6 +266,10 @@ func (t regionTaken) nameOwner(name, skip string) (string, bool) {
 	return owner.display, true
 }
 
+func regionLimitError() error {
+	return &regionError{message: fmt.Sprintf("A scope can have at most %d named regions; remove one first.", regionLimit), base: ErrLimit}
+}
+
 func regionExists(name string) error {
 	return &regionError{message: fmt.Sprintf("A region called %q already exists.", name), base: ErrRegionExists}
 }
@@ -313,7 +317,7 @@ func (s *Service) CreateRegion(ctx context.Context, actor string, scope Scope, n
 			return err
 		}
 		if count >= regionLimit {
-			return &regionError{message: fmt.Sprintf("A scope can have at most %d named regions; remove one first.", regionLimit), base: ErrLimit}
+			return regionLimitError()
 		}
 		slug := uniqueRegionSlug(regionSlugBase(name), taken.slugs)
 		if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.selfhost_regions(scope_kind,scope_id,slug,display_name) VALUES($1,$2,$3,$4)`, scope.Kind, scope.ID, slug, name); err != nil {
@@ -372,6 +376,13 @@ func (s *Service) RenameRegion(ctx context.Context, actor string, scope Scope, i
 		if owner, found := taken.nameOwner(name, id); found {
 			return regionExists(owner)
 		}
+		var stored, count int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE slug=$3),count(*) FROM paperboat.selfhost_regions WHERE scope_kind=$1 AND scope_id=$2`, scope.Kind, scope.ID, id).Scan(&stored, &count); err != nil {
+			return err
+		}
+		if stored == 0 && count >= regionLimit {
+			return regionLimitError()
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO paperboat.selfhost_regions(scope_kind,scope_id,slug,display_name) VALUES($1,$2,$3,$4)
 ON CONFLICT(scope_kind,scope_id,slug) DO UPDATE SET display_name=excluded.display_name,updated_at=now()`, scope.Kind, scope.ID, id, name)
 		return regionConflict(err, name)
@@ -413,7 +424,11 @@ func (s *Service) DeleteRegion(ctx context.Context, actor string, scope Scope, i
 		// Servers: any non-retired node of the scope in the region, claimed or not. Its pool entry goes with it.
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM (`+regionNodesSQL+`) x WHERE region=$3),
  EXISTS(SELECT 1 FROM paperboat.workspace_edge_sets s WHERE s.scope_kind=$1 AND s.scope_id=$2 AND $3=ANY(s.regions))
-  OR ($1='team' AND EXISTS(SELECT 1 FROM paperboat.workspace_edge_sets s WHERE s.scope_kind='account' AND s.mode='self-hosted-only' AND $3=ANY(s.regions) AND paperboat.selfhost_scope_visible($1,$2,s.scope_id)))`,
+  OR ($1='team' AND EXISTS(SELECT 1 FROM paperboat.workspace_edge_sets s WHERE s.scope_kind='account' AND s.mode='self-hosted-only' AND $3=ANY(s.regions) AND paperboat.selfhost_scope_visible($1,$2,s.scope_id)
+   AND NOT EXISTS(SELECT 1 FROM paperboat.selfhost_regions o WHERE o.scope_kind='account' AND o.scope_id=s.scope_id AND o.slug=$3)
+   AND NOT EXISTS(SELECT 1 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.scope_kind='account' AND i.scope_id=s.scope_id AND n.region=$3)))
+  OR EXISTS(SELECT 1 FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id JOIN paperboat.selfhost_pool_policies p ON i.id=ANY(p.installation_ids)
+   WHERE i.scope_kind=$1 AND i.scope_id=$2 AND n.region=$3)`,
 			scope.Kind, scope.ID, id).Scan(&machines, &pairs); err != nil {
 			return err
 		}
