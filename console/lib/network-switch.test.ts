@@ -68,7 +68,7 @@ test("the pair is saved as regions, and drain and resume name the installation a
       return json(200, {
         data: {
           installation_id: "inst/1", node_id: "n", endpoint_host: "h.example.test", name: "n", region: "home", capability: "tunnel",
-          ready: false, trust_notice: "", scope_kind: "account", scope_id: "u", enrollment_state: "enrolled",
+          ready: false, draining: true, trust_notice: "", scope_kind: "account", scope_id: "u", enrollment_state: "enrolled",
         },
       })
     return json(200, { data: { kind: "self_hosted", primary: region("r1"), fallback: region("r2") } })
