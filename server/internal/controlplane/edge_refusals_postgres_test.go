@@ -16,6 +16,7 @@ import (
 // A heartbeat's flood-protection refusals add up per hostname, edge and hour; malformed entries are
 // skipped, and counts past retention are deleted by the same writer.
 func TestEdgeRefusalsAccumulateHourlyAndExpire(t *testing.T) {
+	t.Setenv("PGTZ", "Asia/Kolkata") // a half-hour offset session zone must still bucket by UTC hour
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())

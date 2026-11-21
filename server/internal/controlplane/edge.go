@@ -467,8 +467,8 @@ func (s *EdgeService) recordEdgeRefusals(ctx context.Context, node string, refus
 	}
 	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO edge_refusals(hostname,edge_node_id,hour,refused)
-SELECT h, $2, date_trunc('hour',$3::timestamptz), sum(c) FROM unnest($1::text[],$4::bigint[]) AS u(h,c) GROUP BY h
-ON CONFLICT (hostname,edge_node_id,hour) DO UPDATE SET refused=edge_refusals.refused+excluded.refused`, hosts, node, now, counts); err != nil {
+SELECT h, $2, $3::timestamptz, sum(c) FROM unnest($1::text[],$4::bigint[]) AS u(h,c) GROUP BY h
+ON CONFLICT (hostname,edge_node_id,hour) DO UPDATE SET refused=edge_refusals.refused+excluded.refused`, hosts, node, now.Truncate(time.Hour), counts); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `DELETE FROM edge_refusals WHERE hour<$1`, now.Add(-edgeRefusalRetention))

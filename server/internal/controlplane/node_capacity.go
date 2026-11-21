@@ -89,9 +89,9 @@ func RecordNodeCapacity(ctx context.Context, store *db.DB, sample NodeSample, no
 		}
 		// The same bytes by hour and kind of node, for the operator traffic dashboard (a zero delta still marks the node as reporting).
 		_, err = tx.Exec(ctx, `INSERT INTO paperboat.traffic_hourly(hour,category,node_id,upload_bytes,download_bytes)
- SELECT date_trunc('hour',$1::timestamptz),$2||CASE WHEN EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=$3 AND i.scope_kind IN ('account','team')) THEN '_self_hosted' ELSE '_managed' END,$3,$4,$5
+ SELECT $1::timestamptz,$2||CASE WHEN EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=$3 AND i.scope_kind IN ('account','team')) THEN '_self_hosted' ELSE '_managed' END,$3,$4,$5
  ON CONFLICT(hour,category,node_id,shard) DO UPDATE SET upload_bytes=traffic_hourly.upload_bytes+EXCLUDED.upload_bytes,download_bytes=traffic_hourly.download_bytes+EXCLUDED.download_bytes`,
-			now, sample.Role, sample.NodeID, deltaIn, deltaOut)
+			now.Truncate(time.Hour), sample.Role, sample.NodeID, deltaIn, deltaOut)
 		return err
 	})
 }
