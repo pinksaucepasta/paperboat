@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,5 +155,21 @@ func TestNativeRepairWindowsTreeLeavesSharedLockDirectoriesAlone(t *testing.T) {
 	}
 	if !windowssecurity.ProtectedDACLMatches(lock, sddl) {
 		t.Fatal("the repair rewrote the shared lock directory's DACL")
+	}
+}
+
+// The repair skips a shared lock directory, so the tree's inheritable root DACL must not reach into it: one whose
+// DACL is not protected (a plain directory, which could hold a hardlink to a file outside the tree) is refused.
+func TestNativeRepairWindowsTreeRefusesUnprotectedLockDirectory(t *testing.T) {
+	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "profile"+config.SharedLockDirectorySuffix), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := repairWindowsTreeACL(root, tokenUser.User.Sid.String()); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("repair of a tree with an unprotected lock directory = %v, want ErrInvalidRequest", err)
 	}
 }

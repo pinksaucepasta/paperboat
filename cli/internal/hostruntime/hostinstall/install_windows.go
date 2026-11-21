@@ -4174,6 +4174,9 @@ func PrepareWindowsLocalDaemonState(runtimeStateRoot, ownerSID string) (resultEr
 	if err != nil || !strings.EqualFold(rootFinal, windowsExpectedFinalPath(root)) {
 		return errors.Join(err, ErrInvalidRequest)
 	}
+	if err := repairWindowsLocalDaemonTreeChildren(root, handle, owner, false); err != nil {
+		return err // validate first: the root's inheritable DACL reaches hardlinked children
+	}
 	access := windowsLocalDaemonStateRootDACL(ownerSID)
 	if err := applyWindowsHandleOwnedDACL(handle, owner, access); err != nil {
 		return err
@@ -4181,7 +4184,7 @@ func PrepareWindowsLocalDaemonState(runtimeStateRoot, ownerSID string) (resultEr
 	// Existing lock, owner, and diagnostic files can retain a protected DACL
 	// from an earlier S4U session. Repair the bounded Paperboat-owned subtree
 	// while the root remains pinned against replacement.
-	if err := repairWindowsLocalDaemonTreeChildren(root, handle, owner); err != nil {
+	if err := repairWindowsLocalDaemonTreeChildren(root, handle, owner, true); err != nil {
 		return err
 	}
 	if err := checkWindowsRuntimeHandleSecurity(handle, owner, access); err != nil {
@@ -4259,7 +4262,8 @@ func openWindowsLocalDaemonStateObject(path string, directory bool) (windows.Han
 	return handle, nil
 }
 
-func repairWindowsLocalDaemonTreeChildren(root string, rootHandle windows.Handle, owner *windows.SID) error {
+// With apply false it only runs every check that can refuse; nothing changes until a full pass succeeds.
+func repairWindowsLocalDaemonTreeChildren(root string, rootHandle windows.Handle, owner *windows.SID, apply bool) error {
 	if !safeAbsolute(root) || owner == nil || !owner.IsValid() {
 		return ErrInvalidRequest
 	}
@@ -4275,11 +4279,6 @@ func repairWindowsLocalDaemonTreeChildren(root string, rootHandle windows.Handle
 		if path == root {
 			return nil
 		}
-		if entry.IsDir() && strings.HasSuffix(entry.Name(), config.SharedLockDirectorySuffix) {
-			// A shared credential lock is validated against its exact creation DACL (no inheritance flags): giving it the
-			// tree's inheritable one made it unreleasable and wedged the carrier until it was removed by hand.
-			return filepath.SkipDir
-		}
 		handle, err := openWindowsLocalDaemonStateObject(path, entry.IsDir())
 		if err != nil {
 			return err
@@ -4290,6 +4289,18 @@ func repairWindowsLocalDaemonTreeChildren(root string, rootHandle windows.Handle
 		if finalErr != nil || infoErr != nil || !strings.HasPrefix(strings.ToLower(finalPath), strings.ToLower(rootPrefix)) || !entry.IsDir() && information.NumberOfLinks != 1 {
 			return errors.Join(finalErr, infoErr, windows.CloseHandle(handle), ErrInvalidRequest)
 		}
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), config.SharedLockDirectorySuffix) {
+			// A shared credential lock is validated against its exact creation DACL (no inheritance flags): giving it the
+			// tree's inheritable one made it unreleasable and wedged the carrier until it was removed by hand. It is
+			// left alone only when its DACL is protected, so the tree's inherited ACEs stop at it.
+			if err := errors.Join(checkWindowsHandleDACLProtected(handle), windows.CloseHandle(handle)); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		if !apply {
+			return windows.CloseHandle(handle)
+		}
 		access := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + owner.String() + ")"
 		if entry.IsDir() {
 			access = windowssecurity.OwnerFullControlDirectoryDACL(owner.String())
@@ -4297,6 +4308,18 @@ func repairWindowsLocalDaemonTreeChildren(root string, rootHandle windows.Handle
 		applyErr := applyWindowsHandleOwnedDACL(handle, owner, access)
 		return errors.Join(applyErr, windows.CloseHandle(handle))
 	})
+}
+
+func checkWindowsHandleDACLProtected(handle windows.Handle) error {
+	descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	control, _, err := descriptor.Control()
+	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
+		return errors.Join(err, ErrInvalidRequest)
+	}
+	return nil
 }
 
 func windowsFinalPath(handle windows.Handle) (string, error) {
@@ -4439,10 +4462,15 @@ func repairWindowsTreeACL(root, ownerSID string) (resultErr error) {
 	if err != nil || !strings.EqualFold(rootFinal, windowsExpectedFinalPath(root)) {
 		return errors.Join(err, ErrInvalidRequest)
 	}
+	// Validate the whole tree first: the root's inheritable DACL propagates to children, including a hardlinked
+	// file whose other name lies outside the tree, so a late refusal would come after that file was changed.
+	if err := repairWindowsLocalDaemonTreeChildren(root, handle, owner, false); err != nil {
+		return err
+	}
 	if err := applyWindowsHandleOwnedDACL(handle, owner, windowssecurity.OwnerFullControlDirectoryDACL(ownerSID)); err != nil {
 		return err
 	}
-	return repairWindowsLocalDaemonTreeChildren(root, handle, owner)
+	return repairWindowsLocalDaemonTreeChildren(root, handle, owner, true)
 }
 func isAdministrator() bool { allowed, err := checkAdministrator(); return err == nil && allowed }
 func checkAdministrator() (allowed bool, resultErr error) {
