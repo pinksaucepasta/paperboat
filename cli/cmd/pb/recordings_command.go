@@ -64,7 +64,10 @@ func recordingsCobraCommand() *cobra.Command {
 	reset.Flags().String("team", "", "team whose key to reset; defaults to the active workspace")
 	reset.Flags().String("confirm", "", "the team id, typed to confirm")
 	reset.Flags().Bool("json", false, "print JSON")
-	keyGroup.AddCommand(replace, reset)
+	status := &cobra.Command{Use: "status", Short: "Show the team's recording key generation, whether you hold a copy and who is waiting for one", Long: "Show the state of the team's recording key without changing it: the current generation (0 when the team has none yet; it is created when the first recording starts in the console), whether you hold a copy of it, and which viewers with an ENV vault still wait for a copy. No key material is printed.", Args: commandArgs(cobra.NoArgs), RunE: actionRun(recordingsKeyStatus)}
+	status.Flags().String("team", "", "team to show; defaults to the active workspace")
+	status.Flags().Bool("json", false, "print JSON")
+	keyGroup.AddCommand(status, replace, reset)
 	group.AddCommand(list, play, export, keyGroup)
 	return group
 }
@@ -169,6 +172,58 @@ func recordingsKeyReplace(c *command.Context) error {
 	}
 	_, err = fmt.Fprintf(c.Writer, "Replaced the recording key of %s: generation %d, %d members got a copy. Machines follow it through the signed chain; older recordings stay readable.\n", team, key.Generation, len(request.Grants))
 	return err
+}
+
+// recordingsKeyStatus shows the team's recording key state, read-only: no key material is printed.
+func recordingsKeyStatus(c *command.Context) error {
+	client, err := backendClient(c)
+	if err != nil {
+		return err
+	}
+	team := strings.TrimSpace(c.String("team"))
+	if team == "" {
+		team = client.Workspace()
+	}
+	if team == "" {
+		team = wire.PersonalWorkspace
+	}
+	state, err := client.RecordingKeyState(c.Context, team)
+	if err != nil {
+		return err
+	}
+	out := recordingKeyStatusOf(team, state)
+	if c.Bool("json") {
+		return writeCLIJSON(c.Writer, out)
+	}
+	if out.Generation == 0 {
+		_, err = fmt.Fprintf(c.Writer, "%s has no recording key yet: it is created when the first recording starts in the console.\n", team)
+		return err
+	}
+	_, err = fmt.Fprintf(c.Writer, "%s: recording key generation %d; you hold a copy: %v; %d viewers waiting for a copy.\n", team, out.Generation, out.HoldsCopy, len(out.ViewersWaiting))
+	return err
+}
+
+type recordingKeyStatus struct {
+	Team           string   `json:"team"`
+	Generation     int64    `json:"generation"` // 0: no key yet
+	HoldsCopy      bool     `json:"holds_copy"`
+	ViewersWaiting []string `json:"viewers_waiting"`
+}
+
+// recordingKeyStatusOf: viewers waiting are those with a vault but no copy of the current generation, as the console's waitingViewers.
+func recordingKeyStatusOf(team string, state wire.KeyState) recordingKeyStatus {
+	out := recordingKeyStatus{Team: team, ViewersWaiting: []string{}}
+	if state.Key == nil {
+		return out
+	}
+	out.Generation = state.Key.Generation
+	out.HoldsCopy = state.MyKey != nil && state.MyKey.Generation == state.Key.Generation
+	for _, viewer := range state.Viewers {
+		if len(viewer.SharingPublicKey) > 0 && !viewer.HasGrant {
+			out.ViewersWaiting = append(out.ViewersWaiting, viewer.AccountID)
+		}
+	}
+	return out
 }
 
 // recordingKeyRequest makes the body of POST recording-key: a reset signed by the owner's writer key, or a replacement

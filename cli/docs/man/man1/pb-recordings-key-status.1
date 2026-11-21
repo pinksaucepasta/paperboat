@@ -1,0 +1,50 @@
+.nh
+.TH "PB-RECORDINGS-KEY-STATUS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings-key-status - Show the team's recording key generation, whether you hold a copy and who is waiting for one
+
+
+.SH SYNOPSIS
+\fBpb recordings key status [flags]\fP
+
+
+.SH DESCRIPTION
+Show the state of the team's recording key without changing it: the current generation (0 when the team has none yet; it is created when the first recording starts in the console), whether you hold a copy of it, and which viewers with an ENV vault still wait for a copy. No key material is printed.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for status
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--team\fP=""
+	team to show; defaults to the active workspace
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-recordings-key(1)\fP

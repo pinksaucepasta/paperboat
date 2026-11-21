@@ -45,3 +45,14 @@ func TestRecordingKeyRequestFirstKeyAndRefusals(t *testing.T) {
 		t.Fatalf("owner reset: %v", err)
 	}
 }
+
+func TestRecordingKeyStatusOf(t *testing.T) {
+	if got := recordingKeyStatusOf("t", wire.KeyState{}); got.Generation != 0 || got.HoldsCopy || len(got.ViewersWaiting) != 0 {
+		t.Fatalf("no key: %+v", got)
+	}
+	state := wire.KeyState{Key: &wire.Key{Generation: 2}, MyKey: &wire.SealedKey{Generation: 2}, Viewers: []wire.Viewer{
+		{AccountID: "a", SharingPublicKey: []byte{1}, HasGrant: true}, {AccountID: "b", SharingPublicKey: []byte{1}}, {AccountID: "novault"}}}
+	if got := recordingKeyStatusOf("t", state); got.Generation != 2 || !got.HoldsCopy || len(got.ViewersWaiting) != 1 || got.ViewersWaiting[0] != "b" {
+		t.Fatalf("status: %+v", got)
+	}
+}
