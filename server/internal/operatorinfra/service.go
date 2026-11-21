@@ -17,6 +17,7 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -39,7 +40,7 @@ var (
 	ErrForbidden = errors.New("infrastructure operation forbidden")
 	ErrNotFound  = errors.New("infrastructure resource not found")
 	ErrConflict  = errors.New("infrastructure operation conflict")
-	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, rotate, or an update that
+	// ErrLastServingEdge refuses to take an enabled region's last serving edge out (drain, retire, or an update that
 	// re-registers it): the region would leave the wildcard DNS names and every pair using it.
 	ErrLastServingEdge = errors.New("last serving edge of an enabled region")
 )
@@ -48,10 +49,14 @@ type Service struct {
 	store *db.DB
 	audit *audit.Writer
 	key   string
+	// probeIngress is selfhost.ProbePublicIngress; tests replace it.
+	probeIngress   func(ctx context.Context, host, node, credential string) (any, any, error)
+	ingressMu      sync.Mutex
+	ingressRetries map[string]ingressRetry
 }
 
 func NewService(store *db.DB, encryptionKey string) *Service {
-	return &Service{store: store, audit: audit.NewWriter(store), key: encryptionKey}
+	return &Service{store: store, audit: audit.NewWriter(store), key: encryptionKey, probeIngress: selfhost.ProbePublicIngress}
 }
 
 type Region struct {
@@ -205,35 +210,8 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if in.Revision < 1 {
 				return ErrInvalid
 			}
-			var host, epoch string
-			var cipher, runtimeHash []byte
-			err := tx.QueryRow(ctx, `SELECT n.endpoint_host,n.process_epoch,m.runtime_ciphertext,m.runtime_hash FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1 AND m.revision=$2 AND m.retired_at IS NULL AND r.enabled AND n.state='ready' AND n.ready AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND 'edge'=ANY(n.roles)`, in.NodeID, in.Revision).Scan(&host, &epoch, &cipher, &runtimeHash)
-			if err == pgx.ErrNoRows {
-				return ErrConflict
-			}
-			if err != nil {
+			if err := s.verifyNodeIngress(ctx, tx, in.NodeID, in.Revision); err != nil {
 				return err
-			}
-			credential, err := secrets.Decrypt(s.key, cipher)
-			if err != nil {
-				return err
-			}
-			check := sha256.Sum256([]byte(credential))
-			if !bytes.Equal(check[:], runtimeHash) {
-				return ErrConflict
-			}
-			probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-			defer cancel()
-			v4, v6, err := selfhost.ProbePublicIngress(probeCtx, host, in.NodeID, credential)
-			if err != nil {
-				return ErrConflict
-			}
-			tag, err := tx.Exec(ctx, `UPDATE control_tunnel_nodes n SET public_ingress_ipv4=$3::inet,public_ingress_ipv6=$4::inet,public_ingress_verified_at=now() WHERE n.id=$1 AND n.process_epoch=$2 AND n.endpoint_host=$5 AND n.state='ready' AND n.ready AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND 'edge'=ANY(n.roles) AND EXISTS (SELECT 1 FROM managed_node_authority m JOIN operator_regions r ON r.id=m.region_id WHERE m.node_id=n.id AND m.revision=$6 AND m.runtime_hash=$7 AND m.retired_at IS NULL AND r.enabled)`, in.NodeID, epoch, v4, v6, host, in.Revision, runtimeHash)
-			if err != nil {
-				return err
-			}
-			if tag.RowsAffected() != 1 {
-				return ErrConflict
 			}
 		case "enroll":
 			if in.Revision != 0 || !validNode(in) || len(s.key) < 32 || in.Site != "" {
@@ -275,10 +253,6 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if in.Revision < 1 {
 				return ErrInvalid
 			}
-			// Rotation clears the verified ingress below, which takes the node out of the serving set.
-			if err := refuseLastServingEdge(ctx, tx, in.NodeID); err != nil {
-				return err
-			}
 			credential := randomToken()
 			hash := sha256.Sum256([]byte(credential))
 			cipher, err := secrets.Encrypt(s.key, credential)
@@ -293,10 +267,8 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return ErrConflict
 			}
 			out.RuntimeCredential = credential
-			_, err = tx.Exec(ctx, `UPDATE control_tunnel_nodes SET public_ingress_ipv4=NULL,public_ingress_ipv6=NULL,public_ingress_verified_at=NULL WHERE id=$1`, in.NodeID)
-			if err != nil {
-				return err
-			}
+			// The verified ingress stays: a new credential does not change the node's address (update, which can,
+			// clears it, and ReconcileIngress verifies it again on its own).
 		case "update":
 			// The shape is checked before the stored state is read, so bad input is a 400 even on a stale revision;
 			// the usage key (kept from the stored configuration when left out) is checked once it is known.

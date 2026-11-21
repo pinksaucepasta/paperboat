@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 )
 
 // drainFixture enrolls a managed edge node in a new region and gives it one machine holding a live carrier.
@@ -140,13 +141,23 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 		}
 	}
 	serve(node.ID)
-	for _, action := range []string{"drain", "drain-move", "retire", "rotate"} {
+	for _, action := range []string{"drain", "drain-move", "retire"} {
 		if _, err := s.MutateNode(ctx, admin, action+"-last-"+node.ID, NodeMutation{Action: action, NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); !errors.Is(err, ErrLastServingEdge) {
 			t.Fatalf("%s of the last serving edge: %v", action, err)
 		}
 	}
 	if _, err := s.MutateNode(ctx, admin, "update-last-"+node.ID, NodeMutation{Action: "update", NodeID: node.ID, Revision: node.Revision, RegionID: node.RegionID, EdgePool: node.EdgePool, FailureDomain: "zone-c", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8}); !errors.Is(err, ErrLastServingEdge) {
 		t.Fatalf("update of the last serving edge: %v", err)
+	}
+	// Rotation keeps the address and so the verified ingress: the last edge stays serving (until the node, redeployed
+	// with the new credential, heartbeats again; here the heartbeat is still fresh).
+	rotated, err := s.MutateNode(ctx, admin, "rotate-last-"+node.ID, NodeMutation{Action: "rotate", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"})
+	if err != nil {
+		t.Fatalf("rotate of the last serving edge: %v", err)
+	}
+	node = rotated.Node
+	if !serving(t, store, node.ID) {
+		t.Fatal("rotate took the node out of the serving set")
 	}
 	second, err := s.MutateNode(ctx, admin, "enroll-second-"+node.ID, NodeMutation{Action: "enroll", NodeID: node.ID + "_b", RegionID: node.RegionID, EdgePool: "managed:" + node.RegionID, FailureDomain: "zone-b", EndpointHost: "edge-b.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)})
 	if err != nil {
@@ -155,5 +166,44 @@ func TestOperatorDrainRefusesARegionsLastServingEdge(t *testing.T) {
 	serve(second.Node.ID)
 	if _, err = s.MutateNode(ctx, admin, "drain-with-replacement-"+node.ID, NodeMutation{Action: "drain", NodeID: node.ID, Revision: node.Revision, Reason: "case:test"}); err != nil {
 		t.Fatalf("drain with another serving edge in the region: %v", err)
+	}
+}
+
+func serving(t *testing.T, store *db.DB, node string) bool {
+	t.Helper()
+	var in bool
+	if err := store.SQL().QueryRowContext(context.Background(), `SELECT $1 IN (SELECT id FROM `+edgeset.ServingNodes+` s)`, node).Scan(&in); err != nil {
+		t.Fatal(err)
+	}
+	return in
+}
+
+// A new node that comes up ready is verified and serves without anyone pressing verify-ingress; a failed probe
+// backs off instead of being retried every tick.
+func TestManagedIngressIsVerifiedAutomatically(t *testing.T) {
+	s, store, _, node, _ := drainFixture(t)
+	ctx := context.Background()
+	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour' WHERE id=$1`, node.ID); err != nil {
+		t.Fatal(err)
+	}
+	probes := 0
+	fail := true
+	s.probeIngress = func(context.Context, string, string, string) (any, any, error) {
+		probes++
+		if fail {
+			return nil, nil, errors.New("not reachable yet")
+		}
+		return "203.0.113.7", nil, nil
+	}
+	if err := s.ReconcileIngress(ctx); err != nil || serving(t, store, node.ID) {
+		t.Fatalf("a failed probe verified the node (err=%v)", err)
+	}
+	fail = false
+	if err := s.ReconcileIngress(ctx); err != nil || probes != 1 {
+		t.Fatalf("retried before the backoff: %d probes err=%v", probes, err)
+	}
+	s.ingressRetries[node.ID] = ingressRetry{failures: 1} // the backoff has passed
+	if err := s.ReconcileIngress(ctx); err != nil || !serving(t, store, node.ID) {
+		t.Fatalf("the node is not serving after an automatic verification: err=%v probes=%d", err, probes)
 	}
 }

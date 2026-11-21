@@ -49314,6 +49314,7 @@
                 "worker_certificates",
                 "worker_platform_certificates",
                 "worker_selfhost_ingress",
+                "worker_managed_ingress",
                 "worker_account_deletion",
                 "worker_peer_endpoints",
                 "worker_audit_streams",

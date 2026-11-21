@@ -1024,6 +1024,13 @@ func New(opts Options) (*App, error) {
 		_ = selfhostService.ReconcileIngress(probe) // failures are reported inside, per installation
 		return nil
 	}), progress))
+	// Managed edges are verified the same way, so a new or re-addressed node serves without an operator's click.
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_managed_ingress", periodicPreviewTunnelWorker(15*time.Second, func(ctx context.Context) error {
+		probe, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		_ = infrastructureService.ReconcileIngress(probe) // failures are logged inside, per node, and back off
+		return nil
+	}), progress))
 	if edgeControlService != nil {
 		serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_stale_nodes", edgeControlService.StaleNodeWorker(opts.Config.TerminalSessions.WorkerInterval, controlplane.ControlTunnelNodeStaleAfter()), progress))
 	}
