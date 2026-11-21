@@ -881,6 +881,11 @@ func issuancePending(err error) bool {
 // onDemandIssueTimeout bounds one on-demand issuance (ACME order plus DNS-01 propagation), which outlives the request.
 var onDemandIssueTimeout = 10 * time.Minute
 
+// maxOnDemandFlights bounds issuances running after their requests ended; past it a request is told "not yet".
+const maxOnDemandFlights = 64
+
+var errOnDemandBusy = fmt.Errorf("%w: too many on-demand issuances in flight", ErrIssuanceLocked)
+
 type onDemandFlight struct {
 	done chan struct{}
 	err  error
@@ -898,6 +903,11 @@ func (h *DistributionHub) startOnDemand(parent context.Context, identity Distrib
 	}
 	if h.flights == nil {
 		h.flights = map[string]*onDemandFlight{}
+	}
+	if len(h.flights) >= maxOnDemandFlights {
+		busy := &onDemandFlight{done: make(chan struct{}), err: errOnDemandBusy}
+		close(busy.done)
+		return busy
 	}
 	flight := &onDemandFlight{done: make(chan struct{})}
 	h.flights[key] = flight

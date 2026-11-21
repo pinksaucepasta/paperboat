@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -113,5 +114,18 @@ func TestOnDemandIssuanceOutlivesTheRequestThatStartedIt(t *testing.T) {
 	}
 	if err := await(); err != nil {
 		t.Fatalf("request after the issuance = %v, want the leaf", err)
+	}
+}
+
+// Issuances outliving their requests are bounded: past the cap a request is "not yet", never a new goroutine.
+func TestOnDemandFlightsAreBounded(t *testing.T) {
+	hub := &DistributionHub{flights: map[string]*onDemandFlight{}}
+	for i := range maxOnDemandFlights {
+		hub.flights[fmt.Sprint(i)] = &onDemandFlight{done: make(chan struct{})}
+	}
+	flight := hub.startOnDemand(context.Background(), DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, "leaf.example.test")
+	<-flight.done
+	if !issuancePending(flight.err) || len(hub.flights) != maxOnDemandFlights {
+		t.Fatalf("over the cap: err=%v flights=%d", flight.err, len(hub.flights))
 	}
 }
