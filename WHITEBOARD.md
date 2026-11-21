@@ -398,3 +398,6 @@ Plan bandwidth limits stop big transfers, not floods of tiny requests; per-addre
 - Today we ship BBRv1 (Hysteria's port) in our quic-go fork (`github.com/pinksaucepasta/quic-go`, branch `paperboat`); it is the only sender for every connection.
 - Later, when funded: port BBRv3 (Google, IETF draft-ietf-ccwg-bbr; Chrome quiche `bbr2` code) into the fork and re-run the benchmark, including the fairness and relay-limit tests.
 - Reason: v3 fixes v1's loss blindness and unfairness.
+
+## Windows without App Installer: install OpenSSH from Microsoft's MSI (user 2026-11-21)
+On machines without App Installer/winget for LocalSystem (plain Windows Server, Windows Sandbox), `pb install` now fails visibly instead of setting up managed SSH. Direction: install Microsoft's signed OpenSSH MSI (PowerShell/Win32-OpenSSH release, pinned version, Authenticode check; `msiexec /i OpenSSH-Win64.msi /qn ADDLOCAL=Server`), as Ansible and Chocolatey do. Same rule for `pb update`, which now rolls back there. Start when the user says.
