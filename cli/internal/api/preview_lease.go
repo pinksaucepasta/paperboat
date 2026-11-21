@@ -63,13 +63,17 @@ func (c *Client) CreatePreviewLease(ctx context.Context, input PreviewLeaseCreat
 	}
 	var response previewLeaseCreateResponse
 	var headers http.Header
-	err = c.doRequestMeta(ctx, http.MethodPost, "/v1/previews", input, &response, http.Header{
-		"Idempotency-Key": []string{idempotencyKey},
-		// The control plane's ETag is a strong OCC token. Explicitly request
-		// the identity representation so an intermediary compression layer
-		// cannot rewrite or remove that validator.
-		"Accept-Encoding": []string{"identity"},
-	}, true, &headers)
+	// Right after a server restart the create can answer unavailable_retryable; the same key repeats it safely.
+	err = retryIssuance(ctx, func() error {
+		response = previewLeaseCreateResponse{}
+		return c.doRequestMeta(ctx, http.MethodPost, "/v1/previews", input, &response, http.Header{
+			"Idempotency-Key": []string{idempotencyKey},
+			// The control plane's ETag is a strong OCC token. Explicitly request
+			// the identity representation so an intermediary compression layer
+			// cannot rewrite or remove that validator.
+			"Accept-Encoding": []string{"identity"},
+		}, true, &headers)
+	})
 	if err != nil {
 		return PreviewLease{}, err
 	}

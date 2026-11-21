@@ -80,7 +80,11 @@ func (c *Client) CreateTunnelV1(ctx context.Context, in TunnelCreateInput, key s
 		return TunnelMutation{}, e
 	}
 	var out TunnelMutation
-	e = c.doTunnelRequest(ctx, http.MethodPost, "/v1/tunnels", in, &out, h, nil)
+	// Same Idempotency-Key on every attempt: a create refused by a restarting server is repeated, never doubled.
+	e = retryIssuance(ctx, func() error {
+		out = TunnelMutation{}
+		return c.doTunnelRequest(ctx, http.MethodPost, "/v1/tunnels", in, &out, h, nil)
+	})
 	if e != nil {
 		return out, e
 	}

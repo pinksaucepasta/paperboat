@@ -78,9 +78,17 @@ func TestCreatePreviewLeaseSendsOrderedDomainsAndSafeSummaries(t *testing.T) {
 		}},
 	}
 	var request PreviewLeaseCreateRequest
+	posts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/previews" {
-			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/previews" || r.Header.Get("Idempotency-Key") != "create-domains" {
+			t.Fatalf("request = %s %s key %q", r.Method, r.URL.Path, r.Header.Get("Idempotency-Key"))
+		}
+		// The first attempt meets a restarting server; the same key is sent again.
+		if posts++; posts == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"code":"unavailable_retryable","message":"retry"}}`))
+			return
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
@@ -95,8 +103,8 @@ func TestCreatePreviewLeaseSendsOrderedDomainsAndSafeSummaries(t *testing.T) {
 	got, err := client.CreatePreviewLease(context.Background(), PreviewLeaseCreateRequest{
 		OwnerMachineID: "machine_1", OwnerSessionID: "session_1", OwnerSessionKind: "foreground", Target: PreviewLeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, Domains: []string{"EXAMPLE.COM.", "app.example.com"},
 	}, "create-domains")
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || posts != 2 {
+		t.Fatalf("posts=%d err=%v", posts, err)
 	}
 	if !reflect.DeepEqual(request.Domains, []string{"app.example.com", "example.com"}) {
 		t.Fatalf("request domains = %#v", request.Domains)

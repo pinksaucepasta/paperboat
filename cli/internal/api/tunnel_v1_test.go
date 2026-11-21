@@ -663,3 +663,38 @@ func TestTunnelPauseWithHostProofReadsTheTunnelBackWithoutAProof(t *testing.T) {
 		t.Fatalf("tunnel = %q, read authorization = %q", out.Tunnel.ID, getAuth)
 	}
 }
+
+// Right after a server restart a create answers 503 unavailable_retryable; it is repeated with the same key.
+func TestCreateTunnelV1RetriesUnavailableWithSameKey(t *testing.T) {
+	tunnel := validTunnelTestValue()
+	operation := validTunnelOperationTestValue("tunnel", tunnel.ID)
+	posts := 0
+	client := tunnelTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/tunnels":
+			posts++
+			if got := r.Header.Get("Idempotency-Key"); got != "create_1" {
+				t.Fatalf("create idempotency key = %q", got)
+			}
+			if posts == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"code":"unavailable_retryable","message":"retry"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			writeTunnelTestData(t, w, operation)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/tunnels/tun_1":
+			w.Header().Set("ETag", tunnel.ETag)
+			writeTunnelTestData(t, w, tunnel)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	})
+	out, err := client.CreateTunnelV1(context.Background(), TunnelCreateInput{
+		Name: "demo", AccessMode: "private", Origin: TunnelOriginInput{Scheme: "http", Address: "127.0.0.1:8080"},
+	}, "create_1")
+	if err != nil || posts != 2 || out.Tunnel.ID != tunnel.ID {
+		t.Fatalf("posts=%d out=%#v err=%v", posts, out, err)
+	}
+}

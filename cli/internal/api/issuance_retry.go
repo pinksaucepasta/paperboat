@@ -16,18 +16,28 @@ const (
 	issuanceAttempts   = 5
 	issuanceFirstDelay = 250 * time.Millisecond
 	issuanceMaxDelay   = 2 * time.Second
+	// issuanceBudget stops retrying once another attempt would start past it: a create the server
+	// held for its 10 s dispatch timeout gets one or two more tries, not five.
+	issuanceBudget = 20 * time.Second
 )
 
 // doIssuance is do for descriptor and grant issuance: a 503 or 429, or an answer lost after the request
 // was sent, is retried with jittered backoff inside ctx; any other answer is final.
 func (c *Client) doIssuance(ctx context.Context, method, path string, body, out any, checked bool) error {
-	delay := issuanceFirstDelay
+	return retryIssuance(ctx, func() error { return c.doRequest(ctx, method, path, body, out, nil, checked) })
+}
+
+// retryIssuance repeats one idempotent operation (same Idempotency-Key on every attempt) while the
+// server answers 503/429 or the answer is lost, with jittered backoff inside ctx and issuanceBudget.
+func retryIssuance(ctx context.Context, attemptOnce func() error) error {
+	start, delay := time.Now(), issuanceFirstDelay
 	for attempt := 1; ; attempt++ {
-		err := c.doRequest(ctx, method, path, body, out, nil, checked)
+		err := attemptOnce()
 		if err == nil || attempt == issuanceAttempts || !retryableIssuance(err) {
 			return err
 		}
-		if !sleepContext(ctx, delay/2+rand.N(delay/2+1)) {
+		wait := delay/2 + rand.N(delay/2+1)
+		if time.Since(start)+wait > issuanceBudget || !sleepContext(ctx, wait) {
 			return err
 		}
 		delay = min(2*delay, issuanceMaxDelay)
