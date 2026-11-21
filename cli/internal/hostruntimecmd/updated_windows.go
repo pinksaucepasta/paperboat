@@ -97,8 +97,7 @@ func windowsUpdatedConfigFor(config hostinstall.WindowsRuntimeConfig, layout ser
 	tokenFile := config.TokenFile
 	installState, _ := hostinstall.WindowsInstanceConfigPath(config.Instance)
 	return updated.WindowsConfig{ReconcileCarrier: func(ownerCtx context.Context) error {
-		return errors.Join(hostinstall.ReconcileInstalledCarrier(ownerCtx, config.Instance, updated.ProtectedWindowsPinReferences),
-			hostinstall.CompleteSkippedWindowsSSH(ownerCtx, config.Instance))
+		return hostinstall.ReconcileInstalledCarrier(ownerCtx, config.Instance, updated.ProtectedWindowsPinReferences)
 	}, SessionOwners: func(ownerCtx context.Context) (sessionowner.Coordinator, error) {
 		return hostinstall.InstalledSessionOwnerCoordinator(ownerCtx, config.Instance)
 	}, Source: config.Source, StateRoot: layout.UpdateStateRoot, RuntimeStateRoot: config.StateRoot, Binary: layout.Binary, BinaryRollback: layout.BinaryRollback, BinaryStaged: layout.BinaryStaged, OwnerSID: config.OwnerSID, MachineID: config.MachineID, RepositoryURL: config.Artifact.RepositoryURL, TokenFile: tokenFile, InstallState: installState, ControlSocket: layout.UpdaterSocket, HealthURL: "http://" + config.ListenAddress + "/healthz", ActiveVersion: config.Source.Version, Architecture: config.Source.Architecture, AutomaticChecks: config.Source.AutomaticUpdates, Pending: !config.Committed}

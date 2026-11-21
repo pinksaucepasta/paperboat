@@ -257,7 +257,8 @@ func TestClassifyInventoryPreservesSystemSSHDAndClassifiesEveryDisposition(t *te
 		{name: "windows capability", record: InventoryRecord{CapabilityPresent: true, SystemService: ServiceRecord{Name: "sshd", Exists: true}}, want: InstallationWindowsCapability},
 		{name: "approved winget alongside admin sshd", record: InventoryRecord{WingetRegistered: true, WingetVersion: ApprovedVersion, ProgramFilesSSHD: approved, SystemService: ServiceRecord{Name: "sshd", Exists: true, PathName: `C:\\Windows\\System32\\OpenSSH\\sshd.exe`}}, want: InstallationPaperboatApproved},
 		{name: "different winget version", record: InventoryRecord{WingetRegistered: true, WingetVersion: "9.9.0.0", ProgramFilesSSHD: approved}, want: InstallationDifferentWinget},
-		{name: "third party", record: InventoryRecord{ProgramFilesSSHD: approved}, want: InstallationThirdParty},
+		{name: "third party", record: InventoryRecord{ProgramFilesSSHD: BinaryRecord{Path: approved.Path, Exists: true, Regular: true, SignatureValid: true, Publisher: approved.Publisher, Version: "8.1.0.0"}}, want: InstallationThirdParty},
+		{name: "approved tree winget does not list", record: InventoryRecord{ProgramFilesSSHD: approved}, want: InstallationPaperboatApproved},
 		{name: "untrusted binary", record: InventoryRecord{ProgramFilesSSHD: BinaryRecord{Path: approved.Path, Exists: true, Regular: true, Publisher: "CN=Unknown"}}, want: InstallationUntrusted},
 		{name: "paperboat service ownership conflict", record: InventoryRecord{PaperboatService: ServiceRecord{Name: ServiceName, Exists: true, PathName: `C:\\admin\\sshd.exe -D -f C:\\admin\\sshd_config`}}, want: InstallationConflicting},
 		{name: "winget registration without expected binary", record: InventoryRecord{WingetRegistered: true, WingetVersion: ApprovedVersion}, want: InstallationConflicting},
@@ -327,5 +328,27 @@ func TestInventoryRecognizesCurrentOwnedOpenSSHService(t *testing.T) {
 	}
 	if got := ClassifyInventory(record, config).Class; got != InstallationPaperboatApproved {
 		t.Fatalf("current owned service classification=%q", got)
+	}
+}
+
+// winpool, 2026-11-21: `winget list` without a source stopped at the msstore agreement prompt under LocalSystem.
+func TestWingetListUsesOnlyTheWingetSourceWithAgreementsAccepted(t *testing.T) {
+	args := strings.Join(wingetListArgs(), " ")
+	for _, want := range []string{"--source winget", "--accept-source-agreements", "--disable-interactivity"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("winget list args %q lack %q", args, want)
+		}
+	}
+	if strings.Contains(args, "msstore") {
+		t.Fatalf("winget list args %q name msstore", args)
+	}
+}
+
+// An empty App Installer lookup exits 40 rather than handing an empty path on.
+func TestResolveWingetScriptRefusesAnEmptyLookup(t *testing.T) {
+	runner := &fakeRunner{}
+	_, _ = resolveWinget(context.Background(), runner)
+	if script := runner.calls[0].args[len(runner.calls[0].args)-1]; !strings.Contains(script, "if($null-eq $p){exit 40}") {
+		t.Fatalf("resolve script lacks the empty-lookup exit: %s", script)
 	}
 }

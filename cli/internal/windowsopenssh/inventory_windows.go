@@ -43,10 +43,9 @@ func collectInventory(ctx context.Context, config Config) (InventoryRecord, erro
 	}
 	listCtx, listCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer listCancel()
-	// Inventory the local installed-package database. Supplying --source here
-	// can trigger a source refresh lasting minutes and is unrelated to whether
-	// the approved package is registered. Provision still pins --source winget.
-	wingetOutput, listErr := config.Runner.Run(listCtx, wingetPath, "list", "--exact", "--id", PackageID, "--disable-interactivity")
+	// Without --source, list queried msstore too and a fresh LocalSystem winget stopped at its agreement prompt
+	// (winpool, 2026-11-21); a slow source refresh falls back below like any list failure.
+	wingetOutput, listErr := config.Runner.Run(listCtx, wingetPath, wingetListArgs()...)
 	if listErr != nil {
 		if noInstalledWingetPackage(string(wingetOutput)) {
 			return record, nil
