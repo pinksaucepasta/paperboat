@@ -26,7 +26,10 @@ func openProcessDiagnostics(ctx context.Context, args []string, reporter *errorr
 	var storageErr error
 	var recorder *diagnostics.Recorder
 	command, _, findErr := newRootCommand().Find(args)
-	removesStorage := findErr == nil && diagnosticsStayInMemory(command, args, runtime.GOOS, os.Getenv("PAPERBOAT_INVOKING_UID"))
+	// Every step Paperboat re-runs as root through sudo (install, update, man pages, purge, ...) acts for the
+	// invoking user; a disk segment would land in root's home, where no uninstall removes it.
+	elevated := runtime.GOOS != "windows" && hostDependenciesOf(ctx).euid() == 0 && (os.Getenv("PAPERBOAT_INVOKING_UID") != "" || os.Getenv("SUDO_UID") != "")
+	removesStorage := elevated || findErr == nil && diagnosticsStayInMemory(command, args, runtime.GOOS)
 	if removesStorage {
 		// These commands remove the diagnostics directory itself. A disk segment
 		// would lock that directory on Windows or fail to save at exit. The
@@ -223,10 +226,8 @@ func processDiagnosticsDirectory(ctx context.Context, command *cobra.Command) (s
 	return filepath.Join(paths.StateRoot, "diagnostics"), nil
 }
 
-// diagnosticsStayInMemory names the processes that must not write a disk segment: commands that remove the
-// diagnostics directory itself, and every `__runtime-service` step Paperboat re-runs through sudo, whose
-// segment would land in root's home where no uninstall removes it.
-func diagnosticsStayInMemory(command *cobra.Command, args []string, goos, invokingUID string) bool {
+// diagnosticsStayInMemory names the commands that remove the diagnostics directory itself.
+func diagnosticsStayInMemory(command *cobra.Command, args []string, goos string) bool {
 	if command == nil {
 		return false
 	}
@@ -237,7 +238,7 @@ func diagnosticsStayInMemory(command *cobra.Command, args []string, goos, invoki
 		return goos == "windows"
 	case "__runtime-service":
 		i := slices.Index(args, "__runtime-service")
-		return invokingUID != "" || i >= 0 && i+1 < len(args) && args[i+1] == "purge"
+		return i >= 0 && i+1 < len(args) && args[i+1] == "purge"
 	}
 	return false
 }
