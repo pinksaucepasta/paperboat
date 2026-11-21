@@ -169,7 +169,11 @@ func (r *gatewayRoute) pass(file *os.File) error {
 	if err := r.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
-	n, _, err := r.conn.WriteMsgUnix([]byte{1}, unix.UnixRights(int(file.Fd())), nil)
+	fd, err := socketDescriptor(file)
+	if err != nil {
+		return err
+	}
+	n, _, err := r.conn.WriteMsgUnix([]byte{1}, unix.UnixRights(fd), nil)
 	if err == nil && n != 1 {
 		err = io.ErrShortWrite
 	}

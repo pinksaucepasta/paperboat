@@ -64,7 +64,9 @@ func notifyDescriptors(message string, files ...*os.File) error {
 	if len(files) > 0 {
 		fds := make([]int, len(files))
 		for i, file := range files {
-			fds[i] = int(file.Fd())
+			if fds[i], err = socketDescriptor(file); err != nil {
+				return err
+			}
 		}
 		oob = unix.UnixRights(fds...)
 	}

@@ -142,7 +142,11 @@ func (c *unixControlConn) Send(out response, listener net.Listener) error {
 			return err
 		}
 		defer file.Close()
-		rights = unix.UnixRights(int(file.Fd()))
+		fd, err := socketDescriptor(file)
+		if err != nil {
+			return err
+		}
+		rights = unix.UnixRights(fd)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -216,4 +220,19 @@ func classifyProtectedBindError(err error) error {
 		return ErrPortInUse
 	}
 	return err
+}
+
+// socketDescriptor reads file's descriptor without os.File.Fd, which switches the socket's open file description,
+// shared with the original listener or connection, to blocking mode: their Accept/Read then pin a thread and ignore
+// deadlines and Close.
+func socketDescriptor(file *os.File) (int, error) {
+	raw, err := file.SyscallConn()
+	if err != nil {
+		return -1, err
+	}
+	fd := -1
+	if err := raw.Control(func(descriptor uintptr) { fd = int(descriptor) }); err != nil {
+		return -1, err
+	}
+	return fd, nil
 }
