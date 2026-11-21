@@ -499,23 +499,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/edge/assignments/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Fetch current connector assignment */
-        post: operations["post_v1_edge_assignments_current"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/nodes/register": {
         parameters: {
             query?: never;
@@ -17003,25 +16986,6 @@ export interface operations {
                     "application/json": components["schemas"]["SuccessResponse"];
                 };
             };
-        };
-    };
-    post_v1_edge_assignments_current: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current assignment. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Error"];
         };
     };
     post_v1_nodes_register: {
