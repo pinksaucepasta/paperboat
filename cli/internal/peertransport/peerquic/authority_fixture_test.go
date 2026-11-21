@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"tailscale.com/tailcfg"
 )
 
@@ -56,7 +57,7 @@ func newMeshAuthorityFixture(t *testing.T, keys meshFixtureKeys, index int) *mes
 	if index == 0 {
 		b.MachineID, b.MachineGeneration = id, 1
 	}
-	f := &meshAuthorityFixture{options: tailnet.AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: meshFixtureSecrets{}}, Issuer: "https://api.example.test", Self: b, Keys: keys}}
+	f := &meshAuthorityFixture{options: tailnet.AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: meshFixtureSecrets{}}, Issuer: "https://api.example.test", Self: b, Keys: keys}}
 	var err error
 	f.authority, err = tailnet.NewAuthority(f.options)
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"tailscale.com/tstest/integration"
 )
 
@@ -73,7 +74,7 @@ func TestHostRulesSSHStreamUsageNamesItsPeer(t *testing.T) {
 	applyTestConfiguration(t, serverAuthority, signerPrivate, serverConfig)
 
 	sink := &usageSink{}
-	usage, err := bandwidth.Open(filepath.Join(t.TempDir(), "usage.json"), sink, nil)
+	usage, err := bandwidth.Open(filepath.Join(shorttemp.Dir(t), "usage.json"), sink, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

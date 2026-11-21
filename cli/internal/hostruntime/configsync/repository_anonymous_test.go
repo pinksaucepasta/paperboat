@@ -5,12 +5,14 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 // With no saved credential profile an HTTPS repository is read anonymously (a public repository named by a
 // recipe's [config] needs no per-machine setup); plain HTTP and SSH still need a saved profile.
 func TestHTTPSWithoutAProfileIsReadAnonymously(t *testing.T) {
-	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: /var is a symlink, and the credential root must be canonical
+	root, err := filepath.EvalSymlinks(shorttemp.Dir(t)) // macOS: /var is a symlink, and the credential root must be canonical
 	if err != nil {
 		t.Fatal(err)
 	}

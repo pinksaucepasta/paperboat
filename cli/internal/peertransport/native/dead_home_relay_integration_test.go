@@ -13,7 +13,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=fault-injection-test
 	"tailscale.com/wgengine/magicsock"
 )
@@ -53,7 +55,7 @@ func testDeadRelayFallback(t *testing.T, deadID string, silentPeer bool) {
 			serverSelf.QUICPublicKey = public.(string)
 		}
 		serverAuthority, err = tailnet.NewAuthority(tailnet.AuthorityOptions{
-			Store: config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: serverSelf,
+			Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: serverSelf,
 			Keys: testKeys{"native_test": pub}, TestOnlyDERPCarrier: func(c magicsock.DERPCarrier) magicsock.DERPCarrier { return silentRegionalCarrier{c} },
 		})
 		if err != nil {

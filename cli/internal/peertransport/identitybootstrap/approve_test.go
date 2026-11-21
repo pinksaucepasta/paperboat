@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -41,7 +42,7 @@ func (c *approvalClient) RegisterEndpointCertificate(_ context.Context, _ string
 
 func TestApproveMachineRequiresExactSafetyCodeAndSignsPublishedKeys(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	keys, err := store.PeerIdentityKeys("https://api.example.test", "account_1", "cli_1")
 	if err != nil {
@@ -71,7 +72,7 @@ func TestApproveMachineRequiresExactSafetyCodeAndSignsPublishedKeys(t *testing.T
 
 func TestApproveCLIRequiresCLIRoleAndSignsNewSessionKeys(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	keys, err := store.PeerIdentityKeys("https://api.example.test", "account_1", "cli_existing")
 	if err != nil {
@@ -100,7 +101,7 @@ func TestApproveCLIRequiresCLIRoleAndSignsNewSessionKeys(t *testing.T) {
 func TestApproveMachineBackdatesCertificateForServerClockSkew(t *testing.T) {
 	approverNow := time.Date(2026, 9, 3, 12, 0, 16, 0, time.UTC)
 	serverNow := approverNow.Add(-16 * time.Second)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	keys, err := store.PeerIdentityKeys("https://api.example.test", "account_1", "cli_1")
 	if err != nil {
@@ -165,7 +166,7 @@ func endpointSafetyCode(domain, endpointID string, generation uint64, quic []byt
 
 func TestFreshSignerApprovesMachineWithoutAccountRoot(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	keys, err := store.FreshPeerIdentityKeys("https://api.example.test", "account_1", "cli_1")
 	if err != nil {

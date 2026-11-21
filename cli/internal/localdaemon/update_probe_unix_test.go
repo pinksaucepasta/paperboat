@@ -11,12 +11,13 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 func TestUpdateProbeReadsInstalledNamespace(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			path := updateProbeTestDeclaration(t, home, platform)
 			body := "[Service]\nEnvironment=\"HOME=/wrong\"\nEnvironment=\"TMPDIR=/private/task run\"\nEnvironment=\"XDG_STATE_HOME=/state/100%%/$$data\"\nEnvironment=\"SECRET=excluded\"\n"
 			if platform == "darwin" {
@@ -52,7 +53,7 @@ func TestUpdateServiceDefinitionPath(t *testing.T) {
 func TestUpdateProbeRejectsUnsafeDeclaration(t *testing.T) {
 	for _, scenario := range []string{"symlink", "writable", "oversize", "fifo", "wrong-owner", "relative-namespace"} {
 		t.Run(scenario, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			path := updateProbeTestDeclaration(t, home, "linux")
 			body := []byte("[Service]\nEnvironment=\"TMPDIR=/private/run\"\n")
 			uid := os.Geteuid()
@@ -96,7 +97,7 @@ func TestUpdateProbeRejectsUnsafeDeclaration(t *testing.T) {
 }
 
 func TestUpdateProbeMissingDeclaration(t *testing.T) {
-	home := t.TempDir()
+	home := shorttemp.Dir(t)
 	_, err := readServiceEnvironment("linux", home, updateServiceDefinitionPath("linux", home, 501), os.Geteuid())
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing declaration: %v", err)

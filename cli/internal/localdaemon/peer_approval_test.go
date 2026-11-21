@@ -17,6 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -48,7 +49,7 @@ func TestApproveOwnedPeerEnrollmentsAutomaticCLIApproval(t *testing.T) {
 		}, wantErr: true, wantAttempts: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rootDir := t.TempDir()
+			rootDir := shorttemp.Dir(t)
 			store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 			const accountID, daemonID, endpointID = "account_1", "cli_daemon", "cli_new"
 			serverNow := time.Now().UTC().Truncate(time.Second)
@@ -127,7 +128,7 @@ func TestApproveOwnedPeerEnrollmentsAutomaticCLIApproval(t *testing.T) {
 }
 
 func TestApproveOwnedPeerEnrollmentsVerifierOnlyReturnsTypedNonSignerForMixedPending(t *testing.T) {
-	rootDir := t.TempDir()
+	rootDir := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 	const accountID, daemonID = "account_1", "cli_daemon"
 	serverNow := time.Now().UTC().Truncate(time.Second)
@@ -199,7 +200,7 @@ func TestApproveOwnedPeerEnrollmentsVerifierOnlyRootFailuresRemainHard(t *testin
 		{name: "root API failure", saveLocalPublic: true, rootStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rootDir := t.TempDir()
+			rootDir := shorttemp.Dir(t)
 			store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 			localPublic, _, _ := ed25519.GenerateKey(nil)
 			if tc.saveLocalPublic {
@@ -240,7 +241,7 @@ func TestApproveOwnedPeerEnrollmentsVerifierOnlyRootFailuresRemainHard(t *testin
 }
 
 func TestApproveOwnedPeerEnrollmentsVerifierOnlyWithoutPendingNeedsNoSigner(t *testing.T) {
-	rootDir := t.TempDir()
+	rootDir := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -280,7 +281,7 @@ func TestApproveOwnedMachineEnrollmentRequiresExactOwnedPendingMachine(t *testin
 				}
 			}))
 			defer server.Close()
-			rootDir := t.TempDir()
+			rootDir := shorttemp.Dir(t)
 			store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 			profile := config.Profile{Issuer: server.URL, Account: config.Account{ID: "account_1"}, CLIClientSessionID: "cli_daemon"}
 			err := ApproveOwnedMachineEnrollment(t.Context(), store, profile, api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), "machine_1")

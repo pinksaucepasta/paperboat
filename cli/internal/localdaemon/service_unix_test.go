@@ -5,11 +5,12 @@ package localdaemon
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 
 	hostservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 )
@@ -48,7 +49,7 @@ func serviceExecutable(t *testing.T) string {
 func TestInstallServiceUsesUserManagerAndExactArguments(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			configPath := filepath.Join(home, ".config", "paperboat", "config.json")
 			runner := &serviceRunner{}
 			err := installService(context.Background(), serviceConfig{
@@ -103,7 +104,7 @@ func TestRootDaemonServiceIsSystemUnit(t *testing.T) {
 }
 
 func TestInstallServiceRejectsRelativeConfigAndUnsupportedPlatform(t *testing.T) {
-	base := serviceConfig{Platform: "linux", Home: t.TempDir(), Executable: serviceExecutable(t), ConfigPath: "relative", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": "/tmp"}, Runner: &serviceRunner{}}
+	base := serviceConfig{Platform: "linux", Home: shorttemp.Dir(t), Executable: serviceExecutable(t), ConfigPath: "relative", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": "/tmp"}, Runner: &serviceRunner{}}
 	if err := installService(context.Background(), base); err == nil {
 		t.Fatal("relative config path was accepted")
 	}
@@ -117,7 +118,7 @@ func TestInstallServiceRejectsRelativeConfigAndUnsupportedPlatform(t *testing.T)
 func TestRemoveServiceStopsManagerBeforeDeletingDefinition(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			runner := &serviceRunner{}
 			config := serviceConfig{Platform: platform, Home: home, Executable: serviceExecutable(t), Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: runner}
 			installer, err := newServiceInstaller(config)
@@ -148,7 +149,7 @@ func TestRemoveServiceStopsManagerBeforeDeletingDefinition(t *testing.T) {
 func TestRemoveServiceWorksWithMissingDaemonArtifact(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			definition := filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
 			if platform == "darwin" {
 				definition = filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+".plist")
@@ -194,7 +195,7 @@ func TestRemoveServiceRemovesTheConfigSyncService(t *testing.T) {
 		"darwin": "bootout gui/501/" + hostservice.ConfigLabel,
 	} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			definition := filepath.Join(home, ".config", "systemd", "user", "paperboat-runtime-config.service")
 			if platform == "darwin" {
 				definition = filepath.Join(home, "Library", "LaunchAgents", hostservice.ConfigLabel+".plist")
@@ -226,7 +227,7 @@ func TestRemoveServiceRemovesTheConfigSyncService(t *testing.T) {
 func TestInstallServiceRefusesToRewriteAnotherProfilesService(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			first := filepath.Join(home, "profile-a", "config.json")
 			second := filepath.Join(home, "profile-b", "config.json")
 			runner := &serviceRunner{}
@@ -272,7 +273,7 @@ func TestInstallServiceRefusesToRewriteAnotherProfilesService(t *testing.T) {
 func TestDeclaredFlagAtReadsTheInstalledServer(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		t.Run(platform, func(t *testing.T) {
-			home := t.TempDir()
+			home := shorttemp.Dir(t)
 			config := serviceConfig{Platform: platform, Home: home, Executable: serviceExecutable(t), ConfigPath: filepath.Join(home, "config.json"), ServerURL: "https://api.paperboat.test", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: &serviceRunner{}}
 			if err := installService(context.Background(), config); err != nil {
 				t.Fatal(err)

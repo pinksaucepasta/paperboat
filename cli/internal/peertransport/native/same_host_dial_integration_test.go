@@ -18,6 +18,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=fault-injection-test
 	"tailscale.com/tailcfg"
 )
@@ -72,7 +74,7 @@ func TestSameHostDialRightAfterPairingNeedsNoRelay(t *testing.T) {
 	clientBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFingerprint, VirtualAddress: "fd7a:115c:a1e0::71"}
 	serverBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFingerprint, VirtualAddress: "fd7a:115c:a1e0::72"}
 	clientSelf := bindTestQUICKey(clientBinding)
-	clientAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: clientSelf, Keys: testKeys{"native_test": signerPublic}, LocalMachineID: "machine_test"})
+	clientAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: clientSelf, Keys: testKeys{"native_test": signerPublic}, LocalMachineID: "machine_test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestDialBeforeAnyPathExistsFailsFastWithPathNotReady(t *testing.T) {
 	_, serverFingerprint := testTLS(t, "machine")
 	clientBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "cli_test", Role: "cli", EndpointGeneration: 1, QUICCertificateFingerprint: clientFingerprint, VirtualAddress: "fd7a:115c:a1e0::73"}
 	serverBinding := tailnet.NetworkBinding{AccountID: "account_test", EndpointID: "machine_test", Role: "machine", MachineID: "machine_test", EndpointGeneration: 1, MachineGeneration: 1, QUICCertificateFingerprint: serverFingerprint, VirtualAddress: "fd7a:115c:a1e0::74"}
-	clientAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: bindTestQUICKey(clientBinding), Keys: testKeys{"native_test": signerPublic}, LocalMachineID: "machine_test"})
+	clientAuthority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: bindTestQUICKey(clientBinding), Keys: testKeys{"native_test": signerPublic}, LocalMachineID: "machine_test"})
 	if err != nil {
 		t.Fatal(err)
 	}

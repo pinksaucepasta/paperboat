@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 func TestManagedSSHRuntimeRejectsIncompleteConfiguration(t *testing.T) {
@@ -38,7 +39,7 @@ func TestManagedSSHProxyPreservesQualifiedWindowsUsername(t *testing.T) {
 	if err != nil {
 		t.Skip("OpenSSH client is unavailable")
 	}
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	proxy, capture := filepath.Join(root, "proxy.sh"), filepath.Join(root, "username")
 	script := "#!/bin/sh\nprintf '%s' \"$7\" > " + strconv.Quote(capture) + "\n"
 	if err := os.WriteFile(proxy, []byte(script), 0700); err != nil {

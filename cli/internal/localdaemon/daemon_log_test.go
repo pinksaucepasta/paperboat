@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 func TestDaemonLogMovesAsideAtItsLimitAndWritingContinuesInAFreshFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paperboatd.log")
+	path := filepath.Join(shorttemp.Dir(t), "paperboatd.log")
 	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +44,7 @@ func TestDaemonLogMovesAsideAtItsLimitAndWritingContinuesInAFreshFile(t *testing
 		t.Fatalf("rotated log holds %q", body)
 	}
 	// A daemon run by hand writes to its terminal, not the log: nothing moves.
-	other, err := os.CreateTemp(t.TempDir(), "tty")
+	other, err := os.CreateTemp(shorttemp.Dir(t), "tty")
 	if err != nil {
 		t.Fatal(err)
 	}

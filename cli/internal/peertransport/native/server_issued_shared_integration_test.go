@@ -36,6 +36,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/cli/internal/tunnel"
 	"tailscale.com/tstest/integration"
 )
@@ -152,7 +153,7 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	}
 	keys := testKeys{fixture.KeyID: ed25519.PublicKey(publicRaw)}
 	makeAuthority := func(binding tailnet.NetworkBinding, private, token string) *tailnet.Authority {
-		store := config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}
+		store := config.ProfileStore{Path: shorttemp.Dir(t), Secrets: testSecrets{}}
 		privateRaw, decodeErr := base64.RawURLEncoding.DecodeString(private)
 		if decodeErr != nil {
 			t.Fatal(decodeErr)
@@ -200,7 +201,7 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	defer shared.Close()
 	defer machine.Close()
 
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	ptyAdapter, err := pty.NewAdapter(root)
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +248,7 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	streamAuthorize := hostserver.CredentialStreamAuthorizer(authorizer)
 	filePayload := []byte("server-issued-native-file")
 	fileDigest := sha256.Sum256(filePayload)
-	transferRoot := t.TempDir()
+	transferRoot := shorttemp.Dir(t)
 	durable, err := store.Open(t.Context(), store.Config{Root: filepath.Join(transferRoot, "state")})
 	if err != nil {
 		t.Fatal(err)

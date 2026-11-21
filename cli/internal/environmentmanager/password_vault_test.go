@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type secureMemoryStore struct {
@@ -42,7 +43,7 @@ func (store *secureMemoryStore) Delete(ref string) error { delete(store.values, 
 
 func TestPasswordVaultInitializationDoesNotTreatMixedStoreFailureAsMissing(t *testing.T) {
 	secrets := &secureMemoryStore{getErr: errors.Join(config.ErrSecretNotFound, syscall.EIO)}
-	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: secrets}
+	store := config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: secrets}
 	control := &vaultControl{store: store}
 	vault := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
 
@@ -137,7 +138,7 @@ func (c *vaultControl) PutPasswordVault(_ context.Context, raw []byte) (api.Pass
 
 func TestPasswordVaultOfflineMachineAndInterruptedRewrap(t *testing.T) {
 	ctx := context.Background()
-	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &secureMemoryStore{}}
+	store := config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: &secureMemoryStore{}}
 	control := &vaultControl{store: store}
 	a := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
 	password := []byte("first test master password")
@@ -154,7 +155,7 @@ func TestPasswordVaultOfflineMachineAndInterruptedRewrap(t *testing.T) {
 	}
 	// B has no A identity, session key, root or local ENV record.
 	b := a
-	b.Store = config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &secureMemoryStore{}}
+	b.Store = config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: &secureMemoryStore{}}
 	if err := b.Unlock(ctx, []byte("wrong")); !errors.Is(err, environmente2ee.ErrVaultUnlock) {
 		t.Fatal("wrong password accepted")
 	}
@@ -273,7 +274,7 @@ func TestPasswordVaultOfflineMachineAndInterruptedRewrap(t *testing.T) {
 
 func TestRecoveryKeepsTeamKeysCurrentAndResumesExactSuccessor(t *testing.T) {
 	ctx := context.Background()
-	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &secureMemoryStore{}}
+	store := config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: &secureMemoryStore{}}
 	control := &vaultControl{store: store}
 	a := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: "https://control.example", AccountID: "account_1"}
 	code, err := environmente2ee.GenerateVaultRecoveryCode()
@@ -297,7 +298,7 @@ func TestRecoveryKeepsTeamKeysCurrentAndResumesExactSuccessor(t *testing.T) {
 	}
 	defer before.Clear()
 	b := a
-	b.Store = config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &secureMemoryStore{}}
+	b.Store = config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: &secureMemoryStore{}}
 	control.store = b.Store
 	replacement, err := environmente2ee.GenerateVaultRecoveryCode()
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 // A daemon restarted while Paperboat is unreachable started with no machines, so `pb exec <peer>` asked the server
@@ -21,7 +22,7 @@ import (
 // removes it.
 func TestRestartWhilePaperboatIsUnreachableStartsFromTheLastAnsweredMachines(t *testing.T) {
 	now := time.Date(2026, 11, 16, 5, 0, 0, 0, time.UTC)
-	cache := filepath.Join(t.TempDir(), InventoryCacheFile)
+	cache := filepath.Join(shorttemp.Dir(t), InventoryCacheFile)
 	ready := api.UserMachine{ID: "machine_peer", Alias: "peer", EnvironmentID: "environment_1", State: "ready", Online: true, InstallationGeneration: 3}
 	other := api.UserMachine{ID: "machine_other", Alias: "other", State: "ready", Online: true, InstallationGeneration: 1}
 	start := func(results ...machineResult) *localapi.SnapshotStore {

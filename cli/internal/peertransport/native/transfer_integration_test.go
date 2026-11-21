@@ -37,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tstest/integration"
@@ -141,7 +142,7 @@ func testNativeTransferResume(t *testing.T, relayed bool) {
 	}
 	defer serverOwner.Close()
 
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	var durable *store.Store
 	var service *hosttransfer.Service
 	var handler atomic.Pointer[hostserver.FileTransferHandler]

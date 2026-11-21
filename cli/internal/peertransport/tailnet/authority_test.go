@@ -22,9 +22,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"tailscale.com/tailcfg"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authority-tests
 	"tailscale.com/tstest/integration"
 	"tailscale.com/types/key"
@@ -285,7 +287,7 @@ func networkTestAuthority(t *testing.T) (*Authority, NetworkConfiguration, ed255
 	self := networkTestBinding("cli", "cli_test", "fd7a:115c:a1e0::1", local)
 	peer := networkTestBinding("machine", "machine_test", "fd7a:115c:a1e0::2", remote)
 	secrets := &networkTestStore{values: map[string]string{}}
-	a, err := NewAuthority(AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: secrets}, Issuer: "https://api.example.test", Self: self, Keys: networkTestKeys{"network_test": pub}})
+	a, err := NewAuthority(AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: secrets}, Issuer: "https://api.example.test", Self: self, Keys: networkTestKeys{"network_test": pub}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +622,7 @@ func TestNetworkAllocatedUDPRotationRemovalAndAdmittedLifetime(t *testing.T) {
 	machineKey := key.NewNode()
 	machineBinding := networkTestBinding("machine", "machine_test", "fd7a:115c:a1e0::2", machineKey)
 	c.Peers[0].Identity = machineBinding
-	machine, err := NewAuthority(AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: &networkTestStore{values: map[string]string{}}}, Issuer: c.Issuer, Self: machineBinding, Keys: cli.options.Keys})
+	machine, err := NewAuthority(AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: &networkTestStore{values: map[string]string{}}}, Issuer: c.Issuer, Self: machineBinding, Keys: cli.options.Keys})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -847,7 +849,7 @@ func TestNetworkProducedConfiguration(t *testing.T) {
 	}
 	create := func(self NetworkBinding, private, token string) *Authority {
 		t.Helper()
-		root := t.TempDir()
+		root := shorttemp.Dir(t)
 		a, err := NewAuthority(AuthorityOptions{Store: config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}, Issuer: f.Issuer, Self: self, Keys: networkTestKeys{f.KeyID: ed25519.PublicKey(pub)}})
 		if err != nil {
 			t.Fatal(err)

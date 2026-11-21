@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type execCanaryClock struct{ now time.Time }
@@ -141,7 +142,7 @@ func signExecCanaryCredential(t *testing.T, keyID string, private ed25519.Privat
 }
 
 func TestExecApplicationProtocolCanary(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

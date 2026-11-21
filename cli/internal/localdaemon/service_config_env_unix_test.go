@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 // The service gets PAPERBOAT_CONFIG so the daemon resolves the same credential directory as the command
@@ -25,7 +26,7 @@ func TestCurrentUserServiceConfigKeepsConfigPath(t *testing.T) {
 	if service.Environment[config.EnvConfigPath] != "/srv/pb/config.json" {
 		t.Fatalf("service environment = %v", service.Environment)
 	}
-	t.Chdir(t.TempDir())
+	t.Chdir(shorttemp.Dir(t))
 	t.Setenv(config.EnvConfigPath, "pb.json ")
 	if service, err = currentUserServiceConfig(executable); err != nil {
 		t.Fatal(err)

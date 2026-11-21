@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"golang.org/x/sys/windows"
 )
@@ -28,7 +29,7 @@ type fakeWindowsDaemonService struct {
 
 func installFakeWindowsDaemonService(t *testing.T, fake *fakeWindowsDaemonService) string {
 	t.Helper()
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestCreateCurrentUserServiceElevatesWhenTheServiceManagerDeniesAccess(t *te
 func TestCreateCurrentUserServiceRefusesLaunchOverridesAndKeepsOtherFailures(t *testing.T) {
 	fake := &fakeWindowsDaemonService{}
 	executable := installFakeWindowsDaemonService(t, fake)
-	if err := CreateCurrentUserService(context.Background(), executable, filepath.Join(t.TempDir(), "config.json"), ""); err == nil || !strings.Contains(err.Error(), "unsupported") {
+	if err := CreateCurrentUserService(context.Background(), executable, filepath.Join(shorttemp.Dir(t), "config.json"), ""); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("config override error=%v", err)
 	}
 	if err := CreateCurrentUserService(context.Background(), executable, "", "https://api.example.test"); err == nil || !strings.Contains(err.Error(), "unsupported") {
@@ -159,7 +160,7 @@ func TestUninstallCurrentUserServiceRemovesARunningOrMissingService(t *testing.T
 func TestUninstallCurrentUserServiceRejectsAnInvalidHelper(t *testing.T) {
 	fake := &fakeWindowsDaemonService{installed: true}
 	installFakeWindowsDaemonService(t, fake)
-	if err := UninstallCurrentUserService(context.Background(), filepath.Join(t.TempDir(), "missing.exe")); !errors.Is(err, ErrInvalidInventoryConfig) {
+	if err := UninstallCurrentUserService(context.Background(), filepath.Join(shorttemp.Dir(t), "missing.exe")); !errors.Is(err, ErrInvalidInventoryConfig) {
 		t.Fatalf("error=%v", err)
 	}
 	if len(fake.elevated) != 0 {

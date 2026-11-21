@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
@@ -17,7 +18,7 @@ func TestVerifyWindowsLockACLAcceptsProtectedDACLSerialization(t *testing.T) {
 	if err != nil || user == nil || user.User.Sid == nil {
 		t.Fatalf("resolve current SID: %v", err)
 	}
-	path := filepath.Join(t.TempDir(), "daemon.lock")
+	path := filepath.Join(shorttemp.Dir(t), "daemon.lock")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func TestEnsureWindowsLockParentReplacesSessionScopedDirectoryDACL(t *testing.T)
 		t.Fatalf("resolve current SID: %v", err)
 	}
 	ownerSID := user.User.Sid.String()
-	root := filepath.Join(t.TempDir(), "state")
+	root := filepath.Join(shorttemp.Dir(t), "state")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}

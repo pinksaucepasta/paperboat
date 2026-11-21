@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type fixedSnapshot localapi.Snapshot
@@ -24,7 +25,7 @@ func (s fixedSnapshot) Snapshot(context.Context) (localapi.Snapshot, error) {
 // X-42 on the fleet: the bundle pb bugreport writes still named every machine, because the daemon marshalled its
 // snapshot without bugreportStatus. This reads the status.json of a real bundle.
 func TestBugreportBundleStatusNamesNoOtherMachine(t *testing.T) {
-	service := diagnosticService{recorder: diagnostics.NewMemoryRecorder(), stateRoot: t.TempDir(), ownerUID: os.Getuid(), clock: time.Now,
+	service := diagnosticService{recorder: diagnostics.NewMemoryRecorder(), stateRoot: shorttemp.Dir(t), ownerUID: os.Getuid(), clock: time.Now,
 		snapshots: fixedSnapshot{DaemonState: "ready", Machines: []localapi.MachineStatus{{ID: "machine_other", Alias: "studio-other", OwnerAccount: "acct_other", WorkspaceRoot: "/home/alice", SelectedPath: "direct"}}}}
 	bundle, err := service.CreateBugreport(t.Context())
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -47,7 +48,7 @@ func testCertificateDocument(t *testing.T, certificate endpointidentity.Certific
 	return api.EndpointCertificateDocument{Version: 1, AccountID: c.AccountID, KeyID: "aek_" + hex.EncodeToString(key[:]), EndpointID: c.EndpointID, Role: "cli", Generation: c.Generation, Serial: c.Serial, IssuedAt: c.IssuedAt.Format(time.RFC3339), ExpiresAt: c.ExpiresAt.Format(time.RFC3339), Certificate: base64.RawURLEncoding.EncodeToString(raw), CertificateFingerprint: hex.EncodeToString(fingerprint[:])}
 }
 func TestResolveBindsLocalCustodyAndRemoteCertificateToOneRoot(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	issuer, accountID, cliID, machineID := "https://api.example.test", "account_01", "cli_01", "machine_01"
 	keys, err := store.FreshPeerIdentityKeys(issuer, accountID, cliID)
@@ -227,7 +228,7 @@ func TestClassifyResolutionDeadlineKeepsAuthorityPhaseAndCause(t *testing.T) {
 }
 
 func TestResolveUsesVerifierOnlyRootWithoutCreatingPrivateCustody(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	issuer, accountID, cliID, machineID := "https://api.example.test", "account_01", "cli_verifier", "machine_01"
 	rootPublic, rootPrivate, err := ed25519.GenerateKey(nil)

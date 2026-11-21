@@ -35,6 +35,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/streamauth"
 	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
@@ -119,7 +120,7 @@ func connectedEndpointAuthority(t *testing.T, store config.ProfileStore, issuer,
 
 func connectedStore(t *testing.T) config.ProfileStore {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	return config.ProfileStore{Path: filepath.Join(root, "profiles.json"), Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 }
 

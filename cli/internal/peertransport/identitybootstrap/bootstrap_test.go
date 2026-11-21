@@ -17,6 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
@@ -132,7 +133,7 @@ func (c *existingEnrollmentClient) EndpointCertificate(context.Context, string, 
 func TestEnrollCLIExistingAccountCreatesIndependentMachineIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	rootPublic, _, _ := ed25519.GenerateKey(nil)
-	rootDir := t.TempDir()
+	rootDir := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 	var enrolledPublic []byte
 	client := freshBootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
@@ -164,7 +165,7 @@ func TestEnrollCLIExistingAccountCreatesIndependentMachineIdentity(t *testing.T)
 func TestEnrollExistingRootRecoversAlreadyFulfilledEnrollmentAfterLocalPersistenceFailure(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	rootPublic, rootPrivate, _ := ed25519.GenerateKey(nil)
-	rootDir := t.TempDir()
+	rootDir := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 	keys, err := store.PeerEndpointKeys("https://api.example.test", "account_1", "cli_1")
 	if err != nil {
@@ -197,7 +198,7 @@ func TestEnrollExistingRootRecoversAlreadyFulfilledEnrollmentAfterLocalPersisten
 func TestEnrollExistingRootExpiresWhileApprovalIsPending(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	rootPublic, _, _ := ed25519.GenerateKey(nil)
-	rootDir := t.TempDir()
+	rootDir := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 	keys, err := store.PeerEndpointKeys("https://api.example.test", "account_1", "cli_1")
 	if err != nil {
@@ -218,7 +219,7 @@ func (f bootstrapClientFunc) BootstrapE2EE(ctx context.Context, operation string
 
 func TestEnrollCLINewRootCreatesPersistsAndExactlyReplaysIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	var firstOperation string
 	var firstInput api.E2EEBootstrapInput
@@ -252,7 +253,7 @@ func TestEnrollCLINewRootCreatesPersistsAndExactlyReplaysIdentity(t *testing.T) 
 
 func TestFreshBootstrapPersistsIdentityBeforeReturning(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	client := freshBootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
 		return bootstrapResult(input), nil
@@ -277,7 +278,7 @@ func TestFreshBootstrapPersistsIdentityBeforeReturning(t *testing.T) {
 
 func TestFreshBootstrapUsesEndpointScopedSigningKeyAndExactlyReplays(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	old, err := store.PeerIdentityKeys("https://api.example.test", "account_1", "cli_old")
 	if err != nil {
@@ -317,7 +318,7 @@ func TestFreshBootstrapUsesEndpointScopedSigningKeyAndExactlyReplays(t *testing.
 
 func TestFreshCLICertificateRenewsWithoutAnotherMachine(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	var signer string
 	var serials []uint64
@@ -356,7 +357,7 @@ func TestFreshCLICertificateRenewsWithoutAnotherMachine(t *testing.T) {
 func TestFreshBootstrapBackdatesCertificateForBoundedWindowsClockSkew(t *testing.T) {
 	clientNow := time.Date(2026, 9, 3, 12, 0, 16, 0, time.UTC)
 	serverNow := clientNow.Add(-16 * time.Second)
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	client := freshBootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
 		public, err := base64.RawURLEncoding.Strict().DecodeString(input.RootPublicKey)
@@ -391,7 +392,7 @@ func TestEnrollCLIReplacesObsoleteLocalAccountRootWithMachineIdentity(t *testing
 		{name: "root custody", seed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
+			root := shorttemp.Dir(t)
 			store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 			issuer, accountID, endpointID := "https://api.example.test", "account_1", "cli_1"
 			if tc.seed {
@@ -421,7 +422,7 @@ func TestEnrollCLIReplacesObsoleteLocalAccountRootWithMachineIdentity(t *testing
 }
 
 func TestBootstrapRejectsServerSubstitution(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	client := bootstrapClientFunc(func(_ context.Context, _ string, input api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error) {
 		input.Certificate.EndpointID = "other_cli"
@@ -434,7 +435,7 @@ func TestBootstrapRejectsServerSubstitution(t *testing.T) {
 }
 
 func TestBootstrapRequiresPairingWhenRemoteRootExistsWithoutLocalCustody(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	remotePublic, _, _ := ed25519.GenerateKey(nil)
 	_, err := Bootstrap(context.Background(), Request{Store: store, Client: existingRootClient{root: rootDocument(remotePublic)}, Issuer: "https://api.example.test", AccountID: "account_1", CLIClientSessionID: "cli_1"})

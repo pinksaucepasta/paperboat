@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type rotatingAuthSource struct {
@@ -118,7 +119,7 @@ func TestAuthenticatedMachineSourceReportsMissingSignerWithoutHidingInventory(t 
 		}
 	}))
 	defer server.Close()
-	rootDir := t.TempDir()
+	rootDir := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: rootDir, Secrets: config.FileSecretStore{Dir: filepath.Join(rootDir, "secrets")}}
 	if err := store.SavePeerAccountRootPublic(server.URL, "account_1", rootPublic); err != nil {
 		t.Fatal(err)

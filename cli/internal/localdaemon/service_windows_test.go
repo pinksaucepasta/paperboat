@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	hostruntimeservice "github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
 )
@@ -45,7 +46,7 @@ func (p *fakeWindowsDaemonProcess) TerminateAndWait(ctx context.Context) error {
 func (*fakeWindowsDaemonProcess) Close() error { return nil }
 
 func TestInstallWindowsCurrentUserServiceRequiresManagedService(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -63,13 +64,13 @@ func TestInstallWindowsCurrentUserServiceRequiresManagedService(t *testing.T) {
 	if err := installWindowsCurrentUserService(context.Background(), executable, "", ""); !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		t.Fatalf("error=%v want missing managed service", err)
 	}
-	if err := installWindowsCurrentUserService(context.Background(), executable, filepath.Join(t.TempDir(), "config.json"), ""); err == nil || !strings.Contains(err.Error(), "unsupported") {
+	if err := installWindowsCurrentUserService(context.Background(), executable, filepath.Join(shorttemp.Dir(t), "config.json"), ""); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("configuration override error=%v", err)
 	}
 }
 
 func TestInstallWindowsCurrentUserServiceUsesManagedServiceWithoutLegacyTask(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestWindowsTaskCommandErrorKeepsCauseWithoutRetainingOutput(t *testing.T) {
 }
 
 func TestResolveManagedWindowsDaemonExecutableUsesStableBinary(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	layout := hostruntimeservice.Layout{
 		InstallRoot: root,
 		Binary:      filepath.Join(root, "bin", "pb.exe"),
@@ -279,7 +280,7 @@ func testWindowsDaemonLock(t *testing.T, identity windowsDaemonProcessIdentity) 
 }
 
 func TestStopOwnedWindowsDaemonTerminatesOnlyExactRecordedProcess(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +296,7 @@ func TestStopOwnedWindowsDaemonTerminatesOnlyExactRecordedProcess(t *testing.T) 
 		}
 		return process, nil
 	}
-	if err := stopOwnedWindowsDaemon(context.Background(), filepath.Join(t.TempDir(), "daemon.lock"), identity.OwnerSID, executable); err != nil {
+	if err := stopOwnedWindowsDaemon(context.Background(), filepath.Join(shorttemp.Dir(t), "daemon.lock"), identity.OwnerSID, executable); err != nil {
 		t.Fatal(err)
 	}
 	if !process.terminated {
@@ -307,7 +308,7 @@ func TestStopOwnedWindowsDaemonTerminatesOnlyExactRecordedProcess(t *testing.T) 
 }
 
 func TestWindowsOwnerServiceLifecycleStopsLegacyButRequiresManagedStart(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +333,7 @@ func TestWindowsOwnerServiceLifecycleStopsLegacyButRequiresManagedStart(t *testi
 	stopWindowsLocalDaemonService = func(context.Context) error { return nil }
 	startWindowsLocalDaemonService = func(context.Context) error { return windows.ERROR_SERVICE_DOES_NOT_EXIST }
 	probeWindowsLocalDaemonService = func() (bool, error) { return false, nil }
-	lockPath := filepath.Join(t.TempDir(), "daemon.lock")
+	lockPath := filepath.Join(shorttemp.Dir(t), "daemon.lock")
 	running, err := windowsOwnerServiceRunning(lockPath, identity.OwnerSID)
 	if err != nil || !running {
 		t.Fatalf("running=%t error=%v", running, err)
@@ -371,13 +372,13 @@ func TestWindowsDaemonOwnerRecordRoundTripsExactIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	identity := windowsDaemonProcessIdentity{PID: 8181, Executable: executable, Arguments: []string{executable, "daemon", "--server", "https://api.example.test"}, CreationTime: time.Now().UTC()}
 	lock := testWindowsDaemonLock(t, identity)
-	path := filepath.Join(t.TempDir(), "daemon.lock.owner.json")
+	path := filepath.Join(shorttemp.Dir(t), "daemon.lock.owner.json")
 	if err := writeWindowsDaemonOwnerRecord(path, ownerSID, lock.Record); err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +405,7 @@ func TestDefaultReadWindowsDaemonPIDLockRejectsLegacyOrPartialOwnerRecord(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	lockPath := filepath.Join(t.TempDir(), "daemon.lock")
+	lockPath := filepath.Join(shorttemp.Dir(t), "daemon.lock")
 	if err := os.WriteFile(lockPath, []byte("5652\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -437,8 +438,8 @@ func TestDefaultReadWindowsDaemonPIDLockRejectsLegacyOrPartialOwnerRecord(t *tes
 }
 
 func TestValidateOwnedWindowsDaemonRejectsForeignSIDPathCommandAndPIDReuse(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
-	foreign := filepath.Join(t.TempDir(), "foreign.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
+	foreign := filepath.Join(shorttemp.Dir(t), "foreign.exe")
 	for _, path := range []string{executable, foreign} {
 		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
 			t.Fatal(err)
@@ -474,7 +475,7 @@ func TestValidateOwnedWindowsDaemonRejectsForeignSIDPathCommandAndPIDReuse(t *te
 }
 
 func TestValidateOwnedWindowsDaemonAcceptsCanonicalRollbackRename(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	layout := hostruntimeservice.Layout{
 		InstallRoot:    root,
 		Binary:         filepath.Join(root, "bin", "pb.exe"),
@@ -547,7 +548,7 @@ func TestStopOwnedWindowsDaemonChecksCanceledContextBeforeTermination(t *testing
 }
 
 func TestStopOwnedWindowsDaemonPropagatesBoundedWaitTimeout(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +564,7 @@ func TestStopOwnedWindowsDaemonPropagatesBoundedWaitTimeout(t *testing.T) {
 }
 
 func TestRemoveWindowsCurrentUserServiceIgnoresMissingTaskAndStaleLock(t *testing.T) {
-	executable := filepath.Join(t.TempDir(), "pb.exe")
+	executable := filepath.Join(shorttemp.Dir(t), "pb.exe")
 	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}

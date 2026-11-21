@@ -13,6 +13,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type blockingWindowsMachineSource struct {
@@ -33,7 +34,7 @@ func TestWindowsDaemonServesStartingSnapshotBeforeInitialRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	paths := localapi.Paths{
 		StateRoot:   root,
 		RuntimeRoot: root,

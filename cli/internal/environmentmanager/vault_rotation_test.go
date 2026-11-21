@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 type personalRotationControl struct {
@@ -303,7 +304,7 @@ func TestAbortPersonalRotationWithoutRotationSaysNothingToCancel(t *testing.T) {
 
 func TestAbortPersonalRotationOnAMachineWithoutCustodySaysNothingToCancel(t *testing.T) {
 	_, control, _ := newVaultScopesFixture(t)
-	store := config.ProfileStore{Path: filepath.Join(t.TempDir(), "profiles.json"), Secrets: &vaultScopesSecretStore{}}
+	store := config.ProfileStore{Path: filepath.Join(shorttemp.Dir(t), "profiles.json"), Secrets: &vaultScopesSecretStore{}}
 	v := PasswordVault{WorkspaceID: "personal", Client: control, Store: store, Issuer: control.issuer, AccountID: control.account}
 	if err := v.AbortPersonalRotation(context.Background()); !errors.Is(err, ErrNoRotationInProgress) {
 		t.Fatalf("cancel without local vault custody = %v, want ErrNoRotationInProgress", err)

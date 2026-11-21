@@ -12,8 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
-	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"io"
 	"math/big"
 	"net"
@@ -24,6 +22,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/testleak"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	clienttransfer "github.com/pinksaucepasta/paperboat/cli/internal/filetransfer"
@@ -742,7 +743,7 @@ func testAuthority(t *testing.T, self tailnet.NetworkBinding, keys testKeys, lis
 	if len(listeners) > 0 {
 		listener = listeners[0]
 	}
-	options := tailnet.AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: self, Keys: keys, TestOnlyPacketListener: listener}
+	options := tailnet.AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: self, Keys: keys, TestOnlyPacketListener: listener}
 	if filter, ok := listener.(*directFilter); ok {
 		options.TestOnlyDERPCarrier = filter.wrapCarrier
 	}
@@ -839,7 +840,7 @@ func testLocalAuthority(t *testing.T, self tailnet.NetworkBinding, keys testKeys
 	if public, ok := testQUICKeys.Load(self.QUICCertificateFingerprint); ok {
 		self.QUICPublicKey = public.(string)
 	}
-	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: t.TempDir(), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: self, Keys: keys, LocalMachineID: localMachineID})
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: config.ProfileStore{Path: shorttemp.Dir(t), Secrets: testSecrets{}}, Issuer: "https://api.example.test", Self: self, Keys: keys, LocalMachineID: localMachineID})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -35,7 +36,7 @@ func (p paperboatAnswer) PeerTransportKeys(ctx context.Context) (api.PeerTranspo
 // 2026-11-16). The identity last verified with Paperboat is now served from disk at once; a refusal the server
 // answers in the background confirmation drops it, and a later restart does not serve it again.
 func TestRestartWhilePaperboatIsUnreachableResolvesTheLastVerifiedLocalIdentity(t *testing.T) {
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	store := config.ProfileStore{Path: root, Secrets: config.FileSecretStore{Dir: filepath.Join(root, "secrets")}}
 	issuer, accountID, cliID := "https://api.example.test", "account_01", "cli_01"
 	keys, err := store.FreshPeerIdentityKeys(issuer, accountID, cliID)

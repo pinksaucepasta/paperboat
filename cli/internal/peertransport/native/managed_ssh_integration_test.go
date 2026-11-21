@@ -124,7 +124,7 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxyCommand := filepath.Join(t.TempDir(), "proxy")
+	proxyCommand := filepath.Join(shorttemp.Dir(t), "proxy")
 	if err = os.WriteFile(proxyCommand, []byte(nativeSSHProxyScript(proxyHost, proxyPort)), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -193,12 +193,12 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 	if !forwarded {
 		t.Fatalf("OpenSSH forwarding failed: %s", forwardOutput.String())
 	}
-	upload := filepath.Join(t.TempDir(), "upload")
+	upload := filepath.Join(shorttemp.Dir(t), "upload")
 	if err = os.WriteFile(upload, []byte("paperboat-native-file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runOpenSSH(t, ctx, "scp", nil, append(append([]string{}, common...), upload, target+":"+remoteFile)...)
-	download := filepath.Join(t.TempDir(), "download")
+	download := filepath.Join(shorttemp.Dir(t), "download")
 	runOpenSSH(t, ctx, "sftp", []byte("get "+remoteFile+" "+download+"\n"), append(append([]string{}, common...), "-b", "-", target)...)
 	if content, readErr := os.ReadFile(download); readErr != nil || string(content) != "paperboat-native-file" {
 		t.Fatalf("SFTP download=%q error=%v", content, readErr)
@@ -223,7 +223,7 @@ func TestSystemOpenSSHOverNativeTailnet(t *testing.T) {
 		t.Fatalf("reconnected SSH output=%q", output)
 	}
 
-	wrongHosts := filepath.Join(t.TempDir(), "known_hosts")
+	wrongHosts := filepath.Join(shorttemp.Dir(t), "known_hosts")
 	if err = os.WriteFile(wrongHosts, []byte("paperboat ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

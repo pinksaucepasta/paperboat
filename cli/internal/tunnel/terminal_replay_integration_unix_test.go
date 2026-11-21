@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/cli/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 func TestNativeTerminalReattachRestoresCoherentScreenWithoutReplayingInput(t *testing.T) {
@@ -123,7 +124,7 @@ func terminalReadUntil(t *testing.T, connection *helperTerminalConn, marker []by
 
 func terminalReplayHost(t *testing.T) (*server.Server, server.Authorizer, *session.Manager, resolver.TerminalTarget) {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t)
 	adapter, err := pty.NewShellAdapter(root)
 	if err != nil {
 		t.Fatal(err)

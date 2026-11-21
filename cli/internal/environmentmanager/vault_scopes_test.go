@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/cli/internal/api"
 	"github.com/pinksaucepasta/paperboat/cli/internal/config"
 	"github.com/pinksaucepasta/paperboat/cli/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/cli/internal/shorttemp"
 )
 
 const (
@@ -289,7 +290,7 @@ func (c *vaultScopesControl) AckVaultGrant(_ context.Context, digest, vaultID st
 func newVaultScopesFixture(t *testing.T) (PasswordVault, *vaultScopesControl, config.ProfileStore) {
 	t.Helper()
 	store := config.ProfileStore{
-		Path:    filepath.Join(t.TempDir(), "profiles.json"),
+		Path:    filepath.Join(shorttemp.Dir(t), "profiles.json"),
 		Secrets: &vaultScopesSecretStore{},
 	}
 	control := &vaultScopesControl{
