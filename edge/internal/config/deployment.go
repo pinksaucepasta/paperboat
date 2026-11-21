@@ -37,11 +37,14 @@ type Deployment struct {
 	ControlURL             string `json:"control_url"`
 	CredentialIssuer       string `json:"credential_issuer"`
 	ControlCredentialFile  string `json:"control_credential_file"`
-	ControlCAFile          string `json:"control_ca_file"`
-	JWKSFile               string `json:"jwks_file"`
-	RevocationsFile        string `json:"revocations_file"`
-	UsageSigningKeyFile    string `json:"usage_signing_key_file"`
-	ConnectorAdvertiseHost string `json:"connector_advertise_host"`
+	// CertificateRenewalStatusFile is where the host's certificate renewal timer writes its last check
+	// (deploy/edge-ip-certificate.py); each heartbeat carries it so the admin panel alerts per node. Empty: none.
+	CertificateRenewalStatusFile string `json:"certificate_renewal_status_file,omitempty"`
+	ControlCAFile                string `json:"control_ca_file"`
+	JWKSFile                     string `json:"jwks_file"`
+	RevocationsFile              string `json:"revocations_file"`
+	UsageSigningKeyFile          string `json:"usage_signing_key_file"`
+	ConnectorAdvertiseHost       string `json:"connector_advertise_host"`
 	// Carrier listeners are dedicated connector-v1 data-plane endpoints. They
 	// require mutual TLS plus the
 	// server's admission-backed peer binding.
@@ -136,6 +139,9 @@ func (d Deployment) validate() error {
 		if path == "" || !filepath.IsAbs(path) || len(path) > 4096 {
 			return errors.New("deployment paths must be bounded and absolute")
 		}
+	}
+	if p := d.CertificateRenewalStatusFile; p != "" && (!filepath.IsAbs(p) || len(p) > 4096) {
+		return errors.New("certificate_renewal_status_file must be bounded and absolute")
 	}
 	// The carrier certificate is the edge's stable identity: the server and hosts pin it, and an
 	// install hands it to the replacement process unchanged (edge/internal/handover).

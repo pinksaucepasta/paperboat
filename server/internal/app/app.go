@@ -793,7 +793,7 @@ func New(opts Options) (*App, error) {
 		ServerNodes:              newServerNodeEnroller(store, opts.Config),
 		Database:                 store,
 		OperatorBackups:          backupService,
-		HostHealth:               hosthealth.NewService(store, opts.Config.Secrets.HostHealthToken),
+		HostHealth:               hosthealth.NewService(store),
 		TestFixtures:             fixturesService,
 		OperatorReporting:        reportingService,
 		OperatorMoney:            moneyService(stripeClient, store),

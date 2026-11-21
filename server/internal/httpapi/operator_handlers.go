@@ -64,6 +64,7 @@ var operatorPolicies = map[string]operatorPolicy{
 
 	"GET /v1/admin/backups":                                                         {"operations", "", "backups"},
 	"GET /v1/admin/host-health":                                                     {"operations", "", "host-health"},
+	"POST /v1/admin/host-health/reports":                                            {"operations", "body:source", ""},
 	"GET /v1/admin/backups/runs":                                                    {"operations", "", "backup-runs"},
 	"GET /v1/admin/support":                                                         {"support", "", "support-references"},
 	"GET /v1/admin/sentry/logs":                                                     {"operations", "", "sentry-logs"},

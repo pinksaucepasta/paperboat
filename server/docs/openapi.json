@@ -78,11 +78,6 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Opaque runtime credential issued for exactly one completed active pbh node."
-      },
-      "bearerHostHealth": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "The dedicated host health reporting token (PAPERBOAT_HOST_HEALTH_TOKEN)."
       }
     },
     "schemas": {
@@ -67402,86 +67397,6 @@
         "description": "Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed. Our own relays or edges, paged by node id, with the bytes each carried; a registered node that reported nothing is listed with reporting=false."
       }
     },
-    "/v1/operations/host-health/reports": {
-      "post": {
-        "operationId": "post_host_health_report",
-        "summary": "Record the latest host capacity or canary state",
-        "security": [
-          {
-            "bearerHostHealth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "source",
-                  "payload"
-                ],
-                "properties": {
-                  "source": {
-                    "type": "string",
-                    "pattern": "^(hosts|canary|deploy|edge-certificate:[A-Za-z0-9.:-]{1,253})$"
-                  },
-                  "payload": {
-                    "type": "object",
-                    "additionalProperties": true
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The latest report of that source was replaced.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "status"
-                      ],
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "const": "recorded"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "413": {
-            "$ref": "#/components/responses/Error"
-          },
-          "503": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "description": "Accepts at most 49152 request-body bytes and a payload of at most 32768. This route uses only its dedicated bearer and never accepts browser staff authority or CSRF."
-      }
-    },
     "/v1/admin/host-health": {
       "get": {
         "operationId": "get_admin_host_health",
@@ -67554,6 +67469,120 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/admin/host-health/reports": {
+      "post": {
+        "operationId": "post_host_health_report",
+        "summary": "Record the latest host capacity, canary or deploy state",
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "payload"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "hosts",
+                      "canary",
+                      "deploy"
+                    ]
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The latest report of that source was replaced.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "recorded"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Current active operations operator and separate operator session required; Operator-Target is the source. Audited. Accepts at most 49152 request-body bytes and a payload of at most 32768. Edges never write here: each edge's certificate renewal rides in its authenticated heartbeat.",
+        "x-operator-capability": "operations",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "description": "Opaque incident, ticket, or change reference; do not send prose or secrets.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          }
+        ]
       }
     },
     "/v1/admin/transactional-mails": {

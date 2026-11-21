@@ -82,13 +82,12 @@ carrier certificate. These identities serve different connections; keep the
 carrier key and runtime credentials unchanged.
 
 Install `edge-ip-certificate.py` as
-`/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py` (mode 0755) with `health_report.py` beside it, and install
+`/usr/local/lib/paperboat-selfhost/edge-ip-certificate.py` (mode 0755), and install
 `paperboat-edge-certificate.service` and `.timer` in `/etc/systemd/system/`.
 Create mode-0600 `/etc/paperboat-edge-certificate.env` with
-`PAPERBOAT_CERTIFICATE_EMAIL` set to the operator's certificate contact address, and
-`PAPERBOAT_HEALTH_REPORT_URL` (the server's origin) with `PAPERBOAT_HEALTH_REPORT_TOKEN_FILE` (a mode-0600 file
-holding the server's `PAPERBOAT_HOST_HEALTH_TOKEN`) so each check shows in the admin panel: a failing renewal, or
-no check for a day, is an alert in the admin bell.
+`PAPERBOAT_CERTIFICATE_EMAIL` set to the operator's certificate contact address. Each check is written to
+`public-acme/renew-status.json`; the edge carries it in every heartbeat over its own enrolled node credential, so a
+failing renewal, or no check for a day, is an alert in the admin bell for that node (no reporting credential).
 Run `systemctl daemon-reload`, start `paperboat-edge-certificate.service`, then
 `systemctl enable --now paperboat-edge-certificate.timer`.
 
@@ -284,8 +283,8 @@ server back to .917 after migrations 477-490 had run; .917 could not serve on 49
   commit, 12 chars>` on the new server's commit is `success`. Otherwise the new server keeps serving, edges still
   roll back, an alert goes to the canary's `alerts.log` and `CANARY_ALERT_THREAD`, and the gate exits 6:
   roll forward with a fix.
-- With `PAPERBOAT_HEALTH_REPORT_URL` and `PAPERBOAT_HEALTH_REPORT_TOKEN_FILE` set (the canary's report URL and token
-  file), every gated deploy reports its outcome; an automatic rollback, or a server kept on the migrated schema, is an
+- With `PAPERBOAT_HEALTH_REPORT_URL` (the server's origin) and `PAPERBOAT_HEALTH_REPORT_OPERATOR_FILE` set (a mode-0600
+  file for an operations-role operator: email, password and authenticator key on three lines), every gated deploy reports its outcome; an automatic rollback, or a server kept on the migrated schema, is an
   alert in the admin bell until the next deploy that stays.
 - `SKEW_CHECK_PUBLISH=1 tools/device-smoke/skew_check.sh <previous release>` publishes that status (its schema
   stage runs the previous release's own server and `TestE2ECore` on a database migrated to HEAD), and its
@@ -397,8 +396,8 @@ The timer checks memory in use, CPU busy time between samples, each persistent
 local filesystem, and allocated file descriptors against the host's capacity.
 The policy in `host_resources.py` fires at 80% (warning) or 90% (critical) for
 three minutes and clears each level five percentage points below its trigger.
-The runner also pushes the latest of both (`CANARY_REPORT_URL`, the server's origin, and
-`CANARY_REPORT_TOKEN_FILE`, a file holding the server's `PAPERBOAT_HOST_HEALTH_TOKEN`) so the admin panel's
+The runner also pushes the latest of both through the operator API (`PAPERBOAT_HEALTH_REPORT_URL` and
+`PAPERBOAT_HEALTH_REPORT_OPERATOR_FILE`, as for the gated deploy) so the admin panel's
 Servers > "Hosts & canary" tab shows each host's percentages and the canary's state, and its notices bell lists
 the open alerts. A report older than five minutes is itself an open alert. Transitions go to the canary's `alerts.log`, its
 `CANARY_ALERT_THREAD`. A host whose sample fails three times in a row

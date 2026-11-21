@@ -55,12 +55,14 @@ export function openAlerts(reports: Reports | undefined, now: number): Alert[] {
     alerts.push({ id: "deploy:kept-migrated", level: "critical", title: "A failed deploy could not be rolled back", body: `${deploy.what} failed its canary check, but its database migrations have no passing compatibility check with the previous server, so the new server keeps serving. Deploy a fix forward.`, since: deploy.at })
   for (const report of reports ?? []) {
     if (!report.source.startsWith("edge-certificate:") || typeof report.payload !== "object") continue
-    const edge = report.source.slice("edge-certificate:".length).toLowerCase()
+    // The entry comes from that edge's own authenticated heartbeat, keyed by its node ("node-<id>").
+    const node = report.source.slice("edge-certificate:node-".length)
     const cert = { payload: report.payload as EdgeCertificatePayload, reported_at: report.reported_at }
+    const edge = `edge node ${node}`
     const stale = isStale(cert, now)
     // Only an explicit success is healthy: a malformed report reads as a failure, and a failure stays critical until a success arrives.
-    if (cert.payload.ok !== true) alerts.push({ id: `edge-certificate:${edge}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${typeof cert.payload.error === "string" && cert.payload.error ? cert.payload.error : "The renewal failed."}${stale ? " The edge has also stopped reporting checks." : ""} Browsers will refuse this edge when its certificate expires. Read public-acme/renew.log on the edge, fix the cause, then start paperboat-edge-certificate.service.`, since: cert.reported_at })
-    else if (stale) alerts.push({ id: `edge-certificate-stale:${edge}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Check the paperboat-edge-certificate timer on that edge.", since: cert.reported_at })
+    if (cert.payload.ok !== true) alerts.push({ id: `edge-certificate:${node}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${typeof cert.payload.error === "string" && cert.payload.error ? cert.payload.error : "The renewal failed."}${stale ? " The edge has also stopped reporting checks." : ""} Browsers will refuse this edge when its certificate expires. Read public-acme/renew.log on the edge, fix the cause, then start paperboat-edge-certificate.service.`, since: cert.reported_at })
+    else if (stale) alerts.push({ id: `edge-certificate-stale:${node}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Check the paperboat-edge-certificate timer on that edge.", since: cert.reported_at })
   }
   return alerts.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical"))
 }

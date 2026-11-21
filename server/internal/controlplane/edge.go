@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
@@ -435,7 +436,19 @@ type edgeNodeObservation struct {
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 	// Forward is the edge's visitor-forwarding counters (links, held names, forwarded/accepted streams); optional.
 	Forward *nodemesh.Stats `json:"forward,omitempty"`
+	// CertificateRenewal is the edge's last public certificate renewal check; optional (no renewal timer, or none ran).
+	CertificateRenewal *edgeCertificateRenewal `json:"certificate_renewal,omitempty"`
 }
+
+// edgeCertificateRenewal rides in the heartbeat, so the admin alert is keyed by the authenticated node that sent it.
+type edgeCertificateRenewal struct {
+	OK        bool      `json:"ok"`
+	Error     string    `json:"error"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+// maxCertificateRenewalError bounds the stored reason (the edge's renewal script caps it at 300 characters).
+const maxCertificateRenewalError = 1024
 
 type edgeHostRefusals struct {
 	Hostname string `json:"hostname"`
@@ -617,13 +630,23 @@ func (s *EdgeService) Heartbeat(ctx context.Context, r edgeNodeObservation) (*in
 	if r.Forward != nil && (r.Forward.Links < 0 || r.Forward.Names < 0) {
 		return nil, invalidUsage("edge.go:forward")
 	}
+	now := s.clock().UTC()
 	// The stored observation is the operator's read of the node; forward rides in it (operatorinfra.Node.Forward).
 	stored := map[string]any{"active_streams": r.ActiveStreams}
 	if r.Forward != nil {
 		stored["forward"] = r.Forward
 	}
-	observation, _ := json.Marshal(stored)
-	now := s.clock().UTC()
+	if c := r.CertificateRenewal; c != nil {
+		// A plausible time only: the admin snapshot reads it back as a PostgreSQL timestamp.
+		if c.CheckedAt.Year() < 2020 || c.CheckedAt.After(now.Add(24*time.Hour)) || len(c.Error) > maxCertificateRenewalError || !utf8.ValidString(c.Error) {
+			return nil, invalidUsage("edge.go:certificate_renewal")
+		}
+		stored["certificate_renewal"] = edgeCertificateRenewal{OK: c.OK, Error: c.Error, CheckedAt: c.CheckedAt.UTC()}
+	}
+	observation, err := json.Marshal(stored)
+	if err != nil {
+		return nil, err
+	}
 	node, err := s.store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: r.NodeID, ProcessEpoch: r.ProcessEpoch, Ready: r.Ready, Draining: r.Draining, Observation: observation, Now: sql.NullTime{Time: now, Valid: true}})
 	if err != nil {
 		return nil, err

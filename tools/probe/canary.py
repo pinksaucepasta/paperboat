@@ -9,7 +9,7 @@ State lives in CANARY_STATE (default ~/.local/state/paperboat-canary):
 A step that fails in two runs in a row alerts once; its first pass afterwards sends one recovery line.
 The probe's environment (RUN_A, CANARY_A, ...) comes from the unit's EnvironmentFile.
 """
-import fcntl, json, os, subprocess, sys, time, urllib.request
+import fcntl, json, os, subprocess, sys, time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -140,19 +140,12 @@ def send_alert(message):
 
 
 def push_health(source, payload):
-    """Latest state for the admin panel: CANARY_REPORT_URL (the server's origin) and CANARY_REPORT_TOKEN_FILE, both optional.
-    Best effort: the panel shows a report that stopped arriving as stale, so a failed push must not fail the run."""
-    url, token_file = os.environ.get("CANARY_REPORT_URL"), os.environ.get("CANARY_REPORT_TOKEN_FILE")
-    if not url or not token_file:
-        return
-    try:
-        request = urllib.request.Request(
-            url.rstrip("/") + "/v1/operations/host-health/reports", method="POST",
-            data=json.dumps({"source": source, "payload": payload}).encode(),
-            headers={"content-type": "application/json", "authorization": "Bearer " + Path(token_file).read_text().strip()})
-        urllib.request.urlopen(request, timeout=10).close()
-    except (OSError, ValueError) as error:
-        print(f"health report failed: {error}", file=sys.stderr)
+    """Latest state for the admin panel, through the operator API as an operations operator (deploy/health_report.py:
+    PAPERBOAT_HEALTH_REPORT_URL and PAPERBOAT_HEALTH_REPORT_OPERATOR_FILE, both optional). Best effort: the panel shows
+    a report that stopped arriving as stale, so a failed push must not fail the run."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
+    import health_report
+    health_report.push(source, payload)
 
 
 def health_payload(status):

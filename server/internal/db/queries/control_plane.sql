@@ -941,7 +941,7 @@ SET edge_pool = EXCLUDED.edge_pool,
     carrier_server_certificate_chain_pem = coalesce(EXCLUDED.carrier_server_certificate_chain_pem, control_tunnel_nodes.carrier_server_certificate_chain_pem),
     public_https_port = EXCLUDED.public_https_port,
     state = 'registered', ready = false, capacity = EXCLUDED.capacity,
-    observation = '{}'::jsonb, last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+    observation = CASE WHEN control_tunnel_nodes.observation ? 'certificate_renewal' THEN jsonb_build_object('certificate_renewal', control_tunnel_nodes.observation->'certificate_renewal') ELSE '{}'::jsonb END, last_heartbeat_at = EXCLUDED.last_heartbeat_at,
     drain_deadline = NULL, version = control_tunnel_nodes.version + 1, updated_at = EXCLUDED.last_heartbeat_at
 WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id)
    AND NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=control_tunnel_nodes.id))
@@ -1020,7 +1020,7 @@ ORDER BY r.id;
 UPDATE control_tunnel_nodes
 SET state = CASE WHEN sqlc.arg(draining)::boolean THEN 'draining' WHEN state = 'registered' AND sqlc.arg(ready)::boolean THEN 'ready' ELSE state END,
     ready = CASE WHEN state = 'draining' OR sqlc.arg(draining)::boolean THEN false ELSE sqlc.arg(ready) END,
-    observation = coalesce(sqlc.arg(observation)::jsonb, '{}'::jsonb),
+    observation = coalesce(sqlc.arg(observation)::jsonb, '{}'::jsonb) || CASE WHEN coalesce(sqlc.arg(observation)::jsonb, '{}'::jsonb) ? 'certificate_renewal' OR NOT observation ? 'certificate_renewal' THEN '{}'::jsonb ELSE jsonb_build_object('certificate_renewal', observation->'certificate_renewal') END,
     capacity_observed_at = CASE WHEN roles @> ARRAY['edge']::text[] THEN sqlc.arg(now) ELSE capacity_observed_at END,
     registry_expires_at = CASE WHEN roles @> ARRAY['edge']::text[] THEN sqlc.arg(now)::timestamptz + interval '1 minute' ELSE registry_expires_at END,
     last_heartbeat_at = sqlc.arg(now), version = version + 1, updated_at = sqlc.arg(now)

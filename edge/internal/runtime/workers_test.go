@@ -467,3 +467,31 @@ func TestUsageWorkerDeliversThePastARefusedReportInTheSameTick(t *testing.T) {
 		t.Fatalf("queue=%d delivered=%v dead=%d", queue.Len(), sink.delivered, len(queue.DeadLetters()))
 	}
 }
+
+func TestNodeWorkerHeartbeatCarriesTheCertificateRenewalCheck(t *testing.T) {
+	state := node.New("edge")
+	state.MarkReady()
+	manager, _ := node.NewManager(state)
+	sink := &observedHeartbeats{NodeSink: testedge.New()}
+	pulse := make(chan time.Time)
+	checked := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process"), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) },
+		CertificateRenewal: func() *control.CertificateRenewal {
+			return &control.CertificateRenewal{OK: false, Error: "certbot failed", CheckedAt: checked}
+		}}
+	if err := worker.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Shutdown(context.Background())
+	pulse <- time.Unix(11, 0)
+	pulse <- time.Unix(12, 0)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.seen) == 0 {
+		t.Fatal("no heartbeat was sent")
+	}
+	raw, _ := json.Marshal(sink.seen[len(sink.seen)-1])
+	if !strings.Contains(string(raw), `"certificate_renewal":{"ok":false,"error":"certbot failed","checked_at":"2026-11-21T12:00:00Z"}`) {
+		t.Fatalf("renewal check is not on the wire: %s", raw)
+	}
+}

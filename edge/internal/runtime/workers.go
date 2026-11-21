@@ -190,6 +190,8 @@ type NodeWorker struct {
 	Now          func() time.Time
 	// Metrics, when set, supplies the report sent with each heartbeat.
 	Metrics func(time.Time) *nodemetrics.Report
+	// CertificateRenewal, when set, supplies the last certificate renewal check sent with each heartbeat (nil: none).
+	CertificateRenewal func() *control.CertificateRenewal
 	// OnAnswer, when set, applies each heartbeat answer (the server's ingress limits).
 	OnAnswer func(control.NodeAnswer) error
 	// Drain, when set, runs once per drain order (an answer carrying drain_deadline) in its own goroutine: it tells
@@ -269,6 +271,9 @@ func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 	}
 	if w.Metrics != nil {
 		observation.Metrics = w.Metrics(at)
+	}
+	if w.CertificateRenewal != nil {
+		observation.CertificateRenewal = w.CertificateRenewal()
 	}
 	answer, err := w.Sink.Heartbeat(ctx, observation)
 	if errors.Is(err, control.ErrUpdateRequired) {

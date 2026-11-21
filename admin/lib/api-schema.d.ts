@@ -9643,26 +9643,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/operations/host-health/reports": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record the latest host capacity or canary state
-         * @description Accepts at most 49152 request-body bytes and a payload of at most 32768. This route uses only its dedicated bearer and never accepts browser staff authority or CSRF.
-         */
-        post: operations["post_host_health_report"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/host-health": {
         parameters: {
             query?: never;
@@ -9674,6 +9654,26 @@ export interface paths {
         get: operations["get_admin_host_health"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/host-health/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the latest host capacity, canary or deploy state
+         * @description Current active operations operator and separate operator session required; Operator-Target is the source. Audited. Accepts at most 49152 request-body bytes and a payload of at most 32768. Edges never write here: each edge's certificate renewal rides in its authenticated heartbeat.
+         */
+        post: operations["post_host_health_report"];
         delete?: never;
         options?: never;
         head?: never;
@@ -39136,44 +39136,6 @@ export interface operations {
             };
         };
     };
-    post_host_health_report: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    source: string;
-                    payload: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description The latest report of that source was replaced. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: {
-                            /** @constant */
-                            status: "recorded";
-                        };
-                    };
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            413: components["responses"]["Error"];
-            503: components["responses"]["Error"];
-        };
-    };
     get_admin_host_health: {
         parameters: {
             query?: never;
@@ -39205,6 +39167,50 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_host_health_report: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    source: "hosts" | "canary" | "deploy";
+                    payload: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The latest report of that source was replaced. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            status: "recorded";
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            413: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };
     };

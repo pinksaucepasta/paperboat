@@ -6,10 +6,12 @@ import json
 import os
 import re
 import stat
+import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 
-import health_report
 
 
 def stop_owned_edge(state, log):
@@ -128,10 +130,6 @@ def main():
 
 
 MAX_STATE_FILE = 64 << 10
-# The edge's flags (edge/internal/config/config.go Parse); an unknown one makes the edge refuse its argv.
-EDGE_FLAGS = {"node-id", "edge-pool", "relay-id", "relay-region", "relay-name", "health-address", "state-path",
-              "deployment-config", "shutdown-timeout"}
-NODE_ID = re.compile(r"node_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
 def read_state(state_dir, name):
@@ -156,49 +154,26 @@ def read_state(state_dir, name):
 
 
 def report(args, ok, error):
-    """The admin panel alerts while this edge's renewal fails, or when no check arrived for a day (four missed timer runs)."""
-    # The alert is named by the host renewal accepts; a bad or unreadable host still alerts, named by the
-    # edge's node id (node:<uuid>, which no hostname or IP can equal), with a fixed message that never echoes
-    # the host. Neither usable: nothing is sent and the staleness alert plus the local renew.log show it.
+    """Write this check where the edge reads it (deployment.json certificate_renewal_status_file): every heartbeat carries
+    it over the edge's own authenticated control connection, and the server raises or clears this node's admin alert."""
     error = str(error)[:300]
+    status = Path(args.state_dir) / "public-acme/renew-status.json"
     try:
-        host = json.loads(read_state(args.state_dir, "tunnel/deployment.json"))["connector_advertise_host"]
-        if not isinstance(host, str):
-            raise TypeError
-        source = "edge-certificate:" + subject_flags(host)[1].lower()  # one alert record per edge whatever the case
-    except (OSError, ValueError, KeyError, TypeError, IndexError, RecursionError):
-        source = node_source(args)
-        if source is None:
-            return
-        ok, error = False, "the advertised connector host is missing or invalid; fix tunnel/deployment.json"
-    health_report.push(source, {"ok": ok, "error": error, "stale_after_seconds": 86400})
+        status.parent.mkdir(mode=0o700, exist_ok=True)
+        # A fresh, exclusively created 0600 file in the protected directory, then an atomic rename: never a
+        # predictable path a planted link could redirect.
+        descriptor, temporary = tempfile.mkstemp(prefix=".renew-status.", dir=status.parent)
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                json.dump({"ok": bool(ok), "error": error,
+                           "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}, handle)
+            os.replace(temporary, status)
+        except BaseException:
+            os.unlink(temporary)
+            raise
+    except OSError as failure:  # never mask the renewal's own result; renew.log and the stale alert still show it
+        print(f"certificate status not written: {failure}", file=sys.stderr)
 
-
-def node_source(args):
-    try:
-        runtime = json.loads(read_state(args.state_dir, "tunnel/runtime.args"))
-    except (OSError, ValueError, RecursionError):
-        return None
-    if not isinstance(runtime, list) or not all(isinstance(a, str) for a in runtime):
-        return None
-    # Walk argv as the edge's Go flag parser does (every edge flag takes a value; "-x=v" or "-x v"; stops at the first
-    # non-flag or "--"). It keeps the last of repeated flags; refuse any repeat instead of guessing.
-    values, i = [], 0
-    while i < len(runtime) and runtime[i] != "--" and len(runtime[i]) > 1 and runtime[i][0] == "-":
-        name, eq, value = runtime[i][2 if runtime[i].startswith("--") else 1:].partition("=")
-        if name not in EDGE_FLAGS:
-            return None
-        if not eq:
-            if i + 1 >= len(runtime):
-                return None
-            i, value = i + 1, runtime[i + 1]
-        if name == "node-id":
-            values.append(value)
-        i += 1
-    if len(values) != 1:
-        return None
-    match = NODE_ID.fullmatch(values[0])
-    return "edge-certificate:node:" + match.group(1) if match else None
 
 if __name__ == "__main__":
     raise SystemExit(main())

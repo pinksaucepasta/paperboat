@@ -2897,7 +2897,7 @@ const heartbeatControlTunnelNode = `-- name: HeartbeatControlTunnelNode :one
 UPDATE control_tunnel_nodes
 SET state = CASE WHEN $1::boolean THEN 'draining' WHEN state = 'registered' AND $2::boolean THEN 'ready' ELSE state END,
     ready = CASE WHEN state = 'draining' OR $1::boolean THEN false ELSE $2 END,
-    observation = coalesce($3::jsonb, '{}'::jsonb),
+    observation = coalesce($3::jsonb, '{}'::jsonb) || CASE WHEN coalesce($3::jsonb, '{}'::jsonb) ? 'certificate_renewal' OR NOT observation ? 'certificate_renewal' THEN '{}'::jsonb ELSE jsonb_build_object('certificate_renewal', observation->'certificate_renewal') END,
     capacity_observed_at = CASE WHEN roles @> ARRAY['edge']::text[] THEN $4 ELSE capacity_observed_at END,
     registry_expires_at = CASE WHEN roles @> ARRAY['edge']::text[] THEN $4::timestamptz + interval '1 minute' ELSE registry_expires_at END,
     last_heartbeat_at = $4, version = version + 1, updated_at = $4
@@ -4457,7 +4457,7 @@ SET edge_pool = EXCLUDED.edge_pool,
     carrier_server_certificate_chain_pem = coalesce(EXCLUDED.carrier_server_certificate_chain_pem, control_tunnel_nodes.carrier_server_certificate_chain_pem),
     public_https_port = EXCLUDED.public_https_port,
     state = 'registered', ready = false, capacity = EXCLUDED.capacity,
-    observation = '{}'::jsonb, last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+    observation = CASE WHEN control_tunnel_nodes.observation ? 'certificate_renewal' THEN jsonb_build_object('certificate_renewal', control_tunnel_nodes.observation->'certificate_renewal') ELSE '{}'::jsonb END, last_heartbeat_at = EXCLUDED.last_heartbeat_at,
     drain_deadline = NULL, version = control_tunnel_nodes.version + 1, updated_at = EXCLUDED.last_heartbeat_at
 WHERE (NOT EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id)
    AND NOT EXISTS (SELECT 1 FROM managed_node_authority m WHERE m.node_id=control_tunnel_nodes.id))

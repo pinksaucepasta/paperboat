@@ -283,6 +283,16 @@ type NodeObservation struct {
 	Metrics *nodemetrics.Report `json:"metrics,omitempty"`
 	// Forward counts what this edge forwarded to, and accepted from, other managed nodes (edge/internal/forward).
 	Forward *nodemesh.Stats `json:"forward,omitempty"`
+	// CertificateRenewal is the host's last public certificate renewal check; the server raises or clears this node's
+	// admin alert from it.
+	CertificateRenewal *CertificateRenewal `json:"certificate_renewal,omitempty"`
+}
+
+// CertificateRenewal is one renewal check: ok, else the reason (at most 300 characters), and when it ran.
+type CertificateRenewal struct {
+	OK        bool      `json:"ok"`
+	Error     string    `json:"error"`
+	CheckedAt time.Time `json:"checked_at"`
 }
 
 // HostRefusals is how many requests or connections to one hostname the edge refused for flood protection.

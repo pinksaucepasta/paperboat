@@ -60,23 +60,12 @@ class Health(unittest.TestCase):
         self.assertEqual(len(payload["last"]["steps"][0]["error"]), 200)
         self.assertIsNone(payload["account_last"])
 
-    def test_push_posts_to_the_configured_server_with_the_token_and_is_off_without_config(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(canary.urllib.request, "urlopen") as urlopen:
-            token = Path(directory) / "token"
-            token.write_text("secret\n")
-            with patch.dict(os.environ, {}, clear=True):
-                canary.push_health("hosts", {"a": 1})
-            urlopen.assert_not_called()
-            with patch.dict(os.environ, {"CANARY_REPORT_URL": "https://api.example.test/", "CANARY_REPORT_TOKEN_FILE": str(token)}):
-                canary.push_health("hosts", {"a": 1})
-        request = urlopen.call_args.args[0]
-        self.assertEqual(request.full_url, "https://api.example.test/v1/operations/host-health/reports")
-        self.assertEqual(json.loads(request.data), {"source": "hosts", "payload": {"a": 1}})
-        self.assertEqual(request.get_header("Authorization"), "Bearer secret")
-
-    def test_a_failed_push_never_raises(self):
-        with patch.dict(os.environ, {"CANARY_REPORT_URL": "https://api.example.test", "CANARY_REPORT_TOKEN_FILE": "/nonexistent"}):
-            canary.push_health("hosts", {})
+    def test_push_goes_through_the_operator_reporter(self):
+        sys.path.insert(0, str(Path(canary.__file__).resolve().parents[2] / "deploy"))
+        import health_report
+        with patch.object(health_report, "push") as push:
+            canary.push_health("hosts", {"a": 1})
+        push.assert_called_once_with("hosts", {"a": 1})
 
 
 class Record(unittest.TestCase):

@@ -52,15 +52,15 @@ test("a deploy kept on the migrated schema is a roll-forward alert", () => {
 })
 
 test("a failing edge certificate renewal is a critical alert; a quiet healthy edge is a warning", () => {
-  const failing = report("edge-certificate:203.0.113.7", { ok: false, error: "issue failed", stale_after_seconds: 86400 })
-  const healthy = report("edge-certificate:203.0.113.8", { ok: true, error: "", stale_after_seconds: 86400 })
+  const failing = report("edge-certificate:node-edge-7", { ok: false, error: "issue failed", stale_after_seconds: 86400 })
+  const healthy = report("edge-certificate:node-edge-8", { ok: true, error: "", stale_after_seconds: 86400 })
   const alerts = openAlerts([failing, healthy], now)
-  expect(alerts.map((a) => a.id)).toEqual(["edge-certificate:203.0.113.7"])
+  expect(alerts.map((a) => a.id)).toEqual(["edge-certificate:edge-7"])
   expect(alerts[0].level).toBe("critical")
-  expect(alerts[0].title).toContain("Certificate renewal is failing on 203.0.113.7")
+  expect(alerts[0].title).toContain("Certificate renewal is failing on edge node edge-7")
   expect(alerts[0].body).toContain("renew.log")
   const old = "2026-11-19T09:00:00Z"
-  const staleHealthy = openAlerts([report("edge-certificate:203.0.113.8", { ok: true, error: "", stale_after_seconds: 86400 }, old)], now)
-  expect(staleHealthy.map((a) => a.id)).toEqual(["edge-certificate-stale:203.0.113.8"])
+  const staleHealthy = openAlerts([report("edge-certificate:node-edge-8", { ok: true, error: "", stale_after_seconds: 86400 }, old)], now)
+  expect(staleHealthy.map((a) => a.id)).toEqual(["edge-certificate-stale:edge-8"])
   expect(staleHealthy[0].level).toBe("warning")
 })
