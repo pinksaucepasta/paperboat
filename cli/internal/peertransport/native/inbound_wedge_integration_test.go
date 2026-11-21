@@ -125,7 +125,7 @@ func TestWedgedInboundListenerRecoversAfterWatchdogRebuild(t *testing.T) {
 			t.Fatal("wedged inbound handshakes never tripped the watchdog")
 		}
 	}
-	if accepted.Load() != 0 || !watchdog.CommitRebuild() {
+	if accepted.Load() != 0 || !committed(watchdog) {
 		t.Fatal("the wedged listener accepted a peer")
 	}
 
@@ -145,7 +145,9 @@ func TestWedgedInboundListenerRecoversAfterWatchdogRebuild(t *testing.T) {
 	for accepted.Load() == 0 && ctx.Err() == nil {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if accepted.Load() == 0 || watchdog.CommitRebuild() {
+	if accepted.Load() == 0 || committed(watchdog) {
 		t.Fatal("the rebuilt listener did not accept the peer")
 	}
 }
+
+func committed(w *native.InboundWatchdog) bool { needed, _ := w.CommitRebuild(); return needed }

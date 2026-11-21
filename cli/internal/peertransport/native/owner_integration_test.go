@@ -679,13 +679,22 @@ func readTerminalUntil(t *testing.T, connection tunnel.Conn, markers ...string) 
 
 func startTestServer(t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion) mesh.Addr {
 	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	address, _ := listenTestServer(ctx, t, owner, authority, region)
+	return address
+}
+
+// listenTestServer runs one accept loop until ctx ends; done closes when it returns.
+func listenTestServer(ctx context.Context, t *testing.T, owner *native.Owner, authority *tailnet.Authority, region *tailcfg.DERPRegion) (mesh.Addr, <-chan struct{}) {
+	t.Helper()
 	server, err := authority.Listen(region)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_ = owner.Listen(ctx, region, func(serveCtx context.Context, session *native.Session) error {
 			for {
 				stream, _, acceptErr := session.AcceptAuthorized(serveCtx, func(_ context.Context, header streamauth.Header) (string, error) {
@@ -706,7 +715,7 @@ func startTestServer(t *testing.T, owner *native.Owner, authority *tailnet.Autho
 			}
 		})
 	}()
-	return server.Address()
+	return server.Address(), done
 }
 
 func capability(consumer string) string {

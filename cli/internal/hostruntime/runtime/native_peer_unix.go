@@ -85,8 +85,11 @@ type productionNativePeerGeneration struct {
 	run    context.Context
 	serve  func(context.Context, *native.Session) error
 	region *tailcfg.DERPRegion
-	done   sync.WaitGroup
-	once   sync.Once
+	// stopListen and listening end and await only the primary accept loop (restartListener).
+	stopListen context.CancelFunc
+	listening  chan struct{}
+	done       sync.WaitGroup
+	once       sync.Once
 }
 
 // errInboundWedged ends a generation whose inbound handshakes keep timing out
@@ -375,12 +378,32 @@ func (g *productionNativePeerGeneration) listenPrimary() error {
 	if _, err := g.authority.Listen(g.region); err != nil {
 		return nativePeerListenerError{cause: err}
 	}
+	listen, stop := context.WithCancel(g.run)
+	listening := make(chan struct{})
+	g.stopListen, g.listening = stop, listening
 	g.done.Add(1)
 	go func() {
 		defer g.done.Done()
-		g.errors <- g.owner.Listen(g.run, g.region, g.serve)
+		defer close(listening)
+		err := g.owner.Listen(listen, g.region, g.serve)
+		if listen.Err() != nil && g.run.Err() == nil {
+			return // restartListener ended it and starts the next loop, which replaces any failure here
+		}
+		g.errors <- err
 	}()
 	return nil
+}
+
+// restartListener replaces only the primary accept loop and asks for a renewal
+// now; established sessions, outbound dials and the socket stay. Prior art:
+// tailscale magicsock Rebind+ReSTUN keeps WireGuard sessions across a rebind.
+func (g *productionNativePeerGeneration) restartListener() error {
+	g.stopListen()
+	<-g.listening
+	if g.requestRefresh != nil {
+		g.requestRefresh() // renew now even when the last renewal succeeded
+	}
+	return g.listenPrimary()
 }
 
 // The native owner supplies its own cancellation lifetime. Lend the daemon's
@@ -467,8 +490,22 @@ func (s *productionNativePeerService) supervise(ctx context.Context, generation 
 			if ctx.Err() != nil {
 				return
 			}
-			if errors.Is(err, errInboundWedged) && !s.inbound.CommitRebuild() {
-				continue // an accept landed after the trip: keep its session
+			if errors.Is(err, errInboundWedged) {
+				needed, trips := s.inbound.CommitRebuild()
+				if !needed {
+					continue // an accept landed after the trip: keep its session
+				}
+				if trips == 1 && generation.stopListen != nil {
+					// First trip: replace only the accept loop. A trip again with
+					// no accept since escalates to the full rebuild below.
+					diagnosticlog.TryInfo("native inbound watchdog", "stage", "listener_restart")
+					s.inbound.Reset() // reopen admission before the new loop takes a handshake
+					restartErr := generation.restartListener()
+					if restartErr == nil {
+						continue
+					}
+					err = restartErr
+				}
 			}
 			if err == nil {
 				err = errors.New("native peer worker stopped unexpectedly")

@@ -40,7 +40,7 @@ func TestInboundWatchdogTripsOnlyOnSustainedTimeoutsAndBacksOff(t *testing.T) {
 	if fail(30, 2*time.Second) != 1 {
 		t.Fatal("no second trip after the doubled window")
 	}
-	if !w.CommitRebuild() {
+	if needed, _ := w.CommitRebuild(); !needed {
 		t.Fatal("a trip with no accept since did not need its rebuild")
 	}
 	if w.Admit() || w.windowLocked() == inboundWedgeWindow {
@@ -50,7 +50,8 @@ func TestInboundWatchdogTripsOnlyOnSustainedTimeoutsAndBacksOff(t *testing.T) {
 	if fail(125, 2*time.Second) != 1 { // third trip needs the 4 min window
 		t.Fatal("no third trip")
 	}
-	if !w.Admit() || w.CommitRebuild() || w.windowLocked() != inboundWedgeWindow {
+	admitted := w.Admit()
+	if needed, _ := w.CommitRebuild(); !admitted || needed || w.windowLocked() != inboundWedgeWindow {
 		t.Fatal("a successful accept did not cancel the trip and reset the backoff")
 	}
 	now = now.Add(time.Hour)
@@ -74,7 +75,7 @@ func TestInboundWatchdogAdmitAndCommitRebuildNeverBothWin(t *testing.T) {
 		var race sync.WaitGroup
 		race.Add(2)
 		go func() { defer race.Done(); admitted = w.Admit() }()
-		go func() { defer race.Done(); committed = w.CommitRebuild() }()
+		go func() { defer race.Done(); committed, _ = w.CommitRebuild() }()
 		race.Wait()
 		if admitted == committed {
 			admittedDuringRebuild.Add(1)

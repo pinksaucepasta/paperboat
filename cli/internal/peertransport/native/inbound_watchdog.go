@@ -74,12 +74,14 @@ func (w *InboundWatchdog) Admit() bool {
 }
 
 // CommitRebuild reports whether a queued rebuild is still needed (a trip with
-// no accept since) and, if so, commits to it until Reset.
-func (w *InboundWatchdog) CommitRebuild() bool {
+// no accept since) and, if so, commits to it until Reset. trips counts the
+// consecutive trips with no accept, so the caller can escalate: the first gets
+// the listener-only restart, a later one the full rebuild.
+func (w *InboundWatchdog) CommitRebuild() (needed bool, trips int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.rebuild = w.wedged
-	return w.wedged
+	return w.wedged, w.trips
 }
 
 // Reset starts a new listener's count; the trip streak is kept.
