@@ -130,28 +130,25 @@ func TestRegionalSelectionInvalidInputAndBackupDomains(t *testing.T) {
 	}
 }
 
-func TestRegionalSelectionFollowsServerOrderWithinRegion(t *testing.T) {
+func TestRegionalSelectionKeepsActiveNodeWithinRegion(t *testing.T) {
 	now := time.Unix(2000, 0)
 	x := regionalScore{node: RegionalNode{NodeID: "x", Region: "r", FailureDomain: "one", CapacityLimit: 100}, rtt: 50 * time.Millisecond, order: 1}
-	y := regionalScore{node: RegionalNode{NodeID: "y", Region: "r", FailureDomain: "two", CapacityLimit: 100}, rtt: 52 * time.Millisecond, order: 0}
+	y := regionalScore{node: RegionalNode{NodeID: "y", Region: "r", FailureDomain: "two", CapacityLimit: 100}, rtt: 30 * time.Millisecond, order: 0}
 	var s regionalSelection
 	chosen, _ := s.choose(now, []regionalScore{x})
 	s.commit(chosen.node.NodeID, now)
-	// Same region: the server-first node is chosen at once, without the RTT hysteresis or dwell.
-	chosen, reason := s.choose(now.Add(time.Second), []regionalScore{x, y})
-	if chosen.node.NodeID != "y" || reason != "server_order_within_region" {
-		t.Fatalf("chosen=%s reason=%s, want y server_order_within_region", chosen.node.NodeID, reason)
+	// Same region: the active x stays although the server now lists y first, for as long as x is listed.
+	for i := 1; i <= 5; i++ {
+		at := now.Add(time.Duration(i) * time.Minute)
+		chosen, reason := s.choose(at, []regionalScore{x, y})
+		if chosen.node.NodeID != "x" || reason != "healthy_choice_retained" {
+			t.Fatalf("round %d chosen=%s reason=%s, want x healthy_choice_retained", i, chosen.node.NodeID, reason)
+		}
+		s.commit(chosen.node.NodeID, at)
 	}
-	s.commit("y", now.Add(time.Second))
-	if s.current() != "y" {
-		t.Fatal("server-ordered promotion not committed")
-	}
-	// With y ineligible (failed or absent) the active x is kept.
-	var kept regionalSelection
-	chosen, _ = kept.choose(now, []regionalScore{x})
-	kept.commit(chosen.node.NodeID, now)
-	chosen, reason = kept.choose(now.Add(time.Second), []regionalScore{x})
-	if chosen.node.NodeID != "x" || reason != "healthy_choice_retained" {
-		t.Fatalf("chosen=%s reason=%s, want x healthy_choice_retained", chosen.node.NodeID, reason)
+	// x removed: the server's first node of the region is taken at once.
+	chosen, reason := s.choose(now.Add(time.Hour), []regionalScore{y})
+	if chosen.node.NodeID != "y" || reason != "selected_node_unreachable" {
+		t.Fatalf("chosen=%s reason=%s, want y selected_node_unreachable", chosen.node.NodeID, reason)
 	}
 }

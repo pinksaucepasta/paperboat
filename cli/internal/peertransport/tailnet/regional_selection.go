@@ -69,17 +69,13 @@ func (s *regionalSelection) choose(now time.Time, scores []regionalScore) (regio
 		return best, "selected_node_unreachable"
 	}
 	s.offered = active.node.NodeID
-	if best.node.Region == active.node.Region && best.node.NodeID != s.selected {
-		// RTT cannot tell nodes of one region apart; the server lists them least-loaded first.
-		s.clearCandidate()
-		s.offered = best.node.NodeID
-		return best, "server_order_within_region"
-	}
+	// Within its region the active node is kept while listed and healthy (moving would break the
+	// session); the server's least-loaded-first order applies only when a node is needed.
 	// Hysteresis applies to the region: the active node's region against the best region.
 	rtts := regionRTTs(ranked)
 	currentQuality, bestQuality := float64(rtts[active.node.Region]), float64(rtts[best.node.Region])
 	gain := currentQuality - bestQuality
-	if best.node.NodeID == s.selected || gain < float64(10*time.Millisecond) || gain < currentQuality*0.15 {
+	if best.node.Region == active.node.Region || gain < float64(10*time.Millisecond) || gain < currentQuality*0.15 {
 		s.clearCandidate()
 		return active, "healthy_choice_retained"
 	}
