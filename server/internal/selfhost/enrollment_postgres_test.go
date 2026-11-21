@@ -144,8 +144,10 @@ func TestPackagedHelperEnrollmentOnPostgres(t *testing.T) {
 		if err = store.SQL().QueryRowContext(ctx, `SELECT paperboat.node_pool_eligible($1,$2,$3),paperboat.node_pool_eligible($1,$4,$3)`, i.NodeID, account, i.Capability, other).Scan(&eligible, &outsider); err != nil {
 			t.Fatal(err)
 		}
-		if !eligible || outsider {
-			t.Fatal("scope eligibility violated")
+		// A claimed relay serves its owner at once; a claimed edge serves nobody until the workspace pairs its region
+		// (SetEdgePair, covered by the edge pair tests): the workspace stays managed-only until then.
+		if want := i.Capability == "relay"; eligible != want || outsider {
+			t.Fatalf("%s scope eligibility owner=%v outsider=%v", i.Capability, eligible, outsider)
 		}
 		if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET node_generation=node_generation+1 WHERE id=$1`, i.NodeID); err != nil {
 			t.Fatal(err)
