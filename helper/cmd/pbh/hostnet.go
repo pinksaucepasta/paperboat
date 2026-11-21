@@ -461,6 +461,41 @@ func nftRulePresent(listed string, rules []firewallRule, proto string) bool {
 	return false
 }
 
+// noIPv6Filtering recognizes ip6tables failing because the kernel has no IPv6 filter table.
+func noIPv6Filtering(output string) bool {
+	return strings.Contains(output, "can't initialize ip6tables") || strings.Contains(output, "Address family not supported")
+}
+
+// splitIptablesLine splits an `iptables -S` line into its arguments, undoing the double quotes (and backslash
+// escapes inside them) iptables puts around values with spaces, so a delete replays the exact arguments.
+func splitIptablesLine(line string) []string {
+	var args []string
+	var current strings.Builder
+	inQuote, started := false, false
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case inQuote && c == '\\' && i+1 < len(line):
+			i++
+			current.WriteByte(line[i])
+		case c == '"':
+			inQuote, started = !inQuote, true
+		case !inQuote && (c == ' ' || c == '\t'):
+			if started {
+				args = append(args, current.String())
+				current.Reset()
+				started = false
+			}
+		default:
+			current.WriteByte(c)
+			started = true
+		}
+	}
+	if started {
+		args = append(args, current.String())
+	}
+	return args
+}
+
 // ownedIptablesRule reports whether an `iptables -S` rule is one pbh added: its --comment argument is exactly ours.
 func ownedIptablesRule(fields []string) bool {
 	for i := 0; i+1 < len(fields); i++ {
@@ -529,14 +564,15 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 		for _, tool := range []string{"iptables", "ip6tables"} {
 			listed, err := run(ctx, tool, "-S", "INPUT")
 			if err != nil {
-				// A missing tool (or no IPv6 filtering) has nothing of ours; any other failure must not look like success.
-				if !errors.Is(err, exec.ErrNotFound) && tool == "iptables" {
+				// A missing tool, or a kernel without IPv6 filtering, has nothing of ours; any other failure must
+				// not look like success.
+				if !errors.Is(err, exec.ErrNotFound) && !(tool == "ip6tables" && noIPv6Filtering(listed+err.Error())) {
 					errs = append(errs, fmt.Errorf("list %s INPUT rules: %w", tool, err))
 				}
 				continue
 			}
 			for _, line := range strings.Split(listed, "\n") {
-				fields := strings.Fields(line)
+				fields := splitIptablesLine(line)
 				if len(fields) < 3 || fields[0] != "-A" || fields[1] != "INPUT" || !ownedIptablesRule(fields) {
 					continue
 				}

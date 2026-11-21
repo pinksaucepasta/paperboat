@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -38,13 +37,8 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	// An absent main unit is an expected state on a rerun, so a failure after it was removed can be retried.
-	if _, err := os.Stat(selfhostUnit); err == nil {
-		if err := exec.CommandContext(ctx, "systemctl", "stop", "paperboat-selfhost.service").Run(); err != nil {
-			return fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
-		}
-	}
-	if err := removeCertificateUnits(ctx, execCommander, systemUnitDir, certificateEnvFile, *removeData); err != nil {
+	touched, err := stopServices(ctx, execCommander, systemUnitDir, certificateEnvFile, *removeData)
+	if err != nil {
 		return err
 	}
 	if err := removeHostNetwork(ctx, execCommander, defaultHostPaths(defaultState), out); err != nil {
@@ -53,16 +47,14 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	if err := containers.Teardown(ctx, defaultState); err != nil {
 		return err
 	}
-	if _, err := os.Stat(selfhostUnit); err == nil {
-		if err := exec.CommandContext(ctx, "systemctl", "disable", "paperboat-selfhost.service").Run(); err != nil {
-			return err
-		}
-		if err := os.Remove(selfhostUnit); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
-	if err := exec.CommandContext(ctx, "systemctl", "daemon-reload").Run(); err != nil {
+	removed, err := removeMainUnit(ctx, execCommander, systemUnitDir)
+	if err != nil {
 		return err
+	}
+	if touched || removed { // a host without systemd units (--no-service) has nothing to reload
+		if _, err := execCommander(ctx, "systemctl", "daemon-reload"); err != nil {
+			return err
+		}
 	}
 	if err := os.RemoveAll(defaultBinaries); err != nil {
 		return err
@@ -84,7 +76,7 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 
 const (
 	systemUnitDir      = "/etc/systemd/system"
-	selfhostUnit       = systemUnitDir + "/paperboat-selfhost.service"
+	selfhostUnitName   = "paperboat-selfhost.service"
 	certificateEnvFile = "/etc/paperboat-edge-certificate.env"
 )
 
@@ -92,13 +84,61 @@ const (
 // are disabled and removed with it; the env file is configuration and goes only with --remove-data.
 var certificateUnits = []string{"paperboat-edge-certificate.timer", "paperboat-edge-certificate.service"}
 
-func removeCertificateUnits(ctx context.Context, run commander, unitDir, envFile string, removeData bool) error {
+// stopServices stops everything that could start the node again, certificate renewal first (it restarts the
+// service), then the service. An absent unit is an expected state on a rerun; touched reports a unit existed.
+func stopServices(ctx context.Context, run commander, unitDir, envFile string, removeData bool) (touched bool, err error) {
+	touched, err = removeCertificateUnits(ctx, run, unitDir, envFile, removeData)
+	if err != nil {
+		return touched, err
+	}
+	exists, err := unitExists(filepath.Join(unitDir, selfhostUnitName))
+	if err != nil || !exists {
+		return touched, err
+	}
+	if _, err := run(ctx, "systemctl", "stop", selfhostUnitName); err != nil {
+		return true, fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
+	}
+	return true, nil
+}
+
+// removeMainUnit disables and deletes the service unit if it is still there.
+func removeMainUnit(ctx context.Context, run commander, unitDir string) (bool, error) {
+	path := filepath.Join(unitDir, selfhostUnitName)
+	exists, err := unitExists(path)
+	if err != nil || !exists {
+		return false, err
+	}
+	if _, err := run(ctx, "systemctl", "disable", selfhostUnitName); err != nil {
+		return true, err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return true, err
+	}
+	return true, nil
+}
+
+// unitExists is false only when the file is absent; any other stat failure is an error, not "nothing to do".
+func unitExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func removeCertificateUnits(ctx context.Context, run commander, unitDir, envFile string, removeData bool) (touched bool, err error) {
 	var errs []error
 	for _, unit := range certificateUnits {
 		path := filepath.Join(unitDir, unit)
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		exists, statErr := unitExists(path)
+		if statErr != nil {
+			errs = append(errs, statErr)
 			continue
 		}
+		if !exists {
+			continue
+		}
+		touched = true
 		if _, err := run(ctx, "systemctl", "disable", "--now", unit); err != nil {
 			errs = append(errs, fmt.Errorf("disable %s: %w", unit, err))
 			continue
@@ -113,7 +153,7 @@ func removeCertificateUnits(ctx context.Context, run commander, unitDir, envFile
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%w: %w", commandError("could not remove the edge certificate timer and service; fix the cause and rerun pbh uninstall"), errors.Join(errs...))
+		return touched, fmt.Errorf("%w: %w", commandError("could not remove the edge certificate timer and service; fix the cause and rerun pbh uninstall"), errors.Join(errs...))
 	}
-	return nil
+	return touched, nil
 }

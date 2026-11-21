@@ -481,9 +481,58 @@ func TestUninstallRemovesEveryCommentedRuleWithoutARecord(t *testing.T) {
 			t.Errorf("a rule of another owner was deleted (%q): %v", kept, f.calls)
 		}
 	}
+	deletes := f.called("iptables -D") + f.called("ip6tables -D") + f.called("nft delete")
+	if deletes != 6 {
+		t.Errorf("%d delete commands ran, want exactly the 6 owned rules: %v", deletes, f.calls)
+	}
 	for _, gone := range []string{f.paths.sysctl, f.paths.udp} {
 		if _, err := os.Stat(gone); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s survived uninstall without a record: %v", gone, err)
+		}
+	}
+}
+
+// iptables quotes values with spaces: a foreign comment that contains our marker as words is not our rule, and
+// a delete replays the decoded arguments.
+func TestSplitIptablesLineDecodesQuotedArguments(t *testing.T) {
+	line := `-A INPUT -p tcp -m comment --comment "note --comment paperboat-edge here" -j ACCEPT`
+	args := splitIptablesLine(line)
+	want := []string{"-A", "INPUT", "-p", "tcp", "-m", "comment", "--comment", "note --comment paperboat-edge here", "-j", "ACCEPT"}
+	if strings.Join(args, "|") != strings.Join(want, "|") || ownedIptablesRule(args) {
+		t.Fatalf("args %q owned=%v", args, ownedIptablesRule(args))
+	}
+	own := splitIptablesLine("-A INPUT -p udp -m multiport --dports 443,7273 -m comment --comment paperboat-edge -j ACCEPT")
+	if !ownedIptablesRule(own) || len(own) != 13 {
+		t.Fatalf("own rule args %q", own)
+	}
+	if got := splitIptablesLine(`-A INPUT --comment "a \"b\" c" -j ACCEPT`); got[3] != `a "b" c` {
+		t.Fatalf("escaped quotes: %q", got)
+	}
+}
+
+// Listing failures other than a missing tool are errors for both iptables families and nft; a kernel without
+// IPv6 filtering is not.
+func TestUninstallReportsEveryKindOfFailedListing(t *testing.T) {
+	for name, test := range map[string]struct {
+		kind, failing, message string
+		wantErr                bool
+	}{
+		"ip6tables permission":  {"iptables", "ip6tables", "Permission denied", true},
+		"ip6tables no ipv6":     {"iptables", "ip6tables", "can't initialize ip6tables table `filter': Table does not exist", false},
+		"nft permission":        {"nft", "nft", "Operation not permitted", true},
+		"iptables backend dead": {"iptables", "iptables", "Resource temporarily unavailable", true},
+	} {
+		f := newFakeHost(t, "60000 65535")
+		f.answers = map[string]string{"iptables -S INPUT": "-P INPUT DROP\n", "ip6tables -S INPUT": "-P INPUT DROP\n"}
+		run := func(ctx context.Context, cmd string, args ...string) (string, error) {
+			if cmd == test.failing && (args[0] == "-S" || args[0] == "-a") {
+				return "", errors.New(test.message)
+			}
+			return f.run(ctx, cmd, args...)
+		}
+		err := firewallRemove(t.Context(), run, test.kind, nil)
+		if (err != nil) != test.wantErr {
+			t.Errorf("%s: err %v, want error=%v", name, err, test.wantErr)
 		}
 	}
 }
