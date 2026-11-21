@@ -27,6 +27,16 @@ def registration():
             'public_identity_key', 'public_key_id', 'installation_generation', 'account_id', 'inbox_path')}
 
 
+# SCM restarts the service 5 s after the kill; the rest covers daemon init and a healthy doctor under load.
+CRASH_RECOVERY_SECONDS = 90
+
+
+def record_poll(timeline, elapsed, pid, doctor):
+    """Keep one entry per change of (pid, doctor), so a failure shows never-restored vs slow-restored."""
+    if not timeline or timeline[-1]['pid'] != pid or timeline[-1]['doctor'] != doctor:
+        timeline.append({'seconds': round(elapsed, 1), 'pid': pid, 'doctor': doctor})
+
+
 # Windows forms of the supervisor queries.
 SERVICE_PID = ("(Get-CimInstance Win32_Service|Where-Object{$_.Name -like 'PaperboatLocalDaemon*'}|"
                "Select-Object -First 1).ProcessId")
@@ -140,22 +150,30 @@ def main():
         previous_pid = service_pid()
         if previous_pid < 2:
             raise RuntimeError('could not identify the supervised daemon')
+        timeline = []
         try:
+            killed = time.monotonic()
             device.stop(previous_pid) if device else os.kill(previous_pid, signal.SIGKILL)
-            deadline = time.monotonic() + 30
+            deadline = killed + CRASH_RECOVERY_SECONDS
             while time.monotonic() < deadline:
                 current = service_pid()
+                doctor = 'not-polled'
                 if current > 1 and current != previous_pid:
                     try:
                         command(pb, 'doctor', '--json')
-                        break
+                        doctor = 'healthy'
                     except RuntimeError:
                         # A new OS process is not yet an initialized API.
-                        # Require healthy recovery within the SAME30-second bound.
-                        pass
+                        doctor = 'unhealthy'
+                record_poll(timeline, time.monotonic() - killed, current, doctor)
+                if doctor == 'healthy':
+                    break
                 time.sleep(0.2)
             else:
-                raise RuntimeError('supervisor did not restore the crashed daemon')
+                error = RuntimeError('supervisor did not restore the crashed daemon within ' +
+                                     str(CRASH_RECOVERY_SECONDS) + ' s')
+                error.timeline = timeline
+                raise error
         finally:
             command(pb, 'service', 'start', '--json')
     elif args.check == 'interrupt-install' and device:
@@ -238,6 +256,8 @@ def main():
               'enrollment_preserved': True}
     if args.check == 'setup':
         result['native_exec'] = True
+    if args.check == 'crash-service':
+        result['recovery_timeline'] = timeline
     print(json.dumps(result))
 
 
@@ -245,5 +265,8 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as error:
-        print(json.dumps({'status': 'FAIL', 'reason': str(error)}))
+        failure = {'status': 'FAIL', 'reason': str(error)}
+        if hasattr(error, 'timeline'):
+            failure['recovery_timeline'] = error.timeline
+        print(json.dumps(failure))
         raise SystemExit(1)
