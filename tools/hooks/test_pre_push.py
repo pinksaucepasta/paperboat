@@ -38,20 +38,22 @@ class PrePushTest(unittest.TestCase):
         return subprocess.run([str(HOOK)], cwd=self.repo, input=f"refs/heads/main {local} refs/heads/main {remote}\n",
                               capture_output=True, text=True, env={"PATH": subprocess.os.environ["PATH"], "HOME": subprocess.os.environ["HOME"], "GOFLAGS": "-mod=mod", "GOCACHE": subprocess.os.environ.get("GOCACHE", "/tmp/pb-hook-gocache")})
 
-    def test_recent_main_lines_need_an_explicit_revert(self):
+    def test_recent_main_file_versions_need_an_explicit_revert(self):
+        self.write("console/usage.txt", "old usage card\n")
+        self.commit("older version of the card")
         self.write("console/usage.txt", "usage card\n")
         recent = self.commit("publish usage card")
         git(self.repo, "update-ref", "refs/remotes/origin/main", recent)
 
         self.write("server-fix.txt", "unrelated fix\n")
-        self.write("console/usage.txt", "usage card\nnormal addition\n")
-        normal = self.commit("ordinary update")
+        self.write("console/usage.txt", "updated usage card\n")
+        normal = self.commit("edit the recently added usage card")
         result = self.push(normal, recent)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        git(self.repo, "rm", "-q", "console/usage.txt")
+        self.write("console/usage.txt", "old usage card\n")
         stale = self.commit("unrelated fix with a stale console tree")
-        self.write("console/usage.txt", "usage card\nnormal addition\n")
+        self.write("console/usage.txt", "updated usage card\n")
         restored = self.commit("restore the card in a later commit")
         result = self.push(restored, recent)
         self.assertEqual(result.returncode, 1, result.stderr)

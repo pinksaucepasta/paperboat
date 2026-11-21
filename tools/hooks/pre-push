@@ -3,13 +3,12 @@
 
 A file left out of a commit (the usual way main stops compiling) passes in a working tree that still
 has it, so this builds each pushed commit from `git worktree add` instead. Installed by `make hooks`.
-Reject removal of lines introduced on origin/main in the last 48 hours without a Reverts trailer.
+Reject exact file rollbacks across changes made on origin/main in the last 48 hours without a Reverts trailer.
 Only modules with changes are built. PB_PREPUSH_SKIP=1 skips
 (do not push a tree you have not built). PB_PREPUSH_CROSS=1 also builds the cli for darwin and windows.
 """
 import fcntl
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -55,22 +54,25 @@ def changed_paths(local, remote):
     return [p for p in git("diff", "--name-only", f"{base}..{local}").splitlines() if p]
 
 
-def removed_ranges(patch):
-    for hunk in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+", patch, re.MULTILINE):
-        start = int(hunk[1])
-        count = int(hunk[2]) if hunk[2] is not None else 1
-        if count:
-            yield "-L", f"{start},{start + count - 1}"
-
-
-def recent_line_removals(local, remote, main):
+def recent_file_rollbacks(local, remote, main):
     if not main:
         return []
     cutoff = int(time.time()) - 48 * 60 * 60
 
     @lru_cache(maxsize=None)
-    def on_main(commit):
-        return git("merge-base", commit, main, check=False).strip() == commit
+    def previous_versions(path):
+        history = git("--literal-pathspecs", "log", f"--since=@{cutoff}", "--full-history",
+                      "--diff-merges=first-parent", "--root", "--format=%H", "--raw",
+                      "--no-abbrev", "--no-renames", "--no-color", main, "--", path)
+        versions = []
+        for line in history.split("\n"):
+            if line.startswith(":"):
+                _, _, old_blob, new_blob, _ = line.split("\t", 1)[0].split()
+                if old_blob != new_blob:
+                    versions.append((old_blob, revision))
+            elif line:
+                revision = line
+        return versions
 
     exclude = [f"^{main}"]
     if remote != ZERO and git("rev-parse", "--verify", f"{remote}^{{commit}}", check=False):
@@ -83,32 +85,18 @@ def recent_line_removals(local, remote, main):
         undone = set()
         for parent in parents:
             entries = iter(git("diff", "--raw", "-z", "--no-abbrev", "--find-renames",
-                               "--diff-filter=DMRT", parent, commit).split("\0")[:-1])
+                               "--diff-filter=ADMT", parent, commit).split("\0")[:-1])
             for entry in entries:
-                old_mode, new_mode, old_blob, new_blob, status = entry.split()
+                _, _, old_blob, new_blob, _ = entry.split()
                 path = next(entries)
-                if status.startswith("R"):
-                    next(entries)  # destination; blame uses the preimage path
-                if old_mode not in (":100644", ":100755"):
-                    continue  # only regular files have source lines to blame
-                diff_args = ("--no-ext-diff", "--no-textconv", "--unified=0", "--inter-hunk-context=0", "--no-color")
-                if new_mode in ("000000", "160000"):
-                    patch = git("--literal-pathspecs", "diff", *diff_args, parent, commit, "--", path)
-                else:
-                    patch = git("diff", *diff_args, old_blob, new_blob)
-                ranges = [arg for pair in removed_ranges(patch) for arg in pair]
-                if not ranges:
-                    continue
-                blame = git("blame", "--incremental", *ranges, parent, "--", path)
-                for line in blame.splitlines():
-                    if m := re.fullmatch(r"([0-9a-f]{40}) \d+ \d+ \d+", line):
-                        blamed = m[1]
-                    elif line.startswith("committer-time "):
-                        if int(line.split()[1]) >= cutoff and blamed not in allowed and on_main(blamed):
-                            undone.add((path, blamed))
-        for path, blamed in sorted(undone):
-            failures.append(f"{commit[:10]} removes recent origin/main lines from {path!r} ({blamed}). "
-                            f"If intentional, add a Reverts: {blamed} trailer to {commit[:10]}.")
+                if old_blob != new_blob:
+                    for previous, changed_by in previous_versions(path):
+                        if new_blob == previous and changed_by not in allowed:
+                            undone.add((path, changed_by))
+        for path, changed_by in sorted(undone):
+            failures.append(f"{commit[:10]} restores {path!r} to its exact version before recent "
+                            f"origin/main commit {changed_by}. If intentional, add a "
+                            f"Reverts: {changed_by} trailer to {commit[:10]}.")
     return failures
 
 
@@ -243,7 +231,7 @@ def main():
             main = main_tip
             if sys.argv[1:2] == ["origin"] and remote_ref == "refs/heads/main" and remote != ZERO:
                 main = git("rev-parse", "--verify", f"{remote}^{{commit}}", check=False).strip() or main
-            failures = recent_line_removals(local, remote, main)
+            failures = recent_file_rollbacks(local, remote, main)
             if not failures:
                 paths = changed_paths(local, remote)
                 modules = touched(paths)
