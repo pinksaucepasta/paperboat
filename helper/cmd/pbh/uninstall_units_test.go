@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -137,5 +138,70 @@ func TestReloadSystemdRetriesWhereSystemdRunsAndSkipsWhereItDoesNot(t *testing.T
 	failing := newFakeHost(t, "60000 65535") // reload not answered: fails
 	if err := reloadSystemd(t.Context(), failing.run, true, runtime); err == nil || !strings.Contains(err.Error(), "rerun pbh uninstall") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// The whole uninstall, rerun after a failure at its last systemd step: the first run removes the units and fails to
+// reload, the second still reloads (systemd is running), nothing is torn down twice, and every file is gone.
+func TestUninstallRetryAfterAFailedReloadAtTheEntryPoint(t *testing.T) {
+	root := t.TempDir()
+	unitDir, runtimeDir, binaries, binary := filepath.Join(root, "units"), filepath.Join(root, "run"), filepath.Join(root, "lib"), filepath.Join(root, "pbh")
+	for _, d := range []string{unitDir, runtimeDir, binaries} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range append([]string{selfhostUnitName}, certificateUnits...) {
+		if err := os.WriteFile(filepath.Join(unitDir, name), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(binary, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := newFakeHost(t, "60000 65535")
+	var systemctl []string
+	reloadFails := true
+	env := uninstallEnv{
+		systemctl: func(_ context.Context, name string, args ...string) (string, error) {
+			line := strings.Join(append([]string{name}, args...), " ")
+			systemctl = append(systemctl, line)
+			if line == "systemctl daemon-reload" && reloadFails {
+				return "", errors.New("Failed to connect to bus")
+			}
+			return "", nil
+		},
+		run: f.run, unitDir: unitDir, certEnv: filepath.Join(root, "none.env"), runtimeDir: runtimeDir,
+		paths: f.paths, binaries: binaries, binary: binary,
+		teardown: func(context.Context) error { return nil }, removeLocal: func() error { return nil },
+	}
+	err := runUninstall(t.Context(), env, false, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "rerun pbh uninstall") {
+		t.Fatalf("first run: %v", err)
+	}
+	for _, name := range append([]string{selfhostUnitName}, certificateUnits...) {
+		if _, statErr := os.Stat(filepath.Join(unitDir, name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("%s survived the first run: %v", name, statErr)
+		}
+	}
+	if _, statErr := os.Stat(binaries); statErr != nil {
+		t.Fatalf("binaries removed although the reload failed: %v", statErr)
+	}
+	systemctl = nil
+	reloadFails = false
+	var out strings.Builder
+	if err := runUninstall(t.Context(), env, false, &out); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if strings.Join(systemctl, "|") != "systemctl daemon-reload" {
+		t.Fatalf("retry ran %q, want only the reload", systemctl)
+	}
+	for _, gone := range []string{binaries, binary} {
+		if _, statErr := os.Stat(gone); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("%s survived the retry: %v", gone, statErr)
+		}
+	}
+	if !strings.Contains(out.String(), "Remove the node from Dashboard") {
+		t.Fatalf("output %q", out.String())
 	}
 }

@@ -169,6 +169,7 @@ func TestDetectFirewall(t *testing.T) {
 		"iptables drop":         {map[string]string{"iptables -S INPUT": "-P INPUT DROP\n-A INPUT -i lo -j ACCEPT\n"}, "iptables"},
 		"iptables final reject": {map[string]string{"iptables -S INPUT": "-P INPUT ACCEPT\n-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT\n-A INPUT -j REJECT --reject-with icmp-host-prohibited\n"}, "iptables"},
 		"iptables open":         {map[string]string{"iptables -S INPUT": "-P INPUT ACCEPT\n"}, ""},
+		"ip6tables only drop":   {map[string]string{"iptables -S INPUT": "-P INPUT ACCEPT\n", "ip6tables -S INPUT": "-P INPUT DROP\n"}, "iptables"},
 		"nft only":              {map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n"}, "nft"},
 		"nothing":               {map[string]string{}, ""},
 	} {
@@ -300,11 +301,11 @@ func TestFirewallRulePresentNeedsTheUDPRulesToo(t *testing.T) {
 	if !firewallRulePresent(t.Context(), f.run, "iptables", testRules) {
 		t.Fatal("iptables with both rules not counted as open")
 	}
-	f.answers = map[string]string{"ufw status": "7277/tcp ALLOW\n443/tcp ALLOW\n7272/tcp ALLOW\n10000:59999/tcp ALLOW\n443/udp ALLOW\n"}
+	f.answers = map[string]string{"ufw status": "7277/tcp ALLOW Anywhere\n443/tcp ALLOW Anywhere\n7272/tcp ALLOW Anywhere\n10000:59999/tcp ALLOW Anywhere\n443/udp ALLOW Anywhere\n"}
 	if firewallRulePresent(t.Context(), f.run, "ufw", testRules) {
 		t.Fatal("ufw without the UDP carrier port counted as open")
 	}
-	f.answers["ufw status"] += "7273/udp ALLOW\n"
+	f.answers["ufw status"] += "7273/udp ALLOW Anywhere\n"
 	if !firewallRulePresent(t.Context(), f.run, "ufw", testRules) {
 		t.Fatal("ufw with every rule not counted as open")
 	}
@@ -572,5 +573,75 @@ func TestUninstallRefusesAnUnbalancedRuleListing(t *testing.T) {
 	}
 	if f.called("iptables -D") != 1 { // the readable owned rule is still removed; the broken line is reported
 		t.Fatalf("calls %v", f.calls)
+	}
+}
+
+// A host can filter IPv4 and IPv6 in separate nft tables: the rules go into every input chain with policy
+// drop, and the host counts as open only when each of them has both.
+func TestNftAddsAndChecksEveryInputChain(t *testing.T) {
+	const ruleset = "table ip filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n" +
+		"table ip6 filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n" +
+		"table inet other {\n\tchain input {\n\t\ttype filter hook input priority filter; policy accept;\n\t}\n}\n"
+	const nftTCP = `tcp dport { 443, 7272, 7277, 10000-59999 } accept comment "paperboat-edge"`
+	const nftUDP = `udp dport { 443, 7273 } accept comment "paperboat-edge"`
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"nft list ruleset": ruleset, "nft list chain ip filter input": "", "nft list chain ip6 filter input": "\t\t" + nftTCP + "\n"}
+	for _, chain := range []string{"ip filter input", "ip6 filter input"} {
+		f.answers["nft insert rule "+chain+" "+nftTCP] = ""
+		f.answers["nft insert rule "+chain+" "+nftUDP] = ""
+	}
+	added, err := firewallAdd(t.Context(), f.run, "nft", testRules)
+	if err != nil || len(added) != 1 {
+		t.Fatalf("added %v err %v", added, err)
+	}
+	// ip: both rules; ip6: only the missing UDP rule; the accept-policy chain is left alone.
+	for want, n := range map[string]int{"nft insert rule ip filter input tcp": 1, "nft insert rule ip filter input udp": 1, "nft insert rule ip6 filter input tcp": 0, "nft insert rule ip6 filter input udp": 1, "nft insert rule inet": 0} {
+		if f.called(want) != n {
+			t.Errorf("%q ran %d times, want %d; calls %v", want, f.called(want), n, f.calls)
+		}
+	}
+	// Present only when every chain has both rules.
+	f.answers["nft list chain ip filter input"] = "\t\t" + nftTCP + "\n\t\t" + nftUDP + "\n"
+	if firewallRulePresent(t.Context(), f.run, "nft", testRules) {
+		t.Fatal("the ip6 chain lacks the UDP rule but the host counted as open")
+	}
+	f.answers["nft list chain ip6 filter input"] = "\t\t" + nftTCP + "\n\t\t" + nftUDP + "\n"
+	if !firewallRulePresent(t.Context(), f.run, "nft", testRules) {
+		t.Fatal("every chain has both rules but the host did not count as open")
+	}
+}
+
+// ufw answers once per address family: a rule is ours when either family was added, and doctor wants an ALLOW
+// from anywhere for IPv4 and, where ufw lists IPv6 rules, for IPv6 too (not a DENY, not one limited to a source).
+func TestUfwIPv6RulesAreTrackedAndChecked(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{
+		"ufw allow 7277/tcp": "Skipping adding existing rule\nRule added (v6)\n", "ufw allow 443/tcp": "Skipping adding existing rule\nSkipping adding existing rule (v6)\n",
+		"ufw allow 443/udp": "Rule added\nRule added (v6)\n", "ufw allow 7272/tcp": "Rule added\n", "ufw allow 7273/udp": "Rule added\n", "ufw allow 10000:59999/tcp": "Rule added\nRule added (v6)\n",
+	}
+	added, err := firewallAdd(t.Context(), f.run, "ufw", testRules)
+	if want := "7277/tcp,443/udp,7272/tcp,7273/udp,10000:59999/tcp"; err != nil || strings.Join(added, ",") != want {
+		t.Fatalf("added %v err %v, want %s (a rule with only the v6 half new is ours, an existing one is not)", added, err, want)
+	}
+	rules := []firewallRule{{"tcp", "443"}, {"udp", "7273"}}
+	status := func(lines ...string) map[string]string {
+		return map[string]string{"ufw status": strings.Join(lines, "\n") + "\n"}
+	}
+	for name, test := range map[string]struct {
+		status map[string]string
+		want   bool
+	}{
+		"v4 only host":        {status("443/tcp ALLOW Anywhere", "7273/udp ALLOW Anywhere"), true},
+		"v6 missing one":      {status("443/tcp ALLOW Anywhere", "7273/udp ALLOW Anywhere", "443/tcp (v6) ALLOW Anywhere (v6)"), false},
+		"both families":       {status("443/tcp ALLOW Anywhere", "7273/udp ALLOW Anywhere", "443/tcp (v6) ALLOW Anywhere (v6)", "7273/udp (v6) ALLOW Anywhere (v6)"), true},
+		"denied":              {status("443/tcp DENY Anywhere", "7273/udp ALLOW Anywhere"), false},
+		"limited to a source": {status("443/tcp ALLOW 10.0.0.0/8", "7273/udp ALLOW Anywhere"), false},
+		"direction in":        {status("443/tcp ALLOW IN Anywhere", "7273/udp ALLOW IN Anywhere"), true},
+	} {
+		f := newFakeHost(t, "60000 65535")
+		f.answers = test.status
+		if got := firewallRulePresent(t.Context(), f.run, "ufw", rules); got != test.want {
+			t.Errorf("%s: present %v, want %v", name, got, test.want)
+		}
 	}
 }

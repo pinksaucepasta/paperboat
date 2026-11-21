@@ -38,31 +38,57 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	touched, err := stopServices(ctx, systemctlCommander, systemUnitDir, certificateEnvFile, *removeData)
+	return runUninstall(ctx, defaultUninstallEnv(), *removeData, out)
+}
+
+// uninstallEnv is everything uninstall touches outside its own logic, so a test points it at a temp tree and fakes
+// the commands.
+type uninstallEnv struct {
+	systemctl, run               commander
+	unitDir, certEnv, runtimeDir string
+	paths                        hostPaths
+	binaries, binary             string
+	teardown                     func(context.Context) error
+	removeLocal                  func() error
+}
+
+func defaultUninstallEnv() uninstallEnv {
+	return uninstallEnv{
+		systemctl: systemctlCommander, run: execCommander,
+		unitDir: systemUnitDir, certEnv: certificateEnvFile, runtimeDir: systemdRuntimeDir,
+		paths: defaultHostPaths(defaultState), binaries: defaultBinaries, binary: "/usr/local/bin/pbh",
+		teardown:    func(ctx context.Context) error { return containers.Teardown(ctx, defaultState) },
+		removeLocal: func() error { return selfhost.RemoveLocal(defaultState) },
+	}
+}
+
+// runUninstall is safe to rerun: a step that already happened is skipped, a failed one leaves what a rerun needs.
+func runUninstall(ctx context.Context, env uninstallEnv, removeData bool, out io.Writer) error {
+	touched, err := stopServices(ctx, env.systemctl, env.unitDir, env.certEnv, removeData)
 	if err != nil {
 		return err
 	}
-	if err := removeHostNetwork(ctx, execCommander, defaultHostPaths(defaultState), out); err != nil {
+	if err := removeHostNetwork(ctx, env.run, env.paths, out); err != nil {
 		return err
 	}
-	if err := containers.Teardown(ctx, defaultState); err != nil {
+	if err := env.teardown(ctx); err != nil {
 		return err
 	}
-	removed, err := removeMainUnit(ctx, systemctlCommander, systemUnitDir)
+	removed, err := removeMainUnit(ctx, env.systemctl, env.unitDir)
 	if err != nil {
 		return err
 	}
-	if err := reloadSystemd(ctx, systemctlCommander, touched || removed, systemdRuntimeDir); err != nil {
+	if err := reloadSystemd(ctx, env.systemctl, touched || removed, env.runtimeDir); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(defaultBinaries); err != nil {
+	if err := os.RemoveAll(env.binaries); err != nil {
 		return err
 	}
-	if err := os.Remove("/usr/local/bin/pbh"); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(env.binary); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if *removeData {
-		if err := selfhost.RemoveLocal(defaultState); err != nil {
+	if removeData {
+		if err := env.removeLocal(); err != nil {
 			return err
 		}
 		fmt.Fprintln(out, "Self-host containers, service and explicitly confirmed local data removed.")

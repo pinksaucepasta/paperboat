@@ -308,11 +308,13 @@ func detectFirewall(ctx context.Context, run commander) string {
 	if out, err := run(ctx, "firewall-cmd", "--state"); err == nil && strings.TrimSpace(out) == "running" {
 		return "firewalld"
 	}
-	if out, err := run(ctx, "iptables", "-S", "INPUT"); err == nil && inputFiltered(out) {
-		return "iptables"
+	for _, tool := range []string{"iptables", "ip6tables"} { // a host can filter only IPv6
+		if out, err := run(ctx, tool, "-S", "INPUT"); err == nil && inputFiltered(out) {
+			return "iptables"
+		}
 	}
 	if out, err := run(ctx, "nft", "list", "ruleset"); err == nil {
-		if _, _, _, ok := nftInputChain(out); ok {
+		if len(nftInputChains(out)) > 0 {
 			return "nft"
 		}
 	}
@@ -330,21 +332,25 @@ func inputFiltered(listing string) bool {
 	return false
 }
 
-// nftInputChain finds the first base chain that hooks input with policy drop.
-func nftInputChain(ruleset string) (family, table, chain string, ok bool) {
-	var currentFamily, currentTable, currentChain string
+type nftChainRef struct{ family, table, chain string }
+
+// nftInputChains finds every base chain that hooks input with policy drop, in every table and family: a host can
+// filter IPv4 and IPv6 in separate tables, and a rule in only one of them leaves the other family closed.
+func nftInputChains(ruleset string) []nftChainRef {
+	var chains []nftChainRef
+	var family, table, chain string
 	for _, line := range strings.Split(ruleset, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		switch {
 		case len(fields) >= 3 && fields[0] == "table":
-			currentFamily, currentTable = fields[1], fields[2]
+			family, table, chain = fields[1], fields[2], ""
 		case len(fields) >= 2 && fields[0] == "chain":
-			currentChain = fields[1]
-		case strings.Contains(line, "hook input") && strings.Contains(line, "policy drop") && currentTable != "":
-			return currentFamily, currentTable, currentChain, true
+			chain = fields[1]
+		case chain != "" && strings.Contains(line, "hook input") && strings.Contains(line, "policy drop"):
+			chains = append(chains, nftChainRef{family, table, chain})
 		}
 	}
-	return "", "", "", false
+	return chains
 }
 
 // portsOf lists the ports of the rules that use proto, in the colon form ufw and iptables take.
@@ -388,7 +394,9 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 			if err != nil {
 				return added, err
 			}
-			if !strings.Contains(out, "existing") {
+			// ufw answers once per address family ("Rule added", "Rule added (v6)", "Skipping adding existing
+			// rule"): the rule is ours if either family was added. Its delete removes both families.
+			if ufwAddedARule(out) {
 				added = append(added, spec)
 			}
 		}
@@ -426,24 +434,26 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 		if err != nil {
 			return added, err
 		}
-		family, table, chain, ok := nftInputChain(out)
-		if !ok {
+		chains := nftInputChains(out)
+		if len(chains) == 0 {
 			return added, errors.New("no nftables input chain with policy drop")
 		}
-		listed, err := run(ctx, "nft", "list", "chain", family, table, chain)
-		if err != nil {
-			return added, err
-		}
-		for _, proto := range []string{"tcp", "udp"} {
-			if nftRulePresent(listed, rules, proto) {
-				continue
-			}
-			args := append([]string{"insert", "rule", family, table, chain}, nftSpec(proto, portsOf(rules, proto))...)
-			if _, err := run(ctx, "nft", args...); err != nil {
+		for _, c := range chains {
+			listed, err := run(ctx, "nft", "list", "chain", c.family, c.table, c.chain)
+			if err != nil {
 				return added, err
 			}
-			if len(added) == 0 {
-				added = append(added, "nft")
+			for _, proto := range []string{"tcp", "udp"} {
+				if nftRulePresent(listed, rules, proto) {
+					continue
+				}
+				args := append([]string{"insert", "rule", c.family, c.table, c.chain}, nftSpec(proto, portsOf(rules, proto))...)
+				if _, err := run(ctx, "nft", args...); err != nil {
+					return added, err
+				}
+				if len(added) == 0 {
+					added = append(added, "nft")
+				}
 			}
 		}
 	}
@@ -494,6 +504,36 @@ func splitIptablesLine(line string) ([]string, bool) {
 		args = append(args, current.String())
 	}
 	return args, !inQuote
+}
+
+// ufwAddedARule reports whether an `ufw allow` answer added a rule for any address family.
+func ufwAddedARule(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "Rule added") {
+			return true
+		}
+	}
+	return false
+}
+
+// ufwAllows reports whether `ufw status` lists an ALLOW rule for spec from anywhere, for IPv4 or (v6) IPv6.
+func ufwAllows(status, spec string, v6 bool) bool {
+	for _, line := range strings.Split(status, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != spec {
+			continue
+		}
+		rest := fields[1:]
+		if isV6 := rest[0] == "(v6)"; isV6 != v6 {
+			continue
+		} else if isV6 {
+			rest = rest[1:]
+		}
+		if len(rest) >= 2 && rest[0] == "ALLOW" && slices.Contains(rest, "Anywhere") {
+			return true
+		}
+	}
+	return false
 }
 
 // ownedIptablesRule reports whether an `iptables -S` rule is one pbh added: its --comment argument is exactly ours.
@@ -703,8 +743,13 @@ func firewallRulePresent(ctx context.Context, run commander, kind string, rules 
 	switch kind {
 	case "ufw":
 		out, err := run(ctx, "ufw", "status")
+		if err != nil {
+			return false
+		}
+		v6 := strings.Contains(out, "(v6)") // ufw adds the IPv6 rule itself when IPv6 is enabled
 		for _, r := range rules {
-			if err != nil || !strings.Contains(out, r.Ports+"/"+r.Proto) {
+			spec := r.Ports + "/" + r.Proto
+			if !ufwAllows(out, spec, false) || (v6 && !ufwAllows(out, spec, true)) {
 				return false
 			}
 		}
@@ -728,12 +773,17 @@ func firewallRulePresent(ctx context.Context, run commander, kind string, rules 
 		return true
 	case "nft":
 		out, err := run(ctx, "nft", "list", "ruleset")
-		family, table, chain, ok := nftInputChain(out)
-		if err != nil || !ok {
+		chains := nftInputChains(out)
+		if err != nil || len(chains) == 0 {
 			return false
 		}
-		listed, err := run(ctx, "nft", "list", "chain", family, table, chain)
-		return err == nil && nftRulePresent(listed, rules, "tcp") && nftRulePresent(listed, rules, "udp")
+		for _, c := range chains {
+			listed, err := run(ctx, "nft", "list", "chain", c.family, c.table, c.chain)
+			if err != nil || !nftRulePresent(listed, rules, "tcp") || !nftRulePresent(listed, rules, "udp") {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }
