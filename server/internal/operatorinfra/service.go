@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -123,7 +124,7 @@ func (s *Service) MutateRegion(ctx context.Context, actor, key string, in Region
 	in.Action = strings.TrimSpace(in.Action)
 	in.ID = strings.TrimSpace(in.ID)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
-	if !validCommon(actor, key, in.ID, in.Reason) || !regionIdentifier.MatchString(in.ID) || len(in.DisplayName) > 80 || in.Revision < 0 || (in.Action != "create" && in.Action != "update" && in.Action != "enable" && in.Action != "disable") {
+	if !validCommon(actor, key, in.ID, in.Reason) || !regionIdentifier.MatchString(in.ID) || len(in.DisplayName) > 80 || in.Revision < 0 || (in.Action != "create" && in.Action != "update" && in.Action != "enable" && in.Action != "disable" && in.Action != "replace") {
 		return out, ErrInvalid
 	}
 	err := s.mutate(ctx, actor, key, "region."+in.Action, in.ID, in, &out, func(ctx context.Context, tx *db.Tx) error {
@@ -145,8 +146,12 @@ func (s *Service) MutateRegion(ctx context.Context, actor, key string, in Region
 		} else if err != nil {
 			return err
 		}
-		if revision != in.Revision {
+		if revision != in.Revision || (in.Action == "replace" && enabled) {
 			return ErrConflict
+		}
+		if in.Action == "replace" {
+			out = Region{ID: in.ID, DisplayName: name, Enabled: enabled, Revision: revision}
+			return tx.QueryRow(ctx, `SELECT updated_at FROM operator_regions WHERE id=$1`, in.ID).Scan(&out.UpdatedAt)
 		}
 		switch in.Action {
 		case "update":
@@ -171,6 +176,18 @@ func (s *Service) MutateRegion(ctx context.Context, actor, key string, in Region
 	if err != nil {
 		return Region{}, err
 	}
+	if in.Action == "disable" || in.Action == "replace" {
+		// Move the region's workspaces now, waking their machines; a replay finds none left and wakes nobody. On
+		// failure the region stays disabled and the action (or the sweep) finishes the move.
+		moved, kept, err := edgeset.ReplaceRegion(ctx, s.store, in.ID, time.Now().UTC())
+		slog.InfoContext(ctx, "operator_region_replaced", "region_id", in.ID, "moved", moved, "kept", kept)
+		if errors.Is(err, edgeset.ErrRegionEnabled) {
+			return Region{}, ErrConflict
+		}
+		if err != nil {
+			return Region{}, fmt.Errorf("re-place region's workspaces: %w", err)
+		}
+	}
 	return out, nil
 }
 
@@ -179,6 +196,8 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 	if !validCommon(actor, key, in.NodeID, in.Reason) || in.Revision < 0 {
 		return out, ErrInvalid
 	}
+	// wake is set only when the operation runs: a replay of the same key answers the stored result and wakes nobody.
+	wake := false
 	err := s.mutate(ctx, actor, key, "node."+in.Action, in.NodeID, in, &out, func(ctx context.Context, tx *db.Tx) error {
 		switch in.Action {
 		case "verify-ingress":
@@ -231,6 +250,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			switch in.Action {
 			case "drain", "drain-move":
 				err = nodedrain.Begin(ctx, tx, in.NodeID, in.Action == "drain-move")
+				wake = in.Action == "drain-move"
 			case "resume":
 				err = nodedrain.Resume(ctx, tx, in.NodeID)
 			default:
@@ -250,7 +270,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 	if err != nil {
 		return NodeMutationResult{}, err
 	}
-	if in.Action == "drain-move" {
+	if wake {
 		// A failed wake is not an error: the drain deadline still ends the carriers, only later.
 		if err := nodedrain.Wake(ctx, s.store.Pool(), in.NodeID); err != nil {
 			slog.WarnContext(ctx, "operator_drain_move_wake_failed", "node_id", in.NodeID, "error", err)

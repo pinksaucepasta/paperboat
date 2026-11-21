@@ -65,7 +65,7 @@ function RegionActions({ region }: { region: Region }) {
             <ActionDialog
               {...c}
               title={`Disable ${region.id}`}
-              description="New nodes can’t enrol here; its nodes are fenced and drained. Re-enabling doesn’t resume them."
+              description="New nodes can’t enrol here; its nodes are fenced and drained, and its workspaces move to other regions now. Re-enabling doesn’t resume them."
               target={region.id}
               destructive
               confirmWord={region.id}
@@ -89,6 +89,21 @@ function RegionActions({ region }: { region: Region }) {
           ),
         },
   ]
+  if (!region.enabled)
+    actions.push({
+      key: "replace",
+      label: "Re-place workspaces now",
+      dialog: (c) => (
+        <ActionDialog
+          {...c}
+          title={`Re-place ${region.id}’s workspaces`}
+          description="Moves every workspace whose edge pair uses this region onto other regions now and wakes their machines. A workspace with no other region available keeps its pair."
+          target={region.id}
+          submitLabel="Re-place workspaces"
+          run={(h) => operatorAction("POST", path("replace"), h, { revision: region.revision })}
+        />
+      ),
+    })
   return <RowMenu label={region.id} actions={actions} data-region-actions={region.id} />
 }
 

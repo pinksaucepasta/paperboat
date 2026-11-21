@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,6 +67,11 @@ AND paperboat.node_workspace_edge_candidate(n.id,$2,$3)`
 // samples would otherwise exhaust Postgres's predicate-lock memory and fail writes to those machines
 // (a revoke). The ranking is advisory, so a stale or empty one only changes which edges fill free places.
 func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, rtt map[string]int, now time.Time) (bool, error) {
+	return reconcileScope(ctx, tx, scope, rtt, now, "")
+}
+
+// reconcileScope is ReconcileScope treating region drop (if not empty) as gone: neither retained nor usable.
+func reconcileScope(ctx context.Context, tx *db.Tx, scope Scope, rtt map[string]int, now time.Time, drop string) (bool, error) {
 	if scope.ID == "" || scope.Account == "" || (scope.Kind != "account" && scope.Kind != "team") {
 		return false, errors.New("edge set scope is invalid")
 	}
@@ -105,6 +112,10 @@ func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, rtt map[string]
 	}
 	if err != nil {
 		return false, fmt.Errorf("read retained regions: %w", err)
+	}
+	if drop != "" {
+		delete(retained, drop)
+		usable = slices.DeleteFunc(usable, func(r string) bool { return r == drop })
 	}
 	chosen := choose(scope.Kind+"/"+scope.ID, current, retained, rtt, usable, Size)
 	if len(chosen) == 0 {
@@ -158,7 +169,8 @@ func ReadLatency(ctx context.Context, q interface {
 }
 
 // Store writes the workspace's pair of regions, in order (the first is the primary, the second the backup): a
-// new row, or the next generation of the existing one.
+// new row, or the next generation of the existing one. Its caller wakes the machines with Wake after commit: listing
+// them inside the serializable transaction takes predicate locks that fail revokes (TestReconcileLeavesMachinesAlone...).
 func Store(ctx context.Context, tx *db.Tx, scope Scope, mode string, regions []string, now time.Time) error {
 	if _, err := tx.Exec(ctx, `INSERT INTO workspace_edge_sets(scope_kind,scope_id,mode,regions,assigned_at) VALUES($1,$2,$3,$4,$5)
 ON CONFLICT (scope_kind,scope_id) DO UPDATE SET mode=excluded.mode,regions=excluded.regions,generation=workspace_edge_sets.generation+1,assigned_at=excluded.assigned_at`, scope.Kind, scope.ID, mode, regions, now); err != nil {
@@ -313,6 +325,10 @@ func Sweep(ctx context.Context, database *db.DB, now time.Time, full bool) (int,
 			}
 			if did {
 				changed++
+				// The pair is stored; a failed wake only leaves machines to see it when their attachment next refreshes.
+				if err := Wake(ctx, database.Pool(), scope); err != nil {
+					slog.ErrorContext(ctx, "edge_set_wake_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
+				}
 			}
 		}
 		if len(scopes) < page {

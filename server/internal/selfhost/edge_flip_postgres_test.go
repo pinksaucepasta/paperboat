@@ -3,13 +3,15 @@ package selfhost
 import (
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 )
 
@@ -34,8 +36,8 @@ func TestEdgeFlipRepointsDomainsAndNamesLiveResourcesOnPostgres(t *testing.T) {
 	if err = db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
 	}
-	pairPublishBatch = 1
-	t.Cleanup(func() { pairPublishBatch = 1000 })
+	edgeset.WakeBatch = 1
+	t.Cleanup(func() { edgeset.WakeBatch = 1000 })
 	stamp := randomIdentity()
 	owner := "flip_owner_" + stamp
 	exec := func(query string, args ...any) {

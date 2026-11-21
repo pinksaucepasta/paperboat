@@ -114,6 +114,19 @@ func TestOperatorDrainMoveWakesAttachedMachines(t *testing.T) {
 	if got := topicGenerations(t, store, machine); got != 2 {
 		t.Fatalf("drain and move woke the machine on %d topics, want tunnels and previews", got)
 	}
+	var woke, rewoke int
+	sumGenerations := `SELECT sum(generation) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic IN ('tunnels','previews')`
+	if err = store.SQL().QueryRowContext(ctx, sumGenerations, machine).Scan(&woke); err != nil {
+		t.Fatal(err)
+	}
+	// A replay of the same key answers the stored result and wakes nobody again.
+	replay, err := s.MutateNode(ctx, admin, "drain-move-"+node.ID, NodeMutation{Action: "drain-move", NodeID: node.ID, Revision: drained.Node.Revision, Reason: "case:test"})
+	if err != nil || replay.Node.Revision != moved.Node.Revision {
+		t.Fatalf("replay: %+v err=%v", replay.Node, err)
+	}
+	if err = store.SQL().QueryRowContext(ctx, sumGenerations, machine).Scan(&rewoke); err != nil || rewoke != woke {
+		t.Fatalf("replayed drain-move woke the machine again: generations %d -> %d err=%v", woke, rewoke, err)
+	}
 	var secs float64
 	if err = store.SQL().QueryRowContext(ctx, `SELECT extract(epoch from drain_deadline-now()) FROM paperboat.control_tunnel_nodes WHERE id=$1`, node.ID).Scan(&secs); err != nil || secs > 91 || secs < 60 {
 		t.Fatalf("the deadline did not shorten to the move grace: %v s err=%v", secs, err)

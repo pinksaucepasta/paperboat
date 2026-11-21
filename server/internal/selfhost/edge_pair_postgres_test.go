@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 )
 
@@ -52,8 +53,8 @@ func newPairFixture(t *testing.T) *pairFixture {
 		t.Fatal(err)
 	}
 	// One machine per page, so the wake-up must page through both of the owner's machines.
-	pairPublishBatch = 1
-	t.Cleanup(func() { pairPublishBatch = 1000 })
+	edgeset.WakeBatch = 1
+	t.Cleanup(func() { edgeset.WakeBatch = 1000 })
 	stamp := f.stamp
 	short := strings.ToLower(stamp[:8])
 	f.owner, f.other, f.admin, f.member = "pair_owner_"+stamp, "pair_other_"+stamp, "pair_admin_"+stamp, "pair_member_"+stamp
@@ -201,6 +202,7 @@ func TestSetEdgePairManagedRegions(t *testing.T) {
 	if pair.Fallback == nil || pair.Fallback.BestRTTMillis != nil {
 		t.Fatalf("the stale sample of rb must be ignored: %+v", pair.Fallback)
 	}
+	f.exec(`DELETE FROM paperboat.machine_topic_generations WHERE machine_id IN ($1,$2)`, f.first, f.second)
 	pair = f.set(f.owner, f.personal, "managed", f.rc, f.ra)
 	mode, regions, next := f.stored(f.personal)
 	if mode != "managed-only" || next != generation+1 || !slices.Equal(regions, []string{f.rc, f.ra}) || pair.Primary.ID != f.rc || regionID(pair.Fallback) != f.ra {
@@ -211,6 +213,14 @@ func TestSetEdgePairManagedRegions(t *testing.T) {
 		if err = f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.machine_topic_generations WHERE machine_id IN ($1,$2) AND topic=$3`, f.first, f.second, topic).Scan(&woken); err != nil || woken != 2 {
 			t.Fatalf("machines woken on %s: %d %v", topic, woken, err)
 		}
+	}
+	f.exec(`DELETE FROM paperboat.machine_topic_generations WHERE machine_id IN ($1,$2)`, f.first, f.second)
+	if _, err = f.service.EdgePair(f.ctx, f.owner, f.personal); err != nil {
+		t.Fatal(err)
+	}
+	var reads int
+	if err = f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.machine_topic_generations WHERE machine_id IN ($1,$2)`, f.first, f.second).Scan(&reads); err != nil || reads != 0 {
+		t.Fatalf("reading the pair woke %d machine topics, want none: %v", reads, err)
 	}
 	if got, readErr := f.service.EdgePair(f.ctx, f.owner, f.personal); readErr != nil || got.Primary.ID != f.rc || regionID(got.Fallback) != f.ra {
 		t.Fatalf("pair after put=%+v err=%v", got, readErr)

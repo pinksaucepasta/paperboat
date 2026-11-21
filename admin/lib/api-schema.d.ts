@@ -6092,6 +6092,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/regions/{region_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Move a disabled region's workspaces to other regions now and wake their machines */
+        post: operations["replace_admin_region"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/nodes/{node_id}/drain": {
         parameters: {
             query?: never;
@@ -30537,6 +30554,45 @@ export interface operations {
         };
         responses: {
             /** @description Disabled region or exact idempotent replay. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorRegion"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    replace_admin_region: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                region_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Region (unchanged) after its workspaces moved, or exact idempotent replay. */
             200: {
                 headers: {
                     [name: string]: unknown;

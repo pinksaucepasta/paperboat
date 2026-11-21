@@ -239,7 +239,7 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 	}
 	// The pool is stored; a failed wake-up leaves machines to see the new edges when their attachment next refreshes.
 	if flipped {
-		if err = s.publishPairChange(ctx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}); err != nil {
+		if err = edgeset.Wake(ctx, s.database.Pool(), edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}); err != nil {
 			slog.ErrorContext(ctx, "pool_publish_failed", "scope_kind", scope.Kind, "scope_id", scope.ID, "error", err)
 		}
 	}
@@ -292,7 +292,8 @@ func (s *Service) storePool(ctx context.Context, tx *db.Tx, actor, capability st
 	if flipped {
 		// The stored pair follows the mode at once (a pair change stores it too), not at some later reconcile, and
 		// before the domains are repointed: resolving the new edges goes through the stored pair.
-		if _, err = edgeset.ReconcileScope(ctx, tx, edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}, nil, time.Now().UTC()); err != nil {
+		ws := edgeset.Scope{Kind: scope.Kind, ID: scope.ID, Account: actor}
+		if _, err = edgeset.ReconcileScope(ctx, tx, ws, nil, time.Now().UTC()); err != nil {
 			return false, err
 		}
 		if err = repointWorkspaceDomains(ctx, tx, actor, team, p.Mode); err != nil {

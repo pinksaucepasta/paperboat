@@ -54,14 +54,14 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 		}
 		writeJSON(w, 200, SuccessResponse{Data: out})
 	})))
-	for _, action := range []string{"create", "update", "enable", "disable"} {
+	for _, action := range []string{"create", "update", "enable", "disable", "replace"} {
 		mux.Handle("POST /v1/admin/regions/{region_id}/"+action, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var in operatorRegionInput
 			r.Body = http.MaxBytesReader(w, r.Body, 8192)
 			if !decodeStrictJSON(w, r, &in) {
 				return
 			}
-			if (action == "enable" || action == "disable") && in.DisplayName != "" {
+			if (action == "enable" || action == "disable" || action == "replace") && in.DisplayName != "" {
 				writeError(w, r, 400, "invalid_request", "Only revision is accepted for region enable/disable.")
 				return
 			}
