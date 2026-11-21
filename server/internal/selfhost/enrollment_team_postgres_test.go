@@ -316,7 +316,15 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, owner, ws+".example.test")
 	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear',$5)`, "placement_domain_"+suffix, owner, preview, "custom-"+endpoint+".example.test", "wsd_"+ws)
-	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at) VALUES($1,'managed','1.0','fixture_managed','ready',true,now())`, managed)
+	// A serving Paperboat edge: a global installation in an enabled operator region with verified ingress.
+	exec(`INSERT INTO paperboat.operator_regions(id,display_name) VALUES($1,$1)`, "placement_"+suffix)
+	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,public_ingress_ipv4,public_ingress_verified_at,tls_spki_sha256) VALUES($1,$1,'1.0','fixture_managed','ready',true,now(),$2,'test',ARRAY['edge'],ARRAY['http3','http2'],10,0,now(),now()+interval '1 minute','198.51.100.7',now(),decode(md5($1)||md5($1),'hex'))`, managed, "placement_"+suffix)
+	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),decode(md5($1||'h')||md5($1||'h'),'hex'),'\x00','managed fixture','tunnel','global','global',$1,true)`, managed)
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.selfhost_installations WHERE id=$1`, managed)
+		store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.operator_regions WHERE id=$1`, "placement_"+suffix)
+	})
 	// Explicit placement needs a self-hosted workspace: the tunnel policy pairing a region writes (SetEdgePair).
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'tunnel','self-hosted-only',ARRAY[$2]) ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,installation_ids=excluded.installation_ids`, owner, installation.InstallationID)
 	t.Cleanup(func() {
@@ -342,7 +350,8 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	if err = store.SQL().QueryRowContext(ctx, `SELECT dns_target,ownership_state,expected_records->0->>'type',generation FROM paperboat.preview_domains WHERE preview_id=$1`, preview).Scan(&target, &state, &recordType, &generation); err != nil || target != "93.184.216.35" || state != "verified" || recordType != "A" || generation != 2 {
 		t.Fatalf("placement DNS reset: %q %q %q %d %v", target, state, recordType, generation, err)
 	}
-	exec(`UPDATE paperboat.preview_domains SET ownership_state='verified' WHERE preview_id=$1`, preview)
+	// The claimed edge comes up: it heartbeats ready and its public ingress (the domain's record) is verified.
+	exec(`UPDATE paperboat.control_tunnel_nodes SET state='ready',ready=true,last_heartbeat_at=now(),registry_expires_at=now()+interval '1 minute',public_ingress_ipv4='93.184.216.35',public_ingress_verified_at=now() WHERE id=$1`, installation.NodeID)
 	eligible(installation.NodeID, true)
 	eligible(managed, false)
 	if err = service.RemoveScoped(ctx, owner, installation.InstallationID, false); err != nil {
@@ -350,6 +359,8 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 	}
 	eligible(installation.NodeID, false)
 	eligible(managed, false)
+	// Pairing back to Paperboat's edges drops the self-hosted tunnel policy.
+	exec(`DELETE FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1 AND capability='tunnel'`, owner)
 	cleared, err := service.SetPlacement(ctx, owner, "preview", preview, nil)
 	if err != nil || cleared.InstallationID != nil || cleared.NodeID != nil {
 		t.Fatalf("clear placement: %v", err)
