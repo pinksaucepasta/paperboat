@@ -10,6 +10,7 @@ bounded origins, so grant changes cannot stop the origin itself. Each mutation
 holds both a pb access forward and raw 127.100.x.y TCP; both must echo first,
 close within 30 seconds, and refuse a fresh exchange.
 """
+from results_dir import results_dir
 import argparse
 import concurrent.futures
 import json
@@ -279,7 +280,7 @@ def main():
                     'W>L': (w,a), 'M>W': (m,w), 'W>M': (w,m)}
     results, versions = {}, {}
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-manual-X-19-team-' + stamp + '.json')
+    out = results_dir(__file__) / ('xplat-manual-X-19-team-' + stamp + '.json')
     for d in (a,b,m,w):
         version = d.pb('version')
         assert version.rc == 0, d.name + ' version unavailable'

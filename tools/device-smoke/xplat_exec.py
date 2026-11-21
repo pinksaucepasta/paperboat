@@ -7,6 +7,7 @@ The build host on every target is its own Python (python3 on L and M, python on 
 compared is the target's view of argv, stdin, cwd, environment and exit status. Results go to
 tools/device-smoke/results/xplat-exec-<stamp>.json with one entry per check and ordered pair (`X-17:argv:L>W`).
 """
+from results_dir import results_dir
 import hashlib
 import json
 import os
@@ -195,7 +196,7 @@ def main():
     if 'L' in devices and (not only or 'offline' in only):
         t_offline(devices)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-exec-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-exec-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-exec', 'devices': keys,
                                'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']

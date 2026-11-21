@@ -12,6 +12,7 @@ another program), the containers an iptables DROP to the API address and port; o
   control_outage_windows.py revoke                          L revokes R while W and R are cut off; R still reaches W; after the
                                                             connection returns R is refused (host-side removal on Windows)
 """
+from results_dir import results_dir
 import argparse, base64, json, socket, sys, time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -259,7 +260,7 @@ def revoked(env, args):
 
 
 def write(res, stem, extra):
-    path = HERE / "results" / f"{stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    path = results_dir(__file__) / f"{stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps({**extra, "checks": res.checks}, indent=1) + "\n")
     print("result:", path)

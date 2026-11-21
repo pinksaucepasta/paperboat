@@ -33,6 +33,7 @@ string on a paired Linux client, REVOKE_CLIENT_CMD on a fresh throwaway one that
 ssh-live-revoke make that one themselves (revoke_client.sh, removed after) when REVOKE_CLIENT_HOST (ssh target with docker, signed in as the
 device's account) and REVOKE_CLIENT_BIN (a Linux build for it) are set instead of REVOKE_CLIENT_CMD; creation failure is a FAIL. ssh-trust-host is ssh_trust_host.sh with ROTATE_CMD.
 """
+from results_dir import results_dir
 import argparse
 import contextlib
 import datetime
@@ -378,7 +379,7 @@ def run_check(check, argv, args, device):
         started = time.monotonic()
         done = run_streaming(command, environment, args.timeout, on_state)
     # The whole output is kept beside the result file (owner-only): per-row receipts and failure causes live there.
-    output = HERE / 'results' / 'windows-output' / ('%s-%s.out' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), check))
+    output = results_dir(__file__) / 'windows-output' / ('%s-%s.out' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), check))
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with os.fdopen(os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as handle:
         handle.write(done.stdout + '\n--- stderr ---\n' + done.stderr)
@@ -464,7 +465,7 @@ def main():
         results.append({'id': check + ':' + args.machine, 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
         print('%-34s %-5s %5ss  %s' % (check + ':' + args.machine, outcome[0], outcome[1], outcome[2][:100]), flush=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    path = HERE / 'results' / ('windows-%s.json' % stamp)
+    path = results_dir(__file__) / ('windows-%s.json' % stamp)
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps({'at': stamp, 'results': results}))
     print('results:', path)

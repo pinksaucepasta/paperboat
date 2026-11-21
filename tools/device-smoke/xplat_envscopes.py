@@ -14,6 +14,7 @@ printed). Values are random per run and never printed. Results: results/xplat-en
              (a removal never withholds ENV); the owner's `pb env rotate` re-seals every survivor at a newer fence; the revoked
              machine is not given the rotated delivery
 """
+from results_dir import results_dir
 import base64
 import json
 import os
@@ -288,7 +289,7 @@ def main():
         check('rotation', '+'.join(devices), lambda: t_rotation(ctl, devices))
     ctl.remove(ctl.home + '/.xplat-vault-pw')
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-envscopes-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-envscopes-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-envscopes', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

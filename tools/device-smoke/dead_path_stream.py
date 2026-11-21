@@ -19,6 +19,7 @@ Every run, pass or fail, saves what makes a slow cut provable (cut-16s.md, a 16.
 `arrivals.csv` (t_ms from the block, line), `status.csv` (a 1 s sampler of selected path, relay region and home relay), and
 the receipt names their directory (--trace-dir, default results/dead-path-<UTC>).
 """
+from results_dir import results_dir
 import contextlib
 import csv
 import datetime
@@ -107,7 +108,7 @@ def cut(address, device_addresses=()):
 def main():
     peer = sys.argv[1]
     trace_dir = sys.argv[sys.argv.index('--trace-dir') + 1] if '--trace-dir' in sys.argv else str(
-        pathlib.Path(__file__).parent / 'results' / ('dead-path-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
+        results_dir(__file__) / ('dead-path-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')))
     bound = float(sys.argv[sys.argv.index('--bound') + 1]) if '--bound' in sys.argv else 12.0
     address = sys.argv[sys.argv.index('--peer-address') + 1] if '--peer-address' in sys.argv else None
     device_addresses = [sys.argv[i + 1] for i, word in enumerate(sys.argv) if word == '--device-address']

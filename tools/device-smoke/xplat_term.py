@@ -7,6 +7,7 @@ The controller drives a real pseudo-terminal with pexpect: an `ssh -tt` hop (or 
 runs `pb connect <target>`, so the client's own terminal handling is what is tested, and the target's default shell answers.
 Results: tools/device-smoke/results/xplat-term-<stamp>.json (`X-16:utf8:L>W`, `X-11:connect:L>W`).
 """
+from results_dir import results_dir
 from dev_targets import get_setting
 import hashlib
 import json
@@ -299,7 +300,7 @@ def main():
                 continue
             check(row, name, '%s>%s' % (a_key, b_key), lambda: test(devices[a_key], devices[b_key]))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-term-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-term-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-term', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

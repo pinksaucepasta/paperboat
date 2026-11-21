@@ -23,6 +23,7 @@ Checks (every one is a line in the result JSON; the drill exits 1 on any FAIL):
                              --revoke-wait seconds of the connection returning r is refused (F21-01)
 TOKEN_CMD prints one enrollment token on stdout for the machine name given as its last argument.
 """
+from results_dir import results_dir
 import argparse, base64, json, os, re, shlex, subprocess, sys, time
 from pathlib import Path
 
@@ -219,7 +220,7 @@ def finish(host, res, args, stopped, restored):
     for tag in ("long-ab", "long-ba"):
         ok, detail = eventually(lambda: ((lambda o: (f"{tag}-done" in o[1] and "0" in in_ct(host, NAMES[tag[-2]], f"cat /tmp/{tag}.rc", 30)[1], o[1].strip()[-120:]))(in_ct(host, NAMES[tag[-2]], f"cat /tmp/{tag}.out", 30))), 240, 10)
         res.add(f"recovery: {tag} finished rc 0 with its output", ok, detail)
-    out_dir = HERE / "results"
+    out_dir = results_dir(__file__)
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"control-outage-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     path.write_text(json.dumps({"outage_seconds": args.outage_seconds, "checks": res.checks}, indent=1) + "\n")
@@ -250,7 +251,7 @@ def revoke_drill(args):
     started = time.time()
     ok, detail = eventually(lambda: refused(host, "r", "b"), args.revoke_wait, 10)
     res.add(f"after the connection returned r is refused within {args.revoke_wait} s", ok, f"{int(time.time() - started)} s; {detail}")
-    path = HERE / "results" / f"control-outage-revoke-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    path = results_dir(__file__) / f"control-outage-revoke-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     path.write_text(json.dumps({"checks": res.checks}, indent=1) + "\n")
     print("result:", path)
     return 0 if all(c["status"] == "PASS" for c in res.checks) else 1

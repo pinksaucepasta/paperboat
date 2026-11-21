@@ -8,6 +8,7 @@ on B through `pb exec B`, opens `pb access machine B --port P --listen 127.0.0.1
 origin's reply (a digest of what it received) back; then does the same through B's own private address from `pb resolve B`.
 It also checks `--listen` refuses a non-loopback address. Results: tools/device-smoke/results/xplat-access-<stamp>.json.
 """
+from results_dir import results_dir
 import json
 import sys
 import time
@@ -179,7 +180,7 @@ def main():
     for a_key, b_key in permutations(devices, 2):
         check('tcp', '%s>%s' % (a_key, b_key), lambda: t_access(devices[a_key], devices[b_key]))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-access-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-access-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-access', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

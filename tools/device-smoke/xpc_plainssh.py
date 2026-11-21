@@ -13,6 +13,7 @@ hook:   `pb env hook <shell> --install` twice leaves one marker line; `--uninsta
 doctor: `pb ssh doctor <alias> --json` is ready for every target.
 Results: results/xpc-plainssh-<stamp>.json (`X-28:ssh:L>W`, `X-30:env:W>L`).
 """
+from results_dir import results_dir
 import base64
 import json
 import shlex
@@ -166,7 +167,7 @@ def main():
     for key, dev in devices.items():
         if not only or 'hook' in only:
             check('X-30', 'hook', key, lambda: t_hook(dev))
-    out = HERE / 'results' / ('xpc-plainssh-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xpc-plainssh-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({'check': 'xpc-plainssh', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']

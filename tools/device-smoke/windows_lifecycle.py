@@ -11,6 +11,7 @@ the peer is SMOKE_PEER_SSH, a paired Unix machine of the same account.
 Prints one `PASS|FAIL id seconds detail` line per check and exits non-zero on any failure. Never prints tokens,
 passwords or file contents.
 """
+from results_dir import results_dir
 import argparse
 import base64
 import json
@@ -472,8 +473,9 @@ def main():
             status, detail, failed = 'FAIL', str(error), True
         print(f'{status} windows:{name} {time.time() - started:.0f}s {detail}', flush=True)
         rows.append({'id': f'windows:{name}', 'status': status, 'seconds': round(time.time() - started), 'detail': detail})
-    os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)
-    result = os.path.join(HERE, 'results', time.strftime('windows-lifecycle-%Y%m%dT%H%M%SZ.json', time.gmtime()))
+    results = results_dir(__file__)
+    os.makedirs(results, exist_ok=True)
+    result = os.path.join(results, time.strftime('windows-lifecycle-%Y%m%dT%H%M%SZ.json', time.gmtime()))
     with open(result, 'w') as saved:
         json.dump({'version': args.expect_version, 'device': DEVICE.target, 'results': rows}, saved, indent=1)
     print('results:', os.path.relpath(result, os.path.dirname(HERE)))

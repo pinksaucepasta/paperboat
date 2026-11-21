@@ -9,6 +9,7 @@ the marker, the sha256 of the download; then it stops the origin through the tun
 (it must be the same on every OS). The tunnel is deleted on every exit path. Results:
 tools/device-smoke/results/xplat-tunnel-<stamp>.json (`X-20:v6:W`).
 """
+from results_dir import results_dir
 import hashlib
 import json
 import re
@@ -136,7 +137,7 @@ def main():
         for bind in only:
             check(bind, dev, lambda: t_origin(dev, bind))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-tunnel-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-tunnel-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-tunnel', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

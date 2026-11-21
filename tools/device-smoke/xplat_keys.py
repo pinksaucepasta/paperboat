@@ -8,6 +8,7 @@ its stdin received (arrows, Home, End, Delete, F1-F12, Alt-arrows, Shift-Tab, Al
 Ctrl-Z is checked: a unix target prints Stopped (bash) or suspended (zsh) and a Windows target shows ^Z, and the shell keeps running in both cases.
 Results: tools/device-smoke/results/xplat-keys-<stamp>.json.
 """
+from results_dir import results_dir
 import json
 import sys
 import time
@@ -67,7 +68,7 @@ KEYS = [('up', E + '[A'), ('down', E + '[B'), ('right', E + '[C'), ('left', E + 
 
 
 def results_path():
-    return Path(__file__).parent / 'results' / ('xplat-keys-%s.json' % datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
+    return results_dir(__file__) / ('xplat-keys-%s.json' % datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
 
 
 def keys_check(src, dst):

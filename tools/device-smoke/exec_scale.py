@@ -9,6 +9,7 @@ sleep + (budget - sleep) seconds. The result JSON has the start spread, the slow
 A Windows peer (F21-166, W): --client-ct win-stg-l --target-name win-stg-w2 --windows: the same from the container --client-ct to the
 Windows machine --target-name, each exec running `ping -n SLEEP+1 127.0.0.1` (cmd.exe has no sleep).
 """
+from results_dir import results_dir
 import argparse, base64, json, sys, time
 from pathlib import Path
 
@@ -71,7 +72,7 @@ def main():
               "fastest_s": times[0], "median_s": times[len(times) // 2], "slowest_s": times[-1],
               "failed": [{"i": r["i"], "rc": r["rc"], "tail": r["tail"]} for r in failed][:8], "over_budget": len(slow),
               "status": "PASS" if not failed and not slow else "FAIL"}
-    out_dir = HERE / "results"
+    out_dir = results_dir(__file__)
     out_dir.mkdir(exist_ok=True)
     (out_dir / f"exec-scale-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json").write_text(json.dumps({**result, "rows": rows}, indent=1) + "\n")
     print(json.dumps(result))

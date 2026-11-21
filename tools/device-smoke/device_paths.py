@@ -15,6 +15,7 @@ relay: cold first contact (daemons restarted) target -> peer: relay allowed (the
 relays dropped, the direct path to the peer's addresses dropped.
 All rules are removed on every exit path; a root/admin timer on the device removes them even when this script dies.
 """
+from results_dir import results_dir
 import argparse, base64, contextlib, json, os, re, shlex, subprocess, sys, time
 from pathlib import Path
 
@@ -232,7 +233,7 @@ class Report:
         print(("PASS " if ok else "FAIL ") + name + " " + detail, flush=True)
 
     def finish(self):
-        out = HERE / "results" / f"{self.stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+        out = results_dir(__file__) / f"{self.stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
         out.parent.mkdir(exist_ok=True)
         out.write_text(json.dumps({"checks": self.checks}, indent=1) + "\n")
         print("result:", out)

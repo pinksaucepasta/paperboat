@@ -11,6 +11,7 @@ generation, `policy list` shows that ID with that generation, and after the poli
 Results: tools/device-smoke/results/xplat-tunnel-extend-policy-<stamp>.json (`C304:L`, `C305:M`...). Needs a client at or after
 6ff07ee50 on the device and server .47 (GET /v1/lazy-policies). Everything created is deleted/revoked on every exit path.
 """
+from results_dir import results_dir
 import json
 import os
 import sys
@@ -173,7 +174,7 @@ def main():
         if 'policy' in only:
             check('C305', key, lambda: t_policy(dev))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-tunnel-extend-policy-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-tunnel-extend-policy-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-tunnel-extend-policy', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

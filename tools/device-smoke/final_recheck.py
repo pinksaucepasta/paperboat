@@ -22,6 +22,7 @@ extra starts from), --host (the Docker host), --origin (live console), --only RO
 --dry (print, run nothing), --keep (leave the containers and the account for a look; the next run does not reuse them).
 Secrets come from the environment (HP_SUDO_PASS ...), never from arguments, and are never printed.
 """
+from results_dir import results_dir
 import argparse
 import collections
 import datetime
@@ -431,7 +432,7 @@ def report(build, chosen, results):
         if r['check'] not in by_check or r['status'] == 'FAIL':
             by_check[r['check']] = r
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    out_dir = HERE / 'results'
+    out_dir = results_dir(__file__)
     out_dir.mkdir(exist_ok=True)
     per_row = []
     for r in chosen:

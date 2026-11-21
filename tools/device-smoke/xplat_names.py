@@ -14,6 +14,7 @@ For each ordered pair the SOURCE device renames the TARGET machine (every device
              renamed one).
 Every target is renamed back to its own name at the end. Results: results/xplat-names-<stamp>.json, ids `X-40:<check>:<A>><B>`.
 """
+from results_dir import results_dir
 import json
 import re
 import sys
@@ -215,7 +216,7 @@ def main():
         finally:
             restore(src, dst, mid, dst.alias)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-names-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-names-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-names', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

@@ -12,6 +12,7 @@ Rules are removed on every exit path.
 
   direct_path.py --host tester@staging.example.test --a rel-nat-a --b rel-nat-b
 """
+from results_dir import results_dir
 import argparse, base64, hashlib, json, subprocess, sys, threading, time
 from pathlib import Path
 
@@ -109,7 +110,7 @@ def main():
             ssh(host, undrop)
         if mtu_set:
             ssh(host, f"sudo -n docker exec {args.a} ip link set eth0 mtu 1500")
-    out = HERE / "results" / f"direct-path-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    out = results_dir(__file__) / f"direct-path-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"checks": checks}, indent=1) + "\n")
     print("result:", out)

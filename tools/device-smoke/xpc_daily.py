@@ -11,6 +11,7 @@ network (`docker network disconnect/connect`): the other machines reach it again
 on all three. A hosted Mac or Windows runner cannot reboot or change networks (README, macpool/winpool), so those two
 steps run on L only. Results: results/xpc-daily-<stamp>.json (`X-22:<step>:<A>><B>`).
 """
+from results_dir import results_dir
 from dev_targets import smoke_value
 import hashlib
 import json
@@ -261,7 +262,7 @@ def main():
         recovery(devices, '--m-vm' in argv, dedicated_windows() if '--dedicated-windows' in argv else None)
         for key, dev in devices.items():
             record('X-22:doctor-after:' + key, lambda: t_doctor(dev))
-    out = HERE / 'results' / ('xpc-daily-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xpc-daily-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({'check': 'xpc-daily', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']

@@ -12,6 +12,7 @@ bytes arrive (sha256) under the name the sender used; a name that arrives under 
 a hang, a silent overwrite and a path escape fail. The receiver's Inbox files made by the run are removed again.
 Results: tools/device-smoke/results/xplat-send-<stamp>.json (`X-14:names:L>W`, `X-15:batch:L>W`, ...).
 """
+from results_dir import results_dir
 import hashlib
 import json
 import os
@@ -431,7 +432,7 @@ def main():
                 continue
             check(name, '%s>%s' % (a_key, b_key), lambda: test(devices[a_key], devices[b_key]))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-send-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-send-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-send', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

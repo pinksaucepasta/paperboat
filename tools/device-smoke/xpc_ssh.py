@@ -13,6 +13,7 @@ that an agent cannot be forwarded (the documented launch limitation) and the key
 x11: no DISPLAY on the target (pb never requests X11).
 Results: results/xpc-ssh-<stamp>.json (`X-29:forward:L>W`).
 """
+from results_dir import results_dir
 import json
 import sys
 import time
@@ -173,7 +174,7 @@ def main():
         for name, test in TESTS:
             if not only or name in only:
                 check(name, '%s>%s' % (a, b), lambda: test(devices[a], devices[b]))
-    out = HERE / 'results' / ('xpc-ssh-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xpc-ssh-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({'check': 'xpc-ssh', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']

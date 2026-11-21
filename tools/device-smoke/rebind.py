@@ -9,6 +9,7 @@ also succeed. The firewall and masquerade rules are removed on every exit path.
 
   rebind.py --host tester@staging.example.test --a rel-nat-a --b rel-nat-b
 """
+from results_dir import results_dir
 import argparse, json, subprocess, sys, time
 from pathlib import Path
 
@@ -98,7 +99,7 @@ def main():
 
 
 def finish(checks):
-    out = HERE / "results" / f"rebind-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    out = results_dir(__file__) / f"rebind-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"checks": checks}, indent=1) + "\n")
     print("result:", out)

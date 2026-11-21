@@ -8,6 +8,7 @@ the Linux host; Linux reaches it directly, Windows through ssh -R, macOS through
 its row and pair (`X-01:L-W`) and is recorded in tools/device-smoke/results/xplat-config-<stamp>.json. Everything it
 creates (assignments, machine files, files, credentials, the repository, the server) is removed at the end.
 """
+from results_dir import results_dir
 import base64
 import contextlib
 import hashlib
@@ -241,7 +242,7 @@ def delete_repository(dev, repository_id):
         print('repository delete: %s' % done.errtext[-200:], flush=True)
 
 
-RESULT_FILE = Path(__file__).parent / 'results' / ('xplat-config-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+RESULT_FILE = results_dir(__file__) / ('xplat-config-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
 
 
 def save_results():

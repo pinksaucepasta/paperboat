@@ -7,6 +7,7 @@ writes results/transfer-large-<UTC>.json. --netem-ms adds delay on this machine'
 run. --pb sends with another pb binary (an older build) for a before/after comparison against the same receiver.
 Unix only: the Windows form of the verification belongs with windows_target.
 """
+from results_dir import results_dir
 import argparse
 import json
 import pathlib
@@ -135,8 +136,8 @@ def main():
         raise RuntimeError('transfer large changed the enrolled identity')
     receipt = {'check': CHECK, 'target': args.target, 'status': 'PASS', 'pb': str(binary), 'netem_ms': args.netem_ms,
                'cases': cases, 'enrollment_unchanged': True}
-    results = pathlib.Path(__file__).resolve().parent / 'results'
-    results.mkdir(exist_ok=True)
+    results = results_dir(__file__)
+    results.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     (results / ('transfer-large-%s.json' % stamp)).write_text(json.dumps(receipt, indent=1))
     print(json.dumps(receipt))

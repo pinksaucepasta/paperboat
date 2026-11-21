@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """X-21: team sharing across OSes. A machine of OS A (account OWNER, shared into a team) used by a member (account MEMBER)
+from results_dir import results_dir
 from a machine of OS B, for every ordered pair A>B.
 
   xplat_team.py [--pairs L>M,M>L,...] [--only visible,exec,terminal,files,private,end]
@@ -534,7 +535,7 @@ def main():
             except AssertionError:
                 pass  # the end step already unshared it
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = HERE / 'results' / ('xplat-team-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-team-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-team', 'pairs': pairs, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

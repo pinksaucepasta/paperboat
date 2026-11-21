@@ -9,6 +9,7 @@ on DST, then `pb session close` (confirmed) closes the session. Checks, measured
 (allowing 2 s), the background job is gone within 3 s (the shell resent SIGHUP to it), the close command took at most 10 s, and no process
 of that session remains. Results: results/xplat-term-close-<stamp>.json, ids `term-close:<shell>:<SRC>><DST>`.
 """
+from results_dir import results_dir
 import json
 import re
 import sys
@@ -100,7 +101,7 @@ def main():
         for shell in shells:
             check(shell, '%s>%s' % (a, b), lambda: t_close(devices[a], devices[b], shell))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-term-close-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-term-close-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-term-close', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

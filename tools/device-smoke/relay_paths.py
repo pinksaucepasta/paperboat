@@ -11,6 +11,7 @@ Rules are removed on every exit path.
 
   relay_paths.py --host tester@staging.example.test --a rel-nat-a --b rel-nat-b --relay 203.0.113.10 --relay 203.0.113.11
 """
+from results_dir import results_dir
 import argparse, base64, json, subprocess, sys, time
 from pathlib import Path
 
@@ -83,7 +84,7 @@ def main():
         cold_exec("direct path blocked, relay allowed")
     finally:
         unblock_all()
-    out = HERE / "results" / f"relay-paths-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    out = results_dir(__file__) / f"relay-paths-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"checks": checks}, indent=1) + "\n")
     print("result:", out)

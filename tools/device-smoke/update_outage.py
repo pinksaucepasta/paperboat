@@ -13,6 +13,7 @@ timed on the Mac's clock, the dark window is a gap between probe completions so 
 A Windows target (F21-162, W): --target-ssh HOST --target-windows PB_NEW: the same, with PowerShell on HOST running PB_NEW (a
 pb.exe already on the device) as `PB_NEW install` over the install.
 """
+from results_dir import results_dir
 import argparse, base64, json, re, sys, time
 from pathlib import Path
 
@@ -103,7 +104,7 @@ def main():
         "budget_s": args.budget,
         "status": "PASS" if rc == 0 and before >= 5 and dark <= args.budget and outages <= 1 else "FAIL",
     }
-    out_dir = HERE / "results"
+    out_dir = results_dir(__file__)
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"update-outage-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     path.write_text(json.dumps(result, indent=1) + "\n")

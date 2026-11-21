@@ -19,6 +19,7 @@ The origins run ON the device (xpc_origin.py, xpc_grpc); `pb tunnel create` publ
                (bind-v4 also runs the IP deny on its tunnel)
 Results: results/xpc-tunnel-<stamp>.json (`X-20:<check>:<L|M|W>`), tunnels are deleted on every exit path.
 """
+from results_dir import results_dir
 import hashlib
 import http.client
 import json
@@ -443,7 +444,7 @@ def main():
             except Exception as error:  # noqa: BLE001
                 results[name] = {'status': 'FAIL', 'detail': str(error)[:700]}
             print('%s %s %ds %s' % (results[name]['status'], name, time.time() - started, results[name]['detail'][:400]), flush=True)
-    out = HERE / 'results' / ('xpc-tunnel-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xpc-tunnel-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({'check': 'xpc-tunnel', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']

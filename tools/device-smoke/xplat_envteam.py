@@ -11,6 +11,7 @@ in XPLAT_MEMBER_VAULT_PW, the owner's in XPLAT_VAULT_PW; both read inside, never
   revoke     `pb env team revoke --remove MEMBER`: a member launch no longer sees the value on any target OS, the owner's still does
 Results: results/xplat-envteam-<stamp>.json (`X-12:team-deliver:W<L`, `X-12:team-revoke:W`, ...).
 """
+from results_dir import results_dir
 import json
 import os
 import sys
@@ -182,7 +183,7 @@ def main():
             owner.pb('team', 'machine', 'unshare', TEAM, ids[dev.alias], '--generation', generation(owner), '--json', timeout=180)
         owner.pb('env', 'team', 'reset', TEAM, '--confirm', 'RESET ENV TEAM ' + TEAM, '--json', timeout=180)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-envteam-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-envteam-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-envteam', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

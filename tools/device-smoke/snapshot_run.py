@@ -21,6 +21,10 @@ def main():
         environment = dict(smoke_environment(settings), PAPERBOAT_SMOKE_SNAPSHOT='1',
                            PAPERBOAT_SMOKE_SOURCE_DIR=str(script.parent),
                            PAPERBOAT_SMOKE_FIXTURES=str(archive))
+        if environment.get('SMOKE_RESULTS_DIR'):
+            results = Path(environment['SMOKE_RESULTS_DIR']).expanduser().resolve()
+            results.mkdir(parents=True, exist_ok=True)
+            environment['SMOKE_RESULTS_DIR'] = str(results)
         return subprocess.run(['bash', str(frozen), *sys.argv[2:]], env=environment).returncode
 
 

@@ -13,6 +13,7 @@ bundle: `pb update bundle` made on A and `pb update --from` on B, every ordered 
 Environment is that of xplat_fleet.py (XPLAT_PREFIX, XPLAT_L_CT, XPLAT_MAC_SSH, SMOKE_WINDOWS_SSH, XPLAT_CONTROLLER=L).
 Results: results/xplat-skew-<stamp>.json (`X-36:<feature>:<old>:<A>><B>`, `X-36:bundle:A>B`).
 """
+from results_dir import results_dir
 import json
 import re
 import subprocess
@@ -138,7 +139,7 @@ def main():
         skew(option('--old'), option('--old-dir'), option('--new-dir'), keys, option('--features').split(',') if '--features' in argv else ())
     else:
         bundle(option('--new-dir'), keys)
-    out = HERE / 'results' / ('xplat-skew-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xplat-skew-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.write_text(json.dumps({'check': 'xplat-skew-' + mode, 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

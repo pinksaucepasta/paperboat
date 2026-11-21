@@ -7,6 +7,7 @@ Each observer answers HTTP 200 on http://<alias>.<domain>/ for a peer of its acc
 observer revokes the target neither observer answers 200 for it within 2 minutes (the name goes back to 421); after the target is
 enrolled again both answer 200 again within 3 minutes. Results: results/xplat-removal-names-<stamp>.json, ids `X-41-NAMES:<target>`.
 """
+from results_dir import results_dir
 import json, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -77,7 +78,7 @@ def main():
                 rem.sign_in(dev, TOKEN)
             except Exception as error:  # noqa: BLE001
                 print('sign-in of %s failed: %s' % (dev.name, str(error)[:160]), flush=True)
-    out = Path(__file__).parent / 'results' / ('xplat-removal-names-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xplat-removal-names-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.write_text(json.dumps({'check': 'xplat-removal-names', 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

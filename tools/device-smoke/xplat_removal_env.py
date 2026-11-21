@@ -15,6 +15,7 @@ Per target and flavour, the other two OSes are the observers:
             every XP_ value again, and it appears in `pb env host show` as published.
 Results: results/xplat-removal-env-<stamp>.json, ids `X-41-ENV:<flavour>:<target>`.
 """
+from results_dir import results_dir
 import json
 import os
 import sys
@@ -173,7 +174,7 @@ def main():
                     unlock(dev)
                 except Exception as error:  # noqa: BLE001
                     print('sign-in/unlock of %s failed: %s' % (dev.name, str(error)[:160]), flush=True)
-    out = Path(__file__).parent / 'results' / ('xplat-removal-env-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+    out = results_dir(__file__) / ('xplat-removal-env-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
     out.write_text(json.dumps({'check': 'xplat-removal-env', 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

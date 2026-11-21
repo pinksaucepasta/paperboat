@@ -10,6 +10,7 @@ Across devices: a vault reset on one device makes every other device refuse the 
 diagnostics, shell history and pb logs: they must appear nowhere.
 Results: tools/device-smoke/results/xplat-vault-<stamp>.json (`X-13:lock:L`, `X-13:reset:L>W`, `X-13:leak:W`).
 """
+from results_dir import results_dir
 import json
 import os
 import sys
@@ -231,7 +232,7 @@ def main():
         b_key = order[(i + 1) % len(order)]
         check('reset', '%s>%s' % (a_key, b_key), lambda: t_reset(devices[a_key], devices[b_key]))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-vault-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-vault-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-vault', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

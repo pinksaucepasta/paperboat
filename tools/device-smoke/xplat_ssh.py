@@ -5,6 +5,7 @@
 
 Results: tools/device-smoke/results/xplat-ssh-<stamp>.json, one entry per check and ordered pair (`X-18:scp:L>W`).
 """
+from results_dir import results_dir
 import hashlib
 import json
 import os
@@ -294,7 +295,7 @@ def main():
         dev.write(native(dev, '.keep'), b'')  # the directory every scp, sftp and rsync of this run lands in
         print(key, 'ssh doctor rc', dev.pb('ssh', 'doctor', dev.alias).rc, flush=True)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-ssh-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-ssh-%s.json' % stamp)
 
     def save():  # written after every pair, so a finished pair can be ticked while the next one runs
         out.write_text(json.dumps({'check': 'xplat-ssh', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))

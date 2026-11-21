@@ -10,6 +10,7 @@
 3. the rule removed: local_names passes again
 The rule is removed on every exit path; a timer on the device removes it when this script dies.
 """
+from results_dir import results_dir
 import argparse, os, json, shlex, subprocess, sys, time
 from pathlib import Path
 
@@ -100,7 +101,7 @@ def main():
     time.sleep(3)
     check = local_names(pb)
     add("DNS back: local_names passes again", check.get("status") == "pass", check.get("summary", ""))
-    out = HERE / "results" / f"doctor-local-names-{kind}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    out = results_dir(__file__) / f"doctor-local-names-{kind}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"checks": checks}, indent=1) + "\n")
     print("result:", out)

@@ -17,6 +17,7 @@ enrollment token for another. For each TARGET and each flavour, the other two OS
             (a fresh enrollment is trusted; nothing was left behind that they still depended on).
 Results: results/xplat-removal-<stamp>.json, ids `X-41:<flavour>:<target>`.
 """
+from results_dir import results_dir
 import json
 import os
 import re
@@ -245,7 +246,7 @@ def main():
                 except Exception as error:  # noqa: BLE001
                     print('sign-in of %s failed: %s' % (dev.name, str(error)[:160]), flush=True)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = HERE / 'results' / ('xplat-removal-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-removal-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-removal', 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))

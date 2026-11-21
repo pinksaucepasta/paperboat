@@ -8,6 +8,7 @@ inside this script, never printed). One set of variables (digits and underscores
 backslash, emoji, several lines, 4 KiB; a PATH-like value) is set once; each target's own Python prints the sha256 of every
 value it sees, and that is compared with the sha256 of what was set. Results: tools/device-smoke/results/xplat-env-<stamp>.json.
 """
+from results_dir import results_dir
 import base64
 import hashlib
 import json
@@ -167,7 +168,7 @@ def main():
         for dev in devices.values():
             dev.pb('env', 'hook', '--uninstall', timeout=120)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-env-%s.json' % stamp)
+    out = results_dir(__file__) / ('xplat-env-%s.json' % stamp)
     out.write_text(json.dumps({'check': 'xplat-env', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))
