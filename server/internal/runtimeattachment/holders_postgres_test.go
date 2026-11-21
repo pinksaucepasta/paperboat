@@ -24,12 +24,13 @@ func (f *agentFixture) manage(t *testing.T, nodes ...string) {
 	f.exec(t, `INSERT INTO operator_regions(id,display_name,enabled) VALUES($1,'Holders test',true) ON CONFLICT DO NOTHING`, region)
 	t.Cleanup(func() {
 		for _, n := range nodes {
-			_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM managed_node_authority WHERE node_id=$1`, n)
+			_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM paperboat.selfhost_installations WHERE node_id=$1`, n)
 		}
 		_, _ = f.database.SQL().ExecContext(f.ctx, `DELETE FROM operator_regions WHERE id=$1`, region)
 	})
 	for _, n := range nodes {
-		f.exec(t, `INSERT INTO managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,sha256(convert_to($1::text,'UTF8')),'encrypted','{}'::jsonb)`, n, region)
+		f.exec(t, `UPDATE paperboat.control_tunnel_nodes SET region=$2 WHERE id=$1`, n, region)
+		f.exec(t, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),sha256(convert_to($1::text,'UTF8')),'encrypted','managed fixture','tunnel','global','global',$1,true)`, n)
 	}
 }
 

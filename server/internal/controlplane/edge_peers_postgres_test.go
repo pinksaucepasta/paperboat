@@ -26,7 +26,7 @@ func newMeshFixture(t *testing.T, name string) *meshFixture {
 	f := &meshFixture{t: t, store: store, prefix: "zz_" + name + "_" + x + "_", region: name + "_" + x}
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.managed_node_authority WHERE node_id LIKE $1`, f.prefix+"%")
+		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.selfhost_installations WHERE node_id LIKE $1`, f.prefix+"%")
 		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE $1`, f.prefix+"%")
 		_, _ = store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_regions WHERE id LIKE $1`, f.region+"%")
 	})
@@ -61,7 +61,11 @@ VALUES($1,'default','1.0',$2,$3,$3='ready',$4,$11,$1,ARRAY[$5]::text[],ARRAY['`+
 		id, "epoch_"+suffix, state, now.Add(-heartbeatAge), role, now.Add(time.Hour), suffix+".node.example.test", "carrier-"+suffix+".node.example.test", pin(id), sha256Bytes(id), nodeRegion)
 	if managed {
 		h := sha256.Sum256([]byte("runtime:" + id))
-		f.exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, id, region, h[:])
+		capability := "tunnel"
+		if role == "relay" {
+			capability = "relay"
+		}
+		f.exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,decode(md5($1)||md5($1),'hex'),$2,'encrypted','managed fixture',$3,'global','global',$1,true)`, id, h[:], capability)
 	}
 	// A managed relay reports its serving certificate pin in its observation (the mesh reads it there).
 	if role == "relay" && managed {
@@ -89,7 +93,7 @@ func TestPeersListsManagedReadyAndDrainingEdgesOnly(t *testing.T) {
 	ready := f.node("b", "edge", "ready", true, f.region, 5*time.Second, "public_ingress_ipv4='192.0.2.10', public_ingress_verified_at=now()")
 	draining := f.node("c", "edge", "draining", true, f.region, 0, "public_https_port=8443, ready=false")
 	f.node("retired", "edge", "ready", true, f.region, 0, "")
-	f.exec(`UPDATE paperboat.managed_node_authority SET retired_at=now() WHERE node_id=$1`, f.prefix+"retired")
+	f.exec(`UPDATE paperboat.control_tunnel_nodes SET state='retired' WHERE id=$1`, f.prefix+"retired")
 	f.node("stale", "edge", "ready", true, f.region, 3*time.Minute, "")
 	f.node("relay", "relay", "ready", true, f.region, 0, "")
 	f.node("nopin", "edge", "ready", true, f.region, 0, "carrier_server_spki_sha256=NULL")

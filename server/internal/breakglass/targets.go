@@ -18,7 +18,6 @@ var sealedTargets = []struct{ table, column string }{
 	{"api_token_create_requests", "secret_ciphertext"},
 	{"billing_workspace_operations", "request_ciphertext"},
 	{"billing_workspace_operations", "result_ciphertext"},
-	{"managed_node_authority", "runtime_ciphertext"},
 	{"team_buckets", "secret"},
 	{"control_server_node_acme_cache", "sealed"},
 	{"managed_ssh_user_cas", "private_key_ciphertext"},

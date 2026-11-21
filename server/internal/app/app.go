@@ -505,7 +505,7 @@ func New(opts Options) (*App, error) {
 	trustService.SetSigner(mintKeys)
 	selfhostService.TrustDocuments = trustService.TrustDocuments
 	infrastructureService := operatorinfra.NewService(store, opts.Config.Secrets.EncryptionKey)
-	nodeCredentials := nodeauth.Composite{infrastructureService, selfhostService}
+	nodeCredentials := nodeauth.Composite{selfhostService}
 	var edgeControlHandler http.Handler
 	var edgeControlService *controlplane.EdgeService
 	if opts.Config.Secrets.EdgeControlCredential != "" {

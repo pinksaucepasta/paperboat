@@ -4,7 +4,6 @@ import { enrollNodeCommand } from "@/components/infra/server-nodes"
 import { dateVersion } from "@/components/releases"
 import { ApiError, operatorAction, referencePattern } from "@/lib/api"
 import { sectionsFor } from "@/lib/sections"
-import { generateUsageKeyPair } from "@/lib/use-key-pair"
 
 const realFetch = globalThis.fetch
 afterEach(() => {
@@ -69,18 +68,4 @@ test("only administrators see the release pages", () => {
 test("only administrators see the operators page", () => {
   const has = (role: "admin" | "support" | "billing" | "operations") => sectionsFor(role).some((s) => s.href === "/operators")
   expect([has("admin"), has("support"), has("billing"), has("operations")]).toEqual([true, false, false, false])
-})
-
-test("a generated usage key pair: the public key is 32 bytes and the seed signs for it", async () => {
-  const pair = await generateUsageKeyPair()
-  if (!pair) return // a runtime without Ed25519 in WebCrypto: the panel then asks for a pasted key
-  const publicRaw = Uint8Array.from(atob(pair.publicKey), (c) => c.charCodeAt(0))
-  expect(publicRaw.length).toBe(32)
-  expect(pair.seed).toMatch(/^[A-Za-z0-9_-]{43}$/)
-  const seed = Uint8Array.from(atob(pair.seed.replaceAll("-", "+").replaceAll("_", "/") + "="), (c) => c.charCodeAt(0))
-  const pkcs8 = new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20, ...seed])
-  const priv = await crypto.subtle.importKey("pkcs8", pkcs8, "Ed25519", false, ["sign"])
-  const pub = await crypto.subtle.importKey("raw", publicRaw, "Ed25519", false, ["verify"])
-  const message = new TextEncoder().encode("usage report")
-  expect(await crypto.subtle.verify("Ed25519", pub, await crypto.subtle.sign("Ed25519", priv, message), message)).toBe(true)
 })

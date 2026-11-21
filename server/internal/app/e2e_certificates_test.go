@@ -9,7 +9,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
-	"github.com/pinksaucepasta/paperboat/server/internal/operatorinfra"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -39,7 +38,7 @@ func e2eCertificateRuntime(t *testing.T, database *db.DB, cfg config.Config) *tu
 	c := cfg.Certificates
 	runtime, err := tunnelv1.NewCertificateRuntime(tunnelv1.CertificateRuntimeConfig{
 		Database: database, Issuer: issuer, CAA: caa, Keys: secrets,
-		NodeCredentials:    nodeauth.Composite{operatorinfra.NewService(database, cfg.Secrets.EncryptionKey), selfhost.New(database, cfg.Secrets.EncryptionKey)},
+		NodeCredentials:    nodeauth.Composite{selfhost.New(database, cfg.Secrets.EncryptionKey)},
 		MasterKeyReference: c.MasterKeyReference, DistributionCredential: []byte(cfg.Secrets.EdgeControlCredential),
 		IssuerName: c.Issuer, OwnerID: c.OwnerID, RenewBefore: c.RenewBefore, LockTTL: c.LockTTL,
 		DistributionTimeout: c.DistributionTimeout, ExpiryAlertWindow: c.ExpiryAlertWindow, MaxCertificateLifetime: c.MaxCertificateLifetime,

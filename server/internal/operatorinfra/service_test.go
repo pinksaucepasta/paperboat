@@ -1,7 +1,6 @@
 package operatorinfra
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -26,9 +25,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
+	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
-func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
+func TestOperatorInfrastructureRegionFence(t *testing.T) {
 	store := infraTestDB(t)
 	ctx := context.Background()
 	x := fmt.Sprint(time.Now().UnixNano())
@@ -36,23 +36,17 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, admin); err != nil {
 		t.Fatal(err)
 	}
-	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
+	key := "operator-infrastructure-test-key-32-bytes"
+	s := NewService(store, key)
 	region, err := s.MutateRegion(ctx, admin, "region-create-"+x, RegionMutation{Action: "create", ID: "region_" + x, DisplayName: "Test region", Reason: "case:test"})
 	if err != nil || !region.Enabled || region.Revision != 1 {
 		t.Fatalf("region=%#v err=%v", region, err)
 	}
-	nodeInput := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)}
-	enrolled, err := s.MutateNode(ctx, admin, "node-enroll-"+x, nodeInput)
-	if err != nil || enrolled.RuntimeCredential == "" || enrolled.Node.Ready || enrolled.Node.Revision != 1 {
-		t.Fatalf("enroll=%#v err=%v", enrolled, err)
-	}
-	replay, err := s.MutateNode(ctx, admin, "node-enroll-"+x, nodeInput)
-	if err != nil || replay.RuntimeCredential != enrolled.RuntimeCredential || replay.Node.ID != enrolled.Node.ID {
-		t.Fatalf("replay=%#v err=%v", replay, err)
-	}
-	if node, err := s.RuntimeNode(ctx, enrolled.RuntimeCredential); err != nil || node != nodeInput.NodeID {
-		t.Fatalf("runtime node=%q err=%v", node, err)
-	}
+	nodeInput := struct {
+		NodeID, EdgePool, EndpointHost    string
+		EndpointTCPPort, EndpointQUICPort int32
+	}{"managed_" + x, "managed:" + region.ID, "edge.example.test", 24443, 24444}
+	cred := addManagedNode(t, store, key, nodeInput.NodeID, region.ID, nodeInput.EdgePool, "zone-a", nodeInput.EndpointHost, []string{"edge"}, []string{"http3"}, 8)
 	now := time.Now().UTC()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -72,12 +66,12 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	chain := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert}))
 	registration := dbsqlc.RegisterControlTunnelNodeParams{ID: nodeInput.NodeID, EdgePool: nodeInput.EdgePool, ProtocolVersion: "1.0", ProcessEpoch: "managed-runtime", EndpointHost: sql.NullString{String: nodeInput.EndpointHost, Valid: true}, EndpointTcpPort: sql.NullInt32{Int32: nodeInput.EndpointTCPPort, Valid: true}, EndpointQuicPort: sql.NullInt32{Int32: nodeInput.EndpointQUICPort, Valid: true}, CarrierEndpointHost: sql.NullString{String: nodeInput.EndpointHost, Valid: true}, CarrierEndpointTcpPort: sql.NullInt32{Int32: nodeInput.EndpointTCPPort, Valid: true}, CarrierEndpointQuicPort: sql.NullInt32{Int32: nodeInput.EndpointQUICPort, Valid: true}, CarrierServerSpkiSha256: sql.NullString{String: pin, Valid: true}, CarrierServerCertificateChainPem: sql.NullString{String: chain, Valid: true}, Capacity: []byte(`{"connections":8}`), Now: sql.NullTime{Time: now, Valid: true}}
 	edge := controlplane.NewEdgeService(store, strings.Repeat("fleet-test", 4))
-	edge.SetNodeCredentials(nodeauth.Composite{s})
+	edge.SetNodeCredentials(nodeauth.Composite{selfhost.New(store, key)})
 	runtimeHandler := edge.Handler()
 	endpoint := map[string]any{"host": nodeInput.EndpointHost, "tcp_port": nodeInput.EndpointTCPPort, "quic_port": nodeInput.EndpointQUICPort}
 	body, _ := json.Marshal(map[string]any{"edge_node_id": nodeInput.NodeID, "edge_pool": nodeInput.EdgePool, "protocol": "1.0", "process_epoch": registration.ProcessEpoch, "capacity": 8, "connector_endpoint": endpoint, "carrier_endpoint": endpoint, "carrier_server_spki_sha256": pin, "carrier_server_certificate_chain_pem": chain})
 	runtimeRequest := httptest.NewRequest("POST", "/v1/nodes/register", strings.NewReader(string(body)))
-	runtimeRequest.Header.Set("Authorization", "Bearer "+enrolled.RuntimeCredential)
+	runtimeRequest.Header.Set("Authorization", "Bearer "+cred)
 	runtimeRequest.Header.Set("Content-Type", "application/json")
 	runtimeResponse := httptest.NewRecorder()
 	runtimeHandler.ServeHTTP(runtimeResponse, runtimeRequest)
@@ -93,22 +87,6 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	if _, err = store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: nodeInput.NodeID, ProcessEpoch: registration.ProcessEpoch, Ready: true, Observation: []byte(`{}`), Now: sql.NullTime{Time: now, Valid: true}}); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
-	rotate := NodeMutation{Action: "rotate", NodeID: nodeInput.NodeID, Reason: "case:test", Revision: enrolled.Node.Revision}
-	rotated, err := s.MutateNode(ctx, admin, "node-rotate-"+x, rotate)
-	if err != nil || rotated.RuntimeCredential == "" || rotated.RuntimeCredential == enrolled.RuntimeCredential {
-		t.Fatalf("rotate=%#v err=%v", rotated, err)
-	}
-	if _, err = s.RuntimeNode(ctx, enrolled.RuntimeCredential); !errors.Is(err, nodeauth.ErrNotFound) {
-		t.Fatalf("old credential=%v", err)
-	}
-	rotateReplay, err := s.MutateNode(ctx, admin, "node-rotate-"+x, rotate)
-	if err != nil || rotateReplay.RuntimeCredential != rotated.RuntimeCredential {
-		t.Fatalf("rotate replay=%#v err=%v", rotateReplay, err)
-	}
-	enrollReplay, err := s.MutateNode(ctx, admin, "node-enroll-"+x, nodeInput)
-	if err != nil || enrollReplay.RuntimeCredential != enrolled.RuntimeCredential {
-		t.Fatalf("enroll replay changed=%#v err=%v", enrollReplay, err)
-	}
 	page, err := s.ListNodes(ctx, admin, region.ID, "", 10)
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("nodes=%#v err=%v", page, err)
@@ -116,9 +94,6 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	disabled, err := s.MutateRegion(ctx, admin, "region-disable-"+x, RegionMutation{Action: "disable", ID: region.ID, Reason: "case:test", Revision: region.Revision})
 	if err != nil || disabled.Enabled {
 		t.Fatalf("disable=%#v err=%v", disabled, err)
-	}
-	if _, err = s.RuntimeNode(ctx, rotated.RuntimeCredential); !errors.Is(err, nodeauth.ErrNotFound) {
-		t.Fatalf("disabled credential=%v", err)
 	}
 	if _, err = store.Queries().HeartbeatControlTunnelNode(ctx, dbsqlc.HeartbeatControlTunnelNodeParams{ID: nodeInput.NodeID, ProcessEpoch: registration.ProcessEpoch, Ready: true, Observation: []byte(`{}`), Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("disabled heartbeat accepted: %v", err)
@@ -128,7 +103,7 @@ func TestOperatorInfrastructureEnrollmentReplayAndRegionFence(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, `SELECT state,ready FROM paperboat.control_tunnel_nodes WHERE id=$1`, nodeInput.NodeID).Scan(&state, &ready); err != nil || state != "draining" || ready {
 		t.Fatalf("disabled node=%s/%t err=%v", state, ready, err)
 	}
-	if _, err = s.MutateNode(ctx, admin, "node-resume-"+x, NodeMutation{Action: "resume", NodeID: nodeInput.NodeID, Reason: "case:test", Revision: rotated.Node.Revision}); !errors.Is(err, ErrConflict) {
+	if _, err = s.MutateNode(ctx, admin, "node-resume-"+x, NodeMutation{Action: "resume", NodeID: nodeInput.NodeID, Reason: "case:test", Revision: page.Items[0].Revision}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("disabled resume=%v", err)
 	}
 	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.operator_accounts SET role='support' WHERE id=$1`, admin); err != nil {
@@ -172,11 +147,11 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: make([]byte, 32)}
-	enrolled, err := s.MutateNode(ctx, admin, "enroll-"+x, in)
-	if err != nil {
-		t.Fatal(err)
-	}
+	in := struct {
+		NodeID, EdgePool, EndpointHost string
+		EndpointTCPPort                int32
+	}{"managed_" + x, "managed:" + region.ID, "edge.example.test", 24443}
+	addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", in.NodeID, region.ID, in.EdgePool, "zone-a", in.EndpointHost, []string{"edge"}, []string{"http3"}, 8)
 	site := func() string {
 		var v string
 		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(site,'') FROM paperboat.control_tunnel_nodes WHERE id=$1`, in.NodeID).Scan(&v); err != nil {
@@ -184,8 +159,8 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 		}
 		return v
 	}
-	// Paperboat's own pbh nodes have no managed_node_authority row; the action must not need one.
-	if _, err = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.managed_node_authority WHERE node_id=$1`, in.NodeID); err != nil {
+	// A node of a workspace's own pbh has no global installation; the action must not need one.
+	if _, err = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.selfhost_installations WHERE node_id=$1`, in.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	set := NodeMutation{Action: "site", NodeID: in.NodeID, Reason: "case:test", Site: "Mumbai"}
@@ -208,77 +183,6 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 	if _, err = s.MutateNode(ctx, admin, "site-none-"+x, set); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown node: %v", err)
 	}
-	in.Action, in.Revision, in.Site = "update", enrolled.Node.Revision, "Mumbai"
-	if _, err = s.MutateNode(ctx, admin, "update-site-"+x, in); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("update carrying a site: %v", err)
-	}
-}
-
-// The usage key is write-only: the read model never returns it, so an update that leaves it out keeps the enrolled
-// one, the same key is still accepted, a different key is refused as immutable, and enrolling needs the key.
-func TestOperatorNodeUpdateKeepsStoredUsageKey(t *testing.T) {
-	store := infraTestDB(t)
-	ctx := context.Background()
-	x := fmt.Sprint(time.Now().UnixNano())
-	admin := "infra_admin_" + x
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash,status,role) VALUES($1,$1||'@test.invalid','unused test login','active','admin')`, admin); err != nil {
-		t.Fatal(err)
-	}
-	s := NewService(store, "operator-infrastructure-test-key-32-bytes")
-	region, err := s.MutateRegion(ctx, admin, "region-create-"+x, RegionMutation{Action: "create", ID: "region_" + x, DisplayName: "Test region", Reason: "case:test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := bytes.Repeat([]byte{7}, 32)
-	in := NodeMutation{Action: "enroll", NodeID: "managed_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-a", EndpointHost: "edge.example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: key}
-	noKey := in
-	noKey.UsagePublicKey = nil
-	if _, err = s.MutateNode(ctx, admin, "enroll-nokey-"+x, noKey); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("enrolling an edge without the usage key: %v", err)
-	}
-	enrolled, err := s.MutateNode(ctx, admin, "enroll-"+x, in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored := func() []byte {
-		var raw []byte
-		if err := store.SQL().QueryRowContext(ctx, `SELECT config FROM paperboat.managed_node_authority WHERE node_id=$1`, in.NodeID).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
-		var config nodeConfig
-		if err := json.Unmarshal(raw, &config); err != nil {
-			t.Fatal(err)
-		}
-		return config.UsagePublicKey
-	}
-	update := in
-	update.Action, update.Revision, update.EndpointHost = "update", enrolled.Node.Revision, "edge-2.example.test"
-	update.UsagePublicKey = nil
-	changed, err := s.MutateNode(ctx, admin, "update-nokey-"+x, update)
-	if err != nil || changed.Node.EndpointHost != "edge-2.example.test" || !bytes.Equal(stored(), key) {
-		t.Fatalf("update without the key: %+v err=%v stored=%x", changed.Node, err, stored())
-	}
-	update.Revision, update.EndpointHost, update.UsagePublicKey = changed.Node.Revision, "edge-3.example.test", key
-	changed, err = s.MutateNode(ctx, admin, "update-same-"+x, update)
-	if err != nil || !bytes.Equal(stored(), key) {
-		t.Fatalf("update with the same key: err=%v", err)
-	}
-	// Bad input is a 400 even when the revision is stale.
-	bad := update
-	bad.Revision, bad.EndpointHost, bad.UsagePublicKey = 1, "", nil
-	if _, err = s.MutateNode(ctx, admin, "update-bad-"+x, bad); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("invalid input on a stale revision: %v", err)
-	}
-	update.Revision, update.UsagePublicKey = changed.Node.Revision, bytes.Repeat([]byte{9}, 32)
-	if _, err = s.MutateNode(ctx, admin, "update-other-"+x, update); !errors.Is(err, ErrConflict) || !bytes.Equal(stored(), key) {
-		t.Fatalf("update with a different key: %v", err)
-	}
-	// Everything else in the update still validates against the kept key.
-	update.UsagePublicKey = nil
-	update.Roles, update.Transports, update.CapacityLimit = []string{"edge", "relay"}, []string{"http3", "derp_quic", "derp_wss"}, 8
-	if _, err = s.MutateNode(ctx, admin, "update-roles-"+x, update); err != nil {
-		t.Fatalf("keyless update adding a relay role: %v", err)
-	}
 }
 
 // A node's forwarding counters come from its latest observation: an edge's "forward", a relay's "mesh"; a node that
@@ -298,11 +202,9 @@ func TestOperatorNodeListShowsForwardStats(t *testing.T) {
 	}
 	var ids []string
 	for _, suffix := range []string{"a", "b", "c"} {
-		in := NodeMutation{Action: "enroll", NodeID: "managed_" + suffix + "_" + x, RegionID: region.ID, EdgePool: "managed:" + region.ID, FailureDomain: "zone-" + suffix, EndpointHost: suffix + ".example.test", EndpointTCPPort: 24443, EndpointQUICPort: 24444, Reason: "case:test", Roles: []string{"edge"}, Transports: []string{"http3"}, CapacityLimit: 8, UsagePublicKey: bytes.Repeat([]byte{byte(suffix[0])}, 32)}
-		if _, err = s.MutateNode(ctx, admin, "enroll-"+suffix+"-"+x, in); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, in.NodeID)
+		id := "managed_" + suffix + "_" + x
+		addManagedNode(t, store, "operator-infrastructure-test-key-32-bytes", id, region.ID, "managed:"+region.ID, "zone-"+suffix, suffix+".example.test", []string{"edge"}, []string{"http3"}, 8)
+		ids = append(ids, id)
 	}
 	set := func(id, observation string) {
 		t.Helper()

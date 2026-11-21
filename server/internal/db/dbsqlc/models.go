@@ -1942,12 +1942,12 @@ type ManagedHostname struct {
 
 type ManagedNodeAuthority struct {
 	NodeID            string
-	RegionID          string
+	RegionID          sql.NullString
 	RuntimeHash       []byte
 	RuntimeCiphertext []byte
 	Config            []byte
 	Revision          int64
-	RetiredAt         sql.NullTime
+	RetiredAt         interface{}
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
