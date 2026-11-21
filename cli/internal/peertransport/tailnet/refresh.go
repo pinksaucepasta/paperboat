@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	mrand "math/rand/v2"
 	"net/http"
 	"net/http/httptrace"
 	"strconv"
@@ -396,7 +397,9 @@ func (a *Authority) Run(ctx context.Context, client NetworkAPI, report func(erro
 			// requests while one is pending coalesce into it. A storm then waits for tokens like any renewal.
 			// A failing server keeps its backoff.
 			if failures == 0 && !urgent {
-				wait := max(0, urgentRefreshSpacing-time.Since(lastUrgent))
+				// Every endpoint of an account hears one change at once; a random spread keeps their renewals
+				// (and the server's signing) from arriving as one burst, like NetBird's debounced peer updates.
+				wait := max(0, urgentRefreshSpacing-time.Since(lastUrgent)) + urgentSpread()
 				lastUrgent, urgent = time.Now().Add(wait), true
 				earlier(wait)
 			}
@@ -576,8 +579,18 @@ const unreachedAttempt = 3 * time.Second
 
 // urgentRefreshSpacing spaces the renewals server-announced changes start (on top of the renewal budget). A revoked
 // CLI session must end its running exec and terminal within about 2 s, so a revoke that follows another
-// announcement waits at most this long.
+// announcement waits at most this long plus urgentRefreshSpread.
 const urgentRefreshSpacing = 2 * time.Second
+
+// urgentRefreshSpread bounds the random delay an announced renewal waits so an account's endpoints spread out;
+// with the spacing above a revoke still lands within about 2.5 s.
+const urgentRefreshSpread = 500 * time.Millisecond
+
+func urgentSpreadRandom() time.Duration {
+	return time.Duration(mrand.Int64N(int64(urgentRefreshSpread)))
+}
+
+var urgentSpread = urgentSpreadRandom
 
 // onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
 const onDemandRefreshSpacing = time.Second
