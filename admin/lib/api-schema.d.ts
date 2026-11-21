@@ -33027,10 +33027,20 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    transport: "tcp" | "udp";
+                    transport: "tcp";
                     port: number;
-                    /** @description 16-64 characters for a public TCP tunnel port; empty for a node port. */
                     nonce: string;
+                } | {
+                    /** @enum {string} */
+                    transport: "tcp";
+                    port: number;
+                    nonce?: string;
+                } | {
+                    /** @enum {string} */
+                    transport: "udp";
+                    /** @enum {integer} */
+                    port: 7274;
+                    nonce?: string;
                 };
             };
         };

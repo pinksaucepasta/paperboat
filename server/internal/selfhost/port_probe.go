@@ -22,7 +22,10 @@ import (
 // 16-64 URL-safe character nonce, a node port with one, or any other transport and port.
 var ErrPortProbeInvalid = errors.New("port probe request is invalid")
 
-const portProbeTimeout = 4 * time.Second
+const (
+	portProbeTimeout = 4 * time.Second // one dial
+	portProbeBudget  = 8 * time.Second // resolution, dial and every read and write of one probe
+)
 
 // PortProbe is what the control plane saw when it connected to a node's own public address, for pbh
 // doctor to turn into the missing rule: "refused" and "nonce_mismatch" mean the host answered (a
@@ -41,12 +44,12 @@ type PortProbe struct {
 // so the probe cannot scan anything else.
 func (s *Service) ProbePort(ctx context.Context, credential, transport string, port int, nonce string) (PortProbe, error) {
 	validNonce := len(nonce) >= 16 && len(nonce) <= 64 && strings.Trim(nonce, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") == ""
-	var check func(net.Conn) PortProbe
+	var check func(context.Context, net.Conn) PortProbe
 	switch {
 	case transport == "tcp" && edgeports.PublicTCP(port) && validNonce:
-		check = func(c net.Conn) PortProbe { return echoesNonce(c, nonce) }
+		check = func(ctx context.Context, c net.Conn) PortProbe { return echoesNonce(ctx, c, nonce) }
 	case transport == "tcp" && port >= edgeports.NodeMin && port <= edgeports.NodeMax && nonce == "":
-		check = func(net.Conn) PortProbe { return PortProbe{Reachable: true, Detail: "connected"} }
+		check = func(context.Context, net.Conn) PortProbe { return PortProbe{Reachable: true, Detail: "connected"} }
 	case transport == "udp" && port == edgeports.RelayWSS && nonce == "":
 		check = answersSTUN
 	default:
@@ -69,11 +72,18 @@ AND(i.expires_at IS NULL OR i.expires_at>$2)`, digest(credential), s.now().UTC()
 	if err != nil {
 		return PortProbe{}, err
 	}
-	return probeNodePort(ctx, host, transport, port, check, s.ingressIP, (&net.Dialer{Timeout: portProbeTimeout}).DialContext), nil
+	dial := s.PortProbeDial
+	if dial == nil {
+		dial = (&net.Dialer{Timeout: portProbeTimeout}).DialContext
+	}
+	return probeNodePort(ctx, host, transport, port, check, s.ingressIP, dial), nil
 }
 
-// probeNodePort resolves host once, dials the first allowed address and runs check on the connection.
-func probeNodePort(ctx context.Context, host, transport string, port int, check func(net.Conn) PortProbe, allowed func(netip.Addr) bool, dial func(context.Context, string, string) (net.Conn, error)) PortProbe {
+// probeNodePort resolves host once, dials the first allowed address and runs check on the connection, all
+// within portProbeBudget. Canceling ctx closes the connection, so blocked reads and writes return at once.
+func probeNodePort(ctx context.Context, host, transport string, port int, check func(context.Context, net.Conn) PortProbe, allowed func(netip.Addr) bool, dial func(context.Context, string, string) (net.Conn, error)) PortProbe {
+	ctx, cancel := context.WithTimeout(ctx, portProbeBudget)
+	defer cancel()
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		addresses, err = []netip.Addr{ip}, nil
@@ -85,20 +95,32 @@ func probeNodePort(ctx context.Context, host, transport string, port int, check 
 		if !allowed(ip) {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(ctx, portProbeTimeout)
-		defer cancel()
 		connection, err := dial(ctx, transport, net.JoinHostPort(ip.Unmap().String(), strconv.Itoa(port)))
 		if err != nil {
 			return PortProbe{Detail: classifyDialError(err)}
 		}
 		defer connection.Close()
-		return check(connection)
+		defer context.AfterFunc(ctx, func() { _ = connection.Close() })()
+		result := check(ctx, connection)
+		if !result.Reachable && ctx.Err() != nil {
+			return PortProbe{Detail: "timeout"}
+		}
+		return result
 	}
 	return PortProbe{Detail: "not_public"}
 }
 
-func echoesNonce(connection net.Conn, nonce string) PortProbe {
-	_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+// stepDeadline is now+d, or ctx's deadline when that is sooner.
+func stepDeadline(ctx context.Context, d time.Duration) time.Time {
+	t := time.Now().Add(d)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(t) {
+		return deadline
+	}
+	return t
+}
+
+func echoesNonce(ctx context.Context, connection net.Conn, nonce string) PortProbe {
+	_ = connection.SetDeadline(stepDeadline(ctx, 3*time.Second))
 	got := make([]byte, len(nonce))
 	if n, _ := io.ReadFull(connection, got); n == len(nonce) && string(got) == nonce {
 		return PortProbe{Reachable: true, Detail: "connected"}
@@ -106,21 +128,26 @@ func echoesNonce(connection net.Conn, nonce string) PortProbe {
 	return PortProbe{Detail: "nonce_mismatch"}
 }
 
-// answersSTUN sends an RFC 5389 binding request, at most twice with 2 s each, and counts a binding
-// success with the same transaction id; one read of at most 1 KiB per try. The request layout follows
-// ~/ref/tailscale/net/stun/stun.go (Request), which netcheck uses the same way to probe a DERP's STUN port.
-func answersSTUN(connection net.Conn) PortProbe {
+// stunResponseMax bounds the one datagram read per try; a datagram that fills the buffer is refused as
+// possibly truncated.
+const stunResponseMax = 1024
+
+// answersSTUN sends an RFC 5389 binding request, at most twice with 2 s each (never after ctx ends), and
+// counts only a well-formed binding success that echoes the magic cookie and transaction id. The layout
+// follows ~/ref/tailscale/net/stun/stun.go (Request, ParseResponse), which netcheck uses the same way to
+// probe a DERP's STUN port.
+func answersSTUN(ctx context.Context, connection net.Conn) PortProbe {
 	request := make([]byte, 20)
 	binary.BigEndian.PutUint16(request[0:], 0x0001) // binding request, no attributes
 	binary.BigEndian.PutUint32(request[4:], 0x2112A442)
 	_, _ = rand.Read(request[8:20])
-	response := make([]byte, 1024)
+	response := make([]byte, stunResponseMax+1)
 	detail := "timeout"
-	for try := 0; try < 2; try++ {
+	for try := 0; try < 2 && ctx.Err() == nil; try++ {
+		_ = connection.SetDeadline(stepDeadline(ctx, 2*time.Second))
 		if _, err := connection.Write(request); err != nil {
 			return PortProbe{Detail: classifyDialError(err)}
 		}
-		_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
 		n, err := connection.Read(response)
 		if err != nil {
 			// A closed UDP port answers with ICMP, which the next read reports as refused.
@@ -129,12 +156,22 @@ func answersSTUN(connection net.Conn) PortProbe {
 			}
 			continue
 		}
-		if n >= 20 && binary.BigEndian.Uint16(response) == 0x0101 && bytes.Equal(response[4:20], request[4:20]) {
+		if stunBindingSuccess(response[:n], request) {
 			return PortProbe{Reachable: true, Detail: "connected"}
 		}
 		return PortProbe{Detail: "nonce_mismatch"}
 	}
 	return PortProbe{Detail: detail}
+}
+
+// stunBindingSuccess reports whether packet is exactly one binding success header plus its declared,
+// 4-byte aligned attributes, with the request's magic cookie and transaction id.
+func stunBindingSuccess(packet, request []byte) bool {
+	if len(packet) < 20 || len(packet) > stunResponseMax {
+		return false
+	}
+	length := int(binary.BigEndian.Uint16(packet[2:4]))
+	return binary.BigEndian.Uint16(packet) == 0x0101 && length%4 == 0 && len(packet) == 20+length && bytes.Equal(packet[4:20], request[4:20])
 }
 
 func classifyDialError(err error) string {

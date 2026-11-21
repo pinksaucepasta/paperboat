@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func TestProbeNodePortReportsWhatTheConnectionSaw(t *testing.T) {
 		"cloud firewall":  {fail(context.DeadlineExceeded), PortProbe{Detail: "timeout"}},
 		"other":           {fail(errors.New("boom")), PortProbe{Detail: "error"}},
 	} {
-		check := func(c net.Conn) PortProbe { return echoesNonce(c, nonce) }
+		check := func(ctx context.Context, c net.Conn) PortProbe { return echoesNonce(ctx, c, nonce) }
 		if got := probeNodePort(t.Context(), "203.0.113.7", "tcp", 25000, check, anyAddress, test.dial); got != test.want {
 			t.Errorf("%s: got %+v, want %+v", name, got, test.want)
 		}
@@ -91,72 +92,136 @@ func TestProbeNodePortConnectsToANodePortWithoutANonce(t *testing.T) {
 		_, client := net.Pipe()
 		return client, nil
 	}
-	check := func(net.Conn) PortProbe { return PortProbe{Reachable: true, Detail: "connected"} }
+	check := func(context.Context, net.Conn) PortProbe { return PortProbe{Reachable: true, Detail: "connected"} }
 	got := probeNodePort(t.Context(), "203.0.113.7", "tcp", 7272, check, anyAddress, dial)
 	if got != (PortProbe{Reachable: true, Detail: "connected"}) || network != "tcp" || address != "203.0.113.7:7272" {
 		t.Fatalf("got %+v dialing %s %s", got, network, address)
 	}
 }
 
-func TestAnswersSTUN(t *testing.T) {
-	listen := func(t *testing.T, answer func([]byte) []byte) net.Conn {
-		server, err := net.ListenPacket("udp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = server.Close() })
-		go func() {
-			buf := make([]byte, 1500)
-			for {
-				n, from, err := server.ReadFrom(buf)
-				if err != nil {
-					return
-				}
-				if reply := answer(buf[:n]); reply != nil {
-					_, _ = server.WriteTo(reply, from)
-				}
-			}
-		}()
-		client, err := net.Dial("udp", server.LocalAddr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = client.Close() })
-		return client
-	}
-	success := func(request []byte) []byte {
-		reply := append([]byte(nil), request[:20]...)
-		binary.BigEndian.PutUint16(reply, 0x0101)
-		return reply
-	}
-	if got := answersSTUN(listen(t, success)); got != (PortProbe{Reachable: true, Detail: "connected"}) {
-		t.Errorf("STUN server: got %+v", got)
-	}
-	dropFirst := 0
-	if got := answersSTUN(listen(t, func(r []byte) []byte {
-		if dropFirst++; dropFirst == 1 {
-			return nil
-		}
-		return success(r)
-	})); !got.Reachable {
-		t.Errorf("retry after one lost packet: got %+v", got)
-	}
-	wrongID := func(r []byte) []byte { reply := success(r); reply[19] ^= 1; return reply }
-	if got := answersSTUN(listen(t, wrongID)); got != (PortProbe{Detail: "nonce_mismatch"}) {
-		t.Errorf("wrong transaction id: got %+v", got)
-	}
-	closed, _ := net.ListenPacket("udp", "127.0.0.1:0")
-	_ = closed.Close()
-	client, err := net.Dial("udp", closed.LocalAddr().String())
+// stunServer answers each datagram with answer(request), or not at all when it returns nil, and counts requests.
+func stunServer(t *testing.T, answer func([]byte) []byte) (net.Conn, *atomic.Int32) {
+	server, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
-	if got := answersSTUN(client); got != (PortProbe{Detail: "refused"}) {
+	t.Cleanup(func() { _ = server.Close() })
+	var requests atomic.Int32
+	go func() {
+		buf := make([]byte, 1500)
+		for {
+			n, from, err := server.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			requests.Add(1)
+			if reply := answer(append([]byte(nil), buf[:n]...)); reply != nil {
+				_, _ = server.WriteTo(reply, from)
+			}
+		}
+	}()
+	client, err := net.Dial("udp", server.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client, &requests
+}
+
+// stunSuccess is a real binding success: header plus one XOR-MAPPED-ADDRESS attribute (IPv4 203.0.113.9:4242),
+// as ~/ref/tailscale/net/stun/stun.go Response builds it.
+func stunSuccess(request []byte) []byte {
+	reply := append([]byte(nil), request[:20]...)
+	binary.BigEndian.PutUint16(reply[0:], 0x0101)
+	binary.BigEndian.PutUint16(reply[2:], 12)
+	attribute := []byte{0x00, 0x20, 0x00, 0x08, 0x00, 0x01, 0, 0, 203, 0, 113, 9}
+	binary.BigEndian.PutUint16(attribute[6:], 4242^0x2112)
+	for i, b := range []byte{0x21, 0x12, 0xA4, 0x42} {
+		attribute[8+i] ^= b
+	}
+	return append(reply, attribute...)
+}
+
+func TestAnswersSTUN(t *testing.T) {
+	connected := PortProbe{Reachable: true, Detail: "connected"}
+	mismatch := PortProbe{Detail: "nonce_mismatch"}
+	for name, test := range map[string]struct {
+		answer func([]byte) []byte
+		want   PortProbe
+	}{
+		"binding success":      {stunSuccess, connected},
+		"header only":          {func(r []byte) []byte { reply := stunSuccess(r)[:20]; reply[2], reply[3] = 0, 0; return reply }, connected},
+		"wrong transaction id": {func(r []byte) []byte { reply := stunSuccess(r); reply[19] ^= 1; return reply }, mismatch},
+		"wrong cookie":         {func(r []byte) []byte { reply := stunSuccess(r); reply[4] ^= 1; return reply }, mismatch},
+		"binding error":        {func(r []byte) []byte { reply := stunSuccess(r); reply[1] = 0x11; return reply }, mismatch},
+		"declared longer":      {func(r []byte) []byte { reply := stunSuccess(r); reply[3] = 16; return reply }, mismatch},
+		"declared unaligned":   {func(r []byte) []byte { reply := stunSuccess(r); reply[3] = 11; return reply[:31] }, mismatch},
+		"trailing bytes":       {func(r []byte) []byte { return append(stunSuccess(r), 0, 0, 0, 0) }, mismatch},
+		"short":                {func(r []byte) []byte { return stunSuccess(r)[:19] }, mismatch},
+		"oversized": {func(r []byte) []byte {
+			reply := append(stunSuccess(r), make([]byte, 1100)...)
+			binary.BigEndian.PutUint16(reply[2:], uint16(len(reply)-20))
+			return reply
+		}, mismatch},
+		"fills the buffer exactly": {func(r []byte) []byte {
+			reply := append(stunSuccess(r), make([]byte, stunResponseMax+1-32)...)
+			binary.BigEndian.PutUint16(reply[2:], uint16(len(reply)-20))
+			return reply
+		}, mismatch},
+	} {
+		client, _ := stunServer(t, test.answer)
+		if got := answersSTUN(t.Context(), client); got != test.want {
+			t.Errorf("%s: got %+v, want %+v", name, got, test.want)
+		}
+	}
+	dropFirst := 0
+	client, requests := stunServer(t, func(r []byte) []byte {
+		if dropFirst++; dropFirst == 1 {
+			return nil
+		}
+		return stunSuccess(r)
+	})
+	if got := answersSTUN(t.Context(), client); got != connected || requests.Load() != 2 {
+		t.Errorf("retry after one lost packet: got %+v after %d requests", got, requests.Load())
+	}
+	closed, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	_ = closed.Close()
+	refused, err := net.Dial("udp", closed.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer refused.Close()
+	if got := answersSTUN(t.Context(), refused); got != (PortProbe{Detail: "refused"}) {
 		t.Errorf("closed port: got %+v", got)
 	}
+	silent, requests := stunServer(t, func([]byte) []byte { return nil })
 	start := time.Now()
-	if got := answersSTUN(listen(t, func([]byte) []byte { return nil })); got != (PortProbe{Detail: "timeout"}) || time.Since(start) > 5*time.Second {
-		t.Errorf("silent port: got %+v after %v", got, time.Since(start))
+	if got := answersSTUN(t.Context(), silent); got != (PortProbe{Detail: "timeout"}) || time.Since(start) > 5*time.Second || requests.Load() != 2 {
+		t.Errorf("silent port: got %+v after %v and %d requests", got, time.Since(start), requests.Load())
+	}
+}
+
+func TestProbeNodePortReturnsPromptlyWhenCanceled(t *testing.T) {
+	silent, requests := stunServer(t, func([]byte) []byte { return nil })
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	start := time.Now()
+	got := probeNodePort(ctx, "203.0.113.7", "udp", 7274, answersSTUN, anyAddress, func(context.Context, string, string) (net.Conn, error) { return silent, nil })
+	if got != (PortProbe{Detail: "timeout"}) || time.Since(start) > time.Second {
+		t.Fatalf("got %+v after %v", got, time.Since(start))
+	}
+	time.Sleep(50 * time.Millisecond)
+	if requests.Load() != 1 {
+		t.Fatalf("sent %d requests; a canceled probe must not send another", requests.Load())
+	}
+	done, stop := context.WithCancel(t.Context())
+	stop()
+	dialed := false
+	got = probeNodePort(done, "203.0.113.7", "tcp", 7272, func(context.Context, net.Conn) PortProbe { return PortProbe{Reachable: true} }, anyAddress, func(ctx context.Context, _, _ string) (net.Conn, error) {
+		dialed = true
+		return nil, ctx.Err()
+	})
+	if got.Reachable || !dialed {
+		t.Fatalf("canceled before dial: got %+v", got)
 	}
 }
