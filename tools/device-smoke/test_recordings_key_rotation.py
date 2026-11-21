@@ -19,6 +19,9 @@ class Cli:
         self.made = []
 
     def command_result(self, binary, *args, **_):
+        if binary == 'console-record':
+            self.calls.append(('console-start',) + args)
+            return subprocess.CompletedProcess(args, 0, '', '')
         if binary == 'member-pb':
             self.calls.append(('member',) + args[:2])
             gone = self.reset_done and args[2] in self.before_reset and not self.reset_opens_old
@@ -170,3 +173,62 @@ class RotationTest(unittest.TestCase):
             return original(binary, *args, **kw)
         cli.command_result = skipping
         self.assertIn('replace made generation 3, not 2', self.failed(run(cli))['replace'])
+
+
+class ConsoleStart(unittest.TestCase):
+    """Recordings start only from the console: `start` goes to --console-start-cmd, never `pb recordings start`."""
+
+    def call(self, console_cmd, action='start'):
+        seen = []
+        real = mock.Mock(return_value={'recording': None})
+
+        def command_result(binary, *args, **_):
+            seen.append((binary,) + args)
+            return subprocess.CompletedProcess(args, 7 if 'bad' in binary else 0, '', '')
+        with mock.patch.object(krot.rec, 'recording_control', real), mock.patch.object(krot, 'command_result', command_result):
+            original, control = krot.console_start(TEAM, console_cmd)
+            self.assertIs(real, original)
+            try:
+                return control(action, 'sess_1'), seen, real
+            except RuntimeError as error:
+                return error, seen, real
+
+    def test_start_runs_the_console_command_for_the_session_and_not_the_cli(self):
+        result, seen, real = self.call('console-record --headless')
+        self.assertEqual({'recording': True, 'session_id': 'sess_1'}, result)
+        self.assertEqual([('console-record', '--headless', '--team', TEAM, '--session', 'sess_1')], seen)
+        real.assert_not_called()
+
+    def test_stop_is_unchanged(self):
+        result, seen, real = self.call('console-record', 'stop')
+        self.assertEqual({'recording': None}, result)
+        real.assert_called_once_with('stop', 'sess_1')
+        self.assertEqual([], seen)
+
+    def test_an_unset_command_and_a_failing_command_fail_loudly(self):
+        self.assertIn('SMOKE_RECKEY_CONSOLE_START_CMD is not set', str(self.call('')[0]))
+        self.assertIn('the console could not start the recording', str(self.call('bad-console')[0]))
+
+    def test_run_installs_the_console_start_for_its_recordings_and_restores_it(self):
+        before = krot.rec.recording_control
+        cli = Cli()
+        seen = []
+        original = cli.phase_manual
+
+        def phase_manual(*args):
+            seen.append(krot.rec.recording_control('start', 'sess_9'))
+            return original(*args)
+        cli.phase_manual = phase_manual
+        with mock.patch.object(cli, 'command_result', wraps=cli.command_result) as spy:
+            patches = [mock.patch.object(krot, 'command_result', spy), mock.patch.object(krot.rec, 'phase_manual', phase_manual),
+                       mock.patch.object(krot.rec, 'listing', cli.listing), mock.patch.object(krot.rec, 'export_text', lambda r, d: 'text'),
+                       mock.patch.object(krot.rec, 'played_text', lambda r: 'text')]
+            for patch in patches:
+                patch.start()
+            try:
+                krot.run(TEAM, TARGET, pathlib.Path('/nonexistent'), member_cmd='member-pb', console_cmd='console-record')
+            finally:
+                mock.patch.stopall()
+        self.assertEqual({'recording': True, 'session_id': 'sess_9'}, seen[0])
+        self.assertIs(before, krot.rec.recording_control)
+        self.assertIn(('console-start', '--team', TEAM, '--session', 'sess_9'), cli.calls)

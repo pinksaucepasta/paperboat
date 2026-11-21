@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """C307, C308, F25-11, F25-12: replacing and resetting the team recording key, end to end on a team machine.
 
-Usage: recordings_key_rotation.py TARGET --team TEAM [--vault-password-file FILE] --member-cmd 'PB-OF-A-TEAM-MEMBER'
+Usage: recordings_key_rotation.py TARGET --team TEAM [--vault-password-file FILE] --member-cmd 'PB-OF-A-TEAM-MEMBER' --console-start-cmd 'CONSOLE-RECORD-START'
 TARGET is a machine of TEAM that records. The signed-in account must be the team OWNER (reset is owner-only; replace
 needs a copy of the current key) with an unlocked vault (--vault-password-file unlocks it first). Use a disposable team:
 a key chain only grows, so the team ends two generations higher. The team must have NO recording key beforehand: its
 first recording creates generation 1 (asserted by key_created_by_first_recording). --member-cmd is a command that runs the
 pb of a plain team member who can replay (arguments are appended, e.g. 'ssh member-host .local/bin/pb'); the member's vault
 must already be unlocked. Without it the member steps FAIL (never skip): the key must open for more than its owner.
+Recordings start only from the console (the web terminal's record control: an E2EE record-start over the terminal
+connection, console/lib/terminal/use-terminal-connection.ts controlRecording; there is no server HTTP call), so the
+start is --console-start-cmd: a command run as `CMD --team TEAM --session SESSION_ID` that must click Start recording
+for that attached session in the live console and exit 0 once the recording started. Unset, the first start FAILS.
 Promises asserted (CHECKLIST F25-11, F25-12; cli/cmd/pb/recordings_command.go):
   replace: generation +1 with a copy for every viewer; older recordings STAY readable (sealed previous link); new ones work.
   reset:   generation +1 again, reported older_recordings_readable=false; recordings made before can be opened by no
@@ -56,6 +60,22 @@ def key_generation(team):
         raise RuntimeError('cannot read recording key generation: pb recordings key status did not answer JSON') from None
 
 
+def console_start(team, console_cmd):
+    """rec.recording_control with `start` sent through the console, the only place a recording starts; stop is unchanged."""
+    real = rec.recording_control
+
+    def control(action, session_id):
+        if action != 'start':
+            return real(action, session_id)
+        if not console_cmd:
+            raise RuntimeError('SMOKE_RECKEY_CONSOLE_START_CMD is not set: recordings start only from the console')
+        argv = shlex.split(console_cmd)
+        if command_result(argv[0], *argv[1:], '--team', team, '--session', session_id, timeout=180).returncode:
+            raise RuntimeError('the console could not start the recording')
+        return {'recording': True, 'session_id': session_id}
+    return real, control
+
+
 def member_pb(member_cmd, *args):
     if not member_cmd:
         raise RuntimeError('SMOKE_RECKEY_MEMBER_CMD is not set: a team member must replay the recordings too')
@@ -89,7 +109,15 @@ def refused(recording_id, directory):
     return codes
 
 
-def run(team, target, directory, steps=None, member_cmd=None):
+def run(team, target, directory, steps=None, member_cmd=None, console_cmd=None):
+    real_control, rec.recording_control = console_start(team, console_cmd)
+    try:
+        return _run(team, target, directory, steps, member_cmd)
+    finally:
+        rec.recording_control = real_control
+
+
+def _run(team, target, directory, steps, member_cmd):
     steps = [] if steps is None else steps
     state = {}
 
@@ -159,12 +187,13 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--team', required=True)
     parser.add_argument('--vault-password-file')
+    parser.add_argument('--console-start-cmd', default='', help='starts a recording in the console: run with --team T --session SESSION_ID')
     parser.add_argument('--member-cmd', default='', help="runs a team member's pb; arguments are appended")
     args = parser.parse_args()
     os.environ['PB_SMOKE_WORKSPACE'] = args.team
     rec.unlock(args.vault_password_file)
     with winhost.workdir('paperboat-keyrot-') as directory:  # removed on every exit path
-        receipt = run(args.team, args.target, directory, member_cmd=args.member_cmd)
+        receipt = run(args.team, args.target, directory, member_cmd=args.member_cmd, console_cmd=args.console_start_cmd)
     print(json.dumps(receipt), flush=True)
     sys.exit(0 if receipt['status'] == 'PASS' else 1)
 

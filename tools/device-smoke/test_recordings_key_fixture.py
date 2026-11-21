@@ -141,6 +141,9 @@ class SmokeRunner(unittest.TestCase):
         self.assertNotIn('--member-cmd', self.ssh_log)
         self.run_function(dict(self.ENV, SMOKE_RECKEY_MEMBER_CMD='ssh member-host .local/bin/pb'), '{"name": "n", "machine_id": "machine_1"}', 0, receipt, 0)
         self.assertIn("--member-cmd ssh\\ member-host\\ .local/bin/pb", self.ssh_log)
+        self.assertNotIn('--console-start-cmd', self.ssh_log)
+        self.run_function(dict(self.ENV, SMOKE_RECKEY_CONSOLE_START_CMD='node start.mjs'), '{"name": "n", "machine_id": "machine_1"}', 0, receipt, 0)
+        self.assertIn('--console-start-cmd node\\ start.mjs', self.ssh_log)
 
 
 # A host-in-a-directory: ssh runs the remote command locally, with fake sudo/docker (logged) and a fake owner pb.
