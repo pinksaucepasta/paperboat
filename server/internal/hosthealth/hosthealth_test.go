@@ -89,4 +89,26 @@ func TestLatestReportReplacesThePreviousOneAndBadReportsAreRefusedPostgres(t *te
 	if err != nil || len(entries) != 3 || entries[2].Source != "hosts" || string(entries[2].Payload) != `{"hosts": 2}` {
 		t.Fatalf("snapshot = %+v, %v; want deploy, the current edge certificate row and the second hosts report", entries, err)
 	}
+	// Hostnames are case-insensitive: an edge row is stored lowercase, once, whatever case the report used.
+	for _, source := range []string{"edge-certificate:Example.COM", "edge-certificate:example.com"} {
+		if err := s.Ingest(ctx, Report{Source: source, Payload: json.RawMessage(`{"ok":true}`)}); err != nil {
+			t.Fatal(err)
+		}
+		var sources []string
+		rows, err := store.Pool().Query(ctx, `SELECT source FROM host_health_reports WHERE lower(source) = 'edge-certificate:example.com'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				t.Fatal(err)
+			}
+			sources = append(sources, v)
+		}
+		rows.Close()
+		if len(sources) != 1 || sources[0] != "edge-certificate:example.com" {
+			t.Fatalf("after %s: rows %v, want only the lowercase one", source, sources)
+		}
+	}
 }
