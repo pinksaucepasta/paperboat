@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useApiQuery, useMachines } from "@/lib/api"
 import { hostOf, originLabel, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
 import { CopyRow } from "@/components/copy-button"
+import { BindingDns } from "@/components/domains/dns-records"
 import { Detail } from "@/components/machine-overview"
 import { CrumbLink, Crumb, PageHeader } from "@/components/page-header"
 import { Section, SectionHeading } from "@/components/section"
@@ -137,7 +138,10 @@ function Loaded({ preview }: { preview: Preview }) {
               className="flex min-h-12 items-center justify-between gap-4 border-b border-divider text-sm"
             >
               <span className="min-w-0 truncate font-mono text-code">{domain.hostname}</span>
-              <span className="shrink-0 text-muted-foreground">{domainStates[domain.state] ?? "Setting up"}</span>
+              <span className="flex shrink-0 items-center gap-3 text-muted-foreground">
+                <BindingDns hostname={domain.hostname} />
+                {domainStates[domain.state] ?? "Setting up"}
+              </span>
             </div>
           ))
         ) : (

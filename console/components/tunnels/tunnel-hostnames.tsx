@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
+import { BindingDns } from "@/components/domains/dns-records"
 import { HostnameInput } from "@/components/domains/hostname-input"
 import { Section } from "@/components/section"
 import { Badge } from "@/components/ui/badge"
@@ -206,6 +207,7 @@ function HostnameRow({
               {originLabel(route.origin)}
             </span>
             <span className="flex items-center justify-end gap-3">
+              {domain && <BindingDns hostname={domain.hostname} />}
               {state && state.tone !== "ok" && (
                 <span
                   className={cn(

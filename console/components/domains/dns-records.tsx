@@ -1,9 +1,11 @@
 "use client"
 
 import { CheckCircleIcon, CircleNotchIcon, WarningCircleIcon, WarningIcon } from "@phosphor-icons/react"
+import Link from "next/link"
 import { CommandBlock } from "@/components/add-machine-dialog"
+import { useApiQuery, useWorkspace } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { WorkspaceDomain } from "@/lib/workspace-domains"
+import { workspaceDomainsQuery, type WorkspaceDomain } from "@/lib/workspace-domains"
 
 type DomainRecord = WorkspaceDomain["records"][number]
 type RecordStatus = DomainRecord["record_status"]
@@ -65,6 +67,35 @@ export function DnsHealth({ health }: { health: WorkspaceDomain["dns_health"] })
     <span data-dns-health={health}>
       <Pill status={status[health]} label={health === "healthy" ? "Healthy" : undefined} />
     </span>
+  )
+}
+
+/**
+ * The DNS badge of a tunnel's or preview's own domain: its entry in the Domains list (the same name, or the entry it sits
+ * under: the longest one), so the status is the list's. Without an entry it says to add the domain there.
+ */
+export function BindingDns({ hostname }: { hostname: string }) {
+  const workspace = useWorkspace()
+  const list = useApiQuery({ ...workspaceDomainsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
+  if (!list.data) return null
+  const name = hostname.replace(/^\*\./, "")
+  const entry = list.data
+    .filter((domain) => name === domain.hostname || name.endsWith(`.${domain.hostname}`))
+    .sort((a, b) => b.hostname.length - a.hostname.length)[0]
+  return (
+    <Link
+      href="/network#domains"
+      aria-label={entry ? `DNS records of ${entry.hostname}` : `Add ${name} on the Network page`}
+      className="rounded-full text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+    >
+      {entry ? (
+        <DnsHealth health={entry.dns_health} />
+      ) : (
+        <span data-dns-not-added className="text-muted-foreground underline-offset-2 hover:underline">
+          Not added — add it on the Network page
+        </span>
+      )}
+    </Link>
   )
 }
 
