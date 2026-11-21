@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -35,6 +36,17 @@ func TestEndpointRemovalsAreLoggedWithReason(t *testing.T) {
 		!strings.Contains(lines[0], "msg=endpoint_route_removed route_id=preview_a endpoint_id=preview_a reason=server_removed") ||
 		!strings.Contains(lines[1], "msg=endpoint_route_removed route_id=preview_b endpoint_id=preview_b reason=absent_from_full_set") {
 		t.Fatalf("removal log = %q", out.String())
+	}
+	// A mass removal logs ten routes with ids and one summary.
+	out.Reset()
+	many := make([]runtimewire.Admission, 25)
+	for i := range many {
+		many[i] = admission(fmt.Sprintf("preview_%02d", i))
+	}
+	logEndpointRemovals(many, nil, control.EndpointUpdate{Complete: true})
+	lines = strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != removalLogDetail+1 || !strings.Contains(lines[removalLogDetail], "removed_count=25 reasons=map[absent_from_full_set:25]") {
+		t.Fatalf("mass removal log = %q", out.String())
 	}
 	if detachReason(true) != "admission_changed" || detachReason(false) != "not_expected" {
 		t.Fatal("detach reasons")

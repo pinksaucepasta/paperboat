@@ -909,7 +909,22 @@ func logRemovals(ctx context.Context, q endpoints.Querier, edge previewattachmen
 		slog.Warn("endpoint_removal_reason_failed", "edge_node_id", edge.NodeID, "error", err.Error())
 		return
 	}
-	for _, route := range removed {
-		slog.Info("endpoint_route_removed", "edge_node_id", edge.NodeID, "route_id", route, "reason", reasons[route])
+	// The first removalLogDetail with ids, then one summary: an edge restart can remove thousands.
+	counts := map[string]int{}
+	for i, route := range removed {
+		reason := reasons[route]
+		if reason == "" {
+			reason = "assignment_gone" // the row was deleted: nothing left to evaluate
+		}
+		counts[reason]++
+		if i < removalLogDetail {
+			slog.Info("endpoint_route_removed", "edge_node_id", edge.NodeID, "route_id", route, "reason", reason)
+		}
+	}
+	if len(removed) > removalLogDetail {
+		slog.Info("endpoint_route_removed", "edge_node_id", edge.NodeID, "removed_count", len(removed), "reasons", counts)
 	}
 }
+
+// removalLogDetail is how many removals of one pull are logged with their ids.
+const removalLogDetail = 10

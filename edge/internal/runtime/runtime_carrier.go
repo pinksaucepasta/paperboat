@@ -239,8 +239,8 @@ func (w *RuntimeCarrierWorker) routes() []edgehttp.DataCarrierPreviewRoute {
 	return out
 }
 
-func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute, reason string) {
-	slog.Info("runtime_route_detached", "route_id", r.RouteID, "endpoint_id", r.PreviewID, "reason", reason)
+func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute, log *removalLog, reason string) {
+	log.add(r.RouteID, r.PreviewID, reason)
 	if r.EndpointRoute {
 		_ = w.Endpoints.Detach(r.RouteID, r.Identity, r.Revision)
 		return
@@ -251,8 +251,8 @@ func (w *RuntimeCarrierWorker) detachRoute(r edgehttp.DataCarrierPreviewRoute, r
 	}
 }
 
-func (w *RuntimeCarrierWorker) detachAdmission(a datacarrier.ExpectedAdmission, reason string) {
-	slog.Info("runtime_route_detached", "route_id", a.RouteID, "endpoint_id", a.PreviewID, "reason", reason)
+func (w *RuntimeCarrierWorker) detachAdmission(a datacarrier.ExpectedAdmission, log *removalLog, reason string) {
+	log.add(a.RouteID, a.PreviewID, reason)
 	_ = w.registry(a).DetachAdmission(a)
 	if w.BrowserTerminalHub != nil && !a.EndpointRoute() {
 		w.BrowserTerminalHub.DeactivateRoute(a.RouteID, browserTerminalFence(a))
@@ -474,11 +474,13 @@ func logEndpointRemovals(current, next []runtimewire.Admission, update control.E
 	if update.Complete {
 		reason = "absent_from_full_set"
 	}
+	removed := removalLog{msg: "endpoint_route_removed"}
 	for _, a := range current {
 		if !kept[a.Binding.RouteID] {
-			slog.Info("endpoint_route_removed", "route_id", a.Binding.RouteID, "endpoint_id", a.EndpointID, "reason", reason)
+			removed.add(a.Binding.RouteID, a.EndpointID, reason)
 		}
 	}
+	removed.flush()
 }
 
 func endpointSetEqual(a, b []runtimewire.Admission) bool {
@@ -512,6 +514,8 @@ func (w *RuntimeCarrierWorker) install() error {
 // withdraw detaches routes the expected admissions no longer allow. Credential expiry during an
 // outage never revokes an admitted carrier: only a successful pull changes the set.
 func (w *RuntimeCarrierWorker) withdraw() {
+	detached := removalLog{msg: "runtime_route_detached"}
+	defer detached.flush()
 	allowed := map[string]datacarrier.ExpectedAdmission{}
 	for _, a := range w.Expected.Snapshot() {
 		if a.Admitted {
@@ -526,7 +530,7 @@ func (w *RuntimeCarrierWorker) withdraw() {
 			if w.Expected.Superseded(r.Identity, r.RouteID, time.Now().UTC()) {
 				continue
 			}
-			w.detachRoute(r, detachReason(ok))
+			w.detachRoute(r, &detached, detachReason(ok))
 		}
 	}
 }
@@ -560,9 +564,11 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 	// drainEnd is set while the host's goaway lasts.
 	var drainEnd <-chan time.Time
 	defer func() {
+		detached := removalLog{msg: "runtime_route_detached"}
 		for _, a := range attached {
-			w.detachAdmission(a, "carrier_closed")
+			w.detachAdmission(a, &detached, "carrier_closed")
 		}
+		detached.flush()
 		w.changed()
 	}()
 	for {
@@ -578,6 +584,7 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 			}
 		}
 		changed := false
+		detached := removalLog{msg: "runtime_route_detached"}
 		for key, a := range attached {
 			next, ok := desired[key]
 			if ok {
@@ -593,11 +600,12 @@ func (w *RuntimeCarrierWorker) Handle(ctx context.Context, server *datacarrier.S
 				}
 			}
 			if !ok || !runtimeAdmissionEqual(a, next) {
-				w.detachAdmission(a, detachReason(ok))
+				w.detachAdmission(a, &detached, detachReason(ok))
 				delete(attached, key)
 				changed = true
 			}
 		}
+		detached.flush()
 		for key, a := range desired {
 			if _, ok := attached[key]; !ok {
 				if err := w.registry(a).AttachAdmission(a, server); err != nil {

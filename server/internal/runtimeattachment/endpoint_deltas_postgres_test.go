@@ -1,6 +1,7 @@
 package runtimeattachment
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -11,6 +12,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -86,6 +89,21 @@ VALUES($1,$2,$3,$3,$4,'owner_session_delta','foreground','http','127.0.0.1:3000'
 	reasons, err := endpoints.RemovalReasons(ctx, f.database.Pool(), f.node, f.edge.ProcessEpoch, []string{first, second})
 	if err != nil || reasons[first] != "endpoint_not_live" || reasons[second] != "live_now" {
 		t.Fatalf("removal reasons = %v, %v", reasons, err)
+	}
+	// A deleted assignment logs assignment_gone; a mass removal logs ten ids and one summary.
+	var out bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&out, nil)))
+	gone := []string{first}
+	for i := range 14 {
+		gone = append(gone, fmt.Sprintf("route_gone_%02d", i))
+	}
+	logRemovals(ctx, f.database.Pool(), f.edge, gone)
+	slog.SetDefault(previous)
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != removalLogDetail+1 || !strings.Contains(lines[0], "reason=endpoint_not_live") || !strings.Contains(lines[1], "reason=assignment_gone") ||
+		!strings.Contains(lines[removalLogDetail], "removed_count=15 reasons=\"map[assignment_gone:14 endpoint_not_live:1]\"") {
+		t.Fatalf("removal log = %q", out.String())
 	}
 	f.exec(t, `UPDATE control_tunnel_nodes SET last_heartbeat_at=now()-interval '1 minute' WHERE id=$1`, f.node)
 	if reasons, err = endpoints.RemovalReasons(ctx, f.database.Pool(), f.node, f.edge.ProcessEpoch, []string{second}); err != nil || reasons[second] != "edge_heartbeat_stale" {
@@ -232,6 +250,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_s','foreground','http','127.0.0.1:3000','pu
 	if err != nil || len(flatten(full)) != 1 {
 		t.Fatalf("full endpoint pull = %+v, %v", full, err)
 	}
+	f.exec(t, `UPDATE user_machines SET worker_generation=2 WHERE id=$1`, f.machine)
 	request.ProcessID, request.WorkerGeneration = "process_next", 2
 	second, err := f.service.Attach(ctx, f.proof, request)
 	if err != nil {
