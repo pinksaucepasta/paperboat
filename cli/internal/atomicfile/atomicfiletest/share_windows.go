@@ -27,7 +27,8 @@ func WriteOwnerAndSystemOnly(t testing.TB, path string, data []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor := "D:P(A;;FA;;;SY)"
+	// Name the owner too: an elevated process otherwise creates an Administrators-owned file.
+	descriptor := "O:" + user.User.Sid.String() + "D:P(A;;FA;;;SY)"
 	if user.User.Sid.String() != "S-1-5-18" {
 		descriptor += "(A;;FA;;;" + user.User.Sid.String() + ")"
 	}
