@@ -389,6 +389,17 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 	var added []string
 	switch kind {
 	case "ufw":
+		// `ufw allow` turns a matching DENY/LIMIT/REJECT rule into an allow ("Rule updated") and uninstall could not
+		// put it back, so a conflict is reported before anything is changed.
+		status, err := run(ctx, "ufw", "status")
+		if err != nil {
+			return added, err
+		}
+		for _, r := range rules {
+			if spec := r.Ports + "/" + r.Proto; ufwConflict(status, spec) {
+				return added, fmt.Errorf("ufw has a rule for %s that is not an allow from anywhere; remove or change it first, pbh will not overwrite it", spec)
+			}
+		}
 		for _, r := range rules {
 			spec := r.Ports + "/" + r.Proto
 			out, err := run(ctx, "ufw", "allow", spec)
@@ -404,19 +415,25 @@ func firewallAdd(ctx context.Context, run commander, kind string, rules []firewa
 		if err != nil {
 			return added, err
 		}
+		reload := false
 		for _, zone := range zones {
 			for _, r := range rules {
 				spec := strings.Replace(r.Ports, ":", "-", 1) + "/" + r.Proto
 				if out, err := run(ctx, "firewall-cmd", "--permanent", "--zone="+zone, "--query-port="+spec); err == nil && strings.TrimSpace(out) == "yes" {
+					// Configured already; a reload that failed earlier left it out of the running firewall.
+					if live, err := run(ctx, "firewall-cmd", "--zone="+zone, "--query-port="+spec); err != nil || strings.TrimSpace(live) != "yes" {
+						reload = true
+					}
 					continue
 				}
 				if _, err := run(ctx, "firewall-cmd", "--permanent", "--zone="+zone, "--add-port="+spec); err != nil {
 					return added, err
 				}
 				added = append(added, zone+" "+spec)
+				reload = true
 			}
 		}
-		if len(added) > 0 {
+		if reload {
 			if _, err := run(ctx, "firewall-cmd", "--reload"); err != nil {
 				return added, err
 			}
@@ -560,6 +577,34 @@ func ufwRule(line string) (spec string, v6, allowAnywhere bool) {
 	}
 	source := strings.Join(rest, " ")
 	return spec, v6, (!v6 && source == "Anywhere") || (v6 && source == "Anywhere (v6)")
+}
+
+// ufwConflict reports whether `ufw status` has a rule for spec from anywhere whose action is not ALLOW: the same
+// To and From with another action, which `ufw allow` would replace.
+func ufwConflict(status, spec string) bool {
+	for _, line := range strings.Split(status, "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != spec {
+			continue
+		}
+		rest := fields[1:]
+		v6 := rest[0] == "(v6)"
+		if v6 {
+			rest = rest[1:]
+		}
+		if len(rest) < 2 || rest[0] == "ALLOW" || !slices.Contains([]string{"DENY", "REJECT", "LIMIT"}, rest[0]) {
+			continue
+		}
+		rest = rest[1:]
+		if rest[0] == "IN" {
+			rest = rest[1:]
+		}
+		if source := strings.Join(rest, " "); (!v6 && source == "Anywhere") || (v6 && source == "Anywhere (v6)") {
+			return true
+		}
+	}
+	return false
 }
 
 // ufwAllows reports whether `ufw status` lists an inbound ALLOW from anywhere for spec, for IPv4 or IPv6.

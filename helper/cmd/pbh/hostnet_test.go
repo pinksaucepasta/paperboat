@@ -220,7 +220,7 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 		wantAdd []string // command prefixes that must have run on add
 		wantDel []string // ... and on remove
 	}{
-		"ufw": {"ufw", map[string]string{"ufw allow 7277/tcp": "Rule added", "ufw allow 443/tcp": "Rule added", "ufw allow 443/udp": "Rule added", "ufw allow 7272/tcp": "Rule added", "ufw allow 7273/udp": "Rule added", "ufw allow 10000:59999/tcp": "Skipping adding existing rule",
+		"ufw": {"ufw", map[string]string{"ufw status": "Status: active\n", "ufw allow 7277/tcp": "Rule added", "ufw allow 443/tcp": "Rule added", "ufw allow 443/udp": "Rule added", "ufw allow 7272/tcp": "Rule added", "ufw allow 7273/udp": "Rule added", "ufw allow 10000:59999/tcp": "Skipping adding existing rule",
 			"ufw delete allow 7277/tcp": "", "ufw delete allow 443/tcp": "", "ufw delete allow 443/udp": "", "ufw delete allow 7272/tcp": "", "ufw delete allow 7273/udp": ""},
 			[]string{"7277/tcp", "443/tcp", "443/udp", "7272/tcp", "7273/udp"},
 			[]string{"ufw allow 7277/tcp", "ufw allow 443/udp", "ufw allow 7273/udp", "ufw allow 10000:59999/tcp"},
@@ -616,6 +616,7 @@ func TestNftAddsAndChecksEveryInputChain(t *testing.T) {
 func TestUfwIPv6RulesAreTrackedAndChecked(t *testing.T) {
 	f := newFakeHost(t, "60000 65535")
 	f.answers = map[string]string{
+		"ufw status":         "Status: active\n",
 		"ufw allow 7277/tcp": "Skipping adding existing rule\nRule added (v6)\n", "ufw allow 443/tcp": "Skipping adding existing rule\nSkipping adding existing rule (v6)\n",
 		"ufw allow 443/udp": "Rule added\nRule added (v6)\n", "ufw allow 7272/tcp": "Rule added\n", "ufw allow 7273/udp": "Rule added\n", "ufw allow 10000:59999/tcp": "Rule added\nRule added (v6)\n",
 	}
@@ -741,5 +742,36 @@ func TestNftRulePresentNeedsTheExactRule(t *testing.T) {
 		if got := nftRulePresent(listing, rules, "tcp"); got != want {
 			t.Errorf("%q: present %v, want %v", listing, got, want)
 		}
+	}
+}
+
+// ufw would turn a DENY/LIMIT for the same port into an allow and uninstall could not restore it: refuse first,
+// change nothing.
+func TestUfwRefusesToOverwriteAConflictingRule(t *testing.T) {
+	for _, row := range []string{"443/tcp DENY Anywhere", "443/tcp LIMIT IN Anywhere", "443/tcp (v6) REJECT Anywhere (v6)"} {
+		f := newFakeHost(t, "60000 65535")
+		f.answers = map[string]string{"ufw status": "Status: active\n\n" + row + "\n", "ufw allow 7277/tcp": "Rule added\n", "ufw allow 443/tcp": "Rule updated\n"}
+		added, err := firewallAdd(t.Context(), f.run, "ufw", testRules)
+		if err == nil || !strings.Contains(err.Error(), "will not overwrite") || len(added) != 0 || f.called("ufw allow") != 0 {
+			t.Fatalf("%q: added %v err %v calls %v", row, added, err, f.calls)
+		}
+	}
+	if ufwConflict("443/tcp DENY 10.0.0.0/8\n443/tcp on eth0 DENY IN Anywhere\n443/tcp ALLOW Anywhere\n", "443/tcp") {
+		t.Fatal("a rule with another source or interface is a different rule, not a conflict")
+	}
+}
+
+// A reload that failed after the permanent config was written is redone on the retry, although nothing new is added.
+func TestFirewalldRetryReloadsWhatIsConfiguredButNotLive(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"firewall-cmd --get-default-zone": "public\n", "firewall-cmd --permanent --zone=public --query-port=443/tcp": "yes\n", "firewall-cmd --zone=public --query-port=443/tcp": "no\n", "firewall-cmd --reload": "success"}
+	added, err := firewallAdd(t.Context(), f.run, "firewalld", []firewallRule{{"tcp", "443"}})
+	if err != nil || len(added) != 0 || f.called("firewall-cmd --reload") != 1 {
+		t.Fatalf("added %v err %v calls %v", added, err, f.calls)
+	}
+	f.calls = nil
+	f.answers["firewall-cmd --zone=public --query-port=443/tcp"] = "yes\n"
+	if _, err := firewallAdd(t.Context(), f.run, "firewalld", []firewallRule{{"tcp", "443"}}); err != nil || f.called("firewall-cmd --reload") != 0 {
+		t.Fatalf("a rule that is live was reloaded: err %v calls %v", err, f.calls)
 	}
 }
