@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
@@ -117,5 +118,28 @@ func TestForegroundSupervisorKeepsItsDiagnosticsOnTheStateVolume(t *testing.T) {
 	}
 	if got := foregroundDiagnosticsDirectory(command, []string{"daemon"}); got != "" {
 		t.Fatalf("a daemon without --foreground uses %q", got)
+	}
+}
+
+// PB-U1: a step pb re-runs as root through sudo (here the macOS man-pages step) wrote diagnostics under root's home.
+func TestElevatedStepsWriteNoDiagnosticsUnderRootsHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sudo re-runs are Unix only")
+	}
+	rootState := t.TempDir()
+	ctx := withHostDependencies(t.Context(), func(d *hostDependencies) {
+		d.euid = func() int { return 0 }
+		d.daemonPaths = func() (localapi.Paths, error) { return localapi.Paths{StateRoot: rootState}, nil }
+	})
+	for _, variable := range []string{"PAPERBOAT_INVOKING_UID", "SUDO_UID"} {
+		t.Run(variable, func(t *testing.T) {
+			t.Setenv(variable, "1000")
+			var stderr bytes.Buffer
+			_, closeDiagnostics := openProcessDiagnostics(ctx, []string{"--no-customization", "__man-pages", "--directory", t.TempDir()}, &errorreport.Reporter{}, &stderr)
+			closeDiagnostics()
+			if entries, _ := os.ReadDir(rootState); len(entries) != 0 {
+				t.Fatalf("elevated step wrote under root's state: %v (%s)", entries, stderr.String())
+			}
+		})
 	}
 }
