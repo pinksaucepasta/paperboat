@@ -172,7 +172,7 @@ func nodePortAdvice(name, transport string, port int, capability, detail string)
 	case "refused":
 		return prefix + "nothing listens on it; run pbh status and check the " + capability + " service"
 	case "unreachable":
-		return prefix + "this host's firewall rejects it; run pbh install as root to open " + nodeRange + " (or add the rule by hand)"
+		return prefix + "this host's firewall rejects it; run pbh install as root to open " + strings.ToUpper(transport) + " " + strconv.Itoa(port) + " (or add the rule by hand)"
 	case "not_public":
 		return prefix + "the registered endpoint host does not resolve to a public address; fix --endpoint-host"
 	default:
