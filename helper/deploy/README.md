@@ -1,6 +1,6 @@
 # Install a self-hosted node
 
-Ubuntu 22.04/24.04 or Debian 12 on amd64/arm64, systemd and public inbound connectivity are required. Install
+Ubuntu 22.04/24.04/26.04 or Debian 12/13 on amd64/arm64, systemd and public inbound connectivity are required. Install
 first; no account, team, or global scope is assigned by installation.
 
 ```sh

@@ -41,8 +41,8 @@ func supportedHost(platform, architecture string, release io.Reader) error {
 	if scanner.Err() != nil {
 		return errors.New("Linux operating system metadata is invalid")
 	}
-	if id == "ubuntu" && (version == "22.04" || version == "24.04") || id == "debian" && version == "12" {
+	if id == "ubuntu" && (version == "22.04" || version == "24.04" || version == "26.04") || id == "debian" && (version == "12" || version == "13") {
 		return nil
 	}
-	return errors.New("self-host supports Ubuntu 22.04/24.04 or Debian 12")
+	return errors.New("self-host supports Ubuntu 22.04/24.04/26.04 or Debian 12/13")
 }
