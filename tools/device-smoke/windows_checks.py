@@ -29,7 +29,9 @@ Narrowed on Windows: policy-token (the device creates the tokens, a Unix throwaw
 member-machine approval/transfer), team-business (F19-07 access and F19-10 streaming only with --f19-peer-cmd / --f19-s3-origin), completion (the PowerShell
 script only). cli_credential.py is not ported; winhost.cli_secrets reads the DPAPI-protected tokens (bugreport uses it).
 The ssh-setup-time … ssh-forwarding checks have the device as the TARGET (ssh_mac_rows.py --windows): CLIENT_CMD runs one shell
-string on a paired Linux client, REVOKE_CLIENT_CMD on a fresh throwaway one that signs out. ssh-trust-host is ssh_trust_host.sh with ROTATE_CMD.
+string on a paired Linux client, REVOKE_CLIENT_CMD on a fresh throwaway one that signs out. ssh-control-outage and
+ssh-live-revoke make that one themselves (revoke_client.sh, removed after) when REVOKE_CLIENT_HOST (ssh target with docker, signed in as the
+device's account) and REVOKE_CLIENT_BIN (a Linux build for it) are set instead of REVOKE_CLIENT_CMD; creation failure is a FAIL. ssh-trust-host is ssh_trust_host.sh with ROTATE_CMD.
 """
 import argparse
 import contextlib
@@ -226,7 +228,7 @@ def missing(needs, args):
         if need.startswith('--'):
             if not getattr(args, need[2:]):
                 gaps.append(need)
-        elif not os.environ.get(need):
+        elif not os.environ.get(need) and not (need == 'REVOKE_CLIENT_CMD' and os.environ.get('REVOKE_CLIENT_HOST')):
             gaps.append(need)
     return gaps
 

@@ -11,9 +11,12 @@ that restarts it on a timer; the pf block and the daemon SIGSTOP likewise have a
 --windows: TARGET is the paired Windows machine instead (ssh_windows_target.py; set SMOKE_WINDOWS_SSH and
 PB_SMOKE_WINDOWS_PB, no MAC_CMD). otheruser uses a throwaway local Windows account with its own key and password.
 Prints one JSON line; exit 1 on any FAIL.
+REVOKE_CLIENT_CMD (a fresh throwaway client that signs out) may be left unset when REVOKE_CLIENT_HOST (an ssh target with docker and the
+test-systemd image, signed in as the account under test) and REVOKE_CLIENT_BIN (a Linux build for it) are set: outage and revoke then
+make one with revoke_client.sh before the step and remove it after, even on failure; a failed creation is a FAIL, not a SKIP.
 """
 from dev_targets import get_setting
-import argparse, json, os, re, secrets, shlex, subprocess, sys, time
+import argparse, functools, json, os, re, secrets, shlex, subprocess, sys, time
 
 ANCHOR = 'com.apple/pbsmoke'
 SSHD_PLIST = '/System/Library/LaunchDaemons/ssh.plist'
@@ -95,6 +98,43 @@ echo "RESULT plain_p50=$(echo $plain | p50) pb_p50=$(echo $pb | p50) plain=[$pla
     report('F5-07 setup', 'PASS' if ok else 'FAIL', m[0] if m else out[-300:].replace('\n', ' '))
 
 
+def revoke_client_sh(*args):
+    p = subprocess.run([os.path.join(os.path.dirname(os.path.abspath(__file__)), 'revoke_client.sh')] + list(args),
+                       capture_output=True, text=True, timeout=900, stdin=subprocess.DEVNULL)
+    return p.returncode, p.stdout, p.stderr
+
+
+def own_revoke_client(row):
+    """Decorator: with REVOKE_CLIENT_CMD unset and REVOKE_CLIENT_HOST set, the step gets a fresh throwaway client R."""
+    def wrap(step):
+        @functools.wraps(step)
+        def run_step():
+            host = os.environ.get('REVOKE_CLIENT_HOST')
+            if os.environ.get('REVOKE_CLIENT_CMD') or not host:
+                return step()  # given one, or visibly SKIP
+            binary, name, info = os.environ.get('REVOKE_CLIENT_BIN'), 'test-rc-%d-%s' % (time.time(), secrets.token_hex(2)), {}
+            try:
+                if not binary:
+                    return report(row, 'FAIL', 'REVOKE_CLIENT_HOST is set but REVOKE_CLIENT_BIN (a Linux build for it) is not')
+                rc, out, err = revoke_client_sh('up', host, name, binary)
+                try:
+                    info = json.loads(out.strip().splitlines()[-1]) if rc == 0 else {}
+                except (ValueError, IndexError):
+                    info = {}
+                if not info.get('command'):
+                    return report(row, 'FAIL', 'could not make the throwaway client R on %s: %s' % (host, (err.strip() or out.strip())[-300:]))
+                os.environ['REVOKE_CLIENT_CMD'] = info['command']
+                return step()
+            finally:
+                os.environ.pop('REVOKE_CLIENT_CMD', None)
+                if binary:
+                    rc, _, err = revoke_client_sh('down', host, name, info.get('machine_id', ''))
+                    if rc:
+                        report(row + ' fixture cleanup', 'FAIL', 'throwaway client %s was not fully removed: %s' % (name, err.strip()[-200:]))
+        return run_step
+    return wrap
+
+
 def rcl(script, timeout=300):
     return run('REVOKE_CLIENT_CMD', script, timeout)[1]
 
@@ -110,6 +150,7 @@ def listed(blob):
     return mac('grep -cF %s "$HOME/.ssh/authorized_keys"' % shlex.quote(blob)).strip().splitlines()[-1:] == ['1']
 
 
+@own_revoke_client('F5-08 outage')
 def outage():
     """F5-08: R (REVOKE_CLIENT_CMD, a fresh throwaway client) signs out first and the Mac's sshd stops listing its
     key; then the control plane is blackholed on the Mac and on both clients: the unrevoked client C (CLIENT_CMD)
@@ -284,6 +325,7 @@ def revoke_verdict(out):
     return True, ''
 
 
+@own_revoke_client('F5-10 revoke')
 def revoke():
     # `pb logout` signs the client out for good, so it only runs on a FRESH throwaway client (REVOKE_CLIENT_CMD).
     if not os.environ.get('REVOKE_CLIENT_CMD'):
