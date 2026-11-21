@@ -32,7 +32,7 @@ var strictDecoders = map[string]string{
 	"internal/httpapi/operator_auth_handlers.go:operatorSetupRequest":              "admin body",
 	"internal/httpapi/operator_mfa_handlers.go:registerOperatorMFA":                "admin body",
 	"internal/httpapi/release_authority_handlers.go:releaseAuthorityRequestCreate": "admin body",
-	"internal/httpapi/selfhost_handlers.go:selfhostDecodeStrict":                  "console-only bodies (region routes, enrollment; no CLI or helper calls them and the web app is always current)",
+	"internal/httpapi/selfhost_handlers.go:selfhostDecodeStrict":                   "console-only bodies (region routes, enrollment; no CLI or helper calls them and the web app is always current)",
 	"internal/mint/mint.go:strictCredentialJSON":                                   "server-minted credential claims",
 	"internal/previewdomain/service.go:Decode":                                     "server-minted signed cursor",
 	"internal/previewtunnelapi/common.go:Decode":                                   "server-minted signed cursor",
