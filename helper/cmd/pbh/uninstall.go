@@ -38,8 +38,14 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "systemctl", "stop", "paperboat-selfhost.service").Run(); err != nil {
-		return fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
+	// An absent main unit is an expected state on a rerun, so a failure after it was removed can be retried.
+	if _, err := os.Stat(selfhostUnit); err == nil {
+		if err := exec.CommandContext(ctx, "systemctl", "stop", "paperboat-selfhost.service").Run(); err != nil {
+			return fmt.Errorf("%w: %w", commandError("could not stop self-host service; nothing removed"), err)
+		}
+	}
+	if err := removeCertificateUnits(ctx, execCommander, systemUnitDir, certificateEnvFile, *removeData); err != nil {
+		return err
 	}
 	if err := removeHostNetwork(ctx, execCommander, defaultHostPaths(defaultState), out); err != nil {
 		return err
@@ -47,14 +53,13 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 	if err := containers.Teardown(ctx, defaultState); err != nil {
 		return err
 	}
-	if err := exec.CommandContext(ctx, "systemctl", "disable", "paperboat-selfhost.service").Run(); err != nil {
-		return err
-	}
-	if err := os.Remove("/etc/systemd/system/paperboat-selfhost.service"); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := removeCertificateUnits(ctx, execCommander, systemUnitDir, certificateEnvFile, *removeData); err != nil {
-		return err
+	if _, err := os.Stat(selfhostUnit); err == nil {
+		if err := exec.CommandContext(ctx, "systemctl", "disable", "paperboat-selfhost.service").Run(); err != nil {
+			return err
+		}
+		if err := os.Remove(selfhostUnit); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	if err := exec.CommandContext(ctx, "systemctl", "daemon-reload").Run(); err != nil {
 		return err
@@ -79,6 +84,7 @@ func uninstall(ctx context.Context, args []string, out io.Writer) error {
 
 const (
 	systemUnitDir      = "/etc/systemd/system"
+	selfhostUnit       = systemUnitDir + "/paperboat-selfhost.service"
 	certificateEnvFile = "/etc/paperboat-edge-certificate.env"
 )
 
@@ -101,7 +107,7 @@ func removeCertificateUnits(ctx context.Context, run commander, unitDir, envFile
 			errs = append(errs, err)
 		}
 	}
-	if removeData {
+	if removeData && len(errs) == 0 { // the env file the units read stays until both are gone
 		if err := os.Remove(envFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, err)
 		}

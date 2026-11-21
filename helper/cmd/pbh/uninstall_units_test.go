@@ -62,4 +62,15 @@ func TestUninstallKeepsACertificateUnitItCouldNotDisable(t *testing.T) {
 	if _, statErr := os.Stat(unit); statErr != nil {
 		t.Fatalf("the unit was removed although disable failed: %v", statErr)
 	}
+	// The env file the unit reads stays until the unit is gone, even for the confirmed data removal.
+	env := filepath.Join(dir, "paperboat-edge-certificate.env")
+	if err := os.WriteFile(env, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeCertificateUnits(t.Context(), f.run, dir, env, true); err == nil {
+		t.Fatal("second failure not reported")
+	}
+	if _, statErr := os.Stat(env); statErr != nil {
+		t.Fatalf("env removed while its unit still exists: %v", statErr)
+	}
 }

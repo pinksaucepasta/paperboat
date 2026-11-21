@@ -461,6 +461,39 @@ func nftRulePresent(listed string, rules []firewallRule, proto string) bool {
 	return false
 }
 
+// ownedIptablesRule reports whether an `iptables -S` rule is one pbh added: its --comment argument is exactly ours.
+func ownedIptablesRule(fields []string) bool {
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "--comment" && fields[i+1] == firewallComment {
+			return true
+		}
+	}
+	return false
+}
+
+type nftRuleRef struct{ family, table, chain, handle string }
+
+// ownedNftRules finds the rules pbh added in every table and chain of an `nft -a list ruleset`: a tcp/udp dport
+// rule whose comment is exactly ours.
+func ownedNftRules(listing string) []nftRuleRef {
+	var refs []nftRuleRef
+	var family, table, chain string
+	for _, line := range strings.Split(listing, "\n") {
+		line = strings.TrimSpace(line)
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) >= 3 && fields[0] == "table":
+			family, table, chain = fields[1], fields[2], ""
+		case len(fields) >= 2 && fields[0] == "chain":
+			chain = fields[1]
+		case chain != "" && (strings.HasPrefix(line, "tcp dport ") || strings.HasPrefix(line, "udp dport ")) && strings.Contains(line, ` comment "`+firewallComment+`" # handle `):
+			handle := strings.TrimSpace(line[strings.Index(line, "# handle ")+len("# handle "):])
+			refs = append(refs, nftRuleRef{family, table, chain, handle})
+		}
+	}
+	return refs
+}
+
 // iptablesTools lists iptables, plus ip6tables when IPv6 input is filtered too.
 func iptablesTools(ctx context.Context, run commander) []string {
 	tools := []string{"iptables"}
@@ -496,11 +529,15 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 		for _, tool := range []string{"iptables", "ip6tables"} {
 			listed, err := run(ctx, tool, "-S", "INPUT")
 			if err != nil {
-				continue // no such tool, or no rules to list: nothing of ours in it
+				// A missing tool (or no IPv6 filtering) has nothing of ours; any other failure must not look like success.
+				if !errors.Is(err, exec.ErrNotFound) && tool == "iptables" {
+					errs = append(errs, fmt.Errorf("list %s INPUT rules: %w", tool, err))
+				}
+				continue
 			}
 			for _, line := range strings.Split(listed, "\n") {
 				fields := strings.Fields(line)
-				if len(fields) < 3 || fields[0] != "-A" || fields[1] != "INPUT" || !slices.Contains(fields, firewallComment) {
+				if len(fields) < 3 || fields[0] != "-A" || fields[1] != "INPUT" || !ownedIptablesRule(fields) {
 					continue
 				}
 				if _, err := run(ctx, tool, append([]string{"-D", "INPUT"}, fields[2:]...)...); err != nil {
@@ -509,24 +546,16 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 			}
 		}
 	case "nft":
-		out, err := run(ctx, "nft", "list", "ruleset")
-		family, table, chain, ok := nftInputChain(out)
-		if err != nil || !ok {
-			if len(added) > 0 { // rules were recorded, so the chain they went into must be there
-				errs = append(errs, errors.New("nftables input chain not found"))
+		listed, err := run(ctx, "nft", "-a", "list", "ruleset")
+		if err != nil {
+			if !errors.Is(err, exec.ErrNotFound) {
+				errs = append(errs, fmt.Errorf("list nftables rules: %w", err))
 			}
 			break
 		}
-		listed, err := run(ctx, "nft", "-a", "list", "chain", family, table, chain)
-		if err != nil {
-			errs = append(errs, err)
-			break
-		}
-		for _, line := range strings.Split(listed, "\n") {
-			if i := strings.Index(line, "# handle "); i >= 0 && strings.Contains(line, firewallComment) {
-				if _, err := run(ctx, "nft", "delete", "rule", family, table, chain, "handle", strings.TrimSpace(line[i+len("# handle "):])); err != nil {
-					errs = append(errs, err)
-				}
+		for _, r := range ownedNftRules(listed) {
+			if _, err := run(ctx, "nft", "delete", "rule", r.family, r.table, r.chain, "handle", r.handle); err != nil {
+				errs = append(errs, err)
 			}
 		}
 	}

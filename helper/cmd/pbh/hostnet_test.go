@@ -50,8 +50,8 @@ func (f *fakeHost) run(_ context.Context, name string, args ...string) (string, 
 	if out, ok := f.answers[line]; ok {
 		return out, nil
 	}
-	if name == "nft" {
-		return "", fmt.Errorf("%s: %w", line, exec.ErrNotFound) // a host without nftables
+	if name == "nft" || ((name == "iptables" || name == "ip6tables") && args[0] == "-S") {
+		return "", fmt.Errorf("%s: %w", line, exec.ErrNotFound) // a host without nftables or iptables
 	}
 	return "", errors.New("not found: " + line)
 }
@@ -237,7 +237,7 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 			[]string{"iptables -D INPUT -p tcp -m multiport --dports 7277,443,7272,10000:59999 ", "iptables -D INPUT -p udp -m multiport --dports 443,7273 "}},
 		"nft": {"nft", map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft list chain inet filter input": "",
 			"nft insert rule inet filter input " + nftTCP: "", "nft insert rule inet filter input " + nftUDP: "",
-			"nft -a list chain inet filter input":        "\t\t" + nftTCP + " # handle 7\n\t\t" + nftUDP + " # handle 8\n",
+			"nft -a list ruleset":                        "table inet filter { # handle 1\n\tchain input { # handle 1\n\t\ttype filter hook input priority filter; policy drop;\n\t\t" + nftTCP + " # handle 7\n\t\t" + nftUDP + " # handle 8\n\t}\n}\n",
 			"nft delete rule inet filter input handle 7": "", "nft delete rule inet filter input handle 8": ""}, []string{"nft"},
 			[]string{"nft insert rule inet filter input " + nftTCP, "nft insert rule inet filter input " + nftUDP}, []string{"nft delete rule inet filter input handle 7", "nft delete rule inet filter input handle 8"}},
 	} {
@@ -446,20 +446,21 @@ func TestSetupWithoutATunnelOpensOnlyTheRelayAndClaimPorts(t *testing.T) {
 	}
 }
 
-// Uninstall finds the rules by their comment: with the record gone, with a rule the service re-added, and
-// beside rules of other owners, which stay.
+// Uninstall finds the rules by their exact comment: with the record gone, in every table and chain, and beside
+// rules of other owners (a jump target or a longer comment that merely contains the word), which stay.
 func TestUninstallRemovesEveryCommentedRuleWithoutARecord(t *testing.T) {
 	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
 	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
 	foreign := "-p tcp -m tcp --dport 22 -m comment --comment other-owner -j ACCEPT"
+	lookalikes := "-A INPUT -p tcp -m tcp --dport 23 -j paperboat-edge\n-A INPUT -p tcp -m tcp --dport 24 -m comment --comment \"allow paperboat-edge\" -j ACCEPT\n"
 	f := newFakeHost(t, "60000 65535") // no hostnet.json: nothing recorded
 	f.answers = map[string]string{
-		"iptables -S INPUT":        "-P INPUT DROP\n-A INPUT " + tcp + "\n-A INPUT " + foreign + "\n-A INPUT " + udp + "\n",
+		"iptables -S INPUT":        "-P INPUT DROP\n-A INPUT " + tcp + "\n-A INPUT " + foreign + "\n" + lookalikes + "-A INPUT " + tcp + "\n-A INPUT " + udp + "\n",
 		"ip6tables -S INPUT":       "-P INPUT DROP\n-A INPUT " + tcp + "\n",
 		"iptables -D INPUT " + tcp: "", "iptables -D INPUT " + udp: "", "ip6tables -D INPUT " + tcp: "",
-		"nft list ruleset":                           "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n",
-		"nft -a list chain inet filter input":        "\t\ttcp dport { 443 } accept comment \"paperboat-edge\" # handle 4\n\t\ttcp dport { 22 } accept comment \"other-owner\" # handle 5\n",
-		"nft delete rule inet filter input handle 4": "",
+		"nft -a list ruleset": "table inet filter { # handle 1\n\tchain input { # handle 1\n\t\ttcp dport { 443 } accept comment \"paperboat-edge\" # handle 4\n\t\ttcp dport { 22 } accept comment \"other-owner\" # handle 5\n" +
+			"\t\ttcp dport { 25 } accept comment \"allow paperboat-edge\" # handle 6\n\t}\n}\ntable ip nat { # handle 2\n\tchain extra { # handle 3\n\t\tudp dport { 7273 } accept comment \"paperboat-edge\" # handle 9\n\t}\n}\n",
+		"nft delete rule inet filter input handle 4": "", "nft delete rule ip nat extra handle 9": "",
 	}
 	for _, path := range []string{f.paths.sysctl, f.paths.udp} {
 		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
@@ -469,17 +470,41 @@ func TestUninstallRemovesEveryCommentedRuleWithoutARecord(t *testing.T) {
 	if err := removeHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"iptables -D INPUT " + tcp, "iptables -D INPUT " + udp, "ip6tables -D INPUT " + tcp, "nft delete rule inet filter input handle 4"} {
-		if f.called(want) != 1 {
-			t.Errorf("%q ran %d times; calls %v", want, f.called(want), f.calls)
+	// A rule listed twice is deleted once per listed line.
+	for want, n := range map[string]int{"iptables -D INPUT " + tcp: 2, "iptables -D INPUT " + udp: 1, "ip6tables -D INPUT " + tcp: 1, "nft delete rule inet filter input handle 4": 1, "nft delete rule ip nat extra handle 9": 1} {
+		if f.called(want) != n {
+			t.Errorf("%q ran %d times, want %d; calls %v", want, f.called(want), n, f.calls)
 		}
 	}
-	if f.called("iptables -D INPUT -p tcp -m tcp --dport 22") != 0 || f.called("nft delete rule inet filter input handle 5") != 0 {
-		t.Errorf("a rule of another owner was deleted: %v", f.calls)
+	for _, kept := range []string{"iptables -D INPUT -p tcp -m tcp --dport 2", "nft delete rule inet filter input handle 5", "nft delete rule inet filter input handle 6"} {
+		if f.called(kept) != 0 {
+			t.Errorf("a rule of another owner was deleted (%q): %v", kept, f.calls)
+		}
 	}
 	for _, gone := range []string{f.paths.sysctl, f.paths.udp} {
 		if _, err := os.Stat(gone); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s survived uninstall without a record: %v", gone, err)
 		}
+	}
+}
+
+// A listing that fails for a reason other than a missing tool is an error, and the record stays for a rerun.
+func TestUninstallDoesNotReportSuccessWhenTheRuleListFails(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: "iptables", Rules: testRules}); err != nil {
+		t.Fatal(err)
+	}
+	failing := func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "iptables" && args[0] == "-S" {
+			return "", errors.New("iptables: Permission denied (you must be root)")
+		}
+		return f.run(ctx, name, args...)
+	}
+	err := removeHostNetwork(t.Context(), failing, f.paths, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "Permission denied") {
+		t.Fatalf("err %v", err)
+	}
+	if _, statErr := os.Stat(f.paths.record); statErr != nil {
+		t.Fatalf("the record was dropped although rules may remain: %v", statErr)
 	}
 }
