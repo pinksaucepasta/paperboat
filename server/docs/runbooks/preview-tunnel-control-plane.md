@@ -100,13 +100,15 @@ start) sets up the first two:
 1. The outgoing port range above the public one: `/etc/sysctl.d/90-paperboat-edge.conf` with
    `net.ipv4.ip_local_port_range = 60000 65535`, applied at once. pbh refuses, naming the cause, when another sysctl
    setting overrides it.
-2. The host firewall: if ufw, firewalld, iptables/ip6tables or nftables is filtering inbound traffic, pbh adds an allow
-   rule for TCP 443, 7272-7275 and 10000-59999 (comment `paperboat-edge`). iptables and nftables rules do not persist, so
-   `pbh serve` re-adds them on each start; ufw and firewalld keep theirs.
+2. The host firewall: if ufw, firewalld, iptables/ip6tables or nftables is filtering inbound traffic, pbh adds allow
+   rules (comment `paperboat-edge`) for the ports the installed components listen on: the claim port (7277 by
+   default), TCP 443 and UDP 443 (HTTP/3), the carrier TCP 7272 and QUIC 7273 of an edge, a relay's WSS/STUN
+   and QUIC ports, and TCP 10000-59999 on a tunnel node. iptables and nftables rules do not persist, so `pbh serve` re-adds them on each start;
+   ufw and firewalld keep theirs. The claim port stays open because the claim listener keeps running and accepts
+   the same code again for a trust-rotation retry.
 3. The cloud firewall (security group, security list, VPC firewall): pbh cannot change it from the host; it prints
-   "allow inbound TCP 443, TCP 7272-7275 and TCP 10000-59999 from 0.0.0.0/0 (and ::/0)". The carrier and relay ports
-   also need UDP: 443 and 7273 for an edge, 7274 and 7275 for a relay (helper/deploy/README.md lists them per
-   install mode). The managed edges' Oracle Cloud lists must be changed to the 7272-7275 ports (they allowed the old ones).
+   "allow inbound TCP 7277, 443, 7272, 10000-59999 and UDP 443, 7273 from 0.0.0.0/0 (and ::/0 for IPv6)" (the
+   ports of that node). The managed edges' Oracle Cloud lists must be changed to these ports (they allowed the old ones).
 
 `pbh uninstall` removes exactly what `/var/lib/paperboat-selfhost/hostnet.json` records pbh added (rules, sysctl
 file, and restores the previous outgoing range). `pbh doctor` reports each check and probes reachability of one test

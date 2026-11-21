@@ -63,7 +63,12 @@ Default inbound ports:
 | Tunnel only | 80, 443, 7272 | 443 (HTTP/3), 7273 |
 | Both | 80, 443, 7272, 7274 | 443 (HTTP/3), 7273, 7274 (STUN), 7275 |
 
-Allow these ports in both the host firewall and the cloud network rules. TCP 443
+`pbh install` opens the ports the installed components listen on in the host firewall itself (ufw,
+firewalld, iptables or nftables; TCP and UDP as the table shows, the claim port from `--claim-listen`
+included, and the public tunnel range 10000-59999 on a tunnel installation) and records the rules for `pbh uninstall`; the service re-adds iptables and nftables rules on
+every start. The claim port stays open: pbh keeps the claim listener running, and the same code is
+accepted again when the control plane retries a trust rotation. The cloud network rules (security group,
+security list) are yours to set; the install prints them. TCP 443
 alone permits HTTP/1 and HTTP/2 but leaves HTTP/3 unreachable; verify UDP 443
 from outside the host. On hosts behind public-IP NAT, scope host firewall rules
 to the configured local gateway bind address.
@@ -85,7 +90,9 @@ A connected process is not readiness. Dashboard node status reports actual
 control-plane registration, health, and tunnel ingress verification. The service
 starts component runtimes after durable claim configuration and retries runtime
 crashes (the systemd unit runs `pbh serve`; `pbh help` lists every command). `pbh status` shows service status. `pbh uninstall` stops the service,
-removes its owned containers and helper executables, and retains protected local
+removes its owned containers, its host firewall rules (found by their `paperboat-edge`
+comment on iptables and nftables), the edge certificate timer and service if installed, and its helper
+executables, and retains protected local
 identity, credentials and configuration for reinstall. To permanently delete that
 data, explicitly run `pbh uninstall --remove-data --confirm-remove-data`. Remove
 the node in Network to revoke its registry entry. Docker and unrelated containers

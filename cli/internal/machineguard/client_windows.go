@@ -63,7 +63,7 @@ func (c *Client) exchange(ctx context.Context, in request) (response, error) {
 	if c.conn == nil {
 		return response{}, net.ErrClosed
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(exchangeTimeout(in.Operation))
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}

@@ -64,6 +64,9 @@ func validateConfig(c Config) error {
 	if err != nil {
 		return errors.New("claim listen address requires host:port")
 	}
+	if n, e := strconv.Atoi(claimPort); e != nil || n < 1 || n > 65535 {
+		return errors.New("claim listen port must be a number from 1 to 65535")
+	}
 	// The claim listener and the edge's loopback listeners share the node's TCP ports with the components.
 	reserved := map[int]bool{edgeports.EdgeHealth: true, edgeports.EdgePrivateHTTPS: true}
 	if n, err := strconv.Atoi(claimPort); err == nil {

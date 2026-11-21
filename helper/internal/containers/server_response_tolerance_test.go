@@ -68,7 +68,7 @@ func TestPbhIgnoresFieldsANewerServerAddsToEveryAnswer(t *testing.T) {
 	if got, err := client.readiness(context.Background()); err != nil || got.NodeID != "node_1" {
 		t.Fatalf("readiness with newer fields = %+v, %v", got, err)
 	}
-	if got, err := ProbePort(context.Background(), dir, 8443, "nonce"); err != nil || !got.Reachable {
+	if got, err := ProbePort(context.Background(), dir, "tcp", 8443, "nonce"); err != nil || !got.Reachable {
 		t.Fatalf("port probe with newer fields = %+v, %v", got, err)
 	}
 	update, err := OpenUpdateNode(dir)

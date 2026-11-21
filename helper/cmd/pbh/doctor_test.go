@@ -15,7 +15,7 @@ import (
 )
 
 func tunnelConfig() selfhost.Config {
-	return selfhost.Config{Components: []selfhost.Component{{Capability: "tunnel"}}}
+	return selfhost.Config{Listen: "[::]:7277", Components: []selfhost.Component{{Capability: "tunnel", TCPPort: 7272, QUICPort: 7273}}}
 }
 
 func doctorFixture(t *testing.T, outgoing string, answers map[string]string, probe containers.PortProbe, probeErr error) (doctorDeps, *strings.Builder) {
@@ -24,7 +24,7 @@ func doctorFixture(t *testing.T, outgoing string, answers map[string]string, pro
 	deps := doctorDeps{
 		run:    f.run,
 		paths:  f.paths,
-		probe:  func(context.Context, int, string) (containers.PortProbe, error) { return probe, probeErr },
+		probe:  func(context.Context, string, int, string) (containers.PortProbe, error) { return probe, probeErr },
 		listen: func(string) (int, func(), error) { return 25000, func() {}, nil },
 		ingress: func(context.Context, string) (containers.IngressState, error) {
 			return containers.IngressState{Verified: true}, nil
@@ -46,7 +46,7 @@ func TestDoctorPassesWhenEverythingIsOpen(t *testing.T) {
 func TestDoctorNamesTheMissingRule(t *testing.T) {
 	for detail, want := range map[string]string{
 		"timeout":     "cloud firewall",
-		"unreachable": "this host's firewall rejects it",
+		"unreachable": "rejected by the network (unreachable)",
 		"refused":     "nothing listened",
 	} {
 		deps, out := doctorFixture(t, "60000 65535", nil, containers.PortProbe{Detail: detail}, nil)
@@ -67,7 +67,7 @@ func TestDoctorReportsAWrongOutgoingRangeAndAClosedHostFirewall(t *testing.T) {
 	if err := runDoctor(t.Context(), tunnelConfig(), deps, out); err == nil {
 		t.Fatalf("doctor passed:\n%s", out)
 	}
-	for _, want := range []string{"outgoing port range is \"32768 60999\"", "iptables host firewall does not allow TCP 443"} {
+	for _, want := range []string{"outgoing port range is \"32768 60999\"", "iptables host firewall does not allow TCP 7277, 443, 7272, 10000-59999 and UDP 443, 7273"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -83,7 +83,7 @@ func TestDoctorReportsAFailedProbeCall(t *testing.T) {
 
 func TestDoctorSkipsRelayOnlyInstallations(t *testing.T) {
 	deps, out := doctorFixture(t, "32768 60999", nil, containers.PortProbe{}, nil)
-	deps.probe = func(context.Context, int, string) (containers.PortProbe, error) {
+	deps.probe = func(context.Context, string, int, string) (containers.PortProbe, error) {
 		t.Fatal("probed a relay-only node")
 		return containers.PortProbe{}, nil
 	}
@@ -135,5 +135,65 @@ func TestDoctorReportsEndpointHostVerificationWithTheFix(t *testing.T) {
 	deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
 	if err := runDoctor(t.Context(), config, deps, out); err != nil || !strings.Contains(out.String(), "ok   the control plane verified edge.example.test reaches this node") {
 		t.Fatalf("verified endpoint host not reported: %v\n%s", err, out)
+	}
+}
+
+func TestDoctorChecksEveryNodePort(t *testing.T) {
+	c := selfhost.Config{Components: []selfhost.Component{
+		{Capability: "tunnel", TCPPort: edgeports.CarrierTCP, QUICPort: edgeports.CarrierQUIC},
+		{Capability: "relay", TCPPort: edgeports.RelayWSS, QUICPort: edgeports.RelayQUIC},
+	}}
+	for _, test := range []struct {
+		results map[string]string // "tcp 7272" -> detail; missing means connected
+		want    []string
+	}{
+		{nil, []string{"ok   TCP 7272 (tunnel) is reachable", "ok   TCP 7274 (relay) is reachable", "ok   UDP 7274 (relay STUN) is reachable", "skip UDP 7273 (tunnel QUIC): the control plane does not send QUIC; make sure inbound UDP 7273 is allowed", "skip UDP 7275 (relay QUIC)"}},
+		{map[string]string{"tcp 7272": "timeout"}, []string{"FIX  TCP 7272 (tunnel) is not reachable", "allow inbound TCP 7272 from anywhere"}},
+		{map[string]string{"udp 7274": "timeout"}, []string{"allow inbound UDP 7274 from anywhere"}},
+		{map[string]string{"tcp 7274": "refused"}, []string{"FIX  TCP 7274 (relay) is not reachable", "connection refused", "run pbh status and check the relay service"}},
+		{map[string]string{"tcp 7272": "unreachable"}, []string{"rejected by the network (unreachable)", "host firewall check above"}},
+	} {
+		deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{}, nil)
+		var probed []string
+		deps.probe = func(_ context.Context, transport string, port int, nonce string) (containers.PortProbe, error) {
+			key := transport + " " + strconv.Itoa(port)
+			probed = append(probed, key)
+			if (port == 25000) != (nonce != "") {
+				t.Errorf("%s: nonce %q", key, nonce)
+			}
+			if detail, ok := test.results[key]; ok {
+				return containers.PortProbe{Detail: detail}, nil
+			}
+			return containers.PortProbe{Reachable: true, Detail: "connected"}, nil
+		}
+		err := runDoctor(t.Context(), c, deps, out)
+		if (err == nil) != (test.results == nil) {
+			t.Errorf("%v: err %v\n%s", test.results, err, out)
+		}
+		for _, want := range test.want {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("missing %q in:\n%s", want, out)
+			}
+		}
+		if got := strings.Join(probed, ","); got != "tcp 25000,tcp 7272,tcp 7274,udp 7274" {
+			t.Errorf("probed %s", got)
+		}
+	}
+}
+
+func TestDoctorReportsRelayOnlyListenersAsSkipped(t *testing.T) {
+	c := selfhost.Config{Components: []selfhost.Component{{Capability: "relay", TCPPort: 443, QUICPort: edgeports.RelayQUIC}}}
+	deps, out := doctorFixture(t, "60000 65535", nil, containers.PortProbe{}, nil)
+	deps.probe = func(context.Context, string, int, string) (containers.PortProbe, error) {
+		t.Fatal("relay-only install probed")
+		return containers.PortProbe{}, nil
+	}
+	if err := runDoctor(t.Context(), c, deps, out); err != nil {
+		t.Fatalf("err %v\n%s", err, out)
+	}
+	for _, want := range []string{"does not serve tunnels", "skip TCP 443 (relay): the control plane probes only TCP 7272-7275", "skip UDP 443 (relay STUN): the control plane probes STUN only on UDP 7274", "skip UDP 7275 (relay QUIC): the control plane does not send QUIC"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

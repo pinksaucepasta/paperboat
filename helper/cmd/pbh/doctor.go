@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
@@ -23,7 +24,7 @@ import (
 type doctorDeps struct {
 	run    commander
 	paths  hostPaths
-	probe  func(ctx context.Context, port int, nonce string) (containers.PortProbe, error)
+	probe  func(ctx context.Context, transport string, port int, nonce string) (containers.PortProbe, error)
 	listen func(nonce string) (port int, stop func(), err error)
 	// ingress is the control plane's verdict on the endpoint host, with a reason when it is not verified.
 	ingress func(ctx context.Context, host string) (containers.IngressState, error)
@@ -55,8 +56,8 @@ func doctor(ctx context.Context, args []string, out io.Writer) error {
 	return runDoctor(ctx, c, doctorDeps{
 		run:   execCommander,
 		paths: defaultHostPaths(*dir),
-		probe: func(ctx context.Context, port int, nonce string) (containers.PortProbe, error) {
-			return containers.ProbePort(ctx, *dir, port, nonce)
+		probe: func(ctx context.Context, transport string, port int, nonce string) (containers.PortProbe, error) {
+			return containers.ProbePort(ctx, *dir, transport, port, nonce)
 		},
 		listen: listenTestPort,
 		ingress: func(ctx context.Context, host string) (containers.IngressState, error) {
@@ -72,10 +73,6 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	for _, component := range c.Components {
 		tunnel = tunnel || component.Capability == "tunnel"
 	}
-	if !tunnel {
-		fmt.Fprintln(out, "This installation does not serve tunnels; public TCP ports need no host setup.")
-		return nil
-	}
 	problems := 0
 	report := func(ok bool, good, bad string) {
 		if ok {
@@ -85,10 +82,16 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		problems++
 		fmt.Fprintln(out, "FIX  "+bad)
 	}
+	if !tunnel {
+		fmt.Fprintln(out, "This installation does not serve tunnels; public TCP ports need no host setup.")
+		listeners(ctx, c, d, false, out, report)
+		return nil
+	}
 	current, err := currentOutgoing(d.paths.proc)
 	report(err == nil && current == outgoingRange, "outgoing port range is "+outgoingRange+", clear of the public range", fmt.Sprintf("outgoing port range is %q; run pbh install to move it to %s (public TCP ports %d-%d would collide with outgoing connections)", current, outgoingRange, edgeports.PublicTCPMin, edgeports.PublicTCPMax))
 	kind := detectFirewall(ctx, d.run)
-	report(kind == "" || firewallRulePresent(ctx, d.run, kind), "host firewall ("+firewallLabel(kind)+") lets TCP 443, "+nodeRange+" and "+publicRange+" in", "the "+kind+" host firewall does not allow TCP 443, "+nodeRange+" and "+publicRange+"; run pbh install as root to add the rule")
+	rules := hostFirewallRules(c)
+	report(kind == "" || firewallRulePresent(ctx, d.run, kind, rules), "host firewall ("+firewallLabel(kind)+") lets "+rulesText(rules)+" in", "the "+kind+" host firewall does not allow "+rulesText(rules)+"; run pbh install as root to add the rule")
 	report(edgeGuardPresent(ctx, d.run), "per-address connection limits are on (nftables table "+edgeGuardTable+")", "per-address connection limits are off; install nftables and run pbh install as root")
 	nonceBytes := make([]byte, 24)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -100,12 +103,13 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 		return fmt.Errorf("%w: %w", commandError("could not open a test port in "+publicRange+" on this host"), err)
 	}
 	defer stop()
-	result, err := d.probe(ctx, port, nonce)
+	result, err := d.probe(ctx, "tcp", port, nonce)
 	if err != nil {
 		report(false, "", "the control plane could not run the reachability check ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
 	} else {
-		report(result.Reachable, fmt.Sprintf("test port %d is reachable from the control plane", port), reachabilityAdvice(port, result.Detail))
+		report(result.Reachable, fmt.Sprintf("test port %d is reachable from the control plane", port), reachabilityAdvice(port, result.Detail, rules))
 	}
+	listeners(ctx, c, d, true, out, report)
 	state, err := d.ingress(ctx, c.EndpointHost)
 	if err != nil {
 		report(false, "", "could not read the endpoint host status from the control plane ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
@@ -124,6 +128,79 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	return nil
 }
 
+// listeners reports every edge and relay listener of c: probed from the control plane when canProbe (the
+// probe needs the tunnel component's credential) and the probe accepts the port, otherwise a skip line.
+func listeners(ctx context.Context, c selfhost.Config, d doctorDeps, canProbe bool, out io.Writer, report func(ok bool, good, bad string)) {
+	for _, component := range c.Components {
+		for _, p := range nodePorts(component) {
+			name := fmt.Sprintf("%s %d (%s)", strings.ToUpper(p.transport), p.port, p.service)
+			if p.skip == "" && !canProbe {
+				p.skip = "only an installation with a tunnel component can ask the control plane to probe"
+			}
+			if p.skip != "" {
+				fmt.Fprintf(out, "skip %s: %s; make sure inbound %s %d is allowed\n", name, p.skip, strings.ToUpper(p.transport), p.port)
+				continue
+			}
+			result, err := d.probe(ctx, p.transport, p.port, "")
+			if err != nil {
+				report(false, "", "the control plane could not check "+name+" ("+err.Error()+"); check the node is claimed and the service runs, then rerun pbh doctor")
+				continue
+			}
+			report(result.Reachable, name+" is reachable from the control plane", nodePortAdvice(name, p.transport, p.port, component.Capability, result.Detail))
+		}
+	}
+}
+
+type nodePort struct {
+	transport string
+	port      int
+	service   string // what listens there, for the report
+	skip      string // why the control plane cannot probe it; "" when it can
+}
+
+// nodePorts lists every listener of component: its TCP port (probed in edgeports.NodeMin-NodeMax), the
+// relay's STUN on UDP at its TCP port (probed only at edgeports.RelayWSS) and its QUIC port (never probed:
+// the control plane sends no QUIC). What the probe does not accept comes back with a skip reason.
+func nodePorts(component selfhost.Component) []nodePort {
+	var ports []nodePort
+	if component.TCPPort > 0 {
+		p := nodePort{"tcp", component.TCPPort, component.Capability, ""}
+		if p.port < edgeports.NodeMin || p.port > edgeports.NodeMax {
+			p.skip = fmt.Sprintf("the control plane probes only TCP %d-%d", edgeports.NodeMin, edgeports.NodeMax)
+		}
+		ports = append(ports, p)
+		if component.Capability == "relay" {
+			stun := nodePort{"udp", component.TCPPort, "relay STUN", ""}
+			if stun.port != edgeports.RelayWSS {
+				stun.skip = fmt.Sprintf("the control plane probes STUN only on UDP %d", edgeports.RelayWSS)
+			}
+			ports = append(ports, stun)
+		}
+	}
+	if component.QUICPort > 0 {
+		ports = append(ports, nodePort{"udp", component.QUICPort, component.Capability + " QUIC", "the control plane does not send QUIC"})
+	}
+	return ports
+}
+
+// nodePortAdvice describes what the control plane saw on an edge or relay port and the usual fix.
+func nodePortAdvice(name, transport string, port int, capability, detail string) string {
+	prefix := name + " is not reachable from the control plane: "
+	rule := strings.ToUpper(transport) + " " + strconv.Itoa(port)
+	switch detail {
+	case "timeout":
+		return prefix + "timed out, usually a cloud firewall drop; allow inbound " + rule + " from anywhere (security group, security list or VPC firewall)"
+	case "refused":
+		return prefix + "connection refused, so the host answered but nothing listens there; run pbh status and check the " + capability + " service"
+	case "unreachable":
+		return prefix + "rejected by the network (unreachable), usually the host firewall or routing; see the host firewall check above, or allow inbound " + rule + " by hand"
+	case "not_public":
+		return prefix + "the registered endpoint host does not resolve to a public address; fix --endpoint-host"
+	default:
+		return prefix + "check result '" + detail + "'; verify the endpoint host and firewalls"
+	}
+}
+
 func firewallLabel(kind string) string {
 	if kind == "" {
 		return "none active"
@@ -132,13 +209,13 @@ func firewallLabel(kind string) string {
 }
 
 // reachabilityAdvice turns what the control plane saw into the rule that is missing.
-func reachabilityAdvice(port int, detail string) string {
+func reachabilityAdvice(port int, detail string, rules []firewallRule) string {
 	prefix := fmt.Sprintf("test port %d is not reachable from the control plane: ", port)
 	switch detail {
 	case "timeout":
-		return prefix + "the connection timed out, so a cloud firewall is dropping it; add " + cloudRule() + " (security group, security list or VPC firewall)"
+		return prefix + "timed out, usually a cloud firewall drop; add " + cloudRule(rules) + " (security group, security list or VPC firewall)"
 	case "unreachable":
-		return prefix + "this host's firewall rejects it; run pbh install as root to open TCP 443, " + nodeRange + " and " + publicRange + " (or add the rule by hand)"
+		return prefix + "rejected by the network (unreachable), usually this host's firewall or routing; run pbh install as root to open " + rulesText(rules) + " (or add the rule by hand)"
 	case "refused":
 		return prefix + "the host answered but nothing listened; another firewall layer or a port forward is in the way"
 	case "nonce_mismatch":

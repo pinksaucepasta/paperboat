@@ -22,6 +22,8 @@ import argparse, json, os, re, shlex, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import health_report
+
 STATUS = Path.home() / ".local/state/paperboat-canary/status.json"
 UNIT = "paperboat-canary.service"
 FRESH = 300  # seconds a canary status counts as current; one run a minute, a broken run takes up to ~5 min
@@ -50,10 +52,11 @@ def parse_edge(text):
 
 class Gate:
     def __init__(self, args, sh, deploy, canary, wall=time.time, mono=time.monotonic, say=print, stage=None,
-                 skew_status=None, alert=None):
+                 skew_status=None, alert=None, report=None):
         self.a, self.sh, self.deploy, self.canary, self.stage = args, sh, deploy, canary, stage
         self.wall, self.mono, self.say = wall, mono, say
         self.skew_status, self.alert = skew_status or github_skew_status, alert or send_alert
+        self.report = report or health_report.push
 
     def schema_skew_passed(self, previous, current):
         """True when skew_check.sh's schema stage passed for the previous server image on the current one's schema."""
@@ -147,12 +150,23 @@ class Gate:
                 green, run = self.wait_green(switched)
                 if green:
                     self.say(f"kept: canary green after the switch (run {run['started']})")
+                    self.report("deploy", {"rolled_back": False, "kept_migrated": False, "what": self.a.what[:200],
+                                           "at": iso(self.wall())})
                     return 0
                 failed = [s["step"] for s in (run or {}).get("steps", []) if not s.get("ok")]
                 reason = f"no green canary run within {self.a.wait} s of the switch (failing: {', '.join(failed) or 'no result'})"
             self.say(f"rolling back: {reason}")
-            ok, kept = self.rollback(before)
+            outcome = {"rolled_back": True, "kept_migrated": False, "what": self.a.what[:200], "reason": reason[:300],
+                       "deploy_failed": code != 0, "at": iso(self.wall())}
+            try:
+                ok, kept = self.rollback(before)
+            except Exception:
+                self.report("deploy", {**outcome, "rollback_ok": False})
+                raise
+            outcome.update(rolled_back=not kept, kept_migrated=kept, rollback_ok=ok)
+            self.report("deploy", outcome)  # before the canary verdict, which can take minutes or fail
             green, run = self.wait_green(self.wall())
+            self.report("deploy", {**outcome, "green_after": green})
             self.say(f"after rollback: canary {'green' if green else 'still red'}"
                      + ("" if ok else "; a rollback step failed, see above")
                      + ("; the server was kept on the migrated schema: roll forward" if kept else ""))

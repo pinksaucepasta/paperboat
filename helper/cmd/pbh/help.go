@@ -64,7 +64,7 @@ Dashboard → Network → Add self-hosted node. The code carries no account iden
 readiness; use pbh doctor for the host and Dashboard → Network for registration. As root it also
 shows the state of automatic browser HTTPS (pbh configure-tls --acme).`,
 	"doctor": `Check this host for serving public tunnel ports: the outgoing port range, the host firewall for
-TCP 443, the carrier and relay ports (7272-7275) and the public port range, per-address connection limits, and a reachability test of a
+the ports this node listens on (carrier, relay, claim, TCP and UDP 443) and the public port range, per-address connection limits, and a reachability test of a
 test port from the control plane. Each failed check names the fix. Installations without a tunnel
 need no host setup and report so. Fails when no installation exists in --state-dir.`,
 	"configure-tls": `Operator command for Paperboat-managed installations only; it refuses customer self-hosted nodes. Set or rotate the browser-trusted HTTPS certificate for this installation's endpoint hostname.
@@ -78,7 +78,8 @@ pbh doctor and, as root, in pbh status, and the current certificate serves until
 Examples:
   pbh configure-tls --acme
   pbh configure-tls --https-cert /etc/paperboat/fullchain.pem --https-key /etc/paperboat/privkey.pem`,
-	"uninstall": `Stop the service and remove its containers and the pbh executables. Protected identity,
+	"uninstall": `Stop the service and remove its containers, host firewall rules, the edge certificate timer and
+service, and the pbh executables. Protected identity,
 credentials and configuration are kept for a reinstall unless both --remove-data and
 --confirm-remove-data are given, which deletes them permanently. Remove the node from
 Dashboard → Network to revoke its registration. Needs root (it re-runs itself with sudo).`,

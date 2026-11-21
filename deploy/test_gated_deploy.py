@@ -1,11 +1,13 @@
 """Canary-gated deploy: green keeps, red or a failed deploy rolls back, red before refuses, lock always freed."""
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+sys.path.insert(0, str(Path(__file__).parent))  # gated-deploy.py imports health_report from its own directory
 spec = importlib.util.spec_from_file_location('gated', Path(__file__).with_name('gated-deploy.py'))
 gated = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gated)
@@ -32,6 +34,7 @@ class Fake:
         self.migrated = False  # the deploy applied migrations: rollout-server.py refuses a rollback without --schema-skew-ok
         self.skew = {}  # (commit, context) -> GitHub status state
         self.alerts = []
+        self.reports = []  # (source, payload) pushed to the admin panel
 
     def sh(self, target, script):
         self.calls.append((target, script))
@@ -84,7 +87,7 @@ def gate(fake, status_file, force='', wait=300, stage=None):
     out = []
     g = gated.Gate(args, fake.sh, fake.deploy, fake.canary, wall=lambda: fake.clock, mono=lambda: fake.clock,
                    say=out.append, stage=stage, skew_status=lambda c, ctx: fake.skew.get((c, ctx), ''),
-                   alert=fake.alerts.append)
+                   alert=fake.alerts.append, report=lambda *r: fake.reports.append(r))
     return g.run(), out
 
 
@@ -108,6 +111,7 @@ class GatedDeployTest(unittest.TestCase):
         self.assertFalse(any('--image' in s or 'pbh install' in s for _, s in fake.calls))
         self.assertIsNone(fake.lock)
         self.assertTrue(out[-1].startswith('kept'))
+        self.assertEqual([(s, p['rolled_back']) for s, p in fake.reports], [('deploy', False)])  # clears the panel alert
 
     def test_access_pass_does_not_override_a_failed_account_probe(self):
         fake = Fake([True] * 5)
@@ -134,6 +138,11 @@ class GatedDeployTest(unittest.TestCase):
                                        'local': ('paperboat-relay:1', 'paperboat-edge:1')})
         rollback = [s for _, s in fake.calls if '--image' in s or 'pbh install' in s]
         self.assertEqual(len(rollback), 2)
+        (source, early), (_, report) = fake.reports  # the admin panel shows the rollback before and after the canary verdict
+        self.assertNotIn('green_after', early)
+        self.assertEqual((source, report['rolled_back'], report['green_after'], report['rollback_ok'], report['what']),
+                         ('deploy', True, True, True, 'W4 server 2'))
+        self.assertIn('no green canary run', report['reason'])
         self.assertIn('--reap', rollback[0])  # server first, reaped so retained generations never block it
         self.assertIn('--rollback --image', rollback[0])  # two draining servers never refuse a rollback
         self.assertIsNone(fake.lock)
@@ -161,6 +170,7 @@ class GatedDeployTest(unittest.TestCase):
         self.assertEqual(len(fake.alerts), 1)
         self.assertIn('SERVER KEPT', fake.alerts[0])
         self.assertIn('Roll forward', fake.alerts[0])
+        self.assertEqual([(s, p['rolled_back'], p['kept_migrated']) for s, p in fake.reports], [('deploy', False, True)] * 2)
         self.assertTrue(any('roll forward' in line for line in out))
         self.assertIsNone(fake.lock)
 

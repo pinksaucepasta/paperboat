@@ -33,7 +33,7 @@ const darwinBrokerAccount = "_paperboat_machineguard"
 
 // The receiver must have its own OS identity: permitting all root sockets would
 // admit unrelated privileged wildcard listeners after the controller exits.
-var darwinBrokerIdentity = func(ctx context.Context) (uint32, uint32, error) {
+var darwinBrokerIdentity = cacheIdentity(func(ctx context.Context) (uint32, uint32, error) {
 	var ids [2]uint32
 	for i, flag := range []string{"-u", "-g"} {
 		output, err := exec.CommandContext(ctx, "/usr/bin/id", flag, darwinBrokerAccount).Output()
@@ -47,7 +47,7 @@ var darwinBrokerIdentity = func(ctx context.Context) (uint32, uint32, error) {
 		ids[i] = uint32(value)
 	}
 	return ids[0], ids[1], nil
-}
+})
 
 var darwinSocketCommand = func(ctx context.Context, address, loopbackCIDR string) (*exec.Cmd, error) {
 	executable, err := os.Executable()

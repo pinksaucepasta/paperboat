@@ -56,6 +56,7 @@ type guardServer struct {
 	names           map[controlConn]map[string]string
 	aliases         map[controlConn]map[string]string
 	connections     map[controlConn]string
+	departed        map[controlConn]chan struct{} // closed once the connection's leases are withdrawn
 	wg              sync.WaitGroup
 	closing         bool
 	failures        chan error
@@ -254,6 +255,10 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		defer g.mu.Unlock()
 		g.withdraw(ctx, conn)
 		delete(g.connections, conn)
+		if departed, ok := g.departed[conn]; ok {
+			close(departed)
+			delete(g.departed, conn)
+		}
 	}()
 
 	g.mu.Lock()
@@ -268,14 +273,17 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		return
 	}
 	g.connections[conn] = uid
+	if g.departed == nil {
+		g.departed = map[controlConn]chan struct{}{}
+	}
+	g.departed[conn] = make(chan struct{})
 	g.mu.Unlock()
 	for {
 		in, err := conn.Receive()
 		if err != nil {
 			return
 		}
-		// Below the client's 10 s acquire/apply deadline, so a slow pfctl/ifconfig/nft run still answers in time.
-		opCtx, cancel := context.WithTimeout(ctx, 9*time.Second)
+		opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 		var file net.Listener
 		var status *RuntimeStatus
 		var certificate *CertificateBundle
@@ -298,20 +306,69 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 			out.IP = in.IP
 		}
 		if err != nil {
-			out.Error = err.Error()
-			if errors.Is(err, ErrPortInUse) {
-				out.ErrorCode = "port_in_use"
-			} else if errors.Is(err, ErrListenerRefused) {
-				out.ErrorCode = "listener_refused"
-			} else if errors.Is(err, ErrNamesRefused) {
-				out.ErrorCode = "names_refused"
-			}
+			out.Error, out.ErrorCode = err.Error(), errorCode(err)
 		}
 		if err := conn.Send(out, file); err != nil {
 			return
 		}
 
 	}
+}
+
+// awaitDeparture waits, with g.mu released, until owner's leases are withdrawn; false if ctx ended first or owner
+// is not a served connection. Prior art: tailscale ipn/ipnserver/server.go blocks a new client until the previous
+// one's teardown finished (actor waiting on the old one's done channel).
+func (g *guardServer) awaitDeparture(ctx context.Context, owner controlConn) bool {
+	departed, ok := g.departed[owner]
+	if !ok {
+		return false
+	}
+	g.mu.Unlock()
+	defer g.mu.Lock()
+	select {
+	case <-departed:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// cacheIdentity keeps lookup's first success: the guard account does not change while the guard runs, and each
+// lookup (two /usr/bin/id runs on macOS) woke opendirectoryd on every new listener and PF apply.
+func cacheIdentity(lookup func(context.Context) (uint32, uint32, error)) func(context.Context) (uint32, uint32, error) {
+	var mu sync.Mutex
+	var uid, gid uint32
+	found := false
+	return func(ctx context.Context) (uint32, uint32, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !found {
+			u, g, err := lookup(ctx)
+			if err != nil {
+				return 0, 0, err
+			}
+			uid, gid, found = u, g, true
+		}
+		return uid, gid, nil
+	}
+}
+
+// operationTimeout is below the client's exchangeTimeout, so a slow pfctl/ifconfig/nft run still answers in time.
+const operationTimeout = 9 * time.Second
+
+// errorCode types err for the client's responseError.
+func errorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrPortInUse):
+		return "port_in_use"
+	case errors.Is(err, ErrListenerRefused):
+		return "listener_refused"
+	case errors.Is(err, ErrNamesRefused):
+		return "names_refused"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	}
+	return ""
 }
 
 func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
@@ -439,6 +496,10 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			if _, exists := aliases[in.Hostname]; exists && g.sameNamespace(other, uid) {
 				return nil, errors.New("machine name conflicts with an active browser alias")
 			}
+		}
+		if lease, exists := g.leases[key]; exists && lease.owner != nil && lease.owner != conn && lease.uid == uid &&
+			g.awaitDeparture(ctx, lease.owner) {
+			return g.handle(ctx, conn, uid, in) // the same user's reconnect raced its old connection's withdrawal
 		}
 		if lease, exists := g.leases[key]; exists {
 			if lease.owner != nil || lease.uid != uid || lease.hostname != in.Hostname {

@@ -39,6 +39,9 @@ func platformInstallCommand() *cobra.Command {
 			warnings := installedTrustWarnings(c.Context())
 			if len(warnings) > 0 {
 				result["browser_https"] = "trust_pending"
+			}
+			warnings = append(warnings, managedSSHInstallWarnings()...)
+			if len(warnings) > 0 {
 				result["warnings"] = warnings
 			}
 			asJSON, _ := c.Flags().GetBool("json")

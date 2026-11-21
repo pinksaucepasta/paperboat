@@ -188,3 +188,98 @@ func TestCoordinatorRetriesATransientGuardFailureInTheSameReconcile(t *testing.T
 		})
 	}
 }
+
+// slowStatusGuardClient times out its first Status call only when the reconcile deadline is nearly spent, and
+// its second takes longer than what would be left of it.
+type slowStatusGuardClient struct {
+	*coordinatorNameClient
+	first bool
+}
+
+func (c *slowStatusGuardClient) Status(ctx context.Context) (machineguard.RuntimeStatus, error) {
+	if c.first {
+		deadline, _ := ctx.Deadline()
+		time.Sleep(time.Until(deadline) - 20*time.Millisecond)
+		return machineguard.RuntimeStatus{}, os.ErrDeadlineExceeded
+	}
+	select {
+	case <-time.After(100 * time.Millisecond):
+	case <-ctx.Done():
+		return machineguard.RuntimeStatus{}, ctx.Err()
+	}
+	return c.coordinatorNameClient.Status(ctx)
+}
+
+// A guard that times out late in the reconcile is retried with a full deadline of its own, not the few
+// milliseconds the failed attempt left.
+func TestCoordinatorRetriesALateGuardTimeoutWithItsOwnDeadline(t *testing.T) {
+	dials := 0
+	c, err := NewCoordinator(CoordinatorConfig{
+		SocketAddress:    socketAddress(shorttemp.Dir(t)),
+		ReconcileTimeout: 300 * time.Millisecond,
+		ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+			dials++
+			return &slowStatusGuardClient{coordinatorNameClient: &coordinatorNameClient{}, first: dials == 1}, nil
+		},
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Stop() })
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.24", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err = c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil || dials != 2 {
+		t.Fatalf("dials=%d err=%v; want the retry to succeed on a second dial", dials, err)
+	}
+}
+
+// countingGuardClient refuses every Status call and counts them.
+type countingGuardClient struct {
+	*coordinatorNameClient
+	calls *atomic.Int32
+}
+
+func (c *countingGuardClient) Status(context.Context) (machineguard.RuntimeStatus, error) {
+	c.calls.Add(1)
+	return machineguard.RuntimeStatus{}, errRefusal
+}
+
+// While a failed reconcile waits out its backoff, new snapshots and guard checks join that retry instead of
+// re-running the failing reconcile at once (a Mac ran its guard and name services hot in such a loop).
+func TestCoordinatorSnapshotsWaitForTheReconcileBackoff(t *testing.T) {
+	var calls atomic.Int32
+	c, err := NewCoordinator(CoordinatorConfig{
+		SocketAddress: socketAddress(shorttemp.Dir(t)),
+		RetryBase:     time.Hour, RetryMax: time.Hour,
+		ConnectNameClient: func(context.Context) (guardedNameClient, error) {
+			return &countingGuardClient{coordinatorNameClient: &coordinatorNameClient{}, calls: &calls}, nil
+		},
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Stop() })
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "laptop", AssignedIp: "127.100.0.25", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	first := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1)
+	if first == nil || calls.Load() != 1 {
+		t.Fatalf("setup: err=%v calls=%d; want one refused reconcile", first, calls.Load())
+	}
+	for revision := uint64(2); revision < 6; revision++ {
+		if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, revision); err != first {
+			t.Fatalf("deferred snapshot returned %v; want the pending failure %v", err, first)
+		}
+	}
+	c.retryMu.Lock()
+	retried := c.retryRevision
+	c.retryMu.Unlock()
+	if calls.Load() != 1 || retried != 5 {
+		t.Fatalf("guard called %d times, retry holds revision %d; want 1 call and the newest snapshot (5) queued", calls.Load(), retried)
+	}
+}

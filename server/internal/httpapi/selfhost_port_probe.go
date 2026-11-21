@@ -3,13 +3,14 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 )
 
-// PortProbe lets pbh doctor learn whether this node's public TCP range is reachable from outside:
-// the control plane connects to the credential's own node and expects the nonce echoed back.
+// PortProbe lets pbh doctor learn whether this node's public TCP range and its own edge and relay ports
+// are reachable from outside: the control plane connects to the credential's own node.
 func (h *SelfhostHandlers) PortProbe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	credential, ok := bearerToken(r)
@@ -18,18 +19,21 @@ func (h *SelfhostHandlers) PortProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Port  int    `json:"port"`
-		Nonce string `json:"nonce"`
+		Transport string          `json:"transport"`
+		Port      int             `json:"port"`
+		Nonce     json.RawMessage `json:"nonce"`
 	}
+	var nonce string
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
-	if decoder.Decode(&in) != nil {
-		writeError(w, r, 400, "invalid_request", "Send {\"port\": <public TCP port>, \"nonce\": <16-64 URL-safe characters>}.", nil)
+	// One object only; nonce absent or a string, never null.
+	if decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF || in.Nonce != nil && (string(in.Nonce) == "null" || json.Unmarshal(in.Nonce, &nonce) != nil) {
+		writeError(w, r, 400, "invalid_request", "Send {\"transport\": \"tcp\"|\"udp\", \"port\": <port>, \"nonce\": <16-64 URL-safe characters, public TCP ports only>}.", nil)
 		return
 	}
-	out, err := h.Service.ProbePort(r.Context(), credential, in.Port, in.Nonce)
+	out, err := h.Service.ProbePort(r.Context(), credential, in.Transport, in.Port, nonce)
 	switch {
 	case errors.Is(err, selfhost.ErrPortProbeInvalid):
-		writeError(w, r, 400, "invalid_request", "The port must be a public TCP tunnel port and the nonce 16-64 URL-safe characters.", nil)
+		writeError(w, r, 400, "invalid_request", "Probe a public TCP tunnel port with a 16-64 URL-safe character nonce, a TCP edge or relay node port without one, or the relay's STUN port on UDP.", nil)
 	case errors.Is(err, selfhost.ErrUnauthorized):
 		writeError(w, r, 401, "runtime_unauthorized", "This node's credential is no longer accepted; contact its operator.", nil)
 	case err != nil:

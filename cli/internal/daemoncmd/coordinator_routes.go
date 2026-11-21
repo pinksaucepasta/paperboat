@@ -126,8 +126,12 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	if err != nil && c.cfg.ConnectNameClient != nil && transientGuardFailure(ctx, err) && errors.As(err, &op) &&
 		(op.LocalAccessStep() == "guard_status" || op.LocalAccessStep() == "native_listener") {
 		diagnosticlog.TryWarn("machine guard did not answer; dialing it again", "error", err)
-		c.resetNameGenerationLocked(ctx)
-		err = c.replaceGuardedRoutesLocked(ctx, peers)
+		// The failed attempt spent most of ctx's budget: the retry gets a full one of its own, ended by Stop.
+		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.ReconcileTimeout)
+		defer cancel()
+		defer context.AfterFunc(c.ctx, cancel)()
+		c.resetNameGenerationLocked(retryCtx)
+		err = c.replaceGuardedRoutesLocked(retryCtx, peers)
 	}
 	return err
 }

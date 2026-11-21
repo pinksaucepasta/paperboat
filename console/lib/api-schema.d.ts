@@ -7207,8 +7207,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Check from the control plane that a node's public TCP range is reachable
-         * @description The runtime credential selects the exact node. The control plane connects to that node's registered public endpoint host (a public address only) on the given public TCP tunnel port and reports whether the node's temporary test listener echoed the nonce. Detail names what was seen: connected, refused, unreachable (a host firewall rejects), timeout (a cloud firewall drops), nonce_mismatch, not_public, unresolved. Responses are not cached.
+         * Check from the control plane that a node's public TCP range and its edge and relay ports are reachable
+         * @description The runtime credential selects the exact node. The control plane connects to that node's registered public endpoint host (a public address only). On a public TCP tunnel port (10000-59999) it reports whether the node's temporary test listener echoed the nonce; on a TCP edge or relay node port (7272-7275, no nonce) whether the connection was accepted; on UDP 7274 (the relay's STUN, no nonce) whether a STUN binding request was answered. Detail names what was seen: connected, refused, unreachable (a host firewall rejects), timeout (a cloud firewall drops), nonce_mismatch, not_public, unresolved. Responses are not cached.
          */
         post: operations["selfhost_port_probe"];
         delete?: never;
@@ -33026,8 +33026,21 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @enum {string} */
+                    transport: "tcp";
                     port: number;
                     nonce: string;
+                } | {
+                    /** @enum {string} */
+                    transport: "tcp";
+                    port: number;
+                    nonce?: string;
+                } | {
+                    /** @enum {string} */
+                    transport: "udp";
+                    /** @enum {integer} */
+                    port: 7274;
+                    nonce?: string;
                 };
             };
         };
@@ -39080,8 +39093,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    source: "hosts" | "canary";
+                    source: string;
                     payload: {
                         [key: string]: unknown;
                     };
@@ -39127,8 +39139,7 @@ export interface operations {
                     "application/json": {
                         data: {
                             reports: {
-                                /** @enum {string} */
-                                source: "hosts" | "canary";
+                                source: string;
                                 payload: {
                                     [key: string]: unknown;
                                 };

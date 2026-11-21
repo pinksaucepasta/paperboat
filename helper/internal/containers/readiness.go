@@ -165,15 +165,16 @@ type PortProbe struct {
 	Detail    string `json:"detail"`
 }
 
-// ProbePort asks the control plane to connect to this node's public address on port and expect nonce
-// echoed back by a listener the caller has opened there. dir is the installation state directory; the
-// tunnel component's runtime files live in its "tunnel" subdirectory.
-func ProbePort(ctx context.Context, dir string, port int, nonce string) (PortProbe, error) {
+// ProbePort asks the control plane to reach this node's public address on port over transport ("tcp" or
+// "udp"). A public-range TCP port expects nonce echoed back by a listener the caller has opened there; an
+// edge or relay node port takes no nonce (""), since the service itself holds it. dir is the installation
+// state directory; the tunnel component's runtime files live in its "tunnel" subdirectory.
+func ProbePort(ctx context.Context, dir, transport string, port int, nonce string) (PortProbe, error) {
 	node, err := newNodeClient("tunnel", filepath.Join(dir, "tunnel"))
 	if err != nil {
 		return PortProbe{}, err
 	}
-	body, err := json.Marshal(map[string]any{"port": port, "nonce": nonce})
+	body, err := json.Marshal(map[string]any{"transport": transport, "port": port, "nonce": nonce})
 	if err != nil {
 		return PortProbe{}, err
 	}

@@ -410,7 +410,11 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 }
 
 func (c *Coordinator) reconcileSnapshotLocked(ctx context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
+	unchanged := c.haveSnapshot && slices.EqualFunc(c.lastPeers, peers, samePeer)
 	c.lastPeers, c.lastRevision, c.haveSnapshot = peers, revision, true
+	if unchanged && c.deferToPendingRetry(peers, revision) {
+		return c.reconcileErr
+	}
 	before := c.PendingLocalAccessStep()
 	err := c.applySnapshotLocked(ctx, peers, revision)
 	c.reconcileErr = err
@@ -505,6 +509,25 @@ func (c *Coordinator) scheduleReconcileRetry(peers []*daemonrpc.PeerUpdate, revi
 			c.applySnapshot(peers, revision)
 		}
 	})
+}
+
+// deferToPendingRetry hands an unchanged snapshot to the retry already waiting out its backoff, so repeated
+// snapshots and guard checks do not re-run a failing reconcile faster than the backoff (a Mac's guard and name
+// services ran hot in such a loop). A changed snapshot runs at once: it may withdraw access or fix the failure.
+func (c *Coordinator) deferToPendingRetry(peers []*daemonrpc.PeerUpdate, revision uint64) bool {
+	c.retryMu.Lock()
+	defer c.retryMu.Unlock()
+	if c.retryTimer == nil {
+		return false
+	}
+	c.retryPeers, c.retryRevision = peers, revision
+	return true
+}
+
+func samePeer(a, b *daemonrpc.PeerUpdate) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.PeerId == b.PeerId && a.Alias == b.Alias &&
+		a.AssignedIp == b.AssignedIp && a.Online == b.Online && a.Approved == b.Approved &&
+		slices.Equal(a.ExportedPorts, b.ExportedPorts))
 }
 
 // PendingLocalAccessStep names the local access step still being retried after the last reconciliation

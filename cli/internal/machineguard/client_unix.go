@@ -84,14 +84,8 @@ func (c *Client) exchange(ctx context.Context, in request) (response, *os.File, 
 		return response{}, nil, net.ErrClosed
 	}
 	connection := c.conn
-	// A status ping is quick; acquire and apply run pfctl/ifconfig/iptables, which take seconds on a busy host.
-	// Prior art: tailscale wgengine/router/osrouter/router_linux.go runs each ip/iptables command without a short RPC cap.
-	timeout := 10 * time.Second
-	if in.Operation == "status" {
-		timeout = 5 * time.Second
-	}
 	started := time.Now()
-	deadline := started.Add(timeout)
+	deadline := started.Add(exchangeTimeout(in.Operation))
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}

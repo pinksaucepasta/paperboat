@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"net"
 	"net/netip"
 	"strings"
 	"sync"
@@ -47,6 +48,8 @@ type Service struct {
 	DialAddress         func(context.Context, string) (string, error)
 	// ProbeIngress replaces VerifyIngress inside ReconcileIngress when set (tests hold probes open).
 	ProbeIngress func(context.Context, string) error
+	// PortProbeDial replaces the port probe's dialer when set (tests).
+	PortProbeDial func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 func New(database *db.DB, encryptionKey string) *Service {
