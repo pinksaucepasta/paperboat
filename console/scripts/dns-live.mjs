@@ -70,7 +70,7 @@ export const readPanel = async (panel) => ({
   healthText: await panel.$eval("[data-dns-health]", (e) => e.innerText.replace(/\s+/g, " ")).catch(() => ""),
   pills: await panel.$$eval("[data-dns-record] [data-dns-status]", (e) => e.map((p) => p.getAttribute("data-dns-status"))),
   notes: await panel.$$eval("[data-dns-note]", (e) => e.map((n) => n.innerText.replace(/\s+/g, " "))),
-  apexRows: (await panel.$$("[data-dns-record=apex_routing]")).length,
+  records: await panel.$$eval("[data-dns-record]", (e) => e.map((r) => ({ purpose: r.getAttribute("data-dns-record"), status: r.querySelector("[data-dns-status]")?.getAttribute("data-dns-status") ?? null }))),
   copies: await panel.$$eval("button[aria-label^='Copy']", (b) => b.length),
   tunnelLinks: await panel.$$eval('a[href^="/tunnels/"]', (a) => [...new Set(a.map((x) => x.getAttribute("href")))]),
   usesPreview: (await panel.$$('a[href="/previews"]')).length > 0,

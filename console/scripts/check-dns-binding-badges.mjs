@@ -32,10 +32,23 @@ if (live.liveMode()) {
       verdict(`live/domains list: the entry shows a known DNS health`, live.HEALTHS.includes(r.health), String(r.health))
       if (cfg.expect) verdict(`live/domains list: the entry says ${cfg.expect}`, r.health === cfg.expect, String(r.health))
       verdict(`live/domains list: a tunnel or a preview is bound under the domain`, r.tunnelLinks.length > 0 || r.usesPreview, "the test domain's Used by list is empty: bind a tunnel or preview name under it")
-      const pages = [...r.tunnelLinks.map((href) => ["tunnel", href]), ...(r.usesPreview ? [["preview", "/previews"]] : [])]
+      // The panel's preview link has no id: find the preview pages from the Previews list and keep those that name the domain.
+      const previewPaths = []
+      if (r.usesPreview) {
+        const list = await context.newPage()
+        await list.goto(`${cfg.origin}/previews`, { timeout: 120_000 })
+        await list.waitForLoadState("networkidle").catch(() => {})
+        previewPaths.push(...(await list.$$eval('a[href^="/previews/"]', (a) => [...new Set(a.map((x) => x.getAttribute("href")))])).slice(0, 20))
+        await list.close()
+      }
+      const pages = [...r.tunnelLinks.map((href) => ["tunnel", href]), ...previewPaths.map((href) => ["preview", href])]
       for (const [kind, path] of pages) {
         const page = await context.newPage()
         await page.goto(`${cfg.origin}${path}`, { timeout: 120_000 })
+        if (kind === "preview") {
+          await page.waitForLoadState("networkidle").catch(() => {})
+          if (!(await page.locator("main").innerText().catch(() => "")).includes(cfg.domain)) { await page.close(); continue } // another preview
+        }
         const first = await page.waitForSelector("[data-dns-health]", { timeout: 60_000 }).catch(() => null)
         verdict(`live/${kind} ${path}: the domain row shows a DNS badge`, Boolean(first), first ? "" : live.squash((await page.locator("main").innerText().catch(() => "")).slice(0, 300)))
         if (first) {

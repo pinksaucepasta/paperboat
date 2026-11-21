@@ -32,9 +32,11 @@ if (live.liveMode()) {
       if (cfg.expect) verdict(`live/${name}: the header pill is ${cfg.expect}`, r.health === cfg.expect, String(r.health))
       verdict(`live/${name}: every record pill is a known status`, r.pills.length > 0 && live.knownPills(r.pills), r.pills.join())
       verdict(`live/${name}: the header pill agrees with the record pills`, live.healthAgreesWithPills(r.health, r.pills), `${r.health} vs ${r.pills.join()}`)
-      verdict(`live/${name}: the root-domain record is neither shown nor counted`, r.apexRows === 0 && !/Serves the domain itself/.test(r.text))
+      // The root-domain record only shows when the domain serves its root (then it is required and has a real status), never as not_checked.
+      verdict(`live/${name}: a root-domain record never shows as not checked`, r.records.filter((x) => x.purpose === "apex_routing").every((x) => x.status && x.status !== "not_checked"), r.records.map((x) => `${x.purpose}:${x.status}`).join())
       if (r.health === "healthy") verdict(`live/${name}: a healthy domain has no problem notes`, r.notes.length === 0, r.notes.join(" | "))
-      if (r.health === "wrong_address" || r.health === "missing") verdict(`live/${name}: a ${r.health} domain explains the problem`, r.notes.length > 0, r.notes.join(" | "))
+      // A bad verification record is explained by the domain's own failure message, not a per-record note: only routing records carry notes.
+      if (r.records.some((x) => x.purpose !== "verification" && (x.status === "wrong_address" || x.status === "missing"))) verdict(`live/${name}: a bad routing record is explained by a note`, r.notes.length > 0, r.notes.join(" | "))
       verdict(`live/${name}: every name and value has a copy button`, r.copies === 2 * r.pills.length, `${r.copies} buttons, ${r.pills.length} records`)
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       verdict(`live/${name}: no horizontal overflow`, overflow <= 0, `${overflow}px`)
