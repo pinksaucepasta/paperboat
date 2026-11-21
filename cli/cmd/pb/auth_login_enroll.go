@@ -110,7 +110,7 @@ func pairLoginEnrollment(c *command.Context, server string, enrollment *config.L
 	if err := finishMachineReplacement(c, machineID); err != nil {
 		return err
 	}
-	for _, warning := range installedTrustWarnings(c.Context) {
+	for _, warning := range append(installedTrustWarnings(c.Context), managedSSHInstallWarnings()...) {
 		if _, err = fmt.Fprintln(c.ErrWriter, warning); err != nil {
 			return err
 		}

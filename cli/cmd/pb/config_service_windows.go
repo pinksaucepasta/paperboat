@@ -77,7 +77,12 @@ func windowsConfigServiceStatus() string {
 	if err != nil {
 		return "invalid"
 	}
-	serviceName := "PaperboatRuntimeConfig-" + instance
+	return windowsServiceState(manager, "PaperboatRuntimeConfig-"+instance)
+}
+
+// windowsServiceState is not_installed, installed_inactive, active, invalid or unavailable for serviceName,
+// queried with read-only rights.
+func windowsServiceState(manager *mgr.Mgr, serviceName string) string {
 	name, err := windows.UTF16PtrFromString(serviceName)
 	if err != nil {
 		return "invalid"

@@ -184,10 +184,14 @@ func pairCommand() *cobra.Command {
 				return err
 			}
 			warnings := installedTrustWarnings(command.Context())
+			trustPending := len(warnings) > 0
+			warnings = append(warnings, managedSSHInstallWarnings()...)
 			if jsonOutput {
 				result := map[string]any{"machine_id": paired.MachineID, "environment_id": paired.EnvironmentID, "server_url": paired.ServerURL, "installation_generation": paired.InstallationGeneration}
-				if len(warnings) > 0 {
+				if trustPending {
 					result["browser_https"] = "trust_pending"
+				}
+				if len(warnings) > 0 {
 					result["warnings"] = warnings
 				}
 				return writeCLIJSON(command.OutOrStdout(), result)

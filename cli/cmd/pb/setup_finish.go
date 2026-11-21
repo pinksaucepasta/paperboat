@@ -28,10 +28,18 @@ func finishMachineSetup(command *cobra.Command, client *api.Client, identityStor
 	if err := exportSetupRecoveryKey(command); err != nil {
 		return setupFailure(err)
 	}
+	warnings := managedSSHInstallWarnings()
 	if jsonOutput {
 		recoveryOutput, _ := command.Flags().GetString("recovery-output")
-		return writeCLIJSON(command.OutOrStdout(), map[string]any{"machine": machine, "inbox_path": inboxPath, "recovery_output": strings.TrimSpace(recoveryOutput)})
+		result := map[string]any{"machine": machine, "inbox_path": inboxPath, "recovery_output": strings.TrimSpace(recoveryOutput)}
+		if len(warnings) > 0 {
+			result["warnings"] = warnings
+		}
+		return writeCLIJSON(command.OutOrStdout(), result)
 	}
 	fmt.Fprintf(command.OutOrStdout(), "Set up %s (%s)\n", machine.Alias, machine.ID)
+	for _, warning := range warnings {
+		fmt.Fprintln(command.ErrOrStderr(), warning)
+	}
 	return nil
 }
