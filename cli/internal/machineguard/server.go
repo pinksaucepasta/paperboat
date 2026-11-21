@@ -3,6 +3,7 @@
 package machineguard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -48,6 +49,7 @@ type guardServer struct {
 	mu              sync.Mutex
 	cfg             Config
 	reserved        reservations
+	persisted       []byte // last reservations written; an unchanged state is not rewritten
 	claims          *claimBook
 	leases          map[string]*guardedLease
 	gateways        map[int]*sharedGateway
@@ -573,6 +575,12 @@ func (g *guardServer) persist() error {
 	if err != nil {
 		return err
 	}
+	// Every acquire persists under g.mu; on slow storage an unchanged rewrite (two fsyncs) held up all guard requests
+	// past their 5 s deadline. Same as tailscale ipn/store FileStore.WriteState.
+	if bytes.Equal(data, g.persisted) {
+		return nil
+	}
+	g.persisted = nil // a write that fails part-way leaves the file unknown
 	//paperboat:allow-source-policy atomic-replacement owner=machineguard reason=inherited-acl-state-publication
 	file, err := os.CreateTemp(g.cfg.StateDir, ".reservations-")
 	if err != nil {
@@ -593,7 +601,11 @@ func (g *guardServer) persist() error {
 	if err = replaceStateFile(name, filepath.Join(g.cfg.StateDir, "reservations.json")); err != nil {
 		return err
 	}
-	return syncDirectory(g.cfg.StateDir)
+	if err = syncDirectory(g.cfg.StateDir); err != nil {
+		return err
+	}
+	g.persisted = data
+	return nil
 }
 func (g *guardServer) withdraw(ctx context.Context, conn controlConn) {
 	var retired []net.Listener
