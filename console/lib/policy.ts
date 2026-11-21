@@ -14,11 +14,6 @@ export type PolicyProblem = Schemas["PolicyProblem"]
 /** `ports` is private_access only, e.g. "22,80,443,1024-65535". */
 export type AccessChange = Schemas["PolicyChange"]
 export type Validation = Schemas["PolicyValidation"]
-/** `key_delivered: false`: env_read is allowed but no key holder has delivered the team ENV key yet. */
-export type Decision = Schemas["PolicyDecision"]
-export type Explanation = Schemas["PolicyExplanation"]
-/** `author` is `user:<email>`; absent for versions nobody saved (the first one, written by Paperboat). */
-export type PolicyVersion = Schemas["PolicyVersion"]
 
 export type ScopeEntry = Schemas["ApiTokenScopeEntry"]
 export type APIToken = Schemas["ApiToken"]
@@ -128,31 +123,6 @@ export function setMachineTags(
 /** `tag:<name>` names: lowercase letters, digits, . _ -; 1–63 characters, starting with a letter or digit. */
 export const tagNamePattern = /^tag:[a-z0-9][a-z0-9._-]{0,62}$/
 
-export const policyVersionQuery = (workspace: string, version: number) =>
-  queryOptions({
-    queryKey: ["policy", workspace, "version", version],
-    queryFn: ({ signal }) =>
-      call<Policy>("Loading the version", `${ws(workspace)}/policy?version=${version}`, { signal }),
-    staleTime: Infinity,
-  })
-
-/** A policy's saved versions, newest first, one server page at a time (load more until the server's total). */
-export const policyVersionsQuery = (workspace: string) =>
-  infiniteQueryOptions({
-    queryKey: ["policy", workspace, "versions"],
-    queryFn: async ({ pageParam, signal }) => {
-      const query = new URLSearchParams({ limit: "50", ...(pageParam && { cursor: pageParam }) })
-      return call<Schemas["PolicyVersionsPage"]>(
-        "Loading the history",
-        `${ws(workspace)}/policy/versions?${query}`,
-        { signal },
-      )
-    },
-    initialPageParam: "",
-    getNextPageParam: (page) => page.next_cursor || undefined,
-    enabled: Boolean(workspace),
-  })
-
 export function validatePolicy(workspace: string, policy: string, signal?: AbortSignal) {
   return call<Validation>("Checking the policy", `${ws(workspace)}/policy/validate`, {
     method: "POST",
@@ -166,20 +136,6 @@ export function savePolicy(
   fields: { policy: string; expected_version: number; message?: string; confirm?: string },
 ) {
   return call<Policy>("Saving the policy", `${ws(workspace)}/policy`, { method: "PUT", json: fields })
-}
-
-export function restorePolicy(
-  workspace: string,
-  fields: { version: number; expected_version: number; message?: string; confirm?: string },
-) {
-  return call<Policy>("Restoring the version", `${ws(workspace)}/policy/restore`, { method: "POST", json: fields })
-}
-
-export function explainPolicy(
-  workspace: string,
-  fields: { policy?: string; src?: string; dst?: string; action?: string; port?: number; api_token?: string; recipe?: string },
-) {
-  return call<Explanation>("Testing access", `${ws(workspace)}/policy/explain`, { method: "POST", json: fields })
 }
 
 /**
@@ -249,25 +205,6 @@ export const actionLabels: Record<string, string> = {
   recording_view: "Replay recordings",
 }
 
-export const reasonLabels: Record<string, string> = {
-  owner: "The machine's owner always has access",
-  rule: "Allowed by a rule",
-  denied_by_rule: "Denied by a rule",
-  no_rule: "No rule allows it",
-  port_not_allowed: "The rule does not cover this port",
-  private_access_off: "Private access is off for this team",
-  outside_token_scope: "Outside the API token's scope",
-  outside_recipe_reach: "Outside the recipe’s reach",
-}
-
-export const guardrailLabels: Record<string, string> = {
-  team_suspended: "The team is suspended",
-  membership_inactive: "The member is not active in this workspace",
-  machine_not_in_workspace: "The machine is not in this workspace",
-  team_not_entitled: "The team's plan does not include this",
-  machine_service_off: "The service is switched off on the machine",
-}
-
 /** Tag and group names: lowercase letters, digits, `.`, `_` and `-`, up to 63. API token names too. */
 export const namePattern = /^[a-z0-9][a-z0-9._-]{0,62}$/
 
@@ -328,50 +265,4 @@ export function parsePolicy(text: string): PolicyFile | undefined {
   } catch {
     return undefined
   }
-}
-
-/** A line diff (longest common subsequence), for comparing policy versions. Sizes are bounded by the file limit. */
-export function lineDiff(before: string, after: string): { kind: " " | "-" | "+"; text: string }[] {
-  const a = before.split("\n")
-  const b = after.split("\n")
-  const table = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1))
-  for (let i = a.length - 1; i >= 0; i--)
-    for (let j = b.length - 1; j >= 0; j--)
-      table[i][j] = a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1])
-  const out: { kind: " " | "-" | "+"; text: string }[] = []
-  let i = 0
-  let j = 0
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      out.push({ kind: " ", text: a[i] })
-      i++
-      j++
-    } else if (j < b.length && (i === a.length || table[i][j + 1] >= table[i + 1][j]))
-      out.push({ kind: "+", text: b[j++] })
-    else out.push({ kind: "-", text: a[i++] })
-  }
-  return out
-}
-
-/** " by <who>" for the policy's last save; empty when the server saved it. */
-export function savedBy(policy: Policy) {
-  if (!policy.updated_by) return ""
-  const who = policy.updated_by.replace(/^user:/, "")
-  return ` by ${who}${policy.updated_with_api_token ? ` with API token ${policy.updated_with_api_token}` : ""}${policy.updated_with_recipe ? ` with recipe ${policy.updated_with_recipe}` : ""}`
-}
-
-/** Shown wherever the signed-in member may look but not change the policy. */
-export function readOnlyNote(policy: Policy) {
-  if (policy.can_edit === "all") return null
-  return policy.can_edit === "own_machines"
-    ? "You can change access only for your own machines, from the Team page."
-    : "Only owners and admins can change access."
-}
-
-/** What a `config_sync` rule's errors mean, in plain words, by the server's error code. */
-export const configSyncProblems: Record<string, string> = {
-  required: "Add a target.",
-  unknown_target: "Use machine:* or a tag this policy defines.",
-  invalid_repository: "Use a Git URL (https://, ssh://, user@host:path) or an absolute path.",
-  invalid_branch: "Not a valid Git branch name.",
 }

@@ -819,17 +819,8 @@ deciding rule path.
 
 #### Console (maintainer paths, done by maintainer)
 
-Workspace → **Access**:
-- **Simple** (default): machines × people grid with today's capability checkboxes (the
-  current "Manage access" dialog, unchanged), tag chips on machines, groups, the "Allow
-  private access" switch. Rules the grid cannot show (tags, groups, ports, denies) appear as
-  read-only rows "from the policy file" with an Edit link.
-- **Policy file:** code editor with schema completion, inline errors at the exact path,
-  Format, and **Review changes** (who gains/loses what) before **Save**.
-- **Test:** pick who / machine / action / port (and optionally an API token) → Allowed or
-  Denied with the deciding rule or guardrail, against the saved policy or the unsaved draft;
-  runs the file's `tests`.
-- **History:** versions with author, message, change summary, Diff and Restore.
+Workspace → **Access** (removed from the console on 2026-11-21): the policy file is edited with
+`pb policy` and the API only; the console keeps machine tags and Settings → API tokens.
 Settings → **API tokens**: create (name, expiry, optional scope built from tags/machines and
 actions), list (last used, expiry), revoke.
 
@@ -864,7 +855,7 @@ Simple view (user decision 2026-10-22): preview/tunnel `use`/`manage` and lazy-p
 - F18-06: API tokens: create/list/revoke with expiry, act as their creator, optional scope narrows (solo personal workspace "token may only exec on tag:ci" works), creator losing access takes it from the token, used by `pb` after `pb login --api-token-file`, every use attributed.
 - F18-07: ENV in rules: env_read/env_write decide team ENV grants; removing access revokes as `pb env team revoke` does; explain reports "allowed, key not delivered yet".
 - F18-08: Who may edit: owners/admins edit all; a member edits only rules for their own shared machines; members read and explain their own access.
-- F18-09: Console Access page (Simple grid with today's grants, private-access switch, tags, groups; Policy file editor with inline errors and Review changes; Test; History with Diff/Restore) and Settings → API tokens (scripted browser check).
+- F18-09: Settings → API tokens (scripted browser check). The console Access page and its policy editor (grid, Policy file, Test, History) were removed 2026-11-21; the policy stays managed with `pb policy` and the API.
 - F18-10: CLI `pb policy` and `pb api-token` commands work end to end against the live server (device check on the windows-test VMs).
 - F18-11: Machine tags as a first-class action (user report: no way to tag machines): `PUT /v1/workspaces/{ws}/machines/{machine}/tags` and `GET /v1/workspaces/{ws}/tags` edit and list the policy file's tags map (the only store) as reviewed, audited versions with the editor's rights; tags on machine items; `pb machine tag <machine> add|remove|set`, TAGS and `--tag` in `pb machine list`, tags in `pb status`; console Edit tags, tag filter, Access links (maintainer).
 
@@ -1234,7 +1225,7 @@ from recipe ci; revision 3 applied.` and exits 0 (cloud-init and CI caches rerun
 
 #### 3. Every error in the first five minutes
 
-Writing the file (`pb recipe create|update`, console editor; same text from `shared/recipe`):
+Writing the file (`pb recipe create|update`; the console editor was removed 2026-11-21; same text from `shared/recipe`):
 
 ```text
 Error: ci.toml:7:9: expected a value after "=".

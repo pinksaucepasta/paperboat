@@ -209,39 +209,6 @@ for (const way of ["back", "forward", "sidebar", "cancel"])
     () => viaList("API tokens", "Create token"),
   )
 
-// 3) Create recipe + edit recipe.
-async function recipeRound(label, originPath, nameSel, fillName, home) {
-  for (const way of ["back", "forward", "sidebar", "cancel"])
-    await round(
-      label, originPath, "Recipes", way,
-      async () => ((await page.locator(fillName ? "#recipe-name" : "textarea").filter({ visible: true }).count()) > 0),
-      async () => {
-        if (fillName) await page.locator("#recipe-name").filter({ visible: true }).fill("flowdraft")
-        await page.locator("textarea").filter({ visible: true }).first().fill('machines: ["flow-alpha"]\n# draft\n')
-        await sleep(600)
-      },
-      async () => {
-        if (fillName) {
-          const v = await page.locator("#recipe-name").filter({ visible: true }).inputValue().catch(() => "MISSING")
-          if (v === "MISSING") return { ok: false, detail: "name field missing after return" }
-          if (v !== "") return { ok: false, detail: `stale name: "${v}"` }
-        }
-        const src = await page.locator("textarea").filter({ visible: true }).first().inputValue().catch(() => "MISSING")
-        if (src === "MISSING") return { ok: false, detail: "editor missing after return" }
-        if (/# draft/.test(src)) return { ok: false, detail: "stale source draft visible" }
-        return { ok: true }
-      },
-      async () => ({ ok: true, detail: "reopen covered by clean (page, not dialog)" }),
-      home,
-    )
-}
-await recipeRound("recipe-new", "/settings/recipes/new", null, true, () => viaList("Recipes", "New recipe"))
-await recipeRound("recipe-edit", "/settings/recipes/flow-recipe/edit", null, false, async () => {
-  await viaList("Recipes", "flow-recipe")
-  await page.getByRole("link", { name: "Edit", exact: true }).filter({ visible: true }).first().click()
-  await sleep(1500)
-})
-
 // 4) Create team dialog (button + ?create=1).
 for (const way of ["back", "forward", "esc", "close"])
   await dialogRound("create-team", "/team", "Team", way, "Create team", "Create team", async () => {
@@ -387,31 +354,12 @@ for (const way of ["back", "forward", "esc", "close"])
     await sleep(500)
   })
 
-// 11) Cheap extras: recipe rotate, tags edit, access ChangesDialog.
-for (const way of ["back", "close"])
-  await dialogRound("recipe-rotate", "/settings/recipes/flow-recipe", "Recipes", way, "Rotate token", "Rotate flow-recipe", null, null, null, () => viaList("Recipes", "flow-recipe"))
+// 11) Cheap extras: tags edit.
 for (const way of ["back", "esc"])
   await dialogRound("tags-edit", "/machines/m-alpha", "Machines", way, "Add tags", "Tags of flow-alpha", async () => {
     await dlg("Tags of flow-alpha").getByRole("textbox", { name: "New tag" }).filter({ visible: true }).fill("flowtag")
     await sleep(500)
   }, null, null, () => viaList("Machines", "flow-alpha"))
-for (const way of ["back", "close"]) {
-  const prep = async () => {
-    const a = page.getByRole("textbox", { name: "Policy file" }).filter({ visible: true })
-    if ((await a.count()) > 0) {
-      await a.first().press("End")
-      await a.first().type("\n# flow draft")
-      await sleep(1000)
-    }
-  }
-  await goto("/access")
-  await prep()
-  const rev = page.getByRole("button", { name: "Review changes", exact: true }).filter({ visible: true })
-  if ((await rev.count()) === 0 || (await rev.first().isDisabled()))
-    pass(`access-changes / ${way}`, true, "SKIP: no enabled Review changes button")
-  else await dialogRound("access-changes", "/access", "Access", way, "Review changes", "Review changes", null, null, prep)
-}
-
 for (const s of steps) console.log(`${s.ok ? "PASS" : "FAIL"}  ${s.step}${s.detail ? `  (${s.detail})` : ""}`)
 console.log(`${steps.filter((s) => s.ok).length}/${steps.length} passed`)
 await browser.close()

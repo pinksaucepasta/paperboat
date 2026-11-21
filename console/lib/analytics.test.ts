@@ -50,10 +50,6 @@ test("every event carries the app, the session and the client class, never a que
 
 test("route templates hide ids and names but keep the tab", () => {
   expect(routePath("/machines/m_123/terminals", { machineId: "m_123", tab: "terminals" })).toBe("/machines/[machineId]/terminals")
-  expect(routePath("/settings/recipes/my-recipe/edit", { name: "my-recipe" })).toBe("/settings/recipes/[name]/edit")
-  // A name that is a prefix of a static segment, or has characters the URL encodes, still never leaks.
-  expect(routePath("/settings/recipes/recipe/edit", { name: "recipe" })).not.toContain("recipe/edit")
-  expect(routePath("/settings/recipes/my%20recipe/edit", { name: "my recipe" })).toBe("/settings/recipes/[name]/edit")
   expect(routePath("/machines/m1/terminals", { machineId: "m1", tab: "terminals" })).toBe("/machines/[machineId]/terminals")
 })
 

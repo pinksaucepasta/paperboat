@@ -101,8 +101,6 @@ const machine = (id, alias, platform) =>
   })
 const MACHINES = [machine("m-alpha", "flow-alpha", "linux"), machine("m-beta", "flow-beta", "darwin")]
 let enrollment = null
-const recipeSeed = () =>
-  Object.assign(synth({ $ref: "RecipeView" }), { id: "r-flow", name: "flow-recipe", workspace: "personal", revision: 1, token: "mock-secret-token", source: 'machines: ["flow-alpha"]\n', format: "yaml", created_by: "acct-flow", created_at: now(), updated_at: now(), expires_at: now() })
 
 const server = http.createServer((req, res) => {
   let body = ""
@@ -150,8 +148,6 @@ const server = http.createServer((req, res) => {
     if (method === "POST" && path === "teams") return send(200, { data: { url: "https://example.test/checkout" } })
     if (method === "GET" && path === "teams") return send(200, { data: [] })
     if (method === "GET" && path === "domains") return send(200, { data: { items: [] } })
-    if (method === "GET" && path === "workspaces/personal/recipes") return send(200, { data: { recipes: [recipeSeed()] } })
-    if ((m = path.match(/^workspaces\/[^/]+\/recipes\/([^/]+)$/)) && method === "GET") return send(200, { data: { recipe: { ...recipeSeed(), name: decodeURIComponent(m[1]) }, machines: [] } })
     if ((m = path.match(/^workspaces\/[^/]+\/tags$/)) && method === "GET")
       return send(200, { data: Object.assign(synth({ $ref: "WorkspaceTags" }), { tags: [], can_edit: "all", policy_version: 1 }) })
     if ((m = path.match(/^workspaces\/[^/]+\/policy$/)) && method === "GET")

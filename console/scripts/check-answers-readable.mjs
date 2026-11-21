@@ -17,7 +17,7 @@ const log = (ok, step, detail = "") => {
 const refused = []
 page.on("console", (message) => /cannot read|invalid_response/.test(message.text()) && refused.push(message.text().slice(0, 200)))
 const machines = (await (await ctx.request.get(`${origin}/api/v1/machines?workspace=personal&limit=1`)).json()).data?.items ?? []
-const routes = ["/", "/terminals", "/terminals?view=recordings", "/previews", "/tunnels", "/files", "/environment", "/config", "/network", "/usage", "/activity", "/team", "/access", "/settings", "/billing", "/settings/recipes"]
+const routes = ["/", "/terminals", "/terminals?view=recordings", "/previews", "/tunnels", "/files", "/environment", "/config", "/network", "/usage", "/activity", "/team", "/settings", "/billing"]
 if (machines[0]) routes.push(`/machines/${machines[0].id}`, `/terminals?machine=${machines[0].id}`, `/files?machine=${machines[0].id}`)
 for (const route of routes) {
   refused.length = 0

@@ -2,7 +2,7 @@
 // On a client navigation Next renders the page's static shell (WithSession's Suspense fallback) while the server
 // renders; React then replaces the shell's tree (it never reconciles a fallback with its content), so plain
 // `useState` would be lost (lib/use-shell-state.tsx keeps it). Only pages with a `WithSession` leaf show such
-// a shell (tunnels, terminals, config, activity, files, settings/recipes list, [name], [name]/edit,
+// a shell (tunnels, terminals, config, activity, files,
 // settings/api-tokens, and every page under /machines/[machineId]/ via the machine layout's own leaf); the
 // Files shell has no machine picked (its Inbox filename filter needs one), so it has no case. For each case:
 // hold the server's render (every control-plane read waits on a promise: no sleeping), push the target on the

@@ -149,3 +149,6 @@ export async function namedVaultNames(
 /** Deletes a vault and its values; the server refuses while a recipe still reads it (`vault_in_use`). */
 export const deleteNamedVault = (workspace: string, name: string) =>
   apiAction(vaultPath(workspace, name), { method: "DELETE" })
+
+export const nameHint = "Lowercase letters, numbers and dashes. Up to 63."
+export const validName = (name: string) => /^[a-z0-9][a-z0-9-]{0,62}$/.test(name)

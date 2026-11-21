@@ -308,11 +308,7 @@ function RulesSection({ policy, admin }: { policy: Policy | undefined; admin: bo
       )}
       {editable && policy && !rewritable && (
         <p className="py-3 text-sm text-muted-foreground">
-          The policy file has comments. Change recording rules in the{" "}
-          <Link href="/access" className="text-foreground underline underline-offset-4">
-            policy file
-          </Link>
-          .
+          The policy file has comments. Change recording rules in the policy file.
         </p>
       )}
       {adding && policy && (

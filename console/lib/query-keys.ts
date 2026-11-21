@@ -18,9 +18,6 @@ export const queryKeys = {
   /** A workspace's API tokens, all or one `state`; without `state` it is the prefix of every state (to invalidate). */
   apiTokens: (workspace: string, state?: "active" | "ended") =>
     state ? (["api-tokens", workspace, state] as const) : (["api-tokens", workspace] as const),
-  /** A workspace's recipes (the list), or one recipe by name; `["recipes", workspace]` is the prefix of both. */
-  recipes: (workspace: string, name?: string) =>
-    name ? (["recipes", workspace, name] as const) : (["recipes", workspace] as const),
   tags: (workspace: string) => ["policy", workspace, "tags"],
   githubStatus: ["github-status"],
   /** A tunnels page; `options` as tunnelsPageQuery takes them (lib/tunnels.ts). */
