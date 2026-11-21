@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,5 +74,20 @@ func TestDistributionQueueIsScopedToTheCallersOwnCredential(t *testing.T) {
 	}
 	if code := pull(edge02Bearer, "edge_02"); code != http.StatusOK {
 		t.Fatalf("node B own pull = %d, want 200", code)
+	}
+}
+
+// A request deadline shorter than the on-demand wait (the router's 15 s against 25 s) must still end in
+// "not yet", not the router's timeout: prod falkenstein-1 got 503 on every first request.
+func TestOnDemandWaitEndsBeforeTheRequestDeadline(t *testing.T) {
+	hub := &DistributionHub{onDemand: func(ctx context.Context, _ DistributionNodeIdentity, _ string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	parent, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := hub.awaitOnDemand(parent, DistributionNodeIdentity{NodeID: "edge_01", ProcessEpoch: "epoch_0001"}, "leaf.example.test")
+	if !errors.Is(err, ErrCertificateNotReady) || parent.Err() != nil {
+		t.Fatalf("await = %v, parent = %v; want not-ready before the request deadline", err, parent.Err())
 	}
 }

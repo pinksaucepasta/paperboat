@@ -881,7 +881,12 @@ func issuancePending(err error) bool {
 // in-process channel. Prior art: certmagic's on-demand obtain waits on the in-flight issuance for the same name
 // (handshake.go obtainOnDemandCertificate, obtainCertWaitChans, bounded wait). Only a wait that runs out is returned.
 func (h *DistributionHub) awaitOnDemand(parent context.Context, identity DistributionNodeIdentity, hostname string) error {
-	ctx, cancel := context.WithTimeout(parent, onDemandWait)
+	wait := onDemandWait
+	if deadline, ok := parent.Deadline(); ok {
+		// End our wait before the request's own deadline, so the edge gets "not yet" (409), never the router's 503.
+		wait = min(wait, time.Until(deadline)*4/5)
+	}
+	ctx, cancel := context.WithTimeout(parent, wait)
 	defer cancel()
 	delay := 250 * time.Millisecond
 	for {
