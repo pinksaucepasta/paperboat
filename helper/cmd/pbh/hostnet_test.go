@@ -67,7 +67,7 @@ func (f *fakeHost) called(prefix string) int {
 func TestSetupMovesTheOutgoingRangeAndUninstallRestoresIt(t *testing.T) {
 	f := newFakeHost(t, "32768 60999")
 	var out strings.Builder
-	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out); err != nil {
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out, true, "[::]:7277"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := currentOutgoing(f.paths.proc); got != "60000 65535" {
@@ -94,7 +94,7 @@ func TestSetupMovesTheOutgoingRangeAndUninstallRestoresIt(t *testing.T) {
 
 func TestSetupRaisesTheUDPBuffersForQUICAndUninstallRestoresThem(t *testing.T) {
 	f := newFakeHost(t, "60000 65535")
-	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}, true, "[::]:7277"); err != nil {
 		t.Fatal(err)
 	}
 	want := fmt.Sprint(udpBufferBytes)
@@ -105,7 +105,7 @@ func TestSetupRaisesTheUDPBuffersForQUICAndUninstallRestoresThem(t *testing.T) {
 		t.Fatalf("udp sysctl file = %q", file)
 	}
 	// A rerun keeps the original values for uninstall.
-	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}, true, "[::]:7277"); err != nil {
 		t.Fatal(err)
 	}
 	if err := removeHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
@@ -119,7 +119,7 @@ func TestSetupRaisesTheUDPBuffersForQUICAndUninstallRestoresThem(t *testing.T) {
 func TestSetupNeverLowersAHigherUDPBuffer(t *testing.T) {
 	f := newFakeHost(t, "60000 65535")
 	f.udp["net.core.rmem_max"] = "26214400"
-	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}, true, "[::]:7277"); err != nil {
 		t.Fatal(err)
 	}
 	if f.udp["net.core.rmem_max"] != "26214400" || f.udp["net.core.wmem_max"] != fmt.Sprint(udpBufferBytes) {
@@ -138,7 +138,7 @@ func TestSetupLeavesACorrectRangeAlone(t *testing.T) {
 	if err := os.WriteFile(f.paths.sysctl, []byte("net.ipv4.ip_local_port_range = 60000 65535\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}); err != nil {
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}, true, "[::]:7277"); err != nil {
 		t.Fatal(err)
 	}
 	if f.called("sysctl -w net.ipv4") != 0 {
@@ -149,7 +149,7 @@ func TestSetupLeavesACorrectRangeAlone(t *testing.T) {
 func TestSetupRefusesWhenAnotherSysctlOverridesTheRange(t *testing.T) {
 	f := newFakeHost(t, "32768 60999")
 	f.sysctlOff = true
-	err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{})
+	err := setupHostNetwork(t.Context(), f.run, f.paths, &strings.Builder{}, true, "[::]:7277")
 	var command commandError
 	if !errors.As(err, &command) || !strings.Contains(err.Error(), "another sysctl setting overrides it") {
 		t.Fatalf("err = %v", err)
@@ -178,8 +178,24 @@ func TestDetectFirewall(t *testing.T) {
 	}
 }
 
+var testRules = hostFirewallRules(true, 7277)
+
+// The rules cover TCP and UDP: 443, the carrier/relay ports and the claim port, and the public range on TCP.
+func TestHostFirewallRulesCoverTCPAndUDP(t *testing.T) {
+	if got := rulesText(testRules); got != "TCP 443, 7272-7275, 7277, 10000-59999 and UDP 443, 7272-7275" {
+		t.Fatalf("rules = %q", got)
+	}
+	if got := rulesText(hostFirewallRules(false, 7277)); got != "TCP 443, 7272-7275, 7277 and UDP 443, 7272-7275" {
+		t.Fatalf("rules without a tunnel = %q", got)
+	}
+	if claimPortOf("[::]:7277") != 7277 || claimPortOf("127.0.0.1:9000") != 9000 || claimPortOf("bad") != 7277 {
+		t.Fatal("claim port not read from the claim listen address")
+	}
+}
+
 func TestFirewallAddAndRemovePerKind(t *testing.T) {
-	spec := strings.Join(iptablesSpec(), " ")
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
 	for name, test := range map[string]struct {
 		kind    string
 		answers map[string]string
@@ -187,19 +203,30 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 		wantAdd []string // command prefixes that must have run on add
 		wantDel []string // ... and on remove
 	}{
-		"ufw": {"ufw", map[string]string{"ufw allow 443/tcp": "Rule added", "ufw allow 7272:7275/tcp": "Rule added", "ufw allow 10000:59999/tcp": "Skipping adding existing rule", "ufw delete allow 443/tcp": "", "ufw delete allow 7272:7275/tcp": ""}, []string{"443/tcp", "7272:7275/tcp"},
-			[]string{"ufw allow 443/tcp", "ufw allow 7272:7275/tcp", "ufw allow 10000:59999/tcp"}, []string{"ufw delete allow 443/tcp", "ufw delete allow 7272:7275/tcp"}},
-		"firewalld": {"firewalld", map[string]string{"firewall-cmd --query-port=443/tcp": "yes", "firewall-cmd --query-port=7272-7275/tcp": "no", "firewall-cmd --permanent --add-port=7272-7275/tcp": "success", "firewall-cmd --query-port=10000-59999/tcp": "no", "firewall-cmd --permanent --add-port=10000-59999/tcp": "success", "firewall-cmd --reload": "success", "firewall-cmd --permanent --remove-port=7272-7275/tcp": "success", "firewall-cmd --permanent --remove-port=10000-59999/tcp": "success"}, []string{"7272-7275/tcp", "10000-59999/tcp"},
-			[]string{"firewall-cmd --permanent --add-port=7272-7275/tcp", "firewall-cmd --permanent --add-port=10000-59999/tcp", "firewall-cmd --reload"}, []string{"firewall-cmd --permanent --remove-port=7272-7275/tcp", "firewall-cmd --permanent --remove-port=10000-59999/tcp"}},
-		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + spec: "", "iptables -D INPUT " + spec: ""}, []string{"iptables"},
-			[]string{"iptables -C INPUT " + spec, "iptables -I INPUT 1 " + spec}, []string{"iptables -D INPUT " + spec}},
-		"nft": {"nft", map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\"": "",
-			"nft -a list chain inet filter input": "\t\ttcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\" # handle 7\n", "nft delete rule inet filter input handle 7": ""}, []string{"nft"},
-			[]string{"nft insert rule inet filter input"}, []string{"nft delete rule inet filter input handle 7"}},
+		"ufw": {"ufw", map[string]string{"ufw allow 443/tcp": "Rule added", "ufw allow 7272:7275/tcp": "Rule added", "ufw allow 7277/tcp": "Rule added", "ufw allow 10000:59999/tcp": "Skipping adding existing rule", "ufw allow 443/udp": "Rule added", "ufw allow 7272:7275/udp": "Rule added",
+			"ufw delete allow 443/tcp": "", "ufw delete allow 7272:7275/tcp": "", "ufw delete allow 7277/tcp": "", "ufw delete allow 443/udp": "", "ufw delete allow 7272:7275/udp": ""},
+			[]string{"443/tcp", "7272:7275/tcp", "7277/tcp", "443/udp", "7272:7275/udp"},
+			[]string{"ufw allow 443/tcp", "ufw allow 7277/tcp", "ufw allow 10000:59999/tcp", "ufw allow 443/udp", "ufw allow 7272:7275/udp"},
+			[]string{"ufw delete allow 443/tcp", "ufw delete allow 7277/tcp", "ufw delete allow 443/udp", "ufw delete allow 7272:7275/udp"}},
+		"firewalld": {"firewalld", map[string]string{"firewall-cmd --query-port=443/tcp": "yes", "firewall-cmd --reload": "success",
+			"firewall-cmd --permanent --add-port=7272-7275/tcp": "success", "firewall-cmd --permanent --add-port=7277/tcp": "success", "firewall-cmd --permanent --add-port=10000-59999/tcp": "success", "firewall-cmd --permanent --add-port=443/udp": "success", "firewall-cmd --permanent --add-port=7272-7275/udp": "success",
+			"firewall-cmd --permanent --remove-port=7272-7275/tcp": "success", "firewall-cmd --permanent --remove-port=7277/tcp": "success", "firewall-cmd --permanent --remove-port=10000-59999/tcp": "success", "firewall-cmd --permanent --remove-port=443/udp": "success", "firewall-cmd --permanent --remove-port=7272-7275/udp": "success"},
+			[]string{"7272-7275/tcp", "7277/tcp", "443/udp", "7272-7275/udp", "10000-59999/tcp"},
+			[]string{"firewall-cmd --permanent --add-port=7277/tcp", "firewall-cmd --permanent --add-port=443/udp", "firewall-cmd --permanent --add-port=7272-7275/udp", "firewall-cmd --reload"},
+			[]string{"firewall-cmd --permanent --remove-port=7277/tcp", "firewall-cmd --permanent --remove-port=443/udp", "firewall-cmd --permanent --remove-port=7272-7275/udp"}},
+		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "", "iptables -D INPUT " + tcp: "", "iptables -D INPUT " + udp: ""},
+			[]string{"iptables " + tcp, "iptables " + udp},
+			[]string{"iptables -C INPUT " + tcp, "iptables -I INPUT 1 " + tcp, "iptables -I INPUT 1 " + udp}, []string{"iptables -D INPUT " + tcp, "iptables -D INPUT " + udp}},
+		"nft": {"nft", map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n",
+			"nft insert rule inet filter input tcp dport { 443, 7272-7275, 7277, 10000-59999 } accept comment \"paperboat-edge\"": "",
+			"nft insert rule inet filter input udp dport { 443, 7272-7275 } accept comment \"paperboat-edge\"":                    "",
+			"nft -a list chain inet filter input":        "\t\ttcp dport { 443, 7272-7275, 7277, 10000-59999 } accept comment \"paperboat-edge\" # handle 7\n\t\tudp dport { 443, 7272-7275 } accept comment \"paperboat-edge\" # handle 8\n",
+			"nft delete rule inet filter input handle 7": "", "nft delete rule inet filter input handle 8": ""}, []string{"nft"},
+			[]string{"nft insert rule inet filter input tcp dport", "nft insert rule inet filter input udp dport"}, []string{"nft delete rule inet filter input handle 7", "nft delete rule inet filter input handle 8"}},
 	} {
 		f := newFakeHost(t, "60000 65535")
 		f.answers = test.answers
-		added, err := firewallAdd(t.Context(), f.run, test.kind)
+		added, err := firewallAdd(t.Context(), f.run, test.kind, testRules)
 		if err != nil || strings.Join(added, ",") != strings.Join(test.added, ",") {
 			t.Fatalf("%s: added %v err %v, want %v", name, added, err, test.added)
 		}
@@ -220,22 +247,58 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 	}
 }
 
-func TestIptablesRuleAlreadyPresentIsNotAddedOrRemoved(t *testing.T) {
-	spec := strings.Join(iptablesSpec(), " ")
+// A rule set that has only the TCP half (or none) is completed, never skipped because some rule exists.
+func TestNftAddsTheMissingUDPRule(t *testing.T) {
 	f := newFakeHost(t, "60000 65535")
-	f.answers = map[string]string{"iptables -C INPUT " + spec: ""}
-	added, err := firewallAdd(t.Context(), f.run, "iptables")
+	f.answers = map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n",
+		"nft list chain inet filter input": "\t\ttcp dport { 443, 7272-7275, 7277, 10000-59999 } accept comment \"paperboat-edge\"\n",
+		"nft insert rule inet filter input udp dport { 443, 7272-7275 } accept comment \"paperboat-edge\"": ""}
+	if _, err := firewallAdd(t.Context(), f.run, "nft", testRules); err != nil || f.called("nft insert rule inet filter input udp dport") != 1 || f.called("nft insert rule inet filter input tcp dport") != 0 {
+		t.Fatalf("err %v calls %v", err, f.calls)
+	}
+}
+
+// Every backend reports the TCP and the UDP rules, so doctor flags a host that has only the TCP half.
+func TestFirewallRulePresentNeedsTheUDPRulesToo(t *testing.T) {
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"iptables -C INPUT " + tcp: ""}
+	if firewallRulePresent(t.Context(), f.run, "iptables", testRules) {
+		t.Fatal("iptables with only the TCP rule counted as open")
+	}
+	f.answers["iptables -C INPUT "+strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")] = ""
+	if !firewallRulePresent(t.Context(), f.run, "iptables", testRules) {
+		t.Fatal("iptables with both rules not counted as open")
+	}
+	f.answers = map[string]string{"ufw status": "443/tcp ALLOW\n7272:7275/tcp ALLOW\n7277/tcp ALLOW\n10000:59999/tcp ALLOW\n443/udp ALLOW\n"}
+	if firewallRulePresent(t.Context(), f.run, "ufw", testRules) {
+		t.Fatal("ufw without the UDP carrier range counted as open")
+	}
+	f.answers["ufw status"] += "7272:7275/udp ALLOW\n"
+	if !firewallRulePresent(t.Context(), f.run, "ufw", testRules) {
+		t.Fatal("ufw with every rule not counted as open")
+	}
+}
+
+func TestIptablesRuleAlreadyPresentIsNotAddedOrRemoved(t *testing.T) {
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
+	f := newFakeHost(t, "60000 65535")
+	f.answers = map[string]string{"iptables -C INPUT " + tcp: "", "iptables -C INPUT " + udp: ""}
+	added, err := firewallAdd(t.Context(), f.run, "iptables", testRules)
 	if err != nil || len(added) != 0 || f.called("iptables -I") != 0 {
 		t.Fatalf("added %v err %v calls %v", added, err, f.calls)
 	}
 }
 
 func TestReapplyOnlyForRuntimeOnlyFirewalls(t *testing.T) {
-	spec := strings.Join(iptablesSpec(), " ")
+	tcp := strings.Join(iptablesSpec("tcp", portsOf(testRules, "tcp")), " ")
+	udp := strings.Join(iptablesSpec("udp", portsOf(testRules, "udp")), " ")
 	for kind, wantCalls := range map[string]bool{"iptables": true, "nft": true, "ufw": false, "firewalld": false, "": false} {
 		f := newFakeHost(t, "60000 65535")
-		f.answers = map[string]string{"iptables -I INPUT 1 " + spec: "", "nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\"": ""}
-		if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: kind}); err != nil {
+		f.answers = map[string]string{"iptables -I INPUT 1 " + tcp: "", "iptables -I INPUT 1 " + udp: "", "nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n",
+			"nft insert rule inet filter input tcp dport { 443, 7272-7275, 7277, 10000-59999 } accept comment \"paperboat-edge\"": "", "nft insert rule inet filter input udp dport { 443, 7272-7275 } accept comment \"paperboat-edge\"": ""}
+		if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: kind, Rules: testRules}); err != nil {
 			t.Fatal(err)
 		}
 		reapplyHostFirewall(t.Context(), f.run, f.paths, &strings.Builder{})
@@ -254,7 +317,7 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 	f.answers[apply] = ""
 	f.answers["ip -4 -o route show default"] = "default via 10.0.0.1 dev ens3 proto dhcp src 10.0.0.5 metric 100\n"
 	var out strings.Builder
-	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out); err != nil {
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out, true, "[::]:7277"); err != nil {
 		t.Fatal(err)
 	}
 	rules, _ := os.ReadFile(f.paths.guard)
@@ -282,7 +345,7 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 	bare := newFakeHost(t, "60000 65535")
 	bare.answers["ip -4 -o route show default"] = "default via 10.0.0.1 dev ens3\n"
 	out.Reset()
-	if err := setupHostNetwork(t.Context(), bare.run, bare.paths, &out); err != nil {
+	if err := setupHostNetwork(t.Context(), bare.run, bare.paths, &out, true, "[::]:7277"); err != nil {
 		t.Fatalf("install failed without nft: %v", err)
 	}
 	if record, _ := readHostnetRecord(bare.paths.record); record.Guard || !strings.Contains(out.String(), "nftables (nft) is not installed") {
@@ -309,5 +372,29 @@ func TestEdgeGuardLimitsOnlyPublicInterfaces(t *testing.T) {
 	}
 	if skipped, err := applyEdgeGuard(t.Context(), newFakeHost(t, "60000 65535").run, f.paths.guard); err != nil || !strings.Contains(skipped, "default route") {
 		t.Fatalf("a host with no default route: skipped=%q err=%v", skipped, err)
+	}
+}
+
+// A relay-only node serves no public tunnel ports: it opens the claim port (the one in --claim-listen), the
+// relay ports and 443, but neither moves the outgoing range, opens 10000-59999 nor applies the edge guard.
+func TestSetupWithoutATunnelOpensTheClaimPortOnly(t *testing.T) {
+	f := newFakeHost(t, "32768 60999")
+	f.answers["ufw status"] = "Status: active\n"
+	for _, spec := range []string{"443/tcp", "7272:7275/tcp", "9000/tcp", "443/udp", "7272:7275/udp"} {
+		f.answers["ufw allow "+spec] = "Rule added"
+	}
+	var out strings.Builder
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out, false, "[::]:9000"); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if got, _ := currentOutgoing(f.paths.proc); got != "32768 60999" {
+		t.Fatalf("outgoing range moved to %q on a node without a tunnel", got)
+	}
+	if f.called("ufw allow 10000:59999/tcp") != 0 || f.called("nft -f") != 0 || !strings.Contains(out.String(), "TCP 443, 7272-7275, 9000 and UDP 443, 7272-7275") {
+		t.Fatalf("calls %v\n%s", f.calls, out.String())
+	}
+	record, _ := readHostnetRecord(f.paths.record)
+	if len(record.Rules) != 5 || record.Guard {
+		t.Fatalf("record %+v", record)
 	}
 }

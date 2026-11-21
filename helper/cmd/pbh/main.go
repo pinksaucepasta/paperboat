@@ -309,8 +309,8 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 		return err
 	}
 	fresh = false
-	if !*noService && slices.Contains(selected, "tunnel") {
-		if err := setupHostNetwork(ctx, execCommander, defaultHostPaths(*dir), out); err != nil {
+	if !*noService {
+		if err := setupHostNetwork(ctx, execCommander, defaultHostPaths(*dir), out, slices.Contains(selected, "tunnel"), c.Listen); err != nil {
 			return err
 		}
 	}

@@ -64,7 +64,7 @@ Dashboard → Network → Add self-hosted node. The code carries no account iden
 readiness; use pbh doctor for the host and Dashboard → Network for registration. As root it also
 shows the state of automatic browser HTTPS (pbh configure-tls --acme).`,
 	"doctor": `Check this host for serving public tunnel ports: the outgoing port range, the host firewall for
-TCP 443, the carrier and relay ports (7272-7275) and the public port range, per-address connection limits, and a reachability test of a
+TCP and UDP 443, the carrier, relay and claim ports (7272-7277) and the public port range, per-address connection limits, and a reachability test of a
 test port from the control plane. Each failed check names the fix. Installations without a tunnel
 need no host setup and report so. Fails when no installation exists in --state-dir.`,
 	"configure-tls": `Operator command for Paperboat-managed installations only; it refuses customer self-hosted nodes. Set or rotate the browser-trusted HTTPS certificate for this installation's endpoint hostname.
