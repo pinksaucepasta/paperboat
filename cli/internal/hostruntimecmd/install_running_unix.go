@@ -121,6 +121,15 @@ func installUpdateSource(ctx context.Context, executable string, source installs
 	// The daemon keeps the server it was paired with: --server, else the installed declaration's, else the configured one.
 	declaredServer, _ := localdaemon.DeclaredServer(executable) // an unreadable declaration is rewritten by this install
 	server := installControlURL(controlURL, installControlURL(declaredServer, cfg.ServerURL))
+	if runtime.GOOS == "darwin" && !cfg.Auth.AllowFileFallback {
+		store, err := config.ProfileStoreFor(cfg)
+		if err != nil {
+			return "", err
+		}
+		if err := checkDaemonSignIn(store, server); err != nil {
+			return "", err
+		}
+	}
 	request := supplyInstallRequest(account, uid, gid, group.Name, executable, source, bundlePath, force, explicitUpdate, server)
 	installerExecutable, err := os.Executable()
 	if err != nil {

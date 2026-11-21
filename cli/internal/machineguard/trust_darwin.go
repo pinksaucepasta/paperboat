@@ -12,9 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 )
 
-const darwinSystemKeychain = "/Library/Keychains/System.keychain"
+const darwinSystemKeychain = darwinSystemKeychainPath
 
 type darwinTrustRunner func(context.Context, string, ...string) ([]byte, error)
 
@@ -41,14 +42,31 @@ func installDarwinLocalTrust(ctx context.Context, cfg Config, certificatePEM []b
 	if err = writeOwnedTrustState(pemPath, certificatePEM, 0644); err != nil {
 		return err
 	}
-	return ensureDarwinSystemTrust(ctx, pemPath, run)
+	return ensureDarwinSystemTrust(ctx, pemPath, darwinConsoleUID(ctx), run)
 }
 
-func ensureDarwinSystemTrust(ctx context.Context, pemPath string, run darwinTrustRunner) error {
+// darwinConsoleUID is the user signed in at the Mac's screen; 0 (root, the login window) or an error means nobody.
+func darwinConsoleUID(ctx context.Context) int {
+	out, err := exec.CommandContext(ctx, "/usr/bin/stat", "-f", "%u", "/dev/console").Output()
+	if err != nil {
+		return 0
+	}
+	uid, err := strconv.Atoi(string(bytes.TrimSpace(out)))
+	if err != nil {
+		return 0
+	}
+	return uid
+}
+
+func ensureDarwinSystemTrust(ctx context.Context, pemPath string, consoleUID int, run darwinTrustRunner) error {
 	if err := verifyDarwinSystemTrust(ctx, pemPath, run); err == nil {
 		return recordDarwinTrustOwnership(pemPath)
 	}
-	if output, err := run(ctx, "/usr/bin/security", "add-trusted-cert", "-d", "-r", "trustRoot", "-p", "ssl", "-k", darwinSystemKeychain, pemPath); err != nil {
+	name, args, ok := darwinTrustAddCommand(consoleUID, pemPath)
+	if !ok {
+		return trustPending(ctx, darwinTrustHeadless(pemPath))
+	}
+	if output, err := run(ctx, name, args...); err != nil {
 		return trustPending(ctx, fmt.Errorf("install Paperboat HTTPS root in the macOS System keychain: %w: %s", err, bytes.TrimSpace(output)))
 	}
 	if err := verifyDarwinSystemTrust(ctx, pemPath, run); err != nil {

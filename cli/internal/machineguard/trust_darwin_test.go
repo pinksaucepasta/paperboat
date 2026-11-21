@@ -28,6 +28,9 @@ func TestEnsureDarwinSystemTrustAddsOnceAndReusesExactRoot(t *testing.T) {
 	trusted := false
 	adds := 0
 	runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "/bin/launchctl" && args[0] == "asuser" { // the add runs in the console user session
+			name, args = args[2], args[3:]
+		}
 		if name != "/usr/bin/security" {
 			t.Fatalf("unexpected command %q", name)
 		}
@@ -53,7 +56,7 @@ func TestEnsureDarwinSystemTrustAddsOnceAndReusesExactRoot(t *testing.T) {
 		}
 	}
 	for index := 0; index < 2; index++ {
-		if err := ensureDarwinSystemTrust(t.Context(), pemPath, runner); err != nil {
+		if err := ensureDarwinSystemTrust(t.Context(), pemPath, 501, runner); err != nil {
 			t.Fatal(err)
 		}
 	}

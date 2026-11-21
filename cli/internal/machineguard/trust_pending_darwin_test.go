@@ -19,6 +19,9 @@ func TestDarwinTrustApprovalDenialIsPending(t *testing.T) {
 	}
 	const denial = "The authorization was denied since no user interaction was possible."
 	runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "/bin/launchctl" && args[0] == "asuser" { // the add runs in the console user session
+			name, args = args[2], args[3:]
+		}
 		if name != "/usr/bin/security" {
 			t.Fatalf("unexpected command %q", name)
 		}
@@ -30,7 +33,7 @@ func TestDarwinTrustApprovalDenialIsPending(t *testing.T) {
 		}
 		return []byte(denial), errors.New("exit status 1")
 	}
-	err := ensureDarwinSystemTrust(t.Context(), pemPath, runner)
+	err := ensureDarwinSystemTrust(t.Context(), pemPath, 501, runner)
 	if !errors.Is(err, ErrTrustPending) {
 		t.Fatalf("keychain approval denial is not pending: %v", err)
 	}
