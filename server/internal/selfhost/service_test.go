@@ -28,7 +28,7 @@ func scopedInstallationFixture(t *testing.T, database *db.DB, key, account, capa
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$2,'1.0','','edge.example.test',27443,27444,'registered',false,'test','test-a',ARRAY['edge'],ARRAY['http2','http3'],8,0,now(),now()+interval '1 hour',$3)`, r.NodeID, r.InstallationID, make([]byte, 32))
+	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$2,'1.0','','edge.example.test',7272,7273,'registered',false,'test','test-a',ARRAY['edge'],ARRAY['http2','http3'],8,0,now(),now()+interval '1 hour',$3)`, r.NodeID, r.InstallationID, make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
 	}

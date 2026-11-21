@@ -70,7 +70,7 @@ func TestServingNodesAreTheSameInDNSAndAttach(t *testing.T) {
 		})
 		for i := range count {
 			name, v4 := fmt.Sprintf("%s%d", region[3:4], i+1), fmt.Sprintf("203.0.113.%d", next)
-			id := f.node(name, v4, "", region, `process_epoch='epoch_'||id,carrier_endpoint_host='edge.example.test',carrier_endpoint_tcp_port=27443,carrier_endpoint_quic_port=27444,carrier_server_spki_sha256='sha256:'||repeat('3',64),carrier_server_certificate_chain_pem='fixture certificate'`)
+			id := f.node(name, v4, "", region, `process_epoch='epoch_'||id,carrier_endpoint_host='edge.example.test',carrier_endpoint_tcp_port=7272,carrier_endpoint_quic_port=7273,carrier_server_spki_sha256='sha256:'||repeat('3',64),carrier_server_certificate_chain_pem='fixture certificate'`)
 			regionOf[id], ipOf[v4] = region, id
 			next++
 		}
@@ -113,7 +113,7 @@ func TestPublicationNodesAreTheServingNodes(t *testing.T) {
 			f.exec(`DELETE FROM paperboat.operator_regions WHERE id=$1`, region)
 		})
 		for i := range count {
-			f.node(fmt.Sprintf("p%s%d", region[3:4], i+1), fmt.Sprintf("198.51.100.%d", next), "", region, `process_epoch='epoch_'||id,carrier_endpoint_host='edge.example.test',carrier_endpoint_tcp_port=27443,carrier_endpoint_quic_port=27444,carrier_server_spki_sha256='sha256:'||repeat('3',64),carrier_server_certificate_chain_pem='fixture certificate'`)
+			f.node(fmt.Sprintf("p%s%d", region[3:4], i+1), fmt.Sprintf("198.51.100.%d", next), "", region, `process_epoch='epoch_'||id,carrier_endpoint_host='edge.example.test',carrier_endpoint_tcp_port=7272,carrier_endpoint_quic_port=7273,carrier_server_spki_sha256='sha256:'||repeat('3',64),carrier_server_certificate_chain_pem='fixture certificate'`)
 			next++
 		}
 	}

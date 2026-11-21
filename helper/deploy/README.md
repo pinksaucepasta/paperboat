@@ -58,10 +58,10 @@ Default inbound ports:
 
 | Components | TCP | UDP |
 | --- | --- | --- |
-| Claim API (all installations) | 8443 | — |
-| Relay only | 443 | 443 (STUN), 27446 (QUIC) |
-| Tunnel only | 80, 443, 27443 | 443 (HTTP/3), 27444 |
-| Both | 80, 443, 27443, 27445 | 443 (HTTP/3), 27444, 27445 (STUN), 27446 |
+| Claim API (all installations) | 7277 | — |
+| Relay only | 443 | 443 (STUN), 7275 (QUIC) |
+| Tunnel only | 80, 443, 7272 | 443 (HTTP/3), 7273 |
+| Both | 80, 443, 7272, 7274 | 443 (HTTP/3), 7273, 7274 (STUN), 7275 |
 
 Allow these ports in both the host firewall and the cloud network rules. TCP 443
 alone permits HTTP/1 and HTTP/2 but leaves HTTP/3 unreachable; verify UDP 443
@@ -72,7 +72,7 @@ Flood protection on a tunnel installation: `pbh install` loads the nftables tabl
 `inet paperboat_edge_guard` (rules in the state directory, `edge-guard.nft`) and
 the service re-loads it on every start. It drops a source opening more than 100
 connections a second (burst 200) and resets a source holding more than 512, on
-TCP/UDP 443 and the public TCP range; IPv6 sources count per /64. Only traffic
+TCP/UDP 443, 7272-7275 and the public TCP range; IPv6 sources count per /64. Only traffic
 arriving on an interface with a default route counts; loopback, container and VM
 bridges and VPN interfaces are never limited. A host without `nft` installs
 without it and `pbh doctor` names it. The edge process adds

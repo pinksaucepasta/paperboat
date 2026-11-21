@@ -94,7 +94,7 @@ func carrierAdmittedOnFirstDial(t *testing.T, pullDelay, observeDelay time.Durat
 		EdgeNodeID: edgeNode, EdgeProcessEpoch: edgeProcess, EdgeCarrierServerSPKISHA256: trust.SPKISHA256, EdgeCarrierServerCertificateChainPEM: trust.CertificateChainPEM,
 		MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(machinePublic), MachineIdentityThumbprint: "sha256:" + base64.RawURLEncoding.EncodeToString(digest[:]),
 	}, AttachmentGeneration: 1, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		EdgeEndpoints: []string{"h2://127.0.0.1:27443", "h3://127.0.0.1:27444"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
+		EdgeEndpoints: []string{"h2://127.0.0.1:7272", "h3://127.0.0.1:7273"}, Hostname: "machine.runtime.example.test", RouteKind: runtimewire.RouteKind, RouteRevision: 1, ExpiresAt: time.Now().Add(time.Hour)}
 
 	source := &missSource{}
 	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: edgeNode, ProcessEpoch: edgeProcess})

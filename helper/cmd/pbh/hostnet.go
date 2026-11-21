@@ -17,7 +17,7 @@ import (
 )
 
 // An edge serving public TCP tunnels needs three things from its host: an outgoing (ephemeral) port
-// range clear of the public range, a host firewall that lets 443 and the public range in, and (which
+// range clear of the public range, a host firewall that lets 443, the carrier and relay ports and the public range in, and (which
 // pbh cannot change) a cloud firewall that does the same. pbh sets up the first two on install and
 // serve, removes exactly what it added on uninstall, and names the third. It also applies the
 // per-address connection limits (edge_guard.go).
@@ -86,12 +86,13 @@ func writeHostnetRecord(path string, r hostnetRecord) error {
 
 var (
 	publicRange   = fmt.Sprintf("%d:%d", edgeports.PublicTCPMin, edgeports.PublicTCPMax)
+	nodeRange     = fmt.Sprintf("%d:%d", edgeports.NodeMin, edgeports.NodeMax)
 	outgoingRange = fmt.Sprintf("%d %d", edgeports.OutgoingMin, edgeports.OutgoingMax)
 )
 
 // cloudRule is the rule an operator adds to the cloud firewall, security group or security list.
 func cloudRule() string {
-	return fmt.Sprintf("allow inbound TCP 443 and TCP %d-%d from 0.0.0.0/0 (and ::/0 for IPv6)", edgeports.PublicTCPMin, edgeports.PublicTCPMax)
+	return fmt.Sprintf("allow inbound TCP 443, TCP %d-%d and TCP %d-%d from 0.0.0.0/0 (and ::/0 for IPv6)", edgeports.NodeMin, edgeports.NodeMax, edgeports.PublicTCPMin, edgeports.PublicTCPMax)
 }
 
 // setupHostNetwork moves the outgoing port range clear of the public range and opens the host
@@ -120,9 +121,9 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 		record.Added = mergeStrings(record.Added, added)
 		if err != nil {
 			_ = writeHostnetRecord(paths.record, record)
-			return fmt.Errorf("%w: %w", commandError(fmt.Sprintf("opening the %s host firewall for TCP 443 and %d-%d failed; add the rule by hand or rerun as root", record.Firewall, edgeports.PublicTCPMin, edgeports.PublicTCPMax)), err)
+			return fmt.Errorf("%w: %w", commandError(fmt.Sprintf("opening the %s host firewall for TCP 443, %d-%d and %d-%d failed; add the rule by hand or rerun as root", record.Firewall, edgeports.NodeMin, edgeports.NodeMax, edgeports.PublicTCPMin, edgeports.PublicTCPMax)), err)
 		}
-		fmt.Fprintf(out, "Host firewall (%s): TCP 443 and %d-%d allowed.\n", record.Firewall, edgeports.PublicTCPMin, edgeports.PublicTCPMax)
+		fmt.Fprintf(out, "Host firewall (%s): TCP 443, %d-%d and %d-%d allowed.\n", record.Firewall, edgeports.NodeMin, edgeports.NodeMax, edgeports.PublicTCPMin, edgeports.PublicTCPMax)
 	} else {
 		fmt.Fprintln(out, "No active host firewall found; nothing to open on this host.")
 	}
@@ -276,7 +277,7 @@ func nftInputChain(ruleset string) (family, table, chain string, ok bool) {
 }
 
 func iptablesSpec() []string {
-	return []string{"-p", "tcp", "-m", "multiport", "--dports", "443," + publicRange, "-m", "comment", "--comment", firewallComment, "-j", "ACCEPT"}
+	return []string{"-p", "tcp", "-m", "multiport", "--dports", "443," + nodeRange + "," + publicRange, "-m", "comment", "--comment", firewallComment, "-j", "ACCEPT"}
 }
 
 // firewallAdd opens 443 and the public range and returns what it added (rules that were already
@@ -285,7 +286,7 @@ func firewallAdd(ctx context.Context, run commander, kind string) ([]string, err
 	var added []string
 	switch kind {
 	case "ufw":
-		for _, spec := range []string{"443/tcp", publicRange + "/tcp"} {
+		for _, spec := range []string{"443/tcp", nodeRange + "/tcp", publicRange + "/tcp"} {
 			out, err := run(ctx, "ufw", "allow", spec)
 			if err != nil {
 				return added, err
@@ -295,7 +296,7 @@ func firewallAdd(ctx context.Context, run commander, kind string) ([]string, err
 			}
 		}
 	case "firewalld":
-		for _, spec := range []string{"443/tcp", strings.Replace(publicRange, ":", "-", 1) + "/tcp"} {
+		for _, spec := range []string{"443/tcp", strings.Replace(nodeRange, ":", "-", 1) + "/tcp", strings.Replace(publicRange, ":", "-", 1) + "/tcp"} {
 			if out, err := run(ctx, "firewall-cmd", "--query-port="+spec); err == nil && strings.TrimSpace(out) == "yes" {
 				continue
 			}
@@ -332,7 +333,7 @@ func firewallAdd(ctx context.Context, run commander, kind string) ([]string, err
 		if err == nil && strings.Contains(listed, firewallComment) {
 			return added, nil
 		}
-		if _, err := run(ctx, "nft", "insert", "rule", family, table, chain, "tcp", "dport", "{", "443,", strings.Replace(publicRange, ":", "-", 1), "}", "accept", "comment", `"`+firewallComment+`"`); err != nil {
+		if _, err := run(ctx, "nft", "insert", "rule", family, table, chain, "tcp", "dport", "{", "443,", strings.Replace(nodeRange, ":", "-", 1)+",", strings.Replace(publicRange, ":", "-", 1), "}", "accept", "comment", `"`+firewallComment+`"`); err != nil {
 			return added, err
 		}
 		added = append(added, "nft")
@@ -479,9 +480,9 @@ func firewallRulePresent(ctx context.Context, run commander, kind string) bool {
 	switch kind {
 	case "ufw":
 		out, err := run(ctx, "ufw", "status")
-		return err == nil && strings.Contains(out, publicRange) && strings.Contains(out, "443")
+		return err == nil && strings.Contains(out, publicRange) && strings.Contains(out, nodeRange) && strings.Contains(out, "443")
 	case "firewalld":
-		for _, spec := range []string{"443/tcp", strings.Replace(publicRange, ":", "-", 1) + "/tcp"} {
+		for _, spec := range []string{"443/tcp", strings.Replace(nodeRange, ":", "-", 1) + "/tcp", strings.Replace(publicRange, ":", "-", 1) + "/tcp"} {
 			if out, err := run(ctx, "firewall-cmd", "--query-port="+spec); err != nil || strings.TrimSpace(out) != "yes" {
 				return false
 			}

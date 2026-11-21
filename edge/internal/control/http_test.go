@@ -64,7 +64,7 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 			return response(http.StatusOK, string(data)), nil
 		case "/v1/nodes/register":
 			var registration NodeRegistration
-			if err := json.NewDecoder(r.Body).Decode(&registration); err != nil || registration.CarrierEndpoint.Host != "edge.example.test" || registration.CarrierEndpoint.TCPPort != 27443 || registration.CarrierEndpoint.QUICPort != 27444 || !ValidCarrierServerSPKISHA256(registration.CarrierServerSPKISHA256) || registration.CarrierServerCertificateChainPEM == "" {
+			if err := json.NewDecoder(r.Body).Decode(&registration); err != nil || registration.CarrierEndpoint.Host != "edge.example.test" || registration.CarrierEndpoint.TCPPort != 7272 || registration.CarrierEndpoint.QUICPort != 7273 || !ValidCarrierServerSPKISHA256(registration.CarrierServerSPKISHA256) || registration.CarrierServerCertificateChainPEM == "" {
 				t.Errorf("registration wire = %+v, %v", registration, err)
 			}
 			return response(http.StatusNoContent, ""), nil
@@ -95,7 +95,7 @@ func TestHTTPClientTypedOperationsAndAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
+	if err := client.RegisterNode(context.Background(), NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 7272, QUICPort: 7273}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil {

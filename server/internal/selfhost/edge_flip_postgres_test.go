@@ -55,7 +55,7 @@ func TestEdgeFlipRepointsDomainsAndNamesLiveResourcesOnPostgres(t *testing.T) {
 	}
 	for _, id := range []string{m1, m2} {
 		exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at)
-VALUES($1,'default','1.0','epoch','ready',true,now(),CASE WHEN $1=$2 THEN $3 ELSE $4 END,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',$1||'.example.test','edge.example.test',27443,27444,'sha256:'||repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, m1, r1, r2)
+VALUES($1,'default','1.0','epoch','ready',true,now(),CASE WHEN $1=$2 THEN $3 ELSE $4 END,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',$1||'.example.test','edge.example.test',7272,7273,'sha256:'||repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, m1, r1, r2)
 	}
 	tunnel, route, preview := "flip_t_"+stamp, "flip_r_"+stamp, "flip_p_"+stamp
 	tunnelEndpoint, previewLabel := testutil.EndpointID("flip:"+stamp), testutil.EndpointLabel("flip-preview:"+stamp)

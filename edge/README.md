@@ -25,7 +25,7 @@ paperboat-edge --node-id <id> --deployment-config /abs/path/deployment.json
 | `--deployment-config` | none | Strict deployment JSON (see below). |
 | `--edge-pool` | `default` | Pool this edge is assigned to. |
 | `--relay-id`, `--relay-region`, `--relay-name` | node id, pool, region | Public relay metadata the edge advertises. |
-| `--health-address` | `127.0.0.1:9090` | Loopback listener for health and metrics. |
+| `--health-address` | `127.0.0.1:7278` | Loopback listener for health and metrics. |
 | `--state-path` | `state/edge-state.json` | Private durable state file. |
 | `--shutdown-timeout` | `30s` | Bound for drain and shutdown (at most 5 minutes). |
 

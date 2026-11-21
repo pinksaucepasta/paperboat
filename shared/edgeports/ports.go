@@ -16,6 +16,27 @@ const (
 	OutgoingMax = 65535
 )
 
+// Node ports: where the edge, relay and pbh of a node listen. All sit below PublicTCPMin so a
+// public tunnel can never take one. 80 and 443 are the public web ports and are not listed.
+const (
+	CarrierTCP       = 7272 // edge carrier, TCP
+	CarrierQUIC      = 7273 // edge carrier, UDP
+	RelayWSS         = 7274 // relay WSS (TCP) and STUN (UDP) when it shares a node with an edge; relay-only uses 443
+	RelayQUIC        = 7275 // relay QUIC, UDP
+	RelayMesh        = 7276 // relay-to-relay mesh, UDP default
+	Claim            = 7277 // pbh claim/enroll HTTPS, TCP
+	EdgeHealth       = 7278 // edge health and metrics, loopback only
+	EdgePrivateHTTPS = 7279 // edge private HTTPS, loopback only
+)
+
+// NodeMin and NodeMax bound the contiguous carrier and relay listeners (CarrierTCP to RelayQUIC). The host
+// firewall opens them and the edge guard limits them like 443 and the public range; both used to cover them
+// because they sat inside the public range.
+const (
+	NodeMin = CarrierTCP
+	NodeMax = RelayQUIC
+)
+
 // ErrOverlap reports a public range that reaches into the outgoing range.
 var ErrOverlap = errors.New("public TCP range overlaps the host's outgoing port range")
 
@@ -24,6 +45,9 @@ func PublicTCP(port int) bool { return port >= PublicTCPMin && port <= PublicTCP
 
 // Check proves the two ranges are valid and disjoint.
 func Check() error {
+	if NodeMin < 1024 || NodeMin > NodeMax || NodeMax >= PublicTCPMin || Claim >= PublicTCPMin || EdgeHealth >= PublicTCPMin || EdgePrivateHTTPS >= PublicTCPMin {
+		return errors.New("edge node ports are invalid")
+	}
 	if PublicTCPMin < 1024 || PublicTCPMin > PublicTCPMax || OutgoingMin > OutgoingMax || OutgoingMax > 65535 {
 		return errors.New("edge port ranges are invalid")
 	}

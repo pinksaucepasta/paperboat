@@ -82,6 +82,6 @@ func serverNodeError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, servernodes.ErrUsed):
 		writeError(w, r, 409, "server_node_exists", "That code was already used, or a node with this region and instance is enrolled. Pick a free instance slot.")
 	default:
-		writeError(w, r, 502, "server_node_unreachable", "The new node could not be reached at this address. Check that enroll-node is running and port 8443 is open, then retry.", err)
+		writeError(w, r, 502, "server_node_unreachable", "The new node could not be reached at this address. Check that enroll-node is running and port 7277 is open, then retry.", err)
 	}
 }

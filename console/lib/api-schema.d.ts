@@ -13298,7 +13298,7 @@ export interface components {
             id?: string;
         };
         SelfhostEnrollment: {
-            /** @description Server IP/hostname with optional bootstrap port (default 8443); bracket IPv6 when supplying a port. */
+            /** @description Server IP/hostname with optional bootstrap port (default 7277); bracket IPv6 when supplying a port. */
             address: string;
             /** @description Expiring one-use certificate-pinned code from pbh selfhost code; generated locally without ownership scope. */
             code: string;

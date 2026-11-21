@@ -42,7 +42,7 @@ func TestSelfhostControlNodeRegistrationFenceOnPostgres(t *testing.T) {
 	registration := struct {
 		EndpointHost      string
 		TCPPort, QUICPort uint16
-	}{"edge-fence.example.test", 27443, 27444}
+	}{"edge-fence.example.test", 7272, 7273}
 	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES($1,$2,'1.0','initial_fixture',$3,$4,$5,'registered','test','test-a',ARRAY['edge'],ARRAY['http2','http3'],8,now(),now()+interval '1 hour',$6)`, installed.NodeID, installed.InstallationID, registration.EndpointHost, registration.TCPPort, registration.QUICPort, bytes.Repeat([]byte{0xbb}, 32))
 	if err != nil {
 		t.Fatal(err)

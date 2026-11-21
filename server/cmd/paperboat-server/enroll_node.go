@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
 // runEnrollNode is a new server node before it holds any credentials: it prints a one-time claim code,
@@ -26,7 +27,7 @@ func runEnrollNode(args []string, stdout, stderr io.Writer) error {
 	instance := fs.String("instance", "", "instance slot in the region, slot-01 to slot-64")
 	host := fs.String("host", "", "host name or IP address operators reach this node at")
 	public := fs.String("public-address", "", "public IP address DNS publishes for this node (default: -host)")
-	listen := fs.String("listen", ":8443", "address to accept the claim on")
+	listen := fs.String("listen", fmt.Sprintf(":%d", edgeports.Claim), "address to accept the claim on")
 	out := fs.String("config-out", "", "absolute path to store the delivered config (owner-only)")
 	if err := fs.Parse(args); err != nil {
 		return err

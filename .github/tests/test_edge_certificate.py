@@ -84,9 +84,9 @@ if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
         spec = importlib.util.spec_from_file_location("edge_certificate", ROOT / "deploy/edge-ip-certificate.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for listen, flags in [("10.0.0.221:8443", ["--http-01-address", "10.0.0.221"]),
-                              ("[2001:db8::1]:8443", ["--http-01-address", "2001:db8::1"]),
-                              ("0.0.0.0:8443", []), ("[::]:8443", [])]:
+        for listen, flags in [("10.0.0.221:7277", ["--http-01-address", "10.0.0.221"]),
+                              ("[2001:db8::1]:7277", ["--http-01-address", "2001:db8::1"]),
+                              ("0.0.0.0:7277", []), ("[::]:7277", [])]:
             with self.subTest(listen=listen), tempfile.TemporaryDirectory() as directory:
                 state = Path(directory)
                 (state / "selfhost.json").write_text(json.dumps({"config": {"listen": listen}}))

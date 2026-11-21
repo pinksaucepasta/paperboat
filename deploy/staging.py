@@ -398,7 +398,7 @@ except urllib.error.HTTPError as error:
 
 
 EDGE_QUIC_PORT = 18448  # UDP is closed on the host; the config still needs a distinct QUIC port
-EDGE_PORT = 18445   # carrier TCP (inside the staging host's open 10000-59999 range); the prod edge keeps 80/443/27443-27446
+EDGE_PORT = 18445   # carrier TCP (inside the staging host's open 10000-59999 range); the prod edge keeps 80/443/7272-7275
 EDGE_NAME, EDGE_DIR = "pb-stg-edge", "edge"
 EDGE_TRUST = "edge-trust"  # certificates of the staging edges, read by the server (compose mounts it)
 
@@ -488,7 +488,7 @@ def edge(image, second=False):
             "public_https_cert_file": "/state/pub.crt", "public_https_key_file": "/state/pub.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:443",
-            "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": f"0.0.0.0:{http_port}",
+            "private_https_listen_address": "127.0.0.1:7279", "public_http_listen_address": f"0.0.0.0:{http_port}",
             "preview_base_domain": public_base, "tunnel_base_domain": public_base,
             "runtime_base_domain": f"rt.{domain()}",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 2048, "control_interval": 5_000_000_000,
@@ -533,7 +533,7 @@ except (OSError,subprocess.CalledProcessError,KeyError):
     sql(f"INSERT INTO control_usage_verification_keys(key_id,edge_node_id,public_key,not_before,expires_at) "
         f"VALUES('{usage}','{node}',decode('{raw_pub.hex()}','hex'),now()-interval '1 minute',now()+interval '365 days') "
         "ON CONFLICT(key_id) DO NOTHING")
-    args = f"-node-id {node} -edge-pool {install} -relay-id {node} -relay-region {REGION} -relay-name {EDGE_NAME} -health-address 127.0.0.1:9090 -deployment-config /state/deployment.json -state-path /state/state.json"
+    args = f"-node-id {node} -edge-pool {install} -relay-id {node} -relay-region {REGION} -relay-name {EDGE_NAME} -health-address 127.0.0.1:7278 -deployment-config /state/deployment.json -state-path /state/state.json"
     network = remote("docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "
                      "pb-release-staging-server-1").strip()
     if not network or any(c.isspace() for c in network):

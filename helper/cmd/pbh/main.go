@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/helper/internal/containers"
 	_ "github.com/pinksaucepasta/paperboat/relay/reportcause"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
 )
 
@@ -213,7 +214,7 @@ func install(ctx context.Context, args []string, out io.Writer) (err error) {
 	fs.String("name", "", "installation name")
 	fs.String("region", defaultRegion, "where users see this server; add more servers with the same region to spread load and replace machines without downtime (asked on a terminal when omitted)")
 	fs.String("failure-domain", "", "independent failure domain (defaults to endpoint host)")
-	fs.String("claim-listen", "[::]:8443", "local claim HTTPS listen address; its host is also where the relay and edge listen ([::] is IPv4 and IPv6, 0.0.0.0 IPv4 only)")
+	fs.String("claim-listen", fmt.Sprintf("[::]:%d", edgeports.Claim), "local claim HTTPS listen address; its host is also where the relay and edge listen ([::] is IPv4 and IPv6, 0.0.0.0 IPv4 only)")
 	fs.String("preview-domain", "", "preview base domain")
 	fs.String("tunnel-domain", "", "durable tunnel base domain")
 	fs.String("runtime-domain", "", "runtime base domain")

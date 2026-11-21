@@ -1,14 +1,14 @@
 # Runbooks
 
 Every command below runs on the edge host. The health listener defaults to
-`127.0.0.1:9090` (`--health-address`).
+`127.0.0.1:7278` (`--health-address`).
 
 ## Is the edge healthy?
 
 ```sh
-curl -s http://127.0.0.1:9090/readyz     # 503 until the node is ready
-curl -s http://127.0.0.1:9090/diagnostics
-curl -s http://127.0.0.1:9090/metrics
+curl -s http://127.0.0.1:7278/readyz     # 503 until the node is ready
+curl -s http://127.0.0.1:7278/diagnostics
+curl -s http://127.0.0.1:7278/metrics
 ```
 
 `/readyz` reports each dependency (control, routes, usage, carrier). A node that stays

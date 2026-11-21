@@ -33,7 +33,7 @@ func testNodeRegistration(t *testing.T, nodeID, epoch string) control.NodeRegist
 	if err != nil {
 		t.Fatal(err)
 	}
-	return control.NodeRegistration{NodeID: nodeID, ProcessEpoch: epoch, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
+	return control.NodeRegistration{NodeID: nodeID, ProcessEpoch: epoch, CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 7272, QUICPort: 7273}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
 }
 
 type routeObserver struct {

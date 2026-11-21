@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/peerrelay"
 	_ "github.com/pinksaucepasta/paperboat/relay/reportcause"
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/nodemesh"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
@@ -70,7 +71,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	nodeState := fs.String("node-state", "", "durable node startup state file")
 	servicePath := fs.String("peer-relay-service", "", "registered public service descriptor JSON file")
 	serviceKeyPath := fs.String("peer-relay-disco-key", "", "private service discovery key file (rawurl base64)")
-	serviceAddresses := fs.String("peer-relay-addresses", "", "comma-separated advertised UDP relay IP:port addresses")
+	serviceAddresses := fs.String("peer-relay-addresses", "", fmt.Sprintf("comma-separated advertised UDP relay IP:port addresses (mesh port %d by convention)", edgeports.RelayMesh))
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fs.SetOutput(os.Stdout)

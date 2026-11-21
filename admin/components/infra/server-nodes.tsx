@@ -42,20 +42,20 @@ function Enrol() {
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">Run on the host</span>
           {command ? <CommandBlock command={command} data-install-command /> : <p className="rounded-lg bg-muted px-3.5 py-3 text-xs text-muted-foreground">Fill in region, instance and hostname.</p>}
-          <span className="text-xs text-muted-foreground">It prints a claim code (15 minutes) and waits on port 8443. Afterwards start it with:</span>
+          <span className="text-xs text-muted-foreground">It prints a claim code (15 minutes) and waits on port 7277. Afterwards start it with:</span>
           <CommandBlock command="paperboat-server serve --config /etc/paperboat/node.json" />
         </div>
         <ActionDialog
           title="Enrol the server node"
-          description="An enrolled node claims it on port 8443 and sends its configuration."
+          description="An enrolled node claims it on port 7277 and sends its configuration."
           target={address || "-"}
           submitLabel="Enrol server node"
           valid={address.length > 0 && address.length <= 300 && code.length > 0 && code.length <= 200}
-          trigger={(open) => <div><Button size="lg" disabled={!ready} onClick={() => { if (!address) setAddress(`${host}:8443`); open() }}>I ran it, enrol the node</Button></div>}
+          trigger={(open) => <div><Button size="lg" disabled={!ready} onClick={() => { if (!address) setAddress(`${host}:7277`); open() }}>I ran it, enrol the node</Button></div>}
           run={(h) => operatorAction("POST", "/v1/admin/server-nodes/enrollments", h, { address, code })}
           onDone={() => { setCode(""); setAddress("") }}
         >
-          <TextField label="Claim address" value={address} onChange={(v) => setAddress(v.trim())} placeholder={host ? `${host}:8443` : "host:8443"} />
+          <TextField label="Claim address" value={address} onChange={(v) => setAddress(v.trim())} placeholder={host ? `${host}:7277` : "host:7277"} />
           <TextField label="Claim code" value={code} onChange={(v) => setCode(v.trim())} type="password" autoComplete="off" hint="pbs1.… Used once." />
         </ActionDialog>
       </div>

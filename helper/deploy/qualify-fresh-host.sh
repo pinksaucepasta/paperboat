@@ -99,8 +99,8 @@ endpoint="--endpoint-host $host"
 [ -z "$published" ] || endpoint=''
 step "fresh install $mode_flag"
 inside "$installer $mode_flag $endpoint" > "$work/out" 2>&1 || { tail -30 "$work/out"; fail "install failed"; }
-grep -qE "^Claim address: [0-9a-f.:]+:8443" "$work/out" || fail "claim address not printed"
-[ -n "$published" ] || grep -q "^Claim address: $host:8443" "$work/out" || fail "claim address is not the endpoint host"
+grep -qE "^Claim address: [0-9a-f.:]+:7277" "$work/out" || fail "claim address not printed"
+[ -n "$published" ] || grep -q "^Claim address: $host:7277" "$work/out" || fail "claim address is not the endpoint host"
 grep -qE '^Self-host code: pbh1\.' "$work/out" || fail "claim code not printed"
 inside 'systemctl is-active --quiet paperboat-selfhost.service' || fail "service not active"
 inside 'systemctl is-enabled --quiet paperboat-selfhost.service' || fail "service not enabled"
@@ -108,7 +108,7 @@ for capability in $(echo "$enable" | sed 's/both/relay tunnel/'); do
  grep -q "^Preparing $capability image " "$work/out" || fail "$capability image was not prepared by the installer"
  inside "docker image inspect \"\$(sed -E 's/.*\"$capability\":\"([^\"]*)\".*/\\1/' /var/lib/paperboat-selfhost/images.json)\" >/dev/null" || fail "$capability image not present"
 done
-inside 'ss -ltn | grep -q ":8443 "' || fail "claim API not listening"
+inside 'ss -ltn | grep -q ":7277 "' || fail "claim API not listening"
 inside 'test "$(stat -c %a /var/lib/paperboat-selfhost)" = 700' || fail "state directory is not owner-only"
 before=$(inside 'sha256sum /var/lib/paperboat-selfhost/tls.crt')
 

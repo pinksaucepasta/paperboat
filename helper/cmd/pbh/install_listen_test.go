@@ -37,8 +37,8 @@ func TestCheckClaimListenAcceptsFreeAddress(t *testing.T) {
 }
 
 func TestClaimListenErrorNamesAddressForOtherBindFailures(t *testing.T) {
-	err := claimListenError("192.0.2.1:8443", errors.New("cannot assign requested address"))
-	if err == nil || !strings.Contains(err.Error(), "192.0.2.1:8443") || !strings.Contains(err.Error(), "--claim-listen") {
+	err := claimListenError("192.0.2.1:7277", errors.New("cannot assign requested address"))
+	if err == nil || !strings.Contains(err.Error(), "192.0.2.1:7277") || !strings.Contains(err.Error(), "--claim-listen") {
 		t.Fatalf("bind failure does not name the address and remedy: %v", err)
 	}
 }

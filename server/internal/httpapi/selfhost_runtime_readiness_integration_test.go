@@ -61,7 +61,7 @@ func TestSelfhostRuntimeReadinessAuthenticatesExactNodeOnPostgres(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256,last_heartbeat_at,version) VALUES($1,$1,'1.0',$2,'relay.example.test',27445,27446,'ready',true,'test','test-a',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],8,0,now(),now()+interval '1 hour',decode(repeat('00',32),'hex'),now(),1)`, id, id+"_epoch"); err != nil {
+		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,ready,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,tls_spki_sha256,last_heartbeat_at,version) VALUES($1,$1,'1.0',$2,'relay.example.test',7274,7275,'ready',true,'test','test-a',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],8,0,now(),now()+interval '1 hour',decode(repeat('00',32),'hex'),now(),1)`, id, id+"_epoch"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$1,$4,$2,$3,'Readiness test','relay','global','global',$1,true)`, id, hash[:], ciphertext, []byte(public)); err != nil {

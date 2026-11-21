@@ -16,7 +16,6 @@ import (
 )
 
 const CodeTTL = 15 * time.Minute
-const ClaimPort = 8443
 
 var encoding = base64.RawURLEncoding.Strict()
 

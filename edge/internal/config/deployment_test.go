@@ -24,7 +24,7 @@ func TestLoadDeploymentStrictProfile(t *testing.T) {
 	if deployment.PublicHTTPSCertFile != "/cert.pem" || deployment.PublicHTTPSKeyFile != "/key.pem" {
 		t.Fatal("public HTTPS certificate paths were not retained")
 	}
-	if deployment.CarrierTCPListenAddress != "0.0.0.0:27443" || deployment.CarrierQUICListenAddress != "0.0.0.0:27444" || deployment.PreviewBaseDomain != "preview.example.test" || deployment.TunnelBaseDomain != "tunnels.example.test" || deployment.RuntimeBaseDomain != "runtime.example.test" || deployment.MaxBodyBytes != 100<<20 || deployment.MaxHeaderBytes != 32<<10 {
+	if deployment.CarrierTCPListenAddress != "0.0.0.0:7272" || deployment.CarrierQUICListenAddress != "0.0.0.0:7273" || deployment.PreviewBaseDomain != "preview.example.test" || deployment.TunnelBaseDomain != "tunnels.example.test" || deployment.RuntimeBaseDomain != "runtime.example.test" || deployment.MaxBodyBytes != 100<<20 || deployment.MaxHeaderBytes != 32<<10 {
 		t.Fatalf("deployment = %+v", deployment)
 	}
 }
@@ -98,7 +98,7 @@ func TestLoadDeploymentAcceptsBoundedPublicRoutes(t *testing.T) {
 }
 
 func validDeploymentJSON() string {
-	return `{"control_url":"https://edge-control.example.test","control_credential_file":"/opt/paperboat-edge/private/control.credential","jwks_file":"/opt/paperboat-edge/private/jwks.json","revocations_file":"/opt/paperboat-edge/private/revocations.json","usage_signing_key_file":"/opt/paperboat-edge/private/usage.key","infrastructure_tls_cert_file":"/opt/paperboat-edge/private/tls.crt","infrastructure_tls_key_file":"/opt/paperboat-edge/private/tls.key","connector_advertise_host":"edge.example.test","carrier_tcp_listen_address":"0.0.0.0:27443","carrier_quic_listen_address":"0.0.0.0:27444","public_https_listen_address":"127.0.0.1:18443","private_https_listen_address":"127.0.0.1:19443","public_http_listen_address":"127.0.0.1:18080","preview_base_domain":"preview.example.test","tunnel_base_domain":"tunnels.example.test","runtime_base_domain":"runtime.example.test","trusted_proxy_cidrs":["127.0.0.1/32"],"control_interval":5000000000,"control_timeout":5000000000}`
+	return `{"control_url":"https://edge-control.example.test","control_credential_file":"/opt/paperboat-edge/private/control.credential","jwks_file":"/opt/paperboat-edge/private/jwks.json","revocations_file":"/opt/paperboat-edge/private/revocations.json","usage_signing_key_file":"/opt/paperboat-edge/private/usage.key","infrastructure_tls_cert_file":"/opt/paperboat-edge/private/tls.crt","infrastructure_tls_key_file":"/opt/paperboat-edge/private/tls.key","connector_advertise_host":"edge.example.test","carrier_tcp_listen_address":"0.0.0.0:7272","carrier_quic_listen_address":"0.0.0.0:7273","public_https_listen_address":"127.0.0.1:18443","private_https_listen_address":"127.0.0.1:19443","public_http_listen_address":"127.0.0.1:18080","preview_base_domain":"preview.example.test","tunnel_base_domain":"tunnels.example.test","runtime_base_domain":"runtime.example.test","trusted_proxy_cidrs":["127.0.0.1/32"],"control_interval":5000000000,"control_timeout":5000000000}`
 }
 
 func writeDeployment(t *testing.T, value string) string {

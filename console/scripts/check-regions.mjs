@@ -198,13 +198,13 @@ try {
   check("add edge: Paste what the installer printed", await dialog.getByText("Paste what the installer printed").isVisible())
 
   // 5. Pairing with a machine installed for another region: the server's message, inline.
-  await dialog.getByLabel("Address").fill("203.0.113.7:8443")
+  await dialog.getByLabel("Address").fill("203.0.113.7:7277")
   await dialog.getByLabel("Code").fill("pbh1.wrong")
   await dialog.getByRole("button", { name: "Pair edge" }).click()
   await dialog.getByText(/installed for region lab, not home-lab/).waitFor(slow)
   check("pair: wrong region shows the server's message inline", true)
   check("pair: the dialog stays open on the form", await dialog.getByLabel("Code").isVisible())
-  check("pair: the failed attempt sent expect_region and expect_capability", JSON.stringify(state.posts.pair.at(-1)) === JSON.stringify({ address: "203.0.113.7:8443", code: "pbh1.wrong", scope: { kind: "account" }, expect_region: "home-lab", expect_capability: "tunnel" }), JSON.stringify(state.posts.pair.at(-1)))
+  check("pair: the failed attempt sent expect_region and expect_capability", JSON.stringify(state.posts.pair.at(-1)) === JSON.stringify({ address: "203.0.113.7:7277", code: "pbh1.wrong", scope: { kind: "account" }, expect_region: "home-lab", expect_capability: "tunnel" }), JSON.stringify(state.posts.pair.at(-1)))
 
   // 6. The right code: the claim returns, the machine has not reported yet.
   await dialog.getByLabel("Code").fill("pbh1.good")

@@ -24,6 +24,7 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
 // Enrollment mirrors global edges (selfhost/enrollment.go): an unenrolled node prints a one-time claim code
@@ -277,7 +279,7 @@ func (e *Enroller) Enroll(ctx context.Context, actor, address, code string) (Sta
 	}
 	host, _, splitErr := net.SplitHostPort(address)
 	if splitErr != nil {
-		host, address = address, net.JoinHostPort(address, "8443")
+		host, address = address, net.JoinHostPort(address, strconv.Itoa(edgeports.Claim))
 	}
 	dial := e.Dial
 	if dial == nil {

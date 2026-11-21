@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/edge/internal/edgeerrors"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
-const (
-	defaultHealthAddress = "127.0.0.1:9090"
-	maxShutdownTimeout   = 5 * time.Minute
-)
+const maxShutdownTimeout = 5 * time.Minute
+
+var defaultHealthAddress = fmt.Sprintf("127.0.0.1:%d", edgeports.EdgeHealth)
 
 var identityPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,127}$`)
 

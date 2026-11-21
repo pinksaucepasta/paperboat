@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
 type Config struct {
@@ -75,8 +76,8 @@ func validateConfig(c Config) error {
 			return errors.New("invalid capacity, region, or failure domain")
 		}
 		for _, p := range []int{v.TCPPort, v.QUICPort} {
-			if p < 1 || p > 65535 || ports[p] || p == ClaimPort {
-				return errors.New("component ports must be distinct and must not use claim port 8443")
+			if p < 1 || p > 65535 || ports[p] || p == edgeports.Claim {
+				return errors.New("component ports must be distinct and must not use claim port 7277")
 			}
 			ports[p] = true
 		}

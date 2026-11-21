@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/relay/selfhost"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 )
 
 // selectedMode is the component set named by --relay, --edge or --both (relay when none is given).
@@ -106,12 +107,12 @@ func freshInstallConfig(ctx context.Context, fs *flag.FlagSet, mode, region stri
 	if mode == "relay" || mode == "both" {
 		tcp := 443
 		if mode == "both" {
-			tcp = 27445
+			tcp = edgeports.RelayWSS
 		}
-		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: 27446, Region: region, FailureDomain: failure, CapacityLimit: 256})
+		c.Components = append(c.Components, selfhost.Component{Capability: "relay", TCPPort: tcp, QUICPort: edgeports.RelayQUIC, Region: region, FailureDomain: failure, CapacityLimit: 256})
 	}
 	if mode == "tunnel" || mode == "both" {
-		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: 27443, QUICPort: 27444, Region: region, FailureDomain: failure, CapacityLimit: 256})
+		c.Components = append(c.Components, selfhost.Component{Capability: "tunnel", TCPPort: edgeports.CarrierTCP, QUICPort: edgeports.CarrierQUIC, Region: region, FailureDomain: failure, CapacityLimit: 256})
 	}
 	return c, nil
 }

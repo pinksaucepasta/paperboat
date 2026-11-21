@@ -358,7 +358,7 @@ func TestTask30DockerEdgeRecovery(t *testing.T) {
 	ips := make([]string, 2)
 	for i := range 2 {
 		prefix := filepath.Join(directory, fmt.Sprintf("edge%d", i))
-		node := task30CarrierNode{Address: fmt.Sprintf("edge%d:27443", i), NodeID: fmt.Sprintf("edge_0%d", i+1), Epoch: fmt.Sprintf("epoch_000%d", i+1), Domain: fmt.Sprintf("simulated_container_%d", i)}
+		node := task30CarrierNode{Address: fmt.Sprintf("edge%d:7272", i), NodeID: fmt.Sprintf("edge_0%d", i+1), Epoch: fmt.Sprintf("epoch_000%d", i+1), Domain: fmt.Sprintf("simulated_container_%d", i)}
 		f := task30EdgeFixture{DockerSimulation: true, LifetimeSeconds: 840, Node: node, IP: "0.0.0.0", HTTPPort: "443", TCPPort: "25001", CA: string(ca), Cert: string(certPEM), Key: string(keyPEM), CarrierPath: prefix + "-carrier", AuthorityPath: prefix + "-authority", ReadyPath: prefix + "-ready"}
 		task30Write(t, prefix+"-fixture", f)
 		container := fmt.Sprintf("%s-edge%d", name, i)

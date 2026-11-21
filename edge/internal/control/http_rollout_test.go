@@ -153,7 +153,7 @@ func TestHTTPClientRequestsSurviveRolloutCut(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return c.RegisterNode(ctx, NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM})
+			return c.RegisterNode(ctx, NodeRegistration{NodeID: "edge", ProcessEpoch: "epoch", CarrierEndpoint: ConnectorEndpoint{Host: "edge.example.test", TCPPort: 7272, QUICPort: 7273}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM})
 		}, false, 0, nil},
 	} {
 		for cuts := 1; cuts <= controlAttempts+tc.replayable; cuts++ {

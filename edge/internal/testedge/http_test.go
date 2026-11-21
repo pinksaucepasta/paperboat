@@ -41,7 +41,7 @@ func TestHTTPHandlerMatchesControlClient(t *testing.T) {
 	if trustErr != nil {
 		t.Fatal(trustErr)
 	}
-	if err := client.RegisterNode(ctx, control.NodeRegistration{NodeID: "edge", ProcessEpoch: "process", CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
+	if err := client.RegisterNode(ctx, control.NodeRegistration{NodeID: "edge", ProcessEpoch: "process", CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 7272, QUICPort: 7273}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.Heartbeat(ctx, control.NodeObservation{NodeID: "edge", ProcessEpoch: "process", Ready: true, At: time.Unix(10, 0)}); err != nil {

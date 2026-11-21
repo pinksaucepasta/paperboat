@@ -90,7 +90,7 @@ func newAgentFixture(t *testing.T, name string) *agentFixture {
 		{f.backupNode, "epoch_backup", "second-region", "second-domain", "backup.example.test", "2"},
 	} {
 		f.exec(t, `INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
-VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$4,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$5,27443,27444,$6,'fixture certificate')`, n.id, n.epoch, n.region, n.domain, n.host, "sha256:"+strings.Repeat(n.pin, 64))
+VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$4,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$5,7272,7273,$6,'fixture certificate')`, n.id, n.epoch, n.region, n.domain, n.host, "sha256:"+strings.Repeat(n.pin, 64))
 	}
 	f.service = &Service{DB: database}
 	f.proof = previewattachment.MachineProof{UserID: f.account, MachineID: f.machine, OperationID: "operation_endpoint", InstallationGeneration: 1}

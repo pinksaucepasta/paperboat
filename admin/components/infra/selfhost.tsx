@@ -63,11 +63,11 @@ function EnrolFlow() {
           target={address || "-"}
           submitLabel="Enrol node"
           valid={address.length > 0 && /^pbh1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/.test(code)}
-          trigger={(open) => <div><Button size="lg" disabled={!ready} onClick={() => { if (!address && endpoint) setAddress(`${endpoint}:8443`); open() }}>I ran it, enrol the node</Button></div>}
+          trigger={(open) => <div><Button size="lg" disabled={!ready} onClick={() => { if (!address && endpoint) setAddress(`${endpoint}:7277`); open() }}>I ran it, enrol the node</Button></div>}
           run={(h) => operatorAction("POST", "/v1/admin/selfhost/enrollments", h, { address, code })}
           onDone={() => { setCode(""); setAddress("") }}
         >
-          <TextField label="Claim address" value={address} onChange={(v) => setAddress(v.trim())} placeholder={endpoint ? `${endpoint}:8443` : "host:8443"} />
+          <TextField label="Claim address" value={address} onChange={(v) => setAddress(v.trim())} placeholder={endpoint ? `${endpoint}:7277` : "host:7277"} />
           <TextField label="Self-host code" value={code} onChange={(v) => setCode(v.trim())} type="password" autoComplete="off" hint="pbh1.… Used once." />
         </ActionDialog>
       </div>

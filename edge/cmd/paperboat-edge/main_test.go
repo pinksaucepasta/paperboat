@@ -20,15 +20,15 @@ import (
 )
 
 func TestCarrierEndpointFromDeploymentIsSeparateAndComplete(t *testing.T) {
-	deployment := config.Deployment{ConnectorAdvertiseHost: "edge.example.test", CarrierTCPListenAddress: "0.0.0.0:27443", CarrierQUICListenAddress: "0.0.0.0:27444"}
+	deployment := config.Deployment{ConnectorAdvertiseHost: "edge.example.test", CarrierTCPListenAddress: "0.0.0.0:7272", CarrierQUICListenAddress: "0.0.0.0:7273"}
 	endpoint, err := carrierEndpointFromDeployment(deployment)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if endpoint == nil || endpoint.Host != "edge.example.test" || endpoint.TCPPort != 27443 || endpoint.QUICPort != 27444 {
+	if endpoint == nil || endpoint.Host != "edge.example.test" || endpoint.TCPPort != 7272 || endpoint.QUICPort != 7273 {
 		t.Fatalf("carrier endpoint = %+v", endpoint)
 	}
-	if _, err := carrierEndpointFromDeployment(config.Deployment{ConnectorAdvertiseHost: "edge.example.test", CarrierTCPListenAddress: "0.0.0.0:27443"}); err == nil {
+	if _, err := carrierEndpointFromDeployment(config.Deployment{ConnectorAdvertiseHost: "edge.example.test", CarrierTCPListenAddress: "0.0.0.0:7272"}); err == nil {
 		t.Fatal("incomplete carrier endpoint accepted")
 	}
 	if endpoint, err := carrierEndpointFromDeployment(config.Deployment{}); err == nil || endpoint != nil {

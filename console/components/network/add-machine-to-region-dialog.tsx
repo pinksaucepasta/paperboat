@@ -95,7 +95,7 @@ export function AddMachineToRegionDialog({
                 <FieldLabel htmlFor="node-address">Address</FieldLabel>
                 <Input
                   id="node-address"
-                  placeholder="203.0.113.7:8443"
+                  placeholder="203.0.113.7:7277"
                   value={address}
                   onChange={(event) => setAddress(event.target.value)}
                   className="font-mono"

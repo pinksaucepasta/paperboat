@@ -14,32 +14,32 @@ func TestDeploymentCarrierListenerValidation(t *testing.T) {
 		{
 			name: "listeners missing",
 			mutate: func(value string) string {
-				value = strings.Replace(value, `"carrier_tcp_listen_address":"0.0.0.0:27443"`, `"carrier_tcp_listen_address":""`, 1)
-				return strings.Replace(value, `"carrier_quic_listen_address":"0.0.0.0:27444"`, `"carrier_quic_listen_address":""`, 1)
+				value = strings.Replace(value, `"carrier_tcp_listen_address":"0.0.0.0:7272"`, `"carrier_tcp_listen_address":""`, 1)
+				return strings.Replace(value, `"carrier_quic_listen_address":"0.0.0.0:7273"`, `"carrier_quic_listen_address":""`, 1)
 			},
 		},
 		{
 			name: "missing TCP listener",
 			mutate: func(value string) string {
-				return strings.Replace(value, `"carrier_tcp_listen_address":"0.0.0.0:27443"`, `"carrier_tcp_listen_address":""`, 1)
+				return strings.Replace(value, `"carrier_tcp_listen_address":"0.0.0.0:7272"`, `"carrier_tcp_listen_address":""`, 1)
 			},
 		},
 		{
 			name: "missing QUIC listener",
 			mutate: func(value string) string {
-				return strings.Replace(value, `"carrier_quic_listen_address":"0.0.0.0:27444"`, `"carrier_quic_listen_address":""`, 1)
+				return strings.Replace(value, `"carrier_quic_listen_address":"0.0.0.0:7273"`, `"carrier_quic_listen_address":""`, 1)
 			},
 		},
 		{
 			name: "same listeners",
 			mutate: func(value string) string {
-				return strings.Replace(value, `"carrier_quic_listen_address":"0.0.0.0:27444"`, `"carrier_quic_listen_address":"0.0.0.0:27443"`, 1)
+				return strings.Replace(value, `"carrier_quic_listen_address":"0.0.0.0:7273"`, `"carrier_quic_listen_address":"0.0.0.0:7272"`, 1)
 			},
 		},
 		{
 			name: "hostname listener",
 			mutate: func(value string) string {
-				return strings.Replace(value, `"carrier_tcp_listen_address":"0.0.0.0:27443"`, `"carrier_tcp_listen_address":"edge.example.test:27443"`, 1)
+				return strings.Replace(value, `"carrier_tcp_listen_address":"0.0.0.0:7272"`, `"carrier_tcp_listen_address":"edge.example.test:7272"`, 1)
 			},
 		},
 	}
@@ -67,8 +67,8 @@ func TestDeploymentRequiresTheStableCarrierCertificate(t *testing.T) {
 
 func TestLoadDeploymentRequiresCanonicalCarrier(t *testing.T) {
 	for _, field := range []string{
-		`"carrier_tcp_listen_address":"0.0.0.0:27443",`,
-		`"carrier_quic_listen_address":"0.0.0.0:27444",`,
+		`"carrier_tcp_listen_address":"0.0.0.0:7272",`,
+		`"carrier_quic_listen_address":"0.0.0.0:7273",`,
 	} {
 		value := strings.Replace(validDeploymentJSON(), field, "", 1)
 		if _, err := LoadDeployment(writeDeployment(t, value)); err == nil {

@@ -125,7 +125,7 @@ func (f *pairFixture) cleanup() {
 func (f *pairFixture) node(name, region string, heartbeatAge time.Duration) string {
 	id := name + "_" + f.stamp
 	f.exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,endpoint_host,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at)
-VALUES($1,'default','1.0','epoch','ready',true,now()-make_interval(secs=>$2::float8),$3,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',$1||'.example.test','edge.example.test',27443,27444,'sha256:'||repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, heartbeatAge.Seconds(), region)
+VALUES($1,'default','1.0','epoch','ready',true,now()-make_interval(secs=>$2::float8),$3,$1,ARRAY['edge'],ARRAY['http3','http2'],100,0,now(),now()+interval '1 hour',$1||'.example.test','edge.example.test',7272,7273,'sha256:'||repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())`, id, heartbeatAge.Seconds(), region)
 	return id
 }
 

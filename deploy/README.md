@@ -364,7 +364,7 @@ refuses an image whose revision label is not on `origin/main` (or has none). Tes
 Staging machines: containers `pb-stg-a` and `pb-stg-b` on database-test-host paired with a `pb` built with that `DefaultServerURL`.
 Staging never reads or writes prod data; it copies only the WorkOS client id/key and the Cloudflare DNS token from the
 prod env, in memory. `staging.py edge <edge image>` runs a staging edge as a plain container `pb-stg-edge` (no `pbh`, no firewall or nft
-change; the prod edge keeps 80/443/27443-27446): it registers the node the way a claim would (SQL, as
+change; the prod edge keeps 80/443/7272-7275): it registers the node the way a claim would (SQL, as
 `selfhost_tunnel_process_test.go` does), pins the account to a self-hosted-only pool, marks ingress verified by hand
 and listens on TCP 18445 (carrier). State on 2026-11-12: node ready and heartbeating, edge set assigned, machine
 carriers attached; `pb send` still fails after the file-transfer descriptor (cause not found yet). Limits by design:

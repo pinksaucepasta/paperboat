@@ -7,8 +7,8 @@
     "components": [
       {
         "capability": "tunnel",
-        "tcp_port": 27443,
-        "quic_port": 27444,
+        "tcp_port": 7272,
+        "quic_port": 7273,
         "region": "test",
         "failure_domain": "test-host",
         "capacity_limit": 128

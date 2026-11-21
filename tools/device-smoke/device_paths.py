@@ -352,7 +352,7 @@ def main():
     parser.add_argument("--cut-ip", action="append", default=[], help="Mac only, rebind: an address the cut drops (the API, the hosted relays); repeat")
     parser.add_argument("--relay", action="append", default=[], help="address of a hosted relay (repeat)")
     parser.add_argument("--same-lan", action="store_true", help="the peer is on the target's LAN: also check with no usable relay")
-    parser.add_argument("--relay-ports", default="27445,27446", help="the relays' ports, first to last (TCP and UDP)")
+    parser.add_argument("--relay-ports", default="7274,7275", help="the relays' ports, first to last (TCP and UDP)")
     args = parser.parse_args()
     if not args.host:
         parser.error("configure staging_host in local development targets or pass --host")

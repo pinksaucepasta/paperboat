@@ -187,13 +187,13 @@ func TestFirewallAddAndRemovePerKind(t *testing.T) {
 		wantAdd []string // command prefixes that must have run on add
 		wantDel []string // ... and on remove
 	}{
-		"ufw": {"ufw", map[string]string{"ufw allow 443/tcp": "Rule added", "ufw allow 10000:59999/tcp": "Skipping adding existing rule", "ufw delete allow 443/tcp": ""}, []string{"443/tcp"},
-			[]string{"ufw allow 443/tcp", "ufw allow 10000:59999/tcp"}, []string{"ufw delete allow 443/tcp"}},
-		"firewalld": {"firewalld", map[string]string{"firewall-cmd --query-port=443/tcp": "yes", "firewall-cmd --query-port=10000-59999/tcp": "no", "firewall-cmd --permanent --add-port=10000-59999/tcp": "success", "firewall-cmd --reload": "success", "firewall-cmd --permanent --remove-port=10000-59999/tcp": "success"}, []string{"10000-59999/tcp"},
-			[]string{"firewall-cmd --permanent --add-port=10000-59999/tcp", "firewall-cmd --reload"}, []string{"firewall-cmd --permanent --remove-port=10000-59999/tcp"}},
+		"ufw": {"ufw", map[string]string{"ufw allow 443/tcp": "Rule added", "ufw allow 7272:7275/tcp": "Rule added", "ufw allow 10000:59999/tcp": "Skipping adding existing rule", "ufw delete allow 443/tcp": "", "ufw delete allow 7272:7275/tcp": ""}, []string{"443/tcp", "7272:7275/tcp"},
+			[]string{"ufw allow 443/tcp", "ufw allow 7272:7275/tcp", "ufw allow 10000:59999/tcp"}, []string{"ufw delete allow 443/tcp", "ufw delete allow 7272:7275/tcp"}},
+		"firewalld": {"firewalld", map[string]string{"firewall-cmd --query-port=443/tcp": "yes", "firewall-cmd --query-port=7272-7275/tcp": "no", "firewall-cmd --permanent --add-port=7272-7275/tcp": "success", "firewall-cmd --query-port=10000-59999/tcp": "no", "firewall-cmd --permanent --add-port=10000-59999/tcp": "success", "firewall-cmd --reload": "success", "firewall-cmd --permanent --remove-port=7272-7275/tcp": "success", "firewall-cmd --permanent --remove-port=10000-59999/tcp": "success"}, []string{"7272-7275/tcp", "10000-59999/tcp"},
+			[]string{"firewall-cmd --permanent --add-port=7272-7275/tcp", "firewall-cmd --permanent --add-port=10000-59999/tcp", "firewall-cmd --reload"}, []string{"firewall-cmd --permanent --remove-port=7272-7275/tcp", "firewall-cmd --permanent --remove-port=10000-59999/tcp"}},
 		"iptables": {"iptables", map[string]string{"iptables -I INPUT 1 " + spec: "", "iptables -D INPUT " + spec: ""}, []string{"iptables"},
 			[]string{"iptables -C INPUT " + spec, "iptables -I INPUT 1 " + spec}, []string{"iptables -D INPUT " + spec}},
-		"nft": {"nft", map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 10000-59999 } accept comment \"paperboat-edge\"": "",
+		"nft": {"nft", map[string]string{"nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\"": "",
 			"nft -a list chain inet filter input": "\t\ttcp dport { 443, 10000-59999 } accept comment \"paperboat-edge\" # handle 7\n", "nft delete rule inet filter input handle 7": ""}, []string{"nft"},
 			[]string{"nft insert rule inet filter input"}, []string{"nft delete rule inet filter input handle 7"}},
 	} {
@@ -234,7 +234,7 @@ func TestReapplyOnlyForRuntimeOnlyFirewalls(t *testing.T) {
 	spec := strings.Join(iptablesSpec(), " ")
 	for kind, wantCalls := range map[string]bool{"iptables": true, "nft": true, "ufw": false, "firewalld": false, "": false} {
 		f := newFakeHost(t, "60000 65535")
-		f.answers = map[string]string{"iptables -I INPUT 1 " + spec: "", "nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 10000-59999 } accept comment \"paperboat-edge\"": ""}
+		f.answers = map[string]string{"iptables -I INPUT 1 " + spec: "", "nft list ruleset": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n", "nft insert rule inet filter input tcp dport { 443, 7272-7275, 10000-59999 } accept comment \"paperboat-edge\"": ""}
 		if err := writeHostnetRecord(f.paths.record, hostnetRecord{Firewall: kind}); err != nil {
 			t.Fatal(err)
 		}
@@ -258,7 +258,7 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules, _ := os.ReadFile(f.paths.guard)
-	for _, want := range []string{"table inet " + edgeGuardTable, `iifname != { "ens3" } accept`, "th dport { 443, 10000-59999 }", "limit rate over 100/second burst 200 packets", "ct count over 512", "ip6 saddr and ffff:ffff:ffff:ffff::"} {
+	for _, want := range []string{"table inet " + edgeGuardTable, `iifname != { "ens3" } accept`, "th dport { 443, 7272-7275, 10000-59999 }", "limit rate over 100/second burst 200 packets", "ct count over 512", "ip6 saddr and ffff:ffff:ffff:ffff::"} {
 		if !strings.Contains(string(rules), want) {
 			t.Fatalf("guard rules miss %q:\n%s", want, rules)
 		}

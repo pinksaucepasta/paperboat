@@ -30,8 +30,8 @@ func TestParseExplicitRelayMetadata(t *testing.T) {
 func TestParseRejectsUnsafeConfiguration(t *testing.T) {
 	tests := [][]string{
 		{},
-		{"--node-id=edge_test_01", "--health-address=0.0.0.0:9090"},
-		{"--node-id=edge_test_01", "--health-address=localhost:9090"},
+		{"--node-id=edge_test_01", "--health-address=0.0.0.0:7278"},
+		{"--node-id=edge_test_01", "--health-address=localhost:7278"},
 		{"--node-id=edge_test_01", "--shutdown-timeout=0"},
 		{"--node-id=edge_test_01", "--relay-region=Not-A-Region"},
 		{"--node-id=edge_test_01", "--relay-name=line\nbreak"},

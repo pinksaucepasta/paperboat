@@ -15,3 +15,13 @@ func TestPublicTCPBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestNodePortsAreDistinctAndClearOfThePublicRange(t *testing.T) {
+	seen := map[int]bool{}
+	for _, p := range []int{CarrierTCP, CarrierQUIC, RelayWSS, RelayQUIC, RelayMesh, Claim, EdgeHealth, EdgePrivateHTTPS} {
+		if p < 1024 || p >= PublicTCPMin || seen[p] {
+			t.Fatalf("node port %d is privileged, inside the public range or repeated", p)
+		}
+		seen[p] = true
+	}
+}

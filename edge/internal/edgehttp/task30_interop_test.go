@@ -340,7 +340,7 @@ func TestTask35CPrepare(t *testing.T) {
 	}
 	hosts := task35cHosts(t, task35cRequiredEnv(t, "PAPERBOAT_TASK35C_PUBLIC_RELAY_HOSTS"))
 	publicHostname := task35cRequiredEnv(t, "PAPERBOAT_TASK35C_PUBLIC_HOSTNAME")
-	carrierPort := task35cPort(t, "PAPERBOAT_TASK35C_CARRIER_PORT", "27443")
+	carrierPort := task35cPort(t, "PAPERBOAT_TASK35C_CARRIER_PORT", "7272")
 	httpPort := task35cPort(t, "PAPERBOAT_TASK35C_HTTP_PORT", "28443")
 	tcpPort := task35cPort(t, "PAPERBOAT_TASK35C_TCP_PORT", "25001")
 	carrierListen := task30ListenAddress(os.Getenv("PAPERBOAT_TASK35C_CARRIER_LISTEN_ADDRESS"), net.JoinHostPort("0.0.0.0", carrierPort))
@@ -430,7 +430,7 @@ func TestTask30EdgeProcess(t *testing.T) {
 	}
 	listenAddress := task30ListenAddress(f.CarrierListenAddress, "127.0.0.1:0")
 	if f.DockerSimulation && strings.TrimSpace(f.CarrierListenAddress) == "" {
-		listenAddress = "0.0.0.0:27443"
+		listenAddress = "0.0.0.0:7272"
 	}
 	endpoint := datacarrier.EndpointConfig{Address: listenAddress, TLS: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots}, PeerBinding: func(tls.ConnectionState) (datacarrier.Identity, error) { return identity, nil }}
 	config := datacarrier.ServiceConfig{TCP: &endpoint, Carrier: datacarrier.DefaultConfig()}

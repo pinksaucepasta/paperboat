@@ -17,7 +17,7 @@ func TestRegisterAndHeartbeatReportsDrainObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registration := control.NodeRegistration{NodeID: "edge_test_01", EdgePool: "default", Artifact: "artifact", Protocol: "1.0", ProcessEpoch: "epoch", CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 27443, QUICPort: 27444}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
+	registration := control.NodeRegistration{NodeID: "edge_test_01", EdgePool: "default", Artifact: "artifact", Protocol: "1.0", ProcessEpoch: "epoch", CarrierEndpoint: control.ConnectorEndpoint{Host: "edge.example.test", TCPPort: 7272, QUICPort: 7273}, CarrierServerSPKISHA256: trust.SPKISHA256, CarrierServerCertificateChainPEM: trust.CertificateChainPEM}
 	if _, err := manager.RegisterAndHeartbeat(context.Background(), fake, registration, at); err != nil {
 		t.Fatal(err)
 	}

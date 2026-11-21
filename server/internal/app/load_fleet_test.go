@@ -205,7 +205,7 @@ func fleetEdges(ctx context.Context, t *testing.T, store *db.DB, count int) {
 	beat := func() {
 		for i := 1; i <= count; i++ {
 			_, err := store.SQL().ExecContext(context.Background(), `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,tls_spki_sha256,public_ingress_verified_at)
-VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$2,ARRAY['edge'],ARRAY['http3','http2'],100000,0,now(),now()+interval '1 hour','edge.example.test',27443,27444,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())
+VALUES($1,'default','1.0','epoch','ready',true,now(),'region',$2,ARRAY['edge'],ARRAY['http3','http2'],100000,0,now(),now()+interval '1 hour','edge.example.test',7272,7273,'sha256:' || repeat('ab',32),'pem',decode(repeat('ab',32),'hex'),now())
 ON CONFLICT (id) DO UPDATE SET last_heartbeat_at=now(),registry_expires_at=now()+interval '1 hour',capacity_observed_at=now(),ready=true,state='ready'`,
 				"fleet_edge_"+strconv.Itoa(i), "domain-"+strconv.Itoa(i))
 			if err != nil {

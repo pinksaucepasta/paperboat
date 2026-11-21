@@ -91,7 +91,7 @@ func TestHeldBrowserTerminalSurvivesItsRouteMovingEdgesPostgres(t *testing.T) {
 	exec(`INSERT INTO control_connector_generations(environment_id,machine_id,connector_id,generation,edge_pool,state) VALUES($1,$2,'runtime',1,'default','pending')`, env, machine)
 	for i, node := range nodes {
 		exec(`INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem,endpoint_host,public_ingress_verified_at)
-VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$4,27443,27444,$5,'fixture certificate',$4,now())`,
+VALUES($1,'default','1.0',$2,'ready',true,now(),$3,$3,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$4,7272,7273,$5,'fixture certificate',$4,now())`,
 			node, epochs[node], "region-"+string(rune('a'+i)), "edge-"+string(rune('a'+i))+".example.test", "sha256:"+strings.Repeat(string(rune('1'+i)), 64))
 	}
 	exec(`INSERT INTO user_machine_terminal_sessions(id,user_machine_id,owner_account,name,launch_cwd,desired_state,runtime_state) VALUES($1,$2,$3,'held','/workspace','open','running')`, session, machine, account)

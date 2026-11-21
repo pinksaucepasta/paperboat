@@ -145,7 +145,7 @@ func automaticNode(t *testing.T, host string) string {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c := Config{Name: "managed", EndpointHost: host, Listen: "127.0.0.1:8443", Components: []Component{{Capability: "tunnel", TCPPort: 27443, QUICPort: 27444, Region: "test", FailureDomain: "test", CapacityLimit: 1}}}
+	c := Config{Name: "managed", EndpointHost: host, Listen: "127.0.0.1:7277", Components: []Component{{Capability: "tunnel", TCPPort: 7272, QUICPort: 7273, Region: "test", FailureDomain: "test", CapacityLimit: 1}}}
 	if err := Initialize(dir, c); err != nil {
 		t.Fatal(err)
 	}

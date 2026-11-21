@@ -15,6 +15,7 @@ import (
 	"errors"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/secrets"
+	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"io"
 	"net"
 	"net/http"
@@ -120,7 +121,7 @@ func (s *Service) claimTarget(ctx context.Context, address string) (host, addres
 		return "", "", ErrInvalid
 	}
 	host = address
-	port := "8443"
+	port := strconv.Itoa(edgeports.Claim)
 	if h, p, e := net.SplitHostPort(address); e == nil {
 		host, port = h, p
 	} else if strings.Contains(address, ":") {
@@ -262,7 +263,7 @@ func (s *Service) Enroll(ctx context.Context, actor string, in EnrollRequest, op
 	transport := PinnedTransport(pin, address)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	target := (&url.URL{Scheme: "https", Host: net.JoinHostPort(host, "8443")}).String()
+	target := (&url.URL{Scheme: "https", Host: net.JoinHostPort(host, strconv.Itoa(edgeports.Claim))}).String()
 	nonce := randomToken(32)
 	var inspection Inspection
 	if e = requestNode(ctx, client, target+"/v1/selfhost/inspect", secret, map[string]string{"nonce": nonce}, &inspection); e != nil {

@@ -88,7 +88,7 @@ func runDoctor(ctx context.Context, c selfhost.Config, d doctorDeps, out io.Writ
 	current, err := currentOutgoing(d.paths.proc)
 	report(err == nil && current == outgoingRange, "outgoing port range is "+outgoingRange+", clear of the public range", fmt.Sprintf("outgoing port range is %q; run pbh install to move it to %s (public TCP ports %d-%d would collide with outgoing connections)", current, outgoingRange, edgeports.PublicTCPMin, edgeports.PublicTCPMax))
 	kind := detectFirewall(ctx, d.run)
-	report(kind == "" || firewallRulePresent(ctx, d.run, kind), "host firewall ("+firewallLabel(kind)+") lets TCP 443 and "+publicRange+" in", "the "+kind+" host firewall does not allow TCP 443 and "+publicRange+"; run pbh install as root to add the rule")
+	report(kind == "" || firewallRulePresent(ctx, d.run, kind), "host firewall ("+firewallLabel(kind)+") lets TCP 443, "+nodeRange+" and "+publicRange+" in", "the "+kind+" host firewall does not allow TCP 443 and "+publicRange+"; run pbh install as root to add the rule")
 	report(edgeGuardPresent(ctx, d.run), "per-address connection limits are on (nftables table "+edgeGuardTable+")", "per-address connection limits are off; install nftables and run pbh install as root")
 	nonceBytes := make([]byte, 24)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -138,7 +138,7 @@ func reachabilityAdvice(port int, detail string) string {
 	case "timeout":
 		return prefix + "the connection timed out, so a cloud firewall is dropping it; add " + cloudRule() + " (security group, security list or VPC firewall)"
 	case "unreachable":
-		return prefix + "this host's firewall rejects it; run pbh install as root to open TCP 443 and " + publicRange + " (or add the rule by hand)"
+		return prefix + "this host's firewall rejects it; run pbh install as root to open TCP 443, " + nodeRange + " and " + publicRange + " (or add the rule by hand)"
 	case "refused":
 		return prefix + "the host answered but nothing listened; another firewall layer or a port forward is in the way"
 	case "nonce_mismatch":

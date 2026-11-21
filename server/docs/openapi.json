@@ -13865,7 +13865,7 @@
           "address": {
             "type": "string",
             "maxLength": 300,
-            "description": "Server IP/hostname with optional bootstrap port (default 8443); bracket IPv6 when supplying a port."
+            "description": "Server IP/hostname with optional bootstrap port (default 7277); bracket IPv6 when supplying a port."
           },
           "code": {
             "type": "string",

@@ -113,7 +113,7 @@ To enable the UDP peer-relay role on the same registered node, also supply
 `-peer-relay-service` (public service descriptor JSON), `-peer-relay-disco-key`
 (file containing the private discovery key as canonical rawurl base64), and
 `-peer-relay-addresses` (one to four comma-separated advertised IP:port endpoints,
-all using the same port). The descriptor fields are `wireguard_public_key`,
+all using the same port, 7276 by convention). The descriptor fields are `wireguard_public_key`,
 `disco_public_key`, and `virtual_address`. The registry must publish that exact public
 identity with roles `relay`, `peer_relay` and transports `derp_quic`, `derp_wss`, `peer_relay_udp`.
 The command verifies that the private discovery key matches its public descriptor,

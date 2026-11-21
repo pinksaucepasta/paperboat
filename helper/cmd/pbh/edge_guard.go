@@ -44,7 +44,7 @@ table inet %[1]s {
 	chain input {
 		type filter hook input priority filter - 10; policy accept;
 		iifname != { %[4]s } accept
-		meta l4proto { tcp, udp } th dport { 443, %[2]d-%[3]d } ct state new jump edge_new
+		meta l4proto { tcp, udp } th dport { 443, %[5]d-%[6]d, %[2]d-%[3]d } ct state new jump edge_new
 	}
 	chain edge_new {
 		add @new4 { ip saddr limit rate over 100/second burst 200 packets } drop
@@ -53,7 +53,7 @@ table inet %[1]s {
 		meta l4proto tcp add @held6 { ip6 saddr and ffff:ffff:ffff:ffff:: ct count over 512 } reject with tcp reset
 	}
 }
-`, edgeGuardTable, edgeports.PublicTCPMin, edgeports.PublicTCPMax, strings.Join(quoted, ", "))
+`, edgeGuardTable, edgeports.PublicTCPMin, edgeports.PublicTCPMax, strings.Join(quoted, ", "), edgeports.NodeMin, edgeports.NodeMax)
 }
 
 // publicInterfaces names the interfaces that carry a default route (IPv4 or IPv6), the ones public
@@ -134,7 +134,7 @@ func setupEdgeGuard(ctx context.Context, run commander, paths hostPaths, record 
 	}
 	record.Guard = skipped == ""
 	if record.Guard {
-		fmt.Fprintln(out, "Per-address connection limits on TCP/UDP 443 and the public TCP range: on (nftables, public interfaces only).")
+		fmt.Fprintln(out, "Per-address connection limits on TCP/UDP 443, the carrier and relay ports and the public TCP range: on (nftables, public interfaces only).")
 	} else {
 		fmt.Fprintln(out, "Per-address connection limits are off: "+skipped+".")
 	}

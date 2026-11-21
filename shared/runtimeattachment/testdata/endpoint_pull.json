@@ -28,8 +28,8 @@
           "attachment_generation": 0,
           "config_content_hash": "sha256:db74b1e381568fc692811a35ee4bf319c1e886204fc3ebcffc3dad35df53a623",
           "edge_endpoints": [
-            "h2://edge.example.test:27443",
-            "h3://edge.example.test:27444"
+            "h2://edge.example.test:7272",
+            "h3://edge.example.test:7273"
           ],
           "hostname": "",
           "route_kind": "",
@@ -83,8 +83,8 @@
           "attachment_generation": 0,
           "config_content_hash": "sha256:db74b1e381568fc692811a35ee4bf319c1e886204fc3ebcffc3dad35df53a623",
           "edge_endpoints": [
-            "h2://edge.example.test:27443",
-            "h3://edge.example.test:27444"
+            "h2://edge.example.test:7272",
+            "h3://edge.example.test:7273"
           ],
           "hostname": "",
           "route_kind": "",

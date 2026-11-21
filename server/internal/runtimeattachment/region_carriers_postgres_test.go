@@ -32,7 +32,7 @@ func newRegionFixture(t *testing.T) *regionFixture {
 func (f *regionFixture) addNode(t *testing.T, name, region string) string {
 	id := f.prefix + "_x" + name
 	f.exec(t, `INSERT INTO control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at,region,failure_domain,roles,transports,capacity_limit,capacity_used,capacity_observed_at,registry_expires_at,carrier_endpoint_host,carrier_endpoint_tcp_port,carrier_endpoint_quic_port,carrier_server_spki_sha256,carrier_server_certificate_chain_pem)
-VALUES($1,'default','1.0','epoch_'||$2,'ready',true,now(),$3,$1,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$2||'.example.test',27443,27444,'sha256:'||repeat('3',64),'fixture certificate')`, id, name, region)
+VALUES($1,'default','1.0','epoch_'||$2,'ready',true,now(),$3,$1,ARRAY['edge']::text[],ARRAY['http3','http2']::text[],128,0,now(),now()+interval '1 hour',$2||'.example.test',7272,7273,'sha256:'||repeat('3',64),'fixture certificate')`, id, name, region)
 	return id
 }
 
