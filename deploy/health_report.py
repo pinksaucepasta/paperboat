@@ -20,5 +20,5 @@ def push(source, payload):
             data=json.dumps({"source": source, "payload": payload}).encode(),
             headers={"content-type": "application/json", "authorization": "Bearer " + Path(token_file).read_text().strip()})
         urllib.request.urlopen(request, timeout=10).close()
-    except (OSError, ValueError) as error:
+    except Exception as error:  # never mask the caller's own result
         print(f"health report failed: {error}", file=sys.stderr)

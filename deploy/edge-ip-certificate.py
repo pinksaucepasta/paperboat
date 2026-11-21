@@ -111,7 +111,10 @@ def main():
     parser.add_argument("--email", default=os.environ.get("PAPERBOAT_CERTIFICATE_EMAIL"))
     args = parser.parse_args()
     if not args.email or not 86400 <= args.renew_before <= 259200:
-        parser.error("configure the certificate contact email and a 1–3 day renewal window")
+        message = "configure the certificate contact email and a 1–3 day renewal window"
+        print(message)
+        report(args, False, message)
+        return 2
     try:
         renew(args)
     except Exception as error:
@@ -131,7 +134,7 @@ def report(args, ok, error):
     except (OSError, ValueError, KeyError, TypeError):
         host = ""
     if not re.fullmatch(r"[A-Za-z0-9.:-]{1,253}", str(host)):
-        host = socket.gethostname()
+        host = re.sub(r"[^A-Za-z0-9.:-]", "-", socket.gethostname()) or "unknown"
     health_report.push("edge-certificate:" + host[:253], {"ok": ok, "error": error[:300], "stale_after_seconds": 86400})
 
 

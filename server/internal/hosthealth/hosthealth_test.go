@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -66,8 +67,26 @@ func TestLatestReportReplacesThePreviousOneAndBadReportsAreRefusedPostgres(t *te
 			t.Fatalf("source %s: %v", source, err)
 		}
 	}
+	// A week-old edge row is dropped on the next edge report; past maxEdges a new edge is refused, a known one is not.
+	if _, err := store.Pool().Exec(ctx, `UPDATE host_health_reports SET reported_at = now() - interval '8 days' WHERE source = 'edge-certificate:2001:db8::1'`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxEdges-1; i++ {
+		if err := s.Ingest(ctx, Report{Source: fmt.Sprintf("edge-certificate:e%d", i), Payload: json.RawMessage(`{"ok":true}`)}); err != nil {
+			t.Fatalf("edge %d: %v", i, err)
+		}
+	}
+	if err := s.Ingest(ctx, Report{Source: "edge-certificate:one-too-many", Payload: json.RawMessage(`{}`)}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("edge past the bound: err = %v, want ErrInvalid", err)
+	}
+	if err := s.Ingest(ctx, Report{Source: "edge-certificate:203.0.113.7", Payload: json.RawMessage(`{"ok":false}`)}); err != nil {
+		t.Fatalf("known edge at the bound: %v", err)
+	}
+	if _, err := store.Pool().Exec(ctx, `DELETE FROM host_health_reports WHERE source ~ '^edge-certificate:e[0-9]+$'`); err != nil {
+		t.Fatal(err)
+	}
 	entries, err := s.Snapshot(ctx)
-	if err != nil || len(entries) != 4 || entries[3].Source != "hosts" || string(entries[3].Payload) != `{"hosts": 2}` {
-		t.Fatalf("snapshot = %+v, %v; want deploy, two edge certificate rows and the second hosts report", entries, err)
+	if err != nil || len(entries) != 3 || entries[2].Source != "hosts" || string(entries[2].Payload) != `{"hosts": 2}` {
+		t.Fatalf("snapshot = %+v, %v; want deploy, the current edge certificate row and the second hosts report", entries, err)
 	}
 }

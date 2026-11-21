@@ -156,10 +156,17 @@ class Gate:
                 failed = [s["step"] for s in (run or {}).get("steps", []) if not s.get("ok")]
                 reason = f"no green canary run within {self.a.wait} s of the switch (failing: {', '.join(failed) or 'no result'})"
             self.say(f"rolling back: {reason}")
-            ok, kept = self.rollback(before)
+            outcome = {"rolled_back": True, "kept_migrated": False, "what": self.a.what[:200], "reason": reason[:300],
+                       "deploy_failed": code != 0, "at": iso(self.wall())}
+            try:
+                ok, kept = self.rollback(before)
+            except Exception:
+                self.report("deploy", {**outcome, "rollback_ok": False})
+                raise
+            outcome.update(rolled_back=not kept, kept_migrated=kept, rollback_ok=ok)
+            self.report("deploy", outcome)  # before the canary verdict, which can take minutes or fail
             green, run = self.wait_green(self.wall())
-            self.report("deploy", {"rolled_back": not kept, "kept_migrated": kept, "what": self.a.what[:200],
-                                   "reason": reason[:300], "green_after": green, "rollback_ok": ok, "at": iso(self.wall())})
+            self.report("deploy", {**outcome, "green_after": green})
             self.say(f"after rollback: canary {'green' if green else 'still red'}"
                      + ("" if ok else "; a rollback step failed, see above")
                      + ("; the server was kept on the migrated schema: roll forward" if kept else ""))

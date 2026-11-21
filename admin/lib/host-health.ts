@@ -5,7 +5,7 @@ export type HostResource = { percent: number; level: Level }
 export type HostsPayload = { hosts: Record<string, { resources: Record<string, HostResource>; unreachable: boolean }>; stale_after_seconds: number }
 export type CanaryStep = { step: string; ok: boolean; error: string }
 export type CanaryRun = { started: string; finished: string; ok: boolean; steps: CanaryStep[] }
-export type DeployPayload = { rolled_back: boolean; kept_migrated: boolean; what: string; reason?: string; green_after?: boolean; rollback_ok?: boolean; at: string }
+export type DeployPayload = { rolled_back: boolean; kept_migrated: boolean; what: string; reason?: string; deploy_failed?: boolean; green_after?: boolean; rollback_ok?: boolean; at: string }
 export type EdgeCertificatePayload = { ok: boolean; error: string; stale_after_seconds: number }
 export type CanaryPayload = { red: boolean; red_since: string | null; failing: Record<string, number>; last: CanaryRun | null; account_last: CanaryRun | null; stale_after_seconds: number }
 
@@ -43,16 +43,24 @@ export function openAlerts(reports: Reports | undefined, now: number): Alert[] {
     }
   }
   const deploy = pick<DeployPayload>(reports, "deploy")?.payload
-  if (deploy?.rolled_back)
-    alerts.push({ id: "deploy:rolled-back", level: "critical", title: "A deploy was rolled back automatically", body: `${deploy.what} failed its canary check (${deploy.reason ?? "no reason recorded"}), so the previous server and edges are serving again${deploy.green_after ? " and the canary is green" : deploy.rollback_ok === false ? ", but a rollback step failed: check the deploy log" : ", but the canary is still red: check the canary alerts"}. Fix the cause and deploy again; this clears when a deploy stays.`, since: deploy.at })
-  if (deploy?.kept_migrated)
+  if (deploy?.rolled_back === true) {
+    const cause = deploy.deploy_failed === true ? "its deploy command failed" : `it failed its canary check (${deploy.reason ?? "no reason recorded"})`
+    const after = deploy.rollback_ok === false ? "A rollback step failed, so some servers or edges may still run the new version: check the deploy log and finish the rollback by hand."
+      : deploy.green_after === true ? "The previous server and edges are serving again and the canary is green."
+      : deploy.green_after === false ? "The previous server and edges are serving again, but the canary is still red: check the canary alerts."
+      : "The previous server and edges are serving again; the canary result is not in yet."
+    alerts.push({ id: "deploy:rolled-back", level: "critical", title: "A deploy was rolled back automatically", body: `${deploy.what} was rolled back because ${cause}. ${after} Fix the cause and deploy again; this clears when a deploy stays.`, since: deploy.at })
+  }
+  if (deploy?.kept_migrated === true)
     alerts.push({ id: "deploy:kept-migrated", level: "critical", title: "A failed deploy could not be rolled back", body: `${deploy.what} failed its canary check, but its database migrations have no passing compatibility check with the previous server, so the new server keeps serving. Deploy a fix forward.`, since: deploy.at })
   for (const report of reports ?? []) {
-    if (!report.source.startsWith("edge-certificate:")) continue
+    if (!report.source.startsWith("edge-certificate:") || typeof report.payload !== "object") continue
     const edge = report.source.slice("edge-certificate:".length)
-    const cert = pick<EdgeCertificatePayload>(reports, report.source)!
-    if (isStale(cert, now)) alerts.push({ id: `edge-certificate-stale:${edge}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Check the paperboat-edge-certificate timer on that edge.", since: cert.reported_at })
-    else if (!cert.payload.ok) alerts.push({ id: `edge-certificate:${edge}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${cert.payload.error || "The renewal failed."} Browsers will refuse this edge when its certificate expires. Read public-acme/renew.log on the edge, fix the cause, then start paperboat-edge-certificate.service.`, since: cert.reported_at })
+    const cert = { payload: report.payload as EdgeCertificatePayload, reported_at: report.reported_at }
+    const stale = isStale(cert, now)
+    // Only an explicit success is healthy: a malformed report reads as a failure, and a failure stays critical until a success arrives.
+    if (cert.payload.ok !== true) alerts.push({ id: `edge-certificate:${edge}`, level: "critical", title: `Certificate renewal is failing on ${edge}`, body: `${typeof cert.payload.error === "string" && cert.payload.error ? cert.payload.error : "The renewal failed."}${stale ? " The edge has also stopped reporting checks." : ""} Browsers will refuse this edge when its certificate expires. Read public-acme/renew.log on the edge, fix the cause, then start paperboat-edge-certificate.service.`, since: cert.reported_at })
+    else if (stale) alerts.push({ id: `edge-certificate-stale:${edge}`, level: "warning", title: `${edge} has not checked its certificate`, body: "No certificate renewal check arrived for a day. Check the paperboat-edge-certificate timer on that edge.", since: cert.reported_at })
   }
   return alerts.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical"))
 }
