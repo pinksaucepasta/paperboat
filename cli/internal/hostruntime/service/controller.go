@@ -116,7 +116,9 @@ func UserSystemdController(runner Runner, unit string, uid int) SystemdControlle
 	// `systemctl --user` finds the user manager through XDG_RUNTIME_DIR; a session without one (docker exec,
 	// su, cron) failed with "Failed to connect to bus: No medium found" (pb-canary-b, dev-40342ab86).
 	if exec, ok := runner.(ExecRunner); ok && exec.Environment == nil && uid != 0 && os.Getenv("XDG_RUNTIME_DIR") == "" {
-		runner = ExecRunner{Environment: append(withoutServiceManagerProtocol(os.Environ()), "XDG_RUNTIME_DIR=/run/user/"+strconv.Itoa(uid))}
+		if dir := "/run/user/" + strconv.Itoa(uid); ownRuntimeDir(dir, uid) {
+			runner = ExecRunner{Environment: append(withoutServiceManagerProtocol(os.Environ()), "XDG_RUNTIME_DIR="+dir)}
+		}
 	}
 	return SystemdController{Runner: runner, Unit: unit, User: uid != 0}
 }
