@@ -69,6 +69,13 @@ def advance(status, run):
                 alerted.add(name)
                 lines.append(f"canary RED: {name} failed {counts[name]} runs in a row "
                              f"(last {run['started']}): {s.get('error', '')[:200]}")
+    # A step this unit no longer runs (a retired edge) would otherwise keep its counter and hold red forever. Only this
+    # unit's own steps are dropped; the other unit's failures stay until that unit passes.
+    ran = {step["step"] for step in steps}
+    mine = (lambda name: name in ACCOUNT_STEPS) if run.get("group") == "account" else (lambda name: name not in ACCOUNT_STEPS)
+    for name in [n for n in counts if mine(n) and n not in ran]:
+        del counts[name]
+    alerted = {n for n in alerted if n in ran or not mine(n)}
     red = bool(counts)
     since = status.get("red_since") if red and status.get("red") else (run["started"] if red else None)
     account = run.get("group") == "account"

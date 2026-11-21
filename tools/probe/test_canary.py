@@ -128,6 +128,25 @@ class Record(unittest.TestCase):
                 self.assertEqual(len((canary.STATE / 'history.jsonl').read_text().splitlines()), 1)
                 self.assertEqual(len((canary.STATE / 'account-history.jsonl').read_text().splitlines()), 1)
 
+    def test_retired_step_counter_is_dropped_and_red_clears(self):
+        edge = '{"step":"edge_140.245.11.41","ok":false,"seconds":1,"error":"gone"}'
+        for _ in range(51):
+            self.record([OK, edge], 1)
+        self.assertEqual(self.record([OK, edge], 1)["consecutive_failures"]["edge_140.245.11.41"], 52)
+        status = self.record([OK], 0)  # the edge is retired: the run no longer probes it
+        self.assertEqual(status["consecutive_failures"], {})
+        self.assertEqual(status["alerted"], [])
+        self.assertFalse(status["red"])
+        self.assertIsNone(status["red_since"])
+
+    def test_retired_step_drop_leaves_the_other_unit_failures(self):
+        signin = run(['{"step":"signin","ok":false}'], 1)
+        signin["group"] = "account"
+        canary.record(signin, self.sent.append)
+        status = canary.record(run([OK], 0), self.sent.append)
+        self.assertTrue(status["red"])
+        self.assertIn("signin", status["consecutive_failures"])
+
     def test_only_the_matching_unit_can_recover_its_runner_failure(self):
         for group, runner, own_step, other_step in [('access','probe','exec_a_to_b','signin'),
                                                      ('account','account','signin','exec_a_to_b')]:
