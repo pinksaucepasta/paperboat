@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 from install_lifecycle import registration
-from pairing_lifecycle import command_result
+from pairing_lifecycle import CommandFailed, command_diagnostic, command_result
 import pathlib
 import winhost
 
@@ -38,8 +38,9 @@ def main():
                 pass
             raise
         try:
-            if command_result(PB, 'update', '--from', str(copy), timeout=300).returncode:
-                raise RuntimeError('pb update --from failed')
+            update = command_result(PB, 'update', '--from', str(copy), timeout=300)
+            if update.returncode:
+                raise CommandFailed(command_diagnostic([str(PB), 'update', '--from', str(copy)], update.stdout, update.stderr))
         finally:
             verified = phase('verify', state)
     if registration()['machine_id'] != before['machine_id']:
