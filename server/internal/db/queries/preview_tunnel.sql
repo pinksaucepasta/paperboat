@@ -100,19 +100,6 @@ VALUES
    sqlc.arg(updated_by_actor_id), sqlc.arg(now), sqlc.arg(now))
 RETURNING *;
 
--- name: CreatePreviewTunnelDomain :one
-INSERT INTO tunnel_domains
-  (id, account_id, tunnel_id, route_id, hostname, match_type, ownership_challenge_reference,
-   ownership_state, dns_target, observed_records, certificate_strategy, certificate_reference,
-   certificate_state, caa_state, conflict_state, generation, created_at, updated_at)
-VALUES
-  (sqlc.arg(id), sqlc.arg(account_id), sqlc.arg(tunnel_id), sqlc.arg(route_id),
-   sqlc.arg(hostname), sqlc.arg(match_type), sqlc.arg(ownership_challenge_reference),
-   sqlc.arg(ownership_state), sqlc.arg(dns_target), sqlc.arg(observed_records)::jsonb,
-   sqlc.arg(certificate_strategy), sqlc.narg(certificate_reference), sqlc.arg(certificate_state),
-   sqlc.arg(caa_state), sqlc.arg(conflict_state), 1, sqlc.arg(now), sqlc.arg(now))
-RETURNING *;
-
 -- name: CreatePreviewLease :one
 INSERT INTO preview_leases
   (id, endpoint, account_id, owner_team_id, actor_id, owner_machine_id, owner_session_id,owner_session_kind,

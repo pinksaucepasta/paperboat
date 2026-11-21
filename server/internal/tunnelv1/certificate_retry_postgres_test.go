@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"github.com/google/uuid"
 	"strings"
 	"sync"
 	"testing"
@@ -38,10 +39,14 @@ INSERT INTO paperboat.tunnel_routes
 VALUES ($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000',$4,$4,$5,$5)`, route, tunnel, hostname, account, now); err != nil {
 		t.Fatal(err)
 	}
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.database.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.tunnel_domains
- (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state)
-VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear')`, domain, account, tunnel, route, hostname); err != nil {
+ (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear',$6)`, domain, account, tunnel, route, hostname, "wsd_"+ws); err != nil {
 		t.Fatal(err)
 	}
 	due := func(at time.Time) bool {
@@ -88,6 +93,11 @@ func (i *fanoutIssuer) Issue(_ context.Context, request tunnelcert.IssueRequest)
 
 func (i *fanoutIssuer) IssueDNS01(_ context.Context, domain tunnelcert.Domain) (tunnelcert.CertificateBundle, error) {
 	return i.issue(domain.Hostname)
+}
+
+// WorkspaceCertificate: every live binding lives under a workspace domain, whose certificate it serves.
+func (i *fanoutIssuer) WorkspaceCertificate(_ context.Context, _, workspaceDomainID string) (tunnelcert.CertificateBundle, error) {
+	return i.issue(workspaceDomainID)
 }
 
 func (i *fanoutIssuer) issue(hostname string) (tunnelcert.CertificateBundle, error) {
@@ -158,9 +168,13 @@ VALUES($1,'default','v1',$2,'ready',true,$3,1,ARRAY['edge']::text[],'test','doma
 	exec(`INSERT INTO paperboat.endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, account, host)
 	exec(`INSERT INTO paperboat.endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) VALUES($1,$2,$3,'http',$1)`, route, tunnel, blockedHost)
 	exec(`INSERT INTO paperboat.endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,observed_ready,observed_at) VALUES($1,$2,$3,$4,$5,true,$6)`, route, tunnel, edge, epoch, session, now)
+	workspaceDomains := map[string]string{}
 	for _, domain := range []struct{ id, hostname string }{{blocked, blockedHost}, {next, nextHost}} {
-		exec(`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state)
-VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear')`, domain.id, account, tunnel, route, domain.hostname)
+		ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+		workspaceDomains[domain.id] = "wsd_" + ws
+		exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test")
+		exec(`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id)
+VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear',$6)`, domain.id, account, tunnel, route, domain.hostname, "wsd_"+ws)
 	}
 
 	issuer := &fanoutIssuer{}
@@ -168,7 +182,7 @@ VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','cle
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := tunnelcert.NewCoordinator(tunnelcert.Config{Store: store, Locks: fanoutLock{MemoryLock: tunnelcert.NewMemoryLock(), failingDomain: blocked}, Keys: tunnelcert.ReferenceKeySource{Keys: map[string][]byte{"master/current": make([]byte, 32)}}, Issuer: issuer, CAA: tunnelcert.MemoryCAA{Result: tunnelcert.CAAResult{State: "ready"}}, Distributor: tunnelcert.NewMemoryDistributor(), MasterKeyReference: "master/current", OwnerID: "certificate-fanout-worker"})
+	coordinator, err := tunnelcert.NewCoordinator(tunnelcert.Config{Store: store, Locks: fanoutLock{MemoryLock: tunnelcert.NewMemoryLock(), failingDomain: blocked}, Keys: tunnelcert.ReferenceKeySource{Keys: map[string][]byte{"master/current": make([]byte, 32)}}, Issuer: issuer, WorkspaceCertificates: issuer, CAA: tunnelcert.MemoryCAA{Result: tunnelcert.CAAResult{State: "ready"}}, Distributor: tunnelcert.NewMemoryDistributor(), MasterKeyReference: "master/current", OwnerID: "certificate-fanout-worker"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +193,7 @@ VALUES ($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','cle
 	if _, err := worker.Reconcile(ctx, 500); err != nil {
 		t.Fatalf("one failing certificate domain stopped the reconciliation: %v", err)
 	}
-	if !issuer.saw(nextHost) {
+	if !issuer.saw(workspaceDomains[next]) {
 		t.Fatalf("the domain after the failing one was never attempted; issuer saw %v", issuer.asked)
 	}
 	var attempts int32

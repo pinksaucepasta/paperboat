@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -164,7 +166,11 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if err = database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_route_eligible($1,$2,$3)`, installed.NodeID, account, route).Scan(&managedEligible); err != nil || managedEligible {
 		t.Fatalf("managed route eligible=%v err=%v", managedEligible, err)
 	}
-	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear')`, `top_d_`+suffix, account, tunnel, route, "custom-"+testutil.EndpointLabel(endpointID)+".example.test")
+	ws1 := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws1, account, ws1+".example.test"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear',$6)`, `top_d_`+suffix, account, tunnel, route, "custom-"+testutil.EndpointLabel(endpointID)+".example.test", "wsd_"+ws1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +196,11 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if err = database.SQL().QueryRowContext(ctx, `SELECT paperboat.node_preview_eligible($1,$2,$3)`, installed.NodeID, account, preview).Scan(&eligible); err != nil || eligible {
 		t.Fatalf("managed preview eligible=%v err=%v", eligible, err)
 	}
-	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear')`, `top_pd_`+suffix, account, preview, "custom-preview-"+previewEndpointID+".example.test")
+	ws2 := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws2, account, ws2+".example.test"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear',$5)`, `top_pd_`+suffix, account, preview, "custom-preview-"+previewEndpointID+".example.test", "wsd_"+ws2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +247,11 @@ func TestSelfhostHTTPTopologyPolicyOnPostgres(t *testing.T) {
 	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, teamRoute, teamTunnel); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,expected_records) VALUES($1,$2,$3,$4,$5,'exact','dns:test','verified','203.0.113.50','managed','ready','ready','clear','[{"name":"test","type":"A","value":"203.0.113.50","ttl":300}]')`, "top_team_d_"+suffix, account, teamTunnel, teamRoute, "custom-team-"+testutil.EndpointLabel(teamEndpointID)+".example.test"); err != nil {
+	ws3 := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws3, account, ws3+".example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,expected_records,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact','dns:test','verified','203.0.113.50','managed','ready','ready','clear','[{"name":"test","type":"A","value":"203.0.113.50","ttl":300}]',$6)`, "top_team_d_"+suffix, account, teamTunnel, teamRoute, "custom-team-"+testutil.EndpointLabel(teamEndpointID)+".example.test", "wsd_"+ws3); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = service.SetPlacement(ctx, account, "tunnel", teamTunnel, nil); !errors.Is(err, ErrPlacementMode) {

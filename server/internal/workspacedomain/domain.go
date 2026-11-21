@@ -321,11 +321,15 @@ func Covering(ctx context.Context, tx *db.Tx, account string, team sql.NullStrin
 	if strings.HasPrefix(hostname, "*.") && row.Hostname != base {
 		return row, ErrNotCovered
 	}
+	// Lock, then read the state again: a lapse committed after the lookup must refuse the binding.
+	if err := tx.QueryRow(ctx, `SELECT ownership_state FROM paperboat.workspace_domains WHERE id=$1 FOR SHARE`, row.ID).Scan(&row.OwnershipState); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return row, ErrNotCovered
+		}
+		return row, err
+	}
 	if row.OwnershipState != "verified" {
 		return row, ErrNotVerified
-	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM paperboat.workspace_domains WHERE id=$1 FOR SHARE`, row.ID); err != nil {
-		return row, err
 	}
 	return row, nil
 }

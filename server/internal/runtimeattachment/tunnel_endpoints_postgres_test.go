@@ -463,7 +463,9 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	// the certificate worker read only connector-path route assignments, so such a domain never got an
 	// edge to place its certificate on (staging 4.3).
 	domain := "domain_" + f.prefix
-	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear')`, domain, f.account, tunnel, route, "custom-"+f.prefix+".example.test")
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	f.exec(t, `INSERT INTO workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.account, ws+".example.test")
+	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'managed','issuing','ready','clear',$6)`, domain, f.account, tunnel, route, "custom-"+f.prefix+".example.test", "wsd_"+ws)
 	f.exec(t, `UPDATE endpoint_edge_assignments SET observed_ready=true,observed_at=now() WHERE endpoint_id=$1 AND desired='active'`, tunnel)
 	targets, err := f.database.Queries().ListReadyTunnelCertificateEdgesV1(f.ctx, domain)
 	if err != nil || len(targets) == 0 {

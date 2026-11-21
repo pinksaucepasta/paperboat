@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"testing"
 	"time"
@@ -199,7 +200,9 @@ func TestWithholdBlockedListsBannedOwnersHostnames(t *testing.T) {
 	custom := map[string]string{"banned": "blog-" + suffix + ".example.test", "free": "shop-" + suffix + ".example.test"}
 	for name, host := range custom {
 		exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,'web','http','exact',$3,'http','127.0.0.1:3000','x','x')`, "tr_"+name+suffix, "tn_"+name+suffix, host)
-		exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target) VALUES($1,$2,$3,$4,$5,'exact','ref','verified','target.example.test')`, "td_"+name+suffix, map[string]string{"banned": owner, "free": other}[name], "tn_"+name+suffix, "tr_"+name+suffix, host)
+		ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+		exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, map[string]string{"banned": owner, "free": other}[name], ws+".example.test")
+		exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact','ref','verified','target.example.test',$6)`, "td_"+name+suffix, map[string]string{"banned": owner, "free": other}[name], "tn_"+name+suffix, "tr_"+name+suffix, host, "wsd_"+ws)
 	}
 	exec(`INSERT INTO paperboat.bans(id,subject_kind,subject_id,reason,banned_by) VALUES('ban_u_'||$1,'user',$2,'case','operator_x'),('ban_t_'||$1,'team',$3,'case','operator_x')`, suffix, owner, team)
 	exec(`INSERT INTO paperboat.bans(id,subject_kind,subject_id,reason,banned_by,lifted_at,lifted_by) VALUES('ban_l_'||$1,'user',$2,'case','operator_x',now(),'operator_x')`, suffix, other)

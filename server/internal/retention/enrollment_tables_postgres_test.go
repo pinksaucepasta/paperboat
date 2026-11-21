@@ -3,7 +3,9 @@ package retention
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,23 +103,27 @@ SELECT $1||k,$1,'workos_user',k,st,c,d FROM (VALUES
 	exec(`INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,actor_id,owner_machine_id,owner_session_id,target_scheme,
 target_address,lease_deadline,created_at,terminal_state)
 VALUES('foreground',$1||'_preview','https://'||replace($1,'_','-')||'.preview.example.test',$1,$1,$1||'_host','s','http','127.0.0.1:3000',now()+interval '1 hour',now(),'active')`, user)
+	wsP := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+wsP, user, wsP+".example.test")
 	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,dns_target,
-conflict_state,quarantine_until,deleted_at)
+conflict_state,quarantine_until,deleted_at,workspace_domain_id)
 SELECT $1||'_pd'||k,$1,$1||'_preview',1,k||'.'||$1||'.preview-domains.example.test','exact','c','t',
- CASE WHEN q IS NULL THEN 'clear' ELSE 'quarantined' END,q,d
+ CASE WHEN q IS NULL THEN 'clear' ELSE 'quarantined' END,q,d,CASE WHEN d IS NULL THEN $2::text END
 FROM (VALUES('old',now()-interval '33 days',now()-interval '40 days'),('hold',now()+interval '1 day',now()-interval '40 days'),
- ('recent',now()-interval '3 days',now()-interval '10 days'),('live',NULL::timestamptz,NULL::timestamptz)) v(k,q,d)`, user)
+ ('recent',now()-interval '3 days',now()-interval '10 days'),('live',NULL::timestamptz,NULL::timestamptz)) v(k,q,d)`, user, "wsd_"+wsP)
 	exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,
 created_by_actor_id) SELECT $1||'_tunnel',$1,'t','active','private',1,'endpoint_'||u,'https://'||u||'.tunnels.example.test',$1||'_host',$1
 FROM (SELECT gen_random_uuid()::text u) w`, user)
 	exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,origin_scheme,origin_address,generation,desired_state,created_by_actor_id,updated_by_actor_id)
 VALUES($1||'_route',$1||'_tunnel','r','http','catch_all','http','127.0.0.1:3000',1,'active',$1,$1)`, user)
+	wsT := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+wsT, user, wsT+".example.test")
 	exec(`INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,
-conflict_state,quarantine_until,deleted_at)
+conflict_state,quarantine_until,deleted_at,workspace_domain_id)
 SELECT $1||'_td'||k,$1,$1||'_tunnel',$1||'_route',k||'.'||$1||'.tunnel-domains.example.test','exact','c','t',
- CASE WHEN q IS NULL THEN 'clear' ELSE 'quarantined' END,q,d
+ CASE WHEN q IS NULL THEN 'clear' ELSE 'quarantined' END,q,d,CASE WHEN d IS NULL THEN $2::text END
 FROM (VALUES('old',now()-interval '33 days',now()-interval '40 days'),('hold',now()+interval '1 day',now()-interval '40 days'),
- ('recent',now()-interval '3 days',now()-interval '10 days'),('live',NULL::timestamptz,NULL::timestamptz)) v(k,q,d)`, user)
+ ('recent',now()-interval '3 days',now()-interval '10 days'),('live',NULL::timestamptz,NULL::timestamptz)) v(k,q,d)`, user, "wsd_"+wsT)
 	if err := fixture.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}

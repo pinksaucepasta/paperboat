@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -187,21 +186,6 @@ VALUES ($1, $2, $3, 'active')`, accountID, "workos_"+suffix, "trk03-"+suffix+"@e
 		CreatedByActorID: accountID, UpdatedByActorID: accountID, Now: now,
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate route name error = %v, want ErrConflict", err)
-	}
-
-	domain, err := store.CreateDomain(ctx, dbsqlc.CreatePreviewTunnelDomainParams{
-		ID: "dom_" + suffix, AccountID: accountID, TunnelID: created.Tunnel.ID, RouteID: route.ID,
-		Hostname: "app-" + suffix + ".example.test", MatchType: "exact",
-		OwnershipChallengeReference: "dns-challenge://" + suffix, OwnershipState: "pending",
-		DnsTarget: "domains.example.test", ObservedRecords: json.RawMessage(`[]`),
-		CertificateStrategy: "managed", CertificateState: "pending", CaaState: "unknown",
-		ConflictState: "clear", Now: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if domain.Generation != 1 {
-		t.Fatalf("domain generation = %d", domain.Generation)
 	}
 
 	preview, err := store.CreatePreviewLease(ctx, dbsqlc.CreatePreviewLeaseParams{
