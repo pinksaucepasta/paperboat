@@ -260,7 +260,7 @@ VALUES($1,$2,$3,5,$4,`+extra+`,'tcp','127.0.0.1:1','not_applicable',1,'active',$
 	f.exec(t, `INSERT INTO endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, f.account, f.machine)
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	f.exec(t, `INSERT INTO workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.account, ws+".example.test")
-	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact',$1,'verified',$5,'none','not_applicable','ready','clear',$6)`, "domain_"+f.prefix, f.account, tunnel, tls, custom, "wsd_"+ws)
+	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact',$1,$5,'none','not_applicable','ready','clear',$6)`, "domain_"+f.prefix, f.account, tunnel, tls, custom, "wsd_"+ws)
 	for id, host := range map[string]string{tcp: stable, tls: stable, private: stable} {
 		f.exec(t, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) SELECT $1,$2,$3,protocol,id FROM tunnel_routes WHERE id=$1`, id, tunnel, host)
 		f.exec(t, `INSERT INTO endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,generation,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_endpoint',$4,1,true,now())`, id, tunnel, f.node, session)
@@ -308,7 +308,7 @@ VALUES($1,$2,$1,5,'http','managed',$3,NULL,'http','127.0.0.1:1','not_applicable'
 	f.exec(t, `INSERT INTO endpoints(id,kind,account_id,agent_machine_id,access_mode,lifetime,tunnel_id) VALUES($1,'tunnel',$2,$3,'public','persistent',$1)`, tunnel, f.account, f.machine)
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	f.exec(t, `INSERT INTO workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.account, ws+".example.test")
-	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'one_label_wildcard',$1,'verified',$5,'none','not_applicable','ready','clear',$6)`, "domain_"+f.prefix, f.account, tunnel, exact, "*."+domainSuffix, "wsd_"+ws)
+	f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'one_label_wildcard',$1,$5,'none','not_applicable','ready','clear',$6)`, "domain_"+f.prefix, f.account, tunnel, exact, "*."+domainSuffix, "wsd_"+ws)
 	// endpoint_routes.hostname is always a concrete name (endpoint_routes_hostname_check), so the wildcard route's own
 	// endpoint hostname is a name under the suffix; the seed announces it as before, beside the wildcard key.
 	app := "app." + routeSuffix
@@ -339,8 +339,8 @@ func (f *agentFixture) alias(t *testing.T, domainID, previewID, hostname, matchT
 	t.Helper()
 	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	f.exec(t, `INSERT INTO workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.account, ws+".example.test")
-	f.exec(t, `INSERT INTO preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_reference,certificate_state,caa_state,conflict_state,workspace_domain_id)
-SELECT $1,$2,p.id,p.generation,$3,$4,$1,'verified',$3,'managed','cert-'||$1,$5,'ready','clear',$7 FROM preview_leases p WHERE p.id=$6`, domainID, f.account, hostname, matchType, certificateState, previewID, "wsd_"+ws)
+	f.exec(t, `INSERT INTO preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_reference,certificate_state,caa_state,conflict_state,workspace_domain_id)
+SELECT $1,$2,p.id,p.generation,$3,$4,$1,$3,'managed','cert-'||$1,$5,'ready','clear',$7 FROM preview_leases p WHERE p.id=$6`, domainID, f.account, hostname, matchType, certificateState, previewID, "wsd_"+ws)
 }
 
 // TestPreviewAliasHolderSeeded: the ready custom-domain aliases of a preview (exact and one-label wildcard) are held by the
@@ -394,7 +394,7 @@ VALUES($1,$2,$1,5,'tls','managed',$3,NULL,'tcp','127.0.0.1:1','not_applicable',1
 	for id, domain := range map[string][2]string{"domain_exact_" + f.prefix: {exactDomain, "exact"}, "domain_wild_" + f.prefix: {"*." + wildSuffix, "one_label_wildcard"}} {
 		ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 		f.exec(t, `INSERT INTO workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, f.account, ws+".example.test")
-		f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,$6,$1,'verified',$5,'none','not_applicable','ready','clear',$7)`, id, f.account, tunnel, route, domain[0], domain[1], "wsd_"+ws)
+		f.exec(t, `INSERT INTO tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,$6,$1,$5,'none','not_applicable','ready','clear',$7)`, id, f.account, tunnel, route, domain[0], domain[1], "wsd_"+ws)
 	}
 	f.exec(t, `INSERT INTO endpoint_routes(id,endpoint_id,hostname,protocol,tunnel_route_id) SELECT $1,$2,$3,protocol,id FROM tunnel_routes WHERE id=$1`, route, tunnel, stable)
 	f.exec(t, `INSERT INTO endpoint_edge_assignments(route_id,endpoint_id,edge_node_id,edge_process_epoch,carrier_session_id,generation,observed_ready,observed_at) VALUES($1,$2,$3,'epoch_endpoint',$4,1,true,now())`, route, tunnel, f.node, session)
