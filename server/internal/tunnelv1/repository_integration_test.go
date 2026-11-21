@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
 	"strings"
 	"sync"
@@ -1088,7 +1089,11 @@ func TestSelfhostTunnelCreateBootstrapsCustomDomainOnPostgres(t *testing.T) {
 	}
 	// A verified wildcard alone gives the route no URL: the tunnel still needs a custom domain.
 	wildcard := "*.bootstrap-" + testutil.EndpointLabel(created.Tunnel.StableEndpointID) + ".example.test"
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'one_label_wildcard','dns:bootstrap-wildcard','verified','93.184.216.35','managed','ready','ready','clear')`, "dom_bootstrap_wild_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), wildcard); err != nil {
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, account, ws+".example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'one_label_wildcard','dns:bootstrap-wildcard','verified','93.184.216.35','managed','ready','ready','clear',$6)`, "dom_bootstrap_wild_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), wildcard, "wsd_"+ws); err != nil {
 		t.Fatal(err)
 	}
 	wildOnly, err := f.repository.Get(ctx, account, created.Tunnel.ID)
@@ -1099,7 +1104,11 @@ func TestSelfhostTunnelCreateBootstrapsCustomDomainOnPostgres(t *testing.T) {
 		t.Fatalf("wildcard-only selfhost tunnel = %+v", wildOnly)
 	}
 	hostname := "bootstrap-" + testutil.EndpointLabel(created.Tunnel.StableEndpointID) + ".example.test"
-	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,$4,$5,'exact','dns:bootstrap','verified','93.184.216.35','managed','issuing','ready','clear')`, "dom_bootstrap_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), hostname); err != nil {
+	ws2 := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws2, account, ws2+".example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL().ExecContext(ctx, `INSERT INTO paperboat.tunnel_domains(id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,$4,$5,'exact','dns:bootstrap','verified','93.184.216.35','managed','issuing','ready','clear',$6)`, "dom_bootstrap_"+f.suffix, account, created.Tunnel.ID, newRouteID(created.Tunnel.ID), hostname, "wsd_"+ws2); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_domains SET expected_records=$2::jsonb WHERE id=$1`, "dom_bootstrap_"+f.suffix, fmt.Sprintf(`[{"name":%q,"type":"A","value":"93.184.216.35","ttl":300}]`, hostname)); err != nil {

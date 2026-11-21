@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"net"
 	"os"
 	"os/exec"
@@ -309,7 +310,9 @@ func exerciseTeamPreviewPlacement(t *testing.T, store *db.DB, service *Service, 
 		store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.preview_leases WHERE id=$1`, preview)
 		store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, managed)
 	})
-	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear')`, "placement_domain_"+suffix, owner, preview, "custom-"+endpoint+".example.test")
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, owner, ws+".example.test")
+	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','target.example.test','managed','ready','ready','clear',$5)`, "placement_domain_"+suffix, owner, preview, "custom-"+endpoint+".example.test", "wsd_"+ws)
 	exec(`INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at) VALUES($1,'managed','1.0','fixture_managed','ready',true,now())`, managed)
 	if _, err := service.SetPlacement(ctx, outsider, "preview", preview, &installation.InstallationID); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("outsider changed placement: %v", err)

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
 	"strings"
 	"testing"
@@ -210,6 +211,7 @@ func (f *sqlCertificateFixture) insert(t *testing.T, database *db.DB) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	endpointID := testutil.EndpointID("tls-certificate:" + f.suffix)
 	endpoint := "https://" + testutil.EndpointLabel(endpointID) + ".tunnels.example.test"
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
 	for _, query := range []struct {
 		sql  string
 		args []any
@@ -218,7 +220,8 @@ func (f *sqlCertificateFixture) insert(t *testing.T, database *db.DB) {
 		{`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$1,'linux','amd64','/workspace','offline','released')`, []any{"host_" + f.suffix, f.accountID}},
 		{`INSERT INTO paperboat.tunnels (id,account_id,name,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,summary_transitioned_at,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$2,$7,$7,$7)`, []any{f.tunnelID, f.accountID, "tls-" + f.suffix, endpointID, endpoint, "host_" + f.suffix, now}},
 		{`INSERT INTO paperboat.tunnel_routes (id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES ($1,$2,'default','http','exact',$3,'http','127.0.0.1:3000',$4,$4,$5,$5)`, []any{f.routeID, f.tunnelID, "tls-" + f.suffix + ".example.test", f.accountID, now}},
-		{`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,generation,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,'exact','dns://tls','verified','target.example.test','managed','issuing','ready','clear',1,$6,$6)`, []any{f.domainID, f.accountID, f.tunnelID, f.routeID, "tls-" + f.suffix + ".example.test", now}},
+		{`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, []any{"wsd_" + ws, f.accountID, ws + ".example.test"}},
+		{`INSERT INTO paperboat.tunnel_domains (id,account_id,tunnel_id,route_id,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_state,caa_state,conflict_state,generation,created_at,updated_at,workspace_domain_id) VALUES ($1,$2,$3,$4,$5,'exact','dns://tls','verified','target.example.test','managed','issuing','ready','clear',1,$6,$6,$7)`, []any{f.domainID, f.accountID, f.tunnelID, f.routeID, "tls-" + f.suffix + ".example.test", now, "wsd_" + ws}},
 		{`INSERT INTO paperboat.control_tunnel_nodes (id,edge_pool,protocol_version,process_epoch,state,ready,last_heartbeat_at) VALUES ($1,'default','v1',$2,'ready',true,$3)`, []any{f.edgeID, f.epoch, now}},
 		{`INSERT INTO paperboat.operations (id,account_id,idempotency_key,request_hash,operation_type,resource_kind,resource_id,phase,state,progress,outcome,correlation_id,created_at,updated_at) VALUES ($1,$2,$3,decode(repeat('44',32),'hex'),'domain.create','domain_binding',$4,'issuing_certificate','running',70,'changed',$5,$6,$6)`, []any{f.opID, f.accountID, "idem_" + f.suffix, f.domainID, "corr_" + f.suffix, now}},
 	} {

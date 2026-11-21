@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,9 @@ func TestOfflineOwnerPreviewsListOnlyActiveForegroundWithAnOfflineOwner(t *testi
 	lease("stopped", machines["asleep"], "foreground", "stopped", nil)
 	lease("revoked", machines["revoked"], "foreground", "active", nil)
 
-	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_reference,certificate_state,caa_state,conflict_state) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','edge.example.test','managed','cert_ref','ready','ready','clear')`, "pd_off_"+suffix, owner, "prv_asleep_"+suffix, "custom-"+suffix+".example.test")
+	ws := strings.ReplaceAll(uuid.NewString(), "-", "")
+	exec(`INSERT INTO paperboat.workspace_domains(id,account_id,hostname,challenge_reference,ownership_state,created_by_actor_id) VALUES($1,$2,$3,'x','verified',$2)`, "wsd_"+ws, owner, ws+".example.test")
+	exec(`INSERT INTO paperboat.preview_domains(id,account_id,preview_id,preview_generation,hostname,match_type,ownership_challenge_reference,ownership_state,dns_target,certificate_strategy,certificate_reference,certificate_state,caa_state,conflict_state,workspace_domain_id) VALUES($1,$2,$3,1,$4,'exact','dns:test','verified','edge.example.test','managed','cert_ref','ready','ready','clear',$5)`, "pd_off_"+suffix, owner, "prv_asleep_"+suffix, "custom-"+suffix+".example.test", "wsd_"+ws)
 	wantCustom := "custom-" + suffix + ".example.test"
 	got, err := offlineOwnerPreviews(ctx, store, node)
 	if err != nil {
