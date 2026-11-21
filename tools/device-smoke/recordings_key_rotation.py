@@ -4,7 +4,8 @@
 Usage: recordings_key_rotation.py TARGET --team TEAM [--vault-password-file FILE]
 TARGET is a machine of TEAM that records. The signed-in account must be the team OWNER (reset is owner-only; replace
 needs a copy of the current key) with an unlocked vault (--vault-password-file unlocks it first). Use a disposable team:
-a key chain only grows, so the team ends two generations higher.
+a key chain only grows, so the team ends two generations higher. The team needs no key beforehand: its first
+recording creates generation 1 (asserted by key_created_by_first_recording).
 Promises asserted (CHECKLIST F25-11, F25-12; cli/cmd/pb/recordings_command.go):
   replace: generation +1 with a copy for every viewer; older recordings STAY readable (sealed previous link); new ones work.
   reset:   generation +1 again, reported older_recordings_readable=false; recordings made before can be opened by no
@@ -15,6 +16,7 @@ exit codes only, never recording text, the password or a key.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 
@@ -34,6 +36,21 @@ def key_command(action, team):
     if receipt.get('team') != team or receipt.get('copies', 0) < 1 or receipt.get('generation', 0) < 2:
         raise RuntimeError('pb recordings key %s did not report a new generation with copies' % action)
     return receipt
+
+
+def key_generation(team):
+    """The team's recording key generation through `pb recordings key status` (0: no key). No other CLI command shows it."""
+    listed = command_result(PB, 'recordings', 'key', '--help', timeout=60)
+    if listed.returncode or not re.search(r'^\s+status\b', listed.stdout + listed.stderr, re.M):
+        raise RuntimeError('cannot read recording key generation: pb recordings key has no status command')
+    result = command_result(PB, 'recordings', 'key', 'status', '--team', team, '--json', timeout=90)
+    if result.returncode:
+        raise RuntimeError('cannot read recording key generation: pb recordings key status failed: exit %d' % result.returncode)
+    try:
+        receipt = json.loads(result.stdout)
+        return int((receipt.get('data') or receipt).get('generation', 0))
+    except (ValueError, TypeError, AttributeError):
+        raise RuntimeError('cannot read recording key generation: pb recordings key status did not answer JSON') from None
 
 
 def readable(recording_id, directory):
@@ -80,11 +97,16 @@ def run(team, target, directory, steps=None):
             raise RuntimeError('reset did not make generation %d' % (state['replace']['generation'] + 1))
         return receipt
 
+    def first_recording_made_the_key():
+        if key_generation(team) < 1:  # the team's first recording makes generation 1; nobody creates it by hand
+            raise RuntimeError("the team's first recording did not create recording key generation 1")
+
     def listed():
         if not {state['record_old'], state['record_new']} <= {r['id'] for r in rec.listing(team)}:
             raise RuntimeError('a recording vanished from the list')
 
     step('record_old', [], lambda: rec.phase_manual(team, target, directory))
+    step('key_created_by_first_recording', ['record_old'], first_recording_made_the_key)
     step('replace', ['record_old'], replaced)
     step('old_readable_after_replace', ['replace'], lambda: readable(state['record_old'], directory))
     step('record_new', ['replace'], lambda: rec.phase_manual(team, target, directory))

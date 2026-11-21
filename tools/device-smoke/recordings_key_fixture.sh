@@ -1,5 +1,5 @@
 #!/bin/bash
-# recordings_key_fixture.sh up HOST NAME TEAM | down HOST NAME TEAM [MACHINE_ID] | ensure-key HOST TEAM
+# recordings_key_fixture.sh up HOST NAME TEAM | down HOST NAME TEAM [MACHINE_ID]
 # The team-visible TARGET of the recording-key-rotation check (PB-R1): a disposable systemd container NAME (image SMOKE_CT_IMAGE, default test-systemd)
 # on HOST, running a copy of HOST's own ~/.local/bin/pb (the team owner's session), paired as a machine of that owner and
 # then transferred to TEAM (`pb team machine transfer-to-team`; a machine that is only shared is invisible to
@@ -9,15 +9,12 @@
 #   down  removes the machine from the team, revokes it by exact id (`pb machine revoke ID --json`, then --confirm TOKEN),
 #         removes the container and the staged build. No MACHINE_ID: only the container and files go. Exit 1 when the
 #         revoke failed. Safe to run twice.
-#   ensure-key  exits 0 when TEAM has a recording key (generation >= 1), creating generation 1 through the CLI when it can;
-#         otherwise says why on stderr and exits 1 (never a skip).
 # env (the harness's own, smoke.sh/final_recheck.py): SMOKE_CT_DOCKER (default "sudo -n docker"), SMOKE_CT_USER (pbt),
 # SMOKE_CT_UID (1000), and SMOKE_CT_IMAGE (test-systemd; gap5-systemd on hosts that have no test-systemd).
 # The enrollment token goes from HOST's `pb machine add` straight into the container's stdin; it is never printed.
 set -uo pipefail
-usage() { echo "usage: $0 up HOST NAME TEAM | down HOST NAME TEAM [MACHINE_ID] | ensure-key HOST TEAM" >&2; exit 2; }
+usage() { echo "usage: $0 up HOST NAME TEAM | down HOST NAME TEAM [MACHINE_ID]" >&2; exit 2; }
 ACTION=${1:-} HOST=${2:-} NAME=${3:-} TEAM=${4:-}
-[ "$ACTION" = ensure-key ] && { TEAM=${3:-}; NAME=ensure-key; }
 [ -n "$HOST" ] && [ -n "$TEAM" ] && [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] && [[ $TEAM =~ ^[A-Za-z0-9_-]+$ ]] || usage
 IMAGE=${SMOKE_CT_IMAGE:-test-systemd} CT_USER=${SMOKE_CT_USER:-pbt} CT_UID=${SMOKE_CT_UID:-1000} DOCKER=${SMOKE_CT_DOCKER:-sudo -n docker}
 [[ $IMAGE =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ && $CT_USER =~ ^[a-z_][a-z0-9_-]*$ && $CT_UID =~ ^[0-9]+$ && $DOCKER =~ ^[a-z\ -]+$ ]] || usage
@@ -79,27 +76,7 @@ EOF2
   python3 -c 'import json,sys;print(json.dumps({"name": sys.argv[1], "machine_id": sys.argv[2]}))' "$NAME" "$id"
 }
 
-# The one place to change when the CLI can read or create a team's first recording key: it looks for the subcommands the
-# CLI really has (pb recordings key --help) and uses them; none yet means a loud failure, not a skip.
-ensure_key() {
-  local help gen c pb='$HOME/.local/bin/pb'
-  help=$(ssh "$HOST" "$pb recordings key --help" 2>&1) || { echo "recordings_key_fixture: pb recordings key --help failed on $HOST" >&2; return 1; }
-  if grep -qE '^ +status( |$)' <<<"$help"; then
-    gen=$(ssh "$HOST" "$pb recordings key status --team $TEAM --json" 2>/dev/null | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d.get("data",d);print(d.get("generation",0))' 2>/dev/null)
-    [ "${gen:-0}" -ge 1 ] 2>/dev/null && return 0
-  fi
-  for c in init create setup enable; do
-    if grep -qE "^ +$c( |\$)" <<<"$help"; then
-      ssh "$HOST" "$pb recordings key $c --team $TEAM --confirm $TEAM --json" >/dev/null 2>&1 && return 0
-      echo "recordings_key_fixture: pb recordings key $c failed for $TEAM" >&2; return 1
-    fi
-  done
-  echo "team has no recording key and the CLI cannot create generation 1 yet" >&2
-  return 1
-}
-
 case $ACTION in
-  ensure-key) ensure_key ;;
   up) up ;;
   down) down "${5:-}" ;;
   *) usage ;;

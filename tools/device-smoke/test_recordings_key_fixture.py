@@ -86,7 +86,7 @@ class Fixture(unittest.TestCase):
 class SmokeRunner(unittest.TestCase):
     """The test_recording_key_rotation function of smoke.sh, run alone with record/skipped/now stubbed."""
 
-    def run_function(self, env, fixture_out='', fixture_rc=0, rotation_out='', rotation_rc=0, ensure_rc=0):
+    def run_function(self, env, fixture_out='', fixture_rc=0, rotation_out='', rotation_rc=0):
         text = (HERE / 'smoke.sh').read_text()
         start = text.index('test_recording_key_rotation() {')
         function = text[start:text.index('\n}\n', start) + 3]
@@ -94,9 +94,6 @@ class SmokeRunner(unittest.TestCase):
             d = pathlib.Path(tmp)
             (d / 'recordings_key_fixture.sh').write_text('#!/bin/bash\necho "$@" >> %s/fixture.log\n[ "$1" = up ] || exit 0\n'
                                                          'echo %r; exit %d\n' % (d, fixture_out, fixture_rc))
-            if ensure_rc:  # the stub's ensure-key answers before it reaches the up branch
-                (d / 'recordings_key_fixture.sh').write_text((d / 'recordings_key_fixture.sh').read_text().replace(
-                    '[ "$1" = up ]', '[ "$1" != ensure-key ] || { echo "team has no recording key and the CLI cannot create generation 1 yet" >&2; exit 1; }\n[ "$1" = up ]', 1))
             (d / 'recordings_key_fixture.sh').chmod(0o755)
             (d / 'one.py').write_text('')
             (d / 'ssh').write_text('#!/bin/bash\ncat > /dev/null\ncase "$*" in *recordings_key_rotation.py*) echo %r; exit %d;; esac\n' % (rotation_out, rotation_rc))
@@ -134,13 +131,7 @@ class SmokeRunner(unittest.TestCase):
     def test_a_failed_fixture_is_a_fail_and_runs_down(self):
         out, log = self.run_function(self.ENV, 'recordings_key_fixture: pairing failed', 1)
         self.assertIn('recording-key-rotation|FAIL|fixture: recordings_key_fixture: pairing failed', out)
-        self.assertEqual(['ensure-key', 'up', 'down'], [line.split()[0] for line in log.splitlines()])
-
-
-    def test_a_team_without_a_recording_key_is_a_loud_fail_before_anything_is_built(self):
-        out, log = self.run_function(self.ENV, '{"name": "n", "machine_id": "machine_1"}', 0, '', 0, ensure_rc=1)
-        self.assertEqual('recording-key-rotation|FAIL|team has no recording key and the CLI cannot create generation 1 yet', out)
-        self.assertEqual(['ensure-key'], [line.split()[0] for line in log.splitlines()])  # no container, no machine
+        self.assertEqual(['up', 'down'], [line.split()[0] for line in log.splitlines()])
 
 
 # A host-in-a-directory: ssh runs the remote command locally, with fake sudo/docker (logged) and a fake owner pb.
@@ -156,9 +147,6 @@ echo "pb $*" >> "$STUB_LOG"
 case "$*" in
   "machine add"*) echo '{"data": {"linux_macos_command": "PB_TOKEN='"'"'abc123'"'"'"}}' ;;
   "team get"*) echo '{"data": {"generation": 4, "machines": [{"machine_id": "machine_0a1b-2c3d", "active": true}]}}' ;;
-  "recordings key --help") printf 'Available Commands:\\n%s' "$STUB_KEY_HELP" ;;
-  "recordings key status"*) echo "{\\"data\\": {\\"generation\\": ${STUB_KEY_GENERATION:-0}}}" ;;
-  "recordings key"*) exit "${STUB_KEY_CREATE_RC:-0}" ;;
   "machine revoke"*" --confirm "*) exit 0 ;;
   "machine revoke"*) echo '{"data": {"confirmation_token": "tok"}}' ;;
 esac
@@ -205,21 +193,3 @@ class Executed(unittest.TestCase):
         self.assertIn('cp /tmp/sh-r1-d-pb sh-r1-d:/home/tester/pb', lines)
         self.assertNotIn('pbt', lines)
         self.assertNotIn('1000', lines)
-
-    def test_a_key_the_cli_can_read_is_accepted(self):
-        p = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP='  status  show\n  replace  r\n', STUB_KEY_GENERATION='2')
-        self.assertEqual(0, p.returncode, p.stderr)
-
-    def test_no_key_and_no_create_command_fails_loudly(self):
-        for help_text, generation in (('  replace  r\n  reset  x\n', '0'), ('  status  show\n  replace  r\n', '0')):
-            p = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP=help_text, STUB_KEY_GENERATION=generation)
-            self.assertEqual(1, p.returncode)
-            self.assertIn('team has no recording key and the CLI cannot create generation 1 yet', p.stderr)
-
-    def test_a_create_command_is_used_when_the_cli_has_one(self):
-        p = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP='  replace  r\n  init  make generation 1\n')
-        self.assertEqual(0, p.returncode, p.stderr)
-        self.assertIn('pb recordings key init --team team_1 --confirm team_1 --json', self.log.read_text())
-        failed = self.sh('ensure-key', 'hostx', 'team_1', STUB_KEY_HELP='  init  x\n', STUB_KEY_CREATE_RC='1')
-        self.assertEqual(1, failed.returncode)
-        self.assertIn('pb recordings key init failed', failed.stderr)

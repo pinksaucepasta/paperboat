@@ -12,13 +12,18 @@ TEAM, TARGET = 'team_1', 'pool-1'
 class Cli:
     """A stub pb: records every call in order and answers like the product (recordings_command.go)."""
 
-    def __init__(self, reset_opens_old=False, fail_replace=False):
+    def __init__(self, reset_opens_old=False, fail_replace=False, status=True, first_generation=1):
+        self.status, self.first_generation = status, first_generation
         self.calls, self.generation, self.reset_done, self.before_reset = [], 1, False, []
         self.reset_opens_old, self.fail_replace = reset_opens_old, fail_replace
         self.made = []
 
     def command_result(self, _binary, *args, **_):
-        self.calls.append(args[:3] if args[:2] == ('recordings', 'key') else args[:2])
+        self.calls.append(args[:3] if args[:2] == ('recordings', 'key') else args[:2])  # keeps 'key --help' and 'key status' apart from replace/reset
+        if args[:3] == ('recordings', 'key', '--help'):
+            return subprocess.CompletedProcess(args, 0, 'Available Commands:\n  replace  r\n' + ('  status  s\n' if self.status else ''), '')
+        if args[:3] == ('recordings', 'key', 'status'):
+            return self.done(args, {'data': {'generation': self.first_generation if not self.made_after_replace() else self.generation}})
         if args[:3] == ('recordings', 'key', 'replace'):
             if self.fail_replace:
                 return subprocess.CompletedProcess(args, 1, '', 'you hold no copy PB_SECRET_VALUE')
@@ -32,6 +37,9 @@ class Cli:
             gone = self.reset_done and recording in self.before_reset and not self.reset_opens_old
             return subprocess.CompletedProcess(args, 1 if gone else 0, '', 'cannot be opened' if gone else '')
         raise AssertionError(args)
+
+    def made_after_replace(self):
+        return self.generation > 1
 
     def done(self, args, receipt):
         return subprocess.CompletedProcess(args, 0, json.dumps(receipt), '')
@@ -71,7 +79,7 @@ class RotationTest(unittest.TestCase):
         receipt = run(cli)
         self.assertEqual('PASS', receipt['status'])
         names = [s['step'] for s in receipt['steps']]
-        self.assertEqual(['record_old', 'replace', 'old_readable_after_replace', 'record_new', 'reset', 'old_unreadable_after_reset',
+        self.assertEqual(['record_old', 'key_created_by_first_recording', 'replace', 'old_readable_after_replace', 'record_new', 'reset', 'old_unreadable_after_reset',
                           'new_unreadable_after_reset', 'listed_after_reset', 'record_after_reset'], names)
         kinds = [c[:2] if c[0] != 'recordings' or c[1] != 'key' else c for c in cli.calls]
         self.assertLess(kinds.index(('recordings', 'key', 'replace')), kinds.index(('recordings', 'key', 'reset')))
@@ -105,3 +113,16 @@ class RotationTest(unittest.TestCase):
         self.assertEqual('FAIL', receipt['status'])
         self.assertEqual('FAIL', receipt['steps'][0]['status'])
         self.assertNotIn(('recordings', 'key', 'replace'), cli.calls)  # nothing was rotated without an old recording to check
+
+    def test_a_first_recording_that_made_no_key_is_a_loud_fail(self):
+        receipt = run(Cli(first_generation=0))
+        failed = {s['step']: s['error'] for s in receipt['steps'] if s['status'] == 'FAIL'}
+        self.assertEqual("the team's first recording did not create recording key generation 1", failed['key_created_by_first_recording'])
+        self.assertEqual('FAIL', receipt['status'])
+
+    def test_a_cli_that_cannot_show_the_generation_is_a_loud_fail_never_a_skip(self):
+        receipt = run(Cli(status=False))
+        step = next(s for s in receipt['steps'] if s['step'] == 'key_created_by_first_recording')
+        self.assertEqual('FAIL', step['status'])
+        self.assertIn('cannot read recording key generation', step['error'])
+        self.assertNotIn('SKIP', [s['status'] for s in receipt['steps'] if s['step'] == 'key_created_by_first_recording'])
