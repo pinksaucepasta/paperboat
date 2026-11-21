@@ -50,7 +50,8 @@ func normalizeEndpoints(reported []string) ([]string, error) {
 // later; held back, that set left every peer without a direct path to it for the whole interval.
 const endpointPublishInterval = time.Minute
 
-// endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump): it
+// endpointsUpdate is the identity row write of a configuration request (one statement, the generation bump unless $7
+// is false: a request that may be answered unchanged bumps with generationBump only once it is not): it
 // stores the reported set ($4, NULL when none was sent) and a machine's home relay ($6): NULL (the machine is homed on
 // no relay) clears it at once, a relay that is not an eligible relay of the account keeps the old one, so a machine cannot
 // send peers to a relay that is not theirs. Only a machine's row holds one.
@@ -58,7 +59,7 @@ const endpointPublishInterval = time.Minute
 // the latest set differs from the delivered one it is published now if the last publication is older than $5
 // seconds, else held back until then (endpoints_due_at); a set equal to the delivered one clears a held-back one.
 // NULL and an empty set are the same set. The delivered set's change publishes peer_network (migration 186).
-const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1,updated_at=$1,
+const endpointsUpdate = `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+CASE WHEN $7::bool THEN 1 ELSE 0 END,updated_at=$1,
  endpoints=coalesce($4::text[],endpoints),
  published_endpoints=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` AND NOT ` + endpointsVanish + ` THEN coalesce($4::text[],endpoints) ELSE published_endpoints END,
  endpoints_published_at=CASE WHEN ` + endpointsDiffer + ` AND ` + endpointsOpen + ` AND NOT ` + endpointsVanish + ` THEN $1 ELSE endpoints_published_at END,
@@ -135,3 +136,6 @@ func configurationClaims(issuer string, now, expiry time.Time, generation int64,
 	// Before signing: a client strictly decodes, so it must not receive a field newer than its capability version.
 	return out.ForCapVersion(capVersion)
 }
+
+// generationBump allocates the next configuration generation of an endpoint whose answer turned out to have changed.
+const generationBump = `UPDATE paperboat.peer_network_identities SET config_generation=config_generation+1 WHERE user_id=$1 AND endpoint_id=$2 RETURNING config_generation`

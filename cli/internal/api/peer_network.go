@@ -27,7 +27,9 @@ func (c *Client) RegisterPeerNetwork(ctx context.Context, request PeerNetworkReg
 
 type PeerNetworkConfigurationResult struct {
 	// Exactly one of Configuration (the signed token) and ConfigurationDelta (its changes from the request's
-	// BaseGeneration; the receiver rebuilds the token with Rebuild and verifies it) is set.
+	// BaseGeneration; the receiver rebuilds the token with Rebuild and verifies it) and Unchanged (the configuration,
+	// candidates and grants held at BaseGeneration stand) is set.
+	Unchanged          bool                            `json:"unchanged"`
 	Configuration      string                          `json:"configuration"`
 	ConfigurationDelta *peernetwork.ConfigurationDelta `json:"configuration_delta"`
 	CandidateSet       string                          `json:"candidate_set"`

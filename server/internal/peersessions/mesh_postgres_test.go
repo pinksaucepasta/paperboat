@@ -177,7 +177,9 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 		held = rebuilt
 	}
 	stale := held
-	deltaStep(0) // nothing changed
+	if r, _ := config(peernetwork.ConfigurationGeneration(held)); !r.Unchanged { // nothing changed: nothing signed
+		t.Fatalf("an unchanged renewal got %+v, want unchanged", r)
+	}
 
 	join(1000, 1000)
 	started = time.Now()

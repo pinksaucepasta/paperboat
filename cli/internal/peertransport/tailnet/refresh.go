@@ -262,6 +262,17 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 			}
 			return a.rejectRefusedAuthority(err)
 		}
+		if result.Unchanged {
+			if full {
+				return refused("unchanged answer to a request without a base")
+			}
+			// Nothing changed since the held configuration: it, its candidates and its grants stand.
+			if a.options.OnAuthority != nil {
+				a.options.OnAuthority(nil)
+			}
+			a.refreshedFrom = started
+			return nil
+		}
 		token := result.Configuration
 		if result.ConfigurationDelta != nil {
 			if token, err = result.ConfigurationDelta.Rebuild(held); err != nil {

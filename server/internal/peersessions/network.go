@@ -75,7 +75,9 @@ type NetworkConfigRequest struct {
 const AuthorityUntilRevoked = "until_revoked_v1"
 
 type NetworkConfigResult struct {
-	// Exactly one of Configuration (the signed token) and ConfigurationDelta (its changes from BaseGeneration) is set.
+	// Exactly one of Configuration (the signed token), ConfigurationDelta (its changes from BaseGeneration) and
+	// Unchanged (the endpoint's BaseGeneration configuration, candidates and grants stand; nothing signed) is set.
+	Unchanged          bool                            `json:"unchanged,omitempty"`
 	Configuration      string                          `json:"configuration,omitempty"`
 	ConfigurationDelta *peernetwork.ConfigurationDelta `json:"configuration_delta,omitempty"`
 	CandidateSet       string                          `json:"candidate_set"`
@@ -332,9 +334,14 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err := s.markAdmittedSessions(ctx, in, live["machine_access"], now); err != nil {
 		return NetworkConfigResult{}, err
 	}
+	// An endpoint that holds a base and reports no endpoints may be answered unchanged: its generation is bumped
+	// only once its answer differs (one account change
+	// woke N renewals that each bumped and re-signed; NetBird sends updates to affected peers only:
+	// ref/netbird/management/server/peer.go:1594-1622).
+	maybeUnchanged := in.BaseGeneration != 0 && in.Endpoints == nil
 	start, cacheable := s.cache.begin()
 	step := time.Now()
-	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds(), homeRelay).
+	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds(), homeRelay, !maybeUnchanged).
 		Scan(&generation)
 	trace.generation = time.Since(step)
 	if err == sql.ErrNoRows {
@@ -363,6 +370,19 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		}
 	}
 	trace.peers = len(doc.peers)
+	if maybeUnchanged {
+		nodes, err := s.relayNodes(ctx, in.UserID, now)
+		if err != nil {
+			return NetworkConfigResult{}, err
+		}
+		digest := answerDigest(configurationClaims(s.issuer, now, doc.expiry, 0, doc.self, doc.peers, in.CapVersion), nodes, in.HomeRelay)
+		if s.sent.unchanged(in.EndpointID, in.BaseGeneration, uint64(generation), digest, now) {
+			return NetworkConfigResult{Unchanged: true}, nil
+		}
+		if err = s.store.SQL().QueryRowContext(ctx, generationBump, in.UserID, in.EndpointID).Scan(&generation); err != nil {
+			return NetworkConfigResult{}, err
+		}
+	}
 	step = time.Now()
 	defer func() { trace.sign = time.Since(step) }()
 	return s.signConfiguration(ctx, in, doc, generation, now)
@@ -765,7 +785,8 @@ func (s *NetworkService) signConfiguration(ctx context.Context, in NetworkConfig
 		return NetworkConfigResult{}, err
 	}
 	result := NetworkConfigResult{Configuration: token, CandidateSet: candidates, RelayGrants: relayGrants}
-	if result.ConfigurationDelta = s.sent.answer(in.EndpointID, in.BaseGeneration, token, claims); result.ConfigurationDelta != nil {
+	digest := answerDigest(claims, nodes, in.HomeRelay)
+	if result.ConfigurationDelta = s.sent.answer(in.EndpointID, in.BaseGeneration, token, claims, digest, now); result.ConfigurationDelta != nil {
 		result.Configuration = ""
 	}
 	return result, nil
