@@ -24,7 +24,16 @@ func TestDockerRuntimeReadsExternalTrustFilesWithoutWriteAccess(t *testing.T) {
 	}
 	path := filepath.Join(root, "certificate,key.pem")
 	payload := []byte("trust-file-fixture\n")
-	if err := os.WriteFile(path, payload, 0600); err != nil {
+	// pbh runs as root, so trust files are root-owned 0600 and the uid-0 container reads them without
+	// CAP_DAC_OVERRIDE. A non-root test runner owns the fixture itself, so give "others" read to match.
+	mode := os.FileMode(0600)
+	if os.Geteuid() != 0 {
+		mode = 0644
+	}
+	if err := os.WriteFile(path, payload, mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
 		t.Fatal(err)
 	}
 	dockerfile := filepath.Join(root, "Dockerfile")
