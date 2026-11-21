@@ -28,16 +28,15 @@ import (
 // installation key and its receipt likewise, advertising whatever components the test sets. It stands in for pbh where
 // a test needs to choose the region and the roles the machine reports.
 type fakeClaimNode struct {
-	server        *httptest.Server
-	installation  ed25519.PrivateKey
-	pin           []byte
-	certPEM       string
-	secret        string
-	name          string
-	components    []Component
-	inspects      atomic.Int32
-	claims        atomic.Int32
-	receiptFailed atomic.Bool
+	server       *httptest.Server
+	installation ed25519.PrivateKey
+	pin          []byte
+	certPEM      string
+	secret       string
+	name         string
+	components   []Component
+	inspects     atomic.Int32
+	claims       atomic.Int32
 }
 
 func newFakeClaimNode(t *testing.T, name string, components ...Component) *fakeClaimNode {

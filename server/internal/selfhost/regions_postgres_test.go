@@ -40,7 +40,7 @@ func TestRegionSlugBase(t *testing.T) {
 }
 
 func TestRegionNameValidation(t *testing.T) {
-	for _, bad := range []string{"", "   ", strings.Repeat("a", 49), "tab\there", "new\nline", "bell\x07", "zero​width", "bad\xffutf8", "line sep"} {
+	for _, bad := range []string{"", "   ", strings.Repeat("a", 49), "tab\there", "new\nline", "bell\x07", "zero\u200bwidth", "bad\xffutf8", "line sep"} {
 		if _, err := validRegionName(bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("name %q accepted: %v", bad, err)
 		}
