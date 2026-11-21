@@ -321,10 +321,12 @@ func validate(config Config) error {
 	return nil
 }
 
+// resolveWinget also looks in every user's packages: App Installer is often registered for the signed-in user only,
+// and the install runs as LocalSystem, which has no packages of its own (2026-11-21: CI-image Windows Server).
 func resolveWinget(ctx context.Context, runner Runner) (string, error) {
 	resolveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	script := securityModuleImport + "$p=Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction Stop|Sort-Object Version -Descending|Select-Object -First 1;" +
+	script := securityModuleImport + "$p=@(Get-AppxPackage -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue)+@(Get-AppxPackage -AllUsers -Name Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue)|Where-Object {$_.InstallLocation}|Sort-Object {[version]$_.Version} -Descending|Select-Object -First 1;if($null-eq $p){exit 40};" +
 		"$w=Join-Path $p.InstallLocation 'winget.exe';$s=Get-AuthenticodeSignature -LiteralPath $w;" +
 		"if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notlike '*Microsoft*'){exit 41};Write-Output $w"
 	output, err := runner.Run(resolveCtx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)

@@ -4,27 +4,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
-
-// windowsSetupDependencies are the edges of Windows setup that tests replace.
-type windowsSetupDependencies struct {
-	noticeWriter io.Writer // receives the notice that setup went on without managed SSH
-}
-
-func defaultWindowsSetupDependencies() windowsSetupDependencies {
-	return windowsSetupDependencies{noticeWriter: os.Stderr}
-}
-
-func windowsSetupDependenciesOf(ctx context.Context) windowsSetupDependencies {
-	return dependenciesIn(ctx, defaultWindowsSetupDependencies)
-}
 
 func setupPlatformHostPrerequisites(ctx context.Context) (uint16, error) {
 	executable, err := os.Executable()
@@ -40,22 +25,14 @@ func setupPlatformHostPrerequisites(ctx context.Context) (uint16, error) {
 	return windowsopenssh.DefaultConfig(nil).Port, nil
 }
 
-// runSetupOpenSSH skips what only means "this machine cannot supply OpenSSH in time" (the managed SSH target stays not
-// ready; `pb doctor --repair` prepares it later, as after an install). A refusal or the caller's own expiry still fails.
+// runSetupOpenSSH fails setup when managed SSH cannot be prepared, never skips it: a skipped step left
+// PaperboatSshd missing after an install that reported ok (winpool, 2026-11-21).
 func runSetupOpenSSH(ctx context.Context, step func(context.Context) error) error {
 	bounded, cancel := context.WithTimeout(ctx, timingsOf(ctx).setupOpenSSH)
 	defer cancel()
-	err := step(bounded)
-	if err == nil || ctx.Err() != nil {
-		return err
+	if err := step(bounded); err != nil {
+		return fmt.Errorf("set up managed SSH: %w; make sure App Installer (winget) is installed for all users "+
+			"or the PowerShell Gallery is reachable, then run the command again", err)
 	}
-	var remote *elevation.RemoteError
-	switch {
-	case errors.As(err, &remote) && remote.Code == elevation.CodeOpenSSHUnobtainable:
-	case bounded.Err() != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, elevation.ErrElevationTimedOut)):
-	default:
-		return err
-	}
-	fmt.Fprintf(windowsSetupDependenciesOf(ctx).noticeWriter, "Managed SSH was not prepared (%v); setup continues without it. Run `pb doctor --repair` to prepare it.\n", err)
 	return nil
 }

@@ -21,8 +21,8 @@ func doctorSSHSourceProbes() []doctorpkg.Probe {
 	return []doctorpkg.Probe{{Code: "managed_ssh", Run: windowsManagedSSHCheck}}
 }
 
-// managedSSHInstallWarnings names a missing managed sshd after install or pair: the install skips OpenSSH it
-// cannot obtain in time (hostinstall.prepareWindowsSSHWithinAttempts) and reports success otherwise.
+// managedSSHInstallWarnings names a managed sshd that is not running after install or pair, which the OpenSSH step
+// (hostinstall.prepareWindowsSSHWithinAttempts) does not cover: the service can stop after it was prepared.
 func managedSSHInstallWarnings() []string {
 	return managedSSHInstallWarning(windowsManagedSSHCheck(context.Background()))
 }

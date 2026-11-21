@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/cli/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/cli/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/cli/internal/windowsopenssh"
 )
@@ -235,50 +234,6 @@ func TestWindowsHostServicesInstallSSHBeforeStartingRuntime(t *testing.T) {
 	}
 }
 
-// A Windows guest without App Installer aborted pairing at the OpenSSH step (2026-11-10). Like Linux and macOS
-// without sshd, the rest installs; only a machine that cannot supply OpenSSH is let through.
-func TestWindowsPlansContinueWithoutObtainableOpenSSHAndAbortOnTrustFailures(t *testing.T) {
-	cause := errors.New("exit status 1")
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	for name, test := range map[string]struct {
-		ctx      context.Context
-		err      error
-		proceeds bool
-	}{
-		"inventory unavailable":   {context.Background(), errors.Join(windowsopenssh.ErrInstallerUnavailable, cause), true},
-		"package install failed":  {context.Background(), errors.Join(windowsopenssh.ErrInstallFailed, cause), true},
-		"untrusted binary":        {context.Background(), errors.Join(windowsopenssh.ErrUntrustedBinary, cause), false},
-		"foreign service":         {context.Background(), windowsopenssh.ErrServiceOwnership, false},
-		"unavailable and foreign": {context.Background(), errors.Join(windowsopenssh.ErrInstallerUnavailable, windowsopenssh.ErrServiceOwnership), false},
-		"unclassified":            {context.Background(), cause, false},
-		"cancelled installation":  {cancelled, errors.Join(windowsopenssh.ErrInstallerUnavailable, cause), false},
-	} {
-		for plan, run := range map[string]func(ssh, phase func() error, cleanup func() error) error{
-			"install": func(ssh, phase, cleanup func() error) error {
-				return executeWindowsServiceInstallPlan(ssh, phase, phase, cleanup)
-			},
-			"repair": func(ssh, phase, cleanup func() error) error {
-				return executeWindowsServiceRepairPlan(ssh, phase, phase, phase, cleanup)
-			},
-		} {
-			phases, cleaned := 0, false
-			err := run(
-				func() error { return skipUnobtainableWindowsSSH(test.ctx, test.err) },
-				func() error { phases++; return nil },
-				func() error { cleaned = true; return nil },
-			)
-			if test.proceeds {
-				if err != nil || phases == 0 || cleaned {
-					t.Errorf("%s %s: err=%v phases=%d cleaned=%t, want the runtime installed without OpenSSH", name, plan, err, phases, cleaned)
-				}
-			} else if !errors.Is(err, test.err) || phases != 0 {
-				t.Errorf("%s %s: err=%v phases=%d, want the installation aborted with the cause", name, plan, err, phases)
-			}
-		}
-	}
-}
-
 func TestWindowsHostServicesCleanSSHWhenRuntimeFails(t *testing.T) {
 	var events []string
 	runtimeFailure := errors.New("runtime failed")
@@ -432,63 +387,29 @@ func TestWindowsServiceCleanupRetainsFirstFailureWithoutRepeatingMutation(t *tes
 	}
 }
 
-// a Windows test VM: a machine where OpenSSH is only reachable through the PowerShell Gallery spent the whole 3 min of the
-// bridge in that step and the pair rolled back. The step has its own budget; its expiry is announced and skips managed
-// SSH, but a trust failure never is, whether it comes before or after the budget.
-func TestWindowsSSHPreparationOutOfTimeIsAnnouncedAndTrustFailuresStillAbort(t *testing.T) {
-	previous, previousNotice := windowsSSHPreparationBudget, windowsSSHTimeoutNotice
-	t.Cleanup(func() { windowsSSHPreparationBudget, windowsSSHTimeoutNotice = previous, previousNotice })
+// winpool fresh installs (2026-11-21): OpenSSH could not be obtained, the install skipped managed SSH and reported ok,
+// and PaperboatSshd was missing. Every failure of the step, an expired budget included, now stops the install with
+// the step named and what to do.
+func TestWindowsSSHPreparationFailuresStopTheInstall(t *testing.T) {
+	previous := windowsSSHPreparationBudget
+	t.Cleanup(func() { windowsSSHPreparationBudget = previous })
 	windowsSSHPreparationBudget = 30 * time.Millisecond
-	var announced []error
-	windowsSSHTimeoutNotice = func(err error) { announced = append(announced, err) }
-
 	started := time.Now()
-	err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
-		<-ctx.Done()
-		return ctx.Err()
-	})
-	if err != nil || len(announced) != 1 || !errors.Is(announced[0], context.DeadlineExceeded) || time.Since(started) > 5*time.Second {
-		t.Fatalf("a step out of its budget: err=%v announced=%v after %v", err, announced, time.Since(started))
+	err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() })
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "managed SSH") || time.Since(started) > 5*time.Second {
+		t.Fatalf("a step out of its budget: err=%v after %v", err, time.Since(started))
 	}
-
-	// the package manager was killed at the budget: its failure is unobtainable, not a trust failure
-	killed := fmt.Errorf("%w: signal: killed", windowsopenssh.ErrInstallFailed)
-	if err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
-		<-ctx.Done()
-		return killed
-	}); err != nil || len(announced) != 2 {
-		t.Fatalf("a killed package manager: err=%v announced=%d", err, len(announced))
+	for _, cause := range []error{
+		fmt.Errorf("%w: no App Installer", windowsopenssh.ErrInstallerUnavailable),
+		fmt.Errorf("%w: exit status 1", windowsopenssh.ErrInstallFailed),
+		windowsopenssh.ErrUntrustedBinary,
+	} {
+		err := prepareWindowsSSHWithin(context.Background(), func(context.Context) error { return cause })
+		if !errors.Is(err, cause) || !strings.Contains(err.Error(), "run the command again") {
+			t.Fatalf("%v: err=%v, want the install stopped with the step and advice", cause, err)
+		}
 	}
-
-	refusal := windowsopenssh.ErrUntrustedBinary
-	if err := prepareWindowsSSHWithin(context.Background(), func(context.Context) error { return refusal }); !errors.Is(err, refusal) {
-		t.Fatalf("a trust failure was skipped: %v", err)
-	}
-	// the race the review found: the refusal arrives after the budget expired
-	if err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
-		<-ctx.Done()
-		return refusal
-	}); !errors.Is(err, refusal) || len(announced) != 2 {
-		t.Fatalf("a trust failure after the budget was skipped: err=%v announced=%d", err, len(announced))
-	}
-
-	parent, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := prepareWindowsSSHWithin(parent, func(ctx context.Context) error { return ctx.Err() }); err == nil {
-		t.Fatal("the caller's own cancellation was skipped")
-	}
-}
-
-// A skipped managed SSH preparation is recorded as an observed fault: the elevated helper's stderr notice reaches
-// no one, so the skip must not look like a clean install.
-func TestSkippedWindowsSSHIsAnObservedFault(t *testing.T) {
-	var faults []errorreport.Fault
-	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults = append(faults, fault) })
-	t.Cleanup(restore)
-	if err := skipUnobtainableWindowsSSH(context.Background(), fmt.Errorf("%w: no App Installer", windowsopenssh.ErrInstallFailed)); err != nil {
-		t.Fatalf("an unobtainable package aborted: %v", err)
-	}
-	if len(faults) != 1 || faults[0].Code != "managed_ssh_failed" {
-		t.Fatalf("faults = %+v, want one managed_ssh_failed", faults)
+	if err := prepareWindowsSSHWithin(context.Background(), func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("a prepared step failed: %v", err)
 	}
 }
