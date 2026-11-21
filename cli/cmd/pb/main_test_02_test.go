@@ -821,7 +821,7 @@ func TestCopySSHProxyPrintsAHostRefusal(t *testing.T) {
 	}
 }
 
-// A connection the machine's sshd ends before its banner (MaxStartups, not running) is named by pb.
+// A stream that ends before any byte is named by pb as ErrSSHServerClosed.
 func TestCopySSHProxyNamesASSHServerThatClosedFirst(t *testing.T) {
 	proxy, remote := net.Pipe()
 	connection := &sshProxyTestConn{Conn: proxy, closeWrite: func() error { return nil }}

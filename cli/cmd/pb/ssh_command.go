@@ -457,7 +457,7 @@ func copySSHProxy(connection io.ReadWriteCloser, halfCloser interface{ CloseWrit
 		return refused
 	}
 	copied, outputErr := io.Copy(output, remote)
-	// A remote end with no byte at all is sshd ending the connection before its banner.
+	// A remote end with no byte at all: the stream ended before any banner or refusal line.
 	var closed error
 	if copied == 0 {
 		closed = managedssh.ErrSSHServerClosed

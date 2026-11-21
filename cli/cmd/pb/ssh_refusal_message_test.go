@@ -21,7 +21,7 @@ func TestSSHRefusalsAreShownInPbsWords(t *testing.T) {
 	}{
 		{&managedssh.RefusedError{Reason: managedssh.RefusedNoAccess}, "do not have SSH access"},
 		{&managedssh.RefusedError{Reason: managedssh.RefusedNotSetUp}, "SSH is not set up"},
-		{fmt.Errorf("proxy: %w", managedssh.ErrSSHServerClosed), "SSH server closed the connection"},
+		{fmt.Errorf("proxy: %w", managedssh.ErrSSHServerClosed), "connection to the machine closed before its SSH server answered"},
 		{errors.Join(managedssh.ErrSSHLoopbackOwner, errors.New("tcp table")), "another program connected"},
 		{fmt.Errorf("listener_accept: %w", managedssh.ErrSSHLoopbackAccept), "did not connect to it in time"},
 		{managedssh.ErrSSHLoopbackProcessExited, "exited before connecting"},

@@ -13,9 +13,9 @@ import (
 // A host that refuses an SSH stream writes one refusal line in place of sshd's banner (streamauth.WriteSSHRefusal).
 const refusalPrefix = streamauth.SSHRefusalPrefix
 
-// ErrSSHServerClosed is a connection the machine's sshd ended before its banner: it refused it (MaxStartups,
-// a ban list) or is not serving. Paperboat itself sets no session limit; the machine's sshd decides.
-var ErrSSHServerClosed = errors.New("the machine's SSH server closed the connection before answering; it may be refusing new connections (its sshd MaxStartups or MaxSessions limit) or not running. Retry shortly, or check sshd on that machine")
+// ErrSSHServerClosed is a stream that ended before any byte arrived: no banner and no refusal line. Nothing reached
+// the machine's sshd-side answer, so the cause may be inside Paperboat's own transport, not sshd.
+var ErrSSHServerClosed = errors.New("Paperboat's connection to the machine closed before its SSH server answered (no bytes came back, so the SSH server may never have seen the connection). Run `pb doctor` and check the Paperboat service on both machines, then retry")
 
 // RefusedError is a stream the host refused, with the reason it sent.
 type RefusedError struct{ Reason string }
