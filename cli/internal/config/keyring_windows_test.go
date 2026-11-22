@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -323,6 +324,83 @@ func TestWindowsCredentialLegacyNetworkDirectoryRejectsExtraACE(t *testing.T) {
 	if !windowssecurity.OwnerMatchesSID(path, administrators) {
 		t.Fatal("rejected network-token directory owner was changed")
 	}
+}
+
+// An Administrators owner can write ACEs flagged INHERITED_ACE directly, so the
+// inherited branch must accept only the exact owner-only ACEs the parent gives.
+func TestWindowsCredentialLegacyNetworkDirectoryRejectsForgedInheritedACE(t *testing.T) {
+	user, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, extra := range map[string]string{
+		"everyone read": "(A;OICIID;FR;;;WD)",
+		// GA cannot be stored: Windows canonicalizes it to FA, the legitimate inherited ACE.
+		"no delete child":     "(A;OICIID;0x1f01bf;;;" + user.String() + ")",
+		"no dac owner delete": "(A;OICIID;0x1301bf;;;" + user.String() + ")",
+		"inherit only":        "(A;OICIIOID;FA;;;" + user.String() + ")",
+		"no propagate":        "(A;OICINPID;FA;;;" + user.String() + ")",
+		"creator owner":       "(A;OICIID;FA;;;CO)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory, sddl := preparePrivateWindowsCredentialDirectory(t)
+			path := filepath.Join(directory, "pending-revocations")
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			administrators := makeWindowsNetworkTokenDirectoryFixture(t, path, false)
+			writeRawWindowsFixtureDACL(t, path, "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;S-1-5-5-0-424242)"+extra)
+			before := windowsFixtureDACL(t, path)
+			if !strings.Contains(before, "ID;") {
+				t.Fatalf("fixture lost its inherited ACE: %s", before)
+			}
+			if mask := extra[strings.Index(extra, "ID;")+3 : strings.Index(extra, ";;")]; strings.HasPrefix(mask, "0x") && !strings.Contains(before, "ID;"+mask+";") {
+				t.Fatalf("fixture mask %s was not stored: %s", mask, before)
+			}
+			if err := ensureDPAPIDirectory(path, sddl); !errors.Is(err, ErrCredentialStoreUnavailable) {
+				t.Fatalf("network-token directory with forged inherited ACE error=%v", err)
+			}
+			if !windowssecurity.OwnerMatchesSID(path, administrators) {
+				t.Fatal("rejected network-token directory owner was changed")
+			}
+			if after := windowsFixtureDACL(t, path); after != before {
+				t.Fatalf("rejected network-token directory DACL was rewritten: %s -> %s", before, after)
+			}
+			if entries, err := os.ReadDir(path); err != nil || len(entries) != 0 {
+				t.Fatalf("rejected network-token directory entries=%d err=%v", len(entries), err)
+			}
+		})
+	}
+}
+
+// writeRawWindowsFixtureDACL keeps INHERITED_ACE flags, which SetNamedSecurityInfo would recompute.
+func writeRawWindowsFixtureDACL(t *testing.T, path, sddl string) {
+	t.Helper()
+	descriptor, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(name, windows.WRITE_DAC|windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
+	if err := windows.SetKernelObjectSecurity(handle, windows.DACL_SECURITY_INFORMATION, descriptor); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func windowsFixtureDACL(t *testing.T, path string) string {
+	t.Helper()
+	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return descriptor.String()
 }
 
 func TestWindowsCredentialLegacyNetworkDirectoryDoesNotBroadenRootMigration(t *testing.T) {
