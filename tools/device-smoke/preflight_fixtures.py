@@ -6,7 +6,7 @@ Run by smoke.sh (before its shards) and windows_checks.py (before its checks) wi
 with no --checks/--only-ids every check that needs a fixture is verified. Each missing item prints what is missing and how
 to fix it, all of them in one report, and the exit code is 2. Nothing is created here (the per-run machines are made by
 the checks themselves). Settings come from the `smoke` object of ~/.config/paperboat-dev/targets.json (README.md, "Fixtures").
-Secrets (console sessions, S3 keys, the test-fixtures token) are only checked for existence, mode and a 200 from /v1/me; never printed.
+Secrets (console sessions, S3 keys) are only checked for existence, mode and a 200 from /v1/me; never printed.
 """
 import argparse
 import json
@@ -16,8 +16,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 
 import ct_env
 import dev_targets
@@ -31,7 +29,7 @@ NEEDS = {
     'free-plan': ['free_session', 'free_plan', 'fixture_host'],
     'team-business': ['operator_session', 'team_members', 'team_plan', 's3_keys', 'fixture_host'],
     'ssh-rsync': ['windows_rsync'],
-    'recording-key-rotation': ['test_fixtures', 'console_tools', 'fixture_host'],
+    'recording-key-rotation': ['console_tools', 'fixture_host'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
 NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
@@ -172,34 +170,13 @@ def windows_rsync():
     return None
 
 
-def test_fixtures():
-    """The server's test-fixtures endpoint answers to our token: a recording key only grows, so every run needs a new paid team."""
-    url, token_file = setting('SMOKE_FIXTURES_URL'), Path(setting('SMOKE_FIXTURES_TOKEN_FILE', '/nonexistent'))
-    if not url.startswith('https://') or not setting('SMOKE_FIXTURES_TOKEN_FILE'):
-        return 'SMOKE_FIXTURES_URL (https://<api host>/v1/test-fixtures) and SMOKE_FIXTURES_TOKEN_FILE are not set in targets.json smoke (%s)' % FIX_ACCOUNTS
-    if not token_file.is_file() or token_file.stat().st_mode & 0o077 or not token_file.read_text().strip():
-        return 'the test-fixtures token file %s is missing, empty or not mode 0600 (%s)' % (token_file, FIX_ACCOUNTS)
-    request = urllib.request.Request(url.rstrip('/') + '/zone', headers={'Authorization': 'Bearer ' + token_file.read_text().strip()})
-    try:
-        urllib.request.urlopen(request, timeout=30).close()
-    except urllib.error.HTTPError as error:
-        if error.code in (401, 403):
-            return 'the server rejects the token in %s. Fix: put the current PAPERBOAT_TEST_FIXTURES_TOKEN of the server in it' % token_file
-        if error.code == 404:
-            return 'the server has no test-fixtures endpoint: PAPERBOAT_TEST_FIXTURES_TOKEN is not set in its environment (%s)' % FIX_ACCOUNTS
-        # 429 and 503 (test DNS not configured) still mean the endpoint accepted the token
-    except OSError as error:
-        return 'cannot reach the test-fixtures endpoint %s: %s' % (url, type(error).__name__)
-    return None
-
-
 def console_tools():
     missing = [t for t in ('node',) if not shutil.which(t)] + [p for p in (setting('SMOKE_PW_CHROMIUM'), setting('SMOKE_PW_MODULE')) if not p or not Path(p).exists()]
     return ('console automation is missing: %s. Fix: %s' % (', '.join(missing) or 'SMOKE_PW_CHROMIUM / SMOKE_PW_MODULE unset', FIX_ACCOUNTS)) if missing or not setting('SMOKE_PW_CHROMIUM') else None
 
 
 VERIFIERS = {f.__name__: f for f in (team_plan, operator_session, free_session, free_plan, config_repo, team_admin, team_members,
-                                      s3_keys, fixture_host, windows_rsync, test_fixtures, console_tools)}
+                                      s3_keys, fixture_host, windows_rsync, console_tools)}
 
 
 def selected(args):

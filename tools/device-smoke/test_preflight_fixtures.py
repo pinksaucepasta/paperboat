@@ -31,52 +31,10 @@ class Selection(unittest.TestCase):
                 self.assertIn(name, pf.VERIFIERS)
 
 
-class TestFixturesEndpoint(unittest.TestCase):
-    """The recording-key-rotation fixture: the server's test-fixtures endpoint answers to our token."""
-
-    def verify(self, reply, mode=0o600, token='secret-token'):
-        import tempfile
-        import urllib.error
-        with tempfile.TemporaryDirectory() as directory:
-            file = f'{directory}/token'
-            with open(file, 'w') as out:
-                out.write(token)
-            import os
-            os.chmod(file, mode)
-            settings = {'SMOKE_FIXTURES_URL': 'https://api.example.test/v1/test-fixtures', 'SMOKE_FIXTURES_TOKEN_FILE': file}
-            seen = []
-
-            def urlopen(request, timeout):
-                seen.append((request.full_url, request.get_header('Authorization')))
-                if isinstance(reply, int):
-                    raise urllib.error.HTTPError(request.full_url, reply, 'x', {}, None)
-                return mock.Mock()
-            with mock.patch.dict(pf.ENV, settings), mock.patch('urllib.request.urlopen', urlopen):
-                return pf.test_fixtures(), seen
-
-    def test_accepted_token_is_ok_and_sent_only_as_a_bearer(self):
-        problem, seen = self.verify(None)
-        self.assertIsNone(problem)
-        self.assertEqual([('https://api.example.test/v1/test-fixtures/zone', 'Bearer secret-token')], seen)
-
-    def test_dns_not_configured_and_rate_limit_still_mean_the_token_works(self):
-        self.assertIsNone(self.verify(503)[0])
-        self.assertIsNone(self.verify(429)[0])
-
-    def test_each_refusal_names_its_fix_and_never_the_token(self):
-        self.assertIn('rejects the token', self.verify(401)[0])
-        self.assertIn('PAPERBOAT_TEST_FIXTURES_TOKEN is not set', self.verify(404)[0])
-        self.assertIn('mode 0600', self.verify(None, mode=0o644)[0])
-        self.assertIn('empty', self.verify(None, token='\n')[0])
-        for problem in (self.verify(401)[0], self.verify(404)[0]):
-            self.assertNotIn('secret-token', problem)
-
-    def test_unset_settings_are_reported(self):
-        with mock.patch.dict(pf.ENV, {}, clear=True):
-            self.assertIn('SMOKE_FIXTURES_URL', pf.test_fixtures())
-
-    def test_the_check_needs_no_permanent_accounts(self):
-        self.assertEqual(['test_fixtures', 'console_tools', 'fixture_host'], pf.NEEDS['recording-key-rotation'])
+class RecordingKeyRotation(unittest.TestCase):
+    def test_needs_only_the_tools_and_the_docker_host(self):
+        # the accounts, the team (Stripe sandbox Checkout) and the machines are made by the run itself
+        self.assertEqual(['console_tools', 'fixture_host'], pf.NEEDS['recording-key-rotation'])
 
 
 class Report(unittest.TestCase):

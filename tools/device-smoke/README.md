@@ -27,7 +27,6 @@ The settings live in the `smoke` object of `~/.config/paperboat-dev/targets.json
 | `SMOKE_CONSOLE_ORIGIN`, `SMOKE_PW_CHROMIUM`, `SMOKE_PW_MODULE` | the live console, headless Chromium and `playwright-core` (`npm i playwright-core` in `~/.config/paperboat-dev/pw`) that sign accounts in and mint enrollment tokens | every fixture below |
 | `SMOKE_OPERATOR_STATE` | console session (Playwright storage state, mode 600) of the smoke team's owner `pprbtdev@gmail.com`: `node console_session.mjs password pprbtdev@gmail.com ~/.config/paperboat/console-workos.password STATE` | `config-team-default`, `team-business` |
 | `SMOKE_FREE_STATE` | the **Free fixture account** (never subscribes; created once with `fresh_account.mjs signup ~/.config/paperboat-dev/free-account`, which leaves `account.json` and `state.json` there) | `free-plan` |
-| `SMOKE_FIXTURES_URL`, `SMOKE_FIXTURES_TOKEN_FILE` | the server's test-fixtures endpoint (`https://<api host>/v1/test-fixtures`) and a mode-600 file holding its bearer token (the server's `PAPERBOAT_TEST_FIXTURES_TOKEN`; the endpoint exists only while the server has that set). It makes the paid team of a throwaway owner account, because a recording key only grows and a run needs a team without one | `recording-key-rotation` |
 | `SMOKE_CONFIG_REPO` | `pujan-modha/paperboat-smoke-team-config`: a private GitHub repository connected to the operator account as a config repository (the account's GitHub connection already exists; connect another with `POST /v1/config-repositories` {provider github, numeric external_ref, display_name owner/name}); keep it, `config-team-default` only sets and unsets the team default | `config-team-default` |
 | `SMOKE_FIXTURE_HOST`, `SMOKE_FIXTURE_PB` | an SSH host with passwordless Docker (a linuxpool runner) and the Linux build for its architecture; `fixture_machine.sh` builds the container image there once | the four checks run by `fixture_checks.py` |
 | `~/.config/paperboat-dev/operator-cred` (mode 600: operator email, password, authenticator key; `forward_live.py` format) | the smoke team `paperboat-smoke-paid` keeps a running paid plan and the SSO and SCIM add-ons. They are comp grants that end (the plan after at most 366 days): when preflight says the plan is gone, run `python3 operator_fixture.py ensure` (idempotent; never touches a Stripe subscription) | `config-team-default`, `team-business` |
@@ -41,11 +40,12 @@ an S3 store (versitygw from its official image, filesystem backend, in the machi
 reads the stored objects back as plain `.ndjson.gz` files, which MinIO's object format does not allow; nothing of it outlives the
 run and no other host is involved (the server reaches it through the machine's ephemeral tunnel).
 `recording-key-rotation` (PB-R1) needs a team that has no recording key (the team's first recording, started from the console, makes
-generation 1), so every run makes its own: two throwaway console accounts (owner and member, `fresh_account.mjs`), a paid team for them
-from the test-fixtures endpoint, two machines of the owner (one runs `recordings_key_rotation.py`, the other is the team machine that records)
-and the member's pb as a profile in the first machine's container. The recording starts only in the console, whose browser (node, Chromium,
+generation 1), so every run makes its own, through the product: two throwaway console accounts (owner and member, `fresh_account.mjs`), a team
+the owner creates with `pb team create` and pays in Stripe's **sandbox** Checkout with the 4242 test card (`stripe_checkout.mjs`; prod runs on
+the Stripe sandbox until launch), the member invited and accepting, two machines of the owner (one runs `recordings_key_rotation.py`, the other is
+the team machine that records) and the member's pb as a profile in the first machine's container. The recording starts only in the console, whose browser (node, Chromium,
 the owner's session) is on the controller: the container asks for it through files and the controller runs `console_record_start.mjs`
-(`console_start_bridge.py`). Team, machines and both accounts are removed when the run ends; a record that cannot be removed is reported as
+(`console_start_bridge.py`). The member leaves the team, machines are revoked, and deleting the owner's account deletes the team and cancels its subscription; both accounts are gone when the run ends; a record that cannot be removed is reported as
 `LEFT BEHIND` and fails the check.
 When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator) or
 with the credentials in `free-account/account.json` (Free account).

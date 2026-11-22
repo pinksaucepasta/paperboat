@@ -10,11 +10,11 @@ Prints one JSON receipt line {"check", "status": PASS|FAIL, "detail", "seconds"}
   team-business        two machines of the owner and a per-run S3 store (versitygw, official image, filesystem backend, in the
                        machine's network namespace) with the keys of ~/.f19-s3ak and ~/.f19-s3sk; team_business.py runs from here.
   recording-key-rotation  a recording key only grows, so every run needs a team without one: two throwaway console accounts (owner,
-                       member; fresh_account.mjs), a paid team made for them by the server's test-fixtures endpoint
-                       (final_fixtures.py), two machines of the owner (one runs recordings_key_rotation.py, the other is its team
+                       member; fresh_account.mjs), a paid team the owner makes with `pb team create` and pays in Stripe's SANDBOX
+                       Checkout with the 4242 test card (stripe_checkout.mjs), the member invited and accepting, two machines of the owner (one runs recordings_key_rotation.py, the other is its team
                        target) and the member's pb as a profile in the first machine's container. The console start (the only place
                        a recording starts) runs on this controller, which holds node, Chromium and the owner's session; the
-                       container asks for it through files (console_start_bridge.py). Everything is removed at the end.
+                       container asks for it through files (console_start_bridge.py). Everything is removed at the end (the member leaves; deleting the owner's account deletes the team and cancels its subscription).
 preflight_fixtures.py verifies the fixtures first (smoke.sh and windows_checks.py run it); setup is never retried here.
 """
 import contextlib
@@ -87,13 +87,19 @@ class Machines(contextlib.ExitStack):
         return run(['node', str(HERE / script), *args], env=dict(self.env, **({'STATE': state} if state else {})), check=check, timeout=timeout)
 
     def account(self, label):
-        """(email, console session state file) of a new throwaway account (fresh_account.mjs); deleted, with its login files, when the block ends."""
-        directory = str(Path(tempfile.gettempdir()) / ('fx-%s-%s' % (label, self.run_id)))
-        try:
-            self.node('fresh_account.mjs', 'signup', directory, state=directory + '/state.json')
-        finally:
+        """(email, console session state file) of a new throwaway account (fresh_account.mjs); deleted, with its login files, when the block ends.
+        The sign-up code mail sometimes never arrives: one more account is tried then (the abandoned one has no session to delete)."""
+        for attempt in (1, 2):
+            directory = str(Path(tempfile.gettempdir()) / ('fx-%s-%s-%d' % (label, self.run_id, attempt)))
+            try:
+                self.node('fresh_account.mjs', 'signup', directory, state=directory + '/state.json')
+            except RuntimeError:
+                shutil.rmtree(directory, ignore_errors=True)
+                if attempt == 2:
+                    raise
+                continue
             self.callback(self._delete_account, directory)  # registered before anything uses the account, so it runs after all of it
-        return json.loads(Path(directory, 'account.json').read_text())['email'], directory + '/state.json'
+            return json.loads(Path(directory, 'account.json').read_text())['email'], directory + '/state.json'
 
     def _delete_account(self, directory):
         done = self.node('fresh_account.mjs', 'delete', directory, state=directory + '/state.json', check=False)
@@ -101,21 +107,6 @@ class Machines(contextlib.ExitStack):
             self.leftovers.append('throwaway account NOT deleted, its login stays in %s: %s' % (directory, (done.stdout + done.stderr)[-150:].strip()))
         else:
             shutil.rmtree(directory, ignore_errors=True)
-
-    def team(self, owner, member):
-        """A paid team the owner owns with the member as an active member (the server's test-fixtures endpoint); ended with the block."""
-        self.callback(self._team_teardown, owner)
-        return json.loads(self._fixtures('--email', owner, '--member', member).stdout.strip().splitlines()[-1])['env']['PAPERBOAT_SMOKE_TEAM']
-
-    def _team_teardown(self, owner):
-        done = self._fixtures('--email', owner, '--teardown', check=False)
-        if done.returncode:
-            self.leftovers.append('test-fixtures team NOT torn down (the owner account cannot be deleted): ' + (done.stdout + done.stderr)[-150:].strip())
-
-    def _fixtures(self, *args, check=True):
-        token = Path(path('SMOKE_FIXTURES_TOKEN_FILE')).read_text().strip()
-        return run([sys.executable, str(HERE / 'final_fixtures.py'), *args], check=check, timeout=300,
-                   env=dict(os.environ, FINAL_FIXTURES_URL=ENV['SMOKE_FIXTURES_URL'], FINAL_FIXTURES_TOKEN=token))
 
 
 def stage(prefix):
@@ -134,7 +125,8 @@ def ready(prefix, name, seconds=420):
             return
         last = (done.stdout + done.stderr)[-200:]
         time.sleep(10)
-    raise RuntimeError('the fresh machine %s never became usable within %d s: %s' % (name, seconds, last))
+    state = run(shlex.split(prefix) + ['bash -lc ' + shlex.quote('%s status 2>&1 | grep -E "Daemon|Runtime|Path|Health" | head -8' % PB)], check=False, timeout=60).stdout
+    raise RuntimeError('the fresh machine %s never became usable within %d s: %s [pb status: %s]' % (name, seconds, last, ' '.join(state.split())))
 
 
 def on_machine(prefix, script, args, timeout):
@@ -276,8 +268,9 @@ def member_profile(m, prefix, state):
         'exec %s --config %s/config.json "$@"\n' % (root, root, root, root, root, ct_env.CT_RUNDIR, PB, root)))
 
 
-# every member may use, record and replay every machine of the team: the owner and the member are viewers of its key
-TEAM_POLICY = {'rules': [{'src': ['*'], 'dst': ['machine:*'], 'allow': ['*', 'record', 'recording_view']}]}
+# every member may use and replay every machine of the team (the owner and the member are viewers of its key). Not `record`: that rule makes the
+# machine record every session by itself (trigger rule), and the check starts its recordings by hand (trigger manual)
+TEAM_POLICY = {'rules': [{'src': ['*'], 'dst': ['machine:*'], 'allow': ['*', 'recording_view']}]}
 
 
 def team_generation(m, prefix, team):
@@ -285,16 +278,36 @@ def team_generation(m, prefix, team):
     return (shown.get('data') or shown)['generation']
 
 
+def paid_team(m, prefix, member_email):
+    """A new paid team of the owner whose pb runs at `prefix`, the member (pb: ~/pbm there) an active member of it. Returns its id.
+    The product's own path: `pb team create` prints the Checkout link, the sandbox payment makes the team. The member leaves at the end;
+    deleting the owner's account (the last cleanup step) then deletes the team and cancels its subscription."""
+    team = 'pbkey-' + m.run_id
+    created = json.loads(m.at(prefix, '%s team create %s --seats 2 --interval month --accept-terms --no-wait --json' % (PB, team)).stdout.strip().splitlines()[-1])
+    m.node('stripe_checkout.mjs', created['checkout_url'], timeout=300)
+    deadline = time.monotonic() + 180
+    while not m.at(prefix, '%s team get %s --json' % (PB, team), check=False).returncode == 0:  # the team exists when Stripe has reported the payment
+        if time.monotonic() > deadline:
+            raise RuntimeError('team %s was not created within 180 s of the sandbox payment' % team)
+        time.sleep(3)
+    invitation = json.loads(m.at(prefix, '%s team invite %s %s --generation %s --json' % (PB, team, shlex.quote(member_email), team_generation(m, prefix, team))).stdout.strip().splitlines()[-1])
+    m.at(prefix, '%s/pbm team accept %s --json' % (HOME, invitation['invitation_id']))
+    m.callback(lambda: m.at(prefix, '%s/pbm team leave %s --generation %s --json' % (HOME, team, team_generation(m, prefix, team)), check=False))
+    return team
+
+
 def recording_key_rotation(m):
     owner, owner_state = m.account('owner')
     member, member_state = m.account('member')
-    team = m.team(owner, member)
     name, _, prefix = m.machine('own', state=owner_state)  # runs the check: its pb is the team owner
-    target, target_id, target_prefix = m.machine('tgt', state=owner_state)  # the team machine that records
+    target, target_id, _ = m.machine('tgt', state=owner_state)  # the team machine that records
+    # shortcut: both machines exist before the first command runs on one of them: with a single machine of a new account `pb exec` on itself
+    # answered "service is not ready yet" for 7 minutes (twice), with two it works; look at it again when exec on a lone machine is tested
     stage(prefix)
     ready(prefix, name)
     ready(prefix, target)  # the path the check uses: the owner's machine runs a command on the target
     member_profile(m, prefix, member_state)
+    team = paid_team(m, prefix, member)
     secret = {who: secret_file(m, prefix, who + '.pw') for who in ('owner', 'member')}
     m.at(prefix, '%s env init --password-stdin' % PB, stdin=secret['owner'])
     m.at(prefix, '%s/pbm env init --password-stdin' % HOME, stdin=secret['member'])  # the key is sealed to every viewer who has a vault
@@ -311,6 +324,10 @@ def recording_key_rotation(m):
     print(json.dumps(record), file=sys.stderr, flush=True)  # ids, generations and exit codes only
     bad = ['%s: %s' % (s['step'], s.get('error') or s.get('reason', '')) for s in record.get('steps', []) if s['status'] != 'PASS']
     ok = code == 0 and record.get('status') == 'PASS' and not bad
+    if not ok:  # what the team's recordings look like now (ids, trigger, state: never their content), for the failure report
+        listed = m.at(prefix, "%s recordings list --team %s --json | python3 -c 'import json,sys;d=json.load(sys.stdin);d=d.get(\"data\",d);"
+                      "print([{k:r.get(k) for k in (\"id\",\"trigger\",\"state\",\"session_id\",\"machine_name\")} for r in d[\"recordings\"]])'" % (PB, team), check=False, timeout=90)
+        print('recordings now: ' + (listed.stdout + listed.stderr).strip()[-600:], file=sys.stderr, flush=True)
     g = record.get('generations', {})
     return ok, ('replace kept old recordings readable, reset made them unreadable, new recordings work; generations %s -> %s -> %s' % (g.get('first'), g.get('replace'), g.get('reset'))
                 if ok else '; '.join(bad[:3] + bridge.refusals[:1]) or ' '.join(out.split())[-300:])
