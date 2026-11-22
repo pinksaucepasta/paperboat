@@ -128,7 +128,7 @@ func unprotectWindowsFileSecretV2(path string, protected []byte) ([]byte, error)
 // administrator token leaves it owned by Administrators with an inherited ACL, which writeCredentialFile then
 // refuses as foreign-owned (pb login with auth.allow_file_fallback in an isolated profile, X-35).
 func createCredentialDirectory(path string) error {
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,11 @@ func writeCredentialFile(path string, value []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureDPAPIDirectory(filepath.Dir(path), sddl); err != nil {
+	directorySDDL, err := currentUserDirectorySDDL()
+	if err != nil {
+		return err
+	}
+	if err := ensureDPAPIDirectory(filepath.Dir(path), directorySDDL); err != nil {
 		return err
 	}
 	protected, err := protectWindowsFileSecretV2(path, value)
@@ -244,6 +248,9 @@ func checkCredentialFilePrivate(path string) (private bool, resultErr error) {
 		return false, err
 	}
 	wantSDDL, err := currentUserCredentialSDDL()
+	if info, statErr := os.Lstat(path); statErr == nil && info.IsDir() {
+		wantSDDL, err = currentUserDirectorySDDL()
+	}
 	if err != nil {
 		return false, err
 	}

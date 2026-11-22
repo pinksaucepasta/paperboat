@@ -73,7 +73,7 @@ func createSharedLockDirectory(path string) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func validateSharedLockBoundary(path string, owner *windows.SID) error {
 }
 
 func secureExistingSharedLockDirectory(path string, owner *windows.SID) error {
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func validateSharedLockDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		return err
 	}

@@ -74,7 +74,7 @@ func TestWindowsFileSecretRejectsNonRegularCredentialObject(t *testing.T) {
 // auth.allow_file_fallback in an isolated profile, X-35).
 func TestFileSecretStoreCreatedFromElevatedTokenIsOwnedByTheUser(t *testing.T) {
 	setFixtureDefaultOwnerToAdministrators(t)
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		t.Fatal(err)
 	}

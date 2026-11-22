@@ -2,11 +2,10 @@
 
 package config
 
-// Windows does not inherit the protected DACL used for the credential root.
-// Apply the owner-only descriptor explicitly to each profile namespace before
+// Apply the inheritable owner-only descriptor to each profile namespace before
 // creating locks or atomically replacing profile files.
 func ensureProfileDirectory(path string) error {
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		return err
 	}

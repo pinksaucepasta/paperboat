@@ -57,7 +57,7 @@ func preparePrivateWindowsCredentialDirectory(t *testing.T) (string, string) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestWindowsCredentialLegacyNetworkDirectoryDoesNotBroadenRootMigration(t *t
 		t.Fatal(err)
 	}
 	administrators := makeWindowsNetworkTokenDirectoryFixture(t, path, false)
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,11 @@ import (
 )
 
 func TestWindowsCredentialACLProbePreservesNativeCauseAndRecovers(t *testing.T) {
-	directory, sddl := preparePrivateWindowsCredentialDirectory(t)
+	directory, _ := preparePrivateWindowsCredentialDirectory(t)
+	sddl, err := currentUserCredentialSDDL()
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(directory, "bounded-credential")
 	value := []byte("fixture-only-account-token")
 	defer clear(value)

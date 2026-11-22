@@ -58,6 +58,18 @@ func currentUserCredentialSDDL() (string, error) {
 	return "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + sid.String() + ")", nil
 }
 
+// currentUserDirectorySDDL is the owner-only DACL for folders that hold
+// secrets and locks. Children inherit it; without inheritance a child created
+// by os.Mkdir gets the token default DACL, which for an unelevated
+// administrator network logon excludes the user (Access is denied).
+func currentUserDirectorySDDL() (string, error) {
+	sid, err := currentUserSID()
+	if err != nil {
+		return "", err
+	}
+	return windowssecurity.OwnerFullControlDirectoryDACL(sid.String()), nil
+}
+
 func currentUserSID() (sid *windows.SID, resultErr error) {
 	token, err := currentEffectiveUserToken()
 	if err != nil {
@@ -394,6 +406,7 @@ func adminOwnedExactDPAPIHandle(handle windows.Handle, information windows.ByHan
 	case directory && !protected:
 		expectedFlags = inheritedDirectoryFlags
 	case directory && protected:
+		expectedFlags = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
 	case !directory && protected:
 	default:
 		return false
@@ -670,10 +683,14 @@ func setDPAPISecret(ref, value string) error {
 	if err != nil {
 		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	if err := ensureDPAPIDirectory(filepath.Dir(directory), sddl); err != nil {
+	directorySDDL, err := currentUserDirectorySDDL()
+	if err != nil {
 		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	if err := ensureDPAPIDirectory(directory, sddl); err != nil {
+	if err := ensureDPAPIDirectory(filepath.Dir(directory), directorySDDL); err != nil {
+		return errors.Join(ErrCredentialStoreUnavailable, err)
+	}
+	if err := ensureDPAPIDirectory(directory, directorySDDL); err != nil {
 		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
 	protected, err := protectKeyringDPAPIV2(ref, value)
@@ -714,7 +731,7 @@ func getDPAPISecret(ref string) (string, error) {
 	// An ordinary owner-owned, non-reparse Paperboat root is repaired to the exact owner and DACL before the
 	// secret is read. ensureDPAPIDirectory checks ownership before changing the DACL, so foreign-owned roots
 	// remain untouched and rejected.
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		return "", err
 	}

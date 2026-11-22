@@ -37,7 +37,7 @@ func TestSharedLockCreatesProtectedOwnerAndLockMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestSharedLockParentWithAForeignOwnerIsRefusedUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sddl, err := currentUserCredentialSDDL()
+	sddl, err := currentUserDirectorySDDL()
 	if err != nil {
 		t.Fatal(err)
 	}
