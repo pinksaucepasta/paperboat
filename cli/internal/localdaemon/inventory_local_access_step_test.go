@@ -38,6 +38,7 @@ func TestInventoryNamesTheFailingLocalAccessStep(t *testing.T) {
 		{"pending", "ready", "browser_urls_unavailable", "warning", "browser certificate", LocalAccessPendingError{Step: "browser_certificate"}},
 		{"pending port", "ready", "browser_urls_unavailable", "warning", "browser port listener", LocalAccessPendingError{Step: "browser_port_listener"}},
 		{"busy gateway port", "ready", "browser_urls_unavailable", "warning", "another program is using port 80/443", LocalAccessPendingError{Step: "browser_gateway_port", Detail: "nginx, PID 4242"}},
+		{"busy http port", "ready", "browser_urls_unavailable", "warning", "https:// browser URLs work", LocalAccessPendingError{Step: "browser_http_port", Detail: "nginx, PID 4242"}},
 		{"failed", "degraded", "local_access_unavailable", "error", "machine names", stepFailure{step: "machine_names"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

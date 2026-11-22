@@ -814,6 +814,9 @@ func pendingStepRecovery(step string) string {
 	if step == "browser_gateway_port" {
 		return "Stop that program, and Paperboat turns browser URLs back on by itself."
 	}
+	if step == "browser_http_port" {
+		return "Use the https:// URLs, or stop that program, and Paperboat turns the http:// links back on by itself."
+	}
 	return "The rest of local access works; Paperboat retries the step by itself"
 }
 
@@ -827,6 +830,12 @@ func pendingStepTitle(step, detail string) string {
 			title += " (" + detail + ")"
 		}
 		return title
+	case "browser_http_port":
+		title := "http:// browser links are off because another program is using port 80"
+		if detail != "" {
+			title += " (" + detail + ")"
+		}
+		return title + "; https:// browser URLs work"
 	case "browser_certificate":
 		what = "Browser URLs are unavailable"
 	case "browser_port_listener":

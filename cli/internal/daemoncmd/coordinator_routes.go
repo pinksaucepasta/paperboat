@@ -283,12 +283,12 @@ func (c *Coordinator) replaceGuardedRoutesLocked(ctx context.Context, peers []*d
 		diagnosticlog.TryInfo("protected machine ports remain blocked by local listener conflicts", "count", conflictedPorts, "first_port", firstConflictedPort)
 	}
 	c.browserPortsPending = false // set again below by every per-port listener that cannot start
-	c.browserGatewayBusy, c.browserGatewayOwner = false, ""
+	c.browserGatewayBusy, c.browserHTTPBusy, c.browserGatewayOwner = false, false, ""
 	if len(browserRoutes) > 0 {
 		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases)
 		switch {
 		case errors.Is(err, machineguard.ErrPortInUse), errors.Is(err, machineguard.ErrListenerRefused):
-			// Another program (a web server on :80/:443) owns a gateway port.
+			// Another program (a web server on :443; :80 alone only sets browserHTTPBusy) owns a gateway port.
 			// Machine names and native ports keep working; only browser URLs
 			// are withdrawn, so a busy port must not degrade the whole daemon.
 			c.browserGatewayBusy, c.browserGatewayOwner = true, browserGatewayPortOwner()

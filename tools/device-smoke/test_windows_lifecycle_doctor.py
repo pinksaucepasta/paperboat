@@ -16,6 +16,11 @@ class DoctorOkTest(unittest.TestCase):
         self.assertFalse(windows_lifecycle.doctor_ok('doctor: degraded\nudp_ipv4: fail: blocked\n' + WARNING))
         self.assertFalse(windows_lifecycle.doctor_ok('doctor: unhealthy\n' + WARNING))
 
+    def test_the_http_only_busy_port_warning_is_tolerated(self):
+        http_only = 'daemon: warning: The local daemon is ready. ' + pairing_lifecycle.HTTP_SYS_HTTP_PORT_WARNING + '.'
+        self.assertTrue(windows_lifecycle.doctor_ok('doctor: degraded\n' + http_only))
+        self.assertFalse(windows_lifecycle.doctor_ok('doctor: degraded\nudp_ipv4: fail: blocked\n' + http_only))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -38,7 +38,7 @@ def doctor_ok(out):
     if 'doctor: healthy' in out:
         return True
     problems = re.findall(r'^\S+: (?:fail|warning)[^\n]*', out, re.M)
-    return 'doctor: degraded' in out and bool(problems) and all(pairing_lifecycle.HTTP_SYS_PORT_WARNING in line for line in problems)
+    return 'doctor: degraded' in out and bool(problems) and all(pairing_lifecycle.names_http_sys_port(line) for line in problems)
 
 
 def home(name):

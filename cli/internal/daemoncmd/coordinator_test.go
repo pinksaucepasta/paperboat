@@ -35,13 +35,12 @@ func TestCoordinatorBrowserGatewayPreservesRoutesWhenNativePortsConflict(t *test
 	testCoordinatorSharedBrowserGateway(t, true, testBrowserDomain)
 }
 
-// A web server on :80 (caddy on the Raspberry Pi test machine) made the guard
-// refuse the browser gateway port, which kept the whole daemon degraded and
-// blocked `pb pair`. Native routes must survive; only browser URLs go.
+// A web server on :443 made the guard refuse the browser gateway port, which kept the whole daemon degraded
+// and blocked `pb pair` (caddy on the Raspberry Pi test machine). Native routes must survive; only browser URLs go.
 func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer origin.Close()
-	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{443: true}}
 	c, err := NewCoordinator(CoordinatorConfig{NameClient: names,
 		DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
@@ -60,6 +59,61 @@ func TestCoordinatorBrowserGatewayPortInUseKeepsNativeRoutes(t *testing.T) {
 	}
 	if len(c.webRoutes) != 0 || len(c.routes) != 1 || len(names.names) != 1 {
 		t.Fatalf("web routes=%d native routes=%d names=%d, want 0/1/1", len(c.webRoutes), len(c.routes), len(names.names))
+	}
+}
+
+// Stock Windows: HTTP.sys holds 0.0.0.0:80 and nothing holds :443. https://<port>.<machine>.<domain> must still
+// answer with the machine's bytes; only the http:// links are off, and pb doctor names that step (curl from a
+// Windows client got "connection refused" on :443 because a busy :80 withdrew the whole gateway).
+func TestCoordinatorBusyHTTPPortKeepsHTTPSBrowserURLs(t *testing.T) {
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "machine bytes") }))
+	defer origin.Close()
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
+	c, err := NewCoordinator(CoordinatorConfig{NameClient: names,
+		DialMachine: func(ctx context.Context, _ string, _ int) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", origin.Listener.Addr().String())
+		},
+		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			cert, key, err := ca.IssueCertificate([]string{name})
+			if err != nil {
+				return tls.Certificate{}, err
+			}
+			return tls.X509KeyPair(cert, key)
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ctx = t.Context()
+	defer c.Stop()
+	peers := []*daemonrpc.PeerUpdate{{PeerId: "first", Alias: "laptop", AssignedIp: "127.100.0.4", Approved: true, Online: true, ExportedPorts: []int32{6767}}}
+	if err := c.replaceGuardedRoutes(t.Context(), peers); err != nil {
+		t.Fatalf("a busy :80 must not fail reconciliation: %v", err)
+	}
+	if len(c.webRoutes) != 1 || c.webRoutes[splitdns.BrowserGatewayHostname].proxy.ServesHTTP() {
+		t.Fatalf("web routes=%d: want the HTTPS gateway up without :80", len(c.webRoutes))
+	}
+	if step := c.PendingLocalAccessStep(); step != "browser_http_port" {
+		t.Fatalf("pending step=%q, want browser_http_port", step)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca.CertPEM())
+	host := "6767.laptop." + testBrowserDomain
+	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12}}
+	defer tr.CloseIdleConnections()
+	req, _ := http.NewRequest(http.MethodGet, "https://"+names.addresses[443]+"/", nil)
+	req.Host = host
+	response, err := (&http.Client{Transport: tr}).Do(req)
+	if err != nil {
+		t.Fatalf("https browser URL with a busy :80: %v", err)
+	}
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != "machine bytes" {
+		t.Fatalf("https browser URL answered %d %q %v", response.StatusCode, body, err)
 	}
 }
 

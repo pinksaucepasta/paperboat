@@ -385,11 +385,18 @@ def pair(binary, arguments, root, fault, server, password=None):
 # Only that exact warning is tolerated; any other owner, any other warning or failing check still fails the gate.
 HTTP_SYS_PORT_WARNING = ('Browser URLs are off because another program is using port 80/443 '
                          '(Windows HTTP service (HTTP.sys, for example IIS), PID 4)')
+# HTTP.sys holds only :80 on the runners, so pb serves https:// URLs and turns off only the http:// links.
+HTTP_SYS_HTTP_PORT_WARNING = ('http:// browser links are off because another program is using port 80 '
+                              '(Windows HTTP service (HTTP.sys, for example IIS), PID 4); https:// browser URLs work')
+
+
+def names_http_sys_port(text):
+    return HTTP_SYS_PORT_WARNING in text or HTTP_SYS_HTTP_PORT_WARNING in text
 
 
 def http_sys_port_warning(check):
     return (check.get('code') in ('daemon', 'daemon:browser_urls_unavailable') and check.get('status') == 'warning'
-            and HTTP_SYS_PORT_WARNING in check.get('summary', ''))
+            and names_http_sys_port(check.get('summary', '')))
 
 
 def doctor_report(binary, timeout=60):

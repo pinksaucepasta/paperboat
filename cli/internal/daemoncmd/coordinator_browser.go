@@ -27,6 +27,7 @@ import (
 func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client guardedNameClient, routes map[string]splitdns.BrowserRoute, aliases map[string]string) (web guardedWebRoute, err error) {
 	base := splitdns.BrowserGatewayHostname
 	if old, ok := c.webRoutes[base]; ok {
+		c.retryBrowserHTTPLocked(ctx, client, old.proxy)
 		if maps.Equal(old.browserRoutes, routes) {
 			// A per-port listener that could not start is tried again on every reconciliation, like a native port.
 			c.addBrowserPortListeners(ctx, client, netip.MustParseAddr(splitdns.BrowserGatewayIP), routes, old.proxy, old.ports)
@@ -39,14 +40,17 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		return guardedWebRoute{}, err
 	}
 	ip := netip.MustParseAddr(splitdns.BrowserGatewayIP)
-	httpListener, err := client.Acquire(ctx, base, ip, 80)
+	httpListener, err := c.acquireBrowserHTTPLocked(ctx, client, ip)
 	if err != nil {
-		return guardedWebRoute{}, coordinatorOperationFailure("browser_http_listener", err)
+		return guardedWebRoute{}, err
 	}
 	var httpsListener net.Listener
 	defer func() {
 		if err != nil {
-			causes := []error{err, lifecycleCleanup(httpListener.Close())}
+			causes := []error{err}
+			if httpListener != nil {
+				causes = append(causes, lifecycleCleanup(httpListener.Close()))
+			}
 			if httpsListener != nil {
 				causes = append(causes, lifecycleCleanup(httpsListener.Close()))
 			}
@@ -118,7 +122,11 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 		return c.cfg.DialMachine(ctx, machineID, port)
 	}})
 	if err == nil {
-		err = proxy.StartListeners(&limitedListener{Listener: httpListener, permits: c.connections, ctx: context.WithoutCancel(ctx)}, &limitedListener{Listener: httpsListener, permits: c.connections, ctx: context.WithoutCancel(ctx)})
+		var plain net.Listener // nil while another program owns :80
+		if httpListener != nil {
+			plain = &limitedListener{Listener: httpListener, permits: c.connections, ctx: context.WithoutCancel(ctx)}
+		}
+		err = proxy.StartListeners(plain, &limitedListener{Listener: httpsListener, permits: c.connections, ctx: context.WithoutCancel(ctx)})
 	}
 	if err != nil {
 		return guardedWebRoute{}, coordinatorOperationFailure("browser_proxy", err)
@@ -127,6 +135,38 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	c.addBrowserPortListeners(ctx, client, ip, routes, proxy, web.ports)
 	c.webRoutes[base] = web
 	return web, nil
+}
+
+// acquireBrowserHTTPLocked binds the gateway's :80. Another program there (HTTP.sys holds 0.0.0.0:80 on stock
+// Windows) turns off only the http:// links: https:// URLs on :443 do not need it. It returns a nil listener then
+// and sets browserHTTPBusy, so pb doctor names the owner and the reconcile retry binds :80 once it is free.
+func (c *Coordinator) acquireBrowserHTTPLocked(ctx context.Context, client guardedNameClient, ip netip.Addr) (net.Listener, error) {
+	listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, 80)
+	if errors.Is(err, machineguard.ErrPortInUse) || errors.Is(err, machineguard.ErrListenerRefused) {
+		c.browserHTTPBusy, c.browserGatewayOwner = true, browserGatewayPortOwner()
+		return nil, nil
+	}
+	if err != nil {
+		return nil, coordinatorOperationFailure("browser_http_listener", err)
+	}
+	return listener, nil
+}
+
+// retryBrowserHTTPLocked adds :80 to a running gateway that started without it. A failure leaves https:// serving.
+func (c *Coordinator) retryBrowserHTTPLocked(ctx context.Context, client guardedNameClient, proxy *splitdns.Proxy) {
+	if proxy.ServesHTTP() {
+		return
+	}
+	listener, err := c.acquireBrowserHTTPLocked(ctx, client, netip.MustParseAddr(splitdns.BrowserGatewayIP))
+	if err == nil && listener != nil {
+		if err = proxy.AddHTTPListener(&limitedListener{Listener: listener, permits: c.connections, ctx: context.WithoutCancel(ctx)}); err != nil {
+			err = errors.Join(err, lifecycleCleanup(listener.Close()))
+		}
+	}
+	if err != nil {
+		c.browserHTTPBusy = true
+		diagnosticlog.TryWarn("browser gateway port 80 could not be served; https:// browser URLs keep working", "error", err)
+	}
 }
 
 // updateBrowserGatewayLocked applies changed routes to the running gateway: certificates for new names

@@ -473,24 +473,50 @@ func (p *Proxy) StartListeners(httpListener, httpsListener net.Listener) error {
 	if p.started {
 		return nil
 	}
-	if httpListener == nil || httpsListener == nil || p.issueCertificate == nil {
-		return errors.New("splitdns proxy: protected HTTP/HTTPS listeners and trusted certificates are required")
+	// httpListener may be nil: another program on :80 (HTTP.sys on stock Windows) leaves only the http:// redirect off.
+	if httpsListener == nil || p.issueCertificate == nil {
+		return errors.New("splitdns proxy: a protected HTTPS listener and trusted certificates are required")
 	}
 	return p.startListenersLocked(httpListener, httpsListener)
+}
+
+// ServesHTTP reports whether the started proxy serves plain HTTP (:80).
+func (p *Proxy) ServesHTTP() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.httpServer != nil
+}
+
+// AddHTTPListener serves plain HTTP on listener for a proxy started without one (its :80 was busy then).
+func (p *Proxy) AddHTTPListener(listener net.Listener) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started || p.httpServer != nil || listener == nil {
+		return errors.New("splitdns proxy: no HTTP listener can be added")
+	}
+	p.httpListener = listener
+	p.httpServer = &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	server := p.httpServer
+	go func() { _ = server.Serve(listener) }()
+	return nil
 }
 
 func (p *Proxy) startListenersLocked(httpListener, httpsListener net.Listener) error {
 	p.stopErr = nil
 	p.httpListener = httpListener
-	p.httpServer = &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	if httpListener != nil {
+		p.httpServer = &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	}
 	if httpsListener != nil {
 		tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: p.GetCertificate}
 		p.httpsListener = tls.NewListener(httpsListener, tlsConfig)
 		p.httpsServer = &http.Server{Handler: p, TLSConfig: tlsConfig, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	}
 	p.started = true
-	httpServer, httpBoundListener := p.httpServer, p.httpListener
-	go func() { _ = httpServer.Serve(httpBoundListener) }()
+	if p.httpServer != nil {
+		httpServer, httpBoundListener := p.httpServer, p.httpListener
+		go func() { _ = httpServer.Serve(httpBoundListener) }()
+	}
 	if p.httpsServer != nil {
 		httpsServer, httpsBoundListener := p.httpsServer, p.httpsListener
 		go func() { _ = httpsServer.Serve(httpsBoundListener) }()

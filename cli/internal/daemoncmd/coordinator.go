@@ -72,6 +72,9 @@ type Coordinator struct {
 	// a failed reconcile, so the URLs return by themselves once the port is free.
 	browserGatewayBusy  bool
 	browserGatewayOwner string
+	// browserHTTPBusy is set while another program owns only the gateway's :80: https:// browser URLs work, the
+	// http:// links do not (guarded by mu; browserGatewayOwner names the program). Retried like browserGatewayBusy.
+	browserHTTPBusy bool
 	// retry re-applies the latest snapshot after a failed or incomplete reconciliation (guarded by retryMu).
 	retryMu       sync.Mutex
 	retryTimer    *time.Timer
@@ -430,7 +433,7 @@ func (c *Coordinator) reconcileSnapshotLocked(ctx context.Context, peers []*daem
 		c.reportMu.Unlock()
 	}
 	c.mu.Lock()
-	incomplete := err != nil || c.browserPending || c.namesRefused || c.browserPortsPending || c.browserGatewayBusy
+	incomplete := err != nil || c.browserPending || c.namesRefused || c.browserPortsPending || c.browserGatewayBusy || c.browserHTTPBusy
 	c.mu.Unlock()
 	if incomplete {
 		c.scheduleReconcileRetry(peers, revision)
@@ -541,6 +544,9 @@ func (c *Coordinator) PendingLocalAccessStep() string {
 	if c.browserGatewayBusy {
 		return "browser_gateway_port"
 	}
+	if c.browserHTTPBusy {
+		return "browser_http_port"
+	}
 	if c.browserPending {
 		return "browser_certificate"
 	}
@@ -555,7 +561,7 @@ func (c *Coordinator) PendingLocalAccessStep() string {
 func (c *Coordinator) PendingLocalAccessDetail() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.browserGatewayBusy {
+	if c.browserGatewayBusy || c.browserHTTPBusy {
 		return c.browserGatewayOwner
 	}
 	return ""

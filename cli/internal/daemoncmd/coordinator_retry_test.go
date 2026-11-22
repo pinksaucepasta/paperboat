@@ -5,11 +5,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/cli/internal/daemonrpc"
+	"github.com/pinksaucepasta/paperboat/cli/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/cli/internal/testcert"
 )
 
@@ -205,9 +207,20 @@ func TestCoordinatorDoesNotNagAboutABrowserPortAnotherProgramOwns(t *testing.T) 
 	}
 }
 
-// Another program on :80 turns the browser gateway off. Native access stays, doctor's pending step is
-// browser_gateway_port with the owner the OS named, and the retry brings the URLs back once the port is free.
+// Another program on :443 turns the browser gateway off; on :80 alone only the http:// links go. Native access
+// stays, doctor's pending step names the port with the owner the OS named, and the retry brings everything back
+// once the port is free.
 func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *testing.T) {
+	for _, c := range []struct {
+		port     int
+		step     string
+		webWhile int
+	}{{443, "browser_gateway_port", 0}, {80, "browser_http_port", 1}} {
+		t.Run(strconv.Itoa(c.port), func(t *testing.T) { testBusyGatewayPortRestored(t, c.port, c.step, c.webWhile) })
+	}
+}
+
+func testBusyGatewayPortRestored(t *testing.T, port int, wantStep string, webWhile int) {
 	restoreOwner := browserGatewayPortOwner
 	browserGatewayPortOwner = func() string { return "nginx, PID 4242" }
 	t.Cleanup(func() { browserGatewayPortOwner = restoreOwner })
@@ -215,7 +228,7 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{port: true}}
 	c, err := NewCoordinator(CoordinatorConfig{
 		RetryBase: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond,
 		NameClient:  names,
@@ -242,10 +255,10 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 	c.mu.Lock()
 	routes, web := len(c.routes), len(c.webRoutes)
 	c.mu.Unlock()
-	if routes != 1 || web != 0 {
-		t.Fatalf("routes=%d webRoutes=%d: want native access kept and the browser gateway off", routes, web)
+	if routes != 1 || web != webWhile {
+		t.Fatalf("routes=%d webRoutes=%d: want native access kept and %d browser gateways", routes, web, webWhile)
 	}
-	if step, detail := c.PendingLocalAccessStep(), c.PendingLocalAccessDetail(); step != "browser_gateway_port" || detail != "nginx, PID 4242" {
+	if step, detail := c.PendingLocalAccessStep(), c.PendingLocalAccessDetail(); step != wantStep || detail != "nginx, PID 4242" {
 		t.Fatalf("pending step=%q detail=%q", step, detail)
 	}
 	select {
@@ -254,7 +267,7 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 		t.Fatal("setting the busy gateway port did not wake the inventory")
 	}
 	names.mu.Lock()
-	delete(names.conflictPorts, 80) // the other program stopped
+	delete(names.conflictPorts, port) // the other program stopped
 	names.mu.Unlock()
 	deadline := time.Now().Add(5 * time.Second)
 	for c.PendingLocalAccessStep() != "" {
@@ -270,8 +283,9 @@ func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *t
 	}
 	c.mu.Lock()
 	web = len(c.webRoutes)
+	gateway, up := c.webRoutes[splitdns.BrowserGatewayHostname]
 	c.mu.Unlock()
-	if web != 1 {
-		t.Fatalf("webRoutes=%d after the retry, want the browser gateway back", web)
+	if web != 1 || !up || !gateway.proxy.ServesHTTP() {
+		t.Fatalf("webRoutes=%d after the retry, want the browser gateway back with :80", web)
 	}
 }
