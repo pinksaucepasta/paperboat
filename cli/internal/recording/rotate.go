@@ -46,6 +46,10 @@ func Rotate(teamID string, current int64, old Bundle, resetPublic []byte) (Rotat
 	return Rotation{PublicKey: public, SigningPublicKey: signingPublic, ResetPublicKey: resetPublic, RotationSignature: signature, SealedPrevious: previous, Bundle: Bundle{Private: private.Bytes(), Signing: signing}}, nil
 }
 
+// ErrNoKey says the team has no recording key yet: the console creates generation 1 when the first recording starts,
+// so there is nothing to replace or reset.
+var ErrNoKey = errors.New("this team has no recording key yet")
+
 // ErrNoCopy says this account cannot replace the key: it holds no copy of the current generation, and only a holder's
 // signing key can sign the next one.
 var ErrNoCopy = errors.New("this account holds no copy of the current team recording key")
@@ -55,7 +59,10 @@ var ErrNoCopy = errors.New("this account holds no copy of the current team recor
 // generation signed by it, seal the old bundle to the new key and the new bundle to every viewer with a vault. The
 // result is the body of POST /v1/teams/{team}/recording-key; the server only checks the signature and stores it.
 func ReplaceKey(sharingPrivate []byte, teamID string, state wire.KeyState) (wire.KeyCreate, error) {
-	if state.Key == nil || state.MyKey == nil || state.MyKey.Generation != state.Key.Generation {
+	if state.Key == nil {
+		return wire.KeyCreate{}, ErrNoKey
+	}
+	if state.MyKey == nil || state.MyKey.Generation != state.Key.Generation {
 		return wire.KeyCreate{}, ErrNoCopy
 	}
 	var viewers []wire.Viewer
@@ -104,7 +111,10 @@ var ErrNotResetAuthority = errors.New("this account's ENV key is not the reset k
 // accept it only because that signature verifies under the reset key generation 1 pinned (wire.VerifyReset), never
 // because the server says so. There is no previous bundle to seal: older recordings become unreadable for everyone.
 func ResetKey(writerSeed []byte, teamID string, state wire.KeyState) (wire.KeyCreate, error) {
-	if state.Key == nil || len(writerSeed) != ed25519.SeedSize || len(state.Key.ResetPublicKey) != ed25519.PublicKeySize {
+	if state.Key == nil {
+		return wire.KeyCreate{}, ErrNoKey
+	}
+	if len(writerSeed) != ed25519.SeedSize || len(state.Key.ResetPublicKey) != ed25519.PublicKeySize {
 		return wire.KeyCreate{}, ErrNotResetAuthority
 	}
 	writer := ed25519.NewKeyFromSeed(writerSeed)

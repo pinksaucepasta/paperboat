@@ -229,18 +229,19 @@ func recordingKeyStatusOf(team string, state wire.KeyState) recordingKeyStatus {
 // recordingKeyRequest makes the body of POST recording-key: a reset signed by the owner's writer key, or a replacement
 // signed with this account's copy. Generation 1 is made by the console when the first recording starts, never here.
 func recordingKeyRequest(reset bool, team string, state wire.KeyState, keys *environmente2ee.VaultKeys) (wire.KeyCreate, error) {
-	switch {
-	case state.Key == nil:
-		return wire.KeyCreate{}, localArgumentError("this team has no recording key yet: the recording key is created when the first recording starts in the console; there is nothing to replace or reset")
-	case reset:
-		request, err := recording.ResetKey(keys.WriterSeed, team, state)
-		if errors.Is(err, recording.ErrNotResetAuthority) {
-			return request, localArgumentError("only the team owner can reset this team's recording key, with the ENV vault the key was set up with; if you hold a copy, use `pb recordings key replace` instead")
-		}
-		return request, err
+	var request wire.KeyCreate
+	var err error
+	if reset {
+		request, err = recording.ResetKey(keys.WriterSeed, team, state)
+	} else {
+		request, err = recording.ReplaceKey(keys.SharingPrivate, team, state)
 	}
-	request, err := recording.ReplaceKey(keys.SharingPrivate, team, state)
-	if errors.Is(err, recording.ErrNoCopy) {
+	switch {
+	case errors.Is(err, recording.ErrNoKey):
+		return request, localArgumentError("this team has no recording key yet: the recording key is created when the first recording starts in the console; there is nothing to replace or reset")
+	case errors.Is(err, recording.ErrNotResetAuthority):
+		return request, localArgumentError("only the team owner can reset this team's recording key, with the ENV vault the key was set up with; if you hold a copy, use `pb recordings key replace` instead")
+	case errors.Is(err, recording.ErrNoCopy):
 		return request, localArgumentError("you hold no copy of this team's current recording key: ask a member who can replay to open Recordings in the console, or to replace the key; if nobody holds it, the team owner resets it with `pb recordings key reset`")
 	}
 	return request, err

@@ -301,4 +301,11 @@ func TestResetKeyIsSignedByTheOwnersWriterKeyAndSealsOnlyTheNewKey(t *testing.T)
 	if _, err := ResetKey(seed, "team_1", wire.KeyState{Key: &noReset, Viewers: state.Viewers}); !errors.Is(err, ErrNotResetAuthority) {
 		t.Fatalf("a key without a reset key was reset: %v", err)
 	}
+	// A team with no key yet is told so, not that the caller lacks authority or a copy.
+	if _, err := ResetKey(seed, "team_1", wire.KeyState{Viewers: state.Viewers}); !errors.Is(err, ErrNoKey) {
+		t.Fatalf("reset with no key: %v", err)
+	}
+	if _, err := ReplaceKey(viewer.Bytes(), "team_1", wire.KeyState{Viewers: state.Viewers}); !errors.Is(err, ErrNoKey) {
+		t.Fatalf("replace with no key: %v", err)
+	}
 }
