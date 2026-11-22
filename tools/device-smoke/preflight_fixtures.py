@@ -25,15 +25,15 @@ ENV = dev_targets.smoke_environment(dev_targets.load())
 
 # check id -> the fixtures it needs (names of the verifiers below)
 NEEDS = {
-    'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'fixture_host'],
+    'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan', 'fixture_host'],
     'free-plan': ['free_session', 'free_plan', 'fixture_host'],
-    'team-business': ['operator_session', 'team_members', 's3_keys', 'fixture_host'],
+    'team-business': ['operator_session', 'team_members', 'team_plan', 's3_keys', 'fixture_host'],
     'ssh-rsync': ['windows_rsync'],
     'recording-key-rotation': ['operator_session', 'member_session', 'reckey_env', 'console_tools', 'fixture_host'],
 }
 # the same checks run from windows_checks.py (the device is the machine): no Docker host, no Free fixture
-NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin'],
-                 'team-business': ['operator_session', 'team_members']}
+NEEDS_WINDOWS = {'ssh-rsync': ['windows_rsync'], 'config-team-default': ['operator_session', 'config_repo', 'team_admin', 'team_plan'],
+                 'team-business': ['operator_session', 'team_members', 'team_plan']}
 FIX_ACCOUNTS = 'tools/device-smoke/README.md "Fixtures"'
 
 
@@ -120,6 +120,16 @@ def team_members():
     return None
 
 
+def team_plan():
+    cred = Path.home() / '.config/paperboat-dev/operator-cred'
+    if not cred.is_file():
+        return 'the operator credential file ~/.config/paperboat-dev/operator-cred (email, password, authenticator key; mode 600) is missing (%s)' % FIX_ACCOUNTS
+    done = subprocess.run([sys.executable, str(HERE / 'operator_fixture.py'), 'status'], capture_output=True, text=True, timeout=120)
+    if done.returncode:
+        return 'the smoke team has no running paid plan (30+ days) with the SSO and SCIM add-ons (%s). Fix: python3 tools/device-smoke/operator_fixture.py ensure' % (done.stdout.strip() or done.stderr.strip())[-160:]
+    return None
+
+
 def s3_keys():
     for name in ('.f19-s3ak', '.f19-s3sk'):
         path = Path.home() / name
@@ -174,7 +184,7 @@ def console_tools():
     return ('console automation is missing: %s. Fix: %s' % (', '.join(missing) or 'SMOKE_PW_CHROMIUM / SMOKE_PW_MODULE unset', FIX_ACCOUNTS)) if missing or not setting('SMOKE_PW_CHROMIUM') else None
 
 
-VERIFIERS = {f.__name__: f for f in (operator_session, member_session, free_session, free_plan, config_repo, team_admin, team_members,
+VERIFIERS = {f.__name__: f for f in (team_plan, operator_session, member_session, free_session, free_plan, config_repo, team_admin, team_members,
                                       s3_keys, fixture_host, windows_rsync, reckey_env, console_tools)}
 
 

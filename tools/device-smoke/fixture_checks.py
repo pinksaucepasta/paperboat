@@ -23,6 +23,7 @@ import time
 
 import ct_env
 import dev_targets
+from results_dir import results_dir
 
 HERE = Path(__file__).resolve().parent
 ENV = dev_targets.smoke_environment(dev_targets.load())
@@ -98,6 +99,16 @@ def on_machine(prefix, script, args, timeout):
     return done.returncode, done.stdout + done.stderr
 
 
+def keep(check, text):
+    """The check's full output in the results directory (mode 600); returns its path for the receipt."""
+    folder = results_dir(__file__) / 'fixture-checks'
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / ('%s-%s.log' % (check, time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())))
+    path.write_text(text)
+    path.chmod(0o600)
+    return str(path)
+
+
 def last_json(output):
     for line in reversed(output.strip().splitlines()):
         try:
@@ -116,7 +127,7 @@ def free_plan(m):
     code, out = on_machine(prefix, 'free_plan.py', [name], 900)
     record = last_json(out)
     ok = code == 0 and record.get('status') == 'PASS'
-    return ok, 'state=%s allowance=%s usage=%s' % (record.get('state'), record.get('allowance_bytes'), record.get('usage_bytes')) if ok else ' '.join(out.split())[-300:]
+    return ok, 'state=%s allowance=%s usage=%s' % (record.get('state'), record.get('allowance_bytes'), record.get('usage_bytes')) if ok else ' '.join(out.split())[-300:] + ' log ' + keep('free-plan', out)
 
 
 def config_team_default(m):
@@ -127,7 +138,7 @@ def config_team_default(m):
     code, out = on_machine(prefix, 'config_team_default.py', [TEAM, repo], 900)
     lines = [l for l in out.splitlines() if l.startswith(('PASS ', 'FAIL '))]
     ok = code == 0 and len(lines) == 3 and all(l.startswith('PASS ') for l in lines)
-    return ok, '; '.join(l[5:60] for l in lines) if ok else ' '.join(out.split())[-300:]
+    return ok, '; '.join(l[5:60] for l in lines) if ok else ' '.join(out.split())[-300:] + ' log ' + keep('config-team-default', out)
 
 
 def s3_store(m, machine, prefix):
@@ -168,7 +179,7 @@ def team_business(m):
     fails = [l for l in out.splitlines() if 'FAIL' in l]
     result = [l for l in out.splitlines() if l.startswith('RESULT')]
     ok = done.returncode == 0 and result and result[-1].split()[1] == 'PASS'
-    return ok, (result[-1] if ok else '; '.join(fails[:3] or [' '.join(out.split())[-250:]]))
+    return ok, (result[-1] if ok else '; '.join(f[:120] for f in fails[:4] or [' '.join(out.split())[-250:]]) + ' log ' + keep('team-business', out))
 
 
 CHECKS = {'free-plan': free_plan, 'config-team-default': config_team_default, 'team-business': team_business}
