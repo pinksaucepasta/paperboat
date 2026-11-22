@@ -1316,7 +1316,6 @@ test_device_application approve-refusals approve_refusals.py
 test_tunnel_domain
 test_carrier_throughput
 test_device_application config-sync config_sync.py
-test_reset_lifecycle
 test_device_application tunnel-lifecycle tunnel_lifecycle.py
 test_device_application tunnel-survival tunnel_survival.py
 test_device_application tunnel-failures tunnel_failures.py
@@ -1338,6 +1337,9 @@ test_device_application preview-survival preview_survival.py
 # Drain moves machines between edges and cuts their live connections by design: after the long holds and the survival checks.
 test_region_drain
 test_forward_live
+# reset-lifecycle re-pairs the target, which correctly drops its in-flight sessions: only after the long ssh/exec
+# holds are collected, and after the relay/edge checks above, which need a synced pair, not a fresh one.
+test_reset_lifecycle
 
 if [ -n "$UPDATE_DIR" ]; then
   for t in "${TLIST[@]}"; do update_target "$t"; done

@@ -708,6 +708,15 @@ TLIST=($DEVICES)
         self.assertNotIn('on "$source" "python3', text)
         self.assertNotRegex(text, r'\bon "\$(source|device)" "python3')
 
+    def test_reset_lifecycle_never_overlaps_the_long_session_holds(self):
+        # A re-pair drops the target's in-flight sessions by design; resetting mid-hold failed ssh-long, not the product.
+        text = (HERE / 'smoke.sh').read_text()
+        main = text.split('# Long-running work starts first')[1]
+        self.assertEqual(main.count('\ntest_reset_lifecycle\n'), 1)
+        self.assertGreater(main.index('\ntest_reset_lifecycle\n'), main.index('collect "exec-long:$t"'))
+        self.assertGreater(main.index('\ntest_reset_lifecycle\n'), main.index('collect "ssh-long:$t"'))
+        self.assertGreater(main.index('\ntest_reset_lifecycle\n'), main.index('\ntest_forward_live\n'))
+
     def test_the_carrier_budget_is_asserted_on_real_devices_with_the_ci_floor_off(self):
         # The Go test floors the budget only when GITHUB_ACTIONS=true; this check runs it on each device without that.
         text = (HERE / 'smoke.sh').read_text()
