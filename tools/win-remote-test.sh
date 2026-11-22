@@ -36,6 +36,8 @@ cat > "$stage/.pb-run.sh" <<RUN
 set -uo pipefail
 here=\$(cd "\$(dirname "\$0")" && pwd)
 cd "\$here/$module"
+mkdir -p "\$here/tmp" 
+export RUNNER_TEMP=\$(cygpath -m "\$here/tmp") # a long path: the user TEMP is the 8.3 form (RUNNER~1), which two tests reject (CI has D:\\a\\_temp)
 export PACKAGES=$(printf %q "${*:-./...}") RUN=$(printf %q "${RUN:-}") COUNT=$(printf %q "${COUNT:-1}") RACE=$(printf %q "${RACE:-}") EVENTS="\$here/events"
 "\$here/tools/win-test.sh" > "\$here/log.txt" 2>&1
 echo \$? > "\$here/exit"
