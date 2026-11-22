@@ -79,12 +79,10 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			if !ok {
 				continue
 			}
-			target, requestedUser, err := managedssh.ParseMachineTarget(prefix)
+			// Only an operand naming a machine (name, alias or machine ID) is managed; any other host:path
+			// passes to the tool unchanged.
+			target, requestedUser, err := managedssh.ParseMachineReference(prefix, domain)
 			if err != nil {
-				continue
-			}
-			target = strings.TrimSuffix(strings.ToLower(target), "."+domain)
-			if err := managedssh.ValidateAlias(strings.ToLower(target)); err != nil {
 				continue
 			}
 			destination, err := resolve(ctx, target, requestedUser)
@@ -115,11 +113,10 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 		if prefix, path, ok := splitManagedRemoteOperand(operand); ok {
 			operand, suffix = prefix, ":"+path
 		}
-		target, requestedUser, err := managedssh.ParseMachineTarget(operand)
+		target, requestedUser, err := managedssh.ParseMachineReference(operand, domain)
 		if err != nil {
 			return nil, err
 		}
-		target = strings.TrimSuffix(strings.ToLower(target), "."+domain)
 		destination, err := resolve(ctx, target, requestedUser)
 		if err != nil {
 			return nil, err
