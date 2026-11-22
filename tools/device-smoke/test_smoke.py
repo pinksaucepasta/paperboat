@@ -708,6 +708,45 @@ TLIST=($DEVICES)
         self.assertNotIn('on "$source" "python3', text)
         self.assertNotRegex(text, r'\bon "\$(source|device)" "python3')
 
+    def test_transfer_resume_interrupts_only_a_batch_seen_in_flight(self):
+        import transfer_resume
+
+        class Job:
+            def __init__(self, events, ends_at=None):
+                self.events, self.reads, self.ends_at = events, 0, ends_at
+
+            def stderr(self):
+                self.reads += 1
+                return ('\n'.join(json.dumps(e) for e in self.events[:self.reads]) + '\nnot json\n').encode()
+
+            def poll(self):
+                return 0 if self.ends_at and self.reads >= self.ends_at else None
+        progress = {'event': 'transfer_progress', 'total_bytes': 10}
+        moving = [dict(progress, bytes_sent=0), dict(progress, bytes_sent=3)]
+        quiet = dict(now=lambda: 0, sleep=lambda seconds: None)
+        self.assertEqual(transfer_resume.in_flight(Job(moving), 'ended', **quiet)['bytes_sent'], 3)
+        # A path faster than the fixture: the send ends (or only reports everything sent) before an interruption.
+        for job in (Job(moving[:1], ends_at=2), Job([dict(progress, bytes_sent=10)], ends_at=3)):
+            with self.assertRaisesRegex(RuntimeError, '^ended$'):
+                transfer_resume.in_flight(job, 'ended', **quiet)
+        # After the interruption only a newer event counts: an older in-flight one does not prove anything.
+        done = Job(moving + [dict(progress, bytes_sent=10)], ends_at=3)
+        with self.assertRaisesRegex(RuntimeError, '^not running$'):
+            transfer_resume.in_flight(done, 'not running', after=2, **quiet)
+        later = Job(moving + [dict(progress, bytes_sent=5)])
+        self.assertEqual(transfer_resume.in_flight(later, 'ended', after=2, **quiet)['bytes_sent'], 5)
+        clock = iter([0, 200])
+        with self.assertRaisesRegex(RuntimeError, 'no progress within'):
+            transfer_resume.in_flight(Job([]), 'ended', now=lambda: next(clock), sleep=lambda seconds: None)
+
+    def test_transfer_resume_sizes_the_batch_from_the_pilot_rate(self):
+        import transfer_resume as t
+        mib = 1 << 20
+        self.assertEqual(t.file_size_for(20 * mib), 300 * mib)  # 60 s of a 20 MiB/s path over 4 files, whole MiB
+        self.assertEqual(t.file_size_for(1 * mib), t.MIN_FILE_SIZE)  # a slow path still moves a real batch
+        self.assertEqual(t.file_size_for(1000 * mib), t.MAX_FILE_SIZE)  # never past the Automatic 2 GB bound
+        self.assertLess(t.FILES * t.MAX_FILE_SIZE, 2 * 10 ** 9)
+
     def test_network_inventory_waits_for_relay_sync_bounded(self):
         import network_inventory
         syncing = SimpleNamespace(returncode=1, stdout=json.dumps(
