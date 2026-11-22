@@ -40,6 +40,24 @@ tools/device-smoke/cleanup_test_account.py --prefix winpool- --stale '5 minutes'
 - A machine is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
 - Evidence for a row ticked from a runner says so (`winpool, Windows Server 2025`); the final pass is on windows-test.
 
+### Go tests on a winpool machine
+
+```sh
+tools/win-remote-test.sh winpool-1 cli                       # whole module; also: shared, ./internal/x/..., RUN=TestName, RACE=-race
+```
+
+Never run `go test` in a plain SSH session: it is a network logon in session 0 (no console, some pipes and child
+processes refused, git cannot create folders), so a raw `go test ./...` of the cli failed 273 tests that pass for a user
+(2026-11-22). `win-remote-test.sh` syncs the committed HEAD, then runs `tools/win-test.sh` as a scheduled task of the
+machine's own user (`/IT /RL HIGHEST`), which starts in the logged-on console session, the session GitHub's runner steps
+use. `win-test.sh` is also what `cross-platform.yml` runs, so a winpool result and a CI result mean the same thing:
+every test binary runs through `cli/tools/win-test-exec` with an unelevated token and a private TEMP/APPDATA the token
+owns; the tests in `cli/tools/win-test-exec/elevated_tests.txt` run second, elevated, and the run fails if one of them
+never ran (a renamed or deleted test). Every failure is collected, none stops the run. The run prints counts and every
+skipped test; the `go test -json` events and the log are copied to `$WIN_TEST_OUT` (default `/tmp/pb-win-test-<host>-<sha>`);
+the CI job uploads the same events as the artifact `gotest-events-<module>-windows`. The first run on a machine downloads
+the Go toolchain and modules (about 3 minutes extra); a full cli run takes about 10 minutes. One job per host at a time.
+
 Send these to windows-test, they cannot run on a runner:
 
 - anything that reboots, sleeps or logs the user off (the runner and its tunnel do not come back);

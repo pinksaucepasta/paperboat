@@ -26,6 +26,8 @@ gate, hook, doc or other script names it. Add a row when you add a file.
 |---|---|---|
 | `ci-test.sh` | heavy suites on GitHub Actions for the committed HEAD | manual (AGENTS.md); `.github/tests/test_ci_test.py` |
 | `remote-test.sh` | one module's tests on a spare host | manual (AGENTS.md) |
+| `win-test.sh` | cli/shared Go tests on Windows as a normal user's session runs them (unelevated token, elevated pass, ran-check) | `cross-platform.yml`; `win-remote-test.sh` |
+| `win-remote-test.sh` | one module's Windows tests on a winpool machine, in the console session (not the SSH logon) | manual (device-smoke README) |
 | `push.sh`, `test_push.py` | the shared-branch push path | manual (AGENTS.md); test in `server-ci.yml` |
 | `build-host-slot.sh` | fair queue for compiles on the shared build host | `hooks/pre-push` when present; manual |
 | `perfdb.sh` | prints the isolated PostgreSQL DSN for the performance budgets | manual; named by `gate.sh` |

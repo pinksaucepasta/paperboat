@@ -142,7 +142,9 @@ pushed batch. Preserve the baseline checks during targeted reruns.
 - **Unit tests** for every change, in the package that owns the behaviour. They must not
   be weakened to pass. Run the affected packages (`go vet`, `go test -race` for concurrency).
 - Use `tools/remote-test.sh <host> <module> [go test args]` for committed Go changes on a test host,
-  or `tools/ci-test.sh <module> [-run PATTERN]` for GitHub Actions.
+  or `tools/ci-test.sh <module> [-run PATTERN]` for GitHub Actions. Windows: `tools/win-remote-test.sh winpool-N cli`
+  (never raw `go test` over SSH: that logon session fails over a hundred tests that pass for a user), or the
+  `cross-platform.yml` dispatch; see tools/device-smoke/README.md.
 - After a device run, use `tools/device-smoke/cleanup_test_account.py --prefix <run-prefix>`
   to review stale throwaway machines in the configured test account. Add `--apply` to revoke them.
 - **A check that passed before and fails now is found by bisection, not by reading logs alone.**
