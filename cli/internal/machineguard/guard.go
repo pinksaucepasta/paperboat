@@ -54,15 +54,11 @@ type listenerRefusal struct{ reason string }
 func (e listenerRefusal) Error() string      { return e.reason }
 func (listenerRefusal) Is(target error) bool { return target == ErrListenerRefused }
 
-// exchangeTimeout bounds one client request, above the server's operationTimeout. A status ping is
-// quick; acquire and apply run pfctl/ifconfig/iptables/netsh, which take seconds on a busy host.
+// exchangeTimeout bounds one client request, above the server's operationTimeout. Status too: it waits on the
+// guard's lock behind another connection's acquire or apply (pfctl/ifconfig, up to operationTimeout), and a client
+// that gives up first drops its connection, so the guard withdraws every lease it held (apple, 2026-11-22).
 // Prior art: tailscale wgengine/router/osrouter/router_linux.go runs each ip/iptables command without a short RPC cap.
-func exchangeTimeout(operation string) time.Duration {
-	if operation == "status" {
-		return 5 * time.Second
-	}
-	return 10 * time.Second
-}
+const exchangeTimeout = 10 * time.Second
 
 // guardDeadline is the guard running out of time on an operation: callers retry it as a timeout.
 type guardDeadline struct{ reason string }
