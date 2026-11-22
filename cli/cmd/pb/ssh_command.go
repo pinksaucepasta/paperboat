@@ -26,12 +26,27 @@ import (
 	"time"
 )
 
+// parseSSHMachineOperand reads pb ssh's [user@]machine operand with the same rule as pb scp, sftp and rsync
+// (managedssh.ParseMachineReference). The managed SSH domain is looked up only for a dotted operand, so a plain
+// name or machine ID costs no lookup.
+func parseSSHMachineOperand(value string, domain func() string) (target, username string, err error) {
+	namespace := ""
+	if strings.Contains(value, ".") && domain != nil {
+		namespace = domain()
+	}
+	return managedssh.ParseMachineReference(value, namespace)
+}
+
 func actionSSH(command *cobra.Command, args []string) error {
 	dash := command.ArgsLenAtDash()
 	if len(args) == 0 || dash > 1 || dash < 0 && len(args) != 1 {
 		return invocationError(errors.New("SSH requires [user@]<machine> [-- <OpenSSH arguments...>]"))
 	}
-	targetName, targetUser, err := managedssh.ParseMachineTarget(args[0])
+	ctx := actionContext(command, args)
+	targetName, targetUser, err := parseSSHMachineOperand(args[0], func() string {
+		domain, _ := configuredManagedSSHDomain(ctx)
+		return domain
+	})
 	if err != nil {
 		return invocationError(err)
 	}
@@ -40,7 +55,6 @@ func actionSSH(command *cobra.Command, args []string) error {
 	if err != nil {
 		return invocationError(err)
 	}
-	ctx := actionContext(command, args)
 	client, machine, target, err := resolveSSHCommandTargetWarm(ctx, targetName)
 	if err != nil {
 		return friendlyCommandError(err)

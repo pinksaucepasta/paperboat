@@ -9,11 +9,13 @@ import (
 )
 
 var (
-	ErrSSHAliasInvalid     = errors.New("managed SSH alias is invalid")
-	ErrSSHUsernameInvalid  = errors.New("managed SSH username is invalid")
-	ErrSSHUsernameConflict = errors.New("OpenSSH username conflicts with the requested user")
-	ErrSSHPortConflict     = errors.New("OpenSSH destination port differs from the registered SSH target")
-	ErrSSHUsernameMissing  = errors.New("managed SSH username is unavailable")
+	ErrSSHAliasInvalid = errors.New("managed SSH alias is invalid")
+	// ErrMachineReferenceInvalid is an operand that is neither a machine name nor a machine ID.
+	ErrMachineReferenceInvalid = errors.New("machine must be a machine name or machine ID (machine_<id>)")
+	ErrSSHUsernameInvalid      = errors.New("managed SSH username is invalid")
+	ErrSSHUsernameConflict     = errors.New("OpenSSH username conflicts with the requested user")
+	ErrSSHPortConflict         = errors.New("OpenSSH destination port differs from the registered SSH target")
+	ErrSSHUsernameMissing      = errors.New("managed SSH username is unavailable")
 )
 
 // ParseMachineTarget separates an optional OpenSSH username while preserving
