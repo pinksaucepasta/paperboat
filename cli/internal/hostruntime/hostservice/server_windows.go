@@ -362,6 +362,11 @@ func (s *Server) respond(writer io.Writer, value Response) error {
 func (s *Server) errorResponse(code string) Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.errorResponseLocked(code)
+}
+
+// errorResponseLocked is errorResponse for callers that already hold s.mu.
+func (s *Server) errorResponseLocked(code string) Response {
 	value := s.response(s.state)
 	value.ErrorCode = code
 	return value

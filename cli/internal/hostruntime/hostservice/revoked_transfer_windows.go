@@ -78,50 +78,50 @@ func (s *Server) revokedTransferRequest(ctx context.Context, request Request) (R
 	switch request.Operation {
 	case opRevokedBegin:
 		if request.AuthorizedKeys == nil || len(*request.AuthorizedKeys) > maxAuthorizedKeys || len(request.SSHRevoked) != 0 || request.ChunkIndex != 0 || request.TotalCount < 1 || request.TotalCount > revokedTransferMaxIDs || len(request.TotalDigest) != 2*sha256.Size {
-			return s.errorResponse("invalid_request"), true
+			return s.errorResponseLocked("invalid_request"), true
 		}
 		s.revoked = &revokedTransfer{id: request.TransferID, keys: append([]string(nil), (*request.AuthorizedKeys)...), principal: request.SSHPrincipal, count: request.TotalCount, digest: request.TotalDigest, expires: now.Add(revokedTransferTTL)}
-		return s.errorResponse(""), true
+		return s.errorResponseLocked(""), true
 	case opRevokedChunk:
 		transfer := s.revoked
 		if transfer == nil || transfer.id != request.TransferID || request.AuthorizedKeys != nil || request.TotalCount != 0 || request.TotalDigest != "" || request.ChunkIndex != transfer.chunks {
-			return s.errorResponse("invalid_request"), true
+			return s.errorResponseLocked("invalid_request"), true
 		}
 		if len(request.SSHRevoked) < 1 || len(request.SSHRevoked) > revokedChunkMaxIDs || len(transfer.ids)+len(request.SSHRevoked) > transfer.count {
 			s.revoked = nil
-			return s.errorResponse("invalid_request"), true
+			return s.errorResponseLocked("invalid_request"), true
 		}
 		for _, id := range request.SSHRevoked {
 			if !wire.ValidRevokedKeyID(id) {
 				s.revoked = nil
-				return s.errorResponse("invalid_request"), true
+				return s.errorResponseLocked("invalid_request"), true
 			}
 			transfer.bytes += len(id)
 		}
 		if transfer.bytes > revokedTransferMaxBytes {
 			s.revoked = nil
-			return s.errorResponse("invalid_request"), true
+			return s.errorResponseLocked("invalid_request"), true
 		}
 		transfer.ids = append(transfer.ids, request.SSHRevoked...)
 		transfer.chunks++
-		return s.errorResponse(""), true
+		return s.errorResponseLocked(""), true
 	default: // opRevokedCommit
 		transfer := s.revoked
 		if transfer == nil || transfer.id != request.TransferID || request.AuthorizedKeys != nil || len(request.SSHRevoked) != 0 {
-			return s.errorResponse("invalid_request"), true
+			return s.errorResponseLocked("invalid_request"), true
 		}
 		s.revoked = nil
 		if len(transfer.ids) != transfer.count || subtle.ConstantTimeCompare([]byte(revokedDigest(transfer.ids)), []byte(transfer.digest)) != 1 {
-			return s.errorResponse("invalid_request"), true
+			return s.errorResponseLocked("invalid_request"), true
 		}
 		s.mu.Unlock()
 		changed, err := s.config.AuthorizedKeys.ReconcileAuthorizedKeys(ctx, transfer.keys, transfer.principal, transfer.ids)
 		s.mu.Lock()
 		if err != nil {
 			observeReconcileFailure(ctx, err)
-			return s.errorResponse("ssh_authorized_keys_reconcile_failed"), true
+			return s.errorResponseLocked("ssh_authorized_keys_reconcile_failed"), true
 		}
-		response := s.errorResponse("")
+		response := s.errorResponseLocked("")
 		response.AuthorizedKeysReconciled = true
 		response.AuthorizedKeysChanged = changed
 		return response, true
