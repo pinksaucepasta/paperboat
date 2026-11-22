@@ -11,14 +11,21 @@ const [action, dir] = process.argv.slice(2)
 const accountFile = `${dir}/account.json`
 const stateFile = `${dir}/state.json`
 const write = (file, text) => (writeFileSync(file, text, { mode: 0o600 }), chmodSync(file, 0o600))
+// mail.tm answers 429 when several runs share this address: wait as it asks (Retry-After, else 5 s) and retry, at most 8 times
 const mailtm = async (path, token, body) => {
-  const r = await fetch("https://api.mail.tm" + path, {
-    method: body ? "POST" : "GET",
-    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body && JSON.stringify(body),
-  })
-  if (!r.ok) throw new Error(`mail.tm ${path}: HTTP ${r.status}`)
-  return r.json()
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch("https://api.mail.tm" + path, {
+      method: body ? "POST" : "GET",
+      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body && JSON.stringify(body),
+    })
+    if (r.status === 429 && attempt < 8) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(30, Number(r.headers.get("retry-after")) || 5) * 1000))
+      continue
+    }
+    if (!r.ok) throw new Error(`mail.tm ${path.replace(/\/messages\/.*/, "/messages/<id>")}: HTTP ${r.status}`)
+    return r.json()
+  }
 }
 
 // The live console is a dev server that compiles a route on its first request: ask for each route this script uses until it answers
@@ -131,13 +138,21 @@ async function remove() {
     await page.goto(`${origin}/account/delete`)
     await page.waitForTimeout(5000)
   }
-  await page.fill("#confirm-email", account.email, { timeout: 15000 })
   let status = 0
   page.on("response", (r) => {
     if (new URL(r.url()).pathname === "/api/v1/account" && r.request().method() === "DELETE") status = r.status()
   })
-  await page.getByRole("button", { name: "Delete my account" }).click()
-  await page.waitForURL(/\/auth\/deleted/, { timeout: 60000 }).catch(() => {})
+  for (let attempt = 0; attempt < 2 && status !== 204; attempt++) {
+    if (attempt) { // the delete page looked fresh but the server found the last sign-in too old (401): sign in again once
+      await reauthenticate(page, account)
+      await page.goto(`${origin}/account/delete`)
+      await page.waitForTimeout(5000)
+    }
+    status = 0
+    await page.fill("#confirm-email", account.email, { timeout: 15000 })
+    await page.getByRole("button", { name: "Delete my account" }).click()
+    await page.waitForURL(/\/auth\/deleted/, { timeout: 60000 }).catch(() => {})
+  }
   await browser.close()
   if (status !== 204) throw new Error(`account deletion answered ${status}`)
   console.log("fresh account deleted")

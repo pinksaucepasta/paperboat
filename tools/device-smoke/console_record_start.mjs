@@ -1,13 +1,13 @@
 // Starts a recording of one CLI terminal session from the live console, as the session's owner: the web terminal's
 // "Start recording" control (console/components/terminal/terminal-page.tsx), the only place a recording starts.
 // usage: node console_record_start.mjs --team TEAM --session SESSION_ID [--print-plan]
-//   (the interface recordings_key_rotation.py --console-start-cmd / SMOKE_RECKEY_CONSOLE_START_CMD runs)
+//   (the interface recordings_key_rotation.py --console-start-cmd runs; fixture_checks.py recording-key-rotation answers it through console_start_bridge.py)
 // env: ORIGIN (console origin), STATE (owner's storage state from console_session.mjs, mode 600, never printed),
 //      PW_CHROMIUM (headless Chromium), [PW_MODULE] (playwright-core index.mjs), [SMOKE_RECKEY_START_TIMEOUT_MS] (default 90000).
 // Exit 0 once the page shows the recording active; exit 1 with one reason line on stderr; exit 2 on bad arguments.
-// The terminal-session id the `pb session` commands print is the console's /terminals/<id>. Recording needs the team's
-// recording key to exist already: the console only creates it under Team > Recordings (Set up, an admin with an ENV vault),
-// not at the first start, so without a key the start is refused (recording_key_unavailable) and this exits 1 with that sentence.
+// The terminal-session id the `pb session` commands print is the console's /terminals/<id>. The team's FIRST recording started
+// here makes recording key generation 1 itself (terminal-page.tsx startRecording -> ensureRecordingKey, console/lib/recordings.ts),
+// sealed to every viewer who has an ENV vault; with none the console refuses (recordingNeedsEnv) and this exits 1 with that sentence.
 // No vault password is needed to start a recording, so none is read.
 const SEL = {
   attached: "[data-terminal-phase=attached]", // terminal-surface.tsx:64

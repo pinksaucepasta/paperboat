@@ -1048,52 +1048,6 @@ test_env_scopes() {
   done
 }
 
-# PB-R1 (C307, C308, F25-11, F25-12): replacing and resetting a team's recording key. Needs SMOKE_RECKEY_TEAM (a disposable paid team
-# with a recording key, owned by the account HOST's ~/.local/bin/pb is signed in to) and SMOKE_RECKEY_VAULT_PASSWORD_FILE (a path
-# on HOST; never printed), SMOKE_RECKEY_MEMBER_CMD (runs a team member's pb from HOST, arguments appended; the member's vault unlocked) and
-# SMOKE_RECKEY_CONSOLE_START_CMD (starts a recording in the live console: run with --team T --session ID; recordings start only there);
-# the team must have no recording key yet. HOST is SMOKE_RECKEY_HOST or SMOKE_LINUX_SSH. Builds its own team-visible machine (recordings_key_fixture.sh)
-# and always removes it.
-test_recording_key_rotation() {
-  skipped recording-key-rotation && return
-  local host=${SMOKE_RECKEY_HOST:-${SMOKE_LINUX_SSH:-}} team=${SMOKE_RECKEY_TEAM:-} vault=${SMOKE_RECKEY_VAULT_PASSWORD_FILE:-}
-  local missing="" t0 name fixture id out status detail dir member="" console=""
-  [ -n "$host" ] || missing+=" SMOKE_RECKEY_HOST"
-  [ -n "$team" ] || missing+=" SMOKE_RECKEY_TEAM"
-  [ -n "$vault" ] || missing+=" SMOKE_RECKEY_VAULT_PASSWORD_FILE"
-  if [ -n "$missing" ]; then record recording-key-rotation SKIP 0 "needs${missing}"; return; fi
-  # The member side has no default: unset, the check's member steps fail loudly.
-  [ -z "${SMOKE_RECKEY_MEMBER_CMD:-}" ] || member=" --member-cmd $(printf '%q' "$SMOKE_RECKEY_MEMBER_CMD")"
-  [ -z "${SMOKE_RECKEY_CONSOLE_START_CMD:-}" ] || console=" --console-start-cmd $(printf '%q' "$SMOKE_RECKEY_CONSOLE_START_CMD")"
-  t0=$(now); name="sh-r1-$(date -u +%H%M%S)$RANDOM"; dir=/tmp/$name-files
-  fixture=$("$HERE/recordings_key_fixture.sh" up "$host" "$name" "$team" 2>&1); status=$?; fixture=$(tail -n 1 <<<"$fixture")
-  if [ "$status" != 0 ] || ! id=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["machine_id"])' "$fixture" 2>/dev/null); then
-    "$HERE/recordings_key_fixture.sh" down "$host" "$name" "$team" >/dev/null 2>&1
-    record recording-key-rotation FAIL $(( $(now)-t0 )) "fixture: ${fixture:0:140}"
-    return
-  fi
-  out=$(tar -C "$HERE" -cf - $(cd "$HERE" && ls *.py) | ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "mkdir -p $dir && tar -xf - -C $dir" 2>&1) \
-    && out=$(ssh "${SSH_OPTS[@]}" -o BatchMode=yes "$host" "cd $dir && timeout 2400 python3 recordings_key_rotation.py $name --team $team --vault-password-file $vault$member$console" 2>&1); status=$?
-  detail=$(python3 - "$out" <<'PY'
-import json, sys
-try:
-    r = json.loads(sys.argv[1].strip().splitlines()[-1])
-    assert r["check"] == "recording-key-rotation"
-except Exception:
-    print("FAIL no receipt: " + " ".join(sys.argv[1].split())[-200:]); sys.exit()
-bad = [s["step"] + ": " + s.get("error", s.get("reason", "")) for s in r["steps"] if s["status"] != "PASS"]
-g = r.get("generations", {})
-print(("PASS" if r["status"] == "PASS" and not bad else "FAIL") + " replace->generation %s, reset->%s" % (g.get("replace"), g.get("reset")) + ("; " + "; ".join(bad[:3]) if bad else ""))
-PY
-  )
-  if [ "$status" = 0 ] && [ "${detail%% *}" = PASS ]; then
-    record recording-key-rotation PASS $(( $(now)-t0 )) "replace kept old recordings readable, reset made them unreadable, new recordings work; ${detail#PASS }"
-  else
-    record recording-key-rotation FAIL $(( $(now)-t0 )) "${detail#FAIL }"
-  fi
-  "$HERE/recordings_key_fixture.sh" down "$host" "$name" "$team" "$id" >/dev/null 2>&1 || record recording-key-rotation:cleanup FAIL 0 "could not revoke $id; run recordings_key_fixture.sh down $host $name $team $id"
-}
-
 # F14-06: an official install updates itself at the configured time. Runs only when SMOKE_SCHEDULED_UPDATE=1 and
 # the device is a paired official install older than the newest official release (it takes about 10 minutes).
 test_update_scheduled() {
@@ -1282,8 +1236,9 @@ $parent"
   rm -rf "$probe_root"
 }
 
-# fixture_check ID: free-plan, config-team-default, team-business (fixture_checks.py: their own throwaway machines on
-# SMOKE_FIXTURE_HOST as the Free fixture account or the smoke team's owner; preflight_fixtures.py verified the fixtures).
+# fixture_check ID: free-plan, config-team-default, team-business, recording-key-rotation (PB-R1: C307, C308, F25-11, F25-12; fixture_checks.py:
+# their own throwaway machines on SMOKE_FIXTURE_HOST as the Free fixture account, the smoke team's owner or new throwaway accounts;
+# preflight_fixtures.py verified the fixtures).
 fixture_check() {
   skipped "$1" && return
   local t0 out status detail
@@ -1389,10 +1344,10 @@ if [ -n "$UPDATE_DIR" ]; then
 fi
 test_update_crossbuild
 test_env_scopes
-test_recording_key_rotation
 fixture_check free-plan
 fixture_check config-team-default
 fixture_check team-business
+fixture_check recording-key-rotation
 test_update_scheduled
 test_update_floor
 

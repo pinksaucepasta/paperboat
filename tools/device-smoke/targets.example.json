@@ -18,10 +18,11 @@
     "SMOKE_PW_MODULE": "/home/tester/.config/paperboat-dev/pw/node_modules/playwright-core/index.mjs",
     "SMOKE_OPERATOR_STATE": "/home/tester/.config/paperboat-dev/operator-console/state.json",
     "SMOKE_FREE_STATE": "/home/tester/.config/paperboat-dev/free-account/state.json",
-    "SMOKE_MEMBER_STATE": "/home/tester/.config/paperboat-dev/teammate-member/state.json",
     "SMOKE_CONFIG_REPO": "owner/smoke-team-config",
     "SMOKE_FIXTURE_HOST": "tester@docker-host.example.test",
-    "SMOKE_FIXTURE_PB": "/home/tester/builds/pb-linux-amd64"
+    "SMOKE_FIXTURE_PB": "/home/tester/builds/pb-linux-amd64",
+    "SMOKE_FIXTURES_URL": "https://api.example.test/v1/test-fixtures",
+    "SMOKE_FIXTURES_TOKEN_FILE": "/home/tester/.config/paperboat-dev/final-fixtures-token"
   },
   "remote_hosts": {
     "build": "tester@build.example.test",
