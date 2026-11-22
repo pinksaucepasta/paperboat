@@ -54,18 +54,20 @@ fi
 # What ran: counts and every skipped test (a skip is a test that did not run on Windows).
 summary=$(python3 - "$EVENTS"/*.jsonl <<'PY'
 import collections, json, sys
-counts, skipped = collections.Counter(), []
+counts, skipped, broken = collections.Counter(), [], []
 for path in sys.argv[1:]:
     for line in open(path):
         try:
             event = json.loads(line)
         except ValueError:
             continue
+        if not event.get('Test') and event.get('Action') == 'fail':
+            broken.append(event['Package'].rsplit('/cli/', 1)[-1])
         if event.get('Test') and event.get('Action') in ('pass', 'fail', 'skip'):
             counts[event['Action']] += 1
             if event['Action'] == 'skip':
                 skipped.append('%s %s' % (event['Package'].rsplit('/internal/', 1)[-1], event['Test']))
-print('tests: %d passed, %d failed, %d skipped' % (counts['pass'], counts['fail'], counts['skip']))
+print('tests: %d passed, %d failed, %d skipped; failed packages: %s' % (counts['pass'], counts['fail'], counts['skip'], ' '.join(sorted(set(broken))) or 'none'))
 print('\n'.join('skipped: ' + s for s in sorted(skipped)))
 PY
 )

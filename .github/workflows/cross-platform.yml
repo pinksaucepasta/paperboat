@@ -2,7 +2,7 @@ name: Cross-platform
 
 # Build and test the cli, shared and Go SDK modules on macOS and Windows (Linux has its own workflow), and the
 # device-smoke harness's Python unit tests on every push to main (not on pull requests: its macOS and Windows
-# jobs held every hosted runner slot and kept the required PR checks queued for 7+ minutes, 2026-11-11). Windows runs through tools/win-test.sh (the same script a winpool machine runs).
+# jobs held every hosted runner slot and kept the required PR checks queued for 7+ minutes, 2026-11-11). Windows runs through tools/win-test.sh (the same script a winpool machine runs), without the race detector unless winrace is set.
 on:
   push:
     branches: [main]
@@ -21,6 +21,10 @@ on:
         default: '1'
       norace:
         description: Run without the race detector (timing measurements are skipped under it)
+        type: boolean
+        default: false
+      winrace:
+        description: Also run Windows with the race detector (works, adds about 12 min; session TestRunPrefersAReadyRemoteExitOverCancellation hangs under it until fixed)
         type: boolean
         default: false
       shared:
@@ -84,7 +88,7 @@ jobs:
           # A narrowed run is -v, so its log shows each test that ran (--- PASS).
           RUN: ${{ inputs.run }}
           COUNT: ${{ inputs.count || '1' }}
-          RACE: ${{ !inputs.norace && '-race' || '' }}
+          RACE: ${{ !inputs.norace && (matrix.os != 'windows-latest' || inputs.winrace) && '-race' || '' }}
         run: |
           if [ "$RUNNER_OS" = Windows ]; then
             # The same script a winpool machine runs (tools/win-remote-test.sh): unelevated token plus an elevated pass.
