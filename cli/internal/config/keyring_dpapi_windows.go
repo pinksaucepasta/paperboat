@@ -183,7 +183,7 @@ func ensureDPAPIDirectoryWithCreate(path, sddl string, create dpapiDirectoryCrea
 	ownerMatches := windowssecurity.HandleOwnerMatchesSID(handle, ownerSID)
 	if !ownerMatches {
 		adminOwnedExact := adminOwnedExactDPAPIHandle(handle, information, ownerSID)
-		trustedNetworkLayout := trustedParent && transientDPAPICredentialSubdirectory(path) && trustedNetworkDPAPIDirectoryHandle(handle, information)
+		trustedNetworkLayout := trustedParent && transientDPAPICredentialSubdirectory(path) && trustedNetworkDPAPIDirectoryHandle(handle, information, ownerSID)
 		if !createdBelowTrustedParent && !adminOwnedExact && !trustedNetworkLayout && !dpapiHandlePrivate(handle, ownerSID, sddl) {
 			return fmt.Errorf("%w: refusing to change a foreign-owned credential directory", ErrCredentialStoreUnavailable)
 		}
@@ -443,7 +443,10 @@ func adminOwnedExactDPAPIHandle(handle windows.Handle, information windows.ByHan
 // plus read/execute for one transient logon SID. Only this exact, non-writable
 // third ACE is eligible for adoption, and only beneath the pinned credential
 // parent checked by ensureDPAPIDirectoryWithCreate.
-func trustedNetworkDPAPIDirectoryHandle(handle windows.Handle, information windows.ByHandleFileInformation) bool {
+// Once the parent carries the owner-only inheritable DACL, Windows also adds
+// those ACEs, marked inherited, to the legacy child; only exactly those may
+// accompany the three explicit ones.
+func trustedNetworkDPAPIDirectoryHandle(handle windows.Handle, information windows.ByHandleFileInformation, userSID *windows.SID) bool {
 	if information.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
 		return false
 	}
@@ -465,18 +468,28 @@ func trustedNetworkDPAPIDirectoryHandle(handle windows.Handle, information windo
 		return false
 	}
 	dacl, _, err := descriptor.DACL()
-	if err != nil || dacl == nil || dacl.AceCount != 3 {
+	if err != nil || dacl == nil || userSID == nil || !userSID.IsValid() {
 		return false
 	}
 	seenSystem, seenAdministrators, seenLogon := false, false, false
+	const inherited = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE | windows.INHERITED_ACE
 	const fileAllAccess windows.ACCESS_MASK = 0x001f01ff
 	const networkReadExecute windows.ACCESS_MASK = 0x001200a9
 	for index := uint16(0); index < dacl.AceCount; index++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
-		if err := windows.GetAce(dacl, uint32(index), &ace); err != nil || ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 {
+		if err := windows.GetAce(dacl, uint32(index), &ace); err != nil || ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			return false
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if ace.Header.AceFlags == inherited {
+			if !sid.IsValid() || ace.Mask != fileAllAccess || !(sid.Equals(system) || sid.Equals(administrators) || sid.Equals(userSID)) {
+				return false
+			}
+			continue
+		}
+		if ace.Header.AceFlags != 0 {
+			return false
+		}
 		switch {
 		case !seenSystem && sid.IsValid() && sid.Equals(system) && ace.Mask == fileAllAccess:
 			seenSystem = true

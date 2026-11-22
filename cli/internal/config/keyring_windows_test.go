@@ -393,6 +393,13 @@ func TestWindowsMachineScopeSetDoesNotMutateForeignOwnedDirectory(t *testing.T) 
 		t.Fatal(err)
 	}
 	foreignOwner := changeFixtureOwnerToAdministrators(t, directory)
+	// Administrators owning exactly SYSTEM, Administrators and the user is the adoptable layout; a foreign
+	// directory admits someone else.
+	owner, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	setWindowsFixtureSecurity(t, directory, foreignOwner, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;"+owner.String()+")(A;OICI;FR;;;WD)", true)
 	ref := fmt.Sprintf("native-foreign-precreate-%d", time.Now().UnixNano())
 	if err := (KeyringStore{}).Set(ref, "machine-secret"); !errors.Is(err, ErrCredentialStoreUnavailable) {
 		t.Fatalf("foreign-owned precreated directory Set error=%v", err)

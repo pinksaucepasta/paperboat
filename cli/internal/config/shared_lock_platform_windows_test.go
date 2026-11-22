@@ -75,7 +75,11 @@ func TestSharedLockCreatesProtectedOwnerAndLockMetadata(t *testing.T) {
 	if !windowssecurity.HandleOwnerMatchesSID(handle, owner) {
 		t.Fatal("owner metadata owner is not the stable user SID")
 	}
-	if !windowssecurity.ProtectedHandleDACLMatches(handle, sddl) {
+	fileSDDL, err := currentUserCredentialSDDL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !windowssecurity.ProtectedHandleDACLMatches(handle, fileSDDL) {
 		t.Fatal("owner metadata DACL is not the exact protected credential DACL")
 	}
 	if _, err := os.Stat(ownerPath); err != nil {
