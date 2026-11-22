@@ -2,8 +2,7 @@ name: Cross-platform
 
 # Build and test the cli, shared and Go SDK modules on macOS and Windows (Linux has its own workflow), and the
 # device-smoke harness's Python unit tests on every push to main (not on pull requests: its macOS and Windows
-# jobs held every hosted runner slot and kept the required PR checks queued for 7+ minutes, 2026-11-11). Windows runs without the race detector (slow
-# there); the Linux and macOS jobs carry it.
+# jobs held every hosted runner slot and kept the required PR checks queued for 7+ minutes, 2026-11-11). Windows runs through tools/win-test.sh (the same script a winpool machine runs).
 on:
   push:
     branches: [main]
@@ -21,7 +20,7 @@ on:
         description: Repeat each test this many times (go test -count)
         default: '1'
       norace:
-        description: Run macOS without the race detector too (timing measurements are skipped under it)
+        description: Run without the race detector (timing measurements are skipped under it)
         type: boolean
         default: false
       shared:
@@ -85,28 +84,27 @@ jobs:
           # A narrowed run is -v, so its log shows each test that ran (--- PASS).
           RUN: ${{ inputs.run }}
           COUNT: ${{ inputs.count || '1' }}
-          RACE: ${{ matrix.os != 'windows-latest' && !inputs.norace && '-race' || '' }}
+          RACE: ${{ !inputs.norace && '-race' || '' }}
         run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            # The same script a winpool machine runs (tools/win-remote-test.sh): unelevated token plus an elevated pass.
+            EVENTS="$RUNNER_TEMP/gotest-events" "$GITHUB_WORKSPACE/tools/win-test.sh"
+            exit
+          fi
           # A package list given by hand (a shard of tools/ci-shards.py) may name packages this OS excludes by build constraints, which
           # go test refuses as "setup failed"; keep the packages that have tests here. No package left means nothing to run.
           if [ "$PACKAGES" != "./..." ]; then
             PACKAGES=$(go list -e -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' $PACKAGES)
             [ -n "$PACKAGES" ] || { echo "no test packages for $RUNNER_OS in this shard"; exit 0; }
           fi
-          if [ "$RUNNER_OS" != Windows ]; then
-            go test $RACE -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES
-            exit
-          fi
-          # The runner is an elevated administrator, so what a test creates is owned by Administrators, which the
-          # credential and lock checks refuse. win-test-exec runs each test binary with an unelevated token and a
-          # private TEMP/APPDATA root that token owns. The tests in elevated_tests.txt need Administrators/SYSTEM
-          # ownership and run second, elevated (still in the private root).
-          (cd "$GITHUB_WORKSPACE/cli" && go build -o "$RUNNER_TEMP/win-test-exec.exe" ./tools/win-test-exec)
-          ELEVATED=$(grep -v '^#' "$GITHUB_WORKSPACE/cli/tools/win-test-exec/elevated_tests.txt" | grep . | paste -sd'|')
-          status=0
-          go test -exec "$RUNNER_TEMP/win-test-exec.exe" -skip "^($ELEVATED)\$" -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES || status=1
-          go test -exec "$RUNNER_TEMP/win-test-exec.exe -elevated" ${RUN:+-v} -run "^($ELEVATED)\$" -timeout 15m -count "$COUNT" $PACKAGES || status=1
-          exit $status
+          go test $RACE -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES
+      # Every test's result, readable without the log (go test -json lines; tools/gotest-json.py output).
+      - name: Test events
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gotest-events-${{ matrix.module }}-windows
+          path: ${{ runner.temp }}/gotest-events
 
   # The device harness's own unit tests (no devices, no network), as test's smoke job: a harness
   # regression fails the push that brings it, not the next device run.
