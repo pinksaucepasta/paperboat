@@ -2164,6 +2164,23 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         with patch.object(winhost, 'device', lambda: None):  # Linux/macOS stay strict
             self.assertFalse(p.doctor_healthy(report(owner)))
 
+    def test_install_lifecycle_doctor_gate_uses_the_windows_busy_port_tolerance(self):
+        import install_lifecycle
+        import pairing_lifecycle as p
+        busy = 'Browser URLs are off because another program is using port 80/443 (Windows HTTP service (HTTP.sys, for example IIS), PID 4)'
+        degraded = {'overall': 'degraded', 'checks': [{'code': 'daemon:browser_urls_unavailable', 'status': 'warning', 'summary': busy}]}
+        extra = {'overall': 'degraded', 'checks': degraded['checks'] + [{'code': 'clock', 'status': 'warning', 'summary': 'skewed'}]}
+
+        def doctor(report):  # a degraded `pb doctor --json` exits 1 with its report on stdout
+            return patch.object(p, 'command_result', lambda *a, **k: subprocess.CompletedProcess(a, 0 if report['overall'] == 'healthy' else 1, json.dumps(report), ''))
+        with patch.object(winhost, 'device', lambda: object()):
+            with doctor(degraded):
+                self.assertEqual(install_lifecycle.command('pb', 'doctor', '--json'), degraded)
+            with doctor(extra), self.assertRaises(RuntimeError):
+                install_lifecycle.command('pb', 'doctor', '--json')
+        with patch.object(winhost, 'device', lambda: None), doctor(degraded), self.assertRaises(RuntimeError):
+            install_lifecycle.command('pb', 'doctor', '--json')  # Linux/macOS stay strict
+
     def test_wait_windows_shell_resends_a_line_the_attach_swallowed(self):
         import terminal_lifecycle
 

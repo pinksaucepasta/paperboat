@@ -55,14 +55,15 @@ def system_path(device):
 
 
 def command(pb, *args, timeout=45, env=None):
-    from pairing_lifecycle import command_result
+    from pairing_lifecycle import command_result, doctor_healthy
     result = command_result(pb, *args, timeout=timeout, env=env, input='')
     try:
         receipt = json.loads(result.stdout)
     except ValueError:
         raise RuntimeError('command did not return a JSON receipt') from None
     if args == ('doctor', '--json'):
-        if result.returncode or receipt.get('overall') != 'healthy':
+        # a degraded doctor exits 1; doctor_healthy accepts only healthy, or on Windows only the HTTP.sys busy-port warning
+        if not doctor_healthy(receipt):
             raise RuntimeError('doctor did not report healthy after daemon recovery')
         return receipt
     if result.returncode or receipt.get('ok') is not True:
