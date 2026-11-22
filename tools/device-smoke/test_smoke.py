@@ -708,6 +708,30 @@ TLIST=($DEVICES)
         self.assertNotIn('on "$source" "python3', text)
         self.assertNotRegex(text, r'\bon "\$(source|device)" "python3')
 
+    def test_network_inventory_waits_for_relay_sync_bounded(self):
+        import network_inventory
+        syncing = SimpleNamespace(returncode=1, stdout=json.dumps(
+            {'ok': False, 'error': {'code': 'relay_inventory_unavailable'}}), stderr='')
+        ready = SimpleNamespace(returncode=0, stdout='{}', stderr='')
+        clock = [0.0]
+
+        def sleep(seconds):
+            clock[0] += seconds
+        answers = [syncing, syncing, ready]
+        with patch.object(network_inventory, 'command_result', side_effect=lambda *a, **k: answers.pop(0)):
+            network_inventory.wait_for_relay_sync('pb', seconds=60, sleep=sleep, now=lambda: clock[0])
+        self.assertEqual((answers, clock[0]), ([], 6))  # backoff 2s then 4s
+        # Any other failure goes straight to the asserted reading, which reports it.
+        other = SimpleNamespace(returncode=1, stdout=json.dumps({'ok': False, 'error': {'code': 'not_signed_in'}}), stderr='')
+        with patch.object(network_inventory, 'command_result', return_value=other) as call:
+            network_inventory.wait_for_relay_sync('pb', seconds=60, sleep=sleep, now=lambda: clock[0])
+        self.assertEqual(call.call_count, 1)
+        # Never ready: fails at the deadline with the last answer kept in a private diagnostic.
+        with patch.object(network_inventory, 'command_result', return_value=syncing), \
+                patch.object(network_inventory, 'command_diagnostic', return_value='diag'), \
+                self.assertRaisesRegex(RuntimeError, 'still relay_inventory_unavailable after 60s'):
+            network_inventory.wait_for_relay_sync('pb', seconds=60, sleep=sleep, now=lambda: clock[0])
+
     def test_reset_lifecycle_never_overlaps_the_long_session_holds(self):
         # A re-pair drops the target's in-flight sessions by design; resetting mid-hold failed ssh-long, not the product.
         text = (HERE / 'smoke.sh').read_text()
