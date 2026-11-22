@@ -116,7 +116,7 @@ elif cmd == 'serve':
 '''
 
 CSV_COLUMNS = ['id', 'occurred_at', 'workspace', 'action', 'result', 'reason', 'actor_kind', 'actor_id', 'actor_email',
-               'actor_token_id', 'target_kind', 'target_id', 'target_name', 'machine_id', 'machine_name', 'ip',
+               'actor_token_id', 'actor_recipe_id', 'target_kind', 'target_id', 'target_name', 'machine_id', 'machine_name', 'ip',
                'user_agent', 'request_id', 'details']
 
 
