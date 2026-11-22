@@ -79,7 +79,8 @@ func TestWindowsWorkerOwnedOutputCancellationAndConcurrentReap(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			// The helper takes over 1 s to start under -race; the bound only catches a hung reap.
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			results <- worker.Stop(stopCtx)
 		}()
