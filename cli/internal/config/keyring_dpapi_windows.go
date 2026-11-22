@@ -754,7 +754,11 @@ func getDPAPISecret(ref string) (string, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	if err := repairAdminOwnedDPAPIObject(path, sddl); err != nil {
+	fileSDDL, err := currentUserCredentialSDDL()
+	if err != nil {
+		return "", err
+	}
+	if err := repairAdminOwnedDPAPIObject(path, fileSDDL); err != nil {
 		return "", err
 	}
 	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
