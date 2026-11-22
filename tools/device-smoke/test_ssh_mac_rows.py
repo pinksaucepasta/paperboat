@@ -49,6 +49,22 @@ class OutageRevokeFirst(unittest.TestCase):
         self.assertIn('authorized_keys', r['detail'])
 
 
+class SetupVerdict(unittest.TestCase):
+    def test_pb_may_exceed_plain_ssh_by_the_larger_of_150_ms_and_15_percent(self):
+        self.assertTrue(ssh_mac_rows.setup_verdict(500, 650, [])[0])  # 150 ms floor
+        self.assertFalse(ssh_mac_rows.setup_verdict(500, 651, [])[0])
+        self.assertTrue(ssh_mac_rows.setup_verdict(2000, 2300, [])[0])  # 15% = 300 ms
+        self.assertFalse(ssh_mac_rows.setup_verdict(2000, 2301, [])[0])
+
+    def test_a_slow_host_pair_passes_when_pb_keeps_up_with_plain_ssh(self):
+        self.assertTrue(ssh_mac_rows.setup_verdict(1400, 1450, [])[0])  # the old absolute 1000 ms bound failed this
+
+    def test_a_failed_sample_or_missing_measurement_fails_and_the_detail_names_both_p50s(self):
+        self.assertFalse(ssh_mac_rows.setup_verdict(500, 500, ['-1'])[0])
+        self.assertFalse(ssh_mac_rows.setup_verdict(-1, 500, [])[0])
+        self.assertIn('plain_p50=500 pb_p50=900 allowed_pb_p50=650', ssh_mac_rows.setup_verdict(500, 900, [])[1])
+
+
 class RevokeVerdict(unittest.TestCase):
     ok = ('RESULT normal pb_stderr=[] plain_stderr=[]\nRESULT seconds=2.1 alive=no plain_seconds=2.3 plain_alive=no '
           'stderr=[pb: access to macmini was revoked] plain_stderr=[pb: access to macmini was revoked]')

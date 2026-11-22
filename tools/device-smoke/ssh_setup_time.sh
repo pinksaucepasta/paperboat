@@ -79,7 +79,12 @@ ssh "$HOST" "$CT_DOCKER exec -i -u $CT_USER $C sh -c 'cat > $CT_HOME/run.sh'" < 
 res=$(ssh "$HOST" "$CT_DOCKER exec -u $CT_USER -e HOME=$CT_HOME -e XDG_RUNTIME_DIR=$CT_RUNDIR $C timeout 600 bash $CT_HOME/run.sh $ALIAS" 2>&1)
 detail=$(grep -E "^(domain=|RESULT|RUN )" <<<"$res" | tr '\n' ' ')
 plain=$(sed -n 's/^RESULT plain_p50=\(-\?[0-9]*\) .*/\1/p' <<<"$res"); pb=$(sed -n 's/.* pb_p50=\(-\?[0-9]*\) .*/\1/p' <<<"$res")
-if [ -n "$plain" ] && [ -n "$pb" ] && [ "$plain" -ge 0 ] && [ "$pb" -ge 0 ] && [ "$plain" -lt 1000 ] && [ "$pb" -lt 1000 ] && ! grep -q -- "-1" <<<"$(grep '^RESULT' <<<"$res")"; then
-  finish PASS "$detail"
+# pb p50 may exceed plain ssh p50 by at most max(150 ms, 15%) (same rule as ssh_mac_rows.setup_verdict)
+if [ -n "$plain" ] && [ -n "$pb" ] && [ "$plain" -ge 0 ] && [ "$pb" -ge 0 ]; then
+  extra=$(( plain * 15 / 100 )); [ "$extra" -ge 150 ] || extra=150; allowed=$(( plain + extra ))
+  detail="$detail allowed_pb_p50=$allowed"
+  if [ "$pb" -le "$allowed" ] && ! grep -q -- "-1" <<<"$(grep '^RESULT' <<<"$res")"; then
+    finish PASS "$detail"
+  fi
 fi
 finish FAIL "$detail $(tail -c 300 <<<"$res" | tr '\n' ' ')"

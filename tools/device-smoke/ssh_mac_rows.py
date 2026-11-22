@@ -86,6 +86,13 @@ def check_warm(row):
     return True
 
 
+def setup_verdict(plain, pb, samples):
+    """F5-07: pb ssh setup p50 may exceed plain ssh p50 by at most max(150 ms, 15%), measured in the same run on the same pair."""
+    allowed = plain + max(150, plain * 15 // 100)
+    ok = 0 <= plain and 0 <= pb <= allowed and '-1' not in samples
+    return ok, 'plain_p50=%d pb_p50=%d allowed_pb_p50=%d (plain + max(150 ms, 15%%))' % (plain, pb, allowed)
+
+
 def setup():
     if not check_warm('F5-07 setup'):
         return
@@ -94,8 +101,8 @@ plain=; pb=; for i in 1 2 3 4 5 6 7; do a=$(ms ssh $H $NOP); b=$(ms $PB ssh $A -
 p50() { tr ' ' '\n' | grep -v '^$' | sort -n | sed -n 4p; }
 echo "RESULT plain_p50=$(echo $plain | p50) pb_p50=$(echo $pb | p50) plain=[$plain ] pb=[$pb ]"''', 600)
     m = re.search(r'RESULT plain_p50=(-?\d+) pb_p50=(-?\d+) plain=\[([^\]]*)\] pb=\[([^\]]*)\]', out)
-    ok = m and 0 <= int(m[1]) < 1000 and 0 <= int(m[2]) < 1000 and '-1' not in (m[3] + ' ' + m[4]).split()
-    report('F5-07 setup', 'PASS' if ok else 'FAIL', m[0] if m else out[-300:].replace('\n', ' '))
+    ok, bound = setup_verdict(int(m[1]), int(m[2]), (m[3] + ' ' + m[4]).split()) if m else (False, '')
+    report('F5-07 setup', 'PASS' if ok else 'FAIL', m[0] + ' ' + bound if m else out[-300:].replace('\n', ' '))
 
 
 def revoke_client_sh(*args):
