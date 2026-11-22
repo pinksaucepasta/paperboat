@@ -1282,7 +1282,21 @@ $parent"
   rm -rf "$probe_root"
 }
 
+# fixture_check ID: free-plan, config-team-default, team-business (fixture_checks.py: their own throwaway machines on
+# SMOKE_FIXTURE_HOST as the Free fixture account or the smoke team's owner; preflight_fixtures.py verified the fixtures).
+fixture_check() {
+  skipped "$1" && return
+  local t0 out status detail
+  t0=$(now); out=$(python3 "$HERE/fixture_checks.py" "$1" 2>&1); status=$?
+  detail=$(python3 -c 'import json,sys;r=json.loads(sys.argv[1].strip().splitlines()[-1]);print(r["status"]+" "+r["detail"])' "$out" 2>/dev/null) || detail="FAIL no receipt: $(tr '\n' ' ' <<<"${out: -200}")"
+  if [ "$status" = 0 ] && [ "${detail%% *}" = PASS ]; then record "$1" PASS $(( $(now)-t0 )) "${detail#PASS }"
+  else record "$1" FAIL $(( $(now)-t0 )) "${detail#FAIL }"; fi
+}
+
 # ---------------------------------------------------------------- run
+# Preflight: every operator fixture of the checks about to run exists, or nothing starts (preflight_fixtures.py names what is missing).
+fixture_ids=$(for id in config-team-default free-plan team-business recording-key-rotation; do skipped "$id" || printf '%s,' "$id"; done)
+[ -z "$fixture_ids" ] || python3 "$HERE/preflight_fixtures.py" --checks "${fixture_ids%,}" || exit 2
 IFS=, read -r -a TLIST <<<"$TARGETS"
 echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARGETS"
 printf '%-28s %-5s %7s  %s\n' TEST RESULT TIME DETAIL
@@ -1376,6 +1390,9 @@ fi
 test_update_crossbuild
 test_env_scopes
 test_recording_key_rotation
+fixture_check free-plan
+fixture_check config-team-default
+fixture_check team-business
 test_update_scheduled
 test_update_floor
 

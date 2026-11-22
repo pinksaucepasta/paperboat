@@ -12,7 +12,16 @@
     "SMOKE_MEMBER_SSH": "tester@member.example.test",
     "SMOKE_MACOS_VM_SSH": "tester@macos-vm.example.test",
     "SMOKE_WINDOWS_HOME": "C:/Users/tester",
-    "PAPERBOAT_SMOKE_TEAM": "smoke-team"
+    "PAPERBOAT_SMOKE_TEAM": "smoke-team",
+    "SMOKE_CONSOLE_ORIGIN": "https://console.example.test",
+    "SMOKE_PW_CHROMIUM": "/home/tester/.cache/ms-playwright/chromium/chrome",
+    "SMOKE_PW_MODULE": "/home/tester/.config/paperboat-dev/pw/node_modules/playwright-core/index.mjs",
+    "SMOKE_OPERATOR_STATE": "/home/tester/.config/paperboat-dev/operator-console/state.json",
+    "SMOKE_FREE_STATE": "/home/tester/.config/paperboat-dev/free-account/state.json",
+    "SMOKE_MEMBER_STATE": "/home/tester/.config/paperboat-dev/teammate-member/state.json",
+    "SMOKE_CONFIG_REPO": "owner/smoke-team-config",
+    "SMOKE_FIXTURE_HOST": "tester@docker-host.example.test",
+    "SMOKE_FIXTURE_PB": "/home/tester/builds/pb-linux-amd64"
   },
   "remote_hosts": {
     "build": "tester@build.example.test",

@@ -15,6 +15,33 @@ precedence over the corresponding entries in the `smoke` object.
   throwaway machines and keep account credentials out of the checkout.
 
 
+## Fixtures (permanent, verified before every run)
+
+A check that needs a fixture never SKIPs for a missing one: `smoke.sh` and `windows_checks.py` run
+`preflight_fixtures.py` first, which reports every missing or broken fixture (what, and the command that fixes it) in one
+list and exits 2 before any check starts. `preflight_fixtures.py --list` shows which check needs which fixture.
+The settings live in the `smoke` object of `~/.config/paperboat-dev/targets.json` (keys must start with `SMOKE_`):
+
+| Setting | Fixture | Used by |
+|---|---|---|
+| `SMOKE_CONSOLE_ORIGIN`, `SMOKE_PW_CHROMIUM`, `SMOKE_PW_MODULE` | the live console, headless Chromium and `playwright-core` (`npm i playwright-core` in `~/.config/paperboat-dev/pw`) that sign accounts in and mint enrollment tokens | every fixture below |
+| `SMOKE_OPERATOR_STATE` | console session (Playwright storage state, mode 600) of the smoke team's owner `pprbtdev@gmail.com`: `node console_session.mjs password pprbtdev@gmail.com ~/.config/paperboat/console-workos.password STATE` | `config-team-default`, `team-business`, `recording-key-rotation` |
+| `SMOKE_FREE_STATE` | the **Free fixture account** (never subscribes; created once with `fresh_account.mjs signup ~/.config/paperboat-dev/free-account`, which leaves `account.json` and `state.json` there) | `free-plan` |
+| `SMOKE_MEMBER_STATE` | the member account `~/.config/paperboat-dev/teammate-member/` (a member of the smoke team) | `recording-key-rotation` |
+| `SMOKE_CONFIG_REPO` | `pujan-modha/paperboat-smoke-team-config`: a private GitHub repository connected to the operator account as a config repository (the account's GitHub connection already exists; connect another with `POST /v1/config-repositories` {provider github, numeric external_ref, display_name owner/name}); keep it, `config-team-default` only sets and unsets the team default | `config-team-default` |
+| `SMOKE_FIXTURE_HOST`, `SMOKE_FIXTURE_PB` | an SSH host with passwordless Docker (a linuxpool runner) and the Linux build for its architecture; `fixture_machine.sh` builds the container image there once | the three checks run by `fixture_checks.py` |
+| `~/.f19-s3ak`, `~/.f19-s3sk` (mode 600) | the S3 keys of the audit-log stream store | `team-business` |
+| rsync on every Windows target | MSYS2 `rsync` on the machine `PATH` (`C:\msys64\usr\bin\pacman -S --noconfirm rsync`; `C:\msys64\usr\bin` on PATH) | `ssh-rsync` |
+
+`fixture_checks.py free-plan|config-team-default|team-business` (called by `smoke.sh`) gives each check its own throwaway
+machines in containers on `SMOKE_FIXTURE_HOST` (`fixture_machine.sh up HOST NAME BUILD STATE`: paired as the account of the
+stored console session, revoked by exact id when the check ends, on every exit path). `team-business` also starts, per run,
+an S3 store (versitygw from its official image, filesystem backend, in the machine's own network namespace) because the check
+reads the stored objects back as plain `.ndjson.gz` files, which MinIO's object format does not allow; nothing of it outlives the
+run and no other host is involved (the server reaches it through the machine's ephemeral tunnel).
+When a console session has expired, preflight says which one: sign it in again with `console_session.mjs` (operator, member) or
+with the credentials in `free-account/account.json` (Free account).
+
 ## Extra Windows machines (winpool)
 
 `winpool.sh` turns up to fourteen GitHub-hosted `windows-latest` runners into temporary Windows test machines, so

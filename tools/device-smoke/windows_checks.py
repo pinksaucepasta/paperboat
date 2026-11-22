@@ -50,7 +50,9 @@ import threading
 import time
 import urllib.request
 
+import dev_targets
 import install_path
+import preflight_fixtures
 import winhost
 
 HERE = Path(__file__).resolve().parent
@@ -204,7 +206,7 @@ def checks(args):
     for name in ('config_customize', 'cli_paging', 'network_inventory', 'approve_refusals'):
         table[name.replace('_', '-')] = ([name + '.py'], [])
     table['machine-tags'] = (['machine_tags.py', '--owner-cmd', winhost.WINDOWS, '--target', peer], ['--peer'])
-    table['free-plan'] = (['free_plan.py', args.machine], ['--machine'])  # the device account must be a Free account
+    # free-plan is fixture_checks.py's (the Free fixture account on its own machine): a device account of the smoke team is never Free.
     # F11 across two machines: the device and a Unix peer of the account share one repository served on --pair-repo-shell's host.
     table['config-sync-pair'] = (['config_sync_pair.py', args.pair_repo_shell or '', args.pair_repo_addr or '', winhost.WINDOWS,
                                   args.machine or '', args.pair_peer_shell or '', args.pair_peer_alias or '', '--machine-sections'],
@@ -352,7 +354,10 @@ def run_check(check, argv, args, device):
             replacements.update({'{token}': str(scratch / 'fixtures-token'), '{output}': str(scratch / 'rows.json'),
                                  '{run}': 'win' + secrets.token_hex(4)})
         if '{teammate_account}' in argv:  # the second signed-in profile of the device
-            account = json.loads(winhost.side_run(winhost.WINDOWS_TEAMMATE, ['auth', 'status', '--json'], timeout=60).stdout)['account']
+            status = json.loads(winhost.side_run(winhost.WINDOWS_TEAMMATE, ['auth', 'status', '--json'], timeout=60).stdout)
+            if 'account' not in status:  # signed out: `pb auth status --json` then has no account (cli/cmd/pb/auth_session.go)
+                raise RuntimeError("the device's second profile (windows-teammate) is signed out: sign it in with teammate_signin.py first")
+            account = status['account']
             replacements.update({'{teammate_account}': account['id'], '{teammate_email}': account['email']})
         if '{machine_id}' in argv:
             replacements['{machine_id}'] = json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['machine_id']
@@ -421,7 +426,8 @@ def build_parser():
     parser.add_argument('--suspend-cmd', help='team-suspension: controller command that runs SQL from stdin on the server database')
     parser.add_argument('--sso-team', help='team-identity-commands: a team the device account owns, with SSO and a directory group')
     parser.add_argument('--empty-team', help='workspace-switch: a team of the device account without machines')
-    parser.add_argument('--config-repository', help='config-team-default: a GitHub config repository connected to the account')
+    parser.add_argument('--config-repository', default=dev_targets.smoke_value('SMOKE_CONFIG_REPO'),
+                        help='config-team-default: a GitHub config repository connected to the account (default: SMOKE_CONFIG_REPO)')
     parser.add_argument('--pair-repo-shell', help='config-sync-pair: shell prefix of the host that serves the repository')
     parser.add_argument('--pair-repo-addr', help='config-sync-pair: that host as the controller and the peer reach it')
     parser.add_argument('--pair-peer-shell', help='config-sync-pair: shell prefix of the Unix peer')
@@ -447,9 +453,14 @@ def main():
     only = set(filter(None, args.only.split(',')))
     if only - set(table):
         parser.error('unknown check: ' + ', '.join(sorted(only - set(table))))
+    # Every operator fixture of the checks about to run exists, or nothing starts (preflight_fixtures.py names what is missing).
+    if preflight_fixtures.main(['--windows', '--checks', ','.join(c for c in sorted(table) if not only or c in only)]):
+        return 2
     pb_exe = install_path.windows_executable(json.loads(args.install_json.read_text()))
     os.environ['PB_SMOKE_WINDOWS_PB'] = pb_exe
     device = winhost.device()
+    if not winhost.RemotePath(device, pb_exe).exists():  # a stale install receipt otherwise fails every check with "cannot find the file"
+        parser.error('%s does not exist on the device: --install-json is stale; install the build again and pass its receipt' % pb_exe)
     results = []
     for check, (argv, needs) in sorted(table.items()):
         if only and check not in only:
