@@ -47,9 +47,9 @@ sleep 8
 $docker exec $ct loginctl enable-linger $cu
 $docker exec $ct systemctl start user@$uid.service
 $docker cp /tmp/$ct-pb $ct:/home/$cu/pb
-$docker exec $ct bash -c 'chown $cu:$cu /home/$cu/pb; chmod 755 /home/$cu/pb'
+$docker exec $ct bash -c "chown $cu:$cu /home/$cu/pb; chmod 755 /home/$cu/pb"
 $X bash -c 'cd ~ && ./pb install >/dev/null'
-python3 - "$ct" <<'PY' | $docker exec -i -u $cu $ct sh -c 'umask 077; cat > /home/$cu/token'
+python3 - "$ct" <<'PY' | $docker exec -i -u $cu $ct sh -c "umask 077; cat > /home/$cu/token"
 import json, os, re, subprocess, sys
 added = json.loads(subprocess.run([os.path.expanduser("~/.local/bin/pb"), "machine", "add", "--name", sys.argv[1], "--json"], capture_output=True, text=True, check=True).stdout)
 sys.stdout.write(re.search(r"PB_TOKEN='([A-Za-z0-9]+)'", added["data"]["linux_macos_command"]).group(1))
